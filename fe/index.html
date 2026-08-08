@@ -215,6 +215,8 @@
   #board .nowrap { white-space: nowrap; }
   #board pre { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 12px; margin: 0; max-height: 340px; overflow: auto; }
   #board .muted { color: var(--muted); }
+  /* Stale data must not look like fresh data (UC-S09). */
+  #board .muted.stale { color: var(--bad, #a33a2c); font-weight: 600; }
   #board .err { color: var(--danger); }
   #board .chart { height: 280px; width: 100%; }
   #board .split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -351,6 +353,23 @@
         <h2>Phiên đang chạy</h2>
         <p class="muted" id="sessSummary">đang tải…</p>
         <div id="sessNotes"></div>
+        <!-- UC-S06: mở một phiên làm việc mới ngay từ điện thoại. Nó chạy
+             không hỏi ai, nên câu cảnh báo dưới đây là một phần của tính năng
+             chứ không phải trang trí. -->
+        <details id="sessNewBox">
+          <summary>➕ Mở phiên làm việc mới</summary>
+          <div class="row-flex">
+            <select id="sessNewProject"></select>
+          </div>
+          <div class="row-flex">
+            <input type="text" id="sessNewTask" placeholder="Việc cần làm…" autocomplete="off" />
+            <button type="button" id="sessNew">Mở</button>
+          </div>
+          <p class="muted boardnote" id="sessNewHint">
+            Phiên nền chạy không hỏi ai và tiêu tiền trong lúc chạy — hub không đọc được chi phí của nó, nên hãy dừng khi xong.
+          </p>
+        </details>
+        <div id="sessNewNote" class="hidden"></div>
         <div id="sessList" class="scroll"></div>
       </div>
       <!-- closes #sessListPanel -->
@@ -368,7 +387,18 @@
              và id để nối tiếp. -->
         <div class="row-flex">
           <button type="button" id="sessHandover">📋 Đóng sổ &amp; tiếp tục ở phiên mới</button>
+          <!-- Chỉ hiện với phiên do hub mở: hub không lái phiên người khác mở
+               trong terminal/VS Code (Hà chốt 08-08). -->
+          <button type="button" id="sessStop" class="hidden">⏹ Dừng phiên</button>
         </div>
+        <!-- UC-S05: nói tiếp vào CHÍNH phiên đó (khác hẳn hỏi bên lề, vốn tách
+             ra bản sao). claude từ chối nối vào phiên đang chạy, nên ô này chỉ
+             mở khi phiên đã dừng — và nói rõ lý do khi chưa. -->
+        <div class="row-flex hidden" id="sessTellRow">
+          <input type="text" id="sessTellInput" placeholder="Nói tiếp vào phiên này…" autocomplete="off" />
+          <button type="button" id="sessTell">Gửi</button>
+        </div>
+        <div id="sessTellBox" class="hidden"></div>
         <div id="sessHandoverBox" class="hidden"></div>
         <!-- UC-S05b mức 2: hỏi CHEN NGANG mà không phá ngữ cảnh đang làm.
              Câu hỏi chạy trên một bản fork, nên phiên gốc không thêm lượt nào
@@ -1012,11 +1042,21 @@
     }
     boardLoaded = true;
     lastSnap = snap;
-    // "N mục" counts inbox items — meaningless while looking at sessions.
-    stamp.textContent = panel === 'sessions'
-      ? `Ảnh chụp lúc ${fmtStamp(snap.generated_at)}`
-      : `Ảnh chụp lúc ${fmtStamp(snap.generated_at)} · ${(snap.items || []).length} mục`;
+    // UC-S09 — the page can only ever show what hub last pushed, so it has to
+    // say HOW OLD that is. A timestamp alone reads as "now" to anyone not doing
+    // arithmetic, which is exactly the wrong answer when hubd is dead: the
+    // screen would keep showing yesterday's sessions as if they were live.
+    // hubd cycles every ~120s (4s while following a session), so anything past
+    // 5 minutes means it is not running.
+    const ageMin = (Date.now() - Date.parse(snap.generated_at)) / 60000;
+    const stale = !(ageMin < 5);   // NaN (unparseable stamp) counts as stale
+    const when = `Ảnh chụp lúc ${fmtStamp(snap.generated_at)} (${agoOf(snap.generated_at)})`;
+    stamp.classList.toggle('stale', stale);
+    stamp.textContent = stale
+      ? `⚠ hub chưa đẩy dữ liệu mới — ${when}. Số dưới đây là của lúc đó, không phải bây giờ.`
+      : (panel === 'sessions' ? when : `${when} · ${(snap.items || []).length} mục`);
     renderSessions(snap.sessions || {});
+    renderProjectPicker((snap.config || {}).projects);
     renderContext(snap.chat || {});
     renderCounts(snap.counts || {});
     renderRows(snap.items || []);
@@ -1110,8 +1150,13 @@
       // Chế độ quyền: phiên chạy `auto`/`dontAsk` là phiên KHÔNG hỏi ai —
       // đứng từ xa mà không biết điều đó thì nguy hiểm hơn là không thấy gì.
       const mode = { auto: 'tự duyệt', dontAsk: 'không hỏi', default: 'hỏi trước' }[s.permission_mode] || s.permission_mode;
-      meta.textContent = [s.account, s.kind, s.cwd ? s.cwd.split('/').slice(-1)[0] : '', mode]
+      // `status`/`state` chỉ có ở phiên nền — thiếu nghĩa là KHÔNG BIẾT, không
+      // phải "đang rảnh", nên phiên interactive không hiện gì thay vì hiện sai.
+      const work = { busy: 'đang chạy', idle: 'đang rảnh' }[s.status]
+        || ({ done: 'đã xong' })[s.state] || '';
+      meta.textContent = [s.account, s.kind, s.cwd ? s.cwd.split('/').slice(-1)[0] : '', mode, work]
         .filter(Boolean).join(' · ');
+      if (work) card.dataset.work = work;
 
       card.append(head, meta);
 
@@ -1141,6 +1186,24 @@
     }
   }
 
+  /// Which projects `/new` will accept — the same list hub validates against,
+  /// so the picker can never offer a name the command will reject.
+  function renderProjectPicker(projects) {
+    const sel = $('sessNewProject');
+    const names = projects || [];
+    if (sel.dataset.filled === names.join(',')) return;   // don't fight the user's choice
+    const keep = sel.value;
+    sel.textContent = '';
+    names.forEach((p) => {
+      const o = document.createElement('option');
+      o.value = p;
+      o.textContent = p;
+      sel.append(o);
+    });
+    sel.dataset.filled = names.join(',');
+    if (names.includes(keep)) sel.value = keep;
+  }
+
   let wantSession = null;   // session id the reader asked for
   let wantName = '';
 
@@ -1160,6 +1223,16 @@
     $('sessAskBox').classList.add('hidden');
     $('sessAskBox').textContent = '';
     $('sessAskInput').value = '';
+    $('sessTellBox').classList.add('hidden');
+    $('sessTellBox').textContent = '';
+    $('sessTellInput').value = '';
+    // Steering is only offered for sessions hub started. Showing "Dừng phiên"
+    // on a terminal session would be a button that can only fail — and a
+    // button that cannot work is worse than no button, because it says hub is
+    // in charge of something it is not.
+    const mine = s.kind === 'background';
+    $('sessStop').classList.toggle('hidden', !mine);
+    $('sessTellRow').classList.toggle('hidden', !mine);
     // An answer that arrives after the reader moved on belongs to the session
     // they left, not the one they are looking at.
     waitingFor = null;
@@ -1251,8 +1324,10 @@
   function noteSessionReply(f) {
     if (!waitingFor || f.from === me) return;
     const text = String(f.text || '');
-    if (!/^(💬|📋|⚠)/.test(text)) return;
-    const box = $(waitingFor === 'ask' ? 'sessAskBox' : 'sessHandoverBox');
+    // Every reply hub gives these buttons starts with one of these marks — an
+    // answer, a handover, a start, a stop, a next turn, or a refusal.
+    if (!/^(💬|📋|🚀|⏹|➡️|⚠)/.test(text)) return;
+    const box = $({ ask: 'sessAskBox', tell: 'sessTellBox', new: 'sessNewNote' }[waitingFor] || 'sessHandoverBox');
     waitingFor = null;
     box.classList.remove('hidden');
     box.textContent = '';
@@ -1262,6 +1337,51 @@
     p.textContent = text;
     box.append(p);
   }
+
+  // UC-S06 — mở phiên làm việc mới cho một dự án, ngay từ điện thoại.
+  $('sessNew').addEventListener('click', (e) => {
+    const project = $('sessNewProject').value;
+    const task = $('sessNewTask').value.trim();
+    const note = $('sessNewNote');
+    if (!project || !task) {
+      note.classList.remove('hidden');
+      note.textContent = 'Chọn dự án và nói việc cần làm.';
+      return;
+    }
+    note.classList.remove('hidden');
+    note.textContent = 'Đang mở phiên nền trên máy…';
+    // hub trả lời trong phòng chat. Không nhận nó về đây thì lời báo hỏng nằm
+    // ở TAB KHÁC với cái nút vừa bấm, và màn này đứng im như đang chạy tốt.
+    waitingFor = 'new';
+    sendCommand(`/new ${project} ${task}`, e.target);
+    $('sessNewTask').value = '';
+  });
+
+  // UC-S05 — nói tiếp vào chính phiên đó. Không phải hỏi bên lề: lượt này ở
+  // lại trên thread cũ, nên phiên gốc DÀI RA (ngược hẳn với /ask).
+  function tellSession(e) {
+    if (!wantSession) return;
+    const input = $('sessTellInput');
+    const text = input.value.trim();
+    if (!text) { input.focus(); return; }
+    $('sessTellBox').classList.remove('hidden');
+    $('sessTellBox').textContent = 'Đang nói tiếp vào phiên — lượt này ở lại trên chính phiên đó…';
+    waitingFor = 'tell';
+    sendCommand(`/tell ${text}`, e && e.target);
+    input.value = '';
+  }
+  $('sessTell').addEventListener('click', tellSession);
+  $('sessTellInput').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); tellSession(ev); }
+  });
+
+  $('sessStop').addEventListener('click', (e) => {
+    if (!wantSession) return;
+    $('sessTellBox').classList.remove('hidden');
+    $('sessTellBox').textContent = 'Đang dừng phiên…';
+    waitingFor = 'tell';
+    sendCommand(`/stop ${wantSession}`, e.target);
+  });
 
   $('sessAsk').addEventListener('click', askAside);
   // A phone keyboard's "go" key is the natural way to send; making people

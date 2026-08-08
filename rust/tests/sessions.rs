@@ -186,3 +186,31 @@ fn ordinary_development_chatter_stays_visible() {
         );
     }
 }
+
+#[test]
+fn the_background_id_is_the_first_token_not_the_rest_of_the_line() {
+    use hub::sessions::parse_backgrounded_id;
+
+    // The happy line, as `claude --bg '<task>'` prints it.
+    assert_eq!(
+        parse_backgrounded_id(
+            "Starting background service…\nbackgrounded · a3a24ccd\n  claude agents  list sessions\n"
+        ),
+        Some("a3a24ccd")
+    );
+
+    // THE ONE THAT COST A REAL RUN. A session that came up with no prompt adds
+    // a sentence on the same line; taking the tail stored
+    // "6514f454 (idle — send a prompt to start)" as the session id, and every
+    // later verb quietly failed to match it while hub reported success.
+    assert_eq!(
+        parse_backgrounded_id("backgrounded · 6514f454 (idle — send a prompt to start)"),
+        Some("6514f454")
+    );
+
+    // No marker means hub does NOT know what it started — that has to be an
+    // error, not a cheerful empty id.
+    assert_eq!(parse_backgrounded_id("Starting background service…"), None);
+    assert_eq!(parse_backgrounded_id(""), None);
+    assert_eq!(parse_backgrounded_id("backgrounded · "), None);
+}

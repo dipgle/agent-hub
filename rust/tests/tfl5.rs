@@ -421,6 +421,65 @@ fn a_stranger_cannot_spend_money_asking() {
 }
 
 #[test]
+fn starting_a_session_needs_both_a_project_and_a_task() {
+    let (kind, id, arg) =
+        tfl5::parse_command("/new tfl5 sửa nút Releases bị vỡ regex", OWNER, &owners())
+            .expect("parsed");
+    assert_eq!(kind, hub::adapters::CommandKind::New);
+    assert_eq!(id, 0);
+    assert_eq!(arg, "tfl5 sửa nút Releases bị vỡ regex");
+
+    // A project with no task would start an agent with nothing to do — and it
+    // would still cost money while it worked that out.
+    for t in ["/new", "/new tfl5", "/new   "] {
+        assert!(
+            tfl5::parse_command(t, OWNER, &owners()).is_none(),
+            "sai với: {t}"
+        );
+    }
+}
+
+#[test]
+fn stop_defaults_to_the_session_being_read() {
+    let (kind, _, arg) = tfl5::parse_command("/stop", OWNER, &owners()).expect("parsed");
+    assert_eq!(kind, hub::adapters::CommandKind::Stop);
+    assert_eq!(arg, "", "empty means: whatever /session is following");
+
+    let (_, _, arg) = tfl5::parse_command("/stop a3a24ccd-6ad8", OWNER, &owners()).unwrap();
+    assert_eq!(arg, "a3a24ccd-6ad8");
+}
+
+#[test]
+fn telling_a_session_keeps_the_whole_sentence() {
+    let (kind, id, arg) = tfl5::parse_command(
+        "/tell chạy lại test rồi báo kết quả, đừng commit",
+        OWNER,
+        &owners(),
+    )
+    .expect("parsed");
+    assert_eq!(kind, hub::adapters::CommandKind::Tell);
+    assert_eq!(id, 0);
+    assert_eq!(arg, "chạy lại test rồi báo kết quả, đừng commit");
+    assert!(tfl5::parse_command("/tell", OWNER, &owners()).is_none());
+}
+
+#[test]
+fn a_stranger_cannot_start_or_steer_a_session() {
+    // These three spend money and run tools on the owner's machine, so they sit
+    // behind exactly the same gate as `/approve`.
+    for t in ["/new tfl5 xoá hết đi", "/stop", "/tell chạy rm -rf"] {
+        assert!(
+            tfl5::parse_command(t, "u-stranger", &owners()).is_none(),
+            "người lạ không được gọi: {t}"
+        );
+        assert!(
+            tfl5::parse_command(t, OWNER, &[]).is_none(),
+            "danh sách chủ rỗng thì không ai được gọi: {t}"
+        );
+    }
+}
+
+#[test]
 fn act_is_refused_from_chat_on_purpose() {
     // It writes code and can run for half an hour. A chat keyboard is the wrong
     // trigger, and blocking the poll loop on it would be worse.

@@ -345,16 +345,16 @@ fn follow_sleep(cfg: &hub::config::Config, db: &Db, waker: &hub::live::Waker, de
         waker.sleep(delay);
         return;
     };
-    let Some(path) = hub::sessions::find_transcript(&cfg.claude_transcript_root(), &session_id)
-    else {
-        // Followed something with no transcript: nothing to watch, and the
-        // snapshot already carries the reason.
-        waker.sleep(delay);
-        return;
-    };
+    // A session hub just started has NO transcript for the first few seconds.
+    // This used to give up here and sleep the whole cycle, so pressing "Mở
+    // phiên" on the phone and then waiting **122 seconds** for it to appear was
+    // the normal experience (measured 2026-08-08) — for the one action that
+    // should feel immediate. Keep looking instead; the file shows up.
+    let root = cfg.claude_transcript_root();
+    let mut path = hub::sessions::find_transcript(&root, &session_id);
 
     let started = Instant::now();
-    let mut seen = hub::sessions::transcript_mtime(&path);
+    let mut seen = path.as_deref().and_then(hub::sessions::transcript_mtime);
     let mut last_push = Instant::now();
     while started.elapsed() < delay {
         let slice = FOLLOW_TICK.min(delay.saturating_sub(started.elapsed()));
@@ -372,7 +372,19 @@ fn follow_sleep(cfg: &hub::config::Config, db: &Db, waker: &hub::live::Waker, de
             _ => return,
         }
 
-        let now = hub::sessions::transcript_mtime(&path);
+        // Still waiting for the file to exist. `find_transcript` is a shallow
+        // readdir, cheap enough to repeat every couple of seconds, and only
+        // while there is nothing to watch.
+        if path.is_none() {
+            path = hub::sessions::find_transcript(&root, &session_id);
+            if path.is_none() {
+                continue;
+            }
+            // It just appeared — that IS the news. Push now rather than waiting
+            // for a second write.
+            seen = None;
+        }
+        let now = path.as_deref().and_then(hub::sessions::transcript_mtime);
         if now == seen || last_push.elapsed() < FOLLOW_MIN_GAP {
             continue;
         }

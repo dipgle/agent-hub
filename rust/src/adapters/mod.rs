@@ -67,6 +67,13 @@ pub enum CommandKind {
     /// Close the books on a Claude session and open a new one that continues
     /// its thread. `arg` is the session id, or empty for the focused one.
     Handover,
+    /// Start a background session for a project. `arg` is "<project> <việc>".
+    New,
+    /// Stop the focused background session, keeping its conversation.
+    Stop,
+    /// Continue the focused background session IN PLACE — a real next turn on
+    /// the same thread, unlike `Ask` which forks. `arg` is what to say.
+    Tell,
     /// Ask the focused session a question WITHOUT interrupting it. `arg` is the
     /// question; the target is whatever `/session` is following.
     ///

@@ -61,6 +61,16 @@ pub struct LiveSession {
     pub last_text: Option<String>,
     /// Why this row is thinner than the others. Never silently empty.
     pub note: Option<String>,
+    /// Whether the agent is working right now ("busy") or waiting ("idle"), and
+    /// whether it finished ("done"). Both come straight from `claude agents`,
+    /// and both are **absent for interactive sessions** — measured 2026-08-08,
+    /// only background rows carry them. An empty pair therefore means "hub
+    /// cannot tell", never "the session is idle".
+    ///
+    /// It is also the only honest answer hub has to "is it still working?":
+    /// the transcript records neither a cost nor a completion marker.
+    pub status: Option<String>,
+    pub state: Option<String>,
     /// The permission mode the session is running under ("auto", "dontAsk",
     /// "default"…).
     ///
@@ -332,6 +342,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     .to_string(),
                 pid: s.get("pid").and_then(|v| v.as_i64()).unwrap_or(0),
                 started_at_ms: s.get("startedAt").and_then(|v| v.as_i64()).unwrap_or(0),
+                status: s.get("status").and_then(|v| v.as_str()).map(str::to_string),
+                state: s.get("state").and_then(|v| v.as_str()).map(str::to_string),
                 last_activity: None,
                 last_role: None,
                 last_text: None,
@@ -908,6 +920,371 @@ fn gate_preview(text: &str, hidden: &str) -> String {
     } else {
         hidden.to_string()
     }
+}
+
+/// A session hub started, and how to find it again.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Started {
+    pub session_id: String,
+    pub project: String,
+    pub cwd: String,
+    pub task: String,
+    pub ts: String,
+}
+
+/// The session id out of `claude --bg`'s human-readable output.
+///
+/// The id is the FIRST token after the marker, not the rest of the line. A
+/// session started without a prompt prints
+/// `backgrounded · 6514f454 (idle — send a prompt to start)`, and taking the
+/// whole tail stored that entire sentence as the session id — after which
+/// `/session`, `/ask`, `/tell` and `/stop` all silently failed to match it,
+/// while hub reported the session as started. Pure so the shape can be pinned
+/// by a test instead of by another live run.
+pub fn parse_backgrounded_id(stdout: &str) -> Option<&str> {
+    stdout
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("backgrounded · "))
+        .and_then(|s| s.split_whitespace().next())
+        .filter(|s| !s.is_empty())
+}
+
+/// Start a new background session in a project folder (UC-S06).
+///
+/// `--bg` returns in about a second with an id and leaves the agent running —
+/// measured 2026-08-08: the row shows up in `claude agents` as
+/// `kind: "background"`, named after the task, at `permission_mode: "dontAsk"`.
+///
+/// Two things follow from that last fact and neither is decoration:
+/// - It runs UNATTENDED with tools, so the denylist is the same one the act
+///   stage uses (`act::DENIED_TOOLS`): no push/merge/reset, no ssh/scp/sudo/rm,
+///   no curl. The human approval step non-negotiable #1 asks for is the owner
+///   typing the task and pressing the button.
+/// - hub cannot tell what it costs. The transcript records no price and
+///   `claude agents` reports none, so there is nothing to add up. What hub can
+///   do is show that it is running and offer a stop — control and visibility
+///   instead of a number that would be invented.
+pub fn start_background(cfg: &Config, project: &str, dir: &Path, task: &str) -> Result<Started> {
+    let task = task.trim();
+    if task.is_empty() {
+        anyhow::bail!("chưa nói việc cần làm");
+    }
+    if !dir.is_dir() {
+        anyhow::bail!("không thấy thư mục dự án: {}", dir.display());
+    }
+    // ORDER IS LOad-BEARING and cost a real run to learn. The prompt is
+    // POSITIONAL here — `--bg` and `-p` conflict outright ("--print never
+    // starts the interactive session that `claude agents` attaches to") — and
+    // `--disallowedTools` is VARIADIC, so a prompt placed after it is eaten as
+    // one more tool pattern. The first real `/new` did exactly that: the agent
+    // came up with no task at all, reporting itself as
+    // "idle — send a prompt to start", and hub cheerfully called it started.
+    // Prompt first, variadic last.
+    let mut args: Vec<&str> = vec!["--bg", task, "--disallowedTools"];
+    args.extend_from_slice(&crate::act::DENIED_TOOLS);
+
+    let out = run(
+        &cfg.claude_cli,
+        &args,
+        RunOpts {
+            cwd: Some(dir),
+            input: None,
+            timeout: Some(Duration::from_secs(120)),
+            env: vec![("CLAUDE_CONFIG_DIR".into(), None)],
+        },
+    )?;
+    if out.code != Some(0) {
+        anyhow::bail!(
+            "claude exit {:?}: {}",
+            out.code,
+            truncate(
+                if out.stderr.trim().is_empty() {
+                    &out.stdout
+                } else {
+                    &out.stderr
+                },
+                200
+            )
+        );
+    }
+    // Human-readable output, not JSON — the id is on the "backgrounded · <id>"
+    // line. Parse defensively: a silent miss here would report success while
+    // hub has no idea which session it just started (and cannot stop it).
+    let short = parse_backgrounded_id(&out.stdout)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "không đọc được id phiên nền từ: {}",
+                truncate(out.stdout.trim(), 200)
+            )
+        })?;
+
+    // The short id is a prefix; resolve it to the full one so every other verb
+    // (`/session`, `/ask`, `/tell`, `/stop`) has something to match on. The
+    // agent takes a moment to register, so retry rather than storing a prefix
+    // that nothing will ever match.
+    let mut full = None;
+    for _ in 0..8 {
+        full = snapshot(cfg)
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id.starts_with(&short))
+            .map(|s| s.session_id);
+        if full.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(1));
+    }
+    let full = full.unwrap_or_else(|| {
+        // Say it rather than quietly handing back a prefix: the session IS
+        // running, the owner should know hub lost track of its full id.
+        logging::warn(
+            "background_session_id_unresolved",
+            json!({ "short": short, "effect": "focus cursor holds a prefix; /session may not match" }),
+        );
+        short.clone()
+    });
+
+    // A started session is not a working session. Measured 2026-08-08: a
+    // background agent opened in any folder under this workspace comes up
+    // `state: "blocked"`, sitting on an interactive dialog —
+    //   "2 new MCP servers found in this project. Select any you wish to
+    //    enable. … Space to select · Enter to confirm · Esc to reject all"
+    // — raised by the workspace's own `.mcp.json` (project-agent, vault). It
+    // waits for a keypress that nobody on a phone can give, writes no
+    // transcript, and never does the task. `--strict-mcp-config` does not
+    // suppress it, nor does `--mcp-config '{"mcpServers":{}}'` (both tried).
+    //
+    // Reporting "🚀 đã mở phiên" over that would be the exact failure this
+    // project keeps writing down: a green message for work that never ran. So
+    // look, and if it is stuck, stop it and say what the one-time fix is.
+    let mut stuck = false;
+    for _ in 0..7 {
+        std::thread::sleep(Duration::from_secs(2));
+        let Some(row) = snapshot(cfg)
+            .sessions
+            .into_iter()
+            .find(|s| s.session_id == full)
+        else {
+            continue;
+        };
+        if row.state.as_deref() == Some("blocked") {
+            stuck = true;
+            break;
+        }
+        // Any transcript at all means it got past the dialog and is working.
+        if find_transcript(&cfg.claude_transcript_root(), &full).is_some() {
+            break;
+        }
+    }
+    if stuck {
+        logging::warn(
+            "background_session_blocked",
+            json!({ "session": full, "cwd": dir.display().to_string(), "cause": "interactive MCP approval dialog" }),
+        );
+        // Leave nothing hanging: a blocked agent does no work and only clutters
+        // the list the owner is trying to read.
+        if let Ok(out) = run(
+            &cfg.claude_cli,
+            &["stop", short_id(&full)],
+            RunOpts {
+                cwd: None,
+                input: None,
+                timeout: Some(Duration::from_secs(30)),
+                env: vec![("CLAUDE_CONFIG_DIR".into(), None)],
+            },
+        ) {
+            if out.code != Some(0) {
+                logging::warn(
+                    "blocked_session_stop_failed",
+                    json!({ "session": full, "stderr": truncate(out.stderr.trim(), 120) }),
+                );
+            }
+        }
+        anyhow::bail!(
+            "phiên mở ra nhưng KẸT ngay ở hộp thoại duyệt MCP của dự án (workspace có .mcp.json: project-agent, vault) — nó chờ một phím bấm mà điện thoại không gõ được, nên đã dừng lại. Cách gỡ, làm MỘT LẦN cho mỗi dự án trên máy: cd {} && claude  →  Enter (duyệt) hoặc Esc (bỏ hết), rồi thoát. Sau đó /new chạy được.",
+            dir.display()
+        );
+    }
+
+    Ok(Started {
+        session_id: full,
+        project: project.to_string(),
+        cwd: dir.to_string_lossy().to_string(),
+        task: task.to_string(),
+        ts: crate::logging::now_iso(),
+    })
+}
+
+/// The id `claude stop` accepts — the SHORT one.
+///
+/// `claude agents` reports both: `id` is 8 characters, `sessionId` is the full
+/// uuid. `stop` only matches the short form and answers a full uuid with
+/// *"No job matching '…'. Run 'claude agents' to list running sessions."* —
+/// which hub logged as a warning while telling the owner the session had
+/// stopped. Everything else here keys on the full id, so the narrowing happens
+/// at the one call that needs it.
+fn short_id(session_id: &str) -> &str {
+    session_id.split('-').next().unwrap_or(session_id)
+}
+
+/// Stop a background session. Its conversation is kept, so it can be continued.
+pub fn stop_background(cfg: &Config, session: &LiveSession) -> Result<()> {
+    if session.kind != "background" {
+        // An interactive session belongs to whoever opened the terminal. Hà
+        // decided on 2026-08-08 that hub only ever drives what hub started.
+        anyhow::bail!(
+            "chỉ dừng được phiên do hub mở (phiên này là {})",
+            session.kind
+        );
+    }
+    let out = run(
+        &cfg.claude_cli,
+        &["stop", short_id(&session.session_id)],
+        RunOpts {
+            cwd: None,
+            input: None,
+            timeout: Some(Duration::from_secs(60)),
+            env: vec![(
+                "CLAUDE_CONFIG_DIR".into(),
+                account_dir(cfg, &session.account),
+            )],
+        },
+    )?;
+    if out.code != Some(0) {
+        anyhow::bail!(
+            "claude exit {:?}: {}",
+            out.code,
+            truncate(
+                if out.stderr.trim().is_empty() {
+                    &out.stdout
+                } else {
+                    &out.stderr
+                },
+                200
+            )
+        );
+    }
+    Ok(())
+}
+
+/// What one turn added to a session that was continued in place.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Told {
+    pub session_id: String,
+    pub source_name: String,
+    pub text: String,
+    pub answer: String,
+    pub cost_usd: f64,
+    pub ts: String,
+}
+
+/// Continue a session IN PLACE — a real next turn, not an aside (UC-S05).
+///
+/// The wall here is the CLI's, not a policy hub invented: resuming a live
+/// background agent is refused outright —
+/// *"Session … is currently running as a background agent (bg). Use `claude
+/// agents` to find and attach to it, or add --fork-session to branch off a
+/// copy."* So "talk into a session while it works" has no path at all from a
+/// phone; `attach` needs a terminal on the machine, and forking is a different
+/// thing (UC-S05b level 2, which hub already offers).
+///
+/// What DOES work, measured 2026-08-08: stop the agent first, then resume. The
+/// session id stays the same and the transcript grows (8434 → 11529 bytes,
+/// 16 → 22 records) — a genuine next turn on the same thread.
+pub fn tell(cfg: &Config, session: &LiveSession, text: &str) -> Result<Told> {
+    let text = text.trim();
+    if text.is_empty() {
+        anyhow::bail!("chưa có nội dung");
+    }
+    if session.kind != "background" {
+        anyhow::bail!(
+            "chỉ nói tiếp được vào phiên do hub mở. Phiên này mở từ terminal/VS Code — dùng \"hỏi bên lề\" để hỏi mà không đụng vào nó."
+        );
+    }
+    if session.status.as_deref() == Some("busy") {
+        anyhow::bail!(
+            "phiên đang chạy dở nên claude không cho nối vào. Dừng nó trước (nút Dừng), hoặc dùng \"hỏi bên lề\" để hỏi mà không cắt việc."
+        );
+    }
+
+    let estimate = fork_cost_estimate(cfg, session);
+    let cap = (estimate * 2.0).max(cfg.triage.max_budget_usd).to_string();
+    let cwd = crate::config::expand_home(Path::new(&session.cwd));
+    // Same denylist the session was started with: continuing a task must not
+    // quietly hand it powers its first turn did not have.
+    let mut args: Vec<&str> = vec!["-p", "--resume", &session.session_id, "--disallowedTools"];
+    args.extend_from_slice(&crate::act::DENIED_TOOLS);
+    args.extend_from_slice(&["--max-budget-usd", &cap, "--output-format", "json"]);
+    let out = run(
+        &cfg.claude_cli,
+        &args,
+        RunOpts {
+            cwd: cwd.is_dir().then_some(cwd.as_path()),
+            input: Some(text.to_string()),
+            timeout: Some(Duration::from_secs(cfg.triage.timeout_sec)),
+            env: vec![(
+                "CLAUDE_CONFIG_DIR".into(),
+                account_dir(cfg, &session.account),
+            )],
+        },
+    )?;
+    if out.timed_out {
+        anyhow::bail!("quá {}s", cfg.triage.timeout_sec);
+    }
+    if out.code != Some(0) {
+        anyhow::bail!(
+            "claude exit {:?}: {}",
+            out.code,
+            truncate(
+                if out.stderr.trim().is_empty() {
+                    &out.stdout
+                } else {
+                    &out.stderr
+                },
+                200
+            )
+        );
+    }
+    let v: Value = serde_json::from_str(&out.stdout)
+        .map_err(|e| anyhow::anyhow!("kết quả không đọc được: {e}"))?;
+    let cost_usd = v
+        .get("total_cost_usd")
+        .and_then(|c| c.as_f64())
+        .unwrap_or(0.0);
+    if v.get("is_error").and_then(Value::as_bool) == Some(true) {
+        anyhow::bail!(
+            "claude báo lỗi (đã tính ${cost_usd:.4}): {}",
+            truncate(
+                v.get("result").and_then(|s| s.as_str()).unwrap_or("(rỗng)"),
+                200
+            )
+        );
+    }
+    let got = v
+        .get("session_id")
+        .and_then(|s| s.as_str())
+        .unwrap_or_default();
+    if got != session.session_id {
+        // A NEW id means the turn landed somewhere else — the opposite of what
+        // this verb promises. Say so instead of reporting a cheerful success on
+        // a thread the owner is not looking at.
+        anyhow::bail!("lượt này rơi vào phiên khác ({got}) chứ không nối vào phiên cũ");
+    }
+    Ok(Told {
+        session_id: session.session_id.clone(),
+        source_name: session.name.clone(),
+        text: text.to_string(),
+        answer: gate_preview(
+            v.get("result")
+                .and_then(|s| s.as_str())
+                .unwrap_or_default()
+                .trim(),
+            "[hub ẩn câu trả lời: có thể chứa bí mật — mở phiên trên máy để xem]",
+        ),
+        cost_usd,
+        ts: crate::logging::now_iso(),
+    })
 }
 
 /// `CLAUDE_CONFIG_DIR` for an account label — `None` means the ambient account.

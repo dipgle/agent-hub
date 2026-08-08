@@ -1,5 +1,65 @@
 # active context — hub
 
+## 🚀 2026-08-08 (tối) — mở/dừng/nói-tiếp phiên nền, và ba bức tường có thật
+
+Làm nốt phần còn lại của sổ UC: **`/new` · `/tell` · `/stop`** + tuổi ảnh chụp
+(UC-S09) + trả nợ log. Bundle **v50**, `hubd` pid 5010, `cargo test` **171**.
+
+### Ba bức tường, đo bằng chạy thật — đừng phát hiện lại
+
+| Đo | Kết quả |
+|---|---|
+| `--bg` + `-p` | **xung khắc** ⇒ prompt là tham số **vị trí** |
+| prompt đứng SAU `--disallowedTools` | bị nuốt (option nhiều giá trị) ⇒ phiên mở ra **không có việc**, tự báo `idle — send a prompt to start` |
+| `claude stop <uuid đầy đủ>` | *"No job matching"* — chỉ nhận **id ngắn 8 ký tự** |
+| `--resume` vào phiên nền **đang sống** | CLI **từ chối thẳng**; chỉ còn `attach` (cần TTY) hoặc fork |
+| dừng rồi `--resume` | ✅ **cùng id**, nhật ký 8.434 → 11.529 byte — lượt thật trên thread cũ |
+| gửi input vào phiên đang chạy | ❌ **không có primitive** ⇒ **UC-S05b mức 1 đóng lại** |
+| chi phí phiên nền | ❌ không đọc được ở đâu (agents không có, nhật ký không ghi) |
+
+### 🔴 Bức tường lớn nhất: phiên nền trong workspace này KẸT ngay khi mở
+
+Mọi dự án nằm dưới `~/Documents/projects/.mcp.json` ⇒ phiên nền dừng ở **hộp
+thoại duyệt MCP** (*"2 new MCP servers found…"*), `state: blocked`, **không nhật
+ký, không làm gì**, chờ một phím mà điện thoại không gõ được.
+`--strict-mcp-config` **không** gỡ; `--mcp-config '{"mcpServers":{}}'` cũng không.
+⟹ hub nay **đợi tới 14s xem trạng thái, thấy `blocked` thì dừng phiên và báo
+hỏng kèm cách gỡ** — thay vì báo "🚀 đã mở phiên" cho thứ chẳng bao giờ chạy.
+
+**👉 VIỆC CỦA HÀ, một lần cho mỗi dự án:**
+`cd ~/Documents/projects/AI/<dự án> && claude` → **Esc** → thoát.
+Sau đó `/new` mới chạy được, và mới nghiệm thu được `/tell` + `/stop` qua UI.
+
+### Nợ đã trả
+
+`channel_command_handled` in `ack:"Không tìm thấy decision #0"` cho **mọi**
+`/session`, `/ask`, `/handover` — vì nhánh đã-trả-lời **rơi xuống** match tra
+decision (`let _ = ack;` vứt câu trả lời thật). Nay nhánh ấy trả `Some(ack)` và
+kết thúc dứt khoát. *Phòng chat vẫn nhận đúng, nên chẳng ai thấy gì hỏng — chỉ
+có log nói dối, đúng chỗ tệ nhất để nói dối.*
+
+### Bài học phép đo (lặp lại lần thứ ba trong ngày)
+
+Vá `noteSessionReply` làm **màn nhanh hơn ảnh chụp**, thế là hai assert của
+`fe-stream-uc` hoá đỏ: nó đọc ảnh chụp ngay sau khi hộp đổi chữ. Log chứng minh
+sản phẩm làm đúng (bàn giao mới `78b74def`, focus đã xoá) — **kịch bản đọc sớm**.
+Nay chờ đúng *trạng thái*, không chờ *chữ trên màn*. Và kịch bản `/new` thôi rình
+danh sách phiên (đua với chính vòng dò 14s của hub), chuyển sang **đọc câu trả
+lời của hub**.
+
+**Nghiệm thu:** `cargo test` **171** · clippy 0 · fmt sạch · build 0 warning ·
+`fe-newsession-uc` **9/9** (đường KẸT) · `fe-aside-uc` 19/19 · `fe-stream-uc`
+**18/18** · `fe-sessions-uc` 9/9 · `fe-smoke` 15/15 · `fe-board-uc` 43/43 ·
+bundle v50 đối chiếu byte từ URL thật.
+
+**CHƯA XONG, có sổ:** `/tell` + `/stop` mới có cơ chế đo thật + unit test, **chưa
+nghiệm thu qua UI** (cần một phiên nền chạy được — xem việc của Hà ở trên).
+UC-S09 nửa "ảnh chụp đã cũ" chưa chạy (phải tắt `hubd` rồi chờ qua 5 phút).
+UC-S02b (phiên có subagent) vẫn chưa có mẫu thật.
+
+💡 Lặp lại lần thứ hai: **lượt thứ hai trên cùng phiên rẻ hơn hàng chục lần** —
+bàn giao lần này **$0.064** so với **$0.861** lần đầu cùng phiên đó.
+
 ## 💬 2026-08-08 (chiều) — UC-S05b mức 2 "hỏi bên lề" + trả nợ phép đo mù
 
 **Hỏi chen ngang mà không phá việc đang chạy** (bundle **v44**, `hubd` pid 69153).

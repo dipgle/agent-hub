@@ -52,8 +52,11 @@ built vs. pending. This file is the rules for working ON hub.
    A slash command is an ORDER, never a message: the poller AND `live.rs` must
    both `parse_command` before ingesting (missing that cost $0.18 on 08-07).
    Verbs: approve · reject · close · reply · ingest · run · doctor · set ·
-   project · session · ask · handover · help. The last two spend money, so they
-   pass `owner_budget_state` first — see #11.
+   project · session · new · ask · tell · stop · handover · help. `new`, `ask`,
+   `tell` and `handover` spend money — counted in `spend`, never refused (#11).
+   A verb that already answered must end the first match with `Some(ack)`, not
+   fall through: falling through logged "Không tìm thấy decision #0" as the
+   reply for every `/session`, `/ask` and `/handover` ever issued.
 8. **The web UI is a privileged surface.** Loopback by default, `x-hub-token` on
    every `/api/*` call, config writes validated + backed up + temp-renamed. If
    you add an endpoint, add the token check; config fields must round-trip
@@ -77,7 +80,19 @@ built vs. pending. This file is the rules for working ON hub.
     **measured, not guessed**: `sessions::fork_cost_estimate` sizes it from the
     transcript (`USD_PER_MB`, from a real 0.986 MB → $1.72), because a flat cap
     smaller than the load cost means paying for a call that dies anyway.
-12. **Anything hub runs on a live session runs on a FORK, read-only.** `/ask` and
+12. **`claude` CLI facts that cost a real run to learn.** Do not re-derive them:
+    `--bg` conflicts with `-p`, so the prompt is POSITIONAL — and
+    `--disallowedTools` is VARIADIC, so a prompt placed after it is eaten as one
+    more pattern and the agent comes up with no task at all. `claude stop` takes
+    the SHORT id (8 chars); a full uuid answers "No job matching". Resuming a
+    LIVE background agent is refused outright — stop it first, then `--resume`
+    appends to the same session (same id, transcript grows). There is no
+    primitive for typing into a running session, so UC-S05b level 1 has no path.
+    And a background session opened anywhere under this workspace comes up
+    `state: "blocked"` on an interactive MCP-approval dialog it can never
+    answer; `sessions::start_background` watches for that, stops it, and
+    reports the one-time fix rather than claiming success.
+13. **Anything hub runs on a live session runs on a FORK, read-only.** `/ask` and
     `/handover` go through `sessions::fork_call`: `--fork-session` so the
     original transcript is untouched, and `FORK_TOOLS` (`Read,Grep,Glob`) so a
     question typed on a phone has no hand to write with. Measured 2026-08-08:

@@ -351,13 +351,17 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             }
         };
 
-        // Commands that answer without touching a decision.
-        let ack = match cmd.kind {
+        // Commands that answer without touching a decision. `Some(ack)` means
+        // this command is FINISHED — it has already replied in the room.
+        let answered: Option<String> = match cmd.kind {
             CommandKind::Help => {
                 let ack = "Lệnh dùng được trong phòng này:\n\
                      — Phiên Claude —\n\
                      /session <id> — theo một phiên (bỏ theo: /session -)\n\
+                     /new <dự án> <việc> — mở phiên nền làm việc đó ($, chạy không hỏi ai)\n\
                      /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng ($)\n\
+                     /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước) ($)\n\
+                     /stop [id] — dừng phiên nền, hội thoại vẫn giữ\n\
                      /handover [id] — đóng sổ, lấy bản bàn giao + id để làm tiếp ($)\n\
                      — Hộp việc —\n\
                      /approve <decision-id> — duyệt và gửi\n\
@@ -373,7 +377,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      `/act <id>` (sửa code) chỉ chạy được từ terminal — nó ghi code và có thể chạy hàng chục phút."
                     .to_string();
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                continue;
+                Some(ack)
             }
             // Whole-cycle verbs. `Ingest` and `Run` are answered rather than
             // executed here on purpose: this code already runs INSIDE a cycle
@@ -387,12 +391,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     "Đang poll mọi kênh trong vòng hiện tại."
                 };
                 reply_in_channel(db, cfg, adapter, cmd, what);
-                continue;
+                Some(what.to_string())
             }
             CommandKind::Doctor => {
                 let probe = crate::portal::probe_now(cfg);
                 reply_in_channel(db, cfg, adapter, cmd, &probe);
-                continue;
+                Some(probe)
             }
             CommandKind::Handover => {
                 // Books, not brakes. This costs a `claude` call and every cent
@@ -449,7 +453,144 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     },
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                ack
+                Some(ack)
+            }
+            CommandKind::New => {
+                // `<dự án> <việc>` — the project decides the folder, and only a
+                // folder hub already knows about is accepted: a typo must not
+                // start an agent loose in the wrong repo.
+                let (name, task) = cmd
+                    .arg
+                    .split_once(char::is_whitespace)
+                    .unwrap_or((&cmd.arg, ""));
+                let name = name.trim();
+                let known = known_projects(cfg);
+                let dir = crate::config::project_dir(cfg, name);
+                let ack = match dir {
+                    Some(d)
+                        if known.contains(&name.to_string()) || cfg.projects.contains_key(name) =>
+                    {
+                        match crate::sessions::start_background(cfg, name, &d, task) {
+                            Ok(s) => {
+                                // Follow it straight away: the person who just
+                                // started a job wants to watch it, and making
+                                // them hunt for it in the list is a step hub
+                                // can take for them.
+                                if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, &s.session_id) {
+                                    logging::error(
+                                        "focus_after_start_failed",
+                                        json!({ "err": e.to_string() }),
+                                    );
+                                }
+                                logging::info(
+                                    "session_started",
+                                    json!({ "project": s.project, "session": s.session_id, "cwd": s.cwd }),
+                                );
+                                format!(
+                                    "🚀 Đã mở phiên nền cho {} tại {}.\nPhiên {}\n\n⚠ Nó chạy không hỏi ai và tiêu tiền trong lúc chạy — hub KHÔNG đọc được chi phí của phiên nền. Dừng bằng nút Dừng hoặc /stop.",
+                                    s.project,
+                                    s.cwd,
+                                    &s.session_id[..8.min(s.session_id.len())]
+                                )
+                            }
+                            // Không cắt 200 như các ack khác: lời báo hỏng ở đây
+                            // MANG THEO cách gỡ, và cắt 200 chặt đúng nửa đó —
+                            // người đọc nhận được tin xấu mà không nhận được
+                            // lối ra.
+                            Err(e) => format!(
+                                "⚠ không mở được phiên: {}",
+                                crate::exec::truncate(&e.to_string(), 700)
+                            ),
+                        }
+                    }
+                    _ => format!(
+                        "⚠ không biết dự án '{}'. Đang có: {}",
+                        crate::exec::truncate(name, 40),
+                        known.join(", ")
+                    ),
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+            }
+            CommandKind::Stop => {
+                let want = cmd.arg.trim().to_string();
+                let want = if want.is_empty() {
+                    db.get_cursor(FOCUS_SESSION_KEY)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default()
+                } else {
+                    want
+                };
+                let live = crate::sessions::snapshot(cfg);
+                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                    None if want.is_empty() => "⚠ chưa mở phiên nào.".to_string(),
+                    None => format!(
+                        "⚠ không thấy phiên '{}' đang chạy",
+                        crate::exec::truncate(&want, 40)
+                    ),
+                    Some(s) => match crate::sessions::stop_background(cfg, s) {
+                        Ok(()) => {
+                            logging::info("session_stopped", json!({ "session": s.session_id }));
+                            format!(
+                                "⏹ Đã dừng phiên {}. Hội thoại vẫn còn — nói tiếp bằng /tell hoặc mở lại trên máy.",
+                                s.name
+                            )
+                        }
+                        Err(e) => format!(
+                            "⚠ không dừng được: {}",
+                            crate::exec::truncate(&e.to_string(), 200)
+                        ),
+                    },
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+            }
+            CommandKind::Tell => {
+                let want = db
+                    .get_cursor(FOCUS_SESSION_KEY)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let live = crate::sessions::snapshot(cfg);
+                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                    None if want.is_empty() => {
+                        "⚠ chưa mở phiên nào. Chạm một phiên rồi nói tiếp.".to_string()
+                    }
+                    None => format!(
+                        "⚠ không thấy phiên '{}' đang chạy nữa",
+                        crate::exec::truncate(&want, 40)
+                    ),
+                    Some(s) => match crate::sessions::tell(cfg, s, &cmd.arg) {
+                        Ok(t) => {
+                            if let Err(e) = db.record_spend(
+                                "tell",
+                                &t.session_id,
+                                t.cost_usd,
+                                &crate::exec::truncate(&t.text, 80),
+                            ) {
+                                logging::error(
+                                    "spend_record_failed",
+                                    json!({ "kind": "tell", "err": e.to_string() }),
+                                );
+                            }
+                            logging::info(
+                                "tell_done",
+                                json!({ "session": t.session_id, "cost_usd": t.cost_usd }),
+                            );
+                            format!(
+                                "➡️ Đã nói tiếp vào phiên {} (${:.4}):\n\n{}",
+                                t.source_name, t.cost_usd, t.answer
+                            )
+                        }
+                        Err(e) => format!(
+                            "⚠ không nói tiếp được: {}",
+                            crate::exec::truncate(&e.to_string(), 300)
+                        ),
+                    },
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
             }
             CommandKind::Ask => {
                 // Books, not brakes — same as handover. The owner asking their
@@ -514,7 +655,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     },
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                ack
+                Some(ack)
             }
             CommandKind::Session => {
                 // Which session the phone is reading. Stored as a cursor so it
@@ -549,7 +690,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                ack
+                Some(ack)
             }
             CommandKind::Project => {
                 // The pin belongs to the conversation, so it is keyed on the
@@ -597,7 +738,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                continue;
+                Some(ack)
             }
             CommandKind::SetConfig => {
                 let (key, value) = cmd
@@ -617,7 +758,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                continue;
+                Some(ack)
             }
             // Message-level verbs: they take a message id, so they must NOT go
             // through the decision lookup below.
@@ -633,7 +774,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                continue;
+                Some(ack)
             }
             CommandKind::Reply => {
                 let ack = match reply_to_message(db, cfg, cmd.decision_id, &cmd.arg) {
@@ -647,7 +788,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                continue;
+                Some(ack)
             }
             CommandKind::ActRefused => {
                 let ack = format!(
@@ -656,11 +797,25 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     id = cmd.decision_id
                 );
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
-                continue;
+                Some(ack)
             }
-            _ => String::new(),
+            _ => None,
         };
-        let _ = ack;
+
+        // Already answered above. This used to fall through into the decision
+        // lookup, where `decision_id = 0` found nothing and the log recorded
+        // "Không tìm thấy decision #0" as the reply — for `/session`, `/ask`
+        // and `/handover`, every single time. The room got the right answer, so
+        // nothing looked broken; only the log lied, which is the worst place
+        // for it to lie because the log is where you go when something IS
+        // broken.
+        if let Some(ack) = answered {
+            logging::info(
+                "channel_command_handled",
+                json!({ "adapter": adapter, "decision_id": cmd.decision_id, "kind": format!("{:?}", cmd.kind), "ack": ack }),
+            );
+            continue;
+        }
 
         let ack = match current {
             None => format!("Không tìm thấy decision #{}", cmd.decision_id),
@@ -723,6 +878,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 | CommandKind::Project
                 | CommandKind::Session
                 | CommandKind::Handover
+                | CommandKind::New
+                | CommandKind::Stop
+                | CommandKind::Tell
                 | CommandKind::Ask => continue,
             },
         };

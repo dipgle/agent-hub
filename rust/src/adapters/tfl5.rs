@@ -721,6 +721,36 @@ pub fn parse_command(
                 .unwrap_or_default();
             Some((CommandKind::Handover, 0, want))
         }
+        // `/new <dự án> <việc>` — opens a background session in that project.
+        // Both halves are required: without a task there is nothing to run, and
+        // without a project there is no folder to run it in.
+        "new" | "moi" => {
+            let rest = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            (!rest.is_empty() && rest.contains(char::is_whitespace)).then_some((
+                CommandKind::New,
+                0,
+                rest,
+            ))
+        }
+        // `/stop [id]` — empty means the session being read.
+        "stop" | "dung" => {
+            let want = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            Some((CommandKind::Stop, 0, want))
+        }
+        // `/tell <nội dung>` — next turn on the focused session.
+        "tell" | "noi" => {
+            let what = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            (!what.is_empty()).then_some((CommandKind::Tell, 0, what))
+        }
         // `/ask <câu hỏi>` — everything after the verb is the question, so
         // re-split like `/project`. No id: the target is the focused session,
         // because this is typed while looking at that session's stream.

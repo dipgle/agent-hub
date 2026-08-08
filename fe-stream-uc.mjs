@@ -196,11 +196,20 @@ try {
   ).catch(() => {});
   const hv = await page.evaluate(() => ({
     box: document.getElementById("sessHandoverBox").textContent || "",
-    note: document.getElementById("cmdNote")?.textContent || "",
+    // `cmdNote` là HÀM, không phải id — nó ghi vào `#cmdStatus`.
+    note: document.getElementById("cmdStatus")?.textContent || "",
   }));
 
   {
-    const after = hub(["portal-push", "--dry-run"]);
+    // Chờ ảnh chụp mang bản bàn giao MỚI. Từ 08-08 màn nhận lời đáp thẳng từ
+    // phòng chat, tức nó hiện xong TRƯỚC khi hubd kịp đẩy ảnh chụp — nên "hộp
+    // đã đổi chữ" không còn đồng nghĩa "trạng thái đã tới". Bản trước đọc ngay
+    // và báo đỏ trong khi hub vừa làm xong đúng việc của nó.
+    let after = hub(["portal-push", "--dry-run"]);
+    for (let i = 0; i < 40 && (after.sessions.handover?.ts || "") === handoverBefore; i++) {
+      await page.waitForTimeout(3000);
+      after = hub(["portal-push", "--dry-run"]);
+    }
     const h = after.sessions.handover;
     check("có bản bàn giao MỚI", !!h && h.ts !== handoverBefore && h.source_id === target.session_id);
     check("phiên mới KHÁC phiên cũ", h && h.new_session_id !== h.source_id, h ? h.new_session_id.slice(0, 8) : "");
@@ -212,8 +221,12 @@ try {
   // Quay lại phải thôi theo, không để hub gánh luồng không ai đọc.
   await page.click("#sessBack");
   check("quay lại thì hiện danh sách", await page.locator("#sessListPanel").isVisible());
-  await page.waitForTimeout(9000);
-  const after = hub(["portal-push", "--dry-run"]);
+  // Cùng lý do: chờ ảnh chụp bắt kịp thay vì đếm 9 giây rồi kết luận.
+  let after = hub(["portal-push", "--dry-run"]);
+  for (let i = 0; i < 20 && after.sessions.focus; i++) {
+    await page.waitForTimeout(3000);
+    after = hub(["portal-push", "--dry-run"]);
+  }
   check(
     "quay lại thì hub thôi theo phiên",
     !after.sessions.focus,

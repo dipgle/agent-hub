@@ -225,11 +225,32 @@ là mất tin cả bảng.
 - Phiên nhận đúng ngữ cảnh cũ (hỏi câu chỉ trả lời được nếu nhớ lượt trước).
 - `last_activity` nhảy lên mới nhất; **không** đẻ phiên mới ngoài ý muốn.
 
-**Cơ chế:** ✅ `--resume` (hub đã dùng cho trí nhớ triage).
+### Đo thật 2026-08-08 — bức tường là của CLI, không phải của hub
+
+Nối vào một phiên **đang sống** bị `claude` từ chối thẳng:
+
+> `Error: Session … is currently running as a background agent (bg). Use
+> claude agents to find and attach to it, or add --fork-session to branch off a copy.`
+
+⟹ "gõ vào phiên đang chạy" **không có đường nào** từ điện thoại: `attach` cần
+terminal trên máy, còn fork là việc khác (UC-S05b mức 2, đã dựng).
+
+Thứ **có** chạy: **dừng phiên trước, rồi nối tiếp**. Đo: `claude stop` → `-p
+--resume` ⇒ **cùng session_id**, nhật ký **8.434 → 11.529 byte (16 → 22 bản ghi)**
+— một lượt thật trên chính thread cũ, ngược hẳn với "hỏi bên lề".
+
 ⚠ Ba bẫy đã ghi: `--no-session-persistence` loại trừ `--resume`; phiên đã resume
 **giữ nguyên system prompt lúc tạo**; phiên mất phải **thoái lui**, không được làm
-chết luồng. `--fork-session` chỉ dùng khi cố ý tách nhánh.
-**Sản phẩm:** chưa · **Kịch bản:** chưa.
+chết luồng.
+
+**Cách hub làm:** verb `/tell <nội dung>` + ô nhập trên màn phiên, **chỉ hiện với
+phiên do hub mở**. Đang `busy` thì từ chối kèm lý do thật và chỉ sang hai lối
+khác (Dừng, hoặc hỏi bên lề). Denylist giữ nguyên như lúc mở phiên — nối tiếp một
+việc không được lén cấp thêm quyền mà lượt đầu không có.
+
+**Cơ chế:** ✅ đo thật · **Sản phẩm:** ✅ (`/tell`, `/stop`) ·
+**Kịch bản:** ⏳ chưa nghiệm thu được qua UI — nó cần một phiên nền **do hub mở
+và chạy được**, mà UC-S06 đang kẹt ở hộp thoại MCP (xem trên).
 
 ---
 
@@ -284,9 +305,11 @@ cảnh đang làm".
   nó lạc hậu) · điều fork biết thì **phiên gốc không biết** (muốn đưa về phải dùng
   mức 1) · fork **đẻ ra session id mới** nên UI phải gắn nhãn "hỏi bên lề" và gom
   dưới phiên cha, không thì danh sách rác dần.
-- Mức **1 (xếp hàng)** — cơ chế ✅ có thật và ghi lại đầy đủ, **nhưng** hàng đợi là
-  của tiến trình đang chạy: hub chưa có đường gửi vào một phiên `interactive`
-  (đúng cái nhánh đã bỏ 08-08). Với phiên **do hub nuôi** (`--bg`) thì **chưa thử**.
+- Mức **1 (xếp hàng)** — ❌ **đã đo, không có cửa.** Hàng đợi là của tiến trình
+  đang chạy, và CLI **không có primitive nào gửi input vào phiên đang sống**:
+  toàn bộ mặt lệnh chỉ có `agents · attach · logs · stop`, còn `--resume` thì bị
+  từ chối thẳng khi phiên còn chạy. Kể cả với phiên **do hub nuôi** (`--bg`).
+  `attach` cần TTY trên máy. ⟹ ngừng theo đuổi mức 1 cho tới khi CLI có đường.
 - Mức **3** — không có primitive, và cũng không nên có.
 
 **Nghiệm thu:**
@@ -340,8 +363,41 @@ Mức 1 (xếp hàng) và mức 3: vẫn như trên.
 **Nghiệm thu:** phiên mới có `kind = background`, đúng `cwd`, hiện lên **mà không
 cần** thao tác nào trên máy tính. Mỗi phiên nền là tiền — phải đếm như mọi đường chi.
 
-**Cơ chế:** 📄 `claude --bg` có tài liệu, **chưa chạy lần nào** — phải thử một lần trước khi thiết kế.
-**Sản phẩm:** chưa · **Kịch bản:** chưa.
+### Đã đo cơ chế (2026-08-08) — và nó không như tài liệu gợi ý
+
+| Đo | Kết quả |
+|---|---|
+| `claude --bg "<việc>"` | ✅ trả id sau **1 giây**, phiên lên `claude agents` với `kind: background`, tên tự đặt theo việc |
+| `--bg` + `-p` | ❌ **xung khắc**: *"--print never starts the interactive session that `claude agents` attaches to"* ⇒ prompt là **tham số vị trí** |
+| `--disallowedTools` + prompt đứng sau | ❌ option **nhận nhiều giá trị**, nuốt luôn câu việc ⇒ phiên mở ra **không có việc gì** (`idle — send a prompt to start`). Prompt phải đứng **trước**. |
+| `claude stop <uuid đầy đủ>` | ❌ *"No job matching"* — chỉ nhận **id ngắn 8 ký tự** |
+| chi phí phiên nền | ❌ **không đọc được**: `claude agents` không có, nhật ký không ghi `costUSD`/`usage` |
+| `status`/`state` | ✅ `busy`/`idle`/`done` — **chỉ có ở phiên nền** |
+
+⟹ Yêu cầu *"phiên nền là tiền, phải đếm"* **không thực hiện được**. Thay bằng thứ
+trung thực hơn: hiện **trạng thái thật** + **nút Dừng**, và nói thẳng rằng hub
+không đọc được chi phí. Đưa một con số bịa ra còn tệ hơn không có số.
+
+### 🔴 Rào chắn thật: phiên nền trong workspace này KẸT ngay khi mở
+
+Mọi dự án đều nằm dưới `~/Documents/projects/.mcp.json` (project-agent, vault),
+nên phiên nền mở lên là dừng ở **hộp thoại duyệt MCP** — *"2 new MCP servers found
+in this project… Space to select · Enter to confirm · Esc to reject all"* — chờ
+một phím bấm mà điện thoại không gõ được. `state: blocked`, **không có nhật ký,
+không làm gì**. `--strict-mcp-config` **không** gỡ được; `--mcp-config
+'{"mcpServers":{}}'` cũng không (đã thử cả hai).
+
+**Cách hub xử lý:** sau khi mở, đợi tới 14s xem trạng thái; nếu `blocked` thì
+**dừng phiên đó và báo hỏng kèm cách gỡ**, chứ không báo "🚀 đã mở phiên" cho một
+phiên chẳng bao giờ chạy.
+
+**Cách gỡ, làm MỘT LẦN cho mỗi dự án, trên máy:**
+`cd <thư mục dự án> && claude` → **Esc** (bỏ hết) hoặc **Enter** (duyệt) → thoát.
+
+**Cơ chế:** ✅ đo thật · **Sản phẩm:** ✅ mở + phát hiện kẹt + dừng ·
+**Kịch bản:** ✅ `fe-newsession-uc.mjs` **9/9** — nhưng mới là **đường KẸT**
+(hub nói đúng sự thật, không để lại phiên lơ lửng). Đường **thành công** cần Hà
+duyệt MCP một lần rồi chạy lại.
 
 ---
 
@@ -420,7 +476,15 @@ lệnh — nơi khoá và biến môi trường hay xuất hiện nhất. Cổng
 liệu cũ như thật. Một tài khoản lỗi → hiện đúng "tài khoản này không trả lời",
 không im lặng bỏ qua phiên của nó.
 
-**Cơ chế:** ✅ `notes[]` + mốc thời gian trên ảnh chụp · **Sản phẩm:** dữ liệu xong, giao diện chưa · **Kịch bản:** chưa.
+**Cách làm:** đầu trang nói **ảnh chụp cũ bao lâu**, không chỉ mốc giờ — một mốc
+giờ trần trụi đọc như "bây giờ" với người không ngồi trừ nhẩm, và đó đúng là lúc
+`hubd` chết thì màn vẫn trông như thật. Quá **5 phút** (chu kỳ là ~120s) thì đổi
+sang chữ đỏ và nói thẳng *"Số dưới đây là của lúc đó, không phải bây giờ"*. Mốc
+không đọc được cũng tính là cũ. Tài khoản lỗi vẫn hiện riêng ở `notes[]`.
+
+**Cơ chế:** ✅ · **Sản phẩm:** ✅ (bundle v50) · **Kịch bản:** ✅ nửa "còn tươi"
+trong `fe-newsession-uc.mjs` (nói đúng tuổi, không kêu oan) · ⏳ nửa "đã cũ" chưa
+chạy: phải tắt `hubd` rồi chờ qua 5 phút.
 
 ---
 

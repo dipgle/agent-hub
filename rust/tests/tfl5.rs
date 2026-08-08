@@ -377,6 +377,50 @@ fn an_empty_owner_list_grants_nobody_command_rights() {
 }
 
 #[test]
+fn a_side_question_keeps_every_word_including_the_slashes() {
+    // The whole remainder is the question, not just the first token — a
+    // question is a sentence, and one that arrives truncated is worse than one
+    // refused. It also must survive text that looks like more commands.
+    let (kind, id, arg) = tfl5::parse_command(
+        "/ask lệnh /run vừa rồi đã chạy xong chưa, còn kẹt ở đâu?",
+        OWNER,
+        &owners(),
+    )
+    .expect("parsed");
+    assert_eq!(kind, hub::adapters::CommandKind::Ask);
+    assert_eq!(id, 0, "the target is the focused session, never an id");
+    assert_eq!(arg, "lệnh /run vừa rồi đã chạy xong chưa, còn kẹt ở đâu?");
+
+    let (kind, _, arg) = tfl5::parse_command("/hoi đang làm gì đấy", OWNER, &owners()).unwrap();
+    assert_eq!(kind, hub::adapters::CommandKind::Ask);
+    assert_eq!(arg, "đang làm gì đấy");
+}
+
+#[test]
+fn an_empty_side_question_never_reaches_the_wallet() {
+    // `/ask` alone would otherwise pay for a `claude` call that answers
+    // nothing. Returning None keeps it an ordinary message, so the person sees
+    // it was not understood instead of being billed for silence.
+    for t in ["/ask", "/ask   ", "/hoi"] {
+        assert!(
+            tfl5::parse_command(t, OWNER, &owners()).is_none(),
+            "sai với: {t}"
+        );
+    }
+}
+
+#[test]
+fn a_stranger_cannot_spend_money_asking() {
+    // `/ask` forks a session and bills the owner, so it sits behind the same
+    // gate as `/approve` — being in the room is tfl5's decision, spending the
+    // owner's money is not.
+    assert!(
+        tfl5::parse_command("/ask bí mật gì trong phiên đó?", "u-stranger", &owners()).is_none()
+    );
+    assert!(tfl5::parse_command("/ask bí mật gì trong phiên đó?", OWNER, &[]).is_none());
+}
+
+#[test]
 fn act_is_refused_from_chat_on_purpose() {
     // It writes code and can run for half an hour. A chat keyboard is the wrong
     // trigger, and blocking the poll loop on it would be worse.

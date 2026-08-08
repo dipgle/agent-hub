@@ -1,5 +1,62 @@
 # active context — hub
 
+## 💬 2026-08-08 (chiều) — UC-S05b mức 2 "hỏi bên lề" + trả nợ phép đo mù
+
+**Hỏi chen ngang mà không phá việc đang chạy** (bundle **v44**, `hubd` pid 69153).
+Ô hỏi trên màn luồng phiên → verb mới **`/ask <câu hỏi>`** → hub fork phiên đang
+theo → trả lời về màn kèm nhãn *"phiên gốc không thêm lượt nào"* + giá của chính
+lần hỏi. Đích là **phiên đang theo**, không phải uuid gõ tay.
+
+🔒 **Hàng rào là CẤU TRÚC, không phải lời dặn trong prompt.** `sessions::fork_call`
+(dùng chung cho `/ask` và `/handover`) chạy allowlist **`Read,Grep,Glob`** — hỏi
+chính bản fork thì nó liệt kê đúng `Glob · Grep · Read`, tức **không có tay để
+ghi**. Ba phép đo loại hai phương án nghe rất hợp lý:
+1. `--tools ""` **hỏng** trên phiên đầy vết dùng công cụ → `is_error: "The model's
+   tool call could not be parsed"`. Phiên đời thật ở đây đều tool-heavy, nên
+   "cắt sạch công cụ" **không phải lựa chọn có sẵn**.
+2. `--disallowedTools` mà **không** kèm allowlist vẫn nạp cả schema công cụ: một
+   câu hỏi tốn **$0.2185** và vỡ trần $0.20.
+3. Có allowlist: cùng câu hỏi **$0.0356**. Allowlist vừa là rào vừa là đòn bẩy giá.
+⚠ `handover` **trước đây chạy KHÔNG có bộ khoá này** — chỉ có câu "đừng chạy công
+cụ" trong prompt. Nay đi chung `fork_call`.
+
+**Nghiệm thu lời hứa của UC, đo trên tệp thật:** phiên `fix-deploy-verify-hash`
+**986.649 byte · 452 dòng · mtime y nguyên** trước và sau, `last_activity` không
+nhúc nhích. Đó mới là phép đo của UC này — *một câu trả lời đúng mà phiên gốc bị
+thêm lượt là UC HỎNG, không phải UC đạt*.
+
+⏳ **Nhánh THÀNH CÔNG chưa chạy được:** trần chủ máy cạn đúng hôm dựng
+($1.7228 + $0.50 > $2.00). Nhánh **từ chối** thì xanh 12/12.
+
+💰 **Trả nợ "phép đo mù" đã ghi sổ sáng nay.** `fe-stream-uc` đọc `snap.budget`
+(trần **robot**) trong khi sản phẩm gác bằng `owner_daily_budget_usd`; nó xanh
+chỉ vì hai trần **tình cờ cùng kết luận từ chối**. Sửa gốc chứ không sửa dòng:
+ảnh chụp (**schema 3→4**) nay công bố `owner_budget.blocks_owner_action` =
+**chính quyết định sản phẩm dùng**, kịch bản đọc thẳng thay vì tự suy lại luật.
+*Phép đo tự tính lại quy tắc là phép đo có thể gật gù cùng một sản phẩm đã hỏng.*
+
+🐛 **Kịch bản bắt được lỗi thật ngay lần chạy đầu (11/12):** khi hub **từ chối**,
+ảnh chụp không sinh dòng nào ⇒ ô trả lời **quay mãi** — đúng con "spinner treo
+vĩnh viễn" đã trả giá 08-07. Vá: lời đáp của hub về **qua phòng chat** ngay, nên
+`noteSessionReply` bắt dòng đó (`💬`/`📋`/`⚠`) và đổ vào đúng ô; đổi phiên thì
+huỷ chờ, để câu trả lời của phiên này không rơi lên màn phiên khác. Vá ăn cho
+**cả `/handover`** vì cùng một khuyết tật.
+
+⚠ **PHÁT HIỆN CHƯA XỬ LÝ — giá tỉ lệ với ĐỘ DÀI PHIÊN.** `--resume` nạp cả hội
+thoại, nên tiền phụ thuộc kích thước nhật ký chứ không phụ thuộc câu hỏi. Mốc đo
+thật: **0.986 MB → $1.72**. Chiếu sang 14 phiên đang sống (0.47 MB → **20.46 MB**,
+tổng 74.7 MB) thì trần mỗi lần gọi **$0.50** — vốn là trần của **triage**, dùng
+chung — **nhỏ hơn giá nạp của 13/14 phiên**, và cú hỏng vì trần **vẫn bị tính
+tiền**. Đây là ngoại suy từ **một** mốc, chưa xác nhận; nhưng bậc độ lớn đủ để
+không im. Cần Hà chốt: tách `owner_max_call_usd` riêng khỏi trần triage, và đặt
+bao nhiêu.
+
+**Nghiệm thu lượt này:** `cargo test` **166** (161 → +5) · clippy **0** · fmt sạch ·
+build 0 warning · `fe-aside-uc` **12/12** (mới) · `fe-stream-uc` **14/14** ·
+`fe-sessions-uc` 9/9 · `fe-smoke` 15/15 · `fe-board-uc` 43/43 · bundle v44 đối
+chiếu byte từ URL thật · `hubd` restart cùng lượt (schema 4 phải đi cùng trang).
+Tiền dò cơ chế: **$0.4359**.
+
 ## 🧹 2026-08-08 — hub giờ CHỈ là kênh quản lý phiên Claude CLI
 
 **Đã gỡ hẳn nhánh hộp thư** (commit `88398ca`, **−2.488 dòng**). Hà: *"rõ ràng loại

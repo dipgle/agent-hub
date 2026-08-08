@@ -67,6 +67,13 @@ pub enum CommandKind {
     /// Close the books on a Claude session and open a new one that continues
     /// its thread. `arg` is the session id, or empty for the focused one.
     Handover,
+    /// Ask the focused session a question WITHOUT interrupting it. `arg` is the
+    /// question; the target is whatever `/session` is following.
+    ///
+    /// The target is implicit on purpose: this is typed on a phone while
+    /// looking at one session's stream, and asking a person to retype a uuid
+    /// there is asking them not to use the feature.
+    Ask,
 }
 
 #[derive(Debug, Clone)]

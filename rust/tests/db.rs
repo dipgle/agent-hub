@@ -375,3 +375,63 @@ fn cursors_round_trip_and_runs_record_health() {
         "a credential skip must be recorded, not silent"
     );
 }
+
+#[test]
+fn the_owner_ceiling_refuses_on_the_worst_case_not_after_the_damage() {
+    // THE HOLE THIS CLOSES. `spent >= cap` still lets one unbounded call
+    // through, and the first real handover used exactly that to spend $1.72 on
+    // a $3 day (2026-08-08). The gate has to ask "could this press break the
+    // ceiling", not "has the ceiling already broken".
+    let (db, _dir) = fresh_db();
+    let mut cfg = common::cfg_for_tests();
+    cfg.owner_daily_budget_usd = 2.0;
+    cfg.triage.max_budget_usd = 0.5;
+
+    let fresh = hub::pipeline::owner_budget_state(&db, &cfg);
+    assert!(
+        !fresh.blocks,
+        "an empty day must not refuse the first press"
+    );
+    assert_eq!(fresh.cap_usd, 2.0);
+    assert_eq!(fresh.per_call_usd, 0.5);
+
+    // $1.70 spent is UNDER the $2.00 ceiling, so a naive `spent >= cap` would
+    // wave this through — and one $0.50 call would land at $2.20.
+    db.record_spend("handover", "s-1", 1.70, "→ s-2").unwrap();
+    let tight = hub::pipeline::owner_budget_state(&db, &cfg);
+    assert_eq!(tight.spent_usd, 1.70);
+    assert!(
+        tight.blocks,
+        "worst case 1.70 + 0.50 = 2.20 > 2.00 must refuse BEFORE spending"
+    );
+
+    // Exactly reaching the ceiling is still inside it: 1.50 + 0.50 = 2.00.
+    let (db2, _dir2) = fresh_db();
+    db2.record_spend("aside", "s-1", 1.50, "→ s-3").unwrap();
+    assert!(
+        !hub::pipeline::owner_budget_state(&db2, &cfg).blocks,
+        "landing exactly on the ceiling is within budget, not over it"
+    );
+
+    // No ceiling configured means no gate — but it must be an explicit 0, not
+    // an accident of an unreadable book.
+    cfg.owner_daily_budget_usd = 0.0;
+    assert!(!hub::pipeline::owner_budget_state(&db, &cfg).blocks);
+}
+
+#[test]
+fn a_side_question_and_a_handover_share_one_set_of_books() {
+    // Two spending paths, one ceiling. If `aside` were counted anywhere else,
+    // the owner's budget would be a budget for one feature rather than for the
+    // owner — which is how the inbox branch quietly ate $2.24 of a $3 day.
+    let (db, _dir) = fresh_db();
+    db.record_spend("handover", "s-1", 0.40, "→ s-2").unwrap();
+    db.record_spend("aside", "s-1", 0.30, "→ s-3").unwrap();
+
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let spent = db.owner_cost_on_day(&today).unwrap();
+    assert!(
+        (spent - 0.70).abs() < 1e-9,
+        "both owner-initiated calls must land in the same day's total, got {spent}"
+    );
+}

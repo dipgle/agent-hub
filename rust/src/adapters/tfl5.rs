@@ -721,6 +721,19 @@ pub fn parse_command(
                 .unwrap_or_default();
             Some((CommandKind::Handover, 0, want))
         }
+        // `/ask <câu hỏi>` — everything after the verb is the question, so
+        // re-split like `/project`. No id: the target is the focused session,
+        // because this is typed while looking at that session's stream.
+        "ask" | "hoi" => {
+            let question = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            // An empty `/ask` would otherwise pay for a claude call to answer
+            // nothing. Fall through to `None` so it goes through triage like
+            // any other text and the person sees it was not understood.
+            (!question.is_empty()).then_some((CommandKind::Ask, 0, question))
+        }
         "act" if id > 0 => Some((CommandKind::ActRefused, id, rest)),
         _ => None,
     }

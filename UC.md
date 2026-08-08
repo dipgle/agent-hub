@@ -295,7 +295,31 @@ cảnh đang làm".
 - Bấm “gửi vào phiên” → màn hiện *đang xếp hàng* → *đã nhận*, và việc đang chạy
   **không đứt quãng** (không có lượt nào bị bỏ dở).
 
-**Cơ chế:** ✅ fork · ✅ hàng đợi (quan sát) · **Sản phẩm:** chưa · **Kịch bản:** chưa.
+### Đã dựng — mức 2 (bundle v43, 2026-08-08)
+
+Ô hỏi + nút **💬 Hỏi** nằm ngay trên màn luồng phiên; gõ → trang gửi verb
+**`/ask <câu hỏi>`** vào phòng → hub fork phiên đang theo, trả lời về màn kèm
+nhãn *"phiên gốc không thêm lượt nào"* và số tiền của chính lần hỏi đó.
+Đích là **phiên đang theo**, không phải một uuid gõ tay — hỏi người dùng chép
+uuid trên điện thoại là hỏi họ đừng dùng tính năng.
+
+🔒 **Hàng rào là cấu trúc, không phải lời dặn.** Bản fork chạy với allowlist
+`Read,Grep,Glob` (`sessions::FORK_TOOLS`) — hỏi chính nó thì nó liệt kê đúng
+`Glob · Grep · Read`, tức không có tay để ghi. Ba phép đo 08-08 loại hai phương
+án nghe hợp lý: `--tools ""` **hỏng** trên phiên đầy vết dùng công cụ
+(*"tool call could not be parsed"*), còn `--disallowedTools` mà không kèm
+allowlist thì **nạp cả schema công cụ**, một câu hỏi tốn **$0.2185** và vỡ trần
+$0.20. Allowlist vừa là hàng rào vừa là đòn bẩy giá (cùng câu hỏi: **$0.0356**).
+⚠ `handover` trước đây chạy **không có** bộ khoá này — nay đi chung `fork_call`.
+
+💰 Cùng cổng ngân sách với `/handover`: `owner_daily_budget_usd`, từ chối theo
+**trường hợp xấu nhất**. Ảnh chụp nay công bố `owner_budget.blocks_owner_action`
+để kịch bản đọc **kết luận của sản phẩm** thay vì tự suy lại luật.
+
+**Cơ chế:** ✅ fork · ✅ hàng đợi (quan sát) · **Sản phẩm:** ✅ mức 2 (bundle v43) ·
+**Kịch bản:** ✅ `fe-aside-uc.mjs` — nhánh từ-chối 10/10 · ⏳ nhánh thành công
+**chưa chạy được**: trần chủ máy đã cạn ($1.723 + $0.50 > $2.00) đúng hôm dựng.
+Mức 1 (xếp hàng) và mức 3: vẫn như trên.
 
 ---
 

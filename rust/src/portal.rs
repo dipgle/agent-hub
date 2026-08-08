@@ -187,10 +187,12 @@ pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
         _ => None,
     };
 
+    let owner = crate::pipeline::owner_budget_state(db, cfg);
+
     Ok(json!({
         // Bump when the shape changes so an old page can say "too new to read"
         // instead of rendering half a screen of `undefined`.
-        "schema": 3,
+        "schema": 4,
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "sessions": {
             "list": live.sessions,
@@ -202,6 +204,15 @@ pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
             // went and how to pick it up on the machine.
             "handover": db
                 .get_cursor(crate::pipeline::HANDOVER_KEY)
+                .ok()
+                .flatten()
+                .filter(|s| !s.is_empty())
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
+            // The last side question and its answer. Kept next to `handover`
+            // because they are the same shape of thing: something the phone
+            // asked for that landed in a fork, not in the session itself.
+            "aside": db
+                .get_cursor(crate::pipeline::ASIDE_KEY)
                 .ok()
                 .flatten()
                 .filter(|s| !s.is_empty())
@@ -221,6 +232,21 @@ pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
             "cap_usd": cap,
             "stopped": spent >= cap,
         })),
+        // The OWNER's ceiling — a different ceiling with a different job, and
+        // the one that decides whether a button on the phone works. `budget`
+        // above reins in the unattended robot; refusing the owner's own press
+        // because the robot had a busy morning answers the wrong question.
+        //
+        // `blocks_owner_action` is the product's own decision, published rather
+        // than left to be re-derived: a check that recomputes the rule can
+        // agree with a broken product, which is exactly how `fe-stream-uc` sat
+        // green while reading the wrong ceiling entirely.
+        "owner_budget": {
+            "spent_usd": owner.spent_usd,
+            "cap_usd": owner.cap_usd,
+            "per_call_usd": owner.per_call_usd,
+            "blocks_owner_action": owner.blocks,
+        },
         // Config carries env var NAMES only (non-negotiable #3), never values,
         // so showing it to app members leaks no credential. Read-only here:
         // writing it stays in the console, which is the one surface that
@@ -453,10 +479,32 @@ mod tests {
 
         let snap = build(&db, &test_cfg(), 10).unwrap();
         // Bumped to 3 on 2026-08-08 when the live Claude sessions joined the
-        // snapshot. The page guards on this number, so the two must move
-        // together — this assert is what makes forgetting the page impossible.
-        assert_eq!(snap["schema"], 3);
+        // snapshot, then to 4 when the owner's own ceiling did. The page guards
+        // on this number, so the two must move together — this assert is what
+        // makes forgetting the page impossible.
+        assert_eq!(snap["schema"], 4);
         assert_eq!(snap["read_only"], true);
+
+        // The owner's ceiling is a DIFFERENT ceiling from the robot's, and the
+        // snapshot must publish the product's own verdict rather than leave a
+        // reader to recompute it. `fe-stream-uc` recomputed it against the
+        // wrong ceiling for a whole day and stayed green by coincidence.
+        let owner = &snap["owner_budget"];
+        assert!(
+            owner["blocks_owner_action"].is_boolean(),
+            "the page must be able to read the decision, not re-derive it"
+        );
+        let cfg = test_cfg();
+        assert_eq!(
+            owner["cap_usd"].as_f64().unwrap(),
+            cfg.owner_daily_budget_usd,
+            "owner ceiling must come from owner_daily_budget_usd, not the robot's"
+        );
+        assert_eq!(
+            owner["per_call_usd"].as_f64().unwrap(),
+            cfg.triage.max_budget_usd,
+            "the worst case one press can add is the per-call cap"
+        );
 
         // The sessions block must exist even when nothing is running, and it
         // must carry `notes` — an account that failed to answer has to be

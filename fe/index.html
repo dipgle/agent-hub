@@ -370,6 +370,19 @@
           <button type="button" id="sessHandover">📋 Đóng sổ &amp; tiếp tục ở phiên mới</button>
         </div>
         <div id="sessHandoverBox" class="hidden"></div>
+        <!-- UC-S05b mức 2: hỏi CHEN NGANG mà không phá ngữ cảnh đang làm.
+             Câu hỏi chạy trên một bản fork, nên phiên gốc không thêm lượt nào
+             và không mất một giây nào. Đo 2026-08-08: phiên gốc y nguyên
+             7380 byte / 10 dòng / cùng mtime trước và sau. -->
+        <div class="row-flex" id="sessAskRow">
+          <input type="text" id="sessAskInput"
+                 placeholder="Hỏi bên lề phiên này…" autocomplete="off" />
+          <button type="button" id="sessAsk">💬 Hỏi</button>
+        </div>
+        <p class="muted boardnote" id="sessAskHint">
+          Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại. Tốn tiền, tính vào trần của bạn.
+        </p>
+        <div id="sessAskBox" class="hidden"></div>
         <div id="sessStream" class="scroll"></div>
       </div>
     </div>
@@ -871,6 +884,7 @@
       if (f.type === 'msg') {
         // Anything from someone else answers the pending state.
         if (f.from !== me) pending.classList.remove('on');
+        noteSessionReply(f);
         addMessage(f);
       } else if (f.type === 'error') {
         // Never swallow a rejection: the row did NOT get written.
@@ -992,7 +1006,7 @@
       stamp.textContent = 'hub chưa đẩy dữ liệu lên (chạy: hub portal-push).';
       return;
     }
-    if (snap.schema > 3) {
+    if (snap.schema > 4) {
       stamp.textContent = `Bản dữ liệu mới hơn trang này (schema ${snap.schema}) — cập nhật bundle.`;
       return;
     }
@@ -1123,6 +1137,7 @@
     if (wantSession) {
       renderStream(sessions.focus || null);
       renderHandover(sessions.handover || null);
+      renderAside(sessions.aside || null);
     }
   }
 
@@ -1140,6 +1155,14 @@
     $('sessStream').textContent = '';
     $('sessHandoverBox').classList.add('hidden');
     $('sessHandoverBox').textContent = '';
+    // A previous session's answer on a new session's screen would read as this
+    // session's answer, so clear it with everything else.
+    $('sessAskBox').classList.add('hidden');
+    $('sessAskBox').textContent = '';
+    $('sessAskInput').value = '';
+    // An answer that arrives after the reader moved on belongs to the session
+    // they left, not the one they are looking at.
+    waitingFor = null;
     $('sessStatus').textContent = 'Đang mở phiên — hub đọc nhật ký và đẩy về…';
     sendCommand(`/session ${s.session_id}`, $('sessBack'));
 
@@ -1181,8 +1204,86 @@
     if (!wantSession) return;
     $('sessHandoverBox').classList.remove('hidden');
     $('sessHandoverBox').textContent = 'Đang xin bản bàn giao — hub hỏi chính phiên đó, mất khoảng nửa phút…';
+    waitingFor = 'handover';
     sendCommand(`/handover ${wantSession}`, e.target);
   });
+
+  // UC-S05b mức 2. The question runs on a fork, so the session being watched
+  // keeps working and gains no turn — which is exactly the thing a person
+  // cannot see from a phone, so the screen has to keep saying it.
+  function askAside(e) {
+    if (!wantSession) return;
+    const input = $('sessAskInput');
+    const q = input.value.trim();
+    if (!q) { input.focus(); return; }
+    $('sessAskBox').classList.remove('hidden');
+    $('sessAskBox').textContent =
+      'Đang hỏi bên lề — hub mở một bản sao của phiên, mất khoảng nửa phút. Phiên gốc vẫn chạy bình thường…';
+    waitingFor = 'ask';
+    sendCommand(`/ask ${q}`, e && e.target);
+    input.value = '';
+  }
+
+  // Which session button is waiting for hub: 'ask' | 'handover' | null.
+  let waitingFor = null;
+
+  /// hub answers in the ROOM, and a refusal ("hết ngân sách", "chưa mở phiên
+  /// nào") never becomes a snapshot row — so a box that only listens to
+  /// snapshots spins forever on exactly the cases a person most needs to read.
+  /// That spinner was already paid for once on 2026-08-07; this is the same
+  /// bug, so it gets the same fix rather than a second discovery.
+  ///
+  /// On success the room's line is a real answer too — show it now, and let the
+  /// snapshot replace it a moment later with the richer version (question,
+  /// fork id, cost).
+  function noteSessionReply(f) {
+    if (!waitingFor || f.from === me) return;
+    const text = String(f.text || '');
+    if (!/^(💬|📋|⚠)/.test(text)) return;
+    const box = $(waitingFor === 'ask' ? 'sessAskBox' : 'sessHandoverBox');
+    waitingFor = null;
+    box.classList.remove('hidden');
+    box.textContent = '';
+    const p = document.createElement('pre');
+    p.className = 'ev-body';
+    p.style.whiteSpace = 'pre-wrap';
+    p.textContent = text;
+    box.append(p);
+  }
+
+  $('sessAsk').addEventListener('click', askAside);
+  // A phone keyboard's "go" key is the natural way to send; making people
+  // reach for the button instead is the kind of friction that kills a feature.
+  $('sessAskInput').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); askAside(ev); }
+  });
+
+  /// A side question and its answer — labelled, never mixed into the stream.
+  function renderAside(a) {
+    const box = $('sessAskBox');
+    if (!a || a.source_id !== wantSession) return;
+    box.classList.remove('hidden');
+    box.textContent = '';
+
+    const q = document.createElement('p');
+    q.className = 'muted boardnote';
+    q.textContent = `Bạn hỏi: ${a.question}`;
+
+    const ans = document.createElement('pre');
+    ans.className = 'ev-body';
+    ans.style.whiteSpace = 'pre-wrap';
+    ans.textContent = a.answer;
+
+    // The claim that matters, stated every time: the running session was not
+    // touched, and this answer lives somewhere else.
+    const foot = document.createElement('p');
+    foot.className = 'muted boardnote';
+    foot.textContent =
+      `Trả lời trên bản sao ${String(a.new_session_id).slice(0, 8)} — phiên gốc không thêm lượt nào. ` +
+      `$${Number(a.cost_usd || 0).toFixed(4)}`;
+
+    box.append(q, ans, foot);
+  }
 
   /// The closing note and the id that carries the work on.
   function renderHandover(h) {

@@ -51,7 +51,9 @@ built vs. pending. This file is the rules for working ON hub.
    text a person types. Never re-implement send-and-bookkeeping in a surface.
    A slash command is an ORDER, never a message: the poller AND `live.rs` must
    both `parse_command` before ingesting (missing that cost $0.18 on 08-07).
-   Verbs: approve · reject · close · reply · ingest · run · doctor · set · help.
+   Verbs: approve · reject · close · reply · ingest · run · doctor · set ·
+   project · session · ask · handover · help. The last two spend money, so they
+   pass `owner_budget_state` first — see #11.
 8. **The web UI is a privileged surface.** Loopback by default, `x-hub-token` on
    every `/api/*` call, config writes validated + backed up + temp-renamed. If
    you add an endpoint, add the token check; config fields must round-trip
@@ -62,6 +64,22 @@ built vs. pending. This file is the rules for working ON hub.
    new spending path must be counted the same way, and stopping must stay loud.
 10. **Secrets for the daemon come from `hub.env`** (chmod 600), never the plist,
     never the config. Log key NAMES only. The real environment always wins.
+11. **Two ceilings, two jobs.** `daily_budget_usd` reins in the unattended robot;
+    `owner_daily_budget_usd` covers what the owner sets off by pressing a button
+    (`/ask`, `/handover`). Refusing the owner because the robot had a busy
+    morning answers the wrong question. Both refuse on the WORST CASE
+    (`spent + max_budget_usd > cap`), never after the fact — `spent >= cap` lets
+    one unbounded call through, and that hole cost $1.72 on 2026-08-08. Any new
+    owner-triggered spend books into `spend` and goes through
+    `pipeline::owner_budget_state`, which publishes its verdict into the
+    snapshot so a test asserts the product's decision instead of re-deriving it.
+12. **Anything hub runs on a live session runs on a FORK, read-only.** `/ask` and
+    `/handover` go through `sessions::fork_call`: `--fork-session` so the
+    original transcript is untouched, and `FORK_TOOLS` (`Read,Grep,Glob`) so a
+    question typed on a phone has no hand to write with. Measured 2026-08-08:
+    `--tools ""` breaks on tool-heavy history, and `--disallowedTools` without
+    an allowlist loads the full tool schema ($0.2185 for one sentence). Never
+    give this path a write tool without a human approval step.
 
 ## When you change something
 
@@ -102,7 +120,9 @@ rust/tests/             integration tests + captured real fixture
 fe/                     chat FE + board tab, shipped to tfl5 as an app bundle
 fe-deploy.mjs           zip → Releases → Activate via the console UI, then verifies the served bytes
 fe-*.mjs                Playwright over the DEPLOYED bundle: -smoke (chat), -board (panels),
-                        -command + -config (button → chat verb → state/file changed), -denied, -watch
+                        -command + -config (button → chat verb → state/file changed), -denied, -watch,
+                        -sessions + -stream (UC-S01..S04, S07), -aside (UC-S05b: the fork must
+                        leave the original transcript byte-identical)
 console-acl.mjs         grant/revoke app access through the tfl5 console UI
 ui-smoke.mjs            Playwright headless check of the web UI (0 console errors)
 hub.env(.example)       secrets for launchd runs — chmod 600, gitignored

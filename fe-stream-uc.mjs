@@ -145,16 +145,28 @@ try {
   // UC-S07 — đóng sổ để mở phiên mới làm tiếp. Đây là đường CHI TIỀN, nên
   // kiểm cả hai nhánh: còn tiền thì phải ra bản bàn giao + id mới; hết tiền thì
   // phải từ chối và NÓI RÕ, không được im lặng tiêu tiếp.
-  const budget = snap.budget || {};
   // Bản bàn giao CŨ vẫn nằm trong cursor từ lần chạy trước, nên "có tồn tại
   // không" là phép đo sai — phải hỏi "có bản MỚI trong lượt này không".
   const handoverBefore = snap.sessions.handover?.ts || "";
-  // Luật của sản phẩm: từ chối khi TRƯỜNG HỢP XẤU NHẤT vượt trần, tức
-  // spent + max_budget_usd > cap — không phải khi đã vượt rồi. Phép đo phải
-  // dùng đúng luật đó, nếu không nó kiểm một sản phẩm khác.
-  const perCall = (snap.config?.value?.triage?.max_budget_usd) ?? 0.5;
-  const headroom = budget.cap_usd ? budget.cap_usd - budget.spent_usd : Infinity;
-  console.log(`\nngân sách còn: $${headroom.toFixed(3)} · trần mỗi lần gọi: $${perCall}`);
+  // Trần của CHỦ MÁY, không phải trần robot. Bản trước đọc `snap.budget`
+  // (daily_budget_usd — thứ ghìm con robot chạy không ai trông) trong khi sản
+  // phẩm gác bằng `owner_daily_budget_usd`; nó xanh chỉ vì hai trần tình cờ
+  // cùng kết luận từ chối, tức là một phép đo mù.
+  //
+  // Và không tự suy lại luật nữa: đọc thẳng `blocks_owner_action` — chính
+  // quyết định sản phẩm dùng. Phép đo tự tính lại quy tắc là phép đo có thể
+  // gật gù cùng một sản phẩm đã hỏng.
+  const owner = snap.owner_budget || {};
+  const blocked = owner.blocks_owner_action === true;
+  console.log(
+    `\ntrần chủ máy: đã dùng $${Number(owner.spent_usd ?? 0).toFixed(3)}/$${Number(owner.cap_usd ?? 0).toFixed(2)}` +
+    ` · mỗi lần gọi tối đa $${Number(owner.per_call_usd ?? 0).toFixed(2)} · chặn: ${blocked}`
+  );
+  check(
+    "ảnh chụp có công bố trần của chủ máy",
+    typeof owner.blocks_owner_action === "boolean" && owner.cap_usd > 0,
+    JSON.stringify(owner)
+  );
   await page.click("#sessHandover");
   await page.waitForFunction(
     () => {
@@ -169,7 +181,7 @@ try {
     note: document.getElementById("cmdNote")?.textContent || "",
   }));
 
-  if (headroom <= perCall) {
+  if (blocked) {
     // Không đủ tiền: hub phải từ chối ở phòng chat, và màn không được vờ như xong.
     const after = hub(["portal-push", "--dry-run"]);
     const now = after.sessions.handover?.ts || "";

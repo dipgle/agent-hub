@@ -655,19 +655,49 @@ bằng tiếng Việt cho người sẽ tiếp quản, đúng 4 mục, không qu
 4. Việc kế tiếp nên làm ngay\n\
 Chỉ viết bàn giao. Không chạy công cụ, không sửa file.";
 
-/// Ask a session to write its own handover, on a FORK.
+/// What a fork opened from the phone is allowed to touch: reading, nothing else.
 ///
-/// Fork, not resume-in-place: the original transcript is left byte-identical
-/// (verified 2026-08-08 — 15222 bytes before and after), so closing the books
-/// can never damage the thread it is describing. The new id is what continues
-/// the work.
-pub fn handover(cfg: &Config, session: &LiveSession) -> Result<Handover> {
+/// Three measurements on 2026-08-08 pinned this exact list, and each one ruled
+/// out an option that looked reasonable on paper:
+/// - `--tools ""` (no tools at all) FAILS on a session whose history contains
+///   tool calls: the model keeps trying to call one and the run comes back
+///   `is_error` — *"The model's tool call could not be parsed"*. Every real
+///   session here is tool-heavy, so "just take the tools away" is not on offer.
+/// - `--disallowedTools` WITHOUT an allowlist still loads the full tool schema.
+///   One sentence cost **$0.2185** that way and blew a $0.20 per-call cap.
+/// - With this allowlist, a fork asked to enumerate its own tools answers
+///   exactly `Glob · Grep · Read`, and the same question costs **$0.0356**.
+///
+/// So the fence is structural rather than behavioural: a fork opened from a
+/// phone has no hand to write with, and no prompt can talk it into growing one.
+/// It is also the cost lever — a smaller tool schema is a smaller prompt.
+const FORK_TOOLS: &str = "Read,Grep,Glob";
+
+/// One `claude` turn on a FORK of a live session.
+///
+/// Fork, not resume-in-place, is the whole safety story: the original
+/// transcript comes back byte-identical (measured twice — 15222 bytes on the
+/// first handover, and 7380 bytes / 10 lines / unchanged mtime on the probe
+/// that fixed `FORK_TOOLS`), so nothing done from the phone can damage the
+/// thread it is looking at. The answer lands in a NEW session id, which is why
+/// callers must present it as an aside instead of filing it under the parent.
+struct ForkReply {
+    new_session_id: String,
+    text: String,
+    cost_usd: f64,
+}
+
+fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkReply> {
     // Cap the CALL, not just the day. `--resume` loads the whole conversation,
     // so one handover on a 986 KB session cost **$1.72** on its first real run
     // (2026-08-08) — the daily ceiling only refuses the NEXT call, so a single
     // unbounded one blew a $3 day to $4.51. The per-call cap is what makes this
     // path safe to expose on a button.
     let per_call = cfg.triage.max_budget_usd.to_string();
+    // Pin the working directory to the session's own, so `Read`/`Grep` resolve
+    // against the work being asked about rather than wherever `hubd` was
+    // started from.
+    let cwd = crate::config::expand_home(Path::new(&session.cwd));
     let out = run(
         &cfg.claude_cli,
         &[
@@ -675,23 +705,27 @@ pub fn handover(cfg: &Config, session: &LiveSession) -> Result<Handover> {
             "--resume",
             &session.session_id,
             "--fork-session",
+            "--tools",
+            FORK_TOOLS,
+            "--disable-slash-commands",
+            "--strict-mcp-config",
             "--max-budget-usd",
             &per_call,
             "--output-format",
             "json",
         ],
         RunOpts {
-            input: Some(HANDOVER_PROMPT.to_string()),
+            cwd: cwd.is_dir().then_some(cwd.as_path()),
+            input: Some(prompt.to_string()),
             timeout: Some(Duration::from_secs(cfg.triage.timeout_sec)),
             env: vec![(
                 "CLAUDE_CONFIG_DIR".into(),
                 account_dir(cfg, &session.account),
             )],
-            ..Default::default()
         },
     )?;
     if out.timed_out {
-        anyhow::bail!("bàn giao quá {}s", cfg.triage.timeout_sec);
+        anyhow::bail!("quá {}s", cfg.triage.timeout_sec);
     }
     if out.code != Some(0) {
         anyhow::bail!(
@@ -709,6 +743,23 @@ pub fn handover(cfg: &Config, session: &LiveSession) -> Result<Handover> {
     }
     let v: Value = serde_json::from_str(&out.stdout)
         .map_err(|e| anyhow::anyhow!("kết quả không đọc được: {e}"))?;
+    let cost_usd = v
+        .get("total_cost_usd")
+        .and_then(|c| c.as_f64())
+        .unwrap_or(0.0);
+    // A budget stop or an unparseable tool call comes back with exit 0 and
+    // `is_error: true` — and it is BILLED. Reporting that as an answer would
+    // put "The model's tool call could not be parsed" on screen as if the
+    // session had said it, so fail loudly and let the caller book the cost.
+    if v.get("is_error").and_then(Value::as_bool) == Some(true) {
+        anyhow::bail!(
+            "claude báo lỗi (đã tính ${cost_usd:.4}): {}",
+            truncate(
+                v.get("result").and_then(|s| s.as_str()).unwrap_or("(rỗng)"),
+                200
+            )
+        );
+    }
     let new_id = v
         .get("session_id")
         .and_then(|s| s.as_str())
@@ -719,30 +770,103 @@ pub fn handover(cfg: &Config, session: &LiveSession) -> Result<Handover> {
         // into the live session is exactly what fork exists to avoid.
         anyhow::bail!("không nhận được session id mới (nhận: {new_id:?})");
     }
-    let checkpoint = v
-        .get("result")
-        .and_then(|s| s.as_str())
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    Ok(ForkReply {
+        new_session_id: new_id,
+        text: v
+            .get("result")
+            .and_then(|s| s.as_str())
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+        cost_usd,
+    })
+}
+
+/// Ask a session to write its own handover, on a FORK.
+pub fn handover(cfg: &Config, session: &LiveSession) -> Result<Handover> {
+    let reply = fork_call(cfg, session, HANDOVER_PROMPT)?;
     Ok(Handover {
         source_id: session.session_id.clone(),
         source_name: session.name.clone(),
-        new_session_id: new_id.clone(),
+        new_session_id: reply.new_session_id.clone(),
         // The handover text is a session talking about its own work, so it can
         // quote anything the session saw — same gate as every other preview.
-        checkpoint: if preview_risk(&checkpoint).is_empty() {
-            checkpoint
-        } else {
-            "[hub ẩn bàn giao: có thể chứa bí mật — mở phiên trên máy để xem]".into()
-        },
-        cost_usd: v
-            .get("total_cost_usd")
-            .and_then(|c| c.as_f64())
-            .unwrap_or(0.0),
+        checkpoint: gate_preview(
+            &reply.text,
+            "[hub ẩn bàn giao: có thể chứa bí mật — mở phiên trên máy để xem]",
+        ),
+        cost_usd: reply.cost_usd,
         ts: crate::logging::now_iso(),
-        resume_command: format!("cd {} && claude --resume {}", session.cwd, new_id),
+        resume_command: format!(
+            "cd {} && claude --resume {}",
+            session.cwd, reply.new_session_id
+        ),
     })
+}
+
+/// A question asked ALONGSIDE a running session, and its answer.
+///
+/// "Alongside" is the product claim and the reason this is not just a chat
+/// message: the answer knows everything the session knows up to now, while the
+/// session itself gains no turn and loses no time.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Aside {
+    pub source_id: String,
+    pub source_name: String,
+    /// Where the answer actually lives — a fork, never the parent.
+    pub new_session_id: String,
+    pub question: String,
+    pub answer: String,
+    pub cost_usd: f64,
+    pub ts: String,
+}
+
+/// Ask a live session a question without touching it (UC-S05b, level 2).
+///
+/// The question comes from the owner (`parse_command` refuses anyone else), so
+/// it is an order, not untrusted content — but the ANSWER can quote anything
+/// the session ever read, which is why it goes through the same preview gate as
+/// every other screen.
+pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<Aside> {
+    let question = question.trim();
+    if question.is_empty() {
+        anyhow::bail!("chưa có câu hỏi");
+    }
+    // Say out loud that this is a side question. Without it the fork reads the
+    // transcript as "we were in the middle of X" and carries on working —
+    // which it cannot do here anyway (read-only tools), so it would just
+    // narrate a plan nobody asked for.
+    let prompt = format!(
+        "Đây là câu hỏi CHEN NGANG từ chủ máy, hỏi qua điện thoại. Bạn đang ở một \
+         bản sao (fork) của phiên — phiên gốc vẫn chạy và KHÔNG bị ảnh hưởng.\n\
+         Chỉ TRẢ LỜI câu hỏi dựa trên ngữ cảnh phiên; không tiếp tục công việc dở, \
+         không đề xuất kế hoạch, không sửa file (bạn chỉ có công cụ đọc).\n\
+         Trả lời bằng tiếng Việt, ngắn gọn, đi thẳng vào câu hỏi.\n\n\
+         Câu hỏi: {question}"
+    );
+    let reply = fork_call(cfg, session, &prompt)?;
+    Ok(Aside {
+        source_id: session.session_id.clone(),
+        source_name: session.name.clone(),
+        new_session_id: reply.new_session_id,
+        question: question.to_string(),
+        answer: gate_preview(
+            &reply.text,
+            "[hub ẩn câu trả lời: có thể chứa bí mật — mở phiên trên máy để xem]",
+        ),
+        cost_usd: reply.cost_usd,
+        ts: crate::logging::now_iso(),
+    })
+}
+
+/// Show the text, or say why it is hidden — never show it half-redacted and
+/// never blank it without a reason.
+fn gate_preview(text: &str, hidden: &str) -> String {
+    if preview_risk(text).is_empty() {
+        text.to_string()
+    } else {
+        hidden.to_string()
+    }
 }
 
 /// `CLAUDE_CONFIG_DIR` for an account label — `None` means the ambient account.

@@ -62,15 +62,11 @@ fn compiled() -> &'static Vec<(Regex, &'static str)> {
     })
 }
 
-/// Channels whose payload actually leaves this machine.
-///
-/// `tfl5` counts: the room lives on a server other people can read, so a reply
-/// posted there has left this machine exactly as much as an email has.
-pub const EXTERNAL_CHANNELS: [&str; 4] = ["github", "email", "telegram", "tfl5"];
-
-pub fn is_external_channel(channel: &str) -> bool {
-    EXTERNAL_CHANNELS.contains(&channel)
-}
+// `EXTERNAL_CHANNELS` / `is_external_channel` lived here to decide which
+// outbound replies had to pass the leak scan. There is no outbound reply path
+// any more (2026-08-08), and the one caller left — `sessions::preview_risk` —
+// scans unconditionally, because everything it looks at is on its way to a doc
+// on a server. "Sometimes" was the part worth deleting.
 
 /// Compile `leak_patterns` from config; a bad pattern is reported, never swallowed.
 pub fn compile_extra(list: &[String]) -> Vec<(Regex, String)> {

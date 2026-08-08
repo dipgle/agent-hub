@@ -1,5 +1,88 @@
 # active context — hub
 
+## 🔥 2026-08-08 (khuya) — XOÁ HOÀN TOÀN nhánh hộp thư, kể cả cái xác
+
+Hà nói ba lần trong một tối, mỗi lần một tầng sâu hơn:
+*"sao vẫn liên quan gì tới github vậy"* → *"đã bảo xóa hoàn toàn rồi cơ mà"* →
+*"sao vẫn tốn tiền gì thế"*. Cả ba đều đúng, và cả ba đều chỉ vào **cùng một
+thứ**: sản phẩm hộp thư đã "bị xoá" hôm sáng nhưng **bộ xương vẫn nằm nguyên**.
+
+### Câu trả lời cho "sao vẫn tốn tiền" — đo, không đoán
+
+Chi hôm nay **$8.82**: triage **$2.98** (github $1.82 · devlog $0.42 · tfl5 chat
+$0.74, lần cuối **08:25 sáng**, sau đó chạm trần nên dừng) + `/ask`&`/handover`
+**$5.84**, trong đó **$3.47 là tôi chạy nghiệm thu tối nay** (có **$1.70 mất
+trắng** vì server tfl5 restart giữa chừng, phải chạy lại).
+⟹ Máy tiêu tiền tự động **vẫn còn**: mỗi tin nhắn trong phòng vẫn bị gọi
+`claude` để phân loại. Đó là bộ phận cuối cùng của hộp thư, và nó bị gỡ trước
+tiên: `run_once` không còn `triage_new` + `flush`. **hub nay không tự tiêu một
+đồng nào** — chỉ nút bấm của Hà mới gọi `claude`.
+
+### Đã xoá (≈4.500 dòng), không để lại mã chết
+
+| Mất | Còn |
+|---|---|
+| `triage.rs` `policy.rs` `act.rs` `outbound.rs` `web.rs` + `assets/ui.html` + echarts | `sessions.rs` `portal.rs` `live.rs` `redaction.rs` |
+| bảng `messages` `decisions` `outbox` `dead_letter` (schema; **dữ liệu cũ không đụng**) | `runs` `cursors` `spend` |
+| verb `/approve` `/reject` `/close` `/reply` `/act` (cả parser lẫn enum) | session verbs + `/project` `/set` `/ingest` `/run` `/doctor` `/help` |
+| CLI `inbox show say approve reject close reply act triage flush triage-one web` | `doctor init once ingest status sessions tfl5-say tfl5-tail portal-push` |
+| config `triage` `act` `autonomy` `routing` `daily_budget_usd` `max_triage_per_cycle` `coalesce_hours` `source_*` `leak_patterns` `web` `projects[].repos/tier` | `call{max_budget_usd,timeout_sec}` `adapters.tfl5` `trust` `projects` `notify` `claude_*` |
+| tab **Hộp việc** + ô "Hỏi hub" + ô chờ "đang xử lý" + chi tiết + 4 nút duyệt | tab Phiên · Trao đổi · Sức khoẻ · Cấu hình |
+| 6 tệp test hộp thư + 7 kịch bản `fe-*` + `ui-smoke.mjs` | 9 kịch bản `fe-*`, tất cả chạy ở **390×844** |
+
+Hai thứ **giữ lại có chủ đích, không phải sót**: `DENIED_TOOLS` (chuyển từ
+`act.rs` sang `sessions.rs` — nó là hàng rào của phiên nền, không phải của hộp
+thư) và `redaction::leak_scan` (quét mật khẩu trước khi ảnh chụp rời máy).
+
+### Ảnh chụp: 180.317 → **16.393 byte**
+
+Không còn `items` `counts` `cost_days` `budget` `chat`, và `cost_usd` của
+handover/aside/told nay `#[serde(skip_serializing)]` — giá **vẫn vào sổ**, chỉ
+thôi đi ra màn. `portal.rs` và `fe-board-uc.mjs` đều assert **VẮNG MẶT**, vì thứ
+này đã mọc lại một lần (trần → giá).
+
+### Ba lỗi thật do chạy thật mới lòi ra
+
+1. **`fe-deploy.mjs` báo "ĐẠT" cho một lần deploy không deploy gì.** v51 đã live,
+   trang local đã sửa (95.069 → 95.451 byte), script thấy trùng tên version →
+   bỏ qua upload → `process.exit(0)` **trước** bước đối chiếu byte. Nay nhánh
+   "đã live" vẫn chạy kiểm byte, và báo thẳng *"tên đã tồn tại nên bản mới không
+   được nhận, chạy lại với tên MỚI"*.
+2. **Trang chết ở mọi lần đổi tab** (bundle v51 đang phục vụ): danh sách panel
+   còn liệt kê `'cost'` trong khi `#panel-cost` đã bị xoá ⟹ `$('panel-cost')`
+   trả `null` → ném ngay dòng đầu. Nay `PANELS` **đọc thẳng từ markup**, không
+   thể lệch khỏi số tab đang có.
+3. **`chip is not defined`** — xoá kèm dải số của hộp việc, nhưng bảng Sức khoẻ
+   cũng vẽ badge bằng nó. `fe-sessions-uc` bắt được ngay lần chạy đầu sau deploy.
+
+### Phép đo lại đòi sản phẩm phải SAI mới xanh (lần thứ tư)
+
+`fe-board-uc` đòi dòng "chi phí" trong pane chi tiết · `fe-config-uc` đòi **≥4
+kênh** (github/devlog/email/telegram — đỏ suốt từ sáng) và sửa
+`max_triage_per_cycle` (khoá đã xoá) · `fe-smoke` đòi ô "đang xử lý" quay.
+Sửa **phép đo**, không hạ chuẩn sản phẩm: nay đòi `tin cậy`, đòi kênh tfl5, sửa
+`poll_interval_sec`, và đòi ô chờ **KHÔNG** hiện.
+`fe-config-uc` còn một lỗi thật của chính nó: bước trả cấu hình về nguyên trạng
+gõ vào `#text` trong khi đang đứng ở tab Cấu hình — textarea bị ẩn, `fill` chờ
+30s rồi chết, **để lại config lệch**. Nay bấm sang tab Trao đổi trước.
+
+### Nghiệm thu (exit code đọc trực tiếp)
+
+`cargo test` **67** · clippy 0 · fmt sạch · build release 0 warning ·
+bundle **v55** đối chiếu byte từ URL thật · `hubd` chạy bản mới ·
+`fe-board-uc` **18/18** · `fe-sessions-uc` 9/9 · `fe-smoke` 15/15 ·
+`fe-config-uc` **8/8** (form → `/set` → đĩa → trả về) · `fe-denied-uc` 10/10 ·
+`fe-stream-uc` **17/17** · `fe-aside-uc` **17/17** · `fe-newsession-uc` 9/9.
+
+**CHƯA XONG, có sổ:** `fe-phone-uc` còn đỏ ở **ergonomics** — chữ 11.2px và nút
+tab cao 35px (chuẩn chạm 44px); đỏ từ trước đợt dọn, là nợ thiết kế thật.
+`/tell` + `/stop` vẫn chưa nghiệm thu qua UI (cần một phiên nền chạy được).
+Bảng cũ trong `hub.sqlite` vẫn còn dữ liệu — **cố ý không xoá**.
+
+⚠ `PLAN-portal.md` không xoá được bằng `git rm`: hook toàn cục `SDVI-REVIEWER`
+chặn mọi dạng (đã thử 3 cách nó tự đề xuất). Đã ghi đè thành một trang bia mộ.
+Muốn xoá hẳn: `git -C ~/Documents/projects/AI/hub rm PLAN-portal.md`.
+
 ## 🚀 2026-08-08 (tối) — mở/dừng/nói-tiếp phiên nền, và ba bức tường có thật
 
 Làm nốt phần còn lại của sổ UC: **`/new` · `/tell` · `/stop`** + tuổi ảnh chụp

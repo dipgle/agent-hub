@@ -15,11 +15,12 @@ pub mod tfl5;
 
 use std::collections::BTreeMap;
 
-use crate::db::NewMessage;
-
 #[derive(Debug, Default)]
 pub struct PollResult {
-    pub messages: Vec<NewMessage>,
+    /// How many ordinary chat lines this poll walked past. A COUNT, not the
+    /// lines: hub stopped storing what people type on 2026-08-08 when the inbox
+    /// was deleted, and a number is all the run row ever needed.
+    pub seen: usize,
     pub cursors: BTreeMap<String, String>,
     /// Partial trouble that is not an adapter failure (e.g. one project's
     /// devlog is uninitialized). Recorded on the run row — never silent.
@@ -32,18 +33,7 @@ pub struct PollResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
-    Approve,
-    Reject,
-    /// Not an action — a request hub answers with instructions. The act stage
-    /// writes code and can run for half an hour; triggering it from a chat
-    /// message would block the poll loop and put a code change one typo away
-    /// from a phone keyboard. It stays a terminal command on purpose.
-    ActRefused,
     Help,
-    /// Close a MESSAGE (not a decision) and cancel anything pending on it.
-    Close,
-    /// Answer a MESSAGE by hand with the text in `arg`.
-    Reply,
     /// Poll every channel now (the console's "Poll kênh").
     Ingest,
     /// Run a full cycle now (the console's "Chạy 1 vòng").

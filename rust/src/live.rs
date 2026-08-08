@@ -17,13 +17,13 @@
 
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::json;
 
 use crate::adapters::tfl5;
 use crate::config::Config;
-use crate::db::{Db, NewMessage};
+use crate::db::Db;
 use crate::logging;
 
 /// Lets the listener tell the daemon loop "something arrived, do not sit out
@@ -97,113 +97,53 @@ pub fn spawn(cfg: Config, waker: Arc<Waker>) {
     });
 }
 
-/// One connection's lifetime: log in, hold the room, insert what arrives.
+/// One connection's lifetime: log in, hold the room, wake the cycle on orders.
 fn session_once(cfg: &Config, db: &Db, waker: &Waker) -> anyhow::Result<()> {
+    let _ = db;
     let c = &cfg.adapters.tfl5;
     let s = tfl5::login(c)?;
     let mut live = tfl5::connect_live(c, &s)?;
-    // Short reads so the debounce buffer flushes on time even in a silent room.
     live.set_read_timeout(Duration::from_secs(1));
     logging::info(
         "tfl5_live_connected",
         json!({ "app_tid": c.app_tid, "room": c.room, "as": s.username }),
     );
 
-    // The same reason the poller has a silence window: three lines of one
-    // thought must reach triage together, or the model answers a third of a
-    // question. Held here in memory; the poller is the backstop if hub stops
-    // before the buffer drains.
-    let window = Duration::from_secs(c.silence_window_sec.max(1));
-    let mut buf: Vec<NewMessage> = vec![];
-    let mut last_seen = Instant::now();
-
     loop {
         match live.next_message() {
             Ok(Some(frame)) => {
-                // Our own replies come back on this socket. Ingesting them
-                // would triage hub's own words and bill for the privilege.
+                // Our own replies come back on this socket.
                 if frame.get("from_user_tid").and_then(|v| v.as_str()) == Some(s.user_tid.as_str())
                 {
                     continue;
                 }
                 let text = frame.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                if text.chars().count() < c.min_chars {
-                    logging::info(
-                        "tfl5_message_filtered",
-                        json!({ "reason": "too_short", "via": "live", "len": text.chars().count() }),
-                    );
-                    continue;
-                }
-                // An owner's slash command is an ORDER, not something to pay a
-                // model to classify. The poller already splits them out
-                // (`tfl5::poll`); this path did not, so every `/close` typed in
-                // the room was executed AND stored as a message AND triaged —
-                // $0.18 to classify the word "close" (2026-08-07). Leave it for
-                // the poller, which turns it into a command.
                 let from_uid = frame
                     .get("from_user_tid")
                     .and_then(|v| v.as_str())
                     .unwrap_or_default();
+                // The ONLY thing this socket is for now: notice that an order
+                // arrived and start the cycle immediately, instead of letting it
+                // sit for the rest of the poll interval. The poller reads it from
+                // its cursor and executes it — this path never executes anything
+                // itself, which is what keeps one order from running twice.
+                //
+                // Ordinary conversation is left alone. It used to be buffered,
+                // routed and stored on its way to a paid classifier; a room where
+                // typing costs money is a room nobody types in.
                 if tfl5::parse_command(text, from_uid, &cfg.trust.tfl5_user_tids).is_some() {
                     logging::info(
                         "tfl5_live_command_deferred",
                         json!({ "head": crate::exec::truncate(text, 40), "from_user_tid": from_uid }),
                     );
-                    waker.wake(); // run the cycle now so the order is not sitting idle
-                    continue;
-                }
-                if let Some(m) = tfl5::message_from_frame(c, &frame) {
-                    buf.push(m);
-                    last_seen = Instant::now();
+                    waker.wake();
                 }
             }
             Ok(None) => {}
             Err(e) => {
-                // Flush before giving up the socket, so a buffered burst is not
-                // stranded waiting on the next poll.
-                flush(db, cfg, waker, &mut buf);
                 live.close();
                 return Err(e);
             }
         }
-
-        if !buf.is_empty() && last_seen.elapsed() >= window {
-            flush(db, cfg, waker, &mut buf);
-        }
-    }
-}
-
-/// Commit a settled burst and nudge the daemon so it does not sit out the rest
-/// of its poll interval.
-fn flush(db: &Db, cfg: &Config, waker: &Waker, buf: &mut Vec<NewMessage>) {
-    if buf.is_empty() {
-        return;
-    }
-    let projects = crate::pipeline::known_projects(cfg);
-    let mut inserted = 0usize;
-    for mut m in buf.drain(..) {
-        // Same routing the poller applies. Without this the live path wrote
-        // raw rows — no project, no trust rating — and since live usually wins
-        // the race, that was EVERY chat message.
-        if let Err(e) = crate::pipeline::enrich_message(db, cfg, &mut m, &projects) {
-            logging::error(
-                "tfl5_live_enrich_failed",
-                json!({ "external_id": m.external_id, "err": logging::err_chain(&e) }),
-            );
-        }
-        match db.insert_message(&m) {
-            // Already there because the poller beat us to it — that is the
-            // dedupe working, not a problem.
-            Ok((_, true)) => inserted += 1,
-            Ok((_, false)) => {}
-            Err(e) => logging::error(
-                "tfl5_live_insert_failed",
-                json!({ "external_id": m.external_id, "err": logging::err_chain(&e) }),
-            ),
-        }
-    }
-    if inserted > 0 {
-        logging::info("tfl5_live_ingested", json!({ "new": inserted }));
-        waker.wake();
     }
 }

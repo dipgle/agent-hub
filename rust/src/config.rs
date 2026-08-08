@@ -14,83 +14,44 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-pub const TIERS: [&str; 3] = ["L0", "L1", "L2"];
-
-/// Actions the hub may never perform without a human pressing approve —
-/// regardless of tier or config. Deliberately not configurable.
-pub const ALWAYS_HUMAN_ACTIONS: [&str; 5] = [
-    "deploy",
-    "merge",
-    "force_push",
-    "delete_data",
-    "rotate_secret",
-];
+// `TIERS` and `ALWAYS_HUMAN_ACTIONS` lived here until 2026-08-08. They were the
+// vocabulary of `policy.rs` — how much the robot could do unattended, and the
+// five things it could never do at any tier. With no robot deciding anything,
+// there is no tier to set: hub does exactly what the owner typed, and the wall
+// that matters now is `sessions::DENIED_TOOLS`, which is enforced on the CLI
+// call itself rather than described in a config file.
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct TriageCfg {
-    pub model: String,
+pub struct CallCfg {
+    /// Ceiling for ONE `claude` call hub makes on the owner's behalf, and a
+    /// floor under the measured per-call estimate (`sessions::fork_call`).
+    ///
+    /// Was `triage.max_budget_usd`, the guard on a robot classifying an inbox.
+    /// The inbox is gone; what is left are calls a person pressed a button for,
+    /// so this is not a spending policy — it is a stop on one call running away.
+    #[serde(default = "default_call_budget")]
     pub max_budget_usd: f64,
+    /// Wall-clock stop for the same call.
+    #[serde(default = "default_call_timeout")]
     pub timeout_sec: u64,
-    pub min_confidence_auto: f64,
-    pub context_bytes: usize,
 }
 
-impl Default for TriageCfg {
+impl Default for CallCfg {
     fn default() -> Self {
         Self {
-            model: "sonnet".into(),
-            max_budget_usd: 0.5,
-            timeout_sec: 240,
-            min_confidence_auto: 0.8,
-            context_bytes: 6000,
+            max_budget_usd: default_call_budget(),
+            timeout_sec: default_call_timeout(),
         }
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct ActCfg {
-    pub enabled: bool,
-    pub model: String,
-    pub max_budget_usd: f64,
-    pub timeout_sec: u64,
+pub fn default_call_budget() -> f64 {
+    0.5
 }
 
-impl Default for ActCfg {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            model: "sonnet".into(),
-            max_budget_usd: 3.0,
-            timeout_sec: 1800,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Autonomy {
-    pub default: TierName,
-    pub projects: BTreeMap<String, String>,
-}
-
-/// Newtype so the default is "L0" (draft only) rather than an empty string.
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(transparent)]
-pub struct TierName(pub String);
-
-impl Default for TierName {
-    fn default() -> Self {
-        TierName("L0".into())
-    }
-}
-
-impl std::ops::Deref for TierName {
-    type Target = str;
-    fn deref(&self) -> &str {
-        &self.0
-    }
+pub fn default_call_timeout() -> u64 {
+    240
 }
 
 /// The tfl5 chat room hub talks through. `base_url` is the tfl5 server, NOT a
@@ -174,96 +135,20 @@ impl Default for Trust {
     }
 }
 
-/// Every field is optional and only the ones present must match. They are
-/// skipped when empty so a saved config stays readable instead of filling up
-/// with explicit nulls.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(default)]
-pub struct RoutingWhen {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub repo: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sender: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub chat_id: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub subject_contains: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub body_contains: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct RoutingRule {
-    pub when: RoutingWhen,
-    pub project: String,
-}
-
-/// One project, registered under its FOLDER NAME.
+/// One project, registered under its FOLDER NAME — which is also the name
+/// `/project` and `/new` accept.
 ///
-/// The single registry. Before this there were three lists that had to be kept
-/// in step by hand — a `routing` table whose right-hand side was free text, a
-/// per-project tier map, and an implicit set of folders — and they drifted:
-/// six of the eight routed projects had no devlog, and a typo in any of them
-/// produced no error at all, just a hub that answered with no context.
-///
-/// Now the folder is the identity and everything else hangs off it. A GitHub
-/// repo is an OPTION on a project, not a separate table with its own idea of
-/// what a project is.
+/// It used to carry `repos` (the GitHub repositories that routed mail to this
+/// project) and `tier` (how much the robot could answer on its own). Both were
+/// answers to questions the inbox asked. A project is now just a folder hub can
+/// open a session in, so the only thing left worth storing is a note for a
+/// person — and even that, hub never reads.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ProjectCfg {
-    /// Autonomy tier for this project. Absent = `autonomy.default`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tier: Option<String>,
-    /// GitHub repos that belong to this project — the common case, spelled
-    /// simply instead of as a routing rule.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub repos: Vec<String>,
-    /// Anything the `repos` shorthand cannot express (sender, chat id, subject
-    /// or body text). Same matcher the old routing table used, so nothing that
-    /// worked before becomes unexpressible.
-    #[serde(rename = "match", skip_serializing_if = "Vec::is_empty")]
-    pub matchers: Vec<RoutingWhen>,
     /// Free note for humans; hub never reads it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct WebCfg {
-    /// Serve the console from inside `hubd` too, so one launchd agent gives you
-    /// both the loop and the UI.
-    pub enabled: bool,
-    pub port: u16,
-    /// Interface to bind. Loopback by default **on purpose**: the per-boot token
-    /// is embedded in the page, so anyone who can load `/` is already trusted.
-    pub bind: String,
-    /// Name of the env var holding a password. REQUIRED to bind anything other
-    /// than loopback — see `is_loopback_bind`.
-    pub password_env: String,
-    /// Extra hostnames accepted in the `Host` header when bound off-loopback
-    /// (the domain a reverse proxy fronts this with). Loopback binds always
-    /// accept 127.0.0.1 / localhost / ::1 and nothing else.
-    pub allowed_hosts: Vec<String>,
-}
-
-impl Default for WebCfg {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            port: 9200,
-            bind: "127.0.0.1".into(),
-            password_env: "HUB_WEB_PASSWORD".into(),
-            allowed_hosts: vec![],
-        }
-    }
-}
-
-pub fn is_loopback_bind(bind: &str) -> bool {
-    matches!(bind, "127.0.0.1" | "::1" | "localhost")
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -296,71 +181,20 @@ pub struct Config {
     #[serde(default = "default_project_roots")]
     pub project_roots: Vec<String>,
     pub poll_interval_sec: u64,
-    pub max_triage_per_cycle: i64,
-    /// A repeat item on a thread that already has an unanswered decision is
-    /// attached to it instead of triaged again (0 disables). One triage call
-    /// costs $0.05–$0.11 (measured 2026-07-26) and CI repeats itself.
-    pub coalesce_hours: i64,
-    pub triage: TriageCfg,
-    pub act: ActCfg,
-    pub autonomy: Autonomy,
+    /// Ceiling + timeout for ONE `claude` call the owner asked for.
+    ///
+    /// Everything else that used to live here — `max_triage_per_cycle`,
+    /// `coalesce_hours`, `daily_budget_usd`, the per-source ceilings, `act`,
+    /// `autonomy`, `routing`, `leak_patterns`, `web` — belonged to the inbox and
+    /// went with it on 2026-08-08. An unknown key in an existing file is ignored
+    /// by serde, so an old `hub.config.json` still loads; the next save drops it.
+    pub call: CallCfg,
     pub adapters: Adapters,
     pub trust: Trust,
     /// THE project registry, keyed by folder name under `project_roots`.
-    /// Replaces `routing` + `autonomy.projects`; both are still read for
-    /// existing configs (see `resolve_project` / `effective_tier`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub projects: BTreeMap<String, ProjectCfg>,
-    /// Legacy repo→project table. Kept working so an existing config does not
-    /// break; new entries belong in `projects`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub routing: Vec<RoutingRule>,
-    /// Extra regexes that must never appear in an outbound auto-reply.
-    pub leak_patterns: Vec<String>,
     pub notify: NotifyCfg,
-    pub web: WebCfg,
-    /// Per-source ceilings, on top of `daily_budget_usd`. A chat room open to
-    /// other people must not be able to spend the whole day's budget before
-    /// anything else is looked at. Mechanism, not policy: any source name
-    /// works, absent = no per-source ceiling.
-    #[serde(default)]
-    pub source_daily_budget_usd: std::collections::BTreeMap<String, f64>,
-    /// Per-source override of `coalesce_hours`.
-    ///
-    /// The global default assumes a thread IS a topic — true for a GitHub
-    /// issue, false for a chat room, where `thread_key` is the ROOM and 12
-    /// hours of unrelated questions would collapse into whichever decision
-    /// happened to be open. Observed for real on 2026-08-06: a genuine
-    /// question was swallowed into a pending decision about an earlier smoke
-    /// message, and the draft answered the wrong thing. Chat wants minutes
-    /// (fractional hours), not hours.
-    #[serde(default)]
-    pub source_coalesce_hours: std::collections::BTreeMap<String, f64>,
-    /// How long a conversation on one thread keeps its `claude` session, per
-    /// source. Set for chat, where "và cái kia thì sao?" only means anything if
-    /// the previous turn is still in context; absent/0 = every message is
-    /// triaged from a clean session, which is the safer default and what every
-    /// non-chat source wants.
-    ///
-    /// A thread that ever tripped the injection wire is never resumed — see
-    /// `Db::last_session_for_thread`.
-    #[serde(default)]
-    pub source_thread_memory_hours: std::collections::BTreeMap<String, f64>,
-    /// Hard ceiling on triage spend per calendar day (UTC). 0 = no ceiling.
-    /// Exists because an always-on daemon spends money while nobody watches:
-    /// once the day's decisions add up to this, triage stops and says so.
-    pub daily_budget_usd: f64,
-
-    /// Ceiling for actions the OWNER initiates (a button on his phone), kept
-    /// apart from `daily_budget_usd`.
-    ///
-    /// `daily_budget_usd` exists to rein in an unattended robot triaging an
-    /// inbox nobody asked for. A tap on the phone is not that: it is the owner
-    /// doing his own work through a different keyboard, and refusing it because
-    /// the robot's noise budget is gone makes no sense. Counted from the
-    /// `spend` table only. 0 = no ceiling of its own.
-    #[serde(default = "default_owner_budget")]
-    pub owner_daily_budget_usd: f64,
     /// The `claude` executable used to LIST sessions (`sessions.rs`). Separate
     /// from whatever triage spawns: this one only ever reads.
     #[serde(default = "default_claude_cli")]
@@ -391,23 +225,11 @@ impl Default for Config {
             workspace_root: PathBuf::new(),
             project_roots: default_project_roots(), // filled in by load(): <hub_home>/../..
             poll_interval_sec: 120,
-            max_triage_per_cycle: 8,
-            coalesce_hours: 12,
-            triage: TriageCfg::default(),
-            act: ActCfg::default(),
-            autonomy: Autonomy::default(),
+            call: CallCfg::default(),
             adapters: Adapters::default(),
             trust: Trust::default(),
             projects: BTreeMap::new(),
-            routing: vec![],
-            leak_patterns: vec![],
             notify: NotifyCfg::default(),
-            web: WebCfg::default(),
-            daily_budget_usd: 5.0,
-            source_daily_budget_usd: Default::default(),
-            source_coalesce_hours: Default::default(),
-            source_thread_memory_hours: Default::default(),
-            owner_daily_budget_usd: default_owner_budget(),
             claude_cli: default_claude_cli(),
             claude_accounts: vec![],
             claude_transcript_root: String::new(),
@@ -453,53 +275,26 @@ pub fn find_hub_home(start: &Path) -> PathBuf {
 /// than one that refuses to start.
 pub fn validate(cfg: &Config) -> Result<()> {
     let mut problems: Vec<String> = vec![];
-    if !TIERS.contains(&&*cfg.autonomy.default) {
-        problems.push(format!(
-            "autonomy.default must be one of {}",
-            TIERS.join("|")
-        ));
-    }
-    for (proj, tier) in &cfg.autonomy.projects {
-        if !TIERS.contains(&tier.as_str()) {
-            problems.push(format!(
-                "autonomy.projects.{proj} = {tier} is not a valid tier"
-            ));
-        }
-    }
     if cfg.poll_interval_sec < 10 {
         problems.push("poll_interval_sec must be >= 10".into());
     }
-    if !(0.0..=1.0).contains(&cfg.triage.min_confidence_auto) {
-        problems.push("triage.min_confidence_auto must be within 0..1".into());
+    // A per-call ceiling of 0 does not mean "unlimited" to the CLI — it means
+    // the call dies immediately and is still billed for what it loaded.
+    if cfg.call.max_budget_usd <= 0.0 {
+        problems.push("call.max_budget_usd must be > 0".into());
     }
-    if cfg.triage.max_budget_usd <= 0.0 {
-        problems.push("triage.max_budget_usd must be > 0".into());
+    if cfg.call.timeout_sec < 10 {
+        problems.push("call.timeout_sec must be >= 10".into());
     }
-    if cfg.max_triage_per_cycle < 1 {
-        problems.push("max_triage_per_cycle must be >= 1".into());
+    // The room is where orders come from, so an app_tid that is not set means
+    // hub is listening to nothing — say it at startup, not in a silent no-op.
+    if cfg.adapters.tfl5.enabled && cfg.adapters.tfl5.app_tid.trim().is_empty() {
+        problems.push("adapters.tfl5.enabled needs adapters.tfl5.app_tid".into());
     }
-    for rule in &cfg.routing {
-        if rule.project.trim().is_empty() {
-            problems.push("routing rule needs a non-empty project".into());
-        }
-    }
-    if cfg.daily_budget_usd < 0.0 {
-        problems.push("daily_budget_usd must be >= 0 (0 disables the ceiling)".into());
-    }
-    if cfg.web.enabled && cfg.web.port < 1024 {
-        problems.push("web.port must be >= 1024 (no privileged ports)".into());
-    }
-    // Exposing the console off-loopback without a password would hand full
-    // approve/config rights to anyone who can reach the port, because the page
-    // itself carries the API token.
-    if cfg.web.enabled
-        && !is_loopback_bind(&cfg.web.bind)
-        && secret_from_env(&cfg.web.password_env).is_none()
-    {
-        problems.push(format!(
-            "web.bind = {} is not loopback, so {} must be set (or put the UI behind an SSH tunnel and keep bind=127.0.0.1)",
-            cfg.web.bind, cfg.web.password_env
-        ));
+    // Without an owner tid every slash command in the room is refused, and the
+    // refusal is only visible in the log — a hub nobody can drive.
+    if cfg.adapters.tfl5.enabled && cfg.trust.tfl5_user_tids.is_empty() {
+        problems.push("trust.tfl5_user_tids is empty, so no one can give hub an order".into());
     }
     if !problems.is_empty() {
         bail!("invalid hub config:\n  - {}", problems.join("\n  - "));
@@ -619,10 +414,6 @@ pub fn save(cfg: &Config) -> Result<()> {
 /// Root first, then `AI/` — see `project_dir`.
 pub fn default_project_roots() -> Vec<String> {
     vec![String::new(), "AI".into()]
-}
-
-pub fn default_owner_budget() -> f64 {
-    2.0
 }
 
 pub fn default_claude_cli() -> String {

@@ -110,7 +110,7 @@ try {
   const { s: target, file, mb } = sized[0];
   console.log(`chạm vào phiên: ${target.name} (${target.account}, đứng yên ${Math.round(idleFor(target))} phút)`);
   console.log(`nhật ký: ${file}`);
-  console.log(`kích thước: ${mb.toFixed(2)} MB ≈ $${(mb * 1.75).toFixed(2)} cho một câu hỏi\n`);
+  console.log(`kích thước: ${mb.toFixed(2)} MB\n`);
 
   const before = fingerprint(file);
   const activityBefore = target.last_activity;
@@ -127,14 +127,12 @@ try {
     { timeout: 180000, polling: 1000 }
   );
 
-  // Không còn trần chặn thao tác của chủ máy (gỡ 2026-08-08) — chỉ còn sổ chi,
-  // để hiện GIÁ cạnh cái nút tiêu tiền.
+  // Ảnh chụp KHÔNG mang số tiền nào (gỡ 2026-08-08). Đòi vắng mặt, vì thứ này
+  // đã mọc lại một lần: trần → giá.
   const snap = hub(["portal-push", "--dry-run"]);
-  const owner = snap.owner_spend || {};
   check(
-    "ảnh chụp mang chi của chủ máy, KHÔNG mang trần chặn",
-    typeof owner.spent_usd === "number" && owner.blocks_owner_action === undefined,
-    `đã dùng $${Number(owner.spent_usd ?? 0).toFixed(4)} hôm nay`
+    "ảnh chụp KHÔNG mang số tiền nào",
+    snap.owner_spend === undefined && snap.owner_budget === undefined
   );
   const asideBefore = snap.sessions.aside?.ts || "";
 
@@ -203,23 +201,14 @@ try {
     !!(a && a.new_session_id && a.new_session_id !== a.source_id),
     a ? `${a.source_id.slice(0, 8)} → ${a.new_session_id.slice(0, 8)}` : ""
   );
-  check("tiền vào sổ chi", !!(a && a.cost_usd > 0), a ? `$${a.cost_usd}` : "");
   check("màn hiện câu trả lời", shown.box.includes("phiên gốc không thêm lượt nào"), shown.box.slice(0, 80));
   check("màn hiện câu mình đã hỏi", shown.box.includes(question.slice(0, 20)));
   check(
-    "màn hiện GIÁ của lần hỏi này",
-    /\$\d/.test(shown.box),
+    "màn KHÔNG hiện con số tiền nào",
+    !/\$\s?\d/.test(shown.box),
     shown.box.slice(-60)
   );
 
-  // Sổ chi của chủ máy phải cộng thêm đúng khoản vừa tiêu — giá hiện trên màn
-  // mà sổ không nhúc nhích thì con số kia là trang trí.
-  const spentAfter = Number(after.owner_spend?.spent_usd ?? 0);
-  check(
-    "sổ chi đã cộng khoản vừa tiêu",
-    spentAfter >= Number(owner.spent_usd ?? 0) + Number(a?.cost_usd ?? 0) - 1e-6,
-    `$${Number(owner.spent_usd ?? 0).toFixed(4)} → $${spentAfter.toFixed(4)}`
-  );
 
   const over = await page.evaluate(() => ({
     w: document.documentElement.scrollWidth,

@@ -43,6 +43,10 @@ console.log(`zip: ${zipPath} (${assets.length} tệp: ${assets.map((a) => a.spli
 const SHOTS = HERE + "ui-shots/";
 mkdirSync(SHOTS, { recursive: true });
 const problems = [];
+// A bundle version is immutable on the server: uploading the same name again
+// is a no-op, so re-using a name after editing the page ships nothing. Tracked
+// here so the byte check below can say exactly that instead of "khác nhau".
+let versionExisted = false;
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1400, height: 1100 } });
 // These come from tfl5's OWN admin console, not from the bundle being
@@ -80,11 +84,11 @@ try {
   // which cost two failed runs on 2026-08-07 — `[data-activate="<v>"]` is
   // both stable and unambiguous.
   const activateBtn = page.locator(`[data-activate="${version}"]`);
-  const alreadyUploaded = await page.evaluate(
+  versionExisted = await page.evaluate(
     (v) => [...document.querySelectorAll("tr")].some((r) => r.textContent.trim().startsWith(v)),
     version
   );
-  if (alreadyUploaded) {
+  if (versionExisted) {
     console.log(`${version} đã có trên máy chủ — bỏ qua bước tải lên`);
   } else {
     // Address the upload form by its own placeholders — the page has other
@@ -101,35 +105,43 @@ try {
     await activateBtn.waitFor({ timeout: 30000 });
   }
   // Already live? Activating again would push `previous` to this same
-  // version and destroy the rollback target.
-  if (liveBefore.includes(`Live: ${version} `) || liveBefore.trim() === `Live: ${version}`) {
-    console.log(`${version} đang là bản LIVE — không activate lại`);
-    await browser.close();
-    process.exit(0);
+  // version and destroy the rollback target — so skip the activation, but do
+  // NOT skip the verification below.
+  //
+  // This early `process.exit(0)` used to sit right here, and on 2026-08-08 it
+  // paid for itself in the worst way: a v51 was already live, the local page
+  // had been edited since (95069 → 95451 byte), the run skipped the upload
+  // (bundles are immutable per version), skipped the activate, exited 0, and
+  // never compared a single byte. "ĐẠT" for a deploy that shipped nothing.
+  const alreadyLive =
+    liveBefore.includes(`Live: ${version} `) || liveBefore.trim() === `Live: ${version}`;
+  if (alreadyLive) {
+    console.log(`${version} đang là bản LIVE — không activate lại (vẫn kiểm byte bên dưới)`);
+  } else {
+    await activateBtn.scrollIntoViewIfNeeded();
+    // Read the server's answer to the activate call itself. Clicking and
+    // hoping is how a failed activation gets reported as a successful deploy.
+    const [activateRes] = await Promise.all([
+      page.waitForResponse((r) => r.url().includes("/app/bundle/activate"), { timeout: 20000 }),
+      activateBtn.click(),
+    ]);
+    const activateBody = await activateRes.text();
+    console.log(`activate → HTTP ${activateRes.status()} ${activateBody.slice(0, 200)}`);
+    if (activateRes.status() >= 400 || /"result"\s*:\s*false/.test(activateBody)) {
+      problems.push(`máy chủ từ chối activate: HTTP ${activateRes.status()} ${activateBody.slice(0, 200)}`);
+    }
+    await page.waitForTimeout(2000);
+    // Re-read on a fresh load. Navigate via the tab buttons (the banner's
+    // "Manage versions" link is not clickable once a fresh bundle is live).
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Deploy", exact: true }).click();
+    await page.getByRole("button", { name: "Releases", exact: true }).click();
+    await page.getByText("UPLOAD A NEW BUNDLE").waitFor({ timeout: 15000 });
+    const liveAfter = (await page.locator("text=/^Live: /").first().innerText()).trim();
+    console.log("sau:  ", liveAfter);
+    await page.screenshot({ path: `${SHOTS}deploy-02-activated.png`, fullPage: true });
+    if (!liveAfter.includes(version)) problems.push(`bảng Releases vẫn không báo ${version} là LIVE: "${liveAfter}"`);
   }
-  await activateBtn.scrollIntoViewIfNeeded();
-  // Read the server's answer to the activate call itself. Clicking and
-  // hoping is how a failed activation gets reported as a successful deploy.
-  const [activateRes] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes("/app/bundle/activate"), { timeout: 20000 }),
-    activateBtn.click(),
-  ]);
-  const activateBody = await activateRes.text();
-  console.log(`activate → HTTP ${activateRes.status()} ${activateBody.slice(0, 200)}`);
-  if (activateRes.status() >= 400 || /"result"\s*:\s*false/.test(activateBody)) {
-    problems.push(`máy chủ từ chối activate: HTTP ${activateRes.status()} ${activateBody.slice(0, 200)}`);
-  }
-  await page.waitForTimeout(2000);
-  // Re-read on a fresh load. Navigate via the tab buttons (the banner's
-  // "Manage versions" link is not clickable once a fresh bundle is live).
-  await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Deploy", exact: true }).click();
-  await page.getByRole("button", { name: "Releases", exact: true }).click();
-  await page.getByText("UPLOAD A NEW BUNDLE").waitFor({ timeout: 15000 });
-  const liveAfter = (await page.locator("text=/^Live: /").first().innerText()).trim();
-  console.log("sau:  ", liveAfter);
-  await page.screenshot({ path: `${SHOTS}deploy-02-activated.png`, fullPage: true });
-  if (!liveAfter.includes(version)) problems.push(`bảng Releases vẫn không báo ${version} là LIVE: "${liveAfter}"`);
 } catch (e) {
   // Keep enough of the message to see WHY an action failed (intercepted by
   // another element, outside the viewport, …) — one line hides exactly that.
@@ -146,7 +158,12 @@ try {
   const body = await res.text();
   console.log(`trang công khai: HTTP ${res.status}, ${body.length} byte`);
   if (body.trim() !== source.trim()) {
-    problems.push(`trang đang phục vụ KHÁC với fe/index.html vừa đóng gói (${body.length} vs ${source.length} byte)`);
+    problems.push(
+      `trang đang phục vụ KHÁC với fe/index.html vừa đóng gói (${body.length} vs ${source.length} byte)` +
+        (versionExisted
+          ? ` — tên "${version}" ĐÃ tồn tại trên máy chủ nên bản mới không được nhận; chạy lại với tên version MỚI`
+          : "")
+    );
   }
   for (const a of assets.map((p) => p.split("/").pop()).filter((n) => n !== "index.html")) {
     const r = await fetch(`http://${APP_TID}.test.localhost:8090/${a}`);

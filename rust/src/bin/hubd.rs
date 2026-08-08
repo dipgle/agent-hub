@@ -26,9 +26,69 @@ use hub::config;
 use hub::db::Db;
 use hub::exec::{run, RunOpts};
 use hub::logging;
-use hub::outbound::notify;
 use hub::pipeline::run_once;
 use hub::portal;
+
+/// The one alarm that must reach a person who is not looking at the logs: a
+/// file line plus a macOS banner.
+///
+/// Was `outbound::notify`, the "local channel" of a five-channel send path.
+/// That module went with the inbox on 2026-08-08 and this is all that outlived
+/// it, because the loop can still fail five times in a row while nobody reads
+/// `hubd.out`. Errors here are returned, never swallowed — an alarm that fails
+/// quietly is worse than no alarm.
+fn notify(cfg: &hub::config::Config, subject: Option<&str>, body: &str) -> Result<()> {
+    use std::fs::{create_dir_all, OpenOptions};
+    use std::io::Write;
+
+    if let Some(dir) = cfg.notify.file.parent() {
+        create_dir_all(dir)?;
+    }
+    let entry = format!(
+        "\n===== {} {} =====\n{}\n",
+        logging::now_iso(),
+        subject.unwrap_or(""),
+        body
+    );
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&cfg.notify.file)
+        .and_then(|mut f| f.write_all(entry.as_bytes()))
+        .map_err(|e| anyhow::anyhow!("cannot append to {}: {e}", cfg.notify.file.display()))?;
+
+    if cfg.notify.macos_notification && cfg!(target_os = "macos") {
+        let raw = subject.unwrap_or(body);
+        let text: String = raw
+            .chars()
+            .take(200)
+            .map(|c| {
+                if c == '"' || c == '\\' || c == '\n' {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let script = format!("display notification \"{text}\" with title \"hub\"");
+        match run(
+            "osascript",
+            &["-e", &script],
+            RunOpts {
+                timeout: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        ) {
+            Ok(r) if r.code != Some(0) => logging::warn(
+                "osascript_notify_failed",
+                json!({ "err": hub::exec::truncate(&r.stderr, 200) }),
+            ),
+            Err(e) => logging::warn("osascript_notify_failed", json!({ "err": e.to_string() })),
+            _ => {}
+        }
+    }
+    Ok(())
+}
 
 /// `kill -0 <pid>` — exit 0 means the process exists.
 ///
@@ -176,18 +236,12 @@ fn real_main() -> Result<()> {
 
     let db = Db::open(&cfg.db)?;
 
-    // One agent, both jobs: the console runs in its own thread with its own
-    // sqlite connection (WAL + busy_timeout handles the two writers).
-    if cfg.web.enabled {
-        let web_cfg = cfg.clone();
-        let port = cfg.web.port;
-        thread::spawn(move || {
-            if let Err(e) = hub::web::serve(web_cfg, port) {
-                // The loop must keep running even if the UI cannot bind.
-                logging::error("web_ui_failed", json!({ "err": logging::err_chain(&e) }));
-            }
-        });
-    }
+    // No console thread any more. `web.rs` served the inbox — a list, a detail
+    // pane, approve/reject buttons and two spend charts — on 127.0.0.1 behind a
+    // per-boot token. The inbox is gone (2026-08-08), and everything that
+    // outlived it (sessions, health, config) is on the phone page, which is the
+    // surface the owner actually uses. A second UI for the same three things is
+    // a second thing to keep true.
 
     // The room pushes instead of hub asking: one socket held open, and a wake
     // so a message that lands mid-sleep does not wait out the poll interval.
@@ -203,7 +257,6 @@ fn real_main() -> Result<()> {
             "pid": my_pid,
             "db": cfg.db.display().to_string(),
             "interval_sec": cfg.poll_interval_sec,
-            "autonomy_default": &*cfg.autonomy.default,
             "adapters": {
                 "tfl5": cfg.adapters.tfl5.enabled,
             }
@@ -226,8 +279,6 @@ fn real_main() -> Result<()> {
                         "config_reloaded",
                         json!({
                             "file": fresh.config_file.display().to_string(),
-                            "autonomy_default": &*fresh.autonomy.default,
-                            "daily_budget_usd": fresh.daily_budget_usd,
                             "poll_interval_sec": fresh.poll_interval_sec,
                         }),
                     );

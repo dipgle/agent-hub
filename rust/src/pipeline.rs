@@ -1,8 +1,15 @@
-//! One cycle of the hub: ingest → triage → policy → outbox flush.
+//! One cycle of the hub: poll the room for orders, run them, push a snapshot.
 //!
-//! Ordering matters for durability: a poll cursor only advances AFTER the
-//! messages from that window are committed, so a crash re-polls instead of
-//! losing items.
+//! There is no triage, no queue and no outbox. Until 2026-08-08 this file WAS
+//! `ingest → triage → policy → outbox flush`: every line typed anywhere went
+//! through a `claude -p` call that sorted it into an inbox. That product is
+//! gone, and with it the only thing on this machine that spent money while
+//! nobody was watching. What runs here now is free: parse an order, do it,
+//! answer in the room.
+//!
+//! Ordering still matters for durability: a poll cursor only advances AFTER the
+//! commands from that window have been executed, so a crash re-polls instead of
+//! losing an order.
 
 use std::collections::BTreeMap;
 
@@ -12,39 +19,13 @@ use serde_json::{json, Value};
 
 use crate::adapters::{tfl5, ChannelCommand, CommandKind, PollResult, Skip};
 use crate::config::Config;
-use crate::db::{Db, Message, MessagePatch, NewDecision, NewOutbox, RunFinish};
+use crate::db::{Db, RunFinish};
 use crate::logging;
-use crate::outbound::{flush, FlushSummary};
-use crate::policy::{
-    decide_outcome, effective_tier, human_brief, resolve_project, resolve_trust, Action,
-    OutcomeInput,
-};
-use crate::redaction::{compile_extra, is_external_channel, leak_scan};
-use crate::triage::{triage, ThreadMemoryOwned};
-
-const MAX_TRIAGE_ATTEMPTS: i64 = 3;
-
-#[derive(Debug, Default, Serialize)]
-pub struct TriageCounters {
-    pub triaged: usize,
-    pub auto_replied: usize,
-    pub awaiting_human: usize,
-    pub ignored: usize,
-    pub coalesced: usize,
-    pub failed: usize,
-    pub cost_usd: f64,
-    /// Set when the daily ceiling stopped this cycle — the reason travels in
-    /// the cycle summary so "nothing happened" is never ambiguous.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub budget_stop: Option<String>,
-}
 
 #[derive(Debug, Serialize)]
 pub struct CycleSummary {
     pub ms: u128,
     pub ingested: Value,
-    pub triaged: TriageCounters,
-    pub sent: FlushSummary,
 }
 
 /// Folder names under `project_roots` — the set `/project <name>` accepts.
@@ -100,112 +81,6 @@ pub fn project_pin_key(thread_key: &str) -> String {
     format!("pin:project:{thread_key}")
 }
 
-/// How far back a thread's own history may supply the project. Deliberately
-/// longer than the coalesce window (which is about "same question") and
-/// shorter than forever (which is about "wrong topic from yesterday").
-const THREAD_PROJECT_HOURS: i64 = 12;
-
-/// The project this conversation is already about: an explicit pin wins, then
-/// the last message on the thread that had one.
-///
-/// Only a project that actually exists is accepted, so a typo in `/project`
-/// cannot route work at a folder that is not there.
-fn thread_project(
-    db: &Db,
-    cfg: &Config,
-    thread_key: &Option<String>,
-    known: &[String],
-) -> Result<Option<String>> {
-    let Some(key) = thread_key.as_deref().filter(|k| !k.is_empty()) else {
-        return Ok(None);
-    };
-    let valid = |name: String| -> Option<String> {
-        (known.contains(&name) || cfg.projects.contains_key(&name)).then_some(name)
-    };
-
-    if let Some(pinned) = db.get_cursor(&project_pin_key(key))? {
-        if let Some(ok) = valid(pinned.clone()) {
-            return Ok(Some(ok));
-        }
-        logging::warn(
-            "thread_project_pin_unknown",
-            json!({ "thread_key": key, "pinned": pinned }),
-        );
-    }
-
-    let since = (chrono::Utc::now() - chrono::Duration::hours(THREAD_PROJECT_HOURS))
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    Ok(db.last_project_for_thread(key, &since)?.and_then(valid))
-}
-
-/// Route + rate a message before the row lands, so the inbox is already
-/// useful without a triage call.
-///
-/// **Both** ingest paths must call this. The live socket used to insert its
-/// rows raw (`live.rs` → `db.insert_message`), and since live almost always
-/// beats the poller to a chat message, EVERY chat row in the store had
-/// `project = NULL` and `sender_trust` defaulted — the poller's routing was
-/// dead code for that source (found 2026-08-07, and it is why the room never
-/// knew which project was being discussed).
-pub fn enrich_message(
-    db: &Db,
-    cfg: &Config,
-    m: &mut crate::db::NewMessage,
-    projects: &[String],
-) -> Result<()> {
-    let probe = Message {
-        id: 0,
-        source: m.source.clone(),
-        external_id: m.external_id.clone(),
-        thread_key: m.thread_key.clone(),
-        project: m.project.clone(),
-        sender: m.sender.clone(),
-        sender_trust: m.sender_trust.clone().unwrap_or_else(|| "untrusted".into()),
-        subject: m.subject.clone(),
-        body: m.body.clone(),
-        url: m.url.clone(),
-        raw: m.raw.as_ref().map(|v| v.to_string()),
-        received_at: m.received_at.clone(),
-        ingested_at: String::new(),
-        status: "new".into(),
-        attempts: 0,
-        last_error: None,
-        claimed_at: None,
-        coalesced_into: None,
-    };
-    if m.project.is_none() {
-        m.project = resolve_project(&probe, cfg, projects);
-    }
-    // Conversation context. `resolve_project` is pure and sees one message; a
-    // chat line carries no repo, so anything not literally prefixed "tfl5:"
-    // resolves to nothing and hub answers without knowing which codebase is
-    // meant. Fall back to what this thread is already about: an explicit pin
-    // first, then the last project mentioned.
-    // Replying to a line is the cheapest way to say "this is about that" — no
-    // command, nothing to remember. It outranks the room's pin because it is a
-    // deliberate act aimed at one message.
-    if m.project.is_none() {
-        if let Some(parent) = m
-            .raw
-            .as_ref()
-            .and_then(|r| r.get("reply_to"))
-            .and_then(|v| v.as_str())
-        {
-            let by_reply = db.project_for_external_id(&m.source, &format!("tfl5:{parent}"))?;
-            if by_reply.is_some() {
-                m.project = by_reply;
-            }
-        }
-    }
-    if m.project.is_none() {
-        m.project = thread_project(db, cfg, &m.thread_key, projects)?;
-    }
-    if m.sender_trust.is_none() {
-        m.sender_trust = Some(resolve_trust(&probe, cfg));
-    }
-    Ok(())
-}
-
 pub const ADAPTER_NAMES: [&str; 1] = ["tfl5"];
 
 /// Is this adapter switched on? ONE table, used by both ingest and `doctor`.
@@ -232,7 +107,6 @@ fn poll_adapter(
 
 pub fn ingest(db: &Db, cfg: &Config) -> Result<Value> {
     let mut summary = serde_json::Map::new();
-    let projects = known_projects(cfg);
 
     for name in ADAPTER_NAMES {
         if !adapter_enabled(cfg, name) {
@@ -249,25 +123,19 @@ pub fn ingest(db: &Db, cfg: &Config) -> Result<Value> {
 
         match poll_adapter(cfg, name, &cursors) {
             Ok(res) => {
-                let polled = res.messages.len();
-                let mut inserted = 0usize;
+                let polled = res.seen;
+                // The lines themselves are not kept. They used to be inserted,
+                // routed, rated and triaged; now a line that is not an order is
+                // just conversation, and conversation belongs in the room it was
+                // typed in — not in a database on its way to a paid classifier.
+                let inserted = 0usize;
 
-                for m in res.messages {
-                    let mut m = m;
-                    enrich_message(db, cfg, &mut m, &projects)?;
-                    let (_, is_new) = db.insert_message(&m)?;
-                    if is_new {
-                        inserted += 1;
-                    }
-                }
-
-                // Cursors last: an insert failure above must not skip the window.
+                // Cursors last: a command that failed to run must not have its
+                // window skipped.
                 for (k, v) in &res.cursors {
                     db.set_cursor(k, v)?;
                 }
 
-                // Button presses arrive on the same poll as messages; act on
-                // them through the shared approve/reject path.
                 let commands = res.commands.len();
                 if commands > 0 {
                     execute_commands(db, cfg, name, &res.commands);
@@ -321,7 +189,9 @@ pub fn ingest(db: &Db, cfg: &Config) -> Result<Value> {
                         skipped: None,
                     },
                 )?;
-                db.dead_letter(Some(name), None, "ingest", None, &msg)?;
+                // The failure is on the run row and in the log; there is no
+                // dead-letter table any more to hold a copy of a message hub
+                // never stored in the first place.
                 summary.insert(name.into(), json!({ "error": msg }));
                 logging::error(
                     "adapter_poll_failed",
@@ -339,42 +209,26 @@ pub fn ingest(db: &Db, cfg: &Config) -> Result<Value> {
 /// but every outcome is logged.
 fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCommand]) {
     for cmd in commands {
-        let current = match db.get_decision(cmd.decision_id) {
-            Ok(Some(d)) => Some(d),
-            Ok(None) => None,
-            Err(e) => {
-                logging::error(
-                    "command_lookup_failed",
-                    json!({ "decision_id": cmd.decision_id, "err": e.to_string() }),
-                );
-                None
-            }
-        };
-
-        // Commands that answer without touching a decision. `Some(ack)` means
-        // this command is FINISHED — it has already replied in the room.
+        // Every verb answers for itself. There used to be a second stage below
+        // this match — "look the decision up, then approve or reject it" — and
+        // a verb that forgot to end with `Some(ack)` fell into it and logged
+        // "Không tìm thấy decision #0" as its reply. That whole stage went with
+        // the inbox on 2026-08-08; there are no decisions left to look up.
         let answered: Option<String> = match cmd.kind {
             CommandKind::Help => {
                 let ack = "Lệnh dùng được trong phòng này:\n\
                      — Phiên Claude —\n\
                      /session <id> — theo một phiên (bỏ theo: /session -)\n\
-                     /new <dự án> <việc> — mở phiên nền làm việc đó ($, chạy không hỏi ai)\n\
-                     /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng ($)\n\
-                     /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước) ($)\n\
+                     /new <dự án> <việc> — mở phiên nền làm việc đó (chạy không hỏi ai)\n\
+                     /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng\n\
+                     /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước)\n\
                      /stop [id] — dừng phiên nền, hội thoại vẫn giữ\n\
-                     /handover [id] — đóng sổ, lấy bản bàn giao + id để làm tiếp ($)\n\
-                     — Hộp việc —\n\
-                     /approve <decision-id> — duyệt và gửi\n\
-                     /reject <decision-id> [lý do] — bỏ\n\
-                     /close <message-id> [lý do] — đóng, huỷ mọi thứ đang chờ gửi\n\
-                     /reply <message-id> <nội dung> — tự trả lời tay\n\
+                     /handover [id] — đóng sổ, lấy bản bàn giao + id để làm tiếp\n\
                      — Vận hành —\n\
                      /project [tên] — xem / ghim dự án cho phòng (bỏ ghim: /project -)\n\
                      /ingest · /run · /doctor — poll kênh · chạy một vòng · kiểm tra thật\n\
                      /set <khoá> <giá trị> — sửa một trường cấu hình\n\
-                     /help — bảng này\n\n\
-                     ($) = tốn tiền, tính vào owner_daily_budget_usd.\n\
-                     `/act <id>` (sửa code) chỉ chạy được từ terminal — nó ghi code và có thể chạy hàng chục phút."
+                     /help — bảng này"
                     .to_string();
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
@@ -386,9 +240,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             // this command does the work a moment later anyway.
             CommandKind::Ingest | CommandKind::Run => {
                 let what = if matches!(cmd.kind, CommandKind::Run) {
-                    "Vòng đang chạy ngay bây giờ (lệnh này được xử lý bên trong nó) — ingest → triage → gửi."
+                    "Vòng đang chạy ngay bây giờ (lệnh này được xử lý bên trong nó)."
                 } else {
-                    "Đang poll mọi kênh trong vòng hiện tại."
+                    "Đang đọc phòng trong vòng hiện tại."
                 };
                 reply_in_channel(db, cfg, adapter, cmd, what);
                 Some(what.to_string())
@@ -442,8 +296,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 json!({ "from": h.source_id, "to": h.new_session_id, "cost_usd": h.cost_usd }),
                             );
                             format!(
-                                "📋 Đã đóng sổ phiên {} (${:.4}). Tiếp tục bằng:\n{}\n\n{}",
-                                h.source_name, h.cost_usd, h.resume_command, h.checkpoint
+                                "📋 Đã đóng sổ phiên {}. Tiếp tục bằng:\n{}\n\n{}",
+                                h.source_name, h.resume_command, h.checkpoint
                             )
                         }
                         Err(e) => format!(
@@ -487,7 +341,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     json!({ "project": s.project, "session": s.session_id, "cwd": s.cwd }),
                                 );
                                 format!(
-                                    "🚀 Đã mở phiên nền cho {} tại {}.\nPhiên {}\n\n⚠ Nó chạy không hỏi ai và tiêu tiền trong lúc chạy — hub KHÔNG đọc được chi phí của phiên nền. Dừng bằng nút Dừng hoặc /stop.",
+                                    "🚀 Đã mở phiên nền cho {} tại {}.\nPhiên {}\n\n⚠ Nó chạy không hỏi ai. Dừng bằng nút Dừng hoặc /stop.",
                                     s.project,
                                     s.cwd,
                                     &s.session_id[..8.min(s.session_id.len())]
@@ -579,8 +433,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 json!({ "session": t.session_id, "cost_usd": t.cost_usd }),
                             );
                             format!(
-                                "➡️ Đã nói tiếp vào phiên {} (${:.4}):\n\n{}",
-                                t.source_name, t.cost_usd, t.answer
+                                "➡️ Đã nói tiếp vào phiên {}:\n\n{}",
+                                t.source_name, t.answer
                             )
                         }
                         Err(e) => format!(
@@ -644,8 +498,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // session was left alone, and the person cannot see
                             // that from here.
                             format!(
-                                "💬 Hỏi bên lề phiên {} (phiên gốc không bị đụng, ${:.4}):\n\n{}",
-                                a.source_name, a.cost_usd, a.answer
+                                "💬 Hỏi bên lề phiên {} (phiên gốc không bị đụng):\n\n{}",
+                                a.source_name, a.answer
                             )
                         }
                         Err(e) => format!(
@@ -705,17 +559,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let ack = if want.is_empty() {
                     match db.get_cursor(&key) {
                         Ok(Some(p)) => format!("📌 Đang ghim dự án: {p}"),
+                        // There used to be a fallback here: "no pin, but the
+                        // last message on this thread mentioned <project>". It
+                        // read the stored messages, and messages are no longer
+                        // stored — a guess drawn from an empty table would be a
+                        // confident answer with nothing behind it.
                         Ok(None) => {
-                            let since = (chrono::Utc::now() - chrono::Duration::hours(12))
-                                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-                            match db.last_project_for_thread(&thread, &since) {
-                                Ok(Some(p)) => format!(
-                                    "Chưa ghim. Đang bám theo dự án nhắc gần nhất: {p}. \
-                                     Ghim cố định bằng: /project <tên>"
-                                ),
-                                _ => "Chưa có dự án nào cho phòng này. Đặt bằng: /project <tên>"
-                                    .to_string(),
-                            }
+                            "Chưa ghim dự án cho phòng này. Đặt bằng: /project <tên>".to_string()
                         }
                         Err(e) => format!("⚠ không đọc được ghim: {e}"),
                     }
@@ -760,49 +610,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }
-            // Message-level verbs: they take a message id, so they must NOT go
-            // through the decision lookup below.
-            CommandKind::Close => {
-                let ack = match close_message(db, cmd.decision_id, &cmd.arg) {
-                    Ok(msg) => format!("🗄 {msg}"),
-                    Err(e) => {
-                        logging::error(
-                            "command_close_failed",
-                            json!({ "message_id": cmd.decision_id, "err": logging::err_chain(&e) }),
-                        );
-                        format!("⚠ Đóng #{} lỗi: {e}", cmd.decision_id)
-                    }
-                };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
-            }
-            CommandKind::Reply => {
-                let ack = match reply_to_message(db, cfg, cmd.decision_id, &cmd.arg) {
-                    Ok(msg) => format!("✉ {msg}"),
-                    Err(e) => {
-                        logging::error(
-                            "command_reply_failed",
-                            json!({ "message_id": cmd.decision_id, "err": logging::err_chain(&e) }),
-                        );
-                        format!("⚠ Trả lời #{} lỗi: {e}", cmd.decision_id)
-                    }
-                };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
-            }
-            CommandKind::ActRefused => {
-                let ack = format!(
-                    "Không chạy act stage từ chat. Nó sửa code và có thể chạy rất lâu — gõ ở terminal:\n\
-                     hub approve {id} && hub act {id}",
-                    id = cmd.decision_id
-                );
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
-            }
-            _ => None,
         };
 
-        // Already answered above. This used to fall through into the decision
+        // Every arm above answers. This used to fall through into a decision
         // lookup, where `decision_id = 0` found nothing and the log recorded
         // "Không tìm thấy decision #0" as the reply — for `/session`, `/ask`
         // and `/handover`, every single time. The room got the right answer, so
@@ -816,84 +626,6 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             );
             continue;
         }
-
-        let ack = match current {
-            None => format!("Không tìm thấy decision #{}", cmd.decision_id),
-            Some(d) if d.status != "pending" => {
-                format!("Decision #{} đã ở trạng thái '{}' rồi", d.id, d.status)
-            }
-            Some(d) => match cmd.kind {
-                // Text after the id REPLACES the draft — the console lets you
-                // edit before sending, and dropping `cmd.arg` here silently
-                // sent the model's version instead of yours.
-                CommandKind::Approve => match approve_decision(
-                    db,
-                    cfg,
-                    d.id,
-                    Some(&cmd.arg)
-                        .filter(|a| !a.trim().is_empty())
-                        .map(|a| a.as_str()),
-                ) {
-                    Ok(r) if r.queued => format!(
-                        "✅ Đã duyệt #{} — đã gửi tới {}",
-                        d.id,
-                        r.target.unwrap_or_default()
-                    ),
-                    Ok(_) => format!("✅ Đã duyệt #{} (không có gì để gửi)", d.id),
-                    Err(e) => {
-                        logging::error(
-                            "command_approve_failed",
-                            json!({ "decision_id": d.id, "err": logging::err_chain(&e) }),
-                        );
-                        format!("⚠ Duyệt #{} lỗi: {e}", d.id)
-                    }
-                },
-                CommandKind::Reject => match reject_decision(
-                    db,
-                    d.id,
-                    if cmd.arg.is_empty() {
-                        "rejected via channel button"
-                    } else {
-                        &cmd.arg
-                    },
-                ) {
-                    Ok(()) => format!("🚫 Đã bỏ #{}", d.id),
-                    Err(e) => {
-                        logging::error(
-                            "command_reject_failed",
-                            json!({ "decision_id": d.id, "err": logging::err_chain(&e) }),
-                        );
-                        format!("⚠ Bỏ #{} lỗi: {e}", d.id)
-                    }
-                },
-                // Answered above; never reaches here.
-                CommandKind::Help
-                | CommandKind::ActRefused
-                | CommandKind::Close
-                | CommandKind::Reply
-                | CommandKind::Ingest
-                | CommandKind::Run
-                | CommandKind::Doctor
-                | CommandKind::SetConfig
-                | CommandKind::Project
-                | CommandKind::Session
-                | CommandKind::Handover
-                | CommandKind::New
-                | CommandKind::Stop
-                | CommandKind::Tell
-                | CommandKind::Ask => continue,
-            },
-        };
-
-        logging::info(
-            "channel_command_handled",
-            json!({ "adapter": adapter, "decision_id": cmd.decision_id, "kind": format!("{:?}", cmd.kind), "ack": ack }),
-        );
-
-        // Telegram used to get a second treatment here — answer the callback,
-        // then rewrite the original message with the outcome. That channel went
-        // with the inbox product on 2026-08-08; the chat room answers through
-        // `reply_in_channel` like every other verb.
     }
 }
 
@@ -915,432 +647,6 @@ fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, 
             json!({ "target": cmd.chat_id, "err": logging::err_chain(&e) }),
         );
     }
-}
-
-/// Short recap used when rewriting a Telegram brief after a button press.
-/// Where a human brief goes. Telegram used to win when configured; with that
-/// channel gone there is one destination left — the local notify file.
-fn human_channel(_cfg: &Config) -> (String, String) {
-    ("notify".into(), "local".into())
-}
-
-/// Triage exactly one message: coalesce → classify → policy → outbox.
-pub fn process_message(
-    db: &Db,
-    cfg: &Config,
-    row: &Message,
-    projects: &[String],
-    out: &mut TriageCounters,
-    allow_coalesce: bool,
-) -> Result<()> {
-    // Same thread, already waiting on a human? Attach, do not pay again.
-    let coalesce_window = coalesce_window_for(cfg, &row.source);
-    if allow_coalesce && coalesce_window > chrono::Duration::zero() {
-        // Anchor the window on WHEN THIS MESSAGE WAS WRITTEN, not on now.
-        // Anchoring on now made a backlog collapse into one decision the moment
-        // hub caught up, regardless of how far apart the messages really were.
-        let anchor = row
-            .received_at
-            .as_deref()
-            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-            .map(|t| t.with_timezone(&chrono::Utc))
-            .unwrap_or_else(chrono::Utc::now);
-        let since = (anchor - coalesce_window).to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        if let Some(open) = db.pending_decision_for_thread(row.thread_key.as_deref(), &since)? {
-            db.set_message_status(
-                row.id,
-                "coalesced",
-                // Record WHICH decision it joined. Previously this link existed
-                // only in the log, so the owner answering a decision had no way
-                // to see the other messages folded into it.
-                MessagePatch {
-                    last_error: Some(None),
-                    coalesced_into: Some(open.id),
-                    ..Default::default()
-                },
-            )?;
-            out.coalesced += 1;
-            logging::info(
-                "message_coalesced",
-                json!({ "message_id": row.id, "into_decision": open.id, "thread_key": row.thread_key }),
-            );
-            return Ok(());
-        }
-    }
-
-    // Ceiling checked per message, not per cycle: a batch of 6 under a $0.50
-    // per-call cap could otherwise overshoot a $3 day by 100%. This also covers
-    // `triage_message_by_id` (hub say / the web console), which does not go
-    // through triage_new at all.
-    if let Some((spent, cap)) = budget_state(db, cfg)? {
-        if spent >= cap {
-            let reason = format!("daily budget reached: ${spent:.4} / ${cap:.2}");
-            db.set_message_status(
-                row.id,
-                "new",
-                MessagePatch {
-                    last_error: Some(Some(reason.clone())),
-                    ..Default::default()
-                },
-            )?;
-            out.budget_stop = Some(reason);
-            return Ok(());
-        }
-    }
-
-    // Per-source ceiling, checked in the same place for the same reason: one
-    // noisy channel must not drain the day before the others are looked at.
-    if let Some((spent, cap)) = source_budget_state(db, cfg, &row.source)? {
-        if spent >= cap {
-            let reason = format!(
-                "daily budget for source '{}' reached: ${spent:.4} / ${cap:.2}",
-                row.source
-            );
-            db.set_message_status(
-                row.id,
-                "new",
-                MessagePatch {
-                    last_error: Some(Some(reason.clone())),
-                    ..Default::default()
-                },
-            )?;
-            logging::warn(
-                "source_budget_reached",
-                json!({ "source": row.source, "spent_usd": spent, "cap_usd": cap, "message_id": row.id }),
-            );
-            out.budget_stop = Some(reason);
-            return Ok(());
-        }
-    }
-
-    let project = row
-        .project
-        .clone()
-        .or_else(|| resolve_project(row, cfg, projects));
-    let trust = if row.sender_trust.is_empty() {
-        resolve_trust(row, cfg)
-    } else {
-        row.sender_trust.clone()
-    };
-    db.set_message_status(
-        row.id,
-        "triaging",
-        MessagePatch {
-            project: project.clone(),
-            sender_trust: Some(trust.clone()),
-            ..Default::default()
-        },
-    )?;
-
-    let mut msg = row.clone();
-    msg.project = project.clone();
-    msg.sender_trust = trust.clone();
-
-    let memory = thread_memory_for(db, cfg, row)?;
-    let t = triage(&msg, cfg, memory.as_ref())?;
-    out.cost_usd += t.cost_usd;
-
-    let decision = match (&t.decision, &t.error) {
-        (Some(d), None) => d.clone(),
-        _ => {
-            let err = t
-                .error
-                .unwrap_or_else(|| "triage produced no decision".into());
-
-            // A failed call can still have cost money (schema mismatch, budget
-            // abort mid-flight). Recording it keeps `cost_on_day` — and with it
-            // the daily ceiling — from reading $0.00 forever while the bill grows.
-            if t.cost_usd > 0.0 {
-                db.insert_decision(&NewDecision {
-                    message_id: row.id,
-                    tier: effective_tier(project.as_deref(), &trust, cfg),
-                    model: Some(t.model.clone()),
-                    kind: Some("triage_failed".into()),
-                    project: project.clone(),
-                    summary: Some(crate::exec::truncate(&err, 500)),
-                    needs_human: true,
-                    cost_usd: Some(t.cost_usd),
-                    session_id: t.session_id.clone(),
-                    status: "failed".into(),
-                    ..Default::default()
-                })?;
-            }
-
-            let attempts = row.attempts + 1;
-            if attempts >= MAX_TRIAGE_ATTEMPTS {
-                db.set_message_status(
-                    row.id,
-                    "failed",
-                    MessagePatch {
-                        last_error: Some(Some(err.clone())),
-                        ..Default::default()
-                    },
-                )?;
-                db.dead_letter(
-                    Some(&row.source),
-                    Some(&row.external_id),
-                    "triage",
-                    Some(&json!({ "subject": row.subject })),
-                    &err,
-                )?;
-                let (channel, target) = human_channel(cfg);
-                db.enqueue_outbox(&NewOutbox {
-                    message_id: Some(row.id),
-                    channel,
-                    target,
-                    subject: Some(format!("hub: triage failed {attempts}× ({})", row.source)),
-                    body: format!(
-                        "message #{} {}\n\nlast error: {err}",
-                        row.id,
-                        row.subject.clone().unwrap_or_default()
-                    ),
-                    ..Default::default()
-                })?;
-            } else {
-                db.set_message_status(
-                    row.id,
-                    "new",
-                    MessagePatch {
-                        last_error: Some(Some(err)),
-                        ..Default::default()
-                    },
-                )?;
-            }
-            out.failed += 1;
-            return Ok(());
-        }
-    };
-
-    let tier = effective_tier(project.as_deref(), &trust, cfg);
-    let mut outcome = decide_outcome(OutcomeInput {
-        msg: &msg,
-        decision: &decision,
-        tier: &tier,
-        trust: &trust,
-        tripwire: &t.tripwire,
-        cfg,
-    });
-
-    // Last gate before anything leaves the machine: internal detail in an
-    // outbound reply downgrades the item to human review.
-    if outcome.action == Action::AutoReply
-        && outcome
-            .channel
-            .as_deref()
-            .map(is_external_channel)
-            .unwrap_or(false)
-    {
-        let extra = compile_extra(&cfg.leak_patterns);
-        let leaks = leak_scan(&decision.reply_draft, &extra);
-        if !leaks.is_empty() {
-            logging::warn(
-                "outbound_leak_scan_blocked",
-                json!({ "message_id": row.id, "channel": outcome.channel, "leaks": leaks }),
-            );
-            outcome.action = Action::AwaitHuman;
-            outcome.reason = format!("outbound leak scan: {}", leaks.join(", "));
-        }
-    }
-
-    // One commit point for the whole outcome: decision row, outbox rows and the
-    // message's new status land together or not at all.
-    db.begin()?;
-    let committed = commit_outcome(db, cfg, row, &msg, &decision, &outcome, &tier, &t);
-    let decision_id = match committed {
-        Ok(id) => {
-            db.commit()?;
-            id
-        }
-        Err(e) => {
-            if let Err(re) = db.rollback() {
-                logging::error(
-                    "rollback_failed",
-                    json!({ "message_id": row.id, "err": re.to_string() }),
-                );
-            }
-            return Err(e);
-        }
-    };
-    out.triaged += 1;
-    match outcome.action {
-        Action::AutoReply => out.auto_replied += 1,
-        Action::Ignore => {
-            out.ignored += 1;
-            logging::info(
-                "message_ignored",
-                json!({ "message_id": row.id, "kind": decision.kind }),
-            );
-        }
-        Action::AwaitHuman => out.awaiting_human += 1,
-    }
-
-    logging::info(
-        "message_triaged",
-        json!({
-            "message_id": row.id, "decision_id": decision_id, "source": row.source, "project": project,
-            "kind": decision.kind, "severity": decision.severity, "confidence": decision.confidence,
-            "tier": tier, "action": outcome.action.as_str(), "reason": outcome.reason, "cost_usd": t.cost_usd,
-            "tripwire": if t.tripwire.is_empty() { Value::Null } else { json!(t.tripwire) },
-        }),
-    );
-    Ok(())
-}
-
-/// The write half of `process_message`, run inside one transaction.
-#[allow(clippy::too_many_arguments)]
-fn commit_outcome(
-    db: &Db,
-    cfg: &Config,
-    row: &Message,
-    msg: &Message,
-    decision: &crate::triage::Decision,
-    outcome: &crate::policy::Outcome,
-    tier: &str,
-    t: &crate::triage::TriageResult,
-) -> Result<i64> {
-    let project = msg.project.clone();
-    let decision_project = if decision.project == "unknown" || decision.project.is_empty() {
-        project.clone()
-    } else {
-        Some(decision.project.clone())
-    };
-
-    let decision_id = db.insert_decision(&NewDecision {
-        message_id: row.id,
-        tier: tier.to_string(),
-        model: Some(t.model.clone()),
-        kind: Some(decision.kind.clone()),
-        severity: Some(decision.severity.clone()),
-        project: decision_project,
-        summary: Some(decision.summary.clone()),
-        reply_draft: Some(decision.reply_draft.clone()),
-        actions: Some(serde_json::to_value(&decision.proposed_actions)?),
-        evidence: Some(serde_json::to_value(&decision.evidence)?),
-        confidence: Some(decision.confidence),
-        needs_human: outcome.action == Action::AwaitHuman,
-        tripwire: t.tripwire.clone(),
-        cost_usd: Some(t.cost_usd),
-        session_id: t.session_id.clone(),
-        raw: Some(json!({ "claude": t.raw, "outcome": outcome })),
-        status: match outcome.action {
-            Action::AutoReply | Action::Ignore => "auto".into(),
-            Action::AwaitHuman => "pending".to_string(),
-        },
-    })?;
-
-    let brief = human_brief(msg, decision, outcome, tier, decision_id);
-    let (human_ch, human_target) = human_channel(cfg);
-
-    match outcome.action {
-        Action::AutoReply => {
-            db.enqueue_outbox(&NewOutbox {
-                decision_id: Some(decision_id),
-                message_id: Some(row.id),
-                channel: outcome
-                    .channel
-                    .clone()
-                    .unwrap_or_else(|| row.source.clone()),
-                target: outcome.target.clone().unwrap_or_default(),
-                subject: if row.source == "email" {
-                    Some(
-                        format!("Re: {}", row.subject.clone().unwrap_or_default())
-                            .chars()
-                            .take(200)
-                            .collect(),
-                    )
-                } else {
-                    None
-                },
-                body: decision.reply_draft.clone(),
-            })?;
-            // Always tell the human what went out under their name.
-            db.enqueue_outbox(&NewOutbox {
-                decision_id: Some(decision_id),
-                message_id: Some(row.id),
-                channel: human_ch,
-                target: human_target,
-                subject: Some(format!("hub auto-replied ({})", row.source)),
-                body: brief,
-            })?;
-            db.set_message_status(row.id, "answered", MessagePatch::default())?;
-        }
-        Action::Ignore => {
-            db.set_message_status(row.id, "closed", MessagePatch::default())?;
-        }
-        Action::AwaitHuman => {
-            db.enqueue_outbox(&NewOutbox {
-                decision_id: Some(decision_id),
-                message_id: Some(row.id),
-                channel: human_ch,
-                target: human_target,
-                subject: Some(format!(
-                    "hub cần bạn xem ({}/{})",
-                    decision.kind, decision.severity
-                )),
-                body: brief,
-            })?;
-            db.set_message_status(row.id, "awaiting_human", MessagePatch::default())?;
-        }
-    }
-
-    Ok(decision_id)
-}
-
-/// Should this message continue an earlier conversation, and which one?
-///
-/// Opt-in per source. A GitHub notification is a standalone event; a line in a
-/// chat room is usually a follow-up, and answering "và cái kia thì sao?" with
-/// no memory of the previous turn is useless.
-///
-pub fn thread_memory_for(db: &Db, cfg: &Config, row: &Message) -> Result<ThreadMemoryOwned> {
-    let hours = match cfg.source_thread_memory_hours.get(&row.source) {
-        Some(h) if *h > 0.0 => *h,
-        _ => return Ok(ThreadMemoryOwned::Off),
-    };
-    let key = match row.thread_key.as_deref() {
-        Some(k) if !k.is_empty() => k,
-        // Memory is on for the source, but this row has no thread to remember —
-        // keep the session anyway rather than silently downgrading to Off.
-        _ => return Ok(ThreadMemoryOwned::Start),
-    };
-    let anchor = row
-        .received_at
-        .as_deref()
-        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-        .map(|t| t.with_timezone(&chrono::Utc))
-        .unwrap_or_else(chrono::Utc::now);
-    let since = (anchor - chrono::Duration::milliseconds((hours * 3_600_000.0).round() as i64))
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    Ok(match db.last_session_for_thread(key, &since)? {
-        Some(sid) => ThreadMemoryOwned::Resume(sid),
-        None => ThreadMemoryOwned::Start,
-    })
-}
-
-/// How far back a source may attach a new message to an open decision.
-///
-/// `thread_key` means different things per source. A GitHub issue is a topic,
-/// so 12 hours of activity really is one conversation. A chat ROOM is not a
-/// topic — two unrelated questions an hour apart are two questions, and folding
-/// the second into the first means the second is never answered. So chat gets a
-/// short window (minutes), configured per source.
-pub fn coalesce_window_for(cfg: &Config, source: &str) -> chrono::Duration {
-    match cfg.source_coalesce_hours.get(source) {
-        Some(h) if *h > 0.0 => chrono::Duration::milliseconds((*h * 3_600_000.0).round() as i64),
-        // An explicit 0 disables coalescing for that source entirely.
-        Some(_) => chrono::Duration::zero(),
-        None => chrono::Duration::hours(cfg.coalesce_hours),
-    }
-}
-
-/// Today's spend for one source against its own ceiling, when it has one.
-pub fn source_budget_state(db: &Db, cfg: &Config, source: &str) -> Result<Option<(f64, f64)>> {
-    let cap = match cfg.source_daily_budget_usd.get(source) {
-        Some(c) if *c > 0.0 => *c,
-        _ => return Ok(None),
-    };
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    Ok(Some((db.cost_on_day_for_source(&today, source)?, cap)))
 }
 
 /// Today's OWNER spend — what the person set off by pressing a button.
@@ -1373,333 +679,6 @@ pub fn owner_budget_state(db: &Db) -> OwnerBudget {
         0.0
     });
     OwnerBudget { spent_usd: spent }
-}
-
-/// Today's spend against the ceiling. `None` when no ceiling is configured.
-pub fn budget_state(db: &Db, cfg: &Config) -> Result<Option<(f64, f64)>> {
-    if cfg.daily_budget_usd <= 0.0 {
-        return Ok(None);
-    }
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    Ok(Some((db.cost_on_day(&today)?, cfg.daily_budget_usd)))
-}
-
-pub fn triage_new(db: &Db, cfg: &Config) -> Result<TriageCounters> {
-    // Only reclaim rows no live cycle can still own: a triage cannot outlive
-    // its own timeout by much, so anything older than 2× that was stranded.
-    let stale_after = (cfg.triage.timeout_sec as i64) * 2 + 60;
-    let recovered = db.reset_triaging(stale_after)?;
-    if recovered > 0 {
-        logging::warn(
-            "recovered_stuck_triaging",
-            json!({ "rows": recovered, "older_than_secs": stale_after }),
-        );
-    }
-
-    let mut out = TriageCounters::default();
-
-    // Daily ceiling: an always-on daemon spends money while nobody is looking.
-    // Stopping is loud (log + one notify), never a silent no-op.
-    if let Some((spent, cap)) = budget_state(db, cfg)? {
-        if spent >= cap {
-            out.budget_stop = Some(format!("daily budget reached: ${spent:.4} / ${cap:.2}"));
-            logging::warn(
-                "daily_budget_reached",
-                json!({ "spent_usd": spent, "cap_usd": cap }),
-            );
-            let (channel, target) = human_channel(cfg);
-            // One heads-up per day, not once per cycle.
-            let already = db.conn.query_row(
-                "SELECT COUNT(*) FROM outbox WHERE channel = ?1 AND subject = ?2 AND substr(created_at, 1, 10) = ?3",
-                rusqlite::params![channel, "hub: chạm trần chi phí ngày", chrono::Utc::now().format("%Y-%m-%d").to_string()],
-                |r| r.get::<_, i64>(0),
-            )?;
-            if already == 0 {
-                db.enqueue_outbox(&NewOutbox {
-                    channel,
-                    target,
-                    subject: Some("hub: chạm trần chi phí ngày".into()),
-                    body: format!(
-                        "Đã tiêu ${spent:.4} hôm nay, trần là ${cap:.2} → tạm dừng triage.\n\
-                         Hàng đợi vẫn nhận item, sẽ xử lại sau nửa đêm UTC.\n\
-                         Muốn tiếp tục ngay: tăng daily_budget_usd trong Cấu hình."
-                    ),
-                    ..Default::default()
-                })?;
-            }
-            return Ok(out);
-        }
-    }
-
-    let batch = db.claim_new_messages(cfg.max_triage_per_cycle)?;
-    let projects = known_projects(cfg);
-    for row in &batch {
-        process_message(db, cfg, row, &projects, &mut out, true)?;
-    }
-    Ok(out)
-}
-
-/// Triage one specific message now — what `hub say` needs.
-pub fn triage_message_by_id(
-    db: &Db,
-    cfg: &Config,
-    message_id: i64,
-    allow_coalesce: bool,
-) -> Result<TriageCounters> {
-    let row = db
-        .get_message(message_id)?
-        .ok_or_else(|| anyhow::anyhow!("no message #{message_id}"))?;
-    let projects = known_projects(cfg);
-    let mut out = TriageCounters::default();
-    process_message(db, cfg, &row, &projects, &mut out, allow_coalesce)?;
-    Ok(out)
-}
-
-#[derive(Debug, Serialize)]
-pub struct ApproveResult {
-    pub decision_id: i64,
-    pub queued: bool,
-    pub channel: Option<String>,
-    pub target: Option<String>,
-    pub sent: FlushSummary,
-    pub code_change_proposed: bool,
-    /// Leak-scan hits on an approved outbound reply. Not a block — a human
-    /// approved it — but every surface should be able to say so out loud.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub leaks: Vec<String>,
-}
-
-/// Approve a decision: queue its reply (if there is one and a target exists),
-/// mark the books, flush. Shared by the CLI, the Telegram buttons and the web
-/// UI so all three can never drift apart.
-pub fn approve_decision(
-    db: &Db,
-    cfg: &Config,
-    decision_id: i64,
-    body_override: Option<&str>,
-) -> Result<ApproveResult> {
-    let d = db
-        .get_decision(decision_id)?
-        .ok_or_else(|| anyhow::anyhow!("no decision #{decision_id}"))?;
-    let m = db.get_message(d.message_id)?.ok_or_else(|| {
-        anyhow::anyhow!("decision #{decision_id} has no message (db inconsistent)")
-    })?;
-
-    let outcome = d.raw_json().get("outcome").cloned().unwrap_or(Value::Null);
-    let target = outcome
-        .get("target")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let channel = outcome
-        .get("channel")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| m.source.clone());
-    let body = body_override
-        .map(|s| s.to_string())
-        .or_else(|| d.reply_draft.clone())
-        .unwrap_or_default();
-
-    // The triage path leak-scans an auto-reply before it leaves (rule #4). The
-    // approve path never did, on the theory that a human read it. That was
-    // defensible while every channel was a repo or a mailbox the owner already
-    // knew; it is thinner now that a chat room can hold people the owner has
-    // never met. So scan here too — but WARN rather than block: a human made
-    // this call, and silently refusing to send their approved words would be
-    // its own failure. Loud, recorded, still delivered.
-    let mut leaks: Vec<String> = vec![];
-    if is_external_channel(&channel) && !body.trim().is_empty() {
-        leaks = leak_scan(&body, &compile_extra(&cfg.leak_patterns));
-        if !leaks.is_empty() {
-            logging::warn(
-                "approved_reply_has_internal_detail",
-                json!({ "decision_id": d.id, "channel": channel, "target": target, "leaks": leaks }),
-            );
-            if let Err(e) = crate::outbound::notify(
-                cfg,
-                Some(&format!("hub: bản duyệt #{} có chi tiết nội bộ", d.id)),
-                &format!(
-                    "Đã gửi ra {channel} theo lệnh duyệt của bạn, nhưng nội dung khớp: {}.\n\nNội dung:\n{}",
-                    leaks.join(", "),
-                    crate::exec::truncate(&body, 800)
-                ),
-            ) {
-                logging::error("leak_warning_notify_failed", json!({ "decision_id": d.id, "err": e.to_string() }));
-            }
-        }
-    }
-
-    let mut queued = false;
-    if !body.trim().is_empty() {
-        if let Some(t) = &target {
-            db.enqueue_outbox(&NewOutbox {
-                decision_id: Some(d.id),
-                message_id: Some(m.id),
-                channel: channel.clone(),
-                target: t.clone(),
-                subject: if m.source == "email" {
-                    Some(
-                        format!("Re: {}", m.subject.clone().unwrap_or_default())
-                            .chars()
-                            .take(200)
-                            .collect(),
-                    )
-                } else {
-                    None
-                },
-                body: body.trim().to_string(),
-            })?;
-            queued = true;
-        }
-    }
-
-    db.set_decision_status(
-        d.id,
-        "approved",
-        Some(if queued {
-            "approved, reply queued"
-        } else {
-            "approved"
-        }),
-    )?;
-    db.set_message_status(
-        m.id,
-        if queued { "answered" } else { "closed" },
-        MessagePatch::default(),
-    )?;
-    let sent = flush(db, cfg, 20)?;
-
-    let code_change_proposed = matches!(d.actions_json(), Value::Array(ref a) if a.iter().any(|x| x.get("type").and_then(|v| v.as_str()) == Some("code_change")));
-
-    logging::info(
-        "decision_approved",
-        json!({ "decision_id": d.id, "queued": queued, "channel": channel, "target": target, "sent": sent.sent }),
-    );
-    Ok(ApproveResult {
-        decision_id: d.id,
-        queued,
-        channel: Some(channel),
-        target,
-        sent,
-        code_change_proposed,
-        leaks,
-    })
-}
-
-/// Reject a decision: cancel anything queued for it and close the message.
-pub fn reject_decision(db: &Db, decision_id: i64, reason: &str) -> Result<()> {
-    let d = db
-        .get_decision(decision_id)?
-        .ok_or_else(|| anyhow::anyhow!("no decision #{decision_id}"))?;
-    let reason = if reason.trim().is_empty() {
-        "rejected by owner"
-    } else {
-        reason
-    };
-    db.cancel_outbox_for(d.id)?;
-    db.set_decision_status(d.id, "rejected", Some(reason))?;
-    db.set_message_status(d.message_id, "closed", MessagePatch::default())?;
-    logging::info(
-        "decision_rejected",
-        json!({ "decision_id": d.id, "reason": reason }),
-    );
-    Ok(())
-}
-
-/// Close a message by hand: mark it closed and cancel any pending decision
-/// (and its queued send) so nothing goes out afterwards.
-///
-/// Lives here, not in the CLI, because three surfaces now call it — `hub
-/// close`, the console, and the `/close` command from the chat room — and a
-/// second copy is how two of them start behaving differently.
-pub fn close_message(db: &Db, message_id: i64, reason: &str) -> Result<String> {
-    let m = db
-        .get_message(message_id)?
-        .ok_or_else(|| anyhow::anyhow!("no message #{message_id}"))?;
-    let reason = if reason.trim().is_empty() {
-        "closed by owner"
-    } else {
-        reason
-    };
-    db.set_message_status(
-        m.id,
-        "closed",
-        MessagePatch {
-            last_error: Some(None),
-            ..Default::default()
-        },
-    )?;
-    if let Some(d) = db.latest_decision_for(m.id)? {
-        if d.status == "pending" {
-            db.cancel_outbox_for(d.id)?;
-            db.set_decision_status(d.id, "rejected", Some(reason))?;
-        }
-    }
-    logging::info(
-        "message_closed",
-        json!({ "message_id": m.id, "reason": reason }),
-    );
-    Ok(format!("closed message #{} ({reason})", m.id))
-}
-
-/// Answer a message by hand: queue the text on the channel it arrived from and
-/// flush immediately. Same call for CLI, console and the `/reply` command.
-pub fn reply_to_message(db: &Db, cfg: &Config, message_id: i64, text: &str) -> Result<String> {
-    if text.trim().is_empty() {
-        anyhow::bail!("cần nội dung trả lời");
-    }
-    let m = db
-        .get_message(message_id)?
-        .ok_or_else(|| anyhow::anyhow!("no message #{message_id}"))?;
-    let raw = m.raw_json();
-    let target = match m.source.as_str() {
-        "github" => crate::policy::github_reply_target(&m, &raw),
-        "email" => crate::policy::email_address(m.sender.as_deref()),
-        "telegram" => raw.get("chat_id").map(|v| match v {
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        }),
-        "tfl5" => Some(crate::adapters::tfl5::target_of(
-            raw.get("app_tid")
-                .and_then(Value::as_str)
-                .unwrap_or(&cfg.adapters.tfl5.app_tid),
-            raw.get("room")
-                .and_then(Value::as_str)
-                .unwrap_or(&cfg.adapters.tfl5.room),
-        )),
-        "cli" => Some("local".into()),
-        _ => None,
-    }
-    .ok_or_else(|| anyhow::anyhow!("cannot reply to source={} (no target)", m.source))?;
-
-    let channel = if m.source == "cli" {
-        "notify".to_string()
-    } else {
-        m.source.clone()
-    };
-    db.enqueue_outbox(&crate::db::NewOutbox {
-        message_id: Some(m.id),
-        channel: channel.clone(),
-        target: target.clone(),
-        subject: if m.source == "email" {
-            Some(
-                format!("Re: {}", m.subject.clone().unwrap_or_default())
-                    .chars()
-                    .take(200)
-                    .collect(),
-            )
-        } else {
-            None
-        },
-        body: text.to_string(),
-        ..Default::default()
-    })?;
-    db.set_message_status(m.id, "answered", MessagePatch::default())?;
-    let sent = crate::outbound::flush(db, cfg, 20)?;
-    Ok(format!(
-        "reply queued to {channel}:{target}; sent={} failed={}",
-        sent.sent, sent.failed
-    ))
 }
 
 /// Set ONE config field by dotted path, then round-trip through `Config` so a
@@ -1788,13 +767,16 @@ pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String>
 pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     let started = std::time::Instant::now();
     let ingested = ingest(db, cfg)?;
-    let triaged = triage_new(db, cfg)?;
-    let sent = flush(db, cfg, 20)?;
+    // No triage, and nothing to flush. hub used to spend money on its own here:
+    // every line typed in the room went through a `claude -p` call to be sorted
+    // into an inbox, and a daily ceiling existed to stop that from running away.
+    // The inbox is gone (2026-08-08) and the room now carries orders, not mail
+    // — so the only thing that costs money is a button the owner presses
+    // (`/ask`, `/handover`, `/new`, `/tell`). hub no longer spends unwatched,
+    // which is why the ceiling that guarded it is gone too.
     let summary = CycleSummary {
         ms: started.elapsed().as_millis(),
         ingested,
-        triaged,
-        sent,
     };
     logging::info("cycle_done", serde_json::to_value(&summary)?);
     Ok(summary)

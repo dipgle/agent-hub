@@ -161,11 +161,10 @@ try {
 
   // Every tab, tapped the way a thumb would.
   for (const [panel, label] of [
-    ["inbox", "02-hop-viec"],
+    ["sessions", "02-phien"],
     ["chat", "03-trao-doi"],
     ["health", "04-suc-khoe"],
-    ["cost", "05-chi-phi"],
-    ["config", "06-cau-hinh"],
+    ["config", "05-cau-hinh"],
   ]) {
     await page.click(`#panelTabs button[data-panel="${panel}"]`);
     await page.waitForTimeout(900);
@@ -173,35 +172,35 @@ try {
     await auditScreen(label);
   }
 
-  // The work the owner actually does from a phone: open an item and read it.
-  await page.click('#panelTabs button[data-panel="inbox"]');
+  // The work the owner actually does from a phone: open a session and read it.
+  // Was "open an inbox row" until 2026-08-08 — the inbox is gone, and the thing
+  // he opens the phone for is the list of Claude sessions running on the Mac.
+  await page.click('#panelTabs button[data-panel="sessions"]');
   await page.waitForTimeout(600);
-  const rows = await page.locator("#boardRows tr.row").count();
-  check("hộp việc có dòng để mở", rows > 0, `${rows} dòng`);
+  const rows = await page.locator("#sessList .sess").count();
+  check("có phiên để mở", rows > 0, `${rows} phiên`);
   // The point of the whole product on a phone: see the work. If the first row
   // sits below the fold, every visit starts with a scroll past chrome.
   const fold = await page.evaluate(() => {
-    const row = document.querySelector("#boardRows tr.row");
+    const row = document.querySelector("#sessList .sess");
     if (!row) return null;
     return {
       top: Math.round(row.getBoundingClientRect().top),
       screen: window.innerHeight,
-      // How much of the first screen is spent before any work is visible.
       pct: Math.round((row.getBoundingClientRect().top / window.innerHeight) * 100),
     };
   });
   if (fold) {
     check(
-      "dòng việc đầu tiên nằm trong màn đầu, không phải cuộn mới thấy",
+      "phiên đầu tiên nằm trong màn đầu, không phải cuộn mới thấy",
       fold.top < fold.screen * 0.5,
       `bắt đầu ở ${fold.top}px = ${fold.pct}% chiều cao màn (${fold.screen}px)`
     );
   }
-
   if (rows > 0) {
-    await page.locator("#boardRows tr.row").first().click();
+    await page.locator("#sessList .sess").first().click();
     await page.waitForTimeout(800);
-    await auditScreen("07-chi-tiet");
+    await auditScreen("06-chi-tiet-phien");
   }
 } catch (e) {
   problems.push(`ngoại lệ: ${e.message}`);

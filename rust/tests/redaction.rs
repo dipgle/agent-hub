@@ -1,4 +1,4 @@
-use hub::redaction::{compile_extra, is_external_channel, leak_scan};
+use hub::redaction::{compile_extra, leak_scan};
 
 #[test]
 fn the_observed_real_leak_is_caught() {
@@ -54,16 +54,18 @@ fn an_ordinary_customer_facing_reply_passes_clean() {
     }
 }
 
+/// There used to be a per-channel decision here — "does this channel leave the
+/// machine?" — and the scan only ran when the answer was yes. The channels it
+/// distinguished are gone; what remains (a session preview on its way into a
+/// doc on a server) always leaves. The gate is unconditional now, which is one
+/// fewer place for a new caller to land on the wrong side of a list.
 #[test]
-fn only_channels_that_leave_the_machine_are_gated() {
-    assert!(is_external_channel("github"));
-    assert!(is_external_channel("email"));
-    assert!(is_external_channel("telegram"));
+fn a_password_in_a_session_preview_is_caught_without_asking_which_channel() {
+    let hits = leak_scan("mật khẩu đăng nhập là Abc@12345", &[]);
     assert!(
-        !is_external_channel("notify"),
-        "the local brief may contain internal detail"
+        hits.iter().any(|h| h.starts_with("credential")),
+        "a stated password must be flagged: {hits:?}"
     );
-    assert!(!is_external_channel("devlog"));
 }
 
 #[test]

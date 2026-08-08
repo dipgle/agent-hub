@@ -164,6 +164,36 @@ const SECRET_LABELS: [&str; 4] = [
     "private_key_block",
 ];
 
+/// Tools a session hub starts (`/new`) or continues (`/tell`) may never reach.
+///
+/// Lived in `act.rs` until 2026-08-08; that module was the inbox's "implement
+/// the approved change" branch and went with the inbox, but the list itself is
+/// a structural wall, not part of that product: a phone types one sentence and
+/// a process with the owner's own shell runs unattended on the other end. Deny
+/// what cannot be taken back — push/merge/reset rewrite shared history, ssh /
+/// scp / rsync / sudo / rm / docker / launchctl / *deploy* reach past this
+/// machine or destroy on it, and WebFetch/WebSearch turn a task into a channel
+/// out. Writes inside the working tree stay allowed: that is the work.
+pub const DENIED_TOOLS: [&str; 17] = [
+    "Bash(git push:*)",
+    "Bash(git merge:*)",
+    "Bash(git rebase:*)",
+    "Bash(git reset:*)",
+    "Bash(ssh:*)",
+    "Bash(scp:*)",
+    "Bash(rsync:*)",
+    "Bash(sudo:*)",
+    "Bash(rm:*)",
+    "Bash(curl:*)",
+    "Bash(wget:*)",
+    "Bash(psql:*)",
+    "Bash(docker:*)",
+    "Bash(launchctl:*)",
+    "Bash(*deploy*)",
+    "WebFetch",
+    "WebSearch",
+];
+
 /// Hits that must suppress a preview, or empty if it is safe to carry.
 pub fn preview_risk(text: &str) -> Vec<String> {
     crate::redaction::leak_scan(text, &[])
@@ -652,6 +682,11 @@ pub struct Handover {
     /// The session that carries the work forward. Different from `source_id`.
     pub new_session_id: String,
     pub checkpoint: String,
+    /// What this call cost. Recorded in `spend`, and deliberately NOT published:
+    /// the same struct is serialised into the cursor the portal snapshot
+    /// carries, so a field left visible here would put a price back on the
+    /// phone screen through the back door (2026-08-08).
+    #[serde(default, skip_serializing)]
     pub cost_usd: f64,
     pub ts: String,
     /// How to pick the thread up on the machine.
@@ -737,7 +772,7 @@ fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkRe
     // over the estimate stops a runaway without refusing honest work, and a
     // floor keeps tiny sessions from getting a ceiling of nearly zero.
     let estimate = fork_cost_estimate(cfg, session);
-    let cap = (estimate * 2.0).max(cfg.triage.max_budget_usd);
+    let cap = (estimate * 2.0).max(cfg.call.max_budget_usd);
     logging::info(
         "fork_call_budget",
         json!({
@@ -770,7 +805,7 @@ fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkRe
         RunOpts {
             cwd: cwd.is_dir().then_some(cwd.as_path()),
             input: Some(prompt.to_string()),
-            timeout: Some(Duration::from_secs(cfg.triage.timeout_sec)),
+            timeout: Some(Duration::from_secs(cfg.call.timeout_sec)),
             env: vec![(
                 "CLAUDE_CONFIG_DIR".into(),
                 account_dir(cfg, &session.account),
@@ -778,7 +813,7 @@ fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkRe
         },
     )?;
     if out.timed_out {
-        anyhow::bail!("quá {}s", cfg.triage.timeout_sec);
+        anyhow::bail!("quá {}s", cfg.call.timeout_sec);
     }
     if out.code != Some(0) {
         anyhow::bail!(
@@ -870,6 +905,8 @@ pub struct Aside {
     pub new_session_id: String,
     pub question: String,
     pub answer: String,
+    /// See `Handover::cost_usd` — recorded, never published.
+    #[serde(default, skip_serializing)]
     pub cost_usd: f64,
     pub ts: String,
 }
@@ -956,10 +993,10 @@ pub fn parse_backgrounded_id(stdout: &str) -> Option<&str> {
 /// `kind: "background"`, named after the task, at `permission_mode: "dontAsk"`.
 ///
 /// Two things follow from that last fact and neither is decoration:
-/// - It runs UNATTENDED with tools, so the denylist is the same one the act
-///   stage uses (`act::DENIED_TOOLS`): no push/merge/reset, no ssh/scp/sudo/rm,
-///   no curl. The human approval step non-negotiable #1 asks for is the owner
-///   typing the task and pressing the button.
+/// - It runs UNATTENDED with tools, so it runs behind `DENIED_TOOLS` (above):
+///   no push/merge/reset, no ssh/scp/sudo/rm, no curl. The human approval step
+///   non-negotiable #1 asks for is the owner typing the task and pressing the
+///   button.
 /// - hub cannot tell what it costs. The transcript records no price and
 ///   `claude agents` reports none, so there is nothing to add up. What hub can
 ///   do is show that it is running and offer a stop — control and visibility
@@ -981,7 +1018,7 @@ pub fn start_background(cfg: &Config, project: &str, dir: &Path, task: &str) -> 
     // "idle — send a prompt to start", and hub cheerfully called it started.
     // Prompt first, variadic last.
     let mut args: Vec<&str> = vec!["--bg", task, "--disallowedTools"];
-    args.extend_from_slice(&crate::act::DENIED_TOOLS);
+    args.extend_from_slice(&DENIED_TOOLS);
 
     let out = run(
         &cfg.claude_cli,
@@ -1175,6 +1212,8 @@ pub struct Told {
     pub source_name: String,
     pub text: String,
     pub answer: String,
+    /// See `Handover::cost_usd` — recorded, never published.
+    #[serde(default, skip_serializing)]
     pub cost_usd: f64,
     pub ts: String,
 }
@@ -1209,12 +1248,12 @@ pub fn tell(cfg: &Config, session: &LiveSession, text: &str) -> Result<Told> {
     }
 
     let estimate = fork_cost_estimate(cfg, session);
-    let cap = (estimate * 2.0).max(cfg.triage.max_budget_usd).to_string();
+    let cap = (estimate * 2.0).max(cfg.call.max_budget_usd).to_string();
     let cwd = crate::config::expand_home(Path::new(&session.cwd));
     // Same denylist the session was started with: continuing a task must not
     // quietly hand it powers its first turn did not have.
     let mut args: Vec<&str> = vec!["-p", "--resume", &session.session_id, "--disallowedTools"];
-    args.extend_from_slice(&crate::act::DENIED_TOOLS);
+    args.extend_from_slice(&DENIED_TOOLS);
     args.extend_from_slice(&["--max-budget-usd", &cap, "--output-format", "json"]);
     let out = run(
         &cfg.claude_cli,
@@ -1222,7 +1261,7 @@ pub fn tell(cfg: &Config, session: &LiveSession, text: &str) -> Result<Told> {
         RunOpts {
             cwd: cwd.is_dir().then_some(cwd.as_path()),
             input: Some(text.to_string()),
-            timeout: Some(Duration::from_secs(cfg.triage.timeout_sec)),
+            timeout: Some(Duration::from_secs(cfg.call.timeout_sec)),
             env: vec![(
                 "CLAUDE_CONFIG_DIR".into(),
                 account_dir(cfg, &session.account),
@@ -1230,7 +1269,7 @@ pub fn tell(cfg: &Config, session: &LiveSession, text: &str) -> Result<Told> {
         },
     )?;
     if out.timed_out {
-        anyhow::bail!("quá {}s", cfg.triage.timeout_sec);
+        anyhow::bail!("quá {}s", cfg.call.timeout_sec);
     }
     if out.code != Some(0) {
         anyhow::bail!(

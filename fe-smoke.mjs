@@ -89,7 +89,11 @@ try {
   );
   check("tin vừa gõ hiện trong luồng", true);
   check("ô nhập được dọn sau khi gửi", (await page.inputValue("#text")) === "");
-  check("hiện trạng thái 'đang xử lý'", await page.locator("#pending").isVisible());
+  // KHÔNG còn ô "đang xử lý". Nó theo tin nhắn vào hộp việc để báo "đang phân
+  // loại / chờ bạn duyệt" — hai trạng thái nay không tồn tại, mà một cái quay
+  // mãi thì tệ hơn là không có gì (đã trả giá 08-07). Câu thường không được
+  // trả lời, và màn phải nói đúng như vậy: im lặng.
+  check("KHÔNG còn ô 'đang xử lý' quay vô tận", !(await page.locator("#pending").isVisible()));
   await page.screenshot({ path: `${SHOTS}fe-04-sent.png`, fullPage: true });
 
   // ---- 7. it survives a reload (persisted, not just painted) ------------

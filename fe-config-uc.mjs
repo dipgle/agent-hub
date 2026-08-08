@@ -5,8 +5,10 @@
 // hub's own snapshot. Finally put the original value back — a test that leaves
 // the daemon differently configured is a test that broke production.
 //
-// The field chosen (`max_triage_per_cycle`) costs nothing to flip and changes
-// no behaviour at the value used.
+// The field chosen (`poll_interval_sec`) costs nothing to flip and changes no
+// behaviour at the value used. It used to be `max_triage_per_cycle`, which went
+// with the inbox on 2026-08-08 — a test pointed at a deleted knob fails for the
+// wrong reason and teaches nothing.
 //
 // Usage: node fe-config-uc.mjs
 import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
@@ -19,7 +21,7 @@ const env = Object.fromEntries(
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])
 );
 const APP_TID = env.HUB_TFL5_APP_TID || "a-65dd60d3-624e-45a9-8fdf-62aa7d894d80";
-const KEY = "max_triage_per_cycle";
+const KEY = "poll_interval_sec";
 const SHOTS = HERE + "ui-shots/";
 mkdirSync(SHOTS, { recursive: true });
 
@@ -56,12 +58,14 @@ try {
 
   const field = page.locator(`[data-cfg-key="${KEY}"]`);
   check("form dựng được từ cấu hình thật", (await field.count()) === 1, `${KEY} có mặt`);
-  check("form có đủ các nhóm như console",
-    (await page.locator("#cfgChannels .switch").count()) >= 4 &&
-    (await page.locator("#cfgAutonomy [data-cfg-key]").count()) >= 2 &&
-    (await page.locator("#cfgTriage [data-cfg-key]").count()) >= 4 &&
-    (await page.locator("#cfgAct [data-cfg-key]").count()) >= 2 &&
-    (await page.locator("#cfgTrust [data-cfg-key]").count()) >= 3);
+  // The groups that still exist: the one channel, the loop, and who may give
+  // orders. "≥ 4 kênh" and the triage/act/autonomy boxes were the shape of the
+  // inbox — a measurement that demands the product be wrong never goes green.
+  check("form có đủ các nhóm còn thật",
+    (await page.locator("#cfgChannels .switch").count()) >= 1 &&
+    /tfl5/.test(await page.locator("#cfgChannels").innerText()) &&
+    (await page.locator("#cfgLoop [data-cfg-key]").count()) >= 2 &&
+    (await page.locator("#cfgTrust [data-cfg-key]").count()) >= 1);
   await page.screenshot({ path: `${SHOTS}config-01.png`, fullPage: true });
 
   // Nothing touched → nothing sent. A form that fires writes on every press
@@ -111,7 +115,14 @@ try {
       // person can do, and it does not wait on the snapshot the form is drawn
       // from (that refreshes once per cycle, so the form would still show the
       // old number and "no change" would be sent).
-          await page.waitForFunction(
+      //
+      // The composer lives INSIDE the conversation panel, and we are standing
+      // on the config panel — filling a hidden textarea just waits 30s and
+      // dies, leaving the config file on the test's value. Go to the tab a
+      // person would go to first.
+      await page.click('#panelTabs button[data-panel="chat"]');
+      await page.waitForSelector("#foot:not(.hidden)", { timeout: 15000 });
+      await page.waitForFunction(
         () => document.getElementById("status").dataset.state === "on",
         { timeout: 30000 }
       );

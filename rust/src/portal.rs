@@ -47,13 +47,6 @@ pub const SNAPSHOT_KEY: &str = "snapshot";
 /// Leftover from the first design (a public-tree file); removed on push so an
 /// installation that ran the earlier build does not keep serving it.
 pub const LEGACY_FILE_PATH: &str = "hub-status.json";
-/// How many inbox rows travel. The page filters client-side, so this is the
-/// only knob between "useful history" and "a snapshot nobody wants to load".
-pub const INBOX_LIMIT: i64 = 120;
-/// Per-row body/draft budget. The page shows a detail pane, so the text has to
-/// travel — but a 200 KB CI log would blow the snapshot up on its own.
-const BODY_CHARS: usize = 1200;
-const DRAFT_CHARS: usize = 2000;
 /// How stale a channel-health probe may be before it is measured again. The
 /// probes hit the network (GitHub, Telegram, mailler) and shell out to
 /// `claude --version`, so running them on every cycle would spend real time
@@ -65,16 +58,6 @@ const HEALTH_TTL_MS: i64 = 10 * 60 * 1000;
 /// for a one-shot CLI push.
 static HEALTH_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<(i64, Value)>>> =
     std::sync::OnceLock::new();
-
-/// Cut long text at a character boundary and say so — a silently truncated
-/// body reads like the message really ended there.
-fn clip(s: &str, max: usize) -> Value {
-    if s.chars().count() <= max {
-        return json!(s);
-    }
-    let head: String = s.chars().take(max).collect();
-    json!(format!("{head}\n… (cắt bớt, xem đầy đủ ở console)"))
-}
 
 /// What a push did, so callers can log something truthful.
 #[derive(Debug)]
@@ -88,80 +71,11 @@ pub struct Pushed {
 ///
 /// `cfg` rides along so the page can show the same Config and channel health
 /// the console does; pass `deep_health = false` to reuse a recent probe.
-pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
-    let rows = db.list_messages(None, None, limit)?;
-    let mut items = Vec::with_capacity(rows.len());
-    for m in rows {
-        let d = db.latest_decision_for(m.id)?;
-        items.push(json!({
-            "id": m.id,
-            "status": m.status,
-            "source": m.source,
-            "project": m.project,
-            "sender": m.sender,
-            "sender_trust": m.sender_trust,
-            "subject": m.subject,
-            "url": m.url,
-            "received_at": m.received_at,
-            "ingested_at": m.ingested_at,
-            "attempts": m.attempts,
-            "last_error": m.last_error,
-            "coalesced_into": m.coalesced_into,
-            // For chat rows this is `tfl5:<chat tid>` — the page uses it to
-            // line an inbox item up with the message it came from, so the two
-            // panels stop looking like unrelated lists.
-            "external_id": m.external_id,
-            // The detail pane needs the text itself, clipped so one noisy CI
-            // log cannot dominate the snapshot.
-            "body": m.body.as_deref().map(|b| clip(b, BODY_CHARS)),
-            "decision": d.as_ref().map(|d| json!({
-                "id": d.id,
-                "kind": d.kind,
-                "severity": d.severity,
-                "status": d.status,
-                "tier": d.tier,
-                "model": d.model,
-                "confidence": d.confidence,
-                "needs_human": d.needs_human,
-                "tripwire": d.tripwire,
-                "cost_usd": d.cost_usd,
-                "summary": d.summary,
-                "reply_draft": d.reply_draft.as_deref().map(|r| clip(r, DRAFT_CHARS)),
-                "actions": d.actions_json(),
-                // The console shows these two lists and the policy line; the
-                // detail pane is not equivalent without them.
-                "evidence": d.evidence.as_deref().and_then(|s| serde_json::from_str::<Value>(s).ok()),
-                "outcome": d.raw_json().get("outcome").cloned(),
-                // Which of the gates stopped it — the single most useful
-                // field when someone asks "why is this still waiting?".
-                "reason": d.raw_json().get("outcome").and_then(|o| o.get("reason")).cloned(),
-                "also": db.coalesced_count(d.id).unwrap_or(0),
-                "delivery": db.outbox_state_for(d.id).ok().flatten().map(|(st, at, err)| json!({
-                    "status": st, "attempts": at, "last_error": err,
-                })),
-            })),
-        }));
-    }
-
-    // Spend per UTC day — same query the console's cost tab runs.
-    let mut days = vec![];
-    {
-        let mut stmt = db.conn.prepare(
-            "SELECT substr(ts, 1, 10) AS day, COUNT(*) AS n, COALESCE(SUM(cost_usd), 0) AS cost
-               FROM decisions GROUP BY day ORDER BY day",
-        )?;
-        let mapped = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, f64>(2)?,
-            ))
-        })?;
-        for row in mapped {
-            let (day, n, cost) = row?;
-            days.push(json!({ "day": day, "decisions": n, "cost_usd": cost }));
-        }
-    }
+pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
+    // No spend-per-day series travels any more: the page that drew it (the
+    // "Chi phí" tab) is gone, and a producer whose only consumer was deleted is
+    // just weight on every push. The query still exists in the console, which is
+    // where a spend question belongs.
 
     // The Claude CLI sessions running on this machine — the thing the owner
     // actually opens his phone for. Read-only, and already leak-gated at the
@@ -186,8 +100,6 @@ pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
         }
         _ => None,
     };
-
-    let owner = crate::pipeline::owner_budget_state(db);
 
     Ok(json!({
         // Bump when the shape changes so an old page can say "too new to read"
@@ -218,28 +130,14 @@ pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
                 .filter(|s| !s.is_empty())
                 .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
         },
-        "counts": db.counts()?,
-        "items": items,
-        "cost_days": days,
         "health": health(db, cfg)?,
-        // What the room is currently about, so the page can show it instead of
-        // the person having to remember (or re-state it every message).
-        "chat": chat_context(db, cfg)?,
-        // When the daily ceiling stops triage, nothing moves and the page has
-        // no way to know why — it would just spin. Say it out loud.
-        "budget": crate::pipeline::budget_state(db, cfg)?.map(|(spent, cap)| json!({
-            "spent_usd": spent,
-            "cap_usd": cap,
-            "stopped": spent >= cap,
-        })),
-        // What the OWNER's own presses cost today. Reported, never used to
-        // refuse: `budget` above reins in the unattended robot, but a person
-        // pressing "hỏi bên lề" is working, and nobody caps their own terminal.
-        // The number travels so the price is visible on the screen that spends
-        // it — a cost the person cannot see is worse than one they can.
-        "owner_spend": {
-            "spent_usd": owner.spent_usd,
-        },
+        // No inbox, no counts, no money. Everything this snapshot used to carry
+        // about a queue of mail went with the queue (2026-08-08), and the two
+        // numbers that outlived it — a ceiling, then a price tag — were thrown
+        // out by name: *"sao vẫn nhắc tới tiền vậy, đã bảo xóa hết github rồi
+        // mà"*. `spend` in the database keeps recording, silently, so the
+        // question can still be ANSWERED if it is ever asked; it just stops
+        // being asked on every screen.
         // Config carries env var NAMES only (non-negotiable #3), never values,
         // so showing it to app members leaks no credential. Read-only here:
         // writing it stays in the console, which is the one surface that
@@ -251,25 +149,6 @@ pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
         },
         // The page must never offer buttons this snapshot cannot back.
         "read_only": true,
-    }))
-}
-
-/// The conversation's current project: pinned by `/project`, or inherited
-/// from the last message on the thread that carried one. `pinned` is reported
-/// separately so the page can say WHY, not just WHAT.
-fn chat_context(db: &Db, cfg: &Config) -> Result<Value> {
-    let t = &cfg.adapters.tfl5;
-    let thread = format!("tfl5:{}:{}", t.app_tid, t.room);
-    let pinned = db
-        .get_cursor(&crate::pipeline::project_pin_key(&thread))?
-        .filter(|p| !p.is_empty());
-    let since = (chrono::Utc::now() - chrono::Duration::hours(12))
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let recent = db.last_project_for_thread(&thread, &since)?;
-    Ok(json!({
-        "room": t.room,
-        "pinned_project": pinned,
-        "recent_project": recent,
     }))
 }
 
@@ -382,10 +261,12 @@ pub fn push(cfg: &Config, db: &Db) -> Result<Pushed> {
         ));
     }
 
-    let snap = build(db, cfg, INBOX_LIMIT)?;
-    let items = snap
-        .get("items")
-        .and_then(Value::as_array)
+    let snap = build(db, cfg)?;
+    // What "items" means now: live Claude sessions. It used to be inbox rows,
+    // and a log line that keeps counting a thing that no longer exists is a log
+    // line that quietly reads zero forever.
+    let items = snap["sessions"]["list"]
+        .as_array()
         .map(Vec::len)
         .unwrap_or(0);
     let bytes = serde_json::to_vec(&snap)
@@ -435,7 +316,7 @@ pub fn push(cfg: &Config, db: &Db) -> Result<Pushed> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{Db, NewMessage};
+    use crate::db::Db;
 
     /// Every adapter off: `build` must not shell out or hit the network in a
     /// unit test, and the health probe is what would do it.
@@ -453,43 +334,11 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_carries_the_rows_and_the_shape_the_page_expects() {
+    fn snapshot_carries_the_shape_the_page_expects() {
         let db = mem_db();
-        db.insert_message(&NewMessage {
-            source: "github".into(),
-            external_id: "e1".into(),
-            thread_key: None,
-            project: Some("tfl5".into()),
-            sender: Some("someone".into()),
-            sender_trust: Some("trusted".into()),
-            subject: Some("CI đỏ".into()),
-            body: Some("chi tiết".into()),
-            url: None,
-            raw: None,
-            received_at: Some("2026-08-07T00:00:00Z".into()),
-        })
-        .unwrap();
-
-        let snap = build(&db, &test_cfg(), 10).unwrap();
-        // Bumped to 3 on 2026-08-08 when the live Claude sessions joined the
-        // snapshot, then to 4 when the owner's own ceiling did. The page guards
-        // on this number, so the two must move together — this assert is what
-        // makes forgetting the page impossible.
+        let snap = build(&db, &test_cfg()).unwrap();
         assert_eq!(snap["schema"], 4);
         assert_eq!(snap["read_only"], true);
-
-        // The owner's own spend travels so the price shows up next to the
-        // button that spends it — but as a NUMBER, never as a gate. A ceiling
-        // field here would be the first step back to hub refusing its owner.
-        let owner = &snap["owner_spend"];
-        assert!(
-            owner["spent_usd"].is_number(),
-            "the page must be able to show what today's presses cost"
-        );
-        assert!(
-            owner.get("blocks_owner_action").is_none() && owner.get("cap_usd").is_none(),
-            "owner spend is reported, not gated — see pipeline::owner_budget_state"
-        );
 
         // The sessions block must exist even when nothing is running, and it
         // must carry `notes` — an account that failed to answer has to be
@@ -502,23 +351,13 @@ mod tests {
             snap["sessions"]["notes"].is_array(),
             "sessions.notes must travel so a failed account is visible"
         );
-        let items = snap["items"].as_array().unwrap();
-        assert_eq!(items.len(), 1, "one inserted message must appear once");
-        assert_eq!(items[0]["source"], "github");
-        assert_eq!(items[0]["subject"], "CI đỏ");
-        assert_eq!(items[0]["body"], "chi tiết", "detail pane needs the text");
-        assert!(snap["counts"].is_object(), "counts block must be present");
-        assert!(snap["cost_days"].is_array());
         assert!(
             snap["generated_at"].as_str().unwrap().len() >= 20,
             "generated_at must be a real timestamp"
         );
-
-        // The four things the console shows must all travel, or the page is a
-        // partial copy again.
         assert!(
             snap["health"]["runs"].is_array(),
-            "health needs adapter runs"
+            "health needs the poll history"
         );
         assert!(
             snap["health"]["probe"]["channels"].is_object(),
@@ -532,25 +371,40 @@ mod tests {
         assert!(snap["config"]["file"].is_string());
     }
 
+    /// The inbox and the money both left this snapshot on 2026-08-08, and both
+    /// left by request. Absence is the assert, because each of them grew back
+    /// once already: the ceiling came back as a price tag, and a price tag is
+    /// one well-meant number away from being a ceiling again.
     #[test]
-    fn long_bodies_are_clipped_and_say_so() {
-        let long = "x".repeat(BODY_CHARS + 500);
-        let out = clip(&long, BODY_CHARS);
-        let s = out.as_str().unwrap();
+    fn the_snapshot_carries_no_inbox_and_no_money() {
+        let db = mem_db();
+        let snap = build(&db, &test_cfg()).unwrap();
+        for gone in [
+            "items",
+            "counts",
+            "cost_days",
+            "budget",
+            "owner_budget",
+            "owner_spend",
+            "chat",
+        ] {
+            assert!(
+                snap.get(gone).is_none(),
+                "hub is a session channel, not an inbox or a meter — `{gone}` must not travel"
+            );
+        }
+        let as_text = snap.to_string();
         assert!(
-            s.chars().count() < long.chars().count(),
-            "must actually shrink"
+            !as_text.contains("cost_usd"),
+            "no price may reach the page, at any depth"
         );
-        assert!(s.contains("cắt bớt"), "a clipped body must announce itself");
-        // Short text is passed through untouched, marker and all.
-        assert_eq!(clip("ngắn", BODY_CHARS), json!("ngắn"));
     }
 
     #[test]
     fn config_carries_no_secret_values_only_env_var_names() {
         let cfg = test_cfg();
         let db = mem_db();
-        let snap = build(&db, &cfg, 1).unwrap();
+        let snap = build(&db, &cfg).unwrap();
         let as_text = snap["config"].to_string();
         // Rule #3: the config file holds env var NAMES. If a value ever leaks
         // into Config, this snapshot would publish it to every app member.
@@ -560,28 +414,5 @@ mod tests {
                 "config block looks like it carries a secret value ({marker})"
             );
         }
-    }
-
-    #[test]
-    fn limit_is_honoured_so_the_snapshot_cannot_grow_without_bound() {
-        let db = mem_db();
-        for i in 0..5 {
-            db.insert_message(&NewMessage {
-                source: "cli".into(),
-                external_id: format!("e{i}"),
-                thread_key: None,
-                project: None,
-                sender: None,
-                sender_trust: Some("trusted".into()),
-                subject: Some(format!("m{i}")),
-                body: None,
-                url: None,
-                raw: None,
-                received_at: None,
-            })
-            .unwrap();
-        }
-        let snap = build(&db, &test_cfg(), 3).unwrap();
-        assert_eq!(snap["items"].as_array().unwrap().len(), 3);
     }
 }

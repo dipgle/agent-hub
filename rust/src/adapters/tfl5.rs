@@ -30,7 +30,6 @@ use serde_json::{json, Value};
 
 use crate::adapters::{ChannelCommand, CommandKind, Health, PollResult, Skip};
 use crate::config::{secret_from_env, Tfl5Cfg};
-use crate::db::NewMessage;
 use crate::logging;
 
 pub const NAME: &str = "tfl5";
@@ -598,52 +597,13 @@ pub fn split_reply_marker(text: &str) -> (Option<String>, &str) {
     }
 }
 
-pub fn message_from_frame(cfg: &Tfl5Cfg, frame: &Value) -> Option<NewMessage> {
-    let tid = frame.get("tid").and_then(Value::as_str)?;
-    let raw_text = frame
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let (reply_to, text) = split_reply_marker(raw_text);
-    let from = frame
-        .get("from")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let from_uid = frame
-        .get("from_user_tid")
-        .and_then(Value::as_str)
-        .unwrap_or(from);
-    let ts = frame
-        .get("ts")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
-    Some(NewMessage {
-        source: NAME.into(),
-        external_id: format!("tfl5:{tid}"),
-        thread_key: Some(format!("tfl5:{}:{}", cfg.app_tid, cfg.room)),
-        project: None,
-        sender: Some(format!("tfl5:{from_uid}")),
-        sender_trust: None,
-        subject: Some(crate::exec::truncate(text, 120)),
-        body: Some(text.to_string()),
-        url: None,
-        raw: Some(json!({
-            "app_tid": cfg.app_tid, "room": cfg.room,
-            "from": from, "from_user_tid": from_uid, "ts": ts, "via": "live",
-            // Which chat line this answers, when the person used "reply".
-            "reply_to": reply_to,
-        })),
-        received_at: Some(ts_to_iso(ts)),
-    })
-}
-
 /// A slash command typed in the room, if this text is one AND the author is
 /// allowed to give hub orders.
 ///
 /// The trust check is the whole point: being in the room is tfl5's decision,
-/// but approving an outbound reply is the owner's. Anyone else typing
-/// `/approve 12` is just a person typing text — it goes through triage like
-/// any other message rather than being silently dropped.
+/// but starting a session on this Mac — or asking one a question, and paying
+/// for the answer — is the owner's. Anyone else typing `/new` is just a person
+/// typing text.
 pub fn parse_command(
     text: &str,
     from_user_tid: &str,
@@ -662,20 +622,16 @@ pub fn parse_command(
     }
     let mut parts = t[1..].splitn(3, char::is_whitespace);
     let verb = parts.next().unwrap_or("").to_lowercase();
-    let id = parts
-        .next()
-        .unwrap_or("")
-        .trim()
-        .parse::<i64>()
-        .unwrap_or(0);
-    let rest = parts.next().unwrap_or("").trim().to_string();
+    // No verb takes a numeric id any more — the ones that did (`/approve 12`,
+    // `/close 87`) pointed at inbox rows. Session verbs take a session id or
+    // nothing, and each one re-splits the text for itself.
     match verb.as_str() {
         "help" | "?" => Some((CommandKind::Help, 0, String::new())),
-        "approve" | "ok" | "duyet" if id > 0 => Some((CommandKind::Approve, id, rest)),
-        "reject" | "bo" if id > 0 => Some((CommandKind::Reject, id, rest)),
-        // These two take a MESSAGE id, matching `hub close` / `hub reply`.
-        "close" | "dong" if id > 0 => Some((CommandKind::Close, id, rest)),
-        "reply" | "traloi" if id > 0 && !rest.is_empty() => Some((CommandKind::Reply, id, rest)),
+        // `/approve` `/reject` `/close` `/reply` `/act` were parsed here until
+        // 2026-08-08. They acted on an inbox that no longer exists, and a verb
+        // that parses but has no handler is the worst of both: the room accepts
+        // it, nothing happens, and nothing says so. Unparsed, they are ordinary
+        // text — which is the truth.
         // Whole-cycle verbs — the console's header and health buttons. They
         // take no id, so whatever followed the verb is ignored.
         "ingest" | "poll" => Some((CommandKind::Ingest, 0, String::new())),
@@ -764,7 +720,6 @@ pub fn parse_command(
             // any other text and the person sees it was not understood.
             (!question.is_empty()).then_some((CommandKind::Ask, 0, question))
         }
-        "act" if id > 0 => Some((CommandKind::ActRefused, id, rest)),
         _ => None,
     }
 }
@@ -851,7 +806,7 @@ pub fn poll(
     }
 
     let picked = select_new(&plain, last_ts, now_ms, &s.user_tid, cfg);
-    out.messages.extend(picked.messages);
+    out.seen = picked.seen;
     if picked.newest_ts > last_ts {
         out.cursors.insert(key, picked.newest_ts.to_string());
     }
@@ -872,7 +827,8 @@ pub fn poll(
 /// What one poll decided to do with the page it fetched.
 #[derive(Debug, Default)]
 pub struct Selection {
-    pub messages: Vec<NewMessage>,
+    /// Ordinary chat lines walked past this poll — counted, not kept.
+    pub seen: usize,
     /// Where the cursor should land. Never moves past a held-back message.
     pub newest_ts: i64,
     /// Still inside the silence window — deliberately left for the next cycle.
@@ -938,40 +894,12 @@ pub fn select_new(
         }
         out.newest_ts = out.newest_ts.max(ts);
 
-        let tid = m["tid"].as_str().unwrap_or_default();
-        let from = m["from"].as_str().unwrap_or("unknown");
-        let from_uid = m["from_user_tid"].as_str().unwrap_or(from);
-        // Same reply marker the live path strips — both ingest routes must
-        // produce the identical row for the same chat line.
-        let (reply_to, text) = split_reply_marker(text);
-        out.messages.push(NewMessage {
-            source: NAME.into(),
-            external_id: format!("tfl5:{tid}"),
-            // One room = one conversation, so a burst coalesces into a single
-            // decision instead of one paid call per line.
-            thread_key: Some(format!("tfl5:{}:{}", cfg.app_tid, cfg.room)),
-            project: None,
-            sender: Some(format!("tfl5:{from_uid}")),
-            // tfl5 says who may enter the room; it does not say who hub trusts.
-            sender_trust: None,
-            subject: Some(crate::exec::truncate(text, 120)),
-            body: Some(text.to_string()),
-            url: None,
-            raw: Some(json!({
-                "app_tid": cfg.app_tid, "room": cfg.room,
-                "from": from, "from_user_tid": from_uid, "ts": ts,
-                "reply_to": reply_to,
-            })),
-            received_at: Some(ts_to_iso(ts)),
-        });
+        // An ordinary line: counted, and that is all. Everything that used
+        // to be built here — id, sender, thread key, body, reply marker — was
+        // for a row in a table that no longer exists.
+        out.seen += 1;
     }
     out
-}
-
-fn ts_to_iso(ms: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(ms)
-        .map(|d| d.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
-        .unwrap_or_else(logging::now_iso)
 }
 
 pub fn health(cfg: &Tfl5Cfg) -> Health {

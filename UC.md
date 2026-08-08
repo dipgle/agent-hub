@@ -9,7 +9,16 @@ ngồi máy"*. Vậy vạch đích **không** phải "xem tóm tắt phiên" mà
 thứ terminal đang hiện**: lời nói, suy nghĩ, từng lệnh chạy và kết quả của nó,
 file bị sửa, lúc nào phiên xin quyền.
 
-Luồng kỹ thuật: `fe/flow.html` (bundle v30). Hướng và lý do: `memory/active-context.md`.
+Luồng kỹ thuật: `fe/flow.html`. Hướng và lý do: `memory/active-context.md`.
+
+> **Đọc phần "tiền" trong sổ này thế nào (chốt cuối 2026-08-08).** Các con số
+> `$…` bên dưới là **bằng chứng đo thật** của những lần chạy đã diễn ra — giữ vì
+> chúng trả lời được "cái này đắt bao nhiêu" khi cần. Nhưng **sản phẩm không còn
+> hiện đồng nào**: không trần chặn tay chủ máy, không giá cạnh câu trả lời,
+> không tab Chi phí, không dải tổng chi. Hà, hai nhịp trong một ngày: *"bỏ hết
+> github rồi sao vẫn trần chuồng gì thế"* → gỡ trần; *"sao vẫn nhắc tới tiền
+> vậy"* → gỡ nốt giá. Sổ `spend` vẫn ghi, im lặng. Chỗ nào trong sổ này còn tả
+> "màn hiện giá" là mô tả một bản đã bị thay.
 
 ## Nguyên liệu đã có — đo trên một phiên thật (08-08)
 
@@ -322,7 +331,8 @@ cảnh đang làm".
 
 Ô hỏi + nút **💬 Hỏi** nằm ngay trên màn luồng phiên; gõ → trang gửi verb
 **`/ask <câu hỏi>`** vào phòng → hub fork phiên đang theo, trả lời về màn kèm
-nhãn *"phiên gốc không thêm lượt nào"* và số tiền của chính lần hỏi đó.
+nhãn *"phiên gốc không thêm lượt nào"*. (Bản đầu hiện thêm **giá của lần hỏi**;
+gỡ ngày 08-08 — xem 💰 bên dưới.)
 Đích là **phiên đang theo**, không phải một uuid gõ tay — hỏi người dùng chép
 uuid trên điện thoại là hỏi họ đừng dùng tính năng.
 
@@ -335,13 +345,20 @@ allowlist thì **nạp cả schema công cụ**, một câu hỏi tốn **$0.218
 $0.20. Allowlist vừa là hàng rào vừa là đòn bẩy giá (cùng câu hỏi: **$0.0356**).
 ⚠ `handover` trước đây chạy **không có** bộ khoá này — nay đi chung `fork_call`.
 
-💰 **Không có trần nào chặn nút này.** Hà chốt 08-08: *"bỏ hết github rồi sao vẫn
-trần chuồng gì thế"* / *"liên quan gì tới tiền"*. Bấm nút trên điện thoại là **Hà
-đang làm việc** — cùng việc, cùng giá với gõ ở terminal, nơi chẳng có trần ngày
-nào. Sổ vẫn ghi (`spend`) và **giá hiện ngay cạnh câu trả lời**; trần mỗi-lần-gọi
-thì **tự đo theo độ dài phiên** (`fork_cost_estimate`) chứ không mượn con số cứng
-$0.50 của triage — con số ấy nhỏ hơn giá nạp của 13/14 phiên, mà cú chết vì trần
-**vẫn bị tính tiền**.
+💰 **Không có trần nào chặn nút này, và cũng không còn con số tiền nào trên màn.**
+Hà chốt 08-08, hai nhịp: *"bỏ hết github rồi sao vẫn trần chuồng gì thế"* /
+*"liên quan gì tới tiền"* (⟹ gỡ trần), rồi *"sao vẫn nhắc tới tiền vậy, đã bảo
+xóa hết github rồi mà"* (⟹ gỡ nốt **giá** đã hiện cạnh câu trả lời, dải tổng chi
+ở hộp việc, và cả **tab Chi phí + hai biểu đồ**). Bấm nút trên điện thoại là **Hà
+đang làm việc** — cùng việc, cùng giá với gõ ở terminal, nơi không ai dán bảng giá
+lên từng câu. Sổ `spend` **vẫn ghi**, im lặng, để còn trả lời được nếu có ngày ai
+hỏi; nó chỉ thôi tự hỏi trên mọi màn. Ảnh chụp không mang `owner_spend`,
+`owner_budget` hay `cost_days` nữa — và `portal.rs` có assert **đòi vắng mặt**,
+vì thứ này đã mọc lại một lần rồi (trần → giá).
+Trần mỗi-lần-gọi (bảo vệ khỏi cú chạy vượt tầm, không phải để hỏi tiền người dùng)
+vẫn còn và **tự đo theo độ dài phiên** (`fork_cost_estimate`) chứ không mượn con
+số cứng $0.50 của triage — con số ấy nhỏ hơn giá nạp của 13/14 phiên, mà cú chết
+vì trần **vẫn bị tính tiền**.
 
 **Nghiệm thu THẬT (2026-08-08, bundle v45):** phiên `projects-cd` 0.47 MB —
 ước tính **$0.83**, thực tế **$0.8735** (lệch 5%); phiên gốc **474.525 byte ·
@@ -375,8 +392,14 @@ cần** thao tác nào trên máy tính. Mỗi phiên nền là tiền — phả
 | `status`/`state` | ✅ `busy`/`idle`/`done` — **chỉ có ở phiên nền** |
 
 ⟹ Yêu cầu *"phiên nền là tiền, phải đếm"* **không thực hiện được**. Thay bằng thứ
-trung thực hơn: hiện **trạng thái thật** + **nút Dừng**, và nói thẳng rằng hub
-không đọc được chi phí. Đưa một con số bịa ra còn tệ hơn không có số.
+trung thực hơn: hiện **trạng thái thật** + **nút Dừng**. Đưa một con số bịa ra còn
+tệ hơn không có số.
+
+📌 **Sửa lại lần nữa (08-08, tối):** bản đầu còn kèm câu *"nó tiêu tiền trong lúc
+chạy — hub không đọc được chi phí của nó"* ở ô mở phiên và trong lời hub trả lời.
+Hà: *"sao vẫn nhắc tới tiền vậy"* ⟹ bỏ nốt. Lời nhắc còn lại đúng thứ cần làm:
+**nhớ dừng khi xong**. Nói về tiền mà không đo được tiền thì chỉ là gieo lo lắng,
+không phải thông tin.
 
 ### 🔴 Rào chắn thật: phiên nền trong workspace này KẸT ngay khi mở
 

@@ -192,7 +192,7 @@ fn a_message_still_inside_the_window_is_held_not_dropped() {
     let rows = vec![row("cm-1", "u-alice", "câu hỏi vừa gõ xong", NOW - 2_000)];
     let s = tfl5::select_new(&rows, 0, NOW, "u-hubbot", &quiet());
     assert!(
-        s.messages.is_empty(),
+        s.seen == 0,
         "must not triage a message still being typed around"
     );
     assert_eq!(s.held, 1);
@@ -204,7 +204,7 @@ fn a_message_still_inside_the_window_is_held_not_dropped() {
 fn the_same_message_is_taken_once_the_window_passes() {
     let rows = vec![row("cm-1", "u-alice", "câu hỏi vừa gõ xong", NOW - 20_000)];
     let s = tfl5::select_new(&rows, 0, NOW, "u-hubbot", &quiet());
-    assert_eq!(s.messages.len(), 1);
+    assert_eq!(s.seen, 1);
     assert_eq!(s.held, 0);
     assert_eq!(s.newest_ts, NOW - 20_000);
 }
@@ -220,7 +220,7 @@ fn a_burst_is_never_split_across_the_window_boundary() {
         row("cm-3", "u-alice", "CI đang đỏ ở main", NOW - 1_000),
     ];
     let s = tfl5::select_new(&rows, 0, NOW, "u-hubbot", &quiet());
-    assert_eq!(s.messages.len(), 2, "the settled pair");
+    assert_eq!(s.seen, 2, "the settled pair");
     assert_eq!(s.held, 1, "the fresh one waits");
     assert_eq!(
         s.newest_ts,
@@ -240,7 +240,7 @@ fn hubs_own_replies_never_re_enter_the_queue() {
         NOW - 60_000,
     )];
     let s = tfl5::select_new(&rows, 0, NOW, "u-hubbot", &quiet());
-    assert!(s.messages.is_empty());
+    assert!(s.seen == 0);
     assert_eq!(
         s.newest_ts,
         NOW - 60_000,
@@ -255,10 +255,7 @@ fn one_word_acknowledgements_are_dropped_and_said_so() {
         row("cm-2", "u-alice", "👍", NOW - 59_000),
     ];
     let s = tfl5::select_new(&rows, 0, NOW, "u-hubbot", &quiet());
-    assert!(
-        s.messages.is_empty(),
-        "not questions — not worth $0.11 each"
-    );
+    assert!(s.seen == 0, "not questions — not worth $0.11 each");
     assert_eq!(s.filtered.len(), 2, "dropped, but never silently");
     assert_eq!(s.newest_ts, NOW - 59_000, "decided, so the cursor moves on");
 }
@@ -270,8 +267,7 @@ fn the_cursor_makes_already_seen_rows_free() {
         row("cm-2", "u-alice", "câu mới cần trả lời", NOW - 60_000),
     ];
     let s = tfl5::select_new(&rows, NOW - 90_000, NOW, "u-hubbot", &quiet());
-    assert_eq!(s.messages.len(), 1);
-    assert_eq!(s.messages[0].body.as_deref(), Some("câu mới cần trả lời"));
+    assert_eq!(s.seen, 1);
 }
 
 #[test]
@@ -283,7 +279,7 @@ fn a_zero_window_takes_everything_immediately() {
     };
     let rows = vec![row("cm-1", "u-alice", "gõ xong đúng lúc này", NOW)];
     let s = tfl5::select_new(&rows, 0, NOW, "u-hubbot", &c);
-    assert_eq!(s.messages.len(), 1);
+    assert_eq!(s.seen, 1);
     assert_eq!(s.held, 0);
 }
 
@@ -302,35 +298,9 @@ fn history_order_does_not_change_the_outcome() {
         &quiet(),
     );
     let oldest_first = tfl5::select_new(&[a, b, fresh], 0, NOW, "u-hubbot", &quiet());
-    assert_eq!(newest_first.messages.len(), oldest_first.messages.len());
+    assert_eq!(newest_first.seen, oldest_first.seen);
     assert_eq!(newest_first.newest_ts, oldest_first.newest_ts);
     assert_eq!(newest_first.held, oldest_first.held);
-}
-
-#[test]
-fn an_ingested_row_carries_the_room_and_the_sender_forward() {
-    // policy.rs reads `app_tid`/`room` back out of `raw` to address the reply,
-    // and `from_user_tid` is what the trust list matches on.
-    let rows = vec![row(
-        "cm-9",
-        "u-alice",
-        "câu hỏi đủ dài để qua bộ lọc",
-        NOW - 60_000,
-    )];
-    let m = &tfl5::select_new(&rows, 0, NOW, "u-hubbot", &quiet()).messages[0];
-    assert_eq!(m.source, "tfl5");
-    assert_eq!(m.external_id, "tfl5:cm-9");
-    assert_eq!(
-        m.thread_key.as_deref(),
-        Some("tfl5:a-65dd60d3:hub"),
-        "one room = one coalescing thread"
-    );
-    assert_eq!(m.sender.as_deref(), Some("tfl5:u-alice"));
-    assert_eq!(m.sender_trust, None, "room membership is not hub trust");
-    let raw = m.raw.as_ref().unwrap();
-    assert_eq!(raw["app_tid"], "a-65dd60d3");
-    assert_eq!(raw["room"], "hub");
-    assert_eq!(raw["from_user_tid"], "u-alice");
 }
 
 // ----------------------------------------------------------------------
@@ -345,34 +315,18 @@ fn owners() -> Vec<String> {
 }
 
 #[test]
-fn the_owner_can_approve_from_the_room() {
-    let (kind, id, arg) = tfl5::parse_command("/approve 12", OWNER, &owners()).expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Approve);
-    assert_eq!(id, 12);
-    assert_eq!(arg, "");
-}
-
-#[test]
-fn a_reject_reason_survives_into_the_books() {
-    let (kind, id, arg) =
-        tfl5::parse_command("/reject 12 câu trả lời sai chỗ", OWNER, &owners()).expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Reject);
-    assert_eq!(id, 12);
-    assert_eq!(arg, "câu trả lời sai chỗ");
-}
-
-#[test]
-fn a_stranger_typing_slash_approve_is_just_typing() {
-    // THE BOUNDARY. Being in the room must never be enough to approve an
-    // outbound reply. It is not silently dropped either — returning None means
-    // it stays an ordinary message and goes through triage like anything else.
-    assert!(tfl5::parse_command("/approve 12", "u-stranger", &owners()).is_none());
+fn a_stranger_typing_a_command_is_just_typing() {
+    // THE BOUNDARY. Being in the room must never be enough to drive this Mac.
+    // It is not silently dropped either — returning None means the line stays
+    // an ordinary message in an ordinary conversation.
+    assert!(tfl5::parse_command("/stop", "u-stranger", &owners()).is_none());
+    assert!(tfl5::parse_command("/new tfl5 sửa CI", "u-stranger", &owners()).is_none());
 }
 
 #[test]
 fn an_empty_owner_list_grants_nobody_command_rights() {
     // Fail closed: an unconfigured trust list must not mean "everyone".
-    assert!(tfl5::parse_command("/approve 12", OWNER, &[]).is_none());
+    assert!(tfl5::parse_command("/stop", OWNER, &[]).is_none());
     assert!(tfl5::parse_command("/approve 12", "", &[]).is_none());
 }
 
@@ -480,22 +434,18 @@ fn a_stranger_cannot_start_or_steer_a_session() {
 }
 
 #[test]
-fn act_is_refused_from_chat_on_purpose() {
-    // It writes code and can run for half an hour. A chat keyboard is the wrong
-    // trigger, and blocking the poll loop on it would be worse.
-    let (kind, id, _) = tfl5::parse_command("/act 12", OWNER, &owners()).expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::ActRefused);
-    assert_eq!(id, 12);
-}
-
-#[test]
 fn ordinary_text_is_never_mistaken_for_a_command() {
     for t in [
-        "cho tôi hỏi /approve nghĩa là gì?",
+        "cho tôi hỏi /session nghĩa là gì?",
         "đường dẫn là /var/log/app.log",
-        "/approve",          // no id
-        "/approve abc",      // not a number
         "/khong-ton-tai 12", // unknown verb
+        // Gone with the inbox on 2026-08-08. They must read as TEXT now, not as
+        // a command the room accepts and then does nothing about.
+        "/approve 12",
+        "/reject 12 sai",
+        "/close 155 hết giá trị",
+        "/reply 9 xong",
+        "/act 12",
     ] {
         assert!(
             tfl5::parse_command(t, OWNER, &owners()).is_none(),
@@ -509,32 +459,6 @@ fn help_needs_no_decision_id() {
     let (kind, id, _) = tfl5::parse_command("/help", OWNER, &owners()).expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::Help);
     assert_eq!(id, 0);
-}
-
-#[test]
-fn the_owner_can_close_a_message_from_the_room() {
-    let (kind, id, arg) =
-        tfl5::parse_command("/close 41 hết giá trị", OWNER, &owners()).expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Close);
-    assert_eq!(id, 41, "close takes a MESSAGE id, not a decision id");
-    assert_eq!(arg, "hết giá trị");
-    // Reason is optional.
-    let (kind, id, arg) = tfl5::parse_command("/close 41", OWNER, &owners()).expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Close);
-    assert_eq!(id, 41);
-    assert_eq!(arg, "");
-}
-
-#[test]
-fn reply_carries_the_text_and_refuses_to_send_nothing() {
-    let (kind, id, arg) =
-        tfl5::parse_command("/reply 41 mình đã xử lý xong", OWNER, &owners()).expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Reply);
-    assert_eq!(id, 41);
-    assert_eq!(arg, "mình đã xử lý xong");
-    // An empty reply would queue a blank message on a real channel.
-    assert!(tfl5::parse_command("/reply 41", OWNER, &owners()).is_none());
-    assert!(tfl5::parse_command("/reply 41    ", OWNER, &owners()).is_none());
 }
 
 #[test]
@@ -553,10 +477,10 @@ fn the_new_verbs_are_owner_only_too() {
 #[test]
 fn the_live_path_and_the_poller_agree_on_what_counts_as_a_command() {
     for text in [
-        "/close 155 hết giá trị",
-        "/approve 12",
-        "/reject 12 sai",
-        "/reply 9 xong",
+        "/session 1a2b3c4d",
+        "/stop",
+        "/handover",
+        "/tell chạy nốt test đi",
     ] {
         assert!(
             tfl5::parse_command(text, OWNER, &owners()).is_some(),
@@ -565,7 +489,7 @@ fn the_live_path_and_the_poller_agree_on_what_counts_as_a_command() {
     }
     // ...and ordinary chat must still be a message on both paths, or the live
     // socket would start silently swallowing questions.
-    for text in ["hôm nay CI sao rồi?", "/close", "closing the issue"] {
+    for text in ["hôm nay CI sao rồi?", "/approve 12", "closing the issue"] {
         assert!(
             tfl5::parse_command(text, OWNER, &owners()).is_none(),
             "đây là tin nhắn thường, không được nuốt: {text}"

@@ -3,9 +3,7 @@
 // form is the clearer statement of "everything default EXCEPT this".
 #![allow(clippy::field_reassign_with_default)]
 
-use hub::config::{
-    self, ActCfg, Config, RoutingRule, RoutingWhen, TierName, TriageCfg, ALWAYS_HUMAN_ACTIONS,
-};
+use hub::config::{self, CallCfg, Config};
 
 fn write_config(json: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
@@ -15,96 +13,70 @@ fn write_config(json: &str) -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 #[test]
-fn defaults_are_safe_draft_only_act_off() {
+fn defaults_are_bounded_and_dial_nothing_on_their_own() {
     let d = Config::default();
-    assert_eq!(&*d.autonomy.default, "L0");
-    assert!(!d.act.enabled);
-    assert_eq!(d.coalesce_hours, 12);
-}
-
-#[test]
-fn deploy_and_merge_can_never_be_auto_executed() {
-    for a in [
-        "deploy",
-        "merge",
-        "force_push",
-        "delete_data",
-        "rotate_secret",
-    ] {
-        assert!(ALWAYS_HUMAN_ACTIONS.contains(&a), "{a} must be human-only");
-    }
+    // A fresh install talks to no room until it is told which one.
+    assert!(!d.adapters.tfl5.enabled);
+    assert!(d.trust.tfl5_user_tids.is_empty());
+    // And one call has a stop on it, in money and in time.
+    assert!(d.call.max_budget_usd > 0.0 && d.call.max_budget_usd <= 5.0);
+    assert!(d.call.timeout_sec >= 10 && d.call.timeout_sec <= 3600);
 }
 
 #[test]
 fn config_file_overrides_merge_deeply_and_paths_become_absolute() {
     let (_dir, file) = write_config(
-        r#"{ "adapters": { "tfl5": { "room": "hub" } }, "autonomy": { "default": "L1" } }"#,
+        r#"{ "adapters": { "tfl5": { "room": "hub" } }, "call": { "timeout_sec": 300 } }"#,
     );
     let cfg = config::load(Some(&file)).unwrap();
 
-    assert_eq!(&*cfg.autonomy.default, "L1");
+    assert_eq!(cfg.call.timeout_sec, 300);
     assert_eq!(cfg.adapters.tfl5.room, "hub");
     // untouched sibling keys survive the merge
     assert_eq!(cfg.adapters.tfl5.limit, 50);
+    assert_eq!(cfg.call.max_budget_usd, CallCfg::default().max_budget_usd);
     assert!(cfg.db.is_absolute() && cfg.log_file.is_absolute());
     assert!(cfg.workspace_root.is_absolute());
 }
 
+/// A config file left over from the inbox era must still LOAD. Every key that
+/// went away on 2026-08-08 (`triage`, `act`, `autonomy`, `routing`,
+/// `daily_budget_usd`, `max_triage_per_cycle`, `web`, `leak_patterns`) is
+/// simply unknown to serde now — a hub that refused to start because of a stale
+/// key would be a hub that cannot be upgraded without hand-editing json first.
 #[test]
-fn invalid_tier_interval_and_confidence_are_rejected_loudly() {
-    let mut bad_tier = Config::default();
-    bad_tier.autonomy.default = TierName("L9".into());
-    assert!(config::validate(&bad_tier)
-        .unwrap_err()
-        .to_string()
-        .contains("autonomy.default"));
-
-    let mut bad_project = Config::default();
-    bad_project
-        .autonomy
-        .projects
-        .insert("x".into(), "L5".into());
-    assert!(config::validate(&bad_project)
-        .unwrap_err()
-        .to_string()
-        .contains("autonomy.projects.x"));
-
-    let mut bad_interval = Config::default();
-    bad_interval.poll_interval_sec = 1;
-    assert!(config::validate(&bad_interval)
-        .unwrap_err()
-        .to_string()
-        .contains("poll_interval_sec"));
-
-    let mut bad_conf = Config::default();
-    bad_conf.triage = TriageCfg {
-        min_confidence_auto: 2.0,
-        ..TriageCfg::default()
-    };
-    assert!(config::validate(&bad_conf)
-        .unwrap_err()
-        .to_string()
-        .contains("min_confidence_auto"));
-
-    let mut bad_budget = Config::default();
-    bad_budget.triage = TriageCfg {
-        max_budget_usd: 0.0,
-        ..TriageCfg::default()
-    };
-    assert!(config::validate(&bad_budget)
-        .unwrap_err()
-        .to_string()
-        .contains("max_budget_usd"));
-
-    let mut bad_routing = Config::default();
-    bad_routing.routing = vec![RoutingRule {
-        when: RoutingWhen::default(),
-        project: "  ".into(),
-    }];
-    assert!(config::validate(&bad_routing)
-        .unwrap_err()
-        .to_string()
-        .contains("routing rule"));
+fn a_config_from_the_inbox_era_still_loads_and_its_dead_keys_are_ignored() {
+    let (_dir, file) = write_config(
+        r#"{
+            "adapters": { "tfl5": { "room": "hub" } },
+            "triage": { "model": "sonnet", "max_budget_usd": 0.5 },
+            "act": { "enabled": true },
+            "autonomy": { "default": "L2" },
+            "routing": [{ "when": { "repo": "x/y" }, "project": "y" }],
+            "daily_budget_usd": 3.0,
+            "max_triage_per_cycle": 6,
+            "web": { "enabled": true, "port": 9200 },
+            "leak_patterns": ["secret"]
+        }"#,
+    );
+    let cfg = config::load(Some(&file)).unwrap();
+    assert_eq!(cfg.adapters.tfl5.room, "hub");
+    // The dead `triage.max_budget_usd` must NOT quietly become the live one.
+    assert_eq!(cfg.call.max_budget_usd, CallCfg::default().max_budget_usd);
+    let text = serde_json::to_string(&cfg).unwrap();
+    for gone in [
+        "triage",
+        "\"act\"",
+        "autonomy",
+        "routing",
+        "daily_budget_usd",
+        "web",
+    ] {
+        assert!(
+            !text.contains(gone),
+            "saving the config again must drop `{gone}`, not carry it forward"
+        );
+    }
 }
 
 #[test]
@@ -116,9 +88,35 @@ fn a_malformed_config_file_fails_fast_instead_of_running_with_defaults() {
 
 #[test]
 fn an_invalid_config_file_is_rejected_at_load_time() {
-    let (_dir, file) = write_config(r#"{ "autonomy": { "default": "L7" } }"#);
+    let (_dir, file) = write_config(r#"{ "poll_interval_sec": 1 }"#);
     let err = config::load(Some(&file)).unwrap_err().to_string();
     assert!(err.contains("invalid hub config"), "{err}");
+}
+
+/// The room is the only way in, so a hub configured to listen to a room nobody
+/// may command is a hub that silently ignores its owner. Both halves are
+/// checked at startup rather than discovered in a log line.
+#[test]
+fn a_room_with_no_owner_and_no_app_is_refused_at_startup() {
+    let mut no_owner = Config::default();
+    no_owner.adapters.tfl5.enabled = true;
+    no_owner.adapters.tfl5.app_tid = "a-1234".into();
+    let err = config::validate(&no_owner).unwrap_err().to_string();
+    assert!(err.contains("tfl5_user_tids"), "{err}");
+
+    let mut no_app = Config::default();
+    no_app.adapters.tfl5.enabled = true;
+    no_app.trust.tfl5_user_tids = vec!["u-owner".into()];
+    let err = config::validate(&no_app).unwrap_err().to_string();
+    assert!(err.contains("app_tid"), "{err}");
+}
+
+#[test]
+fn a_call_with_no_ceiling_is_refused() {
+    let mut zero = Config::default();
+    zero.call.max_budget_usd = 0.0;
+    let err = config::validate(&zero).unwrap_err().to_string();
+    assert!(err.contains("call.max_budget_usd"), "{err}");
 }
 
 #[test]
@@ -155,12 +153,4 @@ fn secrets_come_from_the_environment_never_the_config_file() {
         !text.contains("password\":\"") || text.contains("password_env"),
         "a password VALUE must never be serialized"
     );
-}
-
-#[test]
-fn act_stage_defaults_are_bounded() {
-    let a = ActCfg::default();
-    assert!(!a.enabled);
-    assert!(a.max_budget_usd > 0.0 && a.max_budget_usd <= 5.0);
-    assert!(a.timeout_sec <= 3600);
 }

@@ -86,9 +86,8 @@ try {
   const idleFor = (s) =>
     s.last_activity ? (Date.now() - Date.parse(s.last_activity)) / 60000 : Infinity;
   // Trong các phiên đứng yên, chọn phiên có NHẬT KÝ NGẮN NHẤT: bước /handover
-  // bên dưới nạp cả hội thoại nên giá tỉ lệ độ dài (đo thật: 0.986 MB → $1.72),
-  // và chạy trên phiên 20 MB thì kịch bản này tự đốt ~$36 mỗi lần chạy mà không
-  // kiểm thêm được gì.
+  // bên dưới nạp cả hội thoại, nên phiên càng dài thì lượt gọi càng nặng và
+  // càng lâu. Chạy trên phiên 20 MB không kiểm thêm được gì.
   const idle = truth.sessions.filter((s) => s.last_text && !s.note && idleFor(s) > 30);
   const pool = (idle.length ? idle : truth.sessions.filter((s) => s.last_text && !s.note));
   const target =
@@ -97,7 +96,7 @@ try {
         .map((x) => x.s)[0] || truth.sessions[0];
   console.log(
     `chạm vào phiên: ${target.name} (${target.account}, ` +
-    `${transcriptMB(target.session_id).toFixed(2)} MB ≈ $${(transcriptMB(target.session_id) * 1.75).toFixed(2)}/lần bàn giao)\n`
+    `${transcriptMB(target.session_id).toFixed(2)} MB nhật ký)\n`
   );
 
   await page.locator(`.sess[data-session="${target.session_id}"]`).click();
@@ -168,22 +167,20 @@ try {
   check("trang không tràn ngang", over.w <= over.inner + 1, `${over.w}/${over.inner}`);
   await page.screenshot({ path: `${SHOTS}stream-01-phone.png` });
 
-  // UC-S07 — đóng sổ để mở phiên mới làm tiếp. Đây là đường CHI TIỀN THẬT, và
-  // từ 08-08 không còn trần nào chặn nó, nên MỖI LẦN chạy kịch bản này là một
-  // lần trả tiền. Giá tỉ lệ độ dài nhật ký phiên, nên nhắm phiên RẺ NHẤT: đắt
-  // hơn không chứng minh thêm điều gì, chỉ tốn hơn.
+  // UC-S07 — đóng sổ để mở phiên mới làm tiếp. Nó gọi claude thật mỗi lần chạy,
+  // nên nhắm phiên có nhật ký ngắn nhất: phiên dài hơn không chứng minh thêm
+  // điều gì, chỉ chậm hơn.
   // Bản bàn giao CŨ vẫn nằm trong cursor từ lần chạy trước, nên "có tồn tại
   // không" là phép đo sai — phải hỏi "có bản MỚI trong lượt này không".
   const handoverBefore = snap.sessions.handover?.ts || "";
   // Không còn trần chặn thao tác của chủ máy (đã gỡ 2026-08-08) — chỉ còn SỔ.
   // Bản trước đọc `snap.budget` (trần robot) rồi tự suy lại luật, và xanh chỉ
   // vì hai trần tình cờ cùng kết luận: một phép đo mù.
-  const owner = snap.owner_spend || {};
-  console.log(`\nchi của chủ máy hôm nay: $${Number(owner.spent_usd ?? 0).toFixed(4)}`);
+  // Ảnh chụp KHÔNG được mang số tiền nào nữa (gỡ 2026-08-08). Đòi vắng mặt,
+  // vì đây là thứ đã mọc lại một lần rồi: trần → giá → và sẽ lại là gì đó.
   check(
-    "ảnh chụp mang chi của chủ máy (để hiện giá), KHÔNG mang trần chặn",
-    typeof owner.spent_usd === "number" && owner.blocks_owner_action === undefined,
-    JSON.stringify(owner)
+    "ảnh chụp KHÔNG mang số tiền nào",
+    snap.owner_spend === undefined && snap.owner_budget === undefined
   );
   await page.click("#sessHandover");
   await page.waitForFunction(
@@ -214,7 +211,6 @@ try {
     check("có bản bàn giao MỚI", !!h && h.ts !== handoverBefore && h.source_id === target.session_id);
     check("phiên mới KHÁC phiên cũ", h && h.new_session_id !== h.source_id, h ? h.new_session_id.slice(0, 8) : "");
     check("có lệnh để tiếp tục trên máy", !!(h && h.resume_command.includes("--resume")), h ? h.resume_command : "");
-    check("tiền vào sổ chi", !!(h && h.cost_usd > 0), h ? `$${h.cost_usd}` : "");
     check("màn hiện bản bàn giao", hv.box.includes("Đã đóng sổ"), hv.box.slice(0, 60));
   }
 

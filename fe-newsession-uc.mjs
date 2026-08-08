@@ -128,11 +128,11 @@ try {
     await page.waitForTimeout(3000);
   }
   console.log(`\nhub trả lời: ${verdict.slice(0, 160)}\n`);
-  const started = /^🚀/.test(verdict);
-  let fresh = started
+  const openedOk = /^🚀/.test(verdict);
+  let fresh = openedOk
     ? hub(["sessions", "--json"]).sessions.find((s) => !before.has(s.session_id))
     : null;
-  const blocked = started ? "" : verdict;
+  const blocked = openedOk ? "" : verdict;
 
   if (!fresh) {
     // Đường KẸT: nghiệm thu ở đây là "hub nói đúng sự thật", không phải "có phiên".
@@ -217,7 +217,6 @@ try {
     !!stillThere || sizeAfter > sizeBefore,
     stillThere ? "phiên cũ vẫn là phiên cũ" : "(đã rời danh sách sống, nhật ký vẫn là của nó)"
   );
-  check("tiền vào sổ chi", (hub(["portal-push", "--dry-run"]).owner_spend?.spent_usd ?? 0) > 0);
 
   const over = await page.evaluate(() => ({
     w: document.documentElement.scrollWidth,

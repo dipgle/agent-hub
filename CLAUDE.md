@@ -1,86 +1,106 @@
 # hub — operating rules
 
-`hub` is the workspace's comms channel: inbound items from **email, GitHub,
-project devlogs and chat** land in one normalized store, a bounded `claude -p`
-call triages each one, and the result is either an answer sent back on the same
-channel, a brief for the owner, or a code change on a branch.
+`hub` puts the **Claude CLI sessions running on this Mac** on a phone. One chat
+room on tfl5 carries ORDERS (`/session`, `/ask`, `/new`, `/tell`, `/stop`,
+`/handover`); a read-only snapshot travels the other way so the page can show
+what every session is doing. Nothing here reads mail, and nothing here spends
+money unless the owner presses a button.
 
 Read `README.md` for the architecture and the CLI. Read `PLAN.md` for what is
 built vs. pending. This file is the rules for working ON hub.
 
+## What hub is NOT (2026-08-08)
+
+hub was an inbox: GitHub notifications, project devlogs, email and Telegram fed
+one queue, a bounded `claude -p` call triaged every item, and a policy engine
+decided send-vs-ask. **That product is deleted** — adapters, triage, policy,
+redaction of outbound replies, the outbox, the act stage, the local web console,
+the inbox tab on the phone, and every number with a `$` in front of it.
+
+Three measurements decided it, and they are worth keeping because they answer
+"can we bring a bit of it back?" with numbers instead of taste:
+
+- **65% of what it carried was CI noise** — 117 of 180 items were GitHub CI
+  notifications, and they cost $5.89 of $9.12 total spend.
+- **$2.24 of one day's $2.98 triage bill** belonged to the github and devlog
+  branches *after they had already been deleted* — the ceiling built to contain
+  that spending was mostly the ghost of a dead product, and it ended up standing
+  between the owner and his own machine.
+- The thing he actually wanted — drive a session from a phone — had run **once**.
+
+Hà, three times in one evening: *"bỏ hết github rồi sao vẫn trần chuồng gì thế"*
+· *"sao vẫn nhắc tới tiền vậy, đã bảo xóa hết github rồi mà"* · *"đã bảo xóa
+hoàn toàn rồi cơ mà"*. **Before adding anything, ask: does this help him watch
+or drive a session from a phone?** If not, it does not belong here.
+
 ## Stack
 
 - **Rust 2021**, crate in `rust/`, two binaries: `hub` (CLI) and `hubd` (loop).
-  Deliberately **synchronous** — this process spends its life waiting on `gh`,
-  `claude`, and a 20s Telegram long-poll, so an async runtime would add moving
-  parts without removing a single wait. **No `unsafe` anywhere.**
-- Deps match mailler so the workspace keeps one toolchain: `rusqlite` (bundled),
-  `reqwest` (blocking + rustls), `serde`/`serde_json`, `clap`, `regex`, `chrono`,
-  `anyhow`. All present in the local cargo cache → `cargo build --offline` works.
-- Store: `data/hub.sqlite` (WAL). Schema in `rust/src/db.rs`, version in
-  `SCHEMA_VERSION`. The schema is byte-compatible with the archived Node
-  prototype (`legacy-node/`) — do not "tidy" column names without a migration.
-- Tests: `cd rust && cargo test --offline` → 50 integration tests, 0 warnings.
+  Deliberately **synchronous** — this process spends its life waiting on
+  `claude` and a 20s tfl5 long-poll, so an async runtime would add moving parts
+  without removing a single wait. **No `unsafe` anywhere.**
+- Deps: `rusqlite` (bundled), `reqwest` (blocking + rustls), `serde`/`serde_json`,
+  `clap`, `regex`, `chrono`, `anyhow`, `tungstenite`. All in the local cargo
+  cache → `cargo build --offline` works.
+- Store: `data/hub.sqlite` (WAL). Three tables — `runs`, `cursors`, `spend`.
+  An existing file still HAS the four inbox tables and their rows; nothing drops
+  them, and no query can see them.
+- Tests: `cd rust && cargo test --offline` → 67 tests, 0 warnings.
 - `./hub …` is a wrapper that builds on first use then execs `rust/target/release/hub`.
 
 ## Non-negotiables
 
-1. **Untrusted content never becomes instructions.** Inbound bodies are fenced
-   in `<<<INBOUND … INBOUND>>>` and the triage call runs with `--tools ""`. If
-   you add a stage that gives the model tools, it must be reachable only after a
-   human approval step, and its tool denylist stays in `rust/src/act.rs`.
-2. **No silent failure.** Every error path logs (`rust/src/logging.rs`) *and*
-   leaves a row: `runs.err` for adapters, `outbox.last_error` + `dead_letter` for
-   sends, `messages.last_error` for triage. An `Err` mapped to a default value
+1. **Nothing on this Mac runs unattended without a wall.** `/new` and `/tell`
+   start a `claude` process with the owner's own shell, from one sentence typed
+   on a phone. They run behind `sessions::DENIED_TOOLS`: no push/merge/reset, no
+   ssh/scp/rsync/sudo/rm/docker/launchctl/`*deploy*`, no WebFetch/WebSearch.
+   Writes inside the working tree stay allowed — that is the work. Never widen
+   this list to make a feature fit.
+2. **Anything hub runs on a live session runs on a FORK, read-only.** `/ask` and
+   `/handover` go through `sessions::fork_call`: `--fork-session` so the original
+   transcript is untouched, and `FORK_TOOLS` (`Read,Grep,Glob`) so a question
+   typed on a phone has no hand to write with. Measured 2026-08-08: `--tools ""`
+   breaks on tool-heavy history, and `--disallowedTools` without an allowlist
+   loads the full tool schema ($0.2185 for one sentence). The UC's real
+   acceptance is the ORIGINAL file: same bytes, same mtime, same `last_activity`.
+   A correct answer that added a turn to the live session is a FAILED UC.
+3. **No silent failure.** Every error path logs (`rust/src/logging.rs`) *and*
+   leaves a row where one exists (`runs.err`). An `Err` mapped to a default
    without a log line is a bug — same rule as a swallowed `catch {}`.
-3. **Credentials come from env vars only.** The config file holds the *name* of
-   the env var (`token_env`, `api_key_env`), never the value. A missing secret
-   means SKIP-WITH-LOG (`adapters::Skip`), not a crash and not a silent no-op.
-4. **Nothing leaves the machine without passing policy.** `rust/src/policy.rs` is
-   the only place that decides send-vs-ask, `rust/src/redaction.rs` is the last
-   gate before an outbound auto-reply. Untrusted sender ⇒ tier L0. deploy / merge
-   / force-push / data-deletion / secret-rotation ⇒ always human.
-5. **Cursors advance only after the messages they cover are committed.** A crash
-   must re-poll, never skip.
-6. **Cost is a feature.** One triage call is $0.05–$0.11 (measured 2026-07-26).
-   Coalescing, `max_triage_per_cycle`, and `--max-budget-usd` exist for that
-   reason; do not remove them to "simplify".
-7. **One approve path.** CLI, Telegram, the console and the tfl5 board all go
-   through `pipeline::{approve_decision, reject_decision, close_message,
-   reply_to_message}` — the board's buttons send the same `/approve` `/close`
-   text a person types. Never re-implement send-and-bookkeeping in a surface.
-   A slash command is an ORDER, never a message: the poller AND `live.rs` must
-   both `parse_command` before ingesting (missing that cost $0.18 on 08-07).
-   Verbs: approve · reject · close · reply · ingest · run · doctor · set ·
-   project · session · new · ask · tell · stop · handover · help. `new`, `ask`,
-   `tell` and `handover` spend money — counted in `spend`, never refused (#11).
-   A verb that already answered must end the first match with `Some(ack)`, not
-   fall through: falling through logged "Không tìm thấy decision #0" as the
-   reply for every `/session`, `/ask` and `/handover` ever issued.
-8. **The web UI is a privileged surface.** Loopback by default, `x-hub-token` on
-   every `/api/*` call, config writes validated + backed up + temp-renamed. If
-   you add an endpoint, add the token check; config fields must round-trip
-   through `Config` (never free-form JSON onto disk). A non-loopback `web.bind`
-   **must** carry a password — enforced in `config::validate` AND `web::serve`.
-9. **Unattended means bounded.** `hubd` runs on its own with money attached, so
-   `daily_budget_usd` stops triage at the ceiling and says so once per day. Any
-   new spending path must be counted the same way, and stopping must stay loud.
-10. **Secrets for the daemon come from `hub.env`** (chmod 600), never the plist,
-    never the config. Log key NAMES only. The real environment always wins.
-11. **The robot gets a ceiling; the owner gets a receipt.** `daily_budget_usd`
-    stops `hubd` because it spends while nobody watches. `/ask` and `/handover`
-    are the OWNER pressing a button — the same work at the same price as typing
-    it in the terminal, where no daily ceiling exists — so they are **counted,
-    never refused**. A ceiling on them was built and thrown out the same day
-    (2026-08-08, "bỏ hết github rồi sao vẫn trần chuồng gì thế"); the books
-    showed $2.24 of that day's $2.98 belonged to the github/devlog branches
-    already deleted, so it was mostly a dead product's ghost blocking the
-    owner's own hand. Every owner-triggered call still books into `spend` and
-    its price travels to the screen. The per-call cap stays, but it is
-    **measured, not guessed**: `sessions::fork_cost_estimate` sizes it from the
-    transcript (`USD_PER_MB`, from a real 0.986 MB → $1.72), because a flat cap
-    smaller than the load cost means paying for a call that dies anyway.
-12. **`claude` CLI facts that cost a real run to learn.** Do not re-derive them:
+4. **Credentials come from env vars only.** The config holds the *name* of the
+   env var (`user_env`, `password_env`), never the value. A missing secret means
+   SKIP-WITH-LOG (`adapters::Skip`), not a crash and not a silent no-op. Secrets
+   for the daemon come from `hub.env` (chmod 600), never the plist, never the
+   config. Log key NAMES only. The real environment always wins.
+5. **Nothing about a session leaves this Mac unscanned.** `sessions::preview_risk`
+   runs every transcript preview through `redaction::leak_scan` before it can
+   reach the snapshot — the first real run of `hub sessions` printed a session
+   whose latest turn stated a login password in plain text. The snapshot lands in
+   a doc on a server; that is "leaving the machine".
+6. **Cursors advance only after the orders they cover have run.** A crash must
+   re-poll, never skip.
+7. **The room takes ORDERS from the owner only.** `tfl5::parse_command` checks
+   `trust.tfl5_user_tids` first; anyone else typing `/new` is just typing text.
+   Being in the room is tfl5's decision; driving this Mac is the owner's.
+   Verbs: session · new · ask · tell · stop · handover · project · ingest · run ·
+   doctor · set · help. A verb that already answered must end its arm with
+   `Some(ack)` — the fall-through that used to exist logged "Không tìm thấy
+   decision #0" as the reply for every `/session` and `/ask` ever issued.
+8. **hub does not spend money on its own.** There is no triage, so a cycle costs
+   nothing; the only calls are `/ask`, `/handover`, `/new`, `/tell` — a person
+   pressing a button, at the same price as typing it in the terminal. They are
+   **counted in `spend`, never refused**. A daily ceiling on them was built and
+   thrown out the same day (2026-08-08). The per-call cap stays and is
+   **measured, not guessed**: `sessions::fork_cost_estimate` sizes it from the
+   transcript (`USD_PER_MB`, from a real 0.986 MB → $1.72), because a flat cap
+   smaller than the load cost means paying for a call that dies anyway.
+9. **No money on the screen.** `spend` records silently so the question can be
+   ANSWERED if it is ever asked; it stops being asked on every screen. The
+   snapshot carries no `owner_spend`, no `owner_budget`, no `cost_days`, no
+   `budget`, and `cost_usd` is `#[serde(skip_serializing)]` on `Handover`,
+   `Aside` and `Told`. `portal.rs` and `fe-board-uc.mjs` both assert **absence** —
+   this grew back once already (ceiling → price tag).
+10. **`claude` CLI facts that cost a real run to learn.** Do not re-derive them:
     `--bg` conflicts with `-p`, so the prompt is POSITIONAL — and
     `--disallowedTools` is VARIADIC, so a prompt placed after it is eaten as one
     more pattern and the agent comes up with no task at all. `claude stop` takes
@@ -90,60 +110,55 @@ built vs. pending. This file is the rules for working ON hub.
     primitive for typing into a running session, so UC-S05b level 1 has no path.
     And a background session opened anywhere under this workspace comes up
     `state: "blocked"` on an interactive MCP-approval dialog it can never
-    answer; `sessions::start_background` watches for that, stops it, and
-    reports the one-time fix rather than claiming success.
-13. **Anything hub runs on a live session runs on a FORK, read-only.** `/ask` and
-    `/handover` go through `sessions::fork_call`: `--fork-session` so the
-    original transcript is untouched, and `FORK_TOOLS` (`Read,Grep,Glob`) so a
-    question typed on a phone has no hand to write with. Measured 2026-08-08:
-    `--tools ""` breaks on tool-heavy history, and `--disallowedTools` without
-    an allowlist loads the full tool schema ($0.2185 for one sentence). Never
-    give this path a write tool without a human approval step.
+    answer; `sessions::start_background` watches for that, stops it, and reports
+    the one-time fix rather than claiming success.
+11. **The phone page is the only UI.** There is no local console any more. If you
+    add a surface, it must go through the same room commands — one path, one set
+    of books.
 
 ## When you change something
 
-- Adapter contract: `poll(cfg, cursors[, workspace_root]) -> Result<PollResult>`
-  plus optional `health(cfg)` / `send(cfg, target, subject, body)`. Normalizers
-  must be pure and unit-tested against a **captured real payload** (see
-  `rust/tests/fixtures/notifications.real.json`).
-- `external_id` must embed whatever makes an item "new again" (GitHub embeds
-  `updated_at`), because dedupe is `UNIQUE(source, external_id)`.
-- Adding a policy rule ⇒ add the matching case to `rust/tests/policy.rs`. The
-  invariant tests (untrusted caps at L0, tripwire outranks confidence, deploy is
-  human-only) are load-bearing; do not relax them to make a feature fit.
-- Touched the send path? Re-run a real cycle (`./hub once`) + `./hub status` —
-  green unit tests are necessary, not sufficient.
-- Changed the portal snapshot shape or a chat verb? Rebuild **release** and
-  restart `hubd` in the same pass: the running binary is the consumer, and a
-  stale one silently overwrites the new shape (twice on 2026-08-07).
+- Changed the snapshot shape or a chat verb? Rebuild **release** and restart
+  `hubd` in the same pass: the running binary is the consumer, and a stale one
+  silently overwrites the new shape (twice on 2026-08-07).
+- A verb that parses must have a handler. A verb with no handler is worse than
+  an unknown one: the room accepts it, nothing happens, nothing says so.
+- Deploying the page: `node fe-deploy.mjs <version> "<notes>"`. Bundle versions
+  are IMMUTABLE — re-using a name after editing the page ships nothing. The
+  script compares the served bytes against what it packed and fails loudly;
+  that check used to be skipped when the version was already live, and on
+  2026-08-08 it reported "ĐẠT" for a deploy that shipped nothing.
+- E2E runs against the DEPLOYED bundle, as `alice_local` (the owner). Logging in
+  as `hubbot` tests a permission nobody uses — every command comes back
+  `tfl5_command_from_non_owner`.
+- `fe-stream-uc` and `fe-aside-uc` make REAL `claude` calls: each run costs
+  money, and the first touch of a session costs the most (0.99 MB → $1.70; the
+  second question on the same session, $0.10). Both scripts aim at the shortest
+  transcript on purpose.
 
 ## Project layout
 
 ```
 hub                     wrapper script → rust/target/release/hub
 hub.config.json         config (no secrets — only env var NAMES)
-rust/src/main.rs        CLI: doctor init once ingest triage flush inbox show say
-                        approve reject close reply act status
-rust/src/bin/hubd.rs    daemon loop (pid lock, exponential backoff)
-rust/src/{config,db}.rs config + validation + secret_from_env() · schema and every query
-rust/src/pipeline.rs    ingest → triage → policy → outbox, one cycle · the channel verbs
-rust/src/triage.rs      the bounded claude -p call + prompt + injection tripwire
-rust/src/policy.rs      routing, trust, tiers, send-vs-ask
-rust/src/{redaction,outbound}.rs  outbound leak scan · dispatch + retry + dead-letter
-rust/src/act.rs         approved code change, in a git worktree, on a branch
-rust/src/web.rs         local web console (axum, 127.0.0.1 + per-boot token)
+rust/src/main.rs        CLI: doctor init once ingest status sessions
+                        tfl5-say tfl5-tail portal-push
+rust/src/bin/hubd.rs    daemon loop (pid lock, exponential backoff, local alarm)
+rust/src/{config,db}.rs config + validation + secret_from_env() · runs/cursors/spend
+rust/src/pipeline.rs    one cycle: read the room, run the orders, answer
+rust/src/sessions.rs    list · stream · fork (/ask, /handover) · background (/new, /tell, /stop)
 rust/src/portal.rs      read-only snapshot pushed to tfl5 (docs, not files — see its header)
-rust/assets/            ui.html + vendored echarts.min.js (embedded in the binary)
-rust/src/adapters/      github · devlog · email (mailler) · telegram · tfl5 (chat)
+rust/src/redaction.rs   leak scan, used by session previews
+rust/src/live.rs        held-open /ws/chat socket: wakes the cycle when an order lands
+rust/src/adapters/      tfl5 (the one channel) + the poll/command contract
 rust/tests/             integration tests + captured real fixture
-fe/                     chat FE + board tab, shipped to tfl5 as an app bundle
-fe-deploy.mjs           zip → Releases → Activate via the console UI, then verifies the served bytes
-fe-*.mjs                Playwright over the DEPLOYED bundle: -smoke (chat), -board (panels),
-                        -command + -config (button → chat verb → state/file changed), -denied, -watch,
-                        -sessions + -stream (UC-S01..S04, S07), -aside (UC-S05b: the fork must
-                        leave the original transcript byte-identical)
+fe/index.html           the phone page, shipped to tfl5 as an app bundle
+fe-deploy.mjs           zip → Releases → Activate through the console UI, then verifies bytes
+fe-*.mjs                Playwright over the DEPLOYED bundle at 390×844:
+                        -smoke (chat), -board (tabs/health/config, absence of the inbox),
+                        -sessions + -stream (UC-S01..S04, S07), -aside (UC-S05b),
+                        -newsession (UC-S06), -config (form → /set → disk), -denied, -phone
 console-acl.mjs         grant/revoke app access through the tfl5 console UI
-ui-smoke.mjs            Playwright headless check of the web UI (0 console errors)
 hub.env(.example)       secrets for launchd runs — chmod 600, gitignored
-deploy/*.plist          launchd unit · legacy-node/ archived prototype (port oracle)
+deploy/*.plist          launchd unit · legacy-node/ archived prototype
 ```

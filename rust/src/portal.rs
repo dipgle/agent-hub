@@ -187,7 +187,7 @@ pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
         _ => None,
     };
 
-    let owner = crate::pipeline::owner_budget_state(db, cfg);
+    let owner = crate::pipeline::owner_budget_state(db);
 
     Ok(json!({
         // Bump when the shape changes so an old page can say "too new to read"
@@ -232,20 +232,13 @@ pub fn build(db: &Db, cfg: &Config, limit: i64) -> Result<Value> {
             "cap_usd": cap,
             "stopped": spent >= cap,
         })),
-        // The OWNER's ceiling — a different ceiling with a different job, and
-        // the one that decides whether a button on the phone works. `budget`
-        // above reins in the unattended robot; refusing the owner's own press
-        // because the robot had a busy morning answers the wrong question.
-        //
-        // `blocks_owner_action` is the product's own decision, published rather
-        // than left to be re-derived: a check that recomputes the rule can
-        // agree with a broken product, which is exactly how `fe-stream-uc` sat
-        // green while reading the wrong ceiling entirely.
-        "owner_budget": {
+        // What the OWNER's own presses cost today. Reported, never used to
+        // refuse: `budget` above reins in the unattended robot, but a person
+        // pressing "hỏi bên lề" is working, and nobody caps their own terminal.
+        // The number travels so the price is visible on the screen that spends
+        // it — a cost the person cannot see is worse than one they can.
+        "owner_spend": {
             "spent_usd": owner.spent_usd,
-            "cap_usd": owner.cap_usd,
-            "per_call_usd": owner.per_call_usd,
-            "blocks_owner_action": owner.blocks,
         },
         // Config carries env var NAMES only (non-negotiable #3), never values,
         // so showing it to app members leaks no credential. Read-only here:
@@ -485,25 +478,17 @@ mod tests {
         assert_eq!(snap["schema"], 4);
         assert_eq!(snap["read_only"], true);
 
-        // The owner's ceiling is a DIFFERENT ceiling from the robot's, and the
-        // snapshot must publish the product's own verdict rather than leave a
-        // reader to recompute it. `fe-stream-uc` recomputed it against the
-        // wrong ceiling for a whole day and stayed green by coincidence.
-        let owner = &snap["owner_budget"];
+        // The owner's own spend travels so the price shows up next to the
+        // button that spends it — but as a NUMBER, never as a gate. A ceiling
+        // field here would be the first step back to hub refusing its owner.
+        let owner = &snap["owner_spend"];
         assert!(
-            owner["blocks_owner_action"].is_boolean(),
-            "the page must be able to read the decision, not re-derive it"
+            owner["spent_usd"].is_number(),
+            "the page must be able to show what today's presses cost"
         );
-        let cfg = test_cfg();
-        assert_eq!(
-            owner["cap_usd"].as_f64().unwrap(),
-            cfg.owner_daily_budget_usd,
-            "owner ceiling must come from owner_daily_budget_usd, not the robot's"
-        );
-        assert_eq!(
-            owner["per_call_usd"].as_f64().unwrap(),
-            cfg.triage.max_budget_usd,
-            "the worst case one press can add is the per-call cap"
+        assert!(
+            owner.get("blocks_owner_action").is_none() && owner.get("cap_usd").is_none(),
+            "owner spend is reported, not gated — see pipeline::owner_budget_state"
         );
 
         // The sessions block must exist even when nothing is running, and it

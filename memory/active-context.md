@@ -42,20 +42,68 @@ vĩnh viễn" đã trả giá 08-07. Vá: lời đáp của hub về **qua phòn
 huỷ chờ, để câu trả lời của phiên này không rơi lên màn phiên khác. Vá ăn cho
 **cả `/handover`** vì cùng một khuyết tật.
 
-⚠ **PHÁT HIỆN CHƯA XỬ LÝ — giá tỉ lệ với ĐỘ DÀI PHIÊN.** `--resume` nạp cả hội
-thoại, nên tiền phụ thuộc kích thước nhật ký chứ không phụ thuộc câu hỏi. Mốc đo
-thật: **0.986 MB → $1.72**. Chiếu sang 14 phiên đang sống (0.47 MB → **20.46 MB**,
-tổng 74.7 MB) thì trần mỗi lần gọi **$0.50** — vốn là trần của **triage**, dùng
-chung — **nhỏ hơn giá nạp của 13/14 phiên**, và cú hỏng vì trần **vẫn bị tính
-tiền**. Đây là ngoại suy từ **một** mốc, chưa xác nhận; nhưng bậc độ lớn đủ để
-không im. Cần Hà chốt: tách `owner_max_call_usd` riêng khỏi trần triage, và đặt
-bao nhiêu.
+### 🚫 Hà bác cả cái trần đó, và Hà đúng (cùng phiên, 08-08)
 
-**Nghiệm thu lượt này:** `cargo test` **166** (161 → +5) · clippy **0** · fmt sạch ·
-build 0 warning · `fe-aside-uc` **12/12** (mới) · `fe-stream-uc` **14/14** ·
-`fe-sessions-uc` 9/9 · `fe-smoke` 15/15 · `fe-board-uc` 43/43 · bundle v44 đối
-chiếu byte từ URL thật · `hubd` restart cùng lượt (schema 4 phải đi cùng trang).
-Tiền dò cơ chế: **$0.4359**.
+Tôi hỏi Hà chốt hai chuyện tiền. Hà không chọn phương án nào mà **bác tiền đề**:
+*"bỏ hết github rồi sao vẫn trần chuồng gì thế"* · *"liên quan gì tới tiền"*.
+
+Đi kiểm sổ thì Hà đúng, còn nặng hơn tôi tưởng — chi hôm nay theo nguồn:
+**github $1.8183 (cuối 08:25) · devlog $0.4233 (cuối 00:52) · tfl5 $0.7365 ·
+handover $1.7228**. ⟹ **$2.24 trong $2.98 tiền triage là của hai nhánh ĐÃ BỊ
+XOÁ**. Cái trần đang kêu "$4.70/$3.00 — dừng" phần lớn là **bóng ma của sản phẩm
+không còn tồn tại**, và sáng nay tôi lấy đúng họ trần đó **quàng lên nút bấm của
+chính Hà**. Hà gõ ở terminal không có trần ngày nào; bấm nút trên điện thoại
+cũng là Hà đang làm việc, không phải robot chạy không ai trông.
+
+**Đã gỡ:** `owner_daily_budget_usd` không còn là cổng từ chối.
+`owner_budget_state` nay **chỉ đếm**, ảnh chụp đổi `owner_budget{cap,blocks}` →
+**`owner_spend{spent_usd}`**, giá hiện **ngay cạnh câu trả lời**. Trần
+mỗi-lần-gọi thì **tự đo** (`fork_cost_estimate`, `USD_PER_MB` từ mốc thật
+0.986 MB → $1.72) thay vì mượn $0.50 của triage — con số ấy nhỏ hơn giá nạp của
+13/14 phiên, mà cú chết vì trần **vẫn bị tính tiền**.
+⚠ Hệ quả: **mỗi lần chạy `fe-stream-uc`/`fe-aside-uc` là một lần trả tiền thật**
+⇒ hai kịch bản nay tự chọn phiên **nhật ký ngắn nhất**.
+
+### ✅ Đường THÀNH CÔNG đã chạy thật (bundle v46) — 19/19
+
+Phiên `projects-cd` 0.47 MB: ước tính **$0.83** → thực **$0.8735** (lệch 5%, bộ
+ước lượng dùng được). Phiên gốc **474.525 byte · 246 dòng · mtime y nguyên**,
+`last_activity` không đổi. Trả lời từ fork, **đúng ngữ cảnh gốc**. Sổ chi cộng
+đúng khoản vừa tiêu.
+
+💡 **Lần hỏi THỨ HAI trên cùng phiên: $0.0490 — rẻ hơn 18×** (cache prompt).
+Giá đắt là giá *lần đầu chạm vào một phiên*, không phải giá mỗi câu hỏi.
+
+🐛 **Hai lỗi thật, đều do chạy thật mới lòi ra:**
+1. Hub **từ chối** thì ảnh chụp không sinh dòng nào ⇒ ô trả lời **quay mãi** —
+   đúng con "spinner treo vĩnh viễn" của 08-07. Vá: `noteSessionReply` bắt lời
+   đáp về qua **phòng chat**; ăn cho cả `/handover`.
+2. **Đáp án CŨ vẽ đè lên chỗ "đang hỏi…"**: ảnh chụp vẫn về đều trong lúc hub
+   nghĩ, mỗi cái mang câu trả lời trước đó ⇒ hỏi câu thứ hai là màn "trả lời"
+   tức thì bằng chữ của lần trước. Vá bằng mốc thời gian (`askedAfterTs`), khoá
+   theo `ts` chứ không theo cờ chờ — vì lời đáp phòng chat xoá cờ **trước** khi
+   ảnh chụp kịp theo.
+⚠ **Và chính bẫy đó bắt được kịch bản của tôi:** nó hỏi lại **đúng câu cũ**, nên
+mọi phép so chuỗi đều thoả bằng đáp án cũ → báo xanh trong khi hub còn đang
+nghĩ. Nay chờ **ảnh chụp mang `ts` MỚI**, rồi mới chờ màn hiện đúng **bản fork**
+đó. *Phép đo mà dữ liệu cũ cũng thoả thì nó không đo gì cả.*
+
+🎁 **Tác dụng phụ ngoài dự tính: UC-S07 lần ĐẦU chạy trọn qua UI.** Trước nay
+đường thành công của `/handover` chỉ chạy tay bằng CLI, còn qua màn thì luôn rơi
+vào nhánh từ chối vì trần. Gỡ trần xong: bản bàn giao mới, phiên `632cdba2`,
+**$0.8610** vào sổ, `resume_command` dùng được. `fe-stream-uc` 13/13 → **18/18**.
+
+**Nghiệm thu lượt này (exit code đọc trực tiếp, không qua `| tail`):**
+`cargo test` **166** (161 → +5) · clippy **0** · fmt sạch · build 0 warning ·
+`fe-aside-uc` **19/19** · `fe-stream-uc` **18/18** · `fe-sessions-uc` 9/9 ·
+`fe-smoke` 15/15 · `fe-board-uc` 43/43 · bundle **v46** đối chiếu byte từ URL
+thật · `hubd` pid 25230 khớp mã.
+Tiền cả phiên: dò cơ chế **$0.4359** + nghiệm thu thật **$1.83**.
+
+⚠ **Còn nợ, có sổ:** dòng log `channel_command_handled` in
+`ack:"Không tìm thấy decision #0"` cho các verb không mang id (`Session`, `Ask`) —
+phòng chat nhận đúng câu trả lời, nhưng **log nói sai sự thật**. Hành vi cũ, có
+từ trước `/ask`; chưa sửa trong lượt này.
 
 ## 🧹 2026-08-08 — hub giờ CHỈ là kênh quản lý phiên Claude CLI
 

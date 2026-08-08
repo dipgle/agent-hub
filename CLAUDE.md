@@ -64,15 +64,19 @@ built vs. pending. This file is the rules for working ON hub.
    new spending path must be counted the same way, and stopping must stay loud.
 10. **Secrets for the daemon come from `hub.env`** (chmod 600), never the plist,
     never the config. Log key NAMES only. The real environment always wins.
-11. **Two ceilings, two jobs.** `daily_budget_usd` reins in the unattended robot;
-    `owner_daily_budget_usd` covers what the owner sets off by pressing a button
-    (`/ask`, `/handover`). Refusing the owner because the robot had a busy
-    morning answers the wrong question. Both refuse on the WORST CASE
-    (`spent + max_budget_usd > cap`), never after the fact — `spent >= cap` lets
-    one unbounded call through, and that hole cost $1.72 on 2026-08-08. Any new
-    owner-triggered spend books into `spend` and goes through
-    `pipeline::owner_budget_state`, which publishes its verdict into the
-    snapshot so a test asserts the product's decision instead of re-deriving it.
+11. **The robot gets a ceiling; the owner gets a receipt.** `daily_budget_usd`
+    stops `hubd` because it spends while nobody watches. `/ask` and `/handover`
+    are the OWNER pressing a button — the same work at the same price as typing
+    it in the terminal, where no daily ceiling exists — so they are **counted,
+    never refused**. A ceiling on them was built and thrown out the same day
+    (2026-08-08, "bỏ hết github rồi sao vẫn trần chuồng gì thế"); the books
+    showed $2.24 of that day's $2.98 belonged to the github/devlog branches
+    already deleted, so it was mostly a dead product's ghost blocking the
+    owner's own hand. Every owner-triggered call still books into `spend` and
+    its price travels to the screen. The per-call cap stays, but it is
+    **measured, not guessed**: `sessions::fork_cost_estimate` sizes it from the
+    transcript (`USD_PER_MB`, from a real 0.986 MB → $1.72), because a flat cap
+    smaller than the load cost means paying for a call that dies anyway.
 12. **Anything hub runs on a live session runs on a FORK, read-only.** `/ask` and
     `/handover` go through `sessions::fork_call`: `--fork-session` so the
     original transcript is untouched, and `FORK_TOOLS` (`Read,Grep,Glob`) so a

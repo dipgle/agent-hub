@@ -312,13 +312,22 @@ allowlist thì **nạp cả schema công cụ**, một câu hỏi tốn **$0.218
 $0.20. Allowlist vừa là hàng rào vừa là đòn bẩy giá (cùng câu hỏi: **$0.0356**).
 ⚠ `handover` trước đây chạy **không có** bộ khoá này — nay đi chung `fork_call`.
 
-💰 Cùng cổng ngân sách với `/handover`: `owner_daily_budget_usd`, từ chối theo
-**trường hợp xấu nhất**. Ảnh chụp nay công bố `owner_budget.blocks_owner_action`
-để kịch bản đọc **kết luận của sản phẩm** thay vì tự suy lại luật.
+💰 **Không có trần nào chặn nút này.** Hà chốt 08-08: *"bỏ hết github rồi sao vẫn
+trần chuồng gì thế"* / *"liên quan gì tới tiền"*. Bấm nút trên điện thoại là **Hà
+đang làm việc** — cùng việc, cùng giá với gõ ở terminal, nơi chẳng có trần ngày
+nào. Sổ vẫn ghi (`spend`) và **giá hiện ngay cạnh câu trả lời**; trần mỗi-lần-gọi
+thì **tự đo theo độ dài phiên** (`fork_cost_estimate`) chứ không mượn con số cứng
+$0.50 của triage — con số ấy nhỏ hơn giá nạp của 13/14 phiên, mà cú chết vì trần
+**vẫn bị tính tiền**.
 
-**Cơ chế:** ✅ fork · ✅ hàng đợi (quan sát) · **Sản phẩm:** ✅ mức 2 (bundle v43) ·
-**Kịch bản:** ✅ `fe-aside-uc.mjs` — nhánh từ-chối 10/10 · ⏳ nhánh thành công
-**chưa chạy được**: trần chủ máy đã cạn ($1.723 + $0.50 > $2.00) đúng hôm dựng.
+**Nghiệm thu THẬT (2026-08-08, bundle v45):** phiên `projects-cd` 0.47 MB —
+ước tính **$0.83**, thực tế **$0.8735** (lệch 5%); phiên gốc **474.525 byte ·
+246 dòng · mtime y nguyên**, `last_activity` không đổi; trả lời đến từ bản fork
+`801d9c9d → a8723989` và **đúng ngữ cảnh gốc** (*"dựng multi-account cho Claude
+CLI: 3 config dir + alias + symlink skills/plugins…"*); sổ chi $1.7228 → $2.5963.
+
+**Cơ chế:** ✅ fork · ✅ hàng đợi (quan sát) · **Sản phẩm:** ✅ mức 2 (bundle v45) ·
+**Kịch bản:** ✅ `fe-aside-uc.mjs` — chạy thật cả đường thành công.
 Mức 1 (xếp hàng) và mức 3: vẫn như trên.
 
 ---
@@ -363,21 +372,27 @@ bản bàn giao có nội dung dùng được (nêu cả sha bundle và tên scr
 Lần chạy đầu tốn **$1.7228 trong MỘT lần gọi** (resume nạp cả phiên 986 KB), đẩy
 chi hôm nay lên **$4.701 / trần $3.00 — vượt 57%**. Ba lỗ, đều đã bịt:
 
-1. **Trần ngày không nhìn thấy đường chi này.** `cost_on_day` chỉ cộng
-   `decisions`. Nay có bảng **`spend`** và trần cộng cả hai (`SCHEMA_VERSION 3`).
-   Trước khi vá, một đường chi mới là **hoàn toàn vô hình** với chính cái trần
-   sinh ra để chặn nó.
-2. **Gác kiểu `spent >= cap` chỉ từ chối lần SAU** — một lần gọi không chặn thì
-   vượt bao nhiêu cũng được. Nay từ chối khi `spent + max_budget_usd > cap`, tức
-   theo **trường hợp xấu nhất**.
-3. **Lệnh handover không truyền `--max-budget-usd`.** Nay có, chặn ngay trong
-   một lần gọi.
+1. **Sổ không nhìn thấy đường chi này.** `cost_on_day` chỉ cộng `decisions`. Nay
+   có bảng **`spend`** (`SCHEMA_VERSION 3`) — trước khi vá, một đường chi mới là
+   **hoàn toàn vô hình**.
+2. **Lệnh handover không truyền `--max-budget-usd`** ⇒ một lần gọi tiêu bao
+   nhiêu cũng được. Nay có trần mỗi-lần-gọi.
 
-**Cơ chế:** ✅ · **Sản phẩm:** ✅ · **Kịch bản:** ✅ trong `fe-stream-uc.mjs`
-**13/13** — kiểm **cả hai nhánh**: đủ tiền thì phải ra bản bàn giao + id mới +
-tiền vào sổ; hết tiền thì **không được sinh bản mới** và phải nói rõ.
-⚠ Hôm nay chỉ nghiệm thu được nhánh **từ chối** (đã vượt trần); nhánh thành công
-đã chạy thật một lần trước khi vá, số liệu ở trên.
+### 🔁 Rồi chiều cùng ngày, hai trong ba "bản vá" ấy bị gỡ
+
+Hà bác tiền đề: *"bỏ hết github rồi sao vẫn trần chuồng gì thế"*. Sổ cho thấy
+**$2.24 trong $2.98 tiền triage hôm đó là của github+devlog đã bị xoá** — cái
+trần chặn tay Hà phần lớn là bóng ma. ⟹ **trần NGÀY không còn gác thao tác của
+chủ máy** (chỉ còn đếm + hiện giá), và **trần mỗi-lần-gọi tự đo theo độ dài
+phiên** (`fork_cost_estimate`) thay vì mượn $0.50 của triage.
+
+**Nghiệm thu THẬT (bundle v46):** `projects-cd` → bản bàn giao mới, phiên
+`632cdba2`, **$0.8610** vào sổ, `resume_command` chạy được. Đây là **lần đầu**
+đường thành công của UC-S07 đi trọn qua UI — trước đó chỉ chạy tay bằng CLI.
+
+**Cơ chế:** ✅ · **Sản phẩm:** ✅ · **Kịch bản:** ✅ `fe-stream-uc.mjs` **18/18**.
+⚠ Vì không còn trần chặn, **mỗi lần chạy kịch bản này là một lần trả tiền thật**
+— nên nó tự nhắm phiên có nhật ký ngắn nhất.
 
 ---
 

@@ -687,13 +687,54 @@ struct ForkReply {
     cost_usd: f64,
 }
 
+/// Dollars per megabyte of transcript, measured: a 0.986 MB session cost $1.72
+/// to load on 2026-08-08. `--resume` re-reads the whole conversation, so the
+/// price tracks the session's LENGTH, not the length of the question.
+const USD_PER_MB: f64 = 1.75;
+
+/// What one fork of `session` is expected to cost, from the size of its log.
+///
+/// Used for the per-call ceiling instead of borrowing triage's flat $0.50. That
+/// figure was sized for a chat message and is smaller than the load cost of 13
+/// of the 14 sessions live on this machine — and a call killed by its own
+/// ceiling is still BILLED, so a flat cap would have meant paying for nothing,
+/// repeatedly, on exactly the big sessions worth asking about.
+pub fn fork_cost_estimate(cfg: &Config, session: &LiveSession) -> f64 {
+    let root = cfg.claude_transcript_root();
+    let by_cwd = transcript_path(&root, &session.cwd, &session.session_id);
+    let path = if by_cwd.exists() {
+        Some(by_cwd)
+    } else {
+        find_transcript(&root, &session.session_id)
+    };
+    // No transcript found means no estimate — return 0 so the caller falls back
+    // to its floor rather than inventing a ceiling out of a missing file.
+    let bytes = path
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    (bytes as f64 / 1_000_000.0) * USD_PER_MB
+}
+
 fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkReply> {
-    // Cap the CALL, not just the day. `--resume` loads the whole conversation,
-    // so one handover on a 986 KB session cost **$1.72** on its first real run
-    // (2026-08-08) — the daily ceiling only refuses the NEXT call, so a single
-    // unbounded one blew a $3 day to $4.51. The per-call cap is what makes this
-    // path safe to expose on a button.
-    let per_call = cfg.triage.max_budget_usd.to_string();
+    // Cap the CALL. `--resume` loads the whole conversation, so one handover on
+    // a 986 KB session cost $1.72 on its first real run (2026-08-08) and a day
+    // ceiling only refuses the NEXT call.
+    //
+    // The cap is derived from this session rather than fixed: doubled headroom
+    // over the estimate stops a runaway without refusing honest work, and a
+    // floor keeps tiny sessions from getting a ceiling of nearly zero.
+    let estimate = fork_cost_estimate(cfg, session);
+    let cap = (estimate * 2.0).max(cfg.triage.max_budget_usd);
+    logging::info(
+        "fork_call_budget",
+        json!({
+            "session": session.session_id,
+            "estimate_usd": estimate,
+            "cap_usd": cap,
+        }),
+    );
+    let per_call = cap.to_string();
     // Pin the working directory to the session's own, so `Read`/`Grep` resolve
     // against the work being asked about rather than wherever `hubd` was
     // started from.

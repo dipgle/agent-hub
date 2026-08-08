@@ -395,134 +395,123 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 continue;
             }
             CommandKind::Handover => {
-                // Costs a `claude` call, so it obeys the same ceiling as triage
-                // and lands in the same books — a spending path the budget
-                // cannot see is not a budget (non-negotiable #9). Owner budget,
-                // NOT the robot's: see `owner_budget_state`.
-                let budget = owner_budget_state(db, cfg);
-                let ack = match () {
-                    _ if budget.blocks => budget.refusal(),
-                    _ => {
-                        let want = cmd.arg.trim().to_string();
-                        let want = if want.is_empty() {
-                            db.get_cursor(FOCUS_SESSION_KEY)
-                                .ok()
-                                .flatten()
-                                .unwrap_or_default()
-                        } else {
-                            want
-                        };
-                        let live = crate::sessions::snapshot(cfg);
-                        match live.sessions.iter().find(|s| s.session_id == want) {
-                            None => format!(
-                                "⚠ không thấy phiên '{}' đang chạy",
-                                crate::exec::truncate(&want, 40)
-                            ),
-                            Some(s) => match crate::sessions::handover(cfg, s) {
-                                Ok(h) => {
-                                    if let Err(e) = db.record_spend(
-                                        "handover",
-                                        &h.source_id,
-                                        h.cost_usd,
-                                        &format!("→ {}", h.new_session_id),
-                                    ) {
-                                        logging::error(
-                                            "spend_record_failed",
-                                            json!({ "kind": "handover", "err": e.to_string() }),
-                                        );
-                                    }
-                                    let line = serde_json::to_string(&h).unwrap_or_default();
-                                    if let Err(e) = db.set_cursor(HANDOVER_KEY, &line) {
-                                        logging::error(
-                                            "handover_store_failed",
-                                            json!({ "err": e.to_string() }),
-                                        );
-                                    }
-                                    logging::info(
-                                        "handover_done",
-                                        json!({ "from": h.source_id, "to": h.new_session_id, "cost_usd": h.cost_usd }),
-                                    );
-                                    format!(
-                                        "📋 Đã đóng sổ phiên {}. Tiếp tục bằng:\n{}\n\n{}",
-                                        h.source_name, h.resume_command, h.checkpoint
-                                    )
-                                }
-                                Err(e) => format!(
-                                    "⚠ bàn giao hỏng: {}",
-                                    crate::exec::truncate(&e.to_string(), 200)
-                                ),
-                            },
+                // Books, not brakes. This costs a `claude` call and every cent
+                // lands in `spend` — but it is the OWNER asking, so it is not
+                // gated the way the unattended robot is (see `owner_budget_state`).
+                let want = cmd.arg.trim().to_string();
+                let want = if want.is_empty() {
+                    db.get_cursor(FOCUS_SESSION_KEY)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_default()
+                } else {
+                    want
+                };
+                let live = crate::sessions::snapshot(cfg);
+                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                    None => format!(
+                        "⚠ không thấy phiên '{}' đang chạy",
+                        crate::exec::truncate(&want, 40)
+                    ),
+                    Some(s) => match crate::sessions::handover(cfg, s) {
+                        Ok(h) => {
+                            if let Err(e) = db.record_spend(
+                                "handover",
+                                &h.source_id,
+                                h.cost_usd,
+                                &format!("→ {}", h.new_session_id),
+                            ) {
+                                logging::error(
+                                    "spend_record_failed",
+                                    json!({ "kind": "handover", "err": e.to_string() }),
+                                );
+                            }
+                            let line = serde_json::to_string(&h).unwrap_or_default();
+                            if let Err(e) = db.set_cursor(HANDOVER_KEY, &line) {
+                                logging::error(
+                                    "handover_store_failed",
+                                    json!({ "err": e.to_string() }),
+                                );
+                            }
+                            logging::info(
+                                "handover_done",
+                                json!({ "from": h.source_id, "to": h.new_session_id, "cost_usd": h.cost_usd }),
+                            );
+                            format!(
+                                "📋 Đã đóng sổ phiên {} (${:.4}). Tiếp tục bằng:\n{}\n\n{}",
+                                h.source_name, h.cost_usd, h.resume_command, h.checkpoint
+                            )
                         }
-                    }
+                        Err(e) => format!(
+                            "⚠ bàn giao hỏng: {}",
+                            crate::exec::truncate(&e.to_string(), 200)
+                        ),
+                    },
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 ack
             }
             CommandKind::Ask => {
-                // Same books, same ceiling as handover — both are the owner
-                // spending money by pressing a button on a phone.
-                let budget = owner_budget_state(db, cfg);
-                let ack = match () {
-                    _ if budget.blocks => budget.refusal(),
-                    _ => {
-                        // No id in the verb: the target is the session being
-                        // read. Asking a question with nothing open is a
-                        // mistake worth naming, not a silent no-op.
-                        let want = db
-                            .get_cursor(FOCUS_SESSION_KEY)
-                            .ok()
-                            .flatten()
-                            .unwrap_or_default();
-                        let live = crate::sessions::snapshot(cfg);
-                        match live.sessions.iter().find(|s| s.session_id == want) {
-                            None if want.is_empty() => {
-                                "⚠ chưa mở phiên nào. Chạm một phiên trên màn Phiên rồi hỏi lại."
-                                    .to_string()
-                            }
-                            None => format!(
-                                "⚠ không thấy phiên '{}' đang chạy nữa",
-                                crate::exec::truncate(&want, 40)
-                            ),
-                            Some(s) => match crate::sessions::ask_aside(cfg, s, &cmd.arg) {
-                                Ok(a) => {
-                                    if let Err(e) = db.record_spend(
-                                        "aside",
-                                        &a.source_id,
-                                        a.cost_usd,
-                                        &format!("→ {}", a.new_session_id),
-                                    ) {
-                                        logging::error(
-                                            "spend_record_failed",
-                                            json!({ "kind": "aside", "err": e.to_string() }),
-                                        );
-                                    }
-                                    let line = serde_json::to_string(&a).unwrap_or_default();
-                                    if let Err(e) = db.set_cursor(ASIDE_KEY, &line) {
-                                        logging::error(
-                                            "aside_store_failed",
-                                            json!({ "err": e.to_string() }),
-                                        );
-                                    }
-                                    logging::info(
-                                        "aside_done",
-                                        json!({ "from": a.source_id, "to": a.new_session_id, "cost_usd": a.cost_usd }),
-                                    );
-                                    // Say what it did NOT do as well as what it
-                                    // did: the whole point of the feature is
-                                    // that the running session was left alone,
-                                    // and the person cannot see that from here.
-                                    format!(
-                                        "💬 Hỏi bên lề phiên {} (phiên gốc không bị đụng):\n\n{}",
-                                        a.source_name, a.answer
-                                    )
-                                }
-                                Err(e) => format!(
-                                    "⚠ hỏi bên lề hỏng: {}",
-                                    crate::exec::truncate(&e.to_string(), 200)
-                                ),
-                            },
-                        }
+                // Books, not brakes — same as handover. The owner asking their
+                // own session a question is the owner working, not a robot
+                // running loose; the price is reported, not used to refuse.
+                //
+                // No id in the verb: the target is the session being read.
+                // Asking with nothing open is a mistake worth naming, not a
+                // silent no-op.
+                let want = db
+                    .get_cursor(FOCUS_SESSION_KEY)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let live = crate::sessions::snapshot(cfg);
+                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                    None if want.is_empty() => {
+                        "⚠ chưa mở phiên nào. Chạm một phiên trên màn Phiên rồi hỏi lại."
+                            .to_string()
                     }
+                    None => format!(
+                        "⚠ không thấy phiên '{}' đang chạy nữa",
+                        crate::exec::truncate(&want, 40)
+                    ),
+                    Some(s) => match crate::sessions::ask_aside(cfg, s, &cmd.arg) {
+                        Ok(a) => {
+                            if let Err(e) = db.record_spend(
+                                "aside",
+                                &a.source_id,
+                                a.cost_usd,
+                                &format!("→ {}", a.new_session_id),
+                            ) {
+                                logging::error(
+                                    "spend_record_failed",
+                                    json!({ "kind": "aside", "err": e.to_string() }),
+                                );
+                            }
+                            let line = serde_json::to_string(&a).unwrap_or_default();
+                            if let Err(e) = db.set_cursor(ASIDE_KEY, &line) {
+                                logging::error(
+                                    "aside_store_failed",
+                                    json!({ "err": e.to_string() }),
+                                );
+                            }
+                            logging::info(
+                                "aside_done",
+                                json!({ "from": a.source_id, "to": a.new_session_id, "cost_usd": a.cost_usd }),
+                            );
+                            // Say what it did NOT do as well as what it did:
+                            // the whole point of the feature is that the running
+                            // session was left alone, and the person cannot see
+                            // that from here.
+                            format!(
+                                "💬 Hỏi bên lề phiên {} (phiên gốc không bị đụng, ${:.4}):\n\n{}",
+                                a.source_name, a.cost_usd, a.answer
+                            )
+                        }
+                        Err(e) => format!(
+                            "⚠ hỏi bên lề hỏng: {}",
+                            crate::exec::truncate(&e.to_string(), 200)
+                        ),
+                    },
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 ack
@@ -1196,58 +1185,36 @@ pub fn source_budget_state(db: &Db, cfg: &Config, source: &str) -> Result<Option
     Ok(Some((db.cost_on_day_for_source(&today, source)?, cap)))
 }
 
-/// Today's OWNER spend — the person pressing buttons — against its own ceiling.
+/// Today's OWNER spend — what the person set off by pressing a button.
 ///
-/// Separate from `budget_state` on purpose: `daily_budget_usd` exists to rein in
-/// a robot nobody is watching, and refusing the owner's own press because the
-/// robot had a busy morning is the wrong answer to the wrong question.
+/// **It reports; it does not refuse.** A daily ceiling exists to rein in a robot
+/// nobody is watching (`daily_budget_usd`, non-negotiable #9). Pressing "hỏi bên
+/// lề" on a phone is the owner working, exactly as if they had typed it in the
+/// terminal — and nobody puts a $2/day ceiling on their own terminal.
+///
+/// This was wired as a REFUSAL for one afternoon on 2026-08-08 and Hà threw it
+/// out the same day ("bỏ hết github rồi sao vẫn trần chuồng gì thế"). The books
+/// behind it were the giveaway: of $2.98 triaged that day, $2.24 belonged to the
+/// github and devlog branches that had already been deleted, so the ceiling was
+/// mostly the ghost of a product that no longer existed — and it was reaching
+/// out to block the owner's own hand.
+///
+/// What stays is the accounting: every owner-triggered call books into `spend`
+/// and its price travels to the screen, because a cost the person cannot see is
+/// worse than one they can.
 #[derive(Debug, Clone, Copy)]
 pub struct OwnerBudget {
     pub spent_usd: f64,
-    pub cap_usd: f64,
-    /// The worst case ONE press can add.
-    pub per_call_usd: f64,
-    /// Whether the next press is refused. This field is the product's actual
-    /// decision, published so a test can assert the outcome instead of
-    /// re-deriving it — a check that recomputes the rule is a check that can
-    /// agree with a broken product (`fe-stream-uc` did exactly that, and only
-    /// passed because two different ceilings happened to reach the same answer).
-    pub blocks: bool,
 }
 
-/// Refuse on the WORST CASE, not after the fact. `spent >= cap` lets one
-/// unbounded call through, and the first real handover used that hole to spend
-/// $1.72 on a $3 day (2026-08-08).
-pub fn owner_budget_state(db: &Db, cfg: &Config) -> OwnerBudget {
+pub fn owner_budget_state(db: &Db) -> OwnerBudget {
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let spent = db.owner_cost_on_day(&today).unwrap_or_else(|e| {
-        // Reading the books failed, so hub cannot know what it has spent.
-        // Report zero and say so — but never let this decide "plenty left".
+        // Never swallow it: the number on screen would silently become a lie.
         logging::error("owner_spend_read_failed", json!({ "err": e.to_string() }));
-        f64::NAN
+        0.0
     });
-    let cap = cfg.owner_daily_budget_usd;
-    let per_call = cfg.triage.max_budget_usd;
-    let worst_case = spent + per_call;
-    OwnerBudget {
-        spent_usd: if spent.is_nan() { 0.0 } else { spent },
-        cap_usd: cap,
-        per_call_usd: per_call,
-        // Unreadable books (NaN) refuse: not knowing the balance is not the
-        // same as having room. Said out loud rather than left to fall out of a
-        // negated comparison, because that is the case a reader skips.
-        blocks: cap > 0.0 && (worst_case.is_nan() || worst_case > cap),
-    }
-}
-
-impl OwnerBudget {
-    /// The sentence shown when a press is refused.
-    fn refusal(&self) -> String {
-        format!(
-            "⚠ hết ngân sách cho thao tác của bạn hôm nay: đã dùng ${:.2}/${:.2}, một lần gọi có thể tốn tới ${:.2}. Nâng owner_daily_budget_usd nếu cần.",
-            self.spent_usd, self.cap_usd, self.per_call_usd
-        )
-    }
+    OwnerBudget { spent_usd: spent }
 }
 
 /// Today's spend against the ceiling. `None` when no ceiling is configured.

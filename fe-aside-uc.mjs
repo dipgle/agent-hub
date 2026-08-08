@@ -97,14 +97,20 @@ try {
   const truth = hub(["sessions", "--json"]);
   const idleFor = (s) =>
     s.last_activity ? (Date.now() - Date.parse(s.last_activity)) / 60000 : Infinity;
-  const target =
-    truth.sessions.find((s) => s.last_text && !s.note && idleFor(s) > 30) ||
-    truth.sessions.find((s) => s.last_text && !s.note);
-  if (!target) throw new Error("không có phiên đứng yên nào để hỏi — dừng, không đo bừa");
-  const file = transcriptOf(target.session_id);
-  if (!file) throw new Error(`không tìm thấy nhật ký của phiên ${target.session_id}`);
+  // Trong các phiên đứng yên, chọn phiên NHẬT KÝ NGẮN NHẤT. `--resume` nạp cả
+  // hội thoại nên giá tỉ lệ độ dài (đo thật: 0.986 MB → $1.72); hỏi trên phiên
+  // 20 MB thì mỗi lần chạy kịch bản tự đốt ~$36 mà không kiểm thêm được gì.
+  const pool = truth.sessions.filter((s) => s.last_text && !s.note && idleFor(s) > 30);
+  const sized = (pool.length ? pool : truth.sessions.filter((s) => s.last_text && !s.note))
+    .map((s) => ({ s, file: transcriptOf(s.session_id) }))
+    .filter((x) => x.file)
+    .map((x) => ({ ...x, mb: statSync(x.file).size / 1e6 }))
+    .sort((a, b) => a.mb - b.mb);
+  if (!sized.length) throw new Error("không có phiên đứng yên nào để hỏi — dừng, không đo bừa");
+  const { s: target, file, mb } = sized[0];
   console.log(`chạm vào phiên: ${target.name} (${target.account}, đứng yên ${Math.round(idleFor(target))} phút)`);
-  console.log(`nhật ký: ${file}\n`);
+  console.log(`nhật ký: ${file}`);
+  console.log(`kích thước: ${mb.toFixed(2)} MB ≈ $${(mb * 1.75).toFixed(2)} cho một câu hỏi\n`);
 
   const before = fingerprint(file);
   const activityBefore = target.last_activity;
@@ -121,15 +127,14 @@ try {
     { timeout: 180000, polling: 1000 }
   );
 
-  // Trần của CHỦ MÁY quyết định nhánh nào chạy được hôm nay. Đọc thẳng kết luận
-  // sản phẩm công bố, không tự suy lại luật.
+  // Không còn trần chặn thao tác của chủ máy (gỡ 2026-08-08) — chỉ còn sổ chi,
+  // để hiện GIÁ cạnh cái nút tiêu tiền.
   const snap = hub(["portal-push", "--dry-run"]);
-  const owner = snap.owner_budget || {};
-  const blocked = owner.blocks_owner_action === true;
+  const owner = snap.owner_spend || {};
   check(
-    "ảnh chụp công bố trần của chủ máy",
-    typeof owner.blocks_owner_action === "boolean",
-    `đã dùng $${Number(owner.spent_usd ?? 0).toFixed(3)}/$${Number(owner.cap_usd ?? 0).toFixed(2)} · chặn: ${blocked}`
+    "ảnh chụp mang chi của chủ máy, KHÔNG mang trần chặn",
+    typeof owner.spent_usd === "number" && owner.blocks_owner_action === undefined,
+    `đã dùng $${Number(owner.spent_usd ?? 0).toFixed(4)} hôm nay`
   );
   const asideBefore = snap.sessions.aside?.ts || "";
 
@@ -140,6 +145,10 @@ try {
   await page.click("#sessAsk");
   check("ô hỏi được dọn sau khi gửi", (await page.inputValue("#sessAskInput")) === "");
 
+  // Hai bước, vì màn có HAI trạng thái và chỉ trạng thái sau mới là cái người
+  // dùng rốt cuộc nhìn thấy: lời đáp về qua phòng chat trước (nhanh, thô), rồi
+  // ảnh chụp kế tiếp thay bằng thẻ đầy đủ (câu hỏi + bản fork + giá). Đọc ngay
+  // sau bước 1 là đo một màn hình đang trên đường đi.
   await page.waitForFunction(
     () => {
       const t = document.getElementById("sessAskBox").textContent || "";
@@ -148,15 +157,30 @@ try {
     null,
     { timeout: 180000, polling: 1000 }
   ).catch(() => {});
+  // Chờ câu trả lời MỚI, không chờ "có chữ trên màn". Kịch bản hỏi lại đúng câu
+  // cũ, nên đáp án của lần chạy trước cũng thoả mọi phép so chuỗi — bản đầu rơi
+  // đúng bẫy đó và tưởng đã đo xong trong khi hub còn đang nghĩ.
+  let after = null;
+  for (let i = 0; i < 60; i++) {
+    after = hub(["portal-push", "--dry-run"]);
+    if ((after.sessions.aside?.ts || "") !== asideBefore) break;
+    await page.waitForTimeout(3000);
+  }
+  const a = after.sessions.aside;
+  // Rồi mới chờ MÀN bắt kịp đúng câu trả lời ấy (nhận diện bằng bản fork).
+  if (a && a.new_session_id) {
+    await page.waitForFunction(
+      (fork) => (document.getElementById("sessAskBox").textContent || "").includes(fork),
+      a.new_session_id.slice(0, 8),
+      { timeout: 60000, polling: 1000 }
+    ).catch(() => {});
+  }
   const shown = await page.evaluate(() => ({
     box: document.getElementById("sessAskBox").textContent || "",
     note: document.getElementById("cmdNote")?.textContent || "",
   }));
 
-  const after = hub(["portal-push", "--dry-run"]);
-  const a = after.sessions.aside;
-
-  // ——— LỜI HỨA CỦA UC, đo trên tệp thật, chạy ở CẢ HAI nhánh ———
+  // ——— LỜI HỨA CỦA UC, đo trên tệp thật ———
   const now = fingerprint(file);
   check(
     "phiên gốc không thêm một byte nào",
@@ -171,40 +195,31 @@ try {
     `${activityBefore} → ${liveNow ? liveNow.last_activity : "(không còn trong danh sách)"}`
   );
 
-  if (blocked) {
-    // Hết trần: hub phải TỪ CHỐI và nói rõ, không được im lặng tiêu tiếp.
-    check(
-      "hết ngân sách thì KHÔNG hỏi lén",
-      (a?.ts || "") === asideBefore,
-      (a?.ts || "") === asideBefore ? "không sinh câu hỏi mới — đúng" : `sinh lúc ${a.ts}`
-    );
-    check(
-      "màn nói rõ lý do từ chối, không vờ như xong",
-      /ngân sách/i.test(shown.box + shown.note),
-      (shown.box + " " + shown.note).slice(0, 120)
-    );
-    console.log("\n  · ngân sách chủ máy không đủ để kiểm đường THÀNH CÔNG của UC-S05b hôm nay");
-  } else {
-    check("có câu hỏi bên lề MỚI trong ảnh chụp", !!a && a.ts !== asideBefore && a.source_id === target.session_id);
-    check("câu hỏi được giữ nguyên văn", a && a.question === question, a ? a.question : "");
-    check("có câu trả lời", !!(a && a.answer && a.answer.length > 0), a ? a.answer.slice(0, 80) : "");
-    check(
-      "trả lời nằm ở phiên KHÁC (fork), không phải phiên gốc",
-      !!(a && a.new_session_id && a.new_session_id !== a.source_id),
-      a ? `${a.source_id.slice(0, 8)} → ${a.new_session_id.slice(0, 8)}` : ""
-    );
-    check("tiền vào sổ chi", !!(a && a.cost_usd > 0), a ? `$${a.cost_usd}` : "");
-    check("màn hiện câu trả lời", shown.box.includes("phiên gốc không thêm lượt nào"), shown.box.slice(0, 80));
-    check("màn hiện câu mình đã hỏi", shown.box.includes(question.slice(0, 20)));
+  check("có câu hỏi bên lề MỚI trong ảnh chụp", !!a && a.ts !== asideBefore && a.source_id === target.session_id);
+  check("câu hỏi được giữ nguyên văn", a && a.question === question, a ? a.question : "");
+  check("có câu trả lời", !!(a && a.answer && a.answer.length > 0), a ? a.answer.slice(0, 80) : "");
+  check(
+    "trả lời nằm ở phiên KHÁC (fork), không phải phiên gốc",
+    !!(a && a.new_session_id && a.new_session_id !== a.source_id),
+    a ? `${a.source_id.slice(0, 8)} → ${a.new_session_id.slice(0, 8)}` : ""
+  );
+  check("tiền vào sổ chi", !!(a && a.cost_usd > 0), a ? `$${a.cost_usd}` : "");
+  check("màn hiện câu trả lời", shown.box.includes("phiên gốc không thêm lượt nào"), shown.box.slice(0, 80));
+  check("màn hiện câu mình đã hỏi", shown.box.includes(question.slice(0, 20)));
+  check(
+    "màn hiện GIÁ của lần hỏi này",
+    /\$\d/.test(shown.box),
+    shown.box.slice(-60)
+  );
 
-    // Sổ chi phải cộng dồn cả hai đường tiêu của chủ máy.
-    const spentAfter = Number(after.owner_budget?.spent_usd ?? 0);
-    check(
-      "trần chủ máy đã tính khoản vừa tiêu",
-      spentAfter >= Number(owner.spent_usd ?? 0) + Number(a?.cost_usd ?? 0) - 1e-6,
-      `$${Number(owner.spent_usd ?? 0).toFixed(4)} → $${spentAfter.toFixed(4)}`
-    );
-  }
+  // Sổ chi của chủ máy phải cộng thêm đúng khoản vừa tiêu — giá hiện trên màn
+  // mà sổ không nhúc nhích thì con số kia là trang trí.
+  const spentAfter = Number(after.owner_spend?.spent_usd ?? 0);
+  check(
+    "sổ chi đã cộng khoản vừa tiêu",
+    spentAfter >= Number(owner.spent_usd ?? 0) + Number(a?.cost_usd ?? 0) - 1e-6,
+    `$${Number(owner.spent_usd ?? 0).toFixed(4)} → $${spentAfter.toFixed(4)}`
+  );
 
   const over = await page.evaluate(() => ({
     w: document.documentElement.scrollWidth,

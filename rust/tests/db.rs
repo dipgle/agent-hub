@@ -377,46 +377,29 @@ fn cursors_round_trip_and_runs_record_health() {
 }
 
 #[test]
-fn the_owner_ceiling_refuses_on_the_worst_case_not_after_the_damage() {
-    // THE HOLE THIS CLOSES. `spent >= cap` still lets one unbounded call
-    // through, and the first real handover used exactly that to spend $1.72 on
-    // a $3 day (2026-08-08). The gate has to ask "could this press break the
-    // ceiling", not "has the ceiling already broken".
+fn the_owners_own_spend_is_counted_but_never_used_to_refuse() {
+    // THE BOUNDARY, and it points the opposite way from the robot's. Pressing
+    // "hỏi bên lề" on a phone is the owner working — the same work at the same
+    // price as typing it in the terminal, where no daily ceiling exists.
+    //
+    // A ceiling here was built and thrown out the same day (2026-08-08). The
+    // books said why: of $2.98 triaged that day, $2.24 belonged to the github
+    // and devlog branches that had already been deleted, so the ceiling was
+    // mostly the ghost of a dead product — reaching out to block the owner's
+    // own hand. What survives is the counting, so the price can be shown next
+    // to the button that spends it.
     let (db, _dir) = fresh_db();
-    let mut cfg = common::cfg_for_tests();
-    cfg.owner_daily_budget_usd = 2.0;
-    cfg.triage.max_budget_usd = 0.5;
+    assert_eq!(hub::pipeline::owner_budget_state(&db).spent_usd, 0.0);
 
-    let fresh = hub::pipeline::owner_budget_state(&db, &cfg);
-    assert!(
-        !fresh.blocks,
-        "an empty day must not refuse the first press"
-    );
-    assert_eq!(fresh.cap_usd, 2.0);
-    assert_eq!(fresh.per_call_usd, 0.5);
-
-    // $1.70 spent is UNDER the $2.00 ceiling, so a naive `spent >= cap` would
-    // wave this through — and one $0.50 call would land at $2.20.
+    // Well past any ceiling hub used to enforce: it must still only REPORT.
     db.record_spend("handover", "s-1", 1.70, "→ s-2").unwrap();
-    let tight = hub::pipeline::owner_budget_state(&db, &cfg);
-    assert_eq!(tight.spent_usd, 1.70);
+    db.record_spend("aside", "s-1", 8.00, "→ s-3").unwrap();
+    let state = hub::pipeline::owner_budget_state(&db);
     assert!(
-        tight.blocks,
-        "worst case 1.70 + 0.50 = 2.20 > 2.00 must refuse BEFORE spending"
+        (state.spent_usd - 9.70).abs() < 1e-9,
+        "both owner-initiated calls must be counted, got {}",
+        state.spent_usd
     );
-
-    // Exactly reaching the ceiling is still inside it: 1.50 + 0.50 = 2.00.
-    let (db2, _dir2) = fresh_db();
-    db2.record_spend("aside", "s-1", 1.50, "→ s-3").unwrap();
-    assert!(
-        !hub::pipeline::owner_budget_state(&db2, &cfg).blocks,
-        "landing exactly on the ceiling is within budget, not over it"
-    );
-
-    // No ceiling configured means no gate — but it must be an explicit 0, not
-    // an accident of an unreadable book.
-    cfg.owner_daily_budget_usd = 0.0;
-    assert!(!hub::pipeline::owner_budget_state(&db, &cfg).blocks);
 }
 
 #[test]

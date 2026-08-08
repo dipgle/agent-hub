@@ -12,7 +12,24 @@
 
 import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+/// Megabytes of transcript for a session — what a `--resume` call has to pay to
+/// load. Returns Infinity when the file cannot be found, so an unmeasurable
+/// session sorts LAST rather than looking like the cheapest one.
+function transcriptMB(sessionId) {
+  const root = join(homedir(), ".claude", "projects");
+  for (const dir of readdirSync(root)) {
+    try {
+      return statSync(join(root, dir, `${sessionId}.jsonl`)).size / 1e6;
+    } catch {
+      /* not in this project folder */
+    }
+  }
+  return Infinity;
+}
 
 const [appTid, username, password] = process.argv.slice(2);
 if (!appTid || !username || !password) {
@@ -68,11 +85,20 @@ try {
   const truth = hub(["sessions", "--json"]);
   const idleFor = (s) =>
     s.last_activity ? (Date.now() - Date.parse(s.last_activity)) / 60000 : Infinity;
+  // Trong các phiên đứng yên, chọn phiên có NHẬT KÝ NGẮN NHẤT: bước /handover
+  // bên dưới nạp cả hội thoại nên giá tỉ lệ độ dài (đo thật: 0.986 MB → $1.72),
+  // và chạy trên phiên 20 MB thì kịch bản này tự đốt ~$36 mỗi lần chạy mà không
+  // kiểm thêm được gì.
+  const idle = truth.sessions.filter((s) => s.last_text && !s.note && idleFor(s) > 30);
+  const pool = (idle.length ? idle : truth.sessions.filter((s) => s.last_text && !s.note));
   const target =
-    truth.sessions.find((s) => s.last_text && !s.note && idleFor(s) > 30) ||
-    truth.sessions.find((s) => s.last_text && !s.note) ||
-    truth.sessions[0];
-  console.log(`chạm vào phiên: ${target.name} (${target.account})\n`);
+    pool.map((s) => ({ s, mb: transcriptMB(s.session_id) }))
+        .sort((a, b) => a.mb - b.mb)
+        .map((x) => x.s)[0] || truth.sessions[0];
+  console.log(
+    `chạm vào phiên: ${target.name} (${target.account}, ` +
+    `${transcriptMB(target.session_id).toFixed(2)} MB ≈ $${(transcriptMB(target.session_id) * 1.75).toFixed(2)}/lần bàn giao)\n`
+  );
 
   await page.locator(`.sess[data-session="${target.session_id}"]`).click();
   check("chạm vào phiên thì mở màn chi tiết", await page.locator("#sessDetail").isVisible());
@@ -142,29 +168,21 @@ try {
   check("trang không tràn ngang", over.w <= over.inner + 1, `${over.w}/${over.inner}`);
   await page.screenshot({ path: `${SHOTS}stream-01-phone.png` });
 
-  // UC-S07 — đóng sổ để mở phiên mới làm tiếp. Đây là đường CHI TIỀN, nên
-  // kiểm cả hai nhánh: còn tiền thì phải ra bản bàn giao + id mới; hết tiền thì
-  // phải từ chối và NÓI RÕ, không được im lặng tiêu tiếp.
+  // UC-S07 — đóng sổ để mở phiên mới làm tiếp. Đây là đường CHI TIỀN THẬT, và
+  // từ 08-08 không còn trần nào chặn nó, nên MỖI LẦN chạy kịch bản này là một
+  // lần trả tiền. Giá tỉ lệ độ dài nhật ký phiên, nên nhắm phiên RẺ NHẤT: đắt
+  // hơn không chứng minh thêm điều gì, chỉ tốn hơn.
   // Bản bàn giao CŨ vẫn nằm trong cursor từ lần chạy trước, nên "có tồn tại
   // không" là phép đo sai — phải hỏi "có bản MỚI trong lượt này không".
   const handoverBefore = snap.sessions.handover?.ts || "";
-  // Trần của CHỦ MÁY, không phải trần robot. Bản trước đọc `snap.budget`
-  // (daily_budget_usd — thứ ghìm con robot chạy không ai trông) trong khi sản
-  // phẩm gác bằng `owner_daily_budget_usd`; nó xanh chỉ vì hai trần tình cờ
-  // cùng kết luận từ chối, tức là một phép đo mù.
-  //
-  // Và không tự suy lại luật nữa: đọc thẳng `blocks_owner_action` — chính
-  // quyết định sản phẩm dùng. Phép đo tự tính lại quy tắc là phép đo có thể
-  // gật gù cùng một sản phẩm đã hỏng.
-  const owner = snap.owner_budget || {};
-  const blocked = owner.blocks_owner_action === true;
-  console.log(
-    `\ntrần chủ máy: đã dùng $${Number(owner.spent_usd ?? 0).toFixed(3)}/$${Number(owner.cap_usd ?? 0).toFixed(2)}` +
-    ` · mỗi lần gọi tối đa $${Number(owner.per_call_usd ?? 0).toFixed(2)} · chặn: ${blocked}`
-  );
+  // Không còn trần chặn thao tác của chủ máy (đã gỡ 2026-08-08) — chỉ còn SỔ.
+  // Bản trước đọc `snap.budget` (trần robot) rồi tự suy lại luật, và xanh chỉ
+  // vì hai trần tình cờ cùng kết luận: một phép đo mù.
+  const owner = snap.owner_spend || {};
+  console.log(`\nchi của chủ máy hôm nay: $${Number(owner.spent_usd ?? 0).toFixed(4)}`);
   check(
-    "ảnh chụp có công bố trần của chủ máy",
-    typeof owner.blocks_owner_action === "boolean" && owner.cap_usd > 0,
+    "ảnh chụp mang chi của chủ máy (để hiện giá), KHÔNG mang trần chặn",
+    typeof owner.spent_usd === "number" && owner.blocks_owner_action === undefined,
     JSON.stringify(owner)
   );
   await page.click("#sessHandover");
@@ -181,17 +199,7 @@ try {
     note: document.getElementById("cmdNote")?.textContent || "",
   }));
 
-  if (blocked) {
-    // Không đủ tiền: hub phải từ chối ở phòng chat, và màn không được vờ như xong.
-    const after = hub(["portal-push", "--dry-run"]);
-    const now = after.sessions.handover?.ts || "";
-    check(
-      "hết ngân sách thì KHÔNG bàn giao lén",
-      now === handoverBefore,
-      now === handoverBefore ? "không sinh bản mới — đúng" : `sinh bản mới lúc ${now}`
-    );
-    console.log("  · ngân sách không đủ để kiểm đường thành công của UC-S07 hôm nay");
-  } else {
+  {
     const after = hub(["portal-push", "--dry-run"]);
     const h = after.sessions.handover;
     check("có bản bàn giao MỚI", !!h && h.ts !== handoverBefore && h.source_id === target.session_id);

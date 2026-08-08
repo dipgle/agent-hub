@@ -380,7 +380,7 @@
           <button type="button" id="sessAsk">💬 Hỏi</button>
         </div>
         <p class="muted boardnote" id="sessAskHint">
-          Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại. Tốn tiền, tính vào trần của bạn.
+          Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại. Giá hiện kèm câu trả lời; phiên càng dài càng đắt.
         </p>
         <div id="sessAskBox" class="hidden"></div>
         <div id="sessStream" class="scroll"></div>
@@ -1163,6 +1163,8 @@
     // An answer that arrives after the reader moved on belongs to the session
     // they left, not the one they are looking at.
     waitingFor = null;
+    lastAsideTs = '';
+    askedAfterTs = '';
     $('sessStatus').textContent = 'Đang mở phiên — hub đọc nhật ký và đẩy về…';
     sendCommand(`/session ${s.session_id}`, $('sessBack'));
 
@@ -1220,12 +1222,22 @@
     $('sessAskBox').textContent =
       'Đang hỏi bên lề — hub mở một bản sao của phiên, mất khoảng nửa phút. Phiên gốc vẫn chạy bình thường…';
     waitingFor = 'ask';
+    // Remember which answer was already on screen. Snapshots keep arriving
+    // while hub is still thinking, and each one carries the PREVIOUS answer —
+    // repainting it over "đang hỏi…" would show a stale reply as if it were the
+    // new one. Ask the same question twice and the screen would answer
+    // instantly with yesterday's text.
+    askedAfterTs = lastAsideTs;
     sendCommand(`/ask ${q}`, e && e.target);
     input.value = '';
   }
 
   // Which session button is waiting for hub: 'ask' | 'handover' | null.
   let waitingFor = null;
+  // `ts` of the answer currently on screen, and the one a pending question must
+  // beat before its result may be painted.
+  let lastAsideTs = '';
+  let askedAfterTs = '';
 
   /// hub answers in the ROOM, and a refusal ("hết ngân sách", "chưa mở phiên
   /// nào") never becomes a snapshot row — so a box that only listens to
@@ -1262,6 +1274,18 @@
   function renderAside(a) {
     const box = $('sessAskBox');
     if (!a || a.source_id !== wantSession) return;
+    // A question is in flight and this is still the OLD answer: leave the
+    // "đang hỏi…" line alone. Showing the previous reply here is not a cosmetic
+    // flicker — it is the screen asserting something untrue, and asking the
+    // same question twice would "answer" instantly with the earlier text.
+    //
+    // Keyed on the timestamp rather than on `waitingFor`, because the room's
+    // reply clears the wait a beat before the snapshot catches up — and a late
+    // snapshot carrying the old answer must not win that race either.
+    if (askedAfterTs && !(a.ts > askedAfterTs)) return;
+    askedAfterTs = '';
+    waitingFor = null;
+    lastAsideTs = a.ts || '';
     box.classList.remove('hidden');
     box.textContent = '';
 

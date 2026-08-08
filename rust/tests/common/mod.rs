@@ -58,11 +58,8 @@ pub fn cfg_for_tests() -> Config {
         act: ActCfg::default(),
         adapters: Adapters::default(),
         trust: Trust {
-            github_logins: vec!["dipgle".into()],
-            emails: vec!["owner@dipgle.com".into()],
-            telegram_chat_ids: vec!["12345".into()],
             tfl5_user_tids: vec!["u-owner".into()],
-            trusted_sources: vec!["devlog".into(), "cli".into()],
+            trusted_sources: vec!["cli".into()],
         },
         routing: vec![
             RoutingRule {

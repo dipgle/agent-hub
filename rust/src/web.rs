@@ -571,50 +571,30 @@ async fn api_doctor(State(state): State<Arc<AppState>>, headers: HeaderMap) -> A
     check_token(&state, &headers)?;
     let (db, cfg) = (state.db.clone(), state.cfg.clone());
     let out = blocking(move || {
-        let cfg = cfg.lock().map_err(|_| anyhow!("cfg mutex poisoned"))?.clone();
+        let cfg = cfg
+            .lock()
+            .map_err(|_| anyhow!("cfg mutex poisoned"))?
+            .clone();
         let db = db.lock().map_err(|_| anyhow!("db mutex poisoned"))?;
 
         let claude = crate::exec::run(
             "claude",
             &["--version"],
-            crate::exec::RunOpts { timeout: Some(std::time::Duration::from_secs(20)), ..Default::default() },
+            crate::exec::RunOpts {
+                timeout: Some(std::time::Duration::from_secs(20)),
+                ..Default::default()
+            },
         )
         .map(|r| json!({ "ok": r.code == Some(0), "detail": r.stdout.trim() }))
         .unwrap_or_else(|e| json!({ "ok": false, "detail": e.to_string() }));
 
+        // One channel left — the inbox adapters went on 2026-08-08.
         let mut channels = serde_json::Map::new();
         channels.insert(
-            "github".into(),
-            if cfg.adapters.github.enabled {
-                let h = crate::adapters::github::health();
+            "tfl5".into(),
+            if cfg.adapters.tfl5.enabled {
+                let h = crate::adapters::tfl5::health(&cfg.adapters.tfl5);
                 json!({ "enabled": true, "ok": h.ok, "detail": h.detail })
-            } else {
-                json!({ "enabled": false })
-            },
-        );
-        channels.insert(
-            "devlog".into(),
-            json!({ "enabled": cfg.adapters.devlog.enabled, "ok": true, "detail": "read-only tail, no credential" }),
-        );
-        channels.insert(
-            "email".into(),
-            if cfg.adapters.email.enabled {
-                let h = crate::adapters::email::health(&cfg.adapters.email);
-                json!({ "enabled": true, "ok": h.ok, "detail": h.detail })
-            } else {
-                json!({ "enabled": false })
-            },
-        );
-        channels.insert(
-            "telegram".into(),
-            if cfg.adapters.telegram.enabled {
-                let h = crate::adapters::telegram::health(&cfg.adapters.telegram);
-                let seen = if h.ok && cfg.adapters.telegram.allowed_chat_ids.is_empty() {
-                    crate::adapters::telegram::observed_chat_ids(&cfg.adapters.telegram).unwrap_or_default()
-                } else {
-                    vec![]
-                };
-                json!({ "enabled": true, "ok": h.ok, "detail": h.detail, "observed_chat_ids": seen })
             } else {
                 json!({ "enabled": false })
             },

@@ -10,9 +10,7 @@ use anyhow::Result;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::adapters::{
-    devlog, email, github, telegram, tfl5, ChannelCommand, CommandKind, PollResult, Skip,
-};
+use crate::adapters::{tfl5, ChannelCommand, CommandKind, PollResult, Skip};
 use crate::config::Config;
 use crate::db::{Db, Message, MessagePatch, NewDecision, NewOutbox, RunFinish};
 use crate::logging;
@@ -49,8 +47,43 @@ pub struct CycleSummary {
     pub sent: FlushSummary,
 }
 
+/// Folder names under `project_roots` — the set `/project <name>` accepts.
+///
+/// Was `devlog::discover_projects` (folders holding a devlog). With the devlog
+/// adapter gone the list comes straight from the filesystem, which is also the
+/// more honest answer: a project is a folder, whether or not it keeps a devlog.
 pub fn known_projects(cfg: &Config) -> Vec<String> {
-    devlog::discover_projects(&crate::config::project_bases(cfg))
+    let mut out: Vec<String> = vec![];
+    for base in crate::config::project_bases(cfg) {
+        let Ok(entries) = std::fs::read_dir(&base) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            if !e.path().is_dir() {
+                continue;
+            }
+            let Some(name) = e.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if name.starts_with('.') || out.contains(&name) {
+                continue;
+            }
+            // A folder is a project when it looks like one. Without this the
+            // list swallowed `logs`, `memory`, `scripts` and `crates` — and a
+            // name in this list is a name `/project` will accept, so junk here
+            // becomes a pin pointing at a folder that holds no work.
+            let dir = e.path();
+            let is_project = ["CLAUDE.md", ".git", "Cargo.toml", "package.json"]
+                .iter()
+                .any(|marker| dir.join(marker).exists())
+                || dir.join("logs").join("devlog.sqlite").exists();
+            if is_project {
+                out.push(name);
+            }
+        }
+    }
+    out.sort();
+    out
 }
 
 /// Cursor key holding the project pinned to a thread by `/project <name>`.
@@ -170,7 +203,7 @@ pub fn enrich_message(
     Ok(())
 }
 
-pub const ADAPTER_NAMES: [&str; 5] = ["github", "devlog", "email", "telegram", "tfl5"];
+pub const ADAPTER_NAMES: [&str; 1] = ["tfl5"];
 
 /// Is this adapter switched on? ONE table, used by both ingest and `doctor`.
 /// `doctor` used to keep its own copy and they drifted: adding `tfl5` to the
@@ -178,10 +211,6 @@ pub const ADAPTER_NAMES: [&str; 5] = ["github", "devlog", "email", "telegram", "
 /// happily — a status screen that lies is worse than no status screen.
 pub fn adapter_enabled(cfg: &Config, name: &str) -> bool {
     match name {
-        "github" => cfg.adapters.github.enabled,
-        "devlog" => cfg.adapters.devlog.enabled,
-        "email" => cfg.adapters.email.enabled,
-        "telegram" => cfg.adapters.telegram.enabled,
         "tfl5" => cfg.adapters.tfl5.enabled,
         _ => false,
     }
@@ -193,16 +222,8 @@ fn poll_adapter(
     cursors: &BTreeMap<String, String>,
 ) -> Result<PollResult> {
     match name {
-        "github" => github::poll(&cfg.adapters.github, cursors),
-        "devlog" => devlog::poll(
-            &cfg.adapters.devlog,
-            cursors,
-            &crate::config::project_bases(cfg),
-        ),
-        "email" => email::poll(&cfg.adapters.email, cursors),
-        "telegram" => telegram::poll(&cfg.adapters.telegram, cursors),
         "tfl5" => tfl5::poll(&cfg.adapters.tfl5, cursors, &cfg.trust.tfl5_user_tids),
-        other => Err(anyhow::anyhow!("unknown adapter: {other}")),
+        other => Err(anyhow::anyhow!("unknown adapter {other}")),
     }
 }
 
@@ -644,35 +665,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             json!({ "adapter": adapter, "decision_id": cmd.decision_id, "kind": format!("{:?}", cmd.kind), "ack": ack }),
         );
 
-        if adapter == telegram::NAME {
-            if let Err(e) =
-                telegram::answer_callback(&cfg.adapters.telegram, &cmd.callback_id, &ack)
-            {
-                logging::warn(
-                    "telegram_answer_callback_failed",
-                    json!({ "err": e.to_string() }),
-                );
-            }
-            if let Some(message_id) = cmd.message_id {
-                let body = decision_recap(db, cmd.decision_id).unwrap_or_default();
-                let text = if body.is_empty() {
-                    ack.clone()
-                } else {
-                    format!("{ack}\n\n{body}")
-                };
-                if let Err(e) = telegram::finalize_message(
-                    &cfg.adapters.telegram,
-                    &cmd.chat_id,
-                    message_id,
-                    &text,
-                ) {
-                    logging::warn(
-                        "telegram_edit_message_failed",
-                        json!({ "err": e.to_string() }),
-                    );
-                }
-            }
-        }
+        // Telegram used to get a second treatment here — answer the callback,
+        // then rewrite the original message with the outcome. That channel went
+        // with the inbox product on 2026-08-08; the chat room answers through
+        // `reply_in_channel` like every other verb.
     }
 }
 
@@ -697,24 +693,9 @@ fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, 
 }
 
 /// Short recap used when rewriting a Telegram brief after a button press.
-fn decision_recap(db: &Db, decision_id: i64) -> Option<String> {
-    let d = db.get_decision(decision_id).ok().flatten()?;
-    Some(format!(
-        "#{} [{}/{}] {}\n{}",
-        d.id,
-        d.kind.clone().unwrap_or_default(),
-        d.severity.clone().unwrap_or_default(),
-        d.project.clone().unwrap_or_else(|| "unknown".into()),
-        d.summary.clone().unwrap_or_default()
-    ))
-}
-
-/// Where a human brief should also be pushed (phone), when configured.
-fn human_channel(cfg: &Config) -> (String, String) {
-    let tg = &cfg.adapters.telegram;
-    if tg.enabled && !tg.allowed_chat_ids.is_empty() {
-        return ("telegram".into(), tg.allowed_chat_ids[0].clone());
-    }
+/// Where a human brief goes. Telegram used to win when configured; with that
+/// channel gone there is one destination left — the local notify file.
+fn human_channel(_cfg: &Config) -> (String, String) {
     ("notify".into(), "local".into())
 }
 

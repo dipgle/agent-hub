@@ -10,7 +10,7 @@ use anyhow::{anyhow, Result};
 use serde::Serialize;
 use serde_json::json;
 
-use crate::adapters::{email, github, telegram, tfl5};
+use crate::adapters::tfl5;
 use crate::config::Config;
 use crate::db::{Db, OutboxRow};
 use crate::exec::{run, truncate, RunOpts};
@@ -77,33 +77,11 @@ pub fn notify(cfg: &Config, subject: Option<&str>, body: &str) -> Result<()> {
 }
 
 /// Send one outbox row. Errors bubble up so `flush` can record the attempt.
-pub fn send_one(db: &Db, cfg: &Config, row: &OutboxRow) -> Result<Option<String>> {
+pub fn send_one(_db: &Db, cfg: &Config, row: &OutboxRow) -> Result<Option<String>> {
+    // One outbound channel plus the local notify file. GitHub comments, email
+    // replies and Telegram approval buttons went with the inbox product on
+    // 2026-08-08; `git show backup/inbox-adapters` still has them.
     match row.channel.as_str() {
-        "github" => github::send(&row.target, &row.body),
-        "email" => email::send(
-            &cfg.adapters.email,
-            &row.target,
-            row.subject.as_deref(),
-            &row.body,
-        ),
-        "telegram" => {
-            // A brief for a decision still waiting on a human carries the
-            // Approve/Reject buttons; anything else goes out as plain text.
-            let pending = match row.decision_id {
-                Some(id) => db
-                    .get_decision(id)?
-                    .filter(|d| d.status == "pending")
-                    .map(|d| d.id),
-                None => None,
-            };
-            telegram::send_with_approval(
-                &cfg.adapters.telegram,
-                &row.target,
-                row.subject.as_deref(),
-                &row.body,
-                pending,
-            )
-        }
         "tfl5" => tfl5::send(
             &cfg.adapters.tfl5,
             &row.target,

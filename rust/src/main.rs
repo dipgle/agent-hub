@@ -6,7 +6,6 @@ use anyhow::{anyhow, bail, Result};
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 
-use hub::adapters::{email, github, telegram};
 use hub::config::{self, Config};
 use hub::db::{Db, DecisionRow, Message, NewMessage};
 use hub::exec::{run, truncate, RunOpts};
@@ -20,7 +19,7 @@ use hub::pipeline::{
 #[derive(Parser)]
 #[command(
     name = "hub",
-    about = "Comms hub: email / GitHub / project devlog / chat -> claude triage -> reply, brief, or branch",
+    about = "hub — quản lý các phiên Claude CLI trên máy này, điều khiển từ phòng chat tfl5",
     version
 )]
 struct Cli {
@@ -90,12 +89,6 @@ enum Command {
     },
     /// Counts, poll health, spend
     Status,
-    /// Connect Telegram: read the chat id that messaged your bot and write it
-    /// into the config (enables the adapter + trusts that chat).
-    TelegramLink {
-        /// Chat id to link; omit to auto-detect the one that messaged the bot
-        chat_id: Option<String>,
-    },
     /// Serve the local web UI (inbox, approve/reject, config)
     Web {
         /// Override web.port from the config
@@ -201,7 +194,6 @@ fn real_main() -> Result<()> {
         Command::Reply { id, text } => cmd_reply(&db, &cfg, id, &text.join(" ")),
         Command::Act { id, force } => cmd_act(&db, &cfg, id, force),
         Command::Status => cmd_status(&db),
-        Command::TelegramLink { chat_id } => cmd_telegram_link(cfg, chat_id.as_deref()),
         Command::Web { port } => {
             let p = port.unwrap_or(cfg.web.port);
             hub::web::serve(cfg, p)
@@ -354,66 +346,6 @@ fn iso_ms(ms: i64) -> String {
         .unwrap_or_else(|| ms.to_string())
 }
 
-/// Turn "message my bot once" into a working channel without hand-editing JSON.
-fn cmd_telegram_link(mut cfg: Config, explicit: Option<&str>) -> Result<()> {
-    if config::secret_from_env(&cfg.adapters.telegram.token_env).is_none() {
-        bail!(
-            "{} chưa được set. Lấy token từ @BotFather rồi:\n  export {}='<token>'",
-            cfg.adapters.telegram.token_env,
-            cfg.adapters.telegram.token_env
-        );
-    }
-
-    let health = telegram::health(&cfg.adapters.telegram);
-    if !health.ok {
-        bail!("token không dùng được: {}", health.detail);
-    }
-    println!("bot: {}", health.detail);
-
-    let chat_id = match explicit {
-        Some(id) => id.to_string(),
-        None => {
-            let seen = telegram::observed_chat_ids(&cfg.adapters.telegram)?;
-            match seen.len() {
-                0 => bail!(
-                    "chưa thấy ai nhắn cho bot. Mở chat với bot, bấm Start, rồi chạy lại lệnh này."
-                ),
-                1 => {
-                    // "12345 (username)" → "12345"
-                    let id = seen[0]
-                        .split_whitespace()
-                        .next()
-                        .unwrap_or_default()
-                        .to_string();
-                    println!("thấy 1 chat: {}", seen[0]);
-                    id
-                }
-                _ => bail!(
-                    "thấy nhiều chat ({}). Chạy lại với id cụ thể: hub telegram-link <chat_id>",
-                    seen.join(", ")
-                ),
-            }
-        }
-    };
-
-    cfg.adapters.telegram.enabled = true;
-    if !cfg.adapters.telegram.allowed_chat_ids.contains(&chat_id) {
-        cfg.adapters.telegram.allowed_chat_ids.push(chat_id.clone());
-    }
-    if !cfg.trust.telegram_chat_ids.contains(&chat_id) {
-        cfg.trust.telegram_chat_ids.push(chat_id.clone());
-    }
-    config::save(&cfg)?;
-
-    println!("đã ghi vào {}:", cfg.config_file.display());
-    println!("  adapters.telegram.enabled = true");
-    println!("  adapters.telegram.allowed_chat_ids += {chat_id}");
-    println!("  trust.telegram_chat_ids += {chat_id}   (chat này được coi là bạn)");
-    println!();
-    println!("thử ngay: ./hub once   → brief sẽ đẩy về Telegram kèm nút Duyệt/Bỏ");
-    Ok(())
-}
-
 // ─── commands ────────────────────────────────────────────────────────────
 
 fn cmd_doctor(db: &Db, cfg: &Config) -> Result<()> {
@@ -519,57 +451,18 @@ fn cmd_doctor(db: &Db, cfg: &Config) -> Result<()> {
             println!("  {name:<9} off        (adapters.{name}.enabled = false)");
             continue;
         }
-        match name {
-            "github" => {
-                let h = github::health();
-                println!(
-                    "  {name:<9} {}       {}",
-                    if h.ok { "OK  " } else { "FAIL" },
-                    truncate(&h.detail, 90)
-                );
-            }
-            "devlog" => println!("  {name:<9} on         (read-only tail, no credential)"),
-            "email" => {
-                let h = email::health(&cfg.adapters.email);
-                println!(
-                    "  {name:<9} {}       {}",
-                    if h.ok { "OK  " } else { "FAIL" },
-                    truncate(&h.detail, 90)
-                );
-            }
-            "telegram" => {
-                let h = telegram::health(&cfg.adapters.telegram);
-                println!(
-                    "  {name:<9} {}       {}",
-                    if h.ok { "OK  " } else { "FAIL" },
-                    truncate(&h.detail, 90)
-                );
-                if h.ok && cfg.adapters.telegram.allowed_chat_ids.is_empty() {
-                    match telegram::observed_chat_ids(&cfg.adapters.telegram) {
-                        Ok(ids) if !ids.is_empty() => {
-                            println!("             ↳ allowed_chat_ids is empty. Chat ids seen recently: {}", ids.join(", "))
-                        }
-                        Ok(_) => println!("             ↳ allowed_chat_ids is empty and no chat has messaged the bot yet"),
-                        Err(e) => println!("             ↳ could not read updates: {e}"),
-                    }
-                }
-            }
-            "tfl5" => {
-                let h = hub::adapters::tfl5::health(&cfg.adapters.tfl5);
-                println!(
-                    "  {name:<9} {}       {}",
-                    if h.ok { "OK  " } else { "FAIL" },
-                    truncate(&h.detail, 90)
-                );
-            }
-            _ => {}
-        }
+        let h = hub::adapters::tfl5::health(&cfg.adapters.tfl5);
+        println!(
+            "  {name:<9} {}       {}",
+            if h.ok { "OK  " } else { "FAIL" },
+            truncate(&h.detail, 90)
+        );
     }
 
     println!();
     let projects = known_projects(cfg);
     println!(
-        "projects with a devlog: {}",
+        "thư mục dự án nhận ra được: {}",
         if projects.is_empty() {
             "(none found)".to_string()
         } else {

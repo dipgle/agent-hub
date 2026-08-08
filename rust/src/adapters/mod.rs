@@ -1,11 +1,16 @@
-//! Ingest adapters. Each one polls a source and returns normalized messages
-//! plus the cursors it earned; the pipeline commits the messages first and the
-//! cursors second, so a crash re-polls instead of skipping.
+//! The channel hub talks through.
+//!
+//! Was five: GitHub notifications, project devlogs, email and Telegram all fed
+//! an inbox that a bounded `claude -p` call triaged. That product is gone
+//! (2026-08-08) — hub is a management channel for the Claude CLI sessions on
+//! this machine, and the only channel it needs is the tfl5 chat room the owner
+//! opens on his phone. The four ingest adapters were removed with their wiring;
+//! `git show backup/inbox-adapters` still has them.
+//!
+//! The adapter still returns normalized messages plus the cursors it earned;
+//! the pipeline commits the messages first and the cursors second, so a crash
+//! re-polls instead of skipping.
 
-pub mod devlog;
-pub mod email;
-pub mod github;
-pub mod telegram;
 pub mod tfl5;
 
 use std::collections::BTreeMap;

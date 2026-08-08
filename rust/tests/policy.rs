@@ -119,57 +119,38 @@ fn routing_multi_key_rule_needs_every_key() {
 
 #[test]
 fn trust_known_sender_identities() {
+    // GitHub logins, email addresses and Telegram chat ids were the other three
+    // identities; they went with those channels on 2026-08-08. What is left has
+    // to keep holding: a source on `trusted_sources`, and a tfl5 account the
+    // owner listed — and NOTHING else, whatever the room's own ACL says.
     let cfg = cfg_for_tests();
     assert_eq!(
-        resolve_trust(&msg("github", "dipgle", json!({})), &cfg),
-        "trusted"
+        resolve_trust(&msg("cli", "local", json!({})), &cfg),
+        "trusted",
+        "cli is on trusted_sources"
     );
-    assert_eq!(
-        resolve_trust(&msg("github", "stranger", json!({})), &cfg),
-        "untrusted"
-    );
-    assert_eq!(
-        resolve_trust(&msg("email", "Owner <OWNER@dipgle.com>", json!({})), &cfg),
-        "trusted"
-    );
-    assert_eq!(
-        resolve_trust(&msg("email", "x@evil.com", json!({})), &cfg),
-        "untrusted"
-    );
-    assert_eq!(
-        resolve_trust(&msg("telegram", "tg", json!({ "chat_id": "12345" })), &cfg),
-        "trusted"
-    );
-    assert_eq!(
-        resolve_trust(&msg("devlog", "devlog:tfl5", json!({})), &cfg),
-        "trusted"
-    );
-}
-
-#[test]
-fn trust_repo_level_ci_notification_uses_repo_owner() {
-    // CheckSuite notifications have no author: sender is "github:owner/repo".
-    let cfg = cfg_for_tests();
     assert_eq!(
         resolve_trust(
-            &msg(
-                "github",
-                "github:dipgle/tfl5",
-                json!({ "repo": "dipgle/tfl5" })
-            ),
+            &msg("tfl5", "alice", json!({ "from_user_tid": "u-owner" })),
             &cfg
         ),
-        "trusted"
+        "trusted",
+        "a tid on trust.tfl5_user_tids is the owner"
     );
     assert_eq!(
         resolve_trust(
             &msg(
-                "github",
-                "github:someoneelse/repo",
-                json!({ "repo": "someoneelse/repo" })
+                "tfl5",
+                "stranger",
+                json!({ "from_user_tid": "u-someone-else" })
             ),
             &cfg
         ),
+        "untrusted",
+        "being let into the room is tfl5's decision, not hub's"
+    );
+    assert_eq!(
+        resolve_trust(&msg("tfl5", "no-tid", json!({})), &cfg),
         "untrusted"
     );
 }

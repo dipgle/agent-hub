@@ -148,8 +148,14 @@ try {
   await page.click('#panelTabs button[data-panel="health"]');
   await page.waitForSelector("#panel-health:not(.hidden)", { timeout: 5000 });
   check('tab Sức khoẻ có nút "Kiểm tra" như console', await page.locator("#btnDoctor").isVisible());
+  // Hai chip: `claude` và kênh `tfl5`. Trước 2026-08-08 có sáu vì còn github /
+  // devlog / email / telegram — chúng đi cùng nhánh hộp thư, nên assert cũ
+  // (>= 3) giờ là assert của một sản phẩm không còn tồn tại.
+  const chipText = await page.locator("#healthProbe").innerText();
   const probeChips = await page.locator("#healthProbe .chip").count();
-  check("tab Sức khoẻ có kết quả đo kênh", probeChips >= 3, `${probeChips} chip`);
+  check("tab Sức khoẻ có kết quả đo kênh", probeChips >= 2, `${probeChips} chip`);
+  check("có đo kênh tfl5 — kênh duy nhất còn lại", /tfl5/.test(chipText));
+  check("không còn kênh đã gỡ", !/github|telegram|devlog/i.test(chipText), chipText.slice(0, 60));
   check("nói rõ đo lúc nào (số liệu có thể cũ vài phút)",
     /Đo lúc/.test(await page.locator("#healthProbe .boardnote").innerText()));
   const runRows = await page.locator("#runsRows tr").count();

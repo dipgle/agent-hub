@@ -295,10 +295,6 @@ fn doctor_and_ingest_read_the_same_on_off_table() {
     // actively polling. Assert every declared adapter is answerable — a name
     // that falls through to the `_ => false` arm is the drift itself.
     let mut cfg = Config::default();
-    cfg.adapters.github.enabled = true;
-    cfg.adapters.devlog.enabled = true;
-    cfg.adapters.email.enabled = true;
-    cfg.adapters.telegram.enabled = true;
     cfg.adapters.tfl5.enabled = true;
 
     for name in hub::pipeline::ADAPTER_NAMES {

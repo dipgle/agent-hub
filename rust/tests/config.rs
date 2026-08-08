@@ -38,15 +38,14 @@ fn deploy_and_merge_can_never_be_auto_executed() {
 #[test]
 fn config_file_overrides_merge_deeply_and_paths_become_absolute() {
     let (_dir, file) = write_config(
-        r#"{ "adapters": { "github": { "repos": ["dipgle/tfl5"] } }, "autonomy": { "default": "L1" } }"#,
+        r#"{ "adapters": { "tfl5": { "room": "hub" } }, "autonomy": { "default": "L1" } }"#,
     );
     let cfg = config::load(Some(&file)).unwrap();
 
     assert_eq!(&*cfg.autonomy.default, "L1");
-    assert_eq!(cfg.adapters.github.repos, vec!["dipgle/tfl5".to_string()]);
+    assert_eq!(cfg.adapters.tfl5.room, "hub");
     // untouched sibling keys survive the merge
-    assert!(cfg.adapters.github.enabled);
-    assert!(cfg.adapters.devlog.enabled);
+    assert_eq!(cfg.adapters.tfl5.limit, 50);
     assert!(cfg.db.is_absolute() && cfg.log_file.is_absolute());
     assert!(cfg.workspace_root.is_absolute());
 }
@@ -146,11 +145,16 @@ fn secrets_come_from_the_environment_never_the_config_file() {
         "no credential literal may appear in config"
     );
     assert!(!text.contains("gho_"));
+    // The mailler and Telegram key names went with their adapters; the tfl5
+    // credentials are the ones left, and only their NAMES may appear.
     assert!(
-        text.contains("HUB_MAILLER_API_KEY"),
+        text.contains("HUB_TFL5_USER") && text.contains("HUB_TFL5_PASSWORD"),
         "only the env var NAME belongs in config"
     );
-    assert!(text.contains("HUB_TELEGRAM_TOKEN"));
+    assert!(
+        !text.contains("password\":\"") || text.contains("password_env"),
+        "a password VALUE must never be serialized"
+    );
 }
 
 #[test]

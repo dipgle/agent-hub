@@ -93,97 +93,6 @@ impl std::ops::Deref for TierName {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct GithubCfg {
-    pub enabled: bool,
-    pub per_page: u32,
-    pub detail_limit: u32,
-    pub include_read: bool,
-    pub repos: Vec<String>,
-}
-
-impl Default for GithubCfg {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            per_page: 30,
-            detail_limit: 10,
-            include_read: false,
-            repos: vec![],
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct DevlogCfg {
-    pub enabled: bool,
-    pub projects: Vec<String>,
-    pub kinds: Vec<String>,
-    pub max_per_project: i64,
-    pub backfill: bool,
-}
-
-impl Default for DevlogCfg {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            projects: vec![],
-            kinds: ["warning", "blocker", "bug", "test_fail", "question"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
-            max_per_project: 10,
-            backfill: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct EmailCfg {
-    pub enabled: bool,
-    pub base_url: String,
-    pub api_key_env: String,
-    pub folder: String,
-    pub limit: u32,
-    pub backfill: bool,
-}
-
-impl Default for EmailCfg {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            base_url: "https://mail.dipgle.com".into(),
-            api_key_env: "HUB_MAILLER_API_KEY".into(),
-            folder: "inbox".into(),
-            limit: 30,
-            backfill: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct TelegramCfg {
-    pub enabled: bool,
-    pub token_env: String,
-    pub allowed_chat_ids: Vec<String>,
-    pub poll_timeout_sec: u64,
-}
-
-impl Default for TelegramCfg {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            token_env: "HUB_TELEGRAM_TOKEN".into(),
-            allowed_chat_ids: vec![],
-            poll_timeout_sec: 20,
-        }
-    }
-}
-
 /// The tfl5 chat room hub talks through. `base_url` is the tfl5 server, NOT a
 /// port hub opens — hub only ever dials out (see `adapters/tfl5.rs`).
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -234,22 +143,20 @@ impl Default for Tfl5Cfg {
     }
 }
 
+/// One channel. Was five until 2026-08-08 — see `adapters/mod.rs`.
+///
+/// Unknown keys in an existing `hub.config.json` are ignored by serde, so a
+/// file still carrying `github`/`devlog`/`email`/`telegram` loads fine; the
+/// next `config::save` drops them.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Adapters {
-    pub github: GithubCfg,
-    pub devlog: DevlogCfg,
-    pub email: EmailCfg,
-    pub telegram: TelegramCfg,
     pub tfl5: Tfl5Cfg,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Trust {
-    pub github_logins: Vec<String>,
-    pub emails: Vec<String>,
-    pub telegram_chat_ids: Vec<String>,
     /// tfl5 `user_tid`s hub treats as the owner. Deliberately SEPARATE from
     /// tfl5's own ACL: tfl5 answers "may this account enter the room", which is
     /// not the same question as "may this person make hub act". Everyone in the
@@ -261,11 +168,8 @@ pub struct Trust {
 impl Default for Trust {
     fn default() -> Self {
         Self {
-            github_logins: vec![],
-            emails: vec![],
-            telegram_chat_ids: vec![],
             tfl5_user_tids: vec![],
-            trusted_sources: vec!["devlog".into(), "cli".into()],
+            trusted_sources: vec!["cli".into()],
         }
     }
 }

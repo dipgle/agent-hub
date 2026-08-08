@@ -205,10 +205,7 @@ fn real_main() -> Result<()> {
             "interval_sec": cfg.poll_interval_sec,
             "autonomy_default": &*cfg.autonomy.default,
             "adapters": {
-                "github": cfg.adapters.github.enabled,
-                "devlog": cfg.adapters.devlog.enabled,
-                "email": cfg.adapters.email.enabled,
-                "telegram": cfg.adapters.telegram.enabled,
+                "tfl5": cfg.adapters.tfl5.enabled,
             }
         }),
     );

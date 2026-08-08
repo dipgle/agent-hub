@@ -1,18 +1,8 @@
 mod common;
 
 use common::msg;
-use hub::adapters::github::{is_safe_ref, normalize_notification, parse_check_suite_title};
 use hub::triage::{build_prompt, decision_schema, detect_injection, SYSTEM_PROMPT};
-use serde_json::{json, Value};
-
-fn fixture() -> Vec<Value> {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/notifications.real.json"
-    );
-    serde_json::from_str(&std::fs::read_to_string(path).expect("fixture readable"))
-        .expect("fixture parses")
-}
+use serde_json::json;
 
 #[test]
 fn injection_tripwire_catches_the_classic_steering_attempts() {
@@ -153,132 +143,9 @@ fn decision_schema_is_closed_and_requires_what_the_pipeline_reads() {
     assert!(action_types.contains(&"code_change".to_string()));
 }
 
-#[test]
-fn real_captured_github_notifications_normalize_into_hub_messages() {
-    let raw = fixture();
-    assert!(!raw.is_empty(), "fixture is empty");
-    for n in &raw {
-        let m = normalize_notification(n, None, None);
-        let updated = n["updated_at"].as_str().unwrap();
-        let repo = n["repository"]["full_name"].as_str().unwrap();
-
-        assert_eq!(m.source, "github");
-        assert!(m.external_id.starts_with("notif:"));
-        assert!(
-            m.external_id.contains(updated),
-            "external_id must embed updated_at so updates re-enter"
-        );
-        assert!(m
-            .subject
-            .as_deref()
-            .unwrap()
-            .starts_with(&format!("[{repo}]")));
-        assert!(!m.body.as_deref().unwrap().is_empty());
-        assert_eq!(m.received_at.as_deref(), Some(updated));
-        let raw_json = m.raw.unwrap();
-        assert_eq!(raw_json["repo"].as_str(), Some(repo));
-        assert_eq!(raw_json["reason"], n["reason"]);
-    }
-}
-
-// ----------------------------------------------------------------------
-// A red check suite has to say WHY. The notification carries no body and no
-// `subject.url`, so the branch parsed out of the title is the only handle on
-// the failing run — without it triage pays for "cause unknown" (38 items,
-// $4.99, measured 2026-08-08).
-// ----------------------------------------------------------------------
-
-#[test]
-fn check_suite_title_yields_the_workflow_and_the_failing_branch() {
-    assert_eq!(
-        parse_check_suite_title("tfl5 CI workflow run failed for docs/session-close-0807 branch"),
-        Some(("tfl5 CI".into(), "docs/session-close-0807".into()))
-    );
-    assert_eq!(
-        parse_check_suite_title("test workflow run failed for main branch"),
-        Some(("test".into(), "main".into()))
-    );
-
-    // Anything off-shape must degrade to "no CI context", never to a guess.
-    for junk in [
-        "tfl5 CI workflow run failed for main", // no trailing " branch"
-        "some unrelated notification title",    // not a check suite at all
-        "workflow run failed for main branch",  // empty workflow name
-        "x workflow run failed for  branch",    // empty branch
-    ] {
-        assert_eq!(parse_check_suite_title(junk), None, "must reject: {junk}");
-    }
-
-    // A ref becomes an argv element for `gh`; one that could land as a FLAG is
-    // refused rather than passed through.
-    assert_eq!(
-        parse_check_suite_title("ci workflow run failed for --repo=evil/x branch"),
-        None
-    );
-    assert!(!is_safe_ref("--repo"));
-    assert!(!is_safe_ref("a branch with spaces"));
-    assert!(!is_safe_ref(""));
-    assert!(is_safe_ref("feat/studio-account-security"));
-    assert!(is_safe_ref("v1.2.3_rc-4"));
-}
-
-#[test]
-fn check_suite_notification_carries_the_branch_into_raw() {
-    // Shape taken from a real notification: CheckSuite has a null subject.url,
-    // which is exactly why there is no detail call to lean on.
-    let n = json!({
-        "id": "24980720479",
-        "updated_at": "2026-08-08T00:33:09Z",
-        "reason": "ci_activity",
-        "repository": { "full_name": "dipgle/tfl5", "html_url": "https://github.com/dipgle/tfl5" },
-        "subject": {
-            "title": "tfl5 CI workflow run failed for docs/session-close-0807 branch",
-            "type": "CheckSuite",
-            "url": Value::Null
-        }
-    });
-    let raw = normalize_notification(&n, None, None).raw.unwrap();
-    assert_eq!(raw["ci"]["branch"], json!("docs/session-close-0807"));
-    assert_eq!(raw["ci"]["workflow"], json!("tfl5 CI"));
-
-    // Not a check suite ⇒ no CI block to mislead the lookup.
-    let issue = json!({
-        "id": "2",
-        "updated_at": "2026-08-08T00:00:00Z",
-        "reason": "mention",
-        "repository": { "full_name": "dipgle/tfl5", "html_url": "https://github.com/dipgle/tfl5" },
-        "subject": { "title": "Bug: login 500", "type": "Issue", "url": "https://api.github.com/repos/dipgle/tfl5/issues/9" }
-    });
-    assert_eq!(
-        normalize_notification(&issue, None, None).raw.unwrap()["ci"],
-        Value::Null
-    );
-}
-
-#[test]
-fn notification_detail_overrides_sender_and_a_failed_fetch_is_visible() {
-    let n = json!({
-        "id": "1",
-        "updated_at": "2026-07-26T00:00:00Z",
-        "reason": "mention",
-        "repository": { "full_name": "dipgle/tfl5", "html_url": "https://github.com/dipgle/tfl5" },
-        "subject": { "title": "Bug: login 500", "type": "Issue", "url": "https://api.github.com/repos/dipgle/tfl5/issues/9" }
-    });
-
-    let detail = json!({ "body": "chi tiết lỗi", "user": { "login": "someone" }, "html_url": "https://github.com/dipgle/tfl5/issues/9", "number": 9 });
-    let with_detail = normalize_notification(&n, Some(&detail), None);
-    assert_eq!(with_detail.sender.as_deref(), Some("someone"));
-    assert_eq!(with_detail.body.as_deref(), Some("chi tiết lỗi"));
-    assert_eq!(with_detail.raw.unwrap()["detail"]["number"], json!(9));
-
-    let with_error = normalize_notification(&n, None, Some("HTTP 403"));
-    assert!(with_error
-        .body
-        .as_deref()
-        .unwrap()
-        .contains("could not fetch item body: HTTP 403"));
-    assert_eq!(with_error.sender.as_deref(), Some("github:dipgle/tfl5"));
-}
+// The GitHub notification tests lived here — normalizing a captured real
+// payload, parsing a check-suite title, carrying the failing branch into `raw`.
+// They went with the adapter on 2026-08-08 (`git show backup/inbox-adapters`).
 
 // ----------------------------------------------------------------------
 // Conversation memory. Three states, and the middle one is the trap: the

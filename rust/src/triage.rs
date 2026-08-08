@@ -27,7 +27,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::adapters::github;
 use crate::config::{project_dir, Config};
 use crate::db::Message;
 use crate::exec::{run, truncate, RunOpts};
@@ -209,7 +208,11 @@ pub struct GatheredContext {
 pub fn gather_context(msg: &Message, cfg: &Config) -> GatheredContext {
     let budget = cfg.triage.context_bytes;
     let mut parts: Vec<String> = vec![];
-    let mut tripwire: Vec<String> = vec![];
+    // Third-party text quoted into the context used to land here (CI step logs
+    // from the GitHub adapter). Nothing quotes a third party any more, so the
+    // list stays empty — kept because `GatheredContext` is the contract and the
+    // next quoted source must have somewhere to report.
+    let tripwire: Vec<String> = vec![];
     let raw = msg.raw_json();
 
     let project = msg.project.clone().unwrap_or_default();
@@ -245,55 +248,14 @@ pub fn gather_context(msg: &Message, cfg: &Config) -> GatheredContext {
         }
     }
 
-    if let (Some(repo), Some("CheckSuite")) = (
-        raw.get("repo").and_then(|v| v.as_str()),
-        raw.get("type").and_then(|v| v.as_str()),
-    ) {
-        // The branch is what makes this answerable. Listing the repo's newest
-        // runs (what this did until 2026-08-08) shows OTHER branches, so every
-        // CheckSuite decision came back "cause unknown" at $0.15–$0.22 a time —
-        // decision #66 said so itself: "gh run list (context host) lại không
-        // chứa run nào của branch này".
-        let ci = raw.get("ci");
-        let branch = ci
-            .and_then(|c| c.get("branch"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            // Rows ingested before `raw.ci` existed still carry the title in
-            // the subject: "[owner/repo] <workflow> workflow run failed for …".
-            .or_else(|| {
-                let subject = msg.subject.as_deref()?;
-                let title = subject.split_once("] ").map(|(_, t)| t).unwrap_or(subject);
-                github::parse_check_suite_title(title).map(|(_, b)| b)
-            });
-        let workflow = ci
-            .and_then(|c| c.get("workflow"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        match branch {
-            Some(branch) => {
-                let ci = github::ci_failure_context(repo, &branch, workflow.as_deref());
-                let rendered = ci.render();
-                // Annotations and step logs are printed by the code under test,
-                // i.e. by whoever pushed the branch. Same wire as an inbound
-                // body: a poisoned build log must not steer triage from inside
-                // the block the prompt calls trusted.
-                tripwire.extend(
-                    detect_injection(&rendered)
-                        .into_iter()
-                        .map(|hit| format!("ci_log:{hit}")),
-                );
-                // Front of the context: `clip` truncates the tail, and the
-                // reason CI is red outranks a git log for this item.
-                parts.insert(0, format!("CI failure ({repo}@{branch}):\n{rendered}"));
-            }
-            None => parts.push(format!(
-                "CI failure ({repo}): [hub: could not read the branch from the notification title, \
-                 so the failing run was not looked up]"
-            )),
-        }
-    }
+    // A CheckSuite block used to sit here: parse the failing branch out of the
+    // notification title, ask `gh` for the failed jobs and their check-run
+    // annotations, and scan that quoted output with the injection wire. It went
+    // with the GitHub adapter on 2026-08-08 — no notifications arrive any more,
+    // so the code had nothing to run on. `git show backup/inbox-adapters` has
+    // it, and the reasoning is worth re-reading before rebuilding it: a
+    // repo-wide `gh run list` shows OTHER branches, which is why every
+    // CheckSuite decision cost $0.15–$0.22 to say "cause unknown".
 
     let devlog_project = raw
         .get("project")

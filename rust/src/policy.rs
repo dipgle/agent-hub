@@ -196,32 +196,9 @@ pub fn resolve_trust(msg: &Message, cfg: &Config) -> String {
         return "trusted".into();
     }
 
-    if msg.source == "github" {
-        let logins: Vec<String> = t.github_logins.iter().map(|s| s.to_lowercase()).collect();
-        let sender = msg
-            .sender
-            .as_deref()
-            .unwrap_or("")
-            .trim_start_matches("github:")
-            .to_lowercase();
-        if logins.contains(&sender) {
-            return "trusted".into();
-        }
-        // Repo-level notifications (CI, check suites) have no author — the
-        // sender is "github:owner/repo". Our own repos count as trusted.
-        if let Some(owner) = sender.split('/').next() {
-            if !owner.is_empty() && logins.iter().any(|l| l == owner) {
-                return "trusted".into();
-            }
-        }
-    }
-    if msg.source == "email" {
-        if let Some(addr) = email_address(msg.sender.as_deref()) {
-            if t.emails.iter().any(|e| e.to_lowercase() == addr) {
-                return "trusted".into();
-            }
-        }
-    }
+    // GitHub logins, email addresses and Telegram chat ids used to be checked
+    // here. Those sources are gone (2026-08-08), so the only identity hub still
+    // resolves is a tfl5 account.
     if msg.source == "tfl5" {
         // Being allowed into the room is tfl5's decision; being trusted by hub
         // is a separate list the owner keeps. Never infer one from the other.
@@ -230,22 +207,6 @@ pub fn resolve_trust(msg: &Message, cfg: &Config) -> String {
             if t.tfl5_user_tids.iter().any(|u| u == uid) {
                 return "trusted".into();
             }
-        }
-    }
-    if msg.source == "telegram" {
-        let raw = msg.raw_json();
-        let chat = raw.get("chat_id").map(|v| match v {
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        });
-        if let Some(chat) = chat {
-            if t.telegram_chat_ids.contains(&chat) {
-                return "trusted".into();
-            }
-        }
-        // The adapter already filtered to allowed_chat_ids; honour its verdict.
-        if msg.sender_trust == "trusted" {
-            return "trusted".into();
         }
     }
     "untrusted".into()

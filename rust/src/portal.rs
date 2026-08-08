@@ -334,42 +334,9 @@ fn probe_channels(cfg: &Config, now: i64) -> Value {
     .map(|r| json!({ "ok": r.code == Some(0), "detail": r.stdout.trim() }))
     .unwrap_or_else(|e| json!({ "ok": false, "detail": e.to_string() }));
 
+    // One channel left. The four ingest adapters (github, devlog, email,
+    // telegram) went with the inbox product on 2026-08-08.
     let mut channels = serde_json::Map::new();
-    channels.insert(
-        "github".into(),
-        if cfg.adapters.github.enabled {
-            let h = crate::adapters::github::health();
-            json!({ "enabled": true, "ok": h.ok, "detail": h.detail })
-        } else {
-            json!({ "enabled": false })
-        },
-    );
-    channels.insert(
-        "devlog".into(),
-        json!({
-            "enabled": cfg.adapters.devlog.enabled,
-            "ok": true,
-            "detail": "read-only tail, no credential",
-        }),
-    );
-    channels.insert(
-        "email".into(),
-        if cfg.adapters.email.enabled {
-            let h = crate::adapters::email::health(&cfg.adapters.email);
-            json!({ "enabled": true, "ok": h.ok, "detail": h.detail })
-        } else {
-            json!({ "enabled": false })
-        },
-    );
-    channels.insert(
-        "telegram".into(),
-        if cfg.adapters.telegram.enabled {
-            let h = crate::adapters::telegram::health(&cfg.adapters.telegram);
-            json!({ "enabled": true, "ok": h.ok, "detail": h.detail })
-        } else {
-            json!({ "enabled": false })
-        },
-    );
     channels.insert(
         "tfl5".into(),
         if cfg.adapters.tfl5.enabled {

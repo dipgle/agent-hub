@@ -1,0 +1,12 @@
+data/
+logs/
+rust/target/
+node_modules/
+ui-shots/
+hub.env
+hub.config.json.bak*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store
+.tmp/

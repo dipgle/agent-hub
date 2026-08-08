@@ -1,0 +1,44 @@
+[package]
+name = "hub"
+version = "0.1.0"
+edition = "2021"
+description = "Comms hub: email / GitHub / project devlog / chat -> claude triage -> reply, brief, or branch"
+
+# The hub itself is synchronous: it spends its life waiting on `gh`, `claude`
+# and a 20s Telegram long-poll, so an async runtime would add moving parts
+# without removing a wait. tokio/axum exist ONLY for the local web UI
+# (`hub web`), where handlers push blocking work onto spawn_blocking.
+# Same dependency family as mailler so the workspace keeps one toolchain.
+[dependencies]
+anyhow = "1"
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "query"] }
+# tfl5's JSON write path (`/app/file/save`) takes the body base64-encoded;
+# already in the tree as a transitive dependency, so `--offline` still builds.
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
+# Chat with tfl5 needs a WebSocket: tfl5 exposes `/ws/chat` as the ONLY way to
+# post a message (`ws_chat.rs:181 routes()` has history + admin endpoints only).
+# tungstenite's client API is blocking, so this stays out of the async runtime —
+# the pipeline is still synchronous.
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "hub"
+path = "src/main.rs"
+
+[[bin]]
+name = "hubd"
+path = "src/bin/hubd.rs"
+
+[profile.release]
+strip = true

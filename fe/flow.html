@@ -1,0 +1,731 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+</head>
+<body>
+<title>hub — luồng quản lý phiên Claude CLI</title>
+
+<style>
+  /* Palette honours the one hub already uses in its own charts:
+     #2f6f4e / #74c69d / #9a6b1f / #a33a2c (rust/assets/ui.html drawCharts). */
+  :root {
+    --ground: #f6f8f6;
+    --surface: #ffffff;
+    --surface-2: #eef2ee;
+    --ink: #17201b;
+    --ink-2: #4d5b53;
+    --ink-3: #7c8a82;
+    --line: #d6ded8;
+    --line-2: #c2cdc6;
+    --accent: #2f6f4e;
+    --accent-soft: #e4efe8;
+    --caution: #9a6b1f;
+    --caution-soft: #f6eddc;
+    --stop: #a33a2c;
+    --stop-soft: #f7e5e2;
+    --shadow: 0 1px 2px rgba(23, 32, 27, .06), 0 8px 24px -16px rgba(23, 32, 27, .3);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0f1512;
+      --surface: #161e1a;
+      --surface-2: #1c2621;
+      --ink: #e7ede9;
+      --ink-2: #adbcb3;
+      --ink-3: #7f8f86;
+      --line: #2b3831;
+      --line-2: #3a4a41;
+      --accent: #74c69d;
+      --accent-soft: #1b2c23;
+      --caution: #d8a94f;
+      --caution-soft: #2c2416;
+      --stop: #e08575;
+      --stop-soft: #2e1c19;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -18px rgba(0, 0, 0, .8);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f1512;
+    --surface: #161e1a;
+    --surface-2: #1c2621;
+    --ink: #e7ede9;
+    --ink-2: #adbcb3;
+    --ink-3: #7f8f86;
+    --line: #2b3831;
+    --line-2: #3a4a41;
+    --accent: #74c69d;
+    --accent-soft: #1b2c23;
+    --caution: #d8a94f;
+    --caution-soft: #2c2416;
+    --stop: #e08575;
+    --stop-soft: #2e1c19;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -18px rgba(0, 0, 0, .8);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 2.5rem 1.15rem 5rem;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  .page { max-width: 60rem; margin: 0 auto; display: flex; flex-direction: column; gap: 2.75rem; }
+  .prose { max-width: 40rem; display: flex; flex-direction: column; gap: .85rem; }
+
+  .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .72rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0;
+  }
+
+  h1 {
+    font-size: clamp(1.75rem, 5.5vw, 2.6rem);
+    line-height: 1.12;
+    letter-spacing: -.022em;
+    font-weight: 680;
+    margin: .35rem 0 0;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: clamp(1.2rem, 3.4vw, 1.5rem);
+    line-height: 1.25;
+    letter-spacing: -.015em;
+    font-weight: 660;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1rem;
+    font-weight: 640;
+    margin: 0;
+    letter-spacing: -.006em;
+  }
+  p { margin: 0; color: var(--ink-2); }
+  p strong, li strong { color: var(--ink); font-weight: 620; }
+  a { color: var(--accent); }
+
+  .lede { font-size: 1.08rem; color: var(--ink-2); }
+
+  section { display: flex; flex-direction: column; gap: 1.4rem; }
+
+  .rule { height: 1px; background: var(--line); border: 0; margin: 0; }
+
+  code, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .875em;
+  }
+  code {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: .08em .34em;
+    white-space: nowrap;
+  }
+
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 1.1rem 1rem .9rem;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+  }
+  /* The figure scrolls sideways rather than shrinking: scaled to a 358px phone
+     the 640-unit viewBox renders 11.5px labels at ~6px, which is not a diagram
+     any more. Legibility wins over fitting. */
+  .figscroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  figure svg { display: block; width: 100%; height: auto; min-width: 600px; color: var(--ink); }
+  .swipe {
+    display: none;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .68rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  @media (max-width: 42rem) { .swipe { display: block; } }
+  figcaption { font-size: .84rem; color: var(--ink-3); line-height: 1.5; }
+
+  .grid { display: grid; gap: .8rem; }
+  @media (min-width: 44rem) { .grid.two { grid-template-columns: 1fr 1fr; } }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: .95rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+  }
+  .card p { font-size: .92rem; }
+
+  ul { margin: 0; padding-left: 1.15rem; color: var(--ink-2); display: flex; flex-direction: column; gap: .4rem; }
+  li::marker { color: var(--ink-3); }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .7rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    padding: .18rem .55rem;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .chip.done { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .chip.todo { background: var(--caution-soft); color: var(--caution); border-color: var(--caution); }
+  .chip.no { background: var(--stop-soft); color: var(--stop); border-color: var(--stop); }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 34rem; font-size: .92rem; }
+  th, td { text-align: left; padding: .62rem .8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    background: var(--surface-2);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-variant-numeric: tabular-nums; }
+
+  .callout {
+    border-left: 3px solid var(--stop);
+    background: var(--stop-soft);
+    border-radius: 0 8px 8px 0;
+    padding: .85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+  }
+  .callout h3 { color: var(--stop); }
+  .callout p { color: var(--ink-2); font-size: .93rem; }
+
+  .note {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    border-radius: 0 8px 8px 0;
+    padding: .85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+  }
+  .note h3 { color: var(--accent); }
+  .note p { font-size: .93rem; }
+
+  footer { color: var(--ink-3); font-size: .84rem; }
+</style>
+
+<div class="page">
+
+  <header class="prose">
+    <p class="eyebrow">hub · 8 tháng 8, 2026</p>
+    <h1>Luồng quản lý phiên Claude CLI</h1>
+    <p class="lede">
+      Máy Mac chạy <code>claude</code> trong terminal. Điện thoại chỉ có trình duyệt.
+      Giữa hai đầu đó không có cổng nào mở vào máy — nên hình dạng của hệ thống
+      là <strong>hub gọi ra, tfl5 làm điểm hẹn</strong>. Tất cả số liệu dưới đây đo
+      trên máy thật lúc dựng, không phải ví dụ.
+    </p>
+  </header>
+
+  <hr class="rule" />
+
+  <section>
+    <div class="prose">
+      <h2>1. Vì sao phải là hình dạng này</h2>
+      <p>
+        Ba ràng buộc, và chỉ đúng một cách thoả cả ba. Đây là lý do không có
+        “deploy hub lên VPS” và không có tunnel.
+      </p>
+    </div>
+
+    <figure>
+      <p class="swipe">← kéo ngang để xem hết hình →</p>
+      <div class="figscroll">
+        <svg viewBox="0 0 640 300" role="img" aria-label="Ba ràng buộc — claude ở máy local, giao diện trên tfl5, không mở cổng vào máy — dẫn tới một hình dạng duy nhất: hub là client kết nối ra, tfl5 là điểm hẹn.">
+          <defs>
+            <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+            </marker>
+          </defs>
+
+          <g font-family="ui-monospace, Menlo, monospace" font-size="11.5">
+            <rect x="8" y="14" width="188" height="46" rx="7" fill="none" stroke="currentColor" stroke-opacity=".35" />
+            <text x="102" y="34" text-anchor="middle" fill="currentColor" font-size="12">claude CLI ở máy local</text>
+            <text x="102" y="50" text-anchor="middle" fill="currentColor" fill-opacity=".6">bộ não không rời Mac</text>
+
+            <rect x="8" y="76" width="188" height="46" rx="7" fill="none" stroke="currentColor" stroke-opacity=".35" />
+            <text x="102" y="96" text-anchor="middle" fill="currentColor" font-size="12">giao diện nằm trên tfl5</text>
+            <text x="102" y="112" text-anchor="middle" fill="currentColor" fill-opacity=".6">trình duyệt ở bất kỳ đâu</text>
+
+            <rect x="8" y="138" width="188" height="46" rx="7" fill="none" stroke="currentColor" stroke-opacity=".35" />
+            <text x="102" y="158" text-anchor="middle" fill="currentColor" font-size="12">không mở cổng vào Mac</text>
+            <text x="102" y="174" text-anchor="middle" fill="currentColor" fill-opacity=".6">không tunnel, không ngrok</text>
+
+            <line x1="200" y1="37" x2="252" y2="95" stroke="currentColor" stroke-opacity=".4" marker-end="url(#a1)" />
+            <line x1="200" y1="99" x2="252" y2="99" stroke="currentColor" stroke-opacity=".4" marker-end="url(#a1)" />
+            <line x1="200" y1="161" x2="252" y2="103" stroke="currentColor" stroke-opacity=".4" marker-end="url(#a1)" />
+
+            <rect x="248" y="70" width="200" height="58" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" />
+            <text x="348" y="92" text-anchor="middle" fill="var(--accent)" font-size="12.5" font-weight="600">một hình dạng duy nhất</text>
+            <text x="348" y="110" text-anchor="middle" fill="var(--accent)" fill-opacity=".85" font-size="10.5">hub gọi RA · tfl5 là điểm hẹn</text>
+
+            <line x1="348" y1="132" x2="348" y2="168" stroke="var(--accent)" marker-end="url(#a1)" />
+
+            <rect x="238" y="174" width="132" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".45" />
+            <text x="304" y="192" text-anchor="middle" fill="currentColor" font-size="12">hubd (Mac)</text>
+            <text x="304" y="208" text-anchor="middle" fill="currentColor" fill-opacity=".6">là client</text>
+
+            <rect x="386" y="174" width="132" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".45" />
+            <text x="452" y="192" text-anchor="middle" fill="currentColor" font-size="12">tfl5 (VPS)</text>
+            <text x="452" y="208" text-anchor="middle" fill="currentColor" fill-opacity=".6">có IP công khai</text>
+
+            <line x1="372" y1="196" x2="382" y2="196" stroke="var(--accent)" marker-end="url(#a1)" />
+            <text x="377" y="238" text-anchor="middle" fill="var(--accent)" font-size="10.5">kết nối đi ra</text>
+
+            <rect x="524" y="174" width="108" height="44" rx="7" fill="none" stroke="currentColor" stroke-opacity=".45" />
+            <text x="578" y="192" text-anchor="middle" fill="currentColor" font-size="12">điện thoại</text>
+            <text x="578" y="208" text-anchor="middle" fill="currentColor" fill-opacity=".6">HTTPS</text>
+            <line x1="520" y1="196" x2="530" y2="196" stroke="currentColor" stroke-opacity=".55" marker-end="url(#a1)" />
+
+            <text x="8" y="268" fill="currentColor" fill-opacity=".55" font-size="10.5">Một kết nối đi ra giữ mở CHÍNH LÀ cái lỗ cần có — không có gì để “đục” thêm.</text>
+            <text x="8" y="286" fill="currentColor" fill-opacity=".55" font-size="10.5">Webhook của tfl5 gọi ngược lại thì quay về đúng bài toán cũ, nên không dùng.</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        Ba ràng buộc hội tụ về một kiến trúc. Mọi thứ còn lại trong tài liệu này là hệ quả của mũi tên
+        “kết nối đi ra” ở giữa.
+      </figcaption>
+    </figure>
+  </section>
+
+  <hr class="rule" />
+
+  <section>
+    <div class="prose">
+      <h2>2. Thu thập: 3 tài khoản, 14 phiên <span class="chip done">đã chạy</span></h2>
+      <p>
+        <code>claude agents --json</code> không cần TTY nên <code>hubd</code> gọi được thẳng — nhưng nó
+        <strong>chỉ thấy phiên của một tài khoản</strong>. Tài khoản chọn bằng biến
+        <code>CLAUDE_CONFIG_DIR</code>, và tài khoản mặc định chọn bằng biến <strong>vắng mặt</strong>:
+        trỏ nó vào <code>~/.claude</code> sẽ báo “not logged in”.
+      </p>
+    </div>
+
+    <figure>
+      <p class="swipe">← kéo ngang để xem hết hình →</p>
+      <div class="figscroll">
+        <svg viewBox="0 0 640 340" role="img" aria-label="hubd gọi claude agents --json ba lần, một lần cho mỗi tài khoản, với CLAUDE_CONFIG_DIR vắng mặt cho acc1 và trỏ tới thư mục riêng cho acc2 và acc3; kết quả gộp thành 14 phiên, tài khoản lỗi thì vào danh sách ghi chú chứ không biến mất.">
+          <defs>
+            <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+            </marker>
+          </defs>
+
+          <g font-family="ui-monospace, Menlo, monospace" font-size="11.5">
+            <rect x="8" y="12" width="624" height="40" rx="7" fill="var(--surface-2)" stroke="currentColor" stroke-opacity=".3" />
+            <text x="20" y="30" fill="currentColor" font-size="12.5" font-weight="600">hubd — mỗi vòng lặp</text>
+            <text x="20" y="45" fill="currentColor" fill-opacity=".65">poll_interval_sec = 120</text>
+
+            <line x1="320" y1="52" x2="320" y2="70" stroke="currentColor" stroke-opacity=".45" marker-end="url(#a2)" />
+
+            <!-- three account lanes -->
+            <rect x="8" y="76" width="196" height="72" rx="7" fill="none" stroke="currentColor" stroke-opacity=".4" />
+            <text x="20" y="95" fill="currentColor" font-size="12" font-weight="600">acc1</text>
+            <text x="20" y="112" fill="var(--accent)" font-size="10.5">CLAUDE_CONFIG_DIR vắng mặt</text>
+            <text x="20" y="128" fill="currentColor" fill-opacity=".6" font-size="10.5">claude agents --json</text>
+            <text x="186" y="140" text-anchor="end" fill="currentColor" font-size="14" font-weight="600">9</text>
+
+            <rect x="214" y="76" width="196" height="72" rx="7" fill="none" stroke="currentColor" stroke-opacity=".4" />
+            <text x="226" y="95" fill="currentColor" font-size="12" font-weight="600">acc2</text>
+            <text x="226" y="112" fill="currentColor" fill-opacity=".75" font-size="10.5">= ~/.claude-acc2</text>
+            <text x="226" y="128" fill="currentColor" fill-opacity=".6" font-size="10.5">claude agents --json</text>
+            <text x="392" y="140" text-anchor="end" fill="currentColor" font-size="14" font-weight="600">2</text>
+
+            <rect x="420" y="76" width="212" height="72" rx="7" fill="none" stroke="currentColor" stroke-opacity=".4" />
+            <text x="432" y="95" fill="currentColor" font-size="12" font-weight="600">acc3</text>
+            <text x="432" y="112" fill="currentColor" fill-opacity=".75" font-size="10.5">= ~/.claude-acc3</text>
+            <text x="432" y="128" fill="currentColor" fill-opacity=".6" font-size="10.5">claude agents --json</text>
+            <text x="614" y="140" text-anchor="end" fill="currentColor" font-size="14" font-weight="600">3</text>
+
+            <line x1="106" y1="148" x2="290" y2="184" stroke="currentColor" stroke-opacity=".4" marker-end="url(#a2)" />
+            <line x1="312" y1="148" x2="316" y2="184" stroke="currentColor" stroke-opacity=".4" marker-end="url(#a2)" />
+            <line x1="526" y1="148" x2="346" y2="184" stroke="currentColor" stroke-opacity=".4" marker-end="url(#a2)" />
+
+            <rect x="228" y="190" width="184" height="42" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" />
+            <text x="320" y="207" text-anchor="middle" fill="var(--accent)" font-size="12.5" font-weight="600">14 phiên đang sống</text>
+            <text x="320" y="223" text-anchor="middle" fill="var(--accent)" fill-opacity=".85" font-size="10.5">pid · cwd · kind · sessionId · name</text>
+
+            <!-- failure path -->
+            <line x1="412" y1="211" x2="470" y2="211" stroke="var(--stop)" stroke-dasharray="4 3" marker-end="url(#a2)" />
+            <rect x="474" y="190" width="158" height="42" rx="7" fill="var(--stop-soft)" stroke="var(--stop)" />
+            <text x="553" y="207" text-anchor="middle" fill="var(--stop)" font-size="11.5" font-weight="600">notes[]</text>
+            <text x="553" y="223" text-anchor="middle" fill="var(--stop)" fill-opacity=".85" font-size="10">tài khoản lỗi ≠ không có phiên</text>
+
+            <line x1="320" y1="232" x2="320" y2="256" stroke="currentColor" stroke-opacity=".45" marker-end="url(#a2)" />
+            <rect x="150" y="262" width="340" height="40" rx="7" fill="none" stroke="currentColor" stroke-opacity=".4" />
+            <text x="320" y="280" text-anchor="middle" fill="currentColor" font-size="12">với mỗi phiên → đọc nhật ký (mục 3)</text>
+            <text x="320" y="295" text-anchor="middle" fill="currentColor" fill-opacity=".6" font-size="10.5">sắp xếp: vừa động lên trước</text>
+
+            <text x="8" y="326" fill="currentColor" fill-opacity=".55" font-size="10.5">Nửa số phiên đã 40 giờ không đụng tới — danh sách phẳng sẽ chôn mất cái đang làm dở.</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        Ba lời gọi, không phải một. Một tài khoản trả lời lỗi phải rơi vào <code>notes[]</code> — nếu để nó
+        im lặng thì trên điện thoại “tài khoản hỏng” trông y hệt “tài khoản rảnh”.
+      </figcaption>
+    </figure>
+  </section>
+
+  <hr class="rule" />
+
+  <section>
+    <div class="prose">
+      <h2>3. Từ tệp nhật ký tới một dòng trên điện thoại <span class="chip done">đã chạy</span></h2>
+      <p>
+        Đây là chỗ nhiều bẫy nhất, và cả ba đều lộ ra khi chạy trên dữ liệu thật chứ không phải khi ngồi
+        nghĩ.
+      </p>
+    </div>
+
+    <figure>
+      <p class="swipe">← kéo ngang để xem hết hình →</p>
+      <div class="figscroll">
+        <svg viewBox="0 0 640 470" role="img" aria-label="Với mỗi phiên: dựng đường dẫn nhật ký từ cwd và sessionId, nếu không có thì ghi chú; đọc 256KB cuối, đi ngược tìm lượt hội thoại thật, bỏ qua bản ghi sổ sách; lượt chỉ có tool hiện tên tool; sau đó qua cổng quét bí mật, dính thì ẩn kèm lý do, không dính thì giữ; rồi vào ảnh chụp đẩy lên tfl5 và điện thoại đọc.">
+          <defs>
+            <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+            </marker>
+          </defs>
+
+          <g font-family="ui-monospace, Menlo, monospace" font-size="11.5">
+            <rect x="120" y="10" width="400" height="44" rx="7" fill="var(--surface-2)" stroke="currentColor" stroke-opacity=".3" />
+            <text x="320" y="28" text-anchor="middle" fill="currentColor" font-size="12">~/.claude/projects/&lt;slug&gt;/&lt;sessionId&gt;.jsonl</text>
+            <text x="320" y="44" text-anchor="middle" fill="currentColor" fill-opacity=".6" font-size="10.5">slug = cwd, mọi dấu / thành dấu gạch</text>
+
+            <line x1="320" y1="54" x2="320" y2="76" stroke="currentColor" stroke-opacity=".45" marker-end="url(#a3)" />
+
+            <!-- missing branch -->
+            <line x1="520" y1="65" x2="576" y2="65" stroke="var(--caution)" stroke-dasharray="4 3" marker-end="url(#a3)" />
+            <text x="548" y="58" text-anchor="middle" fill="var(--caution)" font-size="10">không có</text>
+            <rect x="470" y="76" width="162" height="34" rx="7" fill="var(--caution-soft)" stroke="var(--caution)" />
+            <text x="551" y="97" text-anchor="middle" fill="var(--caution)" font-size="10.5">“chưa có nhật ký phiên”</text>
+
+            <rect x="150" y="76" width="300" height="42" rx="7" fill="none" stroke="currentColor" stroke-opacity=".4" />
+            <text x="300" y="94" text-anchor="middle" fill="currentColor" font-size="12">đọc 256 KB CUỐI tệp</text>
+            <text x="300" y="110" text-anchor="middle" fill="currentColor" fill-opacity=".6" font-size="10.5">có tệp 12 MB — không đọc cả file</text>
+
+            <line x1="300" y1="118" x2="300" y2="142" stroke="currentColor" stroke-opacity=".45" marker-end="url(#a3)" />
+
+            <rect x="110" y="148" width="380" height="76" rx="7" fill="none" stroke="currentColor" stroke-opacity=".4" />
+            <text x="300" y="167" text-anchor="middle" fill="currentColor" font-size="12" font-weight="600">đi NGƯỢC tìm lượt hội thoại thật</text>
+            <text x="300" y="185" text-anchor="middle" fill="currentColor" fill-opacity=".7" font-size="10.5">bỏ qua: pr-link · attachment · system · last-prompt</text>
+            <text x="300" y="201" text-anchor="middle" fill="var(--stop)" font-size="10.5">5/14 phiên kết thúc bằng bản ghi sổ sách</text>
+            <text x="300" y="217" text-anchor="middle" fill="currentColor" fill-opacity=".6" font-size="10.5">lượt chỉ có tool → “[dùng Bash]”, không để trống</text>
+
+            <line x1="300" y1="224" x2="300" y2="248" stroke="currentColor" stroke-opacity=".45" marker-end="url(#a3)" />
+
+            <!-- gate -->
+            <polygon points="300,252 404,296 300,340 196,296" fill="var(--surface-2)" stroke="currentColor" stroke-opacity=".5" />
+            <text x="300" y="292" text-anchor="middle" fill="currentColor" font-size="11.5" font-weight="600">quét bí mật</text>
+            <text x="300" y="307" text-anchor="middle" fill="currentColor" fill-opacity=".65" font-size="10">4 nhãn nguy hiểm nhất</text>
+
+            <line x1="404" y1="296" x2="470" y2="296" stroke="var(--stop)" marker-end="url(#a3)" />
+            <text x="437" y="289" text-anchor="middle" fill="var(--stop)" font-size="10">dính</text>
+            <rect x="474" y="274" width="158" height="44" rx="7" fill="var(--stop-soft)" stroke="var(--stop)" />
+            <text x="553" y="292" text-anchor="middle" fill="var(--stop)" font-size="10.5">ẩn phần xem trước</text>
+            <text x="553" y="307" text-anchor="middle" fill="var(--stop)" fill-opacity=".85" font-size="10">+ nói rõ lý do</text>
+
+            <line x1="300" y1="340" x2="300" y2="364" stroke="var(--accent)" marker-end="url(#a3)" />
+            <text x="316" y="356" fill="var(--accent)" font-size="10">sạch</text>
+
+            <rect x="150" y="370" width="300" height="42" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" />
+            <text x="300" y="388" text-anchor="middle" fill="var(--accent)" font-size="12" font-weight="600">ảnh chụp → doc trên tfl5</text>
+            <text x="300" y="404" text-anchor="middle" fill="var(--accent)" fill-opacity=".85" font-size="10.5">resource hub_status · gác bởi Reader+</text>
+
+            <line x1="300" y1="412" x2="300" y2="432" stroke="var(--accent)" marker-end="url(#a3)" />
+            <rect x="196" y="438" width="208" height="26" rx="7" fill="none" stroke="var(--accent)" />
+            <text x="300" y="456" text-anchor="middle" fill="var(--accent)" font-size="11.5">điện thoại đọc — 390px</text>
+
+            <text x="8" y="456" fill="currentColor" fill-opacity=".55" font-size="10.5">Đo thật:</text>
+            <text x="8" y="440" fill="currentColor" fill-opacity=".55" font-size="10.5">ẩn 1 · hiện 12 · sót 0</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        Cổng quét chặn <strong>ngay tại nguồn</strong>, không phải ở lớp giao diện — mọi mặt tiền đều đọc
+        chung một struct, nên chặn ở đây thì không màn nào quên được. ⚠ Đường này mới lấy <strong>một lượt
+        cuối</strong> mỗi phiên; vạch đích ở mục 5 cao hơn thế nhiều.
+      </figcaption>
+    </figure>
+
+    <div class="grid two">
+      <div class="callout">
+        <h3>Bẫy đã đạp: cổng quét chỉ biết tiếng Anh</h3>
+        <p>
+          Lần chạy thật đầu tiên in ra một phiên nói thẳng chuỗi đăng nhập <strong>bằng tiếng Việt</strong>,
+          và bộ quét báo <strong>0 rủi ro</strong> — vì mẫu chỉ có từ tiếng Anh, trong khi cả workspace này
+          làm việc bằng tiếng Việt. Một cái cổng như vậy là đồ trang trí.
+        </p>
+      </div>
+      <div class="note">
+        <h3>Vì sao không dùng cả bộ quét rò rỉ</h3>
+        <p>
+          Bộ đầy đủ còn bắt <code>/Users/…</code>, địa chỉ IP và chữ “blocker” — dính gần hết dòng của một
+          phiên lập trình. Dùng cả bộ thì màn hình trống trơn, và người dùng sẽ học cách phớt lờ nó.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule" />
+
+  <section>
+    <div class="prose">
+      <h2>4. Điều khiển: phiên do hub nuôi <span class="chip todo">chưa làm</span></h2>
+      <p>
+        Bước 2 là gõ vào phiên từ điện thoại. Đích của nó là <strong>những phiên hub tự khởi
+        động</strong> — một đường thẳng, không có ngoại lệ nào phải xử lý riêng.
+      </p>
+    </div>
+
+    <figure>
+      <p class="swipe">← kéo ngang để xem hết hình →</p>
+      <div class="figscroll">
+        <svg viewBox="0 0 640 250" role="img" aria-label="Điện thoại gõ vào phòng chat tfl5, hub đang mở socket nhận được, rồi khởi động hoặc nối tiếp một phiên claude bằng cờ nền hoặc resume; kết quả chảy ngược về phòng chat theo đúng đường ảnh chụp đã có.">
+          <defs>
+            <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+            </marker>
+          </defs>
+
+          <g font-family="ui-monospace, Menlo, monospace" font-size="11.5">
+            <rect x="8" y="14" width="146" height="44" rx="7" fill="none" stroke="var(--accent)" />
+            <text x="81" y="33" text-anchor="middle" fill="var(--accent)" font-size="12">điện thoại</text>
+            <text x="81" y="49" text-anchor="middle" fill="var(--accent)" fill-opacity=".8" font-size="10.5">gõ một câu</text>
+
+            <line x1="154" y1="36" x2="204" y2="36" stroke="var(--accent)" marker-end="url(#a4)" />
+
+            <rect x="208" y="14" width="158" height="44" rx="7" fill="none" stroke="var(--accent)" />
+            <text x="287" y="33" text-anchor="middle" fill="var(--accent)" font-size="12">phòng chat tfl5</text>
+            <text x="287" y="49" text-anchor="middle" fill="var(--accent)" fill-opacity=".8" font-size="10.5">hub đang mở socket</text>
+
+            <line x1="366" y1="36" x2="416" y2="36" stroke="var(--accent)" marker-end="url(#a4)" />
+
+            <rect x="420" y="14" width="146" height="44" rx="7" fill="none" stroke="var(--accent)" />
+            <text x="493" y="33" text-anchor="middle" fill="var(--accent)" font-size="12">hubd</text>
+            <text x="493" y="49" text-anchor="middle" fill="var(--accent)" fill-opacity=".8" font-size="10.5">nhận lệnh</text>
+
+            <line x1="493" y1="58" x2="493" y2="82" stroke="var(--accent)" marker-end="url(#a4)" />
+
+            <rect x="238" y="88" width="328" height="72" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" />
+            <text x="402" y="109" text-anchor="middle" fill="var(--accent)" font-size="12.5" font-weight="600">phiên do hub khởi động</text>
+            <text x="402" y="128" text-anchor="middle" fill="var(--accent)" fill-opacity=".9" font-size="10.5">phiên mới: claude --bg · quản lý bằng claude agents</text>
+            <text x="402" y="145" text-anchor="middle" fill="var(--accent)" fill-opacity=".9" font-size="10.5">nói tiếp phiên cũ: -p --resume &lt;sessionId&gt;</text>
+
+            <line x1="402" y1="160" x2="402" y2="184" stroke="var(--accent)" marker-end="url(#a4)" />
+
+            <rect x="238" y="190" width="328" height="42" rx="7" fill="none" stroke="var(--accent)" />
+            <text x="402" y="208" text-anchor="middle" fill="var(--accent)" font-size="11.5">kết quả chảy ngược về phòng chat</text>
+            <text x="402" y="223" text-anchor="middle" fill="var(--accent)" fill-opacity=".8" font-size="10.5">cùng đường ảnh chụp ở mục 3, không thêm kênh nào</text>
+
+            <text x="8" y="104" fill="currentColor" fill-opacity=".55" font-size="10.5">Phiên mở sẵn trong</text>
+            <text x="8" y="120" fill="currentColor" fill-opacity=".55" font-size="10.5">VS Code vẫn hiện ở</text>
+            <text x="8" y="136" fill="currentColor" fill-opacity=".55" font-size="10.5">danh sách để THEO DÕI,</text>
+            <text x="8" y="152" fill="currentColor" fill-opacity=".55" font-size="10.5">nhưng không phải đích</text>
+            <text x="8" y="168" fill="currentColor" fill-opacity=".55" font-size="10.5">của việc điều khiển.</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        Một đường duy nhất, và nó dùng lại đúng hạ tầng của mục 3 — không mở thêm cổng, không thêm token,
+        không thêm kênh trả kết quả.
+      </figcaption>
+    </figure>
+  </section>
+
+  <hr class="rule" />
+
+  <section>
+    <div class="prose">
+      <h2>5. Flow UC — “nhìn thấy giống như đang ngồi máy”</h2>
+      <p>
+        Đây mới là vạch đích. Không phải xem tóm tắt phiên, mà thấy đúng thứ terminal đang hiện: lời nói,
+        suy nghĩ, <strong>từng lệnh và kết quả của nó</strong>, file bị sửa — và thấy <strong>ngay</strong>,
+        không phải chờ hai phút.
+      </p>
+      <p>
+        Tin tốt, đo trên một phiên thật: nhật ký phiên đã chứa sẵn <strong>198 lệnh</strong>,
+        <strong>198 kết quả</strong>, 115 khối suy nghĩ, 48 bản ghi chế độ quyền.
+        <strong>Không thiếu dữ liệu — thiếu phần vẽ.</strong>
+      </p>
+    </div>
+
+    <figure>
+      <p class="swipe">← kéo ngang để xem hết hình →</p>
+      <div class="figscroll">
+        <svg viewBox="0 0 640 268" role="img" aria-label="Hành trình người dùng trên điện thoại: mở app, xem danh sách phiên, mở một phiên và thấy toàn bộ luồng như ở terminal, cập nhật gần tức thì, rồi nói tiếp vào phiên hoặc mở phiên mới; kèm trạng thái từng bước.">
+          <defs>
+            <marker id="a5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
+            </marker>
+          </defs>
+          <g font-family="ui-monospace, Menlo, monospace" font-size="11">
+            <rect x="8" y="20" width="140" height="58" rx="7" fill="none" stroke="var(--accent)" />
+            <text x="78" y="40" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600">UC-S01</text>
+            <text x="78" y="56" text-anchor="middle" fill="currentColor">danh sách phiên</text>
+            <text x="78" y="70" text-anchor="middle" fill="var(--accent)" font-size="9.5">CƠ CHẾ XONG · UI CHƯA</text>
+
+            <line x1="148" y1="49" x2="186" y2="49" stroke="currentColor" stroke-opacity=".5" marker-end="url(#a5)" />
+
+            <rect x="190" y="12" width="180" height="74" rx="7" fill="var(--caution-soft)" stroke="var(--caution)" />
+            <text x="280" y="32" text-anchor="middle" fill="var(--caution)" font-size="11.5" font-weight="600">UC-S02 ★ xương sống</text>
+            <text x="280" y="48" text-anchor="middle" fill="currentColor">toàn luồng: lời nói ·</text>
+            <text x="280" y="62" text-anchor="middle" fill="currentColor">lệnh + kết quả · suy nghĩ</text>
+            <text x="280" y="77" text-anchor="middle" fill="var(--caution)" font-size="9.5">MỚI CÓ 1 LƯỢT CUỐI</text>
+
+            <line x1="370" y1="49" x2="408" y2="49" stroke="currentColor" stroke-opacity=".5" marker-end="url(#a5)" />
+
+            <rect x="412" y="20" width="150" height="58" rx="7" fill="var(--caution-soft)" stroke="var(--caution)" />
+            <text x="487" y="40" text-anchor="middle" fill="var(--caution)" font-size="11.5" font-weight="600">UC-S03</text>
+            <text x="487" y="56" text-anchor="middle" fill="currentColor">thấy trong vài giây</text>
+            <text x="487" y="70" text-anchor="middle" fill="var(--caution)" font-size="9.5">NAY 120 GIÂY</text>
+
+            <line x1="280" y1="86" x2="280" y2="112" stroke="currentColor" stroke-opacity=".5" marker-end="url(#a5)" />
+
+            <rect x="150" y="118" width="126" height="52" rx="7" fill="none" stroke="var(--accent)" />
+            <text x="213" y="137" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600">UC-S05</text>
+            <text x="213" y="152" text-anchor="middle" fill="currentColor">nói tiếp phiên</text>
+            <text x="213" y="164" text-anchor="middle" fill="var(--accent)" font-size="9.5">--resume ĐÃ CHẠY</text>
+
+            <rect x="288" y="118" width="126" height="52" rx="7" fill="none" stroke="var(--caution)" />
+            <text x="351" y="137" text-anchor="middle" fill="var(--caution)" font-size="11.5" font-weight="600">UC-S06</text>
+            <text x="351" y="152" text-anchor="middle" fill="currentColor">mở phiên mới</text>
+            <text x="351" y="164" text-anchor="middle" fill="var(--caution)" font-size="9.5">--bg CHƯA THỬ</text>
+
+            <rect x="20" y="188" width="180" height="62" rx="7" fill="var(--stop-soft)" stroke="var(--stop)" />
+            <text x="110" y="207" text-anchor="middle" fill="var(--stop)" font-size="11.5" font-weight="600">UC-S04</text>
+            <text x="110" y="222" text-anchor="middle" fill="currentColor">thấy lúc xin quyền</text>
+            <text x="110" y="240" text-anchor="middle" fill="var(--stop)" font-size="9.5">CHƯA ĐỦ DỮ KIỆN</text>
+
+            <rect x="214" y="188" width="180" height="62" rx="7" fill="var(--stop-soft)" stroke="var(--stop)" />
+            <text x="304" y="207" text-anchor="middle" fill="var(--stop)" font-size="11.5" font-weight="600">UC-S07</text>
+            <text x="304" y="222" text-anchor="middle" fill="currentColor">dừng một phiên</text>
+            <text x="304" y="240" text-anchor="middle" fill="var(--stop)" font-size="9.5">KHÔNG CÓ LỆNH DỪNG</text>
+
+            <rect x="408" y="188" width="212" height="62" rx="7" fill="var(--accent-soft)" stroke="var(--accent)" />
+            <text x="514" y="207" text-anchor="middle" fill="var(--accent)" font-size="11.5" font-weight="600">UC-S08 gác bí mật</text>
+            <text x="514" y="222" text-anchor="middle" fill="currentColor">hiện kết quả lệnh = hiện</text>
+            <text x="514" y="238" text-anchor="middle" fill="currentColor">nơi khoá hay lộ nhất</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        Sổ đầy đủ: <code>UC.md</code> (S01–S09). Ô vàng là việc gần nhất, ô đỏ là chỗ <strong>chưa có
+        đường</strong> — và cho tới lúc có thì không được vẽ lên màn như thể đã có.
+      </figcaption>
+    </figure>
+  </section>
+
+  <hr class="rule" />
+
+  <section>
+    <div class="prose">
+      <h2>6. Làm được gì, chưa làm được gì</h2>
+      <p>Bảng này là thứ nên đọc trước khi hứa bất cứ điều gì với người khác. Phiên mở trong VS Code nằm ở cột “theo dõi”, không nằm ở cột “điều khiển”.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Việc</th>
+            <th scope="col">Trạng thái</th>
+            <th scope="col">Bằng cách nào</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Thấy mọi phiên đang chạy</td>
+            <td><span class="chip done">chạy rồi</span></td>
+            <td class="mono">claude agents --json × 3 tài khoản</td>
+          </tr>
+          <tr>
+            <td>Đọc phiên đang làm gì, tới đâu</td>
+            <td><span class="chip done">chạy rồi</span></td>
+            <td class="mono">đuôi 256 KB của tệp .jsonl</td>
+          </tr>
+          <tr>
+            <td>Chặn bí mật rò ra trang web</td>
+            <td><span class="chip done">chạy rồi</span></td>
+            <td>quét tại nguồn — ẩn 1/14, sót 0</td>
+          </tr>
+          <tr>
+            <td>Xem trên giao diện điện thoại</td>
+            <td><span class="chip todo">chưa</span></td>
+            <td>mới có CLI + JSON, chưa đẩy lên trang</td>
+          </tr>
+          <tr>
+            <td>Biết phiên nào đang chờ mình</td>
+            <td><span class="chip todo">chưa</span></td>
+            <td>bản ghi cuối không đủ để suy — chưa hứa</td>
+          </tr>
+          <tr>
+            <td>Mở phiên mới từ điện thoại</td>
+            <td><span class="chip todo">chưa</span></td>
+            <td class="mono">claude --bg</td>
+          </tr>
+          <tr>
+            <td>Gõ vào phiên do hub nuôi</td>
+            <td><span class="chip todo">chưa</span></td>
+            <td class="mono">-p --resume &lt;sessionId&gt;</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose">
+      <p>
+        Thứ tự tiếp theo: đẩy danh sách phiên vào ảnh chụp → dựng màn hình trên tfl5 → nghiệm thu thẳng ở
+        390&nbsp;px, rồi mới tới điều khiển.
+      </p>
+    </div>
+  </section>
+
+  <footer class="prose">
+    <hr class="rule" />
+    <p>
+      Mọi con số trong tài liệu này đo trên máy thật ngày 8&nbsp;tháng&nbsp;8, 2026: 14 phiên sống
+      (9&nbsp;·&nbsp;2&nbsp;·&nbsp;3), 5/14 kết thúc bằng bản ghi sổ sách, 1/14 bị ẩn phần xem trước,
+      0 rò rỉ còn sót.
+    </p>
+  </footer>
+
+</div>
+
+</body>
+</html>

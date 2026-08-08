@@ -1,0 +1,660 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hub — bảng điều khiển</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #ffffff; --line: #e4e4e1; --ink: #1c1b19; --muted: #6b6a66;
+    --accent: #2f6f4e; --accent-soft: #eaf3ee; --warn: #9a6b1f; --danger: #a33a2c; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16171a; --panel: #1e1f23; --line: #33353b; --ink: #e9e8e4; --muted: #9b9a95;
+            --accent: #74c69d; --accent-soft: #1f2f27; --warn: #d9a441; --danger: #e07a63; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: .02em; }
+  header .spacer { flex: 1; }
+  .pill { font-size: 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; }
+  /* nowrap: in a flex row next to a wide <select>, "Tải lại" was breaking
+     into two lines and the button grew a second row of height. A control
+     label never wraps. */
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  nav { display: flex; gap: 4px; padding: 10px 20px 0; }
+  nav button { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: none; }
+  nav button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--ink); font-weight: 600; }
+  /* Use the whole window. The old 1180px cap left 740px of empty page on a
+     1920px screen while the inbox table scrolled inside its own box — the
+     detail pane is where the width actually pays off. */
+  main { padding: 16px 20px 60px; max-width: none; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr.row { cursor: pointer; }
+  tr.row:hover td { background: var(--accent-soft); }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.pending { border-color: var(--warn); color: var(--warn); }
+  .tag.trip { border-color: var(--danger); color: var(--danger); }
+  .tag.ok { border-color: var(--accent); color: var(--accent); }
+  .nowrap { white-space: nowrap; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  pre { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 12px; margin: 0; max-height: 340px; overflow: auto; }
+  textarea, input, select { font: inherit; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
+  textarea { font-family: var(--mono); font-size: 12px; min-height: 90px; resize: vertical; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .grid { display: grid; gap: 12px; }
+  .g2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .g3 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .row-flex { display: flex; gap: 8px; align-items: center; }
+  .switch { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+  .switch input { width: auto; }
+  .muted { color: var(--muted); }
+  .err { color: var(--danger); white-space: pre-wrap; }
+  .ok { color: var(--accent); }
+  .chart { height: 280px; width: 100%; }
+  .split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  @media (min-width: 960px) { .split { grid-template-columns: 560px minmax(0, 1fr); } }
+  @media (min-width: 1400px) { .split { grid-template-columns: 640px minmax(0, 1fr); } }
+  /* Past ~1800px the list can afford to be wider without squeezing detail. */
+  @media (min-width: 1800px) { .split { grid-template-columns: 760px minmax(0, 1fr); } }
+  /* Five columns of Vietnamese in a fixed-width panel will overflow before
+     they wrap; let the table scroll inside its own box rather than clipping
+     the last column off the edge. */
+  #inbox-body { font-size: 12.5px; }
+  .scroll table { min-width: 520px; }
+  .scroll { max-height: 68vh; overflow: auto; }
+  .scroll td { padding: 7px 6px; }
+  .hide { display: none !important; }
+  .toast { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 10px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.14); max-width: 420px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>hub</h1>
+  <span class="pill" id="counts">…</span>
+  <span class="pill" id="spend">…</span>
+  <div class="spacer"></div>
+  <button id="btn-ingest">Poll kênh</button>
+  <button id="btn-cycle" class="primary">Chạy 1 vòng</button>
+</header>
+
+<nav>
+  <button data-tab="inbox" class="on">Hộp việc</button>
+  <button data-tab="config">Cấu hình</button>
+  <button data-tab="health">Sức khoẻ</button>
+  <button data-tab="cost">Chi phí</button>
+</nav>
+
+<main>
+  <!-- INBOX -->
+  <section id="tab-inbox">
+    <div class="panel">
+      <h2>Hỏi hub</h2>
+      <div class="row-flex">
+        <input id="say-text" placeholder="vd: tuần này tfl5 vướng gì?">
+        <input id="say-project" placeholder="project (tuỳ chọn)" style="max-width:200px">
+        <button id="btn-say" class="primary">Gửi</button>
+      </div>
+      <p class="muted" style="margin:8px 0 0">Câu hỏi được triage như mọi item khác; trả lời hiện ngay trong danh sách bên dưới.</p>
+    </div>
+
+    <div class="split">
+      <div class="panel">
+        <h2>Hộp việc <span id="filter-note" class="muted"></span></h2>
+        <div class="row-flex" style="margin-bottom:10px">
+          <select id="f-status">
+            <option value="">— mọi trạng thái —</option>
+            <option value="new">new</option>
+            <option value="awaiting_human">awaiting_human</option>
+            <option value="answered">answered</option>
+            <option value="coalesced">coalesced</option>
+            <option value="closed">closed</option>
+            <option value="failed">failed</option>
+          </select>
+          <button id="btn-refresh">Tải lại</button>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th>#</th><th>chờ</th><th>nguồn</th><th>chủ đề</th><th>loại</th></tr></thead>
+            <tbody id="inbox-body"><tr><td colspan="5" class="muted">đang tải…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel" id="detail">
+        <h2>Chi tiết</h2>
+        <p class="muted">Chọn một dòng bên trái.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- CONFIG -->
+  <section id="tab-config" class="hide">
+    <div class="panel">
+      <h2>Kênh</h2>
+      <div class="grid g2">
+        <div class="switch"><input type="checkbox" id="c-github"><label for="c-github" style="margin:0">GitHub (qua <span class="mono">gh</span>)</label></div>
+        <div class="switch"><input type="checkbox" id="c-devlog"><label for="c-devlog" style="margin:0">devlog dự án</label></div>
+        <div class="switch"><input type="checkbox" id="c-email"><label for="c-email" style="margin:0">Email (mailler)</label></div>
+        <div class="switch"><input type="checkbox" id="c-telegram"><label for="c-telegram" style="margin:0">Telegram</label></div>
+      </div>
+      <div class="grid g2" style="margin-top:12px">
+        <div><label>GitHub repos theo dõi thêm (cách nhau dấu phẩy)</label><input id="c-repos" placeholder="dipgle/tfl5, dipgle/sdvi"></div>
+        <div><label>Telegram chat id được phép</label><input id="c-chatids" placeholder="123456789"></div>
+        <div><label>Env var chứa token Telegram</label><input id="c-tgenv"></div>
+        <div><label>Env var chứa API key mailler</label><input id="c-mailenv"></div>
+      </div>
+      <p class="muted" style="margin:10px 0 0">Token/API key <strong>không</strong> lưu ở đây — chỉ lưu <em>tên biến môi trường</em>. Thiếu biến thì adapter tự skip và ghi log.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Mức tự chủ</h2>
+      <div class="grid g3">
+        <div><label>Mặc định</label><select id="c-tier"><option>L0</option><option>L1</option><option>L2</option></select></div>
+        <div><label>Ngưỡng confidence để tự trả lời</label><input id="c-minconf" type="number" step="0.05" min="0" max="1"></div>
+        <div><label>Gộp item cùng thread (giờ)</label><input id="c-coalesce" type="number" min="0"></div>
+      </div>
+      <div style="margin-top:12px">
+        <label>Tier riêng từng project</label>
+        <div id="c-projtiers"></div>
+        <button id="btn-add-tier" style="margin-top:8px">+ thêm project</button>
+      </div>
+      <p class="muted" style="margin:10px 0 0">L0 = chỉ soạn nháp · L1 = tự trả lời item thông tin · L2 = thêm quyền chạy act stage. Người gửi untrusted luôn bị ép về L0; deploy/merge luôn cần bạn.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Triage &amp; chi phí</h2>
+      <div class="grid g3">
+        <div><label>Model</label><input id="c-model" placeholder="sonnet | haiku | opus"></div>
+        <div><label>Trần tiền mỗi call (USD)</label><input id="c-budget" type="number" step="0.05" min="0.01"></div>
+        <div><label>Timeout (giây)</label><input id="c-timeout" type="number" min="10"></div>
+        <div><label>Số item tối đa mỗi vòng</label><input id="c-maxtriage" type="number" min="1"></div>
+        <div><label>Chu kỳ poll (giây)</label><input id="c-poll" type="number" min="10"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Act stage (sửa code)</h2>
+      <div class="grid g3">
+        <div class="switch"><input type="checkbox" id="c-act"><label for="c-act" style="margin:0">Bật</label></div>
+        <div><label>Model</label><input id="c-actmodel"></div>
+        <div><label>Trần tiền (USD)</label><input id="c-actbudget" type="number" step="0.5" min="0.1"></div>
+      </div>
+      <p class="muted" style="margin:10px 0 0">Chỉ chạy khi bạn bấm <span class="mono">hub act &lt;id&gt;</span> sau khi duyệt. Luôn trong worktree + branch riêng; không push, không merge, không deploy.</p>
+    </div>
+
+    <div class="panel">
+      <h2>Tin cậy &amp; định tuyến</h2>
+      <div class="grid g2">
+        <div><label>GitHub logins tin cậy</label><input id="c-trust-gh" placeholder="dipgle"></div>
+        <div><label>Email tin cậy</label><input id="c-trust-mail" placeholder="ban@congty.com"></div>
+        <div>
+          <label>Telegram chat id <strong>tin cậy</strong> (được coi là bạn)</label>
+          <input id="c-trust-tg" placeholder="123456789">
+        </div>
+      </div>
+      <p class="muted" style="margin:8px 0 0">“Được phép” (mục Kênh) chỉ cho nhắn vào hub. “Tin cậy” mới nâng được mức tự chủ — hai danh sách tách nhau có chủ đích.</p>
+      <div style="margin-top:12px">
+        <label>Định tuyến repo → project</label>
+        <div id="c-routing"></div>
+        <button id="btn-add-route" style="margin-top:8px">+ thêm luật</button>
+      </div>
+      <div style="margin-top:12px">
+        <label>Mẫu chặn rò rỉ thêm — <strong>mỗi dòng một regex</strong> (regex hay chứa dấu phẩy, nên không tách theo phẩy)</label>
+        <textarea id="c-leak" spellcheck="false" placeholder="tên-nội-bộ&#10;mã-khách-hàng&#10;\bKH\d{3,}\b" style="min-height:70px"></textarea>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>JSON thô</h2>
+      <textarea id="c-raw" spellcheck="false" style="min-height:160px"></textarea>
+      <p class="muted" style="margin:8px 0 0">Sửa ở form phía trên rồi bấm Lưu; ô này là bản xem/chỉnh nâng cao (áp dụng khi bấm “Dùng JSON thô”).</p>
+      <div class="row-flex" style="margin-top:10px">
+        <button id="btn-use-raw">Dùng JSON thô</button>
+        <div class="spacer" style="flex:1"></div>
+        <span id="cfg-msg" class="muted"></span>
+        <button id="btn-save-cfg" class="primary">Lưu cấu hình</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- HEALTH -->
+  <section id="tab-health" class="hide">
+    <div class="panel">
+      <h2>Kênh &amp; công cụ</h2>
+      <div id="health-body" class="muted">bấm “Kiểm tra” để chạy dò thật (gọi gh / mailler / telegram).</div>
+      <button id="btn-doctor" class="primary" style="margin-top:12px">Kiểm tra</button>
+    </div>
+    <div class="panel">
+      <h2>Lần poll gần đây</h2>
+      <table><thead><tr><th>lúc</th><th>adapter</th><th>kết quả</th><th>ghi chú</th></tr></thead>
+        <tbody id="runs-body"><tr><td colspan="4" class="muted">…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <!-- COST -->
+  <section id="tab-cost" class="hide">
+    <div class="panel">
+      <h2>Chi phí triage theo ngày</h2>
+      <div id="chart-cost" class="chart"></div>
+    </div>
+    <div class="panel">
+      <h2>Message theo trạng thái</h2>
+      <div id="chart-status" class="chart"></div>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast hide"></div>
+<script src="/echarts.js"></script>
+<script>
+const TOKEN = "__HUB_TOKEN__";
+let CFG = null, PROJECTS = [], CURRENT = null;
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { "x-hub-token": TOKEN, "content-type": "application/json", ...(opts.headers || {}) },
+  });
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (e) { throw new Error(`phản hồi không phải JSON: ${text.slice(0, 200)}`); }
+  if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+  return data;
+}
+
+function toast(msg, isErr) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.borderColor = isErr ? "var(--danger)" : "var(--accent)";
+  el.classList.remove("hide");
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.add("hide"), 6000);
+}
+
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+// ─── tabs ───
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  for (const t of ["inbox", "config", "health", "cost"]) {
+    document.getElementById("tab-" + t).classList.toggle("hide", t !== b.dataset.tab);
+  }
+  if (b.dataset.tab === "cost") drawCharts();
+  if (b.dataset.tab === "config" && !CFG) loadConfig();
+});
+
+// ─── inbox ───
+// How long this has been sitting. 31 items spanning three weeks all looked
+// identical without it — a 19-day-old request read the same as one from
+// five minutes ago.
+function age(iso) {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 90) return Math.round(s) + "s";
+  if (s < 5400) return Math.round(s / 60) + "p";
+  if (s < 172800) return Math.round(s / 3600) + "h";
+  return Math.round(s / 86400) + "ng";
+}
+
+function shortWhen(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+async function loadInbox() {
+  const status = document.getElementById("f-status").value;
+  const q = status ? `?status=${encodeURIComponent(status)}&limit=100` : "?limit=100";
+  const data = await api("/api/inbox" + q);
+  const body = document.getElementById("inbox-body");
+  if (!data.items.length) { body.innerHTML = '<tr><td colspan="5" class="muted">trống</td></tr>'; }
+  else {
+    body.innerHTML = data.items.map(m => {
+      const d = m.decision;
+      const kind = d ? `${esc(d.kind)}/${esc(d.severity)}` : "—";
+      const pend = d && d.status === "pending" ? ' <span class="tag pending">chờ bạn</span>' : "";
+      const trip = d && d.tripwire ? ' <span class="tag trip">tripwire</span>' : "";
+      // A reply that failed to send used to look exactly like one that went
+      // out — the "no silent failure" rule broken at the last mile.
+      const dl = d && d.delivery;
+      const send = dl && dl.status === "failed" ? ` <span class="tag trip">gửi hỏng ×${dl.attempts}</span>`
+                 : dl && dl.status === "queued" ? ' <span class="tag">đang chờ gửi</span>'
+                 : dl && dl.status === "sent"   ? ' <span class="tag ok">đã gửi</span>' : "";
+      // You are answering all of them at once, so say how many.
+      const also = d && d.also > 0 ? ` <span class="tag">+${d.also} tin nữa</span>` : "";
+      const err = m.last_error ? ` <span class="tag trip">lỗi ×${m.attempts}</span>` : "";
+      return `<tr class="row" data-id="${m.id}">
+        <td class="mono">${m.id}${d ? `<div class="muted mono">d${d.id}</div>` : ""}</td>
+        <td class="mono nowrap">${esc(age(m.received_at))}<div class="muted mono">${esc(shortWhen(m.received_at))}</div></td>
+        <td>${esc(m.source)}<div class="muted mono">${esc(m.project || "-")}</div></td>
+        <td>${esc((m.subject || "").slice(0, 90))}${pend}${trip}${also}${send}${err}
+            <div class="muted mono">${esc(m.status)}${d && d.reason ? " · " + esc(String(d.reason).slice(0, 70)) : ""}</div></td>
+        <td>${kind}${d && d.confidence != null ? `<div class="muted mono">conf ${d.confidence}${d.cost_usd ? ` · $${(+d.cost_usd).toFixed(3)}` : ""}</div>` : ""}</td>
+      </tr>`;
+    }).join("");
+    body.querySelectorAll("tr.row").forEach(tr => tr.onclick = () => openDetail(tr.dataset.id));
+  }
+  renderCounts(data.counts);
+}
+
+function renderCounts(c) {
+  const m = c.messages || {};
+  document.getElementById("counts").textContent =
+    Object.entries(m).map(([k, v]) => `${k} ${v}`).join(" · ") || "chưa có message";
+  document.getElementById("spend").textContent = `đã tiêu $${(c.cost_usd_total || 0).toFixed(4)}`;
+}
+
+async function openDetail(id) {
+  const el = document.getElementById("detail");
+  el.innerHTML = '<h2>Chi tiết</h2><p class="muted">đang tải…</p>';
+  const data = await api(`/api/message/${id}`);
+  CURRENT = data;
+  const m = data.message, d = data.decision;
+  let html = `<h2>Message #${m.id} <span class="tag">${esc(m.status)}</span></h2>
+    <p class="mono muted">${esc(m.source)} · ${esc(m.sender || "")} (${esc(m.sender_trust)}) · project ${esc(m.project || "-")}${m.url ? ` · <a href="${esc(m.url)}" target="_blank" rel="noopener">mở link</a>` : ""}</p>
+    <p><strong>${esc(m.subject || "(không có chủ đề)")}</strong></p>
+    <pre>${esc((m.body || "").slice(0, 4000))}</pre>`;
+
+  if (d) {
+    html += `<h2 style="margin-top:16px">Decision #${d.id} <span class="tag ${d.status === "pending" ? "pending" : ""}">${esc(d.status)}</span></h2>
+      <p class="mono muted">${esc(d.kind)}/${esc(d.severity)} · tier ${esc(d.tier)} · conf ${d.confidence} · model ${esc(d.model || "")} · $${(d.cost_usd || 0).toFixed(4)}</p>
+      ${d.tripwire ? `<p class="err">⚠ tripwire: ${esc(d.tripwire)}</p>` : ""}
+      <p>${esc(d.summary || "")}</p>`;
+    if (Array.isArray(d.actions) && d.actions.length) {
+      html += `<p class="muted" style="margin-bottom:4px">Đề xuất:</p><ul style="margin:0 0 10px 18px">` +
+        d.actions.map(a => `<li><span class="mono">${esc(a.type)}</span> — ${esc(a.detail)}</li>`).join("") + `</ul>`;
+    }
+    if (Array.isArray(d.evidence) && d.evidence.length) {
+      html += `<p class="muted" style="margin-bottom:4px">Bằng chứng:</p><ul class="mono" style="margin:0 0 10px 18px">` +
+        d.evidence.map(e => `<li>${esc(e)}</li>`).join("") + `</ul>`;
+    }
+    if (d.outcome) html += `<p class="muted mono">policy: ${esc(d.outcome.action)} — ${esc(d.outcome.reason)}${d.outcome.target ? ` → ${esc(d.outcome.channel)}:${esc(d.outcome.target)}` : ""}</p>`;
+    html += `<label style="margin-top:12px">Nháp trả lời (sửa được trước khi gửi)</label>
+      <textarea id="draft">${esc(d.reply_draft || "")}</textarea>
+      <div class="row-flex" style="margin-top:10px">
+        <button class="primary" id="btn-approve" ${d.status !== "pending" ? "disabled" : ""}>Duyệt &amp; gửi</button>
+        <button class="danger" id="btn-reject" ${d.status !== "pending" ? "disabled" : ""}>Bỏ</button>
+        <button id="btn-close">Đóng message</button>
+      </div>`;
+  } else {
+    html += `<p class="muted">Chưa có decision (chưa triage).</p>
+      <button id="btn-close">Đóng message</button>`;
+  }
+  el.innerHTML = html;
+
+  const approve = document.getElementById("btn-approve");
+  if (approve) approve.onclick = async () => {
+    approve.disabled = true;
+    try {
+      const r = await api(`/api/decision/${d.id}/approve`, { method: "POST", body: JSON.stringify({ body: document.getElementById("draft").value }) });
+      toast(r.queued ? `Đã duyệt #${d.id} — gửi tới ${r.target}` : `Đã duyệt #${d.id} (không có gì để gửi)`);
+      await loadInbox(); await openDetail(m.id);
+    } catch (e) { toast(e.message, true); approve.disabled = false; }
+  };
+  const reject = document.getElementById("btn-reject");
+  if (reject) reject.onclick = async () => {
+    try {
+      await api(`/api/decision/${d.id}/reject`, { method: "POST", body: JSON.stringify({ reason: "bỏ trên web UI" }) });
+      toast(`Đã bỏ #${d.id}`); await loadInbox(); await openDetail(m.id);
+    } catch (e) { toast(e.message, true); }
+  };
+  document.getElementById("btn-close").onclick = async () => {
+    try {
+      await api(`/api/message/${m.id}/close`, { method: "POST", body: JSON.stringify({ reason: "đóng trên web UI" }) });
+      toast(`Đã đóng message #${m.id}`); await loadInbox(); await openDetail(m.id);
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
+// ─── config ───
+function listToInput(a) { return (a || []).join(", "); }
+function inputToList(s) { return s.split(",").map(x => x.trim()).filter(Boolean); }
+// Regexes commonly contain commas ({2,4}), so leak patterns are line-separated.
+function listToLines(a) { return (a || []).join("\n"); }
+function linesToList(s) { return s.split("\n").map(x => x.trim()).filter(Boolean); }
+
+async function loadConfig() {
+  const data = await api("/api/config");
+  CFG = data.config; PROJECTS = data.projects || [];
+  fillForm();
+}
+
+// Every form field is written here, so "Dùng JSON thô" repopulates the whole
+// form instead of only the two list widgets (it used to silently revert the
+// scalar fields on the next save).
+function fillForm() {
+  const c = CFG;
+  document.getElementById("c-github").checked = c.adapters.github.enabled;
+  document.getElementById("c-devlog").checked = c.adapters.devlog.enabled;
+  document.getElementById("c-email").checked = c.adapters.email.enabled;
+  document.getElementById("c-telegram").checked = c.adapters.telegram.enabled;
+  document.getElementById("c-repos").value = listToInput(c.adapters.github.repos);
+  document.getElementById("c-chatids").value = listToInput(c.adapters.telegram.allowed_chat_ids);
+  document.getElementById("c-tgenv").value = c.adapters.telegram.token_env;
+  document.getElementById("c-mailenv").value = c.adapters.email.api_key_env;
+  document.getElementById("c-tier").value = c.autonomy.default;
+  document.getElementById("c-minconf").value = c.triage.min_confidence_auto;
+  document.getElementById("c-coalesce").value = c.coalesce_hours;
+  document.getElementById("c-model").value = c.triage.model;
+  document.getElementById("c-budget").value = c.triage.max_budget_usd;
+  document.getElementById("c-timeout").value = c.triage.timeout_sec;
+  document.getElementById("c-maxtriage").value = c.max_triage_per_cycle;
+  document.getElementById("c-poll").value = c.poll_interval_sec;
+  document.getElementById("c-act").checked = c.act.enabled;
+  document.getElementById("c-actmodel").value = c.act.model;
+  document.getElementById("c-actbudget").value = c.act.max_budget_usd;
+  document.getElementById("c-trust-gh").value = listToInput(c.trust.github_logins);
+  document.getElementById("c-trust-mail").value = listToInput(c.trust.emails);
+  document.getElementById("c-trust-tg").value = listToInput(c.trust.telegram_chat_ids);
+  document.getElementById("c-leak").value = listToLines(c.leak_patterns);
+  renderProjectTiers(); renderRouting(); syncRaw();
+}
+
+function renderProjectTiers() {
+  const wrap = document.getElementById("c-projtiers");
+  const entries = Object.entries(CFG.autonomy.projects || {});
+  wrap.innerHTML = entries.map(([p, t], i) => `
+    <div class="row-flex" style="margin-bottom:6px">
+      <input value="${esc(p)}" data-tier-name="${i}" list="proj-list" style="max-width:260px">
+      <select data-tier-value="${i}">${["L0", "L1", "L2"].map(x => `<option ${x === t ? "selected" : ""}>${x}</option>`).join("")}</select>
+      <button data-tier-del="${i}" class="danger">×</button>
+    </div>`).join("") +
+    `<datalist id="proj-list">${PROJECTS.map(p => `<option value="${esc(p)}">`).join("")}</datalist>`;
+  wrap.querySelectorAll("[data-tier-del]").forEach(b => b.onclick = () => {
+    const key = entries[+b.dataset.tierDel][0];
+    delete CFG.autonomy.projects[key]; renderProjectTiers(); syncRaw();
+  });
+  wrap.querySelectorAll("[data-tier-name]").forEach(inp => inp.onchange = () => {
+    const i = +inp.dataset.tierName, [oldKey, val] = entries[i];
+    delete CFG.autonomy.projects[oldKey];
+    if (inp.value.trim()) CFG.autonomy.projects[inp.value.trim()] = val;
+    renderProjectTiers(); syncRaw();
+  });
+  wrap.querySelectorAll("[data-tier-value]").forEach(sel => sel.onchange = () => {
+    CFG.autonomy.projects[entries[+sel.dataset.tierValue][0]] = sel.value; syncRaw();
+  });
+}
+
+function renderRouting() {
+  const wrap = document.getElementById("c-routing");
+  wrap.innerHTML = (CFG.routing || []).map((r, i) => `
+    <div class="row-flex" style="margin-bottom:6px">
+      <input value="${esc(r.when.repo || "")}" data-route-repo="${i}" placeholder="owner/repo" style="max-width:280px">
+      <span class="muted">→</span>
+      <input value="${esc(r.project)}" data-route-proj="${i}" placeholder="project" list="proj-list" style="max-width:200px">
+      <button data-route-del="${i}" class="danger">×</button>
+    </div>`).join("");
+  wrap.querySelectorAll("[data-route-del]").forEach(b => b.onclick = () => { CFG.routing.splice(+b.dataset.routeDel, 1); renderRouting(); syncRaw(); });
+  wrap.querySelectorAll("[data-route-repo]").forEach(inp => inp.onchange = () => { CFG.routing[+inp.dataset.routeRepo].when.repo = inp.value.trim() || null; syncRaw(); });
+  wrap.querySelectorAll("[data-route-proj]").forEach(inp => inp.onchange = () => { CFG.routing[+inp.dataset.routeProj].project = inp.value.trim(); syncRaw(); });
+}
+
+function collectForm() {
+  const c = CFG;
+  c.adapters.github.enabled = document.getElementById("c-github").checked;
+  c.adapters.devlog.enabled = document.getElementById("c-devlog").checked;
+  c.adapters.email.enabled = document.getElementById("c-email").checked;
+  c.adapters.telegram.enabled = document.getElementById("c-telegram").checked;
+  c.adapters.github.repos = inputToList(document.getElementById("c-repos").value);
+  c.adapters.telegram.allowed_chat_ids = inputToList(document.getElementById("c-chatids").value);
+  c.adapters.telegram.token_env = document.getElementById("c-tgenv").value.trim();
+  c.adapters.email.api_key_env = document.getElementById("c-mailenv").value.trim();
+  c.autonomy.default = document.getElementById("c-tier").value;
+  c.triage.min_confidence_auto = parseFloat(document.getElementById("c-minconf").value);
+  c.coalesce_hours = parseInt(document.getElementById("c-coalesce").value, 10);
+  c.triage.model = document.getElementById("c-model").value.trim();
+  c.triage.max_budget_usd = parseFloat(document.getElementById("c-budget").value);
+  c.triage.timeout_sec = parseInt(document.getElementById("c-timeout").value, 10);
+  c.max_triage_per_cycle = parseInt(document.getElementById("c-maxtriage").value, 10);
+  c.poll_interval_sec = parseInt(document.getElementById("c-poll").value, 10);
+  c.act.enabled = document.getElementById("c-act").checked;
+  c.act.model = document.getElementById("c-actmodel").value.trim();
+  c.act.max_budget_usd = parseFloat(document.getElementById("c-actbudget").value);
+  c.trust.github_logins = inputToList(document.getElementById("c-trust-gh").value);
+  c.trust.emails = inputToList(document.getElementById("c-trust-mail").value);
+  // Kept independent from allowed_chat_ids on purpose: copying one into the
+  // other silently granted trusted (L1/L2) rights to anyone you merely let
+  // message the bot, and wiped hand-set trust on every save.
+  c.trust.telegram_chat_ids = inputToList(document.getElementById("c-trust-tg").value);
+  c.leak_patterns = linesToList(document.getElementById("c-leak").value);
+  return c;
+}
+
+function syncRaw() { document.getElementById("c-raw").value = JSON.stringify(collectForm(), null, 2); }
+
+document.getElementById("btn-add-tier").onclick = () => {
+  CFG.autonomy.projects[PROJECTS.find(p => !(p in CFG.autonomy.projects)) || "project"] = "L0";
+  renderProjectTiers(); syncRaw();
+};
+document.getElementById("btn-add-route").onclick = () => {
+  CFG.routing.push({ when: { repo: "" }, project: "" }); renderRouting(); syncRaw();
+};
+document.getElementById("btn-use-raw").onclick = () => {
+  const raw = document.getElementById("c-raw").value;
+  try { CFG = JSON.parse(raw); } catch (e) { return toast("JSON sai: " + e.message, true); }
+  fillForm();
+  toast("Đã nạp JSON thô vào toàn bộ form — bấm Lưu để ghi");
+};
+
+document.getElementById("btn-save-cfg").onclick = async () => {
+  const msg = document.getElementById("cfg-msg");
+  msg.textContent = "đang lưu…"; msg.className = "muted";
+  try {
+    await api("/api/config", { method: "PUT", body: JSON.stringify(collectForm()) });
+    msg.textContent = "đã lưu ✓"; msg.className = "ok";
+    toast("Đã ghi hub.config.json (có backup .bak)");
+    await loadConfig();
+  } catch (e) { msg.textContent = ""; toast("Không lưu được: " + e.message, true); }
+};
+
+// ─── health ───
+document.getElementById("btn-doctor").onclick = async () => {
+  const el = document.getElementById("health-body");
+  el.textContent = "đang dò thật (gh / mailler / telegram)…";
+  try {
+    const d = await api("/api/doctor");
+    const rows = Object.entries(d.channels).map(([name, c]) => {
+      const state = !c.enabled ? '<span class="muted">tắt</span>' : c.ok ? '<span class="ok">OK</span>' : '<span class="err">LỖI</span>';
+      const seen = (c.observed_chat_ids || []).length ? `<div class="muted mono">chat id đã nhắn bot: ${esc(c.observed_chat_ids.join(", "))}</div>` : "";
+      return `<tr><td class="mono">${esc(name)}</td><td>${state}</td><td>${esc(c.detail || "")}${seen}</td></tr>`;
+    }).join("");
+    el.innerHTML = `<table><thead><tr><th>kênh</th><th></th><th>chi tiết</th></tr></thead><tbody>${rows}
+      <tr><td class="mono">claude</td><td>${d.claude.ok ? '<span class="ok">OK</span>' : '<span class="err">LỖI</span>'}</td><td>${esc(d.claude.detail)}</td></tr>
+      </tbody></table>
+      <p class="muted mono" style="margin-top:10px">config: ${esc(d.config_file)} · project có devlog: ${d.projects.length}</p>`;
+    document.getElementById("runs-body").innerHTML = (d.runs || []).map(r => `
+      <tr><td class="mono">${esc(r.started_at)}</td><td class="mono">${esc(r.adapter)}</td>
+      <td>${r.ok === null ? "đang chạy" : r.ok ? '<span class="ok">ok</span>' : '<span class="err">lỗi</span>'} · ${r.n_new ?? 0} mới</td>
+      <td class="muted">${esc(r.skipped || r.err || "")}</td></tr>`).join("");
+    renderCounts(d.counts);
+  } catch (e) { el.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+};
+
+// ─── charts (Apache ECharts) ───
+let costChart, statusChart;
+async function drawCharts() {
+  const data = await api("/api/cost");
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const ink = dark ? "#e9e8e4" : "#1c1b19", line = dark ? "#33353b" : "#e4e4e1";
+  const palette = ["#2f6f4e", "#74c69d", "#9a6b1f", "#a33a2c", "#4a6fa5"];
+
+  costChart = costChart || echarts.init(document.getElementById("chart-cost"));
+  costChart.setOption({
+    grid: { left: 50, right: 20, top: 30, bottom: 40 },
+    tooltip: { trigger: "axis" },
+    xAxis: { type: "category", data: data.days.map(d => d.day), axisLine: { lineStyle: { color: line } }, axisLabel: { color: ink } },
+    yAxis: [
+      { type: "value", name: "USD", axisLabel: { color: ink }, splitLine: { lineStyle: { color: line } } },
+      { type: "value", name: "decisions", axisLabel: { color: ink }, splitLine: { show: false } },
+    ],
+    series: [
+      { name: "chi phí", type: "bar", barMaxWidth: 48, data: data.days.map(d => +d.cost_usd.toFixed(4)), itemStyle: { color: palette[0] } },
+      { name: "số decision", type: "line", yAxisIndex: 1, data: data.days.map(d => d.decisions), itemStyle: { color: palette[2] }, smooth: true },
+    ],
+    legend: { textStyle: { color: ink } },
+  });
+
+  const counts = Object.entries(data.counts.messages || {});
+  statusChart = statusChart || echarts.init(document.getElementById("chart-status"));
+  statusChart.setOption({
+    tooltip: { trigger: "item" },
+    legend: { bottom: 0, textStyle: { color: ink } },
+    series: [{
+      type: "pie", radius: ["45%", "70%"], center: ["50%", "45%"],
+      itemStyle: { borderColor: dark ? "#1e1f23" : "#fff", borderWidth: 2 },
+      label: { color: ink },
+      data: counts.map(([k, v], i) => ({ name: k, value: v, itemStyle: { color: palette[i % palette.length] } })),
+    }],
+  });
+}
+addEventListener("resize", () => { costChart && costChart.resize(); statusChart && statusChart.resize(); });
+
+// ─── actions ───
+document.getElementById("btn-refresh").onclick = () => loadInbox().catch(e => toast(e.message, true));
+document.getElementById("f-status").onchange = () => loadInbox().catch(e => toast(e.message, true));
+document.getElementById("btn-ingest").onclick = async (ev) => {
+  ev.target.disabled = true; ev.target.textContent = "đang poll…";
+  try { const r = await api("/api/ingest", { method: "POST" }); toast("Poll xong: " + JSON.stringify(r)); await loadInbox(); }
+  catch (e) { toast(e.message, true); }
+  finally { ev.target.disabled = false; ev.target.textContent = "Poll kênh"; }
+};
+document.getElementById("btn-cycle").onclick = async (ev) => {
+  ev.target.disabled = true; ev.target.textContent = "đang chạy…";
+  try {
+    const r = await api("/api/cycle", { method: "POST" });
+    toast(`Vòng xong trong ${r.ms}ms — triage ${r.triaged.triaged}, gộp ${r.triaged.coalesced}, gửi ${r.sent.sent}`);
+    await loadInbox();
+  } catch (e) { toast(e.message, true); }
+  finally { ev.target.disabled = false; ev.target.textContent = "Chạy 1 vòng"; }
+};
+document.getElementById("btn-say").onclick = async (ev) => {
+  const text = document.getElementById("say-text").value.trim();
+  if (!text) return;
+  ev.target.disabled = true; ev.target.textContent = "đang hỏi…";
+  try {
+    const r = await api("/api/say", { method: "POST", body: JSON.stringify({ text, project: document.getElementById("say-project").value.trim() }) });
+    document.getElementById("say-text").value = "";
+    await loadInbox();
+    if (r.message_id) await openDetail(r.message_id);
+    toast("Đã trả lời — xem bên phải");
+  } catch (e) { toast(e.message, true); }
+  finally { ev.target.disabled = false; ev.target.textContent = "Gửi"; }
+};
+
+loadInbox().catch(e => toast(e.message, true));
+</script>
+</body>
+</html>

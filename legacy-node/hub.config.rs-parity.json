@@ -1,0 +1,121 @@
+{
+  "poll_interval_sec": 120,
+  "max_triage_per_cycle": 1,
+  "triage": {
+    "model": "sonnet",
+    "max_budget_usd": 0.5,
+    "timeout_sec": 240,
+    "min_confidence_auto": 0.7
+  },
+  "act": {
+    "enabled": false,
+    "model": "sonnet",
+    "max_budget_usd": 3,
+    "timeout_sec": 1800
+  },
+  "autonomy": {
+    "default": "L1",
+    "projects": {}
+  },
+  "adapters": {
+    "github": {
+      "enabled": true,
+      "per_page": 30,
+      "detail_limit": 10,
+      "include_read": false,
+      "repos": []
+    },
+    "devlog": {
+      "enabled": true,
+      "projects": [],
+      "kinds": [
+        "warning",
+        "blocker",
+        "bug",
+        "test_fail",
+        "question"
+      ],
+      "max_per_project": 10
+    },
+    "email": {
+      "enabled": false,
+      "base_url": "https://mail.dipgle.com",
+      "api_key_env": "HUB_MAILLER_API_KEY",
+      "folder": "inbox",
+      "limit": 30
+    },
+    "telegram": {
+      "enabled": false,
+      "token_env": "HUB_TELEGRAM_TOKEN",
+      "allowed_chat_ids": [],
+      "poll_timeout_sec": 20
+    }
+  },
+  "trust": {
+    "github_logins": [
+      "dipgle"
+    ],
+    "emails": [],
+    "telegram_chat_ids": [],
+    "trusted_sources": [
+      "devlog",
+      "cli"
+    ]
+  },
+  "routing": [
+    {
+      "when": {
+        "repo": "dipgle/tfl5"
+      },
+      "project": "tfl5"
+    },
+    {
+      "when": {
+        "repo": "dipgle/social"
+      },
+      "project": "social"
+    },
+    {
+      "when": {
+        "repo": "dipgle/social-backend"
+      },
+      "project": "social"
+    },
+    {
+      "when": {
+        "repo": "dwork-dev/dwork"
+      },
+      "project": "dwork"
+    },
+    {
+      "when": {
+        "repo": "dipgle/agent-workforce"
+      },
+      "project": "ai1"
+    },
+    {
+      "when": {
+        "repo": "dipgle/sdvi"
+      },
+      "project": "sdvi"
+    },
+    {
+      "when": {
+        "repo": "dipgle/tcc-node"
+      },
+      "project": "tcc"
+    },
+    {
+      "when": {
+        "repo": "dipgle/tafalo5"
+      },
+      "project": "tafalo5"
+    },
+    {
+      "when": {
+        "repo": "dipgle/codetrail"
+      },
+      "project": "codetrail"
+    }
+  ]
+}

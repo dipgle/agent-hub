@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Thin wrapper so `./hub …` works from the hub directory without remembering the
+# target path. Builds on first use, then execs the release binary.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bin="$here/rust/target/release/hub"
+if [[ ! -x "$bin" ]]; then
+  echo "hub: building release binary (first run)…" >&2
+  (cd "$here/rust" && cargo build --release --offline)
+fi
+exec "$bin" "$@"

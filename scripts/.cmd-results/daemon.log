@@ -1,0 +1,5 @@
+🛡  runner.sh watching /Users/hanguyen/Documents/projects/AI/hub/scripts/.cmd-queue/  — project=/Users/hanguyen/Documents/projects/AI/hub
+    EXACT allowlist: 11 commands
+    PREFIX allowlist: 13 patterns
+    Audit: /Users/hanguyen/Documents/projects/AI/hub/scripts/.cmd-results/audit.log
+

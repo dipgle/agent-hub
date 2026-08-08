@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent: starts hubd at login and keeps it alive. hubd runs BOTH the
+  poll loop and the web console (web.enabled in hub.config.json), so this is the
+  only unit you need.
+
+  Install:
+    cp deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist
+  Status / logs:
+    launchctl print gui/$(id -u)/com.dipgle.hubd | head -20
+    tail -f ~/Documents/projects/AI/hub/logs/hubd.out
+  Stop / uninstall:
+    launchctl bootout gui/$(id -u)/com.dipgle.hubd
+    rm ~/Library/LaunchAgents/com.dipgle.hubd.plist
+
+  SECRETS: launchd does not read your shell profile. Put tokens in
+  <hub>/hub.env (chmod 600) — hubd loads it at startup and logs only the KEY
+  NAMES. Do not paste tokens into this file; it gets copied and backed up.
+
+  MONEY: an unattended daemon triages on its own. `daily_budget_usd` in
+  hub.config.json is the hard ceiling (default $5/day); when it is reached the
+  loop stops triaging and tells you once.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dipgle.hubd</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/hanguyen/Documents/projects/AI/hub/rust/target/release/hubd</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/hanguyen/Documents/projects/AI/hub</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- gh, claude, git and sqlite3 live outside launchd's default PATH -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/Users/hanguyen/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>HUB_LOG_LEVEL</key>
+    <string>info</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <!-- Do not fight the user for CPU; triage is a background chore. -->
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LowPriorityIO</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/hanguyen/Documents/projects/AI/hub/logs/hubd.out</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/hanguyen/Documents/projects/AI/hub/logs/hubd.err</string>
+</dict>
+</plist>

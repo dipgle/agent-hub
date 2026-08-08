@@ -1,0 +1,172 @@
+{
+  "db": "data/hub.sqlite",
+  "log_file": "logs/hub.log",
+  "project_roots": [
+    "",
+    "AI"
+  ],
+  "poll_interval_sec": 120,
+  "max_triage_per_cycle": 6,
+  "coalesce_hours": 12,
+  "triage": {
+    "model": "sonnet",
+    "max_budget_usd": 0.5,
+    "timeout_sec": 240,
+    "min_confidence_auto": 0.8,
+    "context_bytes": 6000
+  },
+  "act": {
+    "enabled": true,
+    "model": "sonnet",
+    "max_budget_usd": 1.0,
+    "timeout_sec": 1800
+  },
+  "autonomy": {
+    "default": "L0",
+    "projects": {}
+  },
+  "adapters": {
+    "github": {
+      "enabled": false,
+      "per_page": 30,
+      "detail_limit": 10,
+      "include_read": false,
+      "repos": []
+    },
+    "devlog": {
+      "enabled": false,
+      "projects": [],
+      "kinds": [
+        "warning",
+        "blocker",
+        "bug",
+        "test_fail",
+        "question"
+      ],
+      "max_per_project": 10,
+      "backfill": false
+    },
+    "email": {
+      "enabled": false,
+      "base_url": "https://mail.dipgle.com",
+      "api_key_env": "HUB_MAILLER_API_KEY",
+      "folder": "inbox",
+      "limit": 30,
+      "backfill": false
+    },
+    "telegram": {
+      "enabled": false,
+      "token_env": "HUB_TELEGRAM_TOKEN",
+      "allowed_chat_ids": [],
+      "poll_timeout_sec": 20
+    },
+    "tfl5": {
+      "enabled": true,
+      "base_url": "http://localhost:8090",
+      "app_tid": "a-65dd60d3-624e-45a9-8fdf-62aa7d894d80",
+      "room": "hub",
+      "user_env": "HUB_TFL5_USER",
+      "password_env": "HUB_TFL5_PASSWORD",
+      "limit": 50,
+      "backfill": false,
+      "reply_timeout_sec": 15,
+      "silence_window_sec": 10,
+      "min_chars": 3,
+      "live": true
+    }
+  },
+  "trust": {
+    "github_logins": [
+      "dipgle"
+    ],
+    "emails": [],
+    "telegram_chat_ids": [],
+    "tfl5_user_tids": [
+      "u-b08803e3-50b8-4fbf-84de-61c8d3b933d3",
+      "u-34d6a0c5-6200-4393-8412-432713396eba"
+    ],
+    "trusted_sources": [
+      "devlog",
+      "cli"
+    ]
+  },
+  "projects": {
+    "ai1": {
+      "repos": [
+        "dipgle/agent-workforce"
+      ]
+    },
+    "codetrail": {
+      "repos": [
+        "dipgle/codetrail"
+      ]
+    },
+    "dwork": {
+      "repos": [
+        "dwork-dev/dwork"
+      ]
+    },
+    "sdvi": {
+      "repos": [
+        "dipgle/sdvi"
+      ]
+    },
+    "social": {
+      "repos": [
+        "dipgle/social",
+        "dipgle/social-backend"
+      ]
+    },
+    "tafalo5": {
+      "repos": [
+        "dipgle/tafalo5"
+      ]
+    },
+    "tcc": {
+      "repos": [
+        "dipgle/tcc-node"
+      ]
+    },
+    "tfl5": {
+      "repos": [
+        "dipgle/tfl5"
+      ]
+    }
+  },
+  "leak_patterns": [],
+  "notify": {
+    "file": "logs/notify.log",
+    "macos_notification": true
+  },
+  "web": {
+    "enabled": true,
+    "port": 9200,
+    "bind": "127.0.0.1",
+    "password_env": "HUB_WEB_PASSWORD",
+    "allowed_hosts": []
+  },
+  "source_daily_budget_usd": {
+    "tfl5": 1.0
+  },
+  "source_coalesce_hours": {
+    "tfl5": 0.05
+  },
+  "source_thread_memory_hours": {
+    "tfl5": 2.0
+  },
+  "daily_budget_usd": 3.0,
+  "claude_accounts": [
+    {
+      "name": "acc1"
+    },
+    {
+      "name": "acc2",
+      "config_dir": "~/.claude-acc2"
+    },
+    {
+      "name": "acc3",
+      "config_dir": "~/.claude-acc3"
+    }
+  ],
+  "owner_daily_budget_usd": 2.0
+}

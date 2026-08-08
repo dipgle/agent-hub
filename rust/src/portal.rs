@@ -48,9 +48,9 @@ pub const SNAPSHOT_KEY: &str = "snapshot";
 /// installation that ran the earlier build does not keep serving it.
 pub const LEGACY_FILE_PATH: &str = "hub-status.json";
 /// How stale a channel-health probe may be before it is measured again. The
-/// probes hit the network (GitHub, Telegram, mailler) and shell out to
-/// `claude --version`, so running them on every cycle would spend real time
-/// and quota to redraw a panel nobody is looking at most minutes.
+/// probe logs into tfl5 and shells out to `claude --version`, so running it on
+/// every cycle would spend real time to redraw a panel nobody is looking at
+/// most minutes.
 const HEALTH_TTL_MS: i64 = 10 * 60 * 1000;
 
 /// Cache for the deep health probe: `(measured_at_ms, value)`. Lives for the

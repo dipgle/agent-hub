@@ -687,7 +687,7 @@ pub fn owner_budget_state(db: &Db) -> OwnerBudget {
 /// Deliberately field-at-a-time rather than "paste a JSON blob": the value
 /// travels through a chat room, and one key + one value is auditable at a
 /// glance. The type of the EXISTING value decides how the text is parsed, so
-/// `/set adapters.github.enabled false` cannot turn a bool into the string
+/// `/set adapters.tfl5.enabled false` cannot turn a bool into the string
 /// "false" and silently disable the check that reads it.
 pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String> {
     let path = cfg.config_file.clone();

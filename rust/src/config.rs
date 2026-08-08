@@ -1,7 +1,7 @@
 //! Config loading + validation.
 //!
 //! Secrets NEVER live in the config file — only the NAME of the env var that
-//! holds them (`token_env`, `api_key_env`). Charter DoD #8.
+//! holds them (`user_env`, `password_env`). Charter DoD #8.
 //!
 //! `#[serde(default)]` on every struct reproduces the prototype's deep-merge:
 //! a key absent from hub.config.json falls back to the default, and sibling
@@ -68,16 +68,15 @@ pub struct Tfl5Cfg {
     pub password_env: String,
     pub limit: i64,
     /// First poll of a room that already has history: take the tip as the
-    /// baseline rather than triaging (and paying for) every old message.
+    /// baseline rather than replaying every old line looking for orders.
     pub backfill: bool,
     /// How long to wait for tfl5 to echo a sent message back before calling
     /// delivery unconfirmed.
     pub reply_timeout_sec: u64,
-    /// Hold messages younger than this so a burst of short lines becomes ONE
-    /// triage call instead of one per line. 0 disables the wait.
+    /// Hold lines younger than this before reading them, so a burst that is
+    /// still being typed arrives whole. 0 disables the wait.
     pub silence_window_sec: u64,
-    /// Drop anything shorter than this before it reaches the model. "ok" and
-    /// "👍" are not questions, and each one would cost real money.
+    /// Ignore anything shorter than this. "ok" and "👍" are not orders.
     pub min_chars: usize,
     /// Hold the `/ws/chat` socket open in `hubd` so tfl5 pushes messages
     /// instead of hub asking every cycle. The poller stays on regardless as
@@ -121,7 +120,8 @@ pub struct Trust {
     /// tfl5 `user_tid`s hub treats as the owner. Deliberately SEPARATE from
     /// tfl5's own ACL: tfl5 answers "may this account enter the room", which is
     /// not the same question as "may this person make hub act". Everyone in the
-    /// room is untrusted here until listed, so `policy.rs` keeps them at L0.
+    /// room is untrusted here until listed, and `tfl5::parse_command` refuses
+    /// their orders outright (logged, never silently dropped).
     pub tfl5_user_tids: Vec<String>,
     pub trusted_sources: Vec<String>,
 }
@@ -195,8 +195,7 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub projects: BTreeMap<String, ProjectCfg>,
     pub notify: NotifyCfg,
-    /// The `claude` executable used to LIST sessions (`sessions.rs`). Separate
-    /// from whatever triage spawns: this one only ever reads.
+    /// The `claude` executable used to LIST sessions (`sessions.rs`).
     #[serde(default = "default_claude_cli")]
     pub claude_cli: String,
     /// Accounts to enumerate. Empty = just the ambient account, which is the
@@ -507,7 +506,7 @@ pub fn project_bases(cfg: &Config) -> Vec<PathBuf> {
 /// Load `<hub_home>/hub.env` (KEY=VALUE lines) into the process environment.
 ///
 /// launchd does NOT read your shell profile, so an auto-started daemon has no
-/// `HUB_TELEGRAM_TOKEN`. Putting secrets in the plist works but spreads them
+/// `HUB_TFL5_PASSWORD`. Putting secrets in the plist works but spreads them
 /// into a file that gets synced/backed up; a single chmod-600 env file next to
 /// the config is easier to keep private. Values already present in the
 /// environment always win, so an interactive shell can still override.

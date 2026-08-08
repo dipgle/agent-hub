@@ -1,5 +1,39 @@
 # active context — hub
 
+## 🧹 2026-08-08 — hub giờ CHỈ là kênh quản lý phiên Claude CLI
+
+**Đã gỡ hẳn nhánh hộp thư** (commit `88398ca`, **−2.488 dòng**). Hà: *"rõ ràng loại
+bỏ github ra khỏi flow rồi mà, chỉ đơn thuần tạo kênh quản lý thôi"*.
+
+Bỏ: 4 adapter `github`/`telegram`/`devlog`/`email` + toàn bộ wiring
+(`ADAPTER_NAMES`, `poll_adapter`, `adapter_enabled`, các `*Cfg`,
+`Trust.{github_logins,emails,telegram_chat_ids}`, mục kênh trong doctor/web/portal),
+nhánh gửi outbound của 3 kênh, nhánh callback Telegram, khối CI-context trong
+`triage`, nhánh trust theo github/email/telegram trong `policy`, và test tương ứng.
+
+**Trước khi xoá** — hub chưa từng có git: `git init` + commit **`525beeb`** chụp
+nguyên trạng, nhánh **`backup/inbox-adapters`**, bản sao `/tmp/adapters-backup`.
+Hook kiểm duyệt đòi đủ ba thứ đó; tôi làm theo chứ không lách.
+
+**Còn lại:** một kênh `tfl5`, và ba việc — **danh sách phiên · xem luồng như ngồi
+máy · đóng sổ bàn giao**. Hộp việc + `/approve` vẫn chạy trên xương sống
+`messages/decisions/outbox` cũ (Hà chưa chốt có bỏ nữa không).
+
+⚠ **Hai hồi quy do chính việc gỡ, bắt được trước khi commit:**
+1. `known_projects` bỏ devlog adapter → chuyển sang quét thư mục, và bản đầu vơ
+   cả `logs`, `memory`, `scripts`, `crates`. Một tên trong danh sách này là một
+   tên **`/project` sẽ chấp nhận** — pin trỏ vào thư mục không có việc. Nay chỉ
+   nhận thư mục có dấu hiệu dự án (`CLAUDE.md`/`.git`/`Cargo.toml`/`package.json`/
+   `logs/devlog.sqlite`).
+2. `fe-board-uc` đòi tab Sức khoẻ có **≥3 chip kênh** — assert của sản phẩm cũ.
+   Nay đòi đúng 2 chip còn lại **và** đòi **không** còn github/telegram/devlog,
+   để lần sau ai bật lại lén thì test đỏ.
+
+**Nghiệm thu sau khi gỡ:** `cargo test` **161** · clippy **0** · build 0 warning ·
+`fe-sessions-uc` 9/9 · `fe-stream-uc` 13/13 · `fe-smoke` 15/15 · `fe-board-uc`
+43/43 · `hubd` pid 35849 · `doctor` chỉ còn kênh `tfl5`.
+
+
 **Cập nhật:** 2026-08-08 · **Một mặt tiền duy nhất trên tfl5**: hộp việc +
 trao đổi + sức khoẻ + chi phí + cấu hình, đọc-và-ghi.
 Phương án + bằng chứng: `PLAN-portal.md`. Lịch sử cũ ở `PLAN.md`.

@@ -64,6 +64,21 @@ pub enum CommandKind {
     /// Continue the focused background session IN PLACE — a real next turn on
     /// the same thread, unlike `Ask` which forks. `arg` is what to say.
     Tell,
+    /// `/type <chữ>` — gõ THẲNG vào cửa sổ terminal của phiên đang theo.
+    ///
+    /// Khác `Tell` ở chỗ căn bản: `Tell` chạy `claude --resume`, tức mở một
+    /// lượt mới trên nhật ký và chỉ dùng được cho phiên nền ĐÃ DỪNG. `Type` gõ
+    /// phím vào phiên **đang chạy**, kể cả phiên interactive Hà mở tay — đó là
+    /// đường DUY NHẤT trả lời một hộp chọn đang chờ, thứ không nằm trong nhật
+    /// ký nên không có API nào chạm tới.
+    ///
+    /// ⚠ Đường này **bỏ qua `DENIED_TOOLS`**: chữ gõ vào terminal không đi qua
+    /// bộ khoá nào. Hà chốt 2026-08-09 sau khi được nêu rõ đánh đổi.
+    Type,
+    /// `/key <tên phím>` — một phím điều khiển: up · down · enter · esc · tab ·
+    /// space · 1-9. Hộp chọn của `claude` đi bằng mũi tên, gửi chữ "xuống" vào
+    /// đó thì nó gõ ra chữ chứ không di chuyển.
+    Key,
     /// Ask the focused session a question WITHOUT interrupting it. `arg` is the
     /// question; the target is whatever `/session` is following.
     ///

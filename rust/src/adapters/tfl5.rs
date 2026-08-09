@@ -707,6 +707,22 @@ pub fn parse_command(
                 .unwrap_or_default();
             (!what.is_empty()).then_some((CommandKind::Tell, 0, what))
         }
+        // `/type <chữ>` — gõ thẳng vào cửa sổ của phiên đang theo.
+        "type" | "go" => {
+            let what = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            (!what.is_empty()).then_some((CommandKind::Type, 0, what))
+        }
+        // `/key <tên phím>` — một phím điều khiển.
+        "key" | "phim" => {
+            let what = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            (!what.is_empty()).then_some((CommandKind::Key, 0, what))
+        }
         // `/ask <câu hỏi>` — everything after the verb is the question, so
         // re-split like `/project`. No id: the target is the focused session,
         // because this is typed while looking at that session's stream.

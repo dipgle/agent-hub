@@ -494,6 +494,15 @@
   }
   .rt-row:last-child { border-bottom: 0; }
   .rt-k { color: var(--muted); flex: 0 0 auto; min-width: 116px; }
+  /* Trong lý lịch phiên, khung hẹp hơn hẳn tab Sức khoẻ: nhãn cứng 116px làm
+     hàng rộng gấp đôi khung (đo 116/61). Cho nhãn co lại và hàng xuống dòng. */
+  /* `#sessDetail` là flex column; một `<details>` trong đó bị co về bề rộng
+     nội dung của `<summary>` (đo: khung 61px trong khi hàng 116px). Ép nó
+     chiếm trọn bề ngang như mọi khối khác. */
+  #sessInfoBox { width: 100%; box-sizing: border-box; }
+  #sessInfo { width: 100%; box-sizing: border-box; }
+  #sessInfo .rt-k { min-width: 0; }
+  #sessInfo .rt-row { flex-wrap: wrap; gap: 4px 8px; }
   .rt-v { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
   .rt-v.ok { color: var(--accent, #2f6f4e); font-weight: 600; }
   .rt-v.bad { color: var(--danger, #a33a2c); font-weight: 600; }
@@ -883,7 +892,13 @@
                (cắt đuôi nếu dài), cách hiển thị bên phải. Nó là chú thích, nên
                nó xuống cuối và không bao giờ được chiếm hai dòng. -->
           <div id="sessNote">
-            <p class="muted" id="sessStatus"></p>
+            <!-- Lý lịch phiên: gấp sẵn để không đẩy luồng xuống, mở một chạm khi
+             cần đối chiếu. Số liệu vốn đã đi kèm ảnh chụp. -->
+        <details id="sessInfoBox">
+          <summary class="muted">Thông tin phiên</summary>
+          <div id="sessInfo" class="rt"></div>
+        </details>
+        <p class="muted" id="sessStatus"></p>
             <label class="term-toggle muted">
               <input type="checkbox" id="termMode" checked />
               <span>kiểu terminal</span>
@@ -1975,6 +1990,7 @@
   function openSession(s, opts) {
     wantSession = s.session_id;
     wantName = s.name || s.session_id.slice(0, 8);
+    renderSessInfo(s);
     // Mở một phiên là một bước đi, trừ khi chính địa chỉ vừa yêu cầu nó (dựng
     // lại sau F5 hoặc Back) — lúc đó ghi đè, đừng đẩy thêm một bước vào lịch sử.
     writeUrl({ tab: 'sessions', session: wantSession }, !(opts && opts.fromUrl));
@@ -2151,12 +2167,69 @@
   /// On success the room's line is a real answer too — show it now, and let the
   /// snapshot replace it a moment later with the richer version (question,
   /// fork id, cost).
+  /// Lý lịch phiên, hiện ngay khi mở (Hà 2026-08-09: *"khi mở 1 phiên nên hiện
+  /// thêm các thông tin chi tiết của phiên đó lên để tiện theo dõi"*).
+  ///
+  /// Trước đó màn chi tiết chỉ có tên + luồng sự kiện: muốn biết phiên chạy tài
+  /// khoản nào, ngữ cảnh đầy chưa, có subagent không thì phải quay ra danh sách
+  /// đọc thẻ. Toàn bộ số liệu này đã đi kèm ảnh chụp rồi — chỉ là chưa ai bày ra.
+  function renderSessInfo(s) {
+    const box = $('sessInfo');
+    if (!box) return;
+    box.textContent = '';
+    const WIN = { haiku: 200000 };
+    const win = Object.entries(WIN).find(([k]) => (s.model || '').includes(k))?.[1] || 1000000;
+    const pct = s.context_tokens ? Math.round((s.context_tokens / win) * 100) : 0;
+    const WHERE = {
+      terminal: 'cửa sổ terminal', editor: 'trong editor',
+      background: 'chạy nền', detached: 'không gắn cửa sổ', dead: 'đã dừng',
+    };
+    const rows = [
+      ['tài khoản', s.account],
+      ['nơi chạy', (WHERE[s.host] || s.host) + (s.tty && s.tty !== '??' ? ` · ${s.tty}` : '')],
+      ['mở bởi', s.started_by_hub ? 'hub (từ điện thoại)' : (s.parent_name ? `phiên «${s.parent_name}»` : 'bạn')],
+      ['model', s.model || '(chưa rõ)'],
+      // Ngữ cảnh là con số quyết định "khi nào nên đóng sổ", nên nó đứng đây
+      // chứ không chỉ nằm trên thẻ ở danh sách.
+      ['ngữ cảnh', pct ? `${pct}% · ${s.context_tokens.toLocaleString('vi-VN')} token` : '(chưa đọc được)'],
+      ['chế độ quyền', { auto: 'tự duyệt', dontAsk: 'không hỏi', default: 'hỏi trước' }[s.permission_mode] || s.permission_mode || '(chưa rõ)'],
+      ['thư mục', s.cwd || '—'],
+    ];
+    if (s.pending_subagents) rows.splice(4, 0, ['subagent', `${s.pending_subagents} đang chạy`]);
+    rows.forEach(([k, v]) => {
+      if (!v) return;
+      const r = document.createElement('div');
+      r.className = 'rt-row';
+      const kk = document.createElement('span');
+      kk.className = 'rt-k';
+      kk.textContent = k;
+      const vv = document.createElement('span');
+      vv.className = 'rt-v';
+      vv.textContent = v;
+      if (k === 'ngữ cảnh' && pct >= 60) vv.classList.add('warn');
+      r.append(kk, vv);
+      box.append(r);
+    });
+  }
+
   function noteSessionReply(f) {
     if (!waitingFor || f.from === me) return;
     const text = String(f.text || '');
-    // Every reply hub gives these buttons starts with one of these marks — an
-    // answer, a handover, a start, a stop, a next turn, or a refusal.
-    if (!/^(💬|📋|🚀|⏹|➡️|⚠)/.test(text)) return;
+    // Trả lời phải KHỚP LỆNH đã hỏi, không phải "bất kỳ trả lời nào của hub".
+    //
+    // Bản trước nhận mọi câu bắt đầu bằng một trong sáu dấu rồi đổ vào ô đang
+    // chờ — nên bấm "Đóng sổ" mà màn hiện *"🚀 Đã mở phiên nền cho
+    // hub-act-demo…"*, tức lời đáp của một lệnh KHÁC (Hà gặp 2026-08-09).
+    // Mỗi loại chờ nay chỉ nhận dấu của chính nó; `⚠` thì ai cũng nhận, vì một
+    // lời từ chối là câu trả lời cho đúng cái vừa hỏi.
+    const MARKS = {
+      ask: /^(💬|⚠)/,
+      tell: /^(➡️|⏹|⌨|⚠)/,
+      new: /^(🚀|⚠)/,
+      handover: /^(📋|⚠)/,
+    };
+    const want = MARKS[waitingFor] || MARKS.handover;
+    if (!want.test(text)) return;
     const box = $({ ask: 'sessAskBox', tell: 'sessTellBox', new: 'sessNewNote' }[waitingFor] || 'sessHandoverBox');
     waitingFor = null;
     box.classList.remove('hidden');

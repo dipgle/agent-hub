@@ -106,6 +106,9 @@ pub struct LiveSession {
     /// Subagent đang chạy (xem `TranscriptTail::pending_subagents`).
     #[serde(default)]
     pub pending_subagents: usize,
+    /// tty của tiến trình, hoặc rỗng. Chìa để tìm cửa sổ Terminal của phiên.
+    #[serde(default)]
+    pub tty: String,
     /// Cỡ ngữ cảnh lượt gần nhất, và model để biết cửa sổ rộng bao nhiêu.
     #[serde(default)]
     pub context_tokens: u64,
@@ -255,12 +258,15 @@ pub const DENIED_TOOLS: [&str; 17] = [
 /// separates them, not the process name. A pid that answers nothing at all is
 /// a row the CLI still lists for a process that is gone: `"dead"`, so the phone
 /// can show it as something to clean up rather than as work in progress.
-fn host_of(pid: i64, kind: &str) -> String {
+/// `(host, tty)` — tty đi kèm vì đó là chìa ghép phiên với cửa sổ Terminal
+/// (`keys::window_of`). Tính rồi vứt đi thì mỗi lần cần lại phải gọi `ps` lần
+/// nữa, trên đúng con số vừa đọc xong.
+fn host_of(pid: i64, kind: &str) -> (String, String) {
     if pid <= 0 {
         // Background rows come back with pid 0 once stopped; `claude agents`
         // keeps listing them. Both dead rows seen on 2026-08-09 were exactly
         // this — stopped on 08-07, still on the list two days later.
-        return "dead".into();
+        return ("dead".into(), String::new());
     }
     let out = run(
         "ps",
@@ -275,13 +281,13 @@ fn host_of(pid: i64, kind: &str) -> String {
         // `ps` exits non-zero when the pid is gone — that is the answer, not a
         // failure. A spawn error is different: say "unknown" rather than
         // claiming a session is dead on the strength of a broken probe.
-        Ok(_) => return "dead".into(),
+        Ok(_) => return ("dead".into(), String::new()),
         Err(e) => {
             logging::warn(
                 "session_host_probe_failed",
                 json!({ "pid": pid, "err": e.to_string() }),
             );
-            return "unknown".into();
+            return ("unknown".into(), String::new());
         }
     };
     // `ps -o tty=,command=` in ra tty rồi mới tới dòng lệnh; tty là từ đầu tiên.
@@ -289,7 +295,7 @@ fn host_of(pid: i64, kind: &str) -> String {
         Some((t, rest)) => (t, rest),
         None => ("??", cmd.as_str()),
     };
-    classify_host(cmd, kind, tty).to_string()
+    (classify_host(cmd, kind, tty).to_string(), tty.to_string())
 }
 
 /// The half of `host_of` that is a decision rather than a probe.
@@ -697,6 +703,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 // Điền ở tầng có `Db` (`pipeline::mark_started_by_hub`); ở đây
                 // không có sổ để tra, mà đoán thì thà để trống.
                 started_by_hub: false,
+                tty: String::new(),
                 pending_subagents: 0,
                 context_tokens: 0,
                 model: None,
@@ -706,7 +713,9 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 parent_name: None,
             };
 
-            row.host = host_of(row.pid, &row.kind);
+            let (host, tty) = host_of(row.pid, &row.kind);
+            row.host = host;
+            row.tty = tty;
 
             // Phiên do extension VS Code/Cursor chạy KHÔNG lên màn.
             //

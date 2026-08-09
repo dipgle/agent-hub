@@ -618,6 +618,70 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }
+            CommandKind::Type | CommandKind::Key => {
+                // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
+                // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
+                // khác, và đó là hàng rào duy nhất còn lại ở đường này.
+                let want = db
+                    .get_cursor(FOCUS_SESSION_KEY)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                let live = crate::sessions::snapshot(cfg);
+                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                    None if want.is_empty() => {
+                        "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
+                    }
+                    None => format!(
+                        "⚠ không thấy phiên '{}' trong danh sách",
+                        crate::exec::truncate(&want, 40)
+                    ),
+                    Some(s) => match crate::keys::window_of(&s.tty) {
+                        Ok(Some(w)) => {
+                            let is_key = matches!(cmd.kind, CommandKind::Key);
+                            let res = if is_key {
+                                crate::keys::press(w, cmd.arg.trim())
+                            } else {
+                                crate::keys::type_into(w, &cmd.arg, true)
+                            };
+                            match res {
+                                Ok(()) => {
+                                    // Nội dung KHÔNG vào log: nó là chữ của chủ
+                                    // máy, còn log là tệp nằm lâu. Ghi đủ để
+                                    // truy: phiên nào, cửa sổ nào, dài bao nhiêu.
+                                    logging::info(
+                                        "keys_typed",
+                                        json!({ "session": s.session_id, "window": w,
+                                                "kind": if is_key { "key" } else { "text" },
+                                                "len": cmd.arg.trim().len() }),
+                                    );
+                                    if is_key {
+                                        format!("⌨ đã bấm '{}' vào {}", cmd.arg.trim(), s.name)
+                                    } else {
+                                        format!("⌨ đã gõ vào {} ({} ký tự)", s.name, cmd.arg.trim().len())
+                                    }
+                                }
+                                Err(e) => format!(
+                                    "⚠ không gõ được: {}",
+                                    crate::exec::truncate(&e.to_string(), 300)
+                                ),
+                            }
+                        }
+                        // Phiên nền không có cửa sổ nào — nói đúng lý do thay vì
+                        // một lời từ chối chung chung.
+                        Ok(None) => format!(
+                            "⚠ {} không có cửa sổ terminal để gõ (host: {}). Chỉ phiên mở trong Terminal mới gõ được.",
+                            s.name, s.host
+                        ),
+                        Err(e) => format!(
+                            "⚠ không tìm được cửa sổ: {}",
+                            crate::exec::truncate(&e.to_string(), 200)
+                        ),
+                    },
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+            }
             CommandKind::Ask => {
                 // Books, not brakes — same as handover. The owner asking their
                 // own session a question is the owner working, not a robot

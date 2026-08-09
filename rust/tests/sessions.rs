@@ -233,34 +233,41 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
     use hub::sessions::classify_host;
 
     let vscode = "/Users/hanguyen/.vscode/extensions/anthropic.claude-code-2.1.220-darwin-arm64/resources/native-binary/claude --output-format stream-json --verbose --input-format stream-json";
-    assert_eq!(classify_host(vscode, "interactive"), "editor");
+    // Editor thắng cả tty: extension có thể chạy kèm tty hay không, không đổi.
+    assert_eq!(classify_host(vscode, "interactive", "??"), "editor");
+    assert_eq!(classify_host(vscode, "interactive", "ttys009"), "editor");
     assert_eq!(
-        classify_host("/Users/x/.cursor/extensions/anthropic.claude-code/claude", "interactive"),
+        classify_host("/Users/x/.cursor/extensions/anthropic.claude-code/claude", "interactive", "??"),
         "editor"
     );
     assert_eq!(
-        classify_host("/Applications/Cursor.app/Contents/Resources/claude", "interactive"),
+        classify_host("/Applications/Cursor.app/Contents/Resources/claude", "interactive", "??"),
         "editor"
     );
 
-    // A real terminal row, verbatim: no editor path anywhere in it.
+    // Dòng terminal thật, chép nguyên từ `ps` trên máy này (tty ttys005).
     assert_eq!(
-        classify_host("claude tiếp /Users/hanguyen/Documents/projects/AI/hub", "interactive"),
+        classify_host("claude tiếp /Users/hanguyen/Documents/projects/AI/hub", "interactive", "ttys005"),
         "terminal"
     );
-    assert_eq!(classify_host("claude tiếp tfl5", "interactive"), "terminal");
+    assert_eq!(classify_host("claude tiếp tfl5", "interactive", "ttys006"), "terminal");
 
-    // `kind` beats the path: a session hub started with `--bg` is hub's to
-    // drive no matter which binary happens to be first on the PATH. Without
-    // this, a background session launched from an editor-installed `claude`
-    // would be filed as "editor" and hidden from the one screen that can stop
-    // it.
-    assert_eq!(classify_host(vscode, "background"), "background");
+    // KHÔNG có tty thì KHÔNG được gọi là terminal. Trước 2026-08-09 nhãn này
+    // suy bằng loại trừ, nên một `claude` do script hay cron chạy vẫn đọc là
+    // "terminal" — màn hình khai một thứ chưa ai kiểm. `ps` in `??` hoặc `-`.
+    assert_eq!(classify_host("claude tiếp dwork", "interactive", "??"), "detached");
+    assert_eq!(classify_host("claude tiếp dwork", "interactive", "-"), "detached");
+    assert_eq!(classify_host("claude tiếp dwork", "interactive", ""), "detached");
 
-    // A path merely MENTIONING a project called "vscode-something" is not an
-    // editor session; the marker is the dot-directory.
+    // `kind` thắng đường dẫn: phiên hub mở bằng `--bg` là của hub, dù binary
+    // nào tình cờ đứng trước trong PATH. Thiếu vế này, một phiên nền mở từ
+    // binary của editor sẽ bị xếp loại "editor" và biến mất khỏi đúng màn có
+    // thể dừng nó.
+    assert_eq!(classify_host(vscode, "background", "??"), "background");
+
+    // Tên dự án có chữ "vscode" KHÔNG phải phiên editor; dấu hiệu là thư mục ẩn.
     assert_eq!(
-        classify_host("claude tiếp /Users/hanguyen/Documents/projects/vscode-notes", "interactive"),
+        classify_host("claude tiếp /Users/hanguyen/Documents/projects/vscode-notes", "interactive", "ttys002"),
         "terminal"
     );
 }

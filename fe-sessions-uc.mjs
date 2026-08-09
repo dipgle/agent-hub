@@ -178,6 +178,35 @@ try {
   check("trang không tràn ngang", over.w <= over.inner + 1, `${over.w}/${over.inner}`);
 
   // A withheld preview must say so; silence would read as "phiên im lặng".
+  // "terminal" phải THẬT SỰ là terminal — Hà hỏi thẳng 2026-08-09: *"danh sách
+  // phiên thực sự đang liệt kê terminal hay chỉ claude?"*. Nhãn ấy từng được
+  // suy bằng loại trừ (không phải editor ⇒ terminal), nên một `claude` do
+  // script hay cron chạy vẫn đọc là "terminal". Phép đo này hỏi HỆ ĐIỀU HÀNH,
+  // không hỏi lại chính hub: mỗi dòng gắn nhãn terminal phải có tty điều khiển.
+  const ttyOf = (pid) => {
+    try {
+      return execFileSync("ps", ["-p", String(pid), "-o", "tty="], { encoding: "utf8" }).trim();
+    } catch {
+      return "";
+    }
+  };
+  const claimTerminal = truth.sessions.filter((s) => s.host === "terminal");
+  const noTty = claimTerminal.filter((s) => {
+    const t = ttyOf(s.pid);
+    return !t || t === "??" || t === "-";
+  });
+  check(
+    "mọi dòng gắn nhãn 'terminal' đều có tty thật",
+    noTty.length === 0,
+    `${claimTerminal.length} dòng · ${noTty.length} không tty${noTty.length ? ": " + noTty.map((s) => s.name).join(", ") : ""}`
+  );
+  const ttys = new Set(claimTerminal.map((s) => ttyOf(s.pid)).filter(Boolean));
+  check(
+    "mỗi phiên terminal ngồi ở một cửa sổ riêng",
+    ttys.size === claimTerminal.length,
+    `${claimTerminal.length} phiên / ${ttys.size} tty: ${[...ttys].join(" ")}`
+  );
+
   // Phiên chạy trong editor bị bỏ khỏi danh sách — màn phải NÓI RA, và nói
   // đúng số. Đo 2026-08-09: hub ẩn 8 phiên mỗi vòng suốt 601 lần ghi log, mà
   // màn hình không có một chữ nào về chúng; câu hỏi gốc của Hà ("3 terminal sao

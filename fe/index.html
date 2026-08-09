@@ -1219,8 +1219,15 @@
     // agents` vẫn liệt kê. Con số tổng không sai; nó chỉ không nói ra điều đó.
     const byHost = {};
     rows.forEach((s) => { byHost[s.host || 'unknown'] = (byHost[s.host || 'unknown'] || 0) + 1; });
-    const LABEL = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', dead: 'đã dừng', unknown: 'chưa rõ' };
-    const per = ['terminal', 'editor', 'background', 'dead', 'unknown']
+    // 'detached' = tiến trình claude còn sống nhưng KHÔNG gắn cửa sổ nào (script,
+    // cron, hoặc thứ gì đó hub không mở). Trước 2026-08-09 nó bị gộp vào
+    // 'terminal' vì nhãn suy bằng loại trừ — Hà hỏi đúng chỗ đó: *"danh sách
+    // phiên thực sự đang liệt kê terminal hay chỉ claude?"*
+    const LABEL = {
+      terminal: 'terminal', editor: 'trong editor', background: 'chạy nền',
+      detached: 'không gắn cửa sổ', dead: 'đã dừng', unknown: 'chưa rõ',
+    };
+    const per = ['terminal', 'editor', 'background', 'detached', 'dead', 'unknown']
       .filter((k) => byHost[k])
       .map((k) => `${byHost[k]} ${LABEL[k]}`)
       .join(' · ');
@@ -1280,7 +1287,7 @@
         || ({ done: 'đã xong' })[s.state] || '';
       // `kind` nói "interactive" cho cả cửa sổ terminal lẫn phiên do extension
       // của VS Code/Cursor chạy — nên hàng này hiện `host`, thứ phân biệt được.
-      const where = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', dead: 'đã dừng' }[s.host] || s.kind;
+      const where = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', detached: 'không gắn cửa sổ', dead: 'đã dừng' }[s.host] || s.kind;
       // `cwd` bỏ đi: mọi phiên trên máy này đều mở từ ~/Documents/projects nên
       // nó giống hệt nhau ở mọi dòng — chiếm chỗ mà không phân biệt được gì.
       // `work` cũng bỏ khỏi chữ: đã có chấm màu nói điều đó rồi.

@@ -52,9 +52,11 @@ pub struct LiveSession {
     pub cwd: String,
     /// "interactive" (a terminal / editor) or "background".
     pub kind: String,
-    /// WHERE the session actually lives: `"terminal"`, `"editor"` (the VS Code
-    /// / Cursor extension), `"background"`, or `"dead"` when no process is
-    /// behind it any more.
+    /// WHERE the session actually lives: `"terminal"` (has a controlling tty),
+    /// `"editor"` (the VS Code / Cursor extension), `"background"`, `"detached"`
+    /// (a live process with no tty and no editor path — a script, a cron, or
+    /// something hub did not start), or `"dead"` when no process is behind it
+    /// any more.
     ///
     /// `kind` alone reads "interactive" for a terminal window and for an
     /// editor-hosted session alike, and on 2026-08-09 that cost a real
@@ -232,7 +234,7 @@ fn host_of(pid: i64, kind: &str) -> String {
     }
     let out = run(
         "ps",
-        &["-p", &pid.to_string(), "-o", "command="],
+        &["-p", &pid.to_string(), "-o", "tty=,command="],
         RunOpts {
             timeout: Some(Duration::from_secs(5)),
             ..Default::default()
@@ -252,7 +254,12 @@ fn host_of(pid: i64, kind: &str) -> String {
             return "unknown".into();
         }
     };
-    classify_host(&cmd, kind).to_string()
+    // `ps -o tty=,command=` in ra tty rồi mới tới dòng lệnh; tty là từ đầu tiên.
+    let (tty, cmd) = match cmd.trim_start().split_once(char::is_whitespace) {
+        Some((t, rest)) => (t, rest),
+        None => ("??", cmd.as_str()),
+    };
+    classify_host(cmd, kind, tty).to_string()
 }
 
 /// The half of `host_of` that is a decision rather than a probe.
@@ -262,7 +269,7 @@ fn host_of(pid: i64, kind: &str) -> String {
 /// there is no way to exercise it through the UI. `host_of` still owns the
 /// `ps` call and the pid-is-gone answer; this owns only "given this command
 /// line, whose session is it".
-pub fn classify_host(cmd: &str, kind: &str) -> &'static str {
+pub fn classify_host(cmd: &str, kind: &str, tty: &str) -> &'static str {
     // A background session hub started is `--bg`, never an editor's, whatever
     // binary is on the path — the kind is the stronger signal, so it wins.
     if kind == "background" {
@@ -272,7 +279,21 @@ pub fn classify_host(cmd: &str, kind: &str) -> &'static str {
     // the PATH is what separates it from a terminal — the process name is
     // `claude` in both cases.
     if cmd.contains("/.vscode") || cmd.contains("/.cursor") || cmd.contains("Cursor.app") {
-        "editor"
+        return "editor";
+    }
+    // "terminal" phải CÓ NGHĨA LÀ terminal.
+    //
+    // Hà hỏi 2026-08-09: *"danh sách phiên thực sự đang liệt kê terminal hay chỉ
+    // claude?"* — và trước câu hỏi ấy, nhãn này được suy bằng LOẠI TRỪ: không
+    // phải editor thì gọi là terminal. Một `claude` do script/cron/tiến trình
+    // khác chạy (không gắn cửa sổ nào) vẫn đọc là "terminal", tức màn hình khai
+    // một thứ nó chưa từng kiểm. Đo lúc sửa: cả 5 dòng đang có tty thật và khác
+    // nhau (ttys000/003/005/006/010), nên nhãn *đang* đúng — nhưng đúng vì may,
+    // không vì có ai kiểm.
+    //
+    // `ps` in `??` (hoặc `-`) khi tiến trình không có tty điều khiển.
+    if tty.is_empty() || tty == "??" || tty == "-" {
+        "detached"
     } else {
         "terminal"
     }

@@ -1,5 +1,31 @@
 # active context — hub
 
+## 🔎 2026-08-09 (chiều) — "danh sách phiên đang liệt kê terminal hay chỉ claude?"
+
+Câu hỏi của Hà trúng đúng chỗ nhãn **được suy chứ chưa được kiểm**. Trả lời
+thẳng: danh sách liệt kê **phiên `claude`** (nguồn là `claude agents`), không
+phải cửa sổ terminal. Nhãn `terminal` khi ấy có nghĩa duy nhất là **"không phải
+editor"** — nên một `claude` do script/cron/tiến trình khác chạy vẫn đọc là
+"terminal", tức màn hình khai một thứ chưa ai kiểm.
+
+**Đo bằng `ps -o tty=` thì hoá ra nhãn *đang* đúng** — cả 5 dòng đều có tty thật
+và **khác nhau**: `ttys000 · ttys003 · ttys005 · ttys006 · ttys010` ⟹ 5 phiên ↔ 5
+cửa sổ. Nhưng đúng vì **may**, không vì có ai kiểm.
+
+**Sửa cho nhãn nói đúng thứ nó biết:** `host_of` nay đọc `ps -o tty=,command=`,
+`classify_host(cmd, kind, tty)` thêm nhãn thứ năm **`detached`** ("không gắn cửa
+sổ") cho tiến trình còn sống mà không có tty và không phải editor. Thứ tự quyết
+định: `background` (kind thắng) → `editor` (đường dẫn) → có tty? `terminal` :
+`detached`.
+
+**Phép đo hỏi HỆ ĐIỀU HÀNH, không hỏi lại chính hub** (`fe-sessions-uc`, 16/16):
+mỗi dòng gắn nhãn `terminal` phải có tty, và số tty **riêng biệt** phải bằng số
+dòng — nếu hub bịa nhãn thì `ps` sẽ cãi. Con số sau khi sửa không đổi (5/2/2, ẩn
+8), tức không có hồi quy.
+
+Bundle **v75** · `hubd` pid 39839 · `cargo test` **68** · `fe-sessions` 16/16 ·
+`fe-url` 16/16 · `fe-board` 19/19 · `fe-phone` 25/25 · `fe-smoke` 15/15.
+
 ## 👀 2026-08-09 (sáng) — nhìn bằng mắt bắt được 5 lỗi mà 80 assert xanh bỏ lọt
 
 Ba yêu cầu của Hà trong một mạch: *"chuyển 4 tab lên header… bỏ các phiên của

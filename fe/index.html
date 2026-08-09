@@ -2196,6 +2196,118 @@
   }
 
   // Phím điều khiển: một cú bấm = một phím, không có ô nhập nào ở giữa.
+  // UC-S05b mức 2. The question runs on a fork, so the session being watched
+  // keeps working and gains no turn — which is exactly the thing a person
+  // cannot see from a phone, so the screen has to keep saying it.
+  function askAside(e) {
+    if (!wantSession) return;
+    const input = $('sessSayInput');
+    const q = input.value.trim();
+    if (!q) { input.focus(); return; }
+    $('sessAskBox').classList.remove('hidden');
+    $('sessAskBox').textContent =
+      'Đang hỏi bên lề — hub mở một bản sao của phiên, mất khoảng nửa phút. Phiên gốc vẫn chạy bình thường…';
+    waitingFor = 'ask';
+    // Remember which answer was already on screen. Snapshots keep arriving
+    // while hub is still thinking, and each one carries the PREVIOUS answer —
+    // repainting it over "đang hỏi…" would show a stale reply as if it were the
+    // new one. Ask the same question twice and the screen would answer
+    // instantly with yesterday's text.
+    askedAfterTs = lastAsideTs;
+    sendCommand(`/ask ${q}`, e && e.target);
+    input.value = '';
+  }
+
+  // Which session button is waiting for hub: 'ask' | 'handover' | null.
+  let waitingFor = null;
+  // `ts` of the answer currently on screen, and the one a pending question must
+  // beat before its result may be painted.
+  let lastAsideTs = '';
+  let askedAfterTs = '';
+
+  /// hub answers in the ROOM, and a refusal ("hết ngân sách", "chưa mở phiên
+  /// nào") never becomes a snapshot row — so a box that only listens to
+  /// snapshots spins forever on exactly the cases a person most needs to read.
+  /// That spinner was already paid for once on 2026-08-07; this is the same
+  /// bug, so it gets the same fix rather than a second discovery.
+  ///
+  /// On success the room's line is a real answer too — show it now, and let the
+  /// snapshot replace it a moment later with the richer version (question,
+  /// fork id, cost).
+  /// Lý lịch phiên, hiện ngay khi mở (Hà 2026-08-09: *"khi mở 1 phiên nên hiện
+  /// thêm các thông tin chi tiết của phiên đó lên để tiện theo dõi"*).
+  ///
+  /// Trước đó màn chi tiết chỉ có tên + luồng sự kiện: muốn biết phiên chạy tài
+  /// khoản nào, ngữ cảnh đầy chưa, có subagent không thì phải quay ra danh sách
+  /// đọc thẻ. Toàn bộ số liệu này đã đi kèm ảnh chụp rồi — chỉ là chưa ai bày ra.
+  function renderSessInfo(s) {
+    const box = $('sessInfo');
+    if (!box) return;
+    box.textContent = '';
+    const WIN = { haiku: 200000 };
+    const win = Object.entries(WIN).find(([k]) => (s.model || '').includes(k))?.[1] || 1000000;
+    const pct = s.context_tokens ? Math.round((s.context_tokens / win) * 100) : 0;
+    const WHERE = {
+      terminal: 'cửa sổ terminal', editor: 'trong editor',
+      background: 'chạy nền', detached: 'không gắn cửa sổ', dead: 'đã dừng',
+    };
+    const rows = [
+      ['tài khoản', s.account],
+      ['nơi chạy', (WHERE[s.host] || s.host) + (s.tty && s.tty !== '??' ? ` · ${s.tty}` : '')],
+      ['mở bởi', s.started_by_hub ? 'hub (từ điện thoại)' : (s.parent_name ? `phiên «${s.parent_name}»` : 'bạn')],
+      ['model', s.model || '(chưa rõ)'],
+      // Ngữ cảnh là con số quyết định "khi nào nên đóng sổ", nên nó đứng đây
+      // chứ không chỉ nằm trên thẻ ở danh sách.
+      ['ngữ cảnh', pct ? `${pct}% · ${s.context_tokens.toLocaleString('vi-VN')} token` : '(chưa đọc được)'],
+      ['chế độ quyền', { auto: 'tự duyệt', dontAsk: 'không hỏi', default: 'hỏi trước' }[s.permission_mode] || s.permission_mode || '(chưa rõ)'],
+      ['thư mục', s.cwd || '—'],
+    ];
+    if (s.pending_subagents) rows.splice(4, 0, ['subagent', `${s.pending_subagents} đang chạy`]);
+    rows.forEach(([k, v]) => {
+      if (!v) return;
+      const r = document.createElement('div');
+      r.className = 'rt-row';
+      const kk = document.createElement('span');
+      kk.className = 'rt-k';
+      kk.textContent = k;
+      const vv = document.createElement('span');
+      vv.className = 'rt-v';
+      vv.textContent = v;
+      if (k === 'ngữ cảnh' && pct >= 60) vv.classList.add('warn');
+      r.append(kk, vv);
+      box.append(r);
+    });
+  }
+
+  function noteSessionReply(f) {
+    if (!waitingFor || f.from === me) return;
+    const text = String(f.text || '');
+    // Trả lời phải KHỚP LỆNH đã hỏi, không phải "bất kỳ trả lời nào của hub".
+    //
+    // Bản trước nhận mọi câu bắt đầu bằng một trong sáu dấu rồi đổ vào ô đang
+    // chờ — nên bấm "Đóng sổ" mà màn hiện *"🚀 Đã mở phiên nền cho
+    // hub-act-demo…"*, tức lời đáp của một lệnh KHÁC (Hà gặp 2026-08-09).
+    // Mỗi loại chờ nay chỉ nhận dấu của chính nó; `⚠` thì ai cũng nhận, vì một
+    // lời từ chối là câu trả lời cho đúng cái vừa hỏi.
+    const MARKS = {
+      ask: /^(💬|⚠)/,
+      tell: /^(➡️|⏹|⌨|📷|⚠)/,
+      new: /^(🚀|⚠)/,
+      handover: /^(📋|⚠)/,
+    };
+    const want = MARKS[waitingFor] || MARKS.handover;
+    if (!want.test(text)) return;
+    const box = $({ ask: 'sessAskBox', tell: 'sessTellBox', new: 'sessNewNote' }[waitingFor] || 'sessHandoverBox');
+    waitingFor = null;
+    box.classList.remove('hidden');
+    box.textContent = '';
+    const p = document.createElement('pre');
+    p.className = 'ev-body';
+    p.style.whiteSpace = 'pre-wrap';
+    p.textContent = text;
+    box.append(p);
+  }
+
   /// Bàn phím đi THẲNG vào phiên: phím điều hướng gửi ngay, chữ gửi khi Enter.
   ///
   /// Đây là chỗ "giống remote desktop" nằm ở: không nút trung gian, không bảng

@@ -178,6 +178,36 @@ try {
   check("trang không tràn ngang", over.w <= over.inner + 1, `${over.w}/${over.inner}`);
 
   // A withheld preview must say so; silence would read as "phiên im lặng".
+  // Nhìn qua một cái là biết loại nào, ai mở — Hà 2026-08-09. Phép đo: MỖI thẻ
+  // phải có huy hiệu, và huy hiệu phải khớp với thứ máy nói, không phải với
+  // thứ trang tự nghĩ ra. Nhãn "hub mở" chỉ được xuất hiện khi `started_by_hub`
+  // là true trong sổ — nhãn đoán còn tệ hơn không nhãn.
+  const badges = await page.evaluate(() =>
+    [...document.querySelectorAll("#sessList .sess")].map((e) => ({
+      id: e.dataset.session,
+      host: e.dataset.host,
+      hub: e.dataset.hub === "1",
+      badge: (e.querySelector(".sess-kind")?.textContent || "").trim(),
+    }))
+  );
+  check("mọi thẻ phiên đều có huy hiệu loại", badges.every((b) => b.badge.length > 2),
+    badges.map((b) => b.badge).join(" | ").slice(0, 90));
+  const WORDS = {
+    terminal: "bạn mở ở terminal", background: "chạy nền",
+    detached: "không gắn cửa sổ", dead: "đã dừng",
+  };
+  const wrong = badges.filter((b) => (b.hub && b.host !== "dead")
+    ? !/hub mở/.test(b.badge)
+    : !b.badge.includes(WORDS[b.host] || "\u0000"));
+  check("huy hiệu nói đúng loại của từng phiên", wrong.length === 0,
+    wrong.map((b) => `${b.host}→${b.badge}`).join(", "));
+  const hubClaims = badges.filter((b) => /hub mở/.test(b.badge)).map((b) => b.id);
+  const hubTruth = truth.sessions.filter((s) => s.started_by_hub).map((s) => s.session_id);
+  check("chỉ phiên hub THẬT SỰ mở mới mang nhãn 'hub mở'",
+    hubClaims.every((id) => hubTruth.includes(id)) && hubTruth.filter((id) =>
+      truth.sessions.find((s) => s.session_id === id && s.host !== "editor")).every((id) => hubClaims.includes(id)),
+    `màn: ${hubClaims.length} · sổ: ${hubTruth.length}`);
+
   // "terminal" phải THẬT SỰ là terminal — Hà hỏi thẳng 2026-08-09: *"danh sách
   // phiên thực sự đang liệt kê terminal hay chỉ claude?"*. Nhãn ấy từng được
   // suy bằng loại trừ (không phải editor ⇒ terminal), nên một `claude` do

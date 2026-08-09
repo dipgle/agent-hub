@@ -93,6 +93,16 @@ pub struct LiveSession {
     /// asks for permission" has nothing to show; what matters on a phone is
     /// knowing a session is running unattended in the first place.
     pub permission_mode: Option<String>,
+    /// True when THIS hub started the session (`/new` from the phone).
+    ///
+    /// `kind == "background"` only says "no window"; it cannot say who opened
+    /// it — a `claude --bg` typed by hand looks identical. Hà asked for a label
+    /// that says *ai tạo* (2026-08-09), and a badge that guessed would be worse
+    /// than no badge, so hub keeps a list of the ids it started and this field
+    /// is filled from that list (`pipeline::mark_started_by_hub`). Never
+    /// inferred.
+    #[serde(default)]
+    pub started_by_hub: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -488,6 +498,9 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 permission_mode: None,
                 cwd: cwd.clone(),
                 session_id: session_id.clone(),
+                // Điền ở tầng có `Db` (`pipeline::mark_started_by_hub`); ở đây
+                // không có sổ để tra, mà đoán thì thà để trống.
+                started_by_hub: false,
             };
 
             row.host = host_of(row.pid, &row.kind);

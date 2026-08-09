@@ -87,6 +87,70 @@ pub const ASIDE_KEY: &str = "aside:last";
 /// and the account that owns it, which is exactly what this row carries.
 pub const STOPPED_KEY: &str = "stopped:session";
 
+/// Ids of the sessions THIS hub started, newest last.
+///
+/// Nothing in `claude agents` says who opened a session: a background row looks
+/// the same whether hub ran `/new` from the phone or someone typed `claude --bg`
+/// in a window. The phone needs the difference — those are the rows it can stop
+/// and talk to — so hub writes down what it starts instead of guessing.
+pub const STARTED_KEY: &str = "started:by_hub";
+
+/// How many ids to keep. Enough to cover every session alive at once on this
+/// machine many times over; the list is for labelling a screen, not an audit.
+const STARTED_KEEP: usize = 50;
+
+fn started_ids(db: &Db) -> Vec<String> {
+    match db.get_cursor(STARTED_KEY) {
+        Ok(Some(raw)) => serde_json::from_str::<Vec<String>>(&raw).unwrap_or_else(|e| {
+            logging::warn("started_list_unparseable", json!({ "err": e.to_string() }));
+            Vec::new()
+        }),
+        Ok(None) => Vec::new(),
+        Err(e) => {
+            logging::warn("started_list_unreadable", json!({ "err": e.to_string() }));
+            Vec::new()
+        }
+    }
+}
+
+fn remember_started(db: &Db, session_id: &str) {
+    let mut ids = started_ids(db);
+    if ids.iter().any(|i| i == session_id) {
+        return;
+    }
+    ids.push(session_id.to_string());
+    if ids.len() > STARTED_KEEP {
+        let cut = ids.len() - STARTED_KEEP;
+        ids.drain(..cut);
+    }
+    match serde_json::to_string(&ids) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(STARTED_KEY, &v) {
+                logging::error(
+                    "started_list_not_saved",
+                    json!({ "session": session_id, "err": e.to_string() }),
+                );
+            }
+        }
+        Err(e) => logging::error("started_list_not_encodable", json!({ "err": e.to_string() })),
+    }
+}
+
+/// Stamp `started_by_hub` on the rows hub opened.
+///
+/// Lives here rather than in `sessions` because it needs the book; every
+/// surface that shows sessions (portal snapshot, `hub sessions`) calls it, so
+/// the phone and the CLI cannot disagree about who opened what.
+pub fn mark_started_by_hub(db: &Db, snap: &mut crate::sessions::SessionsSnapshot) {
+    let ids = started_ids(db);
+    if ids.is_empty() {
+        return;
+    }
+    for s in snap.sessions.iter_mut() {
+        s.started_by_hub = ids.iter().any(|i| *i == s.session_id);
+    }
+}
+
 /// Keep a stopped session whole, minus the fields that only make sense while a
 /// process is behind it.
 ///
@@ -398,6 +462,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // started a job wants to watch it, and making
                                 // them hunt for it in the list is a step hub
                                 // can take for them.
+                                remember_started(db, &s.session_id);
                                 if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, &s.session_id) {
                                     logging::error(
                                         "focus_after_start_failed",

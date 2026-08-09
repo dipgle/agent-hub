@@ -319,6 +319,34 @@
   /* Trạng thái đọc bằng MẮT trước khi đọc bằng chữ: xanh = đang chạy, hổ phách
      = đang rảnh (chờ mình), xám = đã dừng. Trên màn 390px, ba chấm này thay
      được cả cột chữ mà vẫn quét được trong một cái liếc. */
+  /* Huy hiệu LOẠI + AI TẠO. Hà 2026-08-09: *"cần một kiểu đánh dấu hoặc ghi chú
+     rõ ràng hơn cho từng loại… nhìn qua cái là biết nó là kiểu nào ai tạo"*.
+     Chấm màu cũ chỉ nói phiên đang bận hay rảnh — nó không trả lời "ai mở cái
+     này", mà đó mới là thứ quyết định mình LÀM GÌ được với nó: phiên hub mở thì
+     nói tiếp và dừng được, phiên ở terminal thì chỉ xem và hỏi bên lề. */
+  .sess-kind {
+    display: inline-flex; align-items: center; gap: 4px; flex: none;
+    font-size: 12px; font-weight: 600; line-height: 1;
+    padding: 3px 7px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--muted); background: var(--bg);
+    white-space: nowrap;
+  }
+  .sess[data-host="terminal"] .sess-kind {
+    color: #1f5f8b; border-color: #bcd7e8; background: #eef6fb;
+  }
+  .sess[data-hub="1"] .sess-kind {
+    color: var(--accent, #2f6f4e); border-color: #b9dcc7; background: #eef8f2;
+  }
+  .sess[data-host="background"] .sess-kind {
+    color: #6b4fa8; border-color: #d4c9ec; background: #f4f0fb;
+  }
+  .sess[data-host="detached"] .sess-kind {
+    color: #8a6100; border-color: #ead4a3; background: #fdf6e6;
+  }
+  .sess[data-host="dead"] .sess-kind {
+    color: var(--muted); border-style: dashed; background: transparent;
+  }
+  .sess-kindrow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
   .sess-dot {
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     margin-right: 7px; vertical-align: 1px; background: var(--muted); flex: none;
@@ -1263,6 +1291,36 @@
       // mà không cần chọc vào biến nội bộ của trang.
       card.dataset.activity = s.last_activity || '';
 
+      // Một dòng huy hiệu ĐỨNG TRƯỚC tên: loại phiên + ai mở nó.
+      //
+      // `started_by_hub` do hub tự ghi sổ lúc `/new`, KHÔNG suy từ `kind` —
+      // `claude --bg` gõ tay cũng ra `background` y hệt. Nhãn đoán còn tệ hơn
+      // không có nhãn, nên phiên nền hub không nhận là của mình thì nói đúng
+      // như vậy: "chạy nền" trống chủ.
+      const KIND_BADGE = {
+        terminal:   { icon: '⌨', text: 'bạn mở ở terminal' },
+        background: { icon: '⚙', text: 'chạy nền' },
+        detached:   { icon: '❓', text: 'không gắn cửa sổ' },
+        dead:       { icon: '⏹', text: 'đã dừng' },
+        editor:     { icon: '🧩', text: 'trong editor' },
+      };
+      const badge = s.started_by_hub && s.host !== 'dead'
+        ? { icon: '📱', text: 'hub mở từ điện thoại' }
+        : (KIND_BADGE[s.host] || { icon: '•', text: s.kind || 'chưa rõ' });
+      const kindRow = document.createElement('div');
+      kindRow.className = 'sess-kindrow';
+      const chip = document.createElement('span');
+      chip.className = 'sess-kind';
+      chip.textContent = `${badge.icon} ${badge.text}`;
+      // Nói luôn LÀM GÌ ĐƯỢC với nó — đó là lý do người ta cần phân biệt.
+      chip.title = s.started_by_hub
+        ? 'hub mở phiên này: nói tiếp và dừng được từ đây'
+        : (s.host === 'terminal'
+            ? 'bạn mở ở cửa sổ terminal: xem và hỏi bên lề được, hub không gõ vào được'
+            : (s.host === 'dead' ? 'không còn tiến trình — dọn đi được' : ''));
+      kindRow.append(chip);
+      card.append(kindRow);
+
       const head = document.createElement('div');
       head.className = 'sess-head';
       const name = document.createElement('strong');
@@ -1291,8 +1349,12 @@
       // `cwd` bỏ đi: mọi phiên trên máy này đều mở từ ~/Documents/projects nên
       // nó giống hệt nhau ở mọi dòng — chiếm chỗ mà không phân biệt được gì.
       // `work` cũng bỏ khỏi chữ: đã có chấm màu nói điều đó rồi.
-      meta.textContent = [s.account, where, mode].filter(Boolean).join(' · ');
+      // `where` giờ nằm ở huy hiệu, nên hàng phụ thôi lặp lại nó — chỉ còn tài
+      // khoản và chế độ quyền, thứ huy hiệu không nói.
+      void where;
+      meta.textContent = [s.account, mode].filter(Boolean).join(' · ');
       if (s.host) card.dataset.host = s.host;
+      if (s.started_by_hub) card.dataset.hub = '1';
       if (work) card.dataset.work = work;
 
       card.append(head, meta);

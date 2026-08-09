@@ -1,5 +1,39 @@
 # active context — hub
 
+## 🏷 2026-08-09 (chiều) — huy hiệu "loại + ai tạo" trên từng thẻ (v76)
+
+Hà: *"cần một kiểu đánh dấu… nhìn qua cái là biết nó là kiểu nào ai tạo"*. Chấm
+màu cũ chỉ nói **bận hay rảnh** — nó không trả lời "ai mở cái này", mà đó mới là
+thứ quyết định **làm gì được**: phiên hub mở thì nói tiếp + dừng được; phiên ở
+terminal chỉ xem + hỏi bên lề.
+
+| Huy hiệu | Khi nào | Màu |
+|---|---|---|
+| 📱 hub mở từ điện thoại | `started_by_hub` **có trong sổ** | xanh lá (accent) |
+| ⌨ bạn mở ở terminal | có tty | xanh dương |
+| ⚙ chạy nền | `--bg` mà hub **không nhận là của mình** | tím |
+| ❓ không gắn cửa sổ | sống, không tty, không editor | hổ phách |
+| ⏹ đã dừng | không còn tiến trình | viền đứt, xám |
+
+🔑 **"Ai tạo" phải là SỰ THẬT CÓ SỔ, không phải suy từ `kind`.** `claude --bg` gõ
+tay cũng ra `background` y hệt phiên hub mở — nhãn đoán còn tệ hơn không nhãn.
+Nên hub **ghi lại id nó mở** (`pipeline::STARTED_KEY`, giữ 50 id gần nhất) và
+`mark_started_by_hub` dán cờ cho **cả ảnh chụp lẫn `hub sessions`**, để màn và
+CLI không nói khác nhau. Hai phiên nền đang chạy hiện ra **"⚙ chạy nền"** chứ
+không phải "hub mở" — đúng, vì chúng có trước khi hub biết ghi sổ.
+
+`title` của huy hiệu nói luôn **làm gì được** ("hub mở phiên này: nói tiếp và
+dừng được từ đây" / "bạn mở ở cửa sổ terminal: hub không gõ vào được").
+
+**Phép đo (đối chiếu với máy, không hỏi lại trang):** mọi thẻ phải có huy hiệu ·
+huy hiệu khớp `host` · **nhãn "hub mở" chỉ được xuất hiện đúng bằng danh sách
+trong sổ** (`fe-sessions-uc` 19/19). Và `fe-newsession-uc` **20/20**: phiên vừa
+mở qua UI hiện đúng **"📱 hub mở từ điện thoại"**.
+
+Bundle **v76** · `hubd` pid 75008 · `cargo test` 68 · `fe-url` 16/16 ·
+`fe-board` 19/19 · `fe-phone` 25/25 · `fe-denied` 10/10 · `fe-config` 8/8 ·
+`fe-smoke` 15/15 · `fe-stream` 13/13 · `fe-aside` 9/9.
+
 ## 🔎 2026-08-09 (chiều) — "danh sách phiên đang liệt kê terminal hay chỉ claude?"
 
 Câu hỏi của Hà trúng đúng chỗ nhãn **được suy chứ chưa được kiểm**. Trả lời

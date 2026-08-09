@@ -107,7 +107,7 @@ fn real_main() -> Result<()> {
             Ok(())
         }
         Command::Status => cmd_status(&db),
-        Command::Sessions { json } => cmd_sessions(&cfg, json),
+        Command::Sessions { json } => cmd_sessions(&db, &cfg, json),
         Command::Tfl5Say { text } => cmd_tfl5_say(&cfg, &text.join(" ")),
         Command::Tfl5Tail { limit } => cmd_tfl5_tail(&cfg, limit),
         Command::PortalPush { dry_run } => cmd_portal_push(&db, &cfg, dry_run),
@@ -116,8 +116,11 @@ fn real_main() -> Result<()> {
 
 /// What `claude` is doing on this machine right now. Read-only: this lists and
 /// reads transcripts, it never starts, stops, or types into a session.
-fn cmd_sessions(cfg: &Config, as_json: bool) -> Result<()> {
-    let snap = hub::sessions::snapshot(cfg);
+fn cmd_sessions(db: &hub::db::Db, cfg: &Config, as_json: bool) -> Result<()> {
+    let mut snap = hub::sessions::snapshot(cfg);
+    // Cùng một nguồn sự thật với ảnh chụp: màn và CLI không được nói khác nhau
+    // về việc ai mở phiên nào.
+    hub::pipeline::mark_started_by_hub(db, &mut snap);
     if as_json {
         println!("{}", serde_json::to_string_pretty(&snap)?);
         return Ok(());

@@ -165,6 +165,15 @@ try {
   );
   check("phiên mới hiện trên màn danh sách", true, fresh.name || "");
 
+  // Phiên vừa mở phải TỰ NÓI nó do hub mở — đó là điểm khác biệt duy nhất giữa
+  // nó và một `claude --bg` gõ tay, và là thứ quyết định người dùng có nói tiếp
+  // / dừng được từ điện thoại hay không.
+  const newBadge = await page.evaluate(
+    (id) => (document.querySelector(`.sess[data-session="${id}"] .sess-kind`)?.textContent || "").trim(),
+    fresh.session_id
+  );
+  check("thẻ phiên mới mang nhãn 'hub mở'", /hub mở/.test(newBadge), newBadge);
+
   await page.locator(`.sess[data-session="${fresh.session_id}"]`).click();
   check("mở được màn chi tiết của phiên mới", await page.locator("#sessDetail").isVisible());
   check("phiên do hub mở thì CÓ nút Dừng", await page.locator("#sessStop").isVisible());

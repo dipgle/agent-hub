@@ -80,7 +80,9 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
     // The Claude CLI sessions running on this machine — the thing the owner
     // actually opens his phone for. Read-only, and already leak-gated at the
     // source (`sessions::snapshot`), so nothing here needs a second gate.
-    let live = crate::sessions::snapshot(cfg);
+    let mut live = crate::sessions::snapshot(cfg);
+    // Ai mở phiên là thứ chỉ cuốn sổ của hub biết — dán nhãn trước khi gói.
+    crate::pipeline::mark_started_by_hub(db, &mut live);
 
     // Only the session being read carries its full stream. Pushing every
     // transcript every cycle would be megabytes for the one screen anybody is

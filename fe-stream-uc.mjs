@@ -49,26 +49,32 @@ const check = (name, ok, detail = "") => {
   if (!ok) problems.push(`${name}${detail ? `: ${detail}` : ""}`);
 };
 
-// ── CỔNG GIÁ ────────────────────────────────────────────────────────────────
-// Bước dưới đây gọi `claude` THẬT trên bản fork, và giá tỉ lệ độ dài nhật ký
-// (đo thật: 0.986 MB → $1.72). Đêm 2026-08-08 kịch bản này chạy 5 lượt cho cùng
-// một bằng chứng và tiêu $5.65 — tiền của kịch bản, không phải của hub: vòng
-// chạy của hub từ hôm nay là $0.
+// ── CỔNG HẠN MỨC ────────────────────────────────────────────────────────────
+// Bước dưới đây gọi `claude` THẬT trên bản fork, và lượng dùng tỉ lệ độ dài
+// nhật ký (đo thật: 0.986 MB → 1.72 đơn vị).
 //
-// Nên: ước tính TRƯỚC, và nếu vượt trần thì KHÔNG gọi. Bỏ qua được ghi rõ ra
-// màn và đếm vào ô "bỏ qua" — một kịch bản lặng lẽ nhảy cóc rồi báo xanh còn
-// tệ hơn một kịch bản đắt.
+// ⚠ ĐƠN VỊ: con số `$` ở đây là `total_cost_usd` do chính CLI trả về — GIÁ QUY
+// ĐỔI theo bảng giá API cho lượng token của lần gọi. Máy này chạy gói **Max**
+// (`claude auth status` → authMethod claude.ai, subscriptionType max), nên
+// KHÔNG có đồng nào bị trừ mỗi lần gọi; cái bị tiêu là **hạn mức của gói**
+// (cửa sổ 5 giờ / tuần). Dùng số này làm thước đo lượng dùng, đừng đọc nó là
+// hoá đơn. `--max-budget-usd` của CLI cũng gác trên đúng thang này.
+//
+// Vì sao vẫn cần gác: đêm 2026-08-08 kịch bản này chạy 5 lượt cho CÙNG một
+// bằng chứng, đốt ~5.65 đơn vị hạn mức của chủ máy — hết hạn mức thì chính Hà
+// bị chặn làm việc. Nên: ước tính TRƯỚC, vượt trần thì KHÔNG gọi; bỏ qua phải
+// ghi rõ ra màn — một kịch bản lặng lẽ nhảy cóc rồi báo xanh còn tệ hơn.
 const USD_PER_MB = 1.75;                      // mốc đo thật 2026-08-08
-const MAX_USD = Number(process.env.HUB_UC_MAX_USD || 0.25);
+const MAX_USD = Number(process.env.HUB_UC_MAX_USD || 0.25); // đơn vị quy đổi, không phải tiền
 const PAY = process.env.HUB_UC_PAY === "1";   // chấp nhận trả tiền lượt này
 const skipped = [];
 const affordable = (mb, what) => {
   const est = mb * USD_PER_MB;
   if (PAY || est <= MAX_USD) return true;
-  const msg = `${what}: ước tính $${est.toFixed(2)} > trần $${MAX_USD.toFixed(2)}`;
+  const msg = `${what}: ước tính ${est.toFixed(2)} > trần ${MAX_USD.toFixed(2)} đơn vị hạn mức`;
   skipped.push(msg);
   console.log(`\n⏭  BỎ QUA (không gọi claude) — ${msg}`);
-  console.log(`   Muốn nghiệm thu lại đường tốn tiền: HUB_UC_PAY=1 node ${process.argv[1].split("/").pop()} …\n`);
+  console.log(`   Muốn nghiệm thu lại đường tốn hạn mức: HUB_UC_PAY=1 node ${process.argv[1].split("/").pop()} …\n`);
   return false;
 };
 
@@ -121,7 +127,7 @@ try {
   const targetMB = transcriptMB(target.session_id);
   console.log(
     `chạm vào phiên: ${target.name} (${target.account}, ` +
-    `${targetMB.toFixed(2)} MB nhật ký ≈ $${(targetMB * USD_PER_MB).toFixed(2)} cho bước bàn giao)\n`
+    `${targetMB.toFixed(2)} MB nhật ký ≈ ${(targetMB * USD_PER_MB).toFixed(2)} đơn vị hạn mức cho bước bàn giao)\n`
   );
 
   await page.locator(`.sess[data-session="${target.session_id}"]`).click();
@@ -265,14 +271,14 @@ try {
 const passed = checks.filter((c) => c.ok).length;
 console.log(
   `\n${passed}/${checks.length} kiểm tra qua · ${problems.length} vấn đề` +
-  (skipped.length ? ` · ${skipped.length} BỎ QUA vì tốn tiền` : "")
+  (skipped.length ? ` · ${skipped.length} BỎ QUA vì tốn hạn mức` : "")
 );
 // Một lần bỏ qua mà không nói ra thì bản tóm tắt đang nói dối: "xanh trọn" và
 // "xanh phần không mất tiền" là hai kết luận khác nhau.
 if (skipped.length) {
   console.log("\nCHƯA NGHIỆM THU (không gọi claude lượt này):");
   skipped.forEach((s) => console.log(`  ⏭ ${s}`));
-  console.log("  → chạy lại với HUB_UC_PAY=1 khi cần bằng chứng đường tốn tiền.");
+  console.log("  → chạy lại với HUB_UC_PAY=1 khi cần bằng chứng đường tốn hạn mức.");
 }
 if (problems.length) {
   console.log("\nVẤN ĐỀ:");

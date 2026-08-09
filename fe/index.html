@@ -232,6 +232,8 @@
   #board.on-sessions .boardnote,
   #board.on-sessions .boardbar button { display: none; }
   #sessList { display: flex; flex-direction: column; gap: 8px; }
+  /* Một dòng đã chết không được đọc như việc đang chạy. */
+  .sess.sess-dead { opacity: .62; border-style: dashed; }
   .sess { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg); }
   .sess-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
   .sess-head strong { font-size: 15px; overflow-wrap: anywhere; }
@@ -1004,11 +1006,20 @@
     notes.textContent = '';
 
     const rows = sessions.list || [];
-    const byAccount = {};
-    rows.forEach((s) => { byAccount[s.account] = (byAccount[s.account] || 0) + 1; });
-    const per = Object.entries(byAccount).map(([a, n]) => `${a} ${n}`).join(' · ');
+    // Đếm theo NƠI phiên sống, không theo tài khoản. Hỏi thật ngày 2026-08-09:
+    // "máy chỉ mở 3 terminal sao màn hiện 13 phiên?" — cả hai đều đúng: 3
+    // terminal, 8 phiên chạy trong VS Code/Cursor, 2 dòng đã chết mà `claude
+    // agents` vẫn liệt kê. Con số tổng không sai; nó chỉ không nói ra điều đó.
+    const byHost = {};
+    rows.forEach((s) => { byHost[s.host || 'unknown'] = (byHost[s.host || 'unknown'] || 0) + 1; });
+    const LABEL = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', dead: 'đã dừng', unknown: 'chưa rõ' };
+    const per = ['terminal', 'editor', 'background', 'dead', 'unknown']
+      .filter((k) => byHost[k])
+      .map((k) => `${byHost[k]} ${LABEL[k]}`)
+      .join(' · ');
+    const live = rows.length - (byHost.dead || 0);
     summary.textContent = rows.length
-      ? `${rows.length} phiên đang chạy${per ? ` — ${per}` : ''}`
+      ? `${live} phiên đang sống${per ? ` — ${per}` : ''}`
       : 'Không có phiên nào đang chạy.';
 
     // An account that failed to answer is not an account with no sessions.
@@ -1022,7 +1033,7 @@
 
     rows.forEach((s) => {
       const card = document.createElement('div');
-      card.className = 'sess';
+      card.className = s.host === 'dead' ? 'sess sess-dead' : 'sess';
       card.dataset.session = s.session_id;
       // Đo được từ DOM: thứ tự "vừa động trước" là tính chất phải kiểm được
       // mà không cần chọc vào biến nội bộ của trang.
@@ -1048,8 +1059,12 @@
       // phải "đang rảnh", nên phiên interactive không hiện gì thay vì hiện sai.
       const work = { busy: 'đang chạy', idle: 'đang rảnh' }[s.status]
         || ({ done: 'đã xong' })[s.state] || '';
-      meta.textContent = [s.account, s.kind, s.cwd ? s.cwd.split('/').slice(-1)[0] : '', mode, work]
+      // `kind` nói "interactive" cho cả cửa sổ terminal lẫn phiên do extension
+      // của VS Code/Cursor chạy — nên hàng này hiện `host`, thứ phân biệt được.
+      const where = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', dead: 'ĐÃ DỪNG' }[s.host] || s.kind;
+      meta.textContent = [s.account, where, s.cwd ? s.cwd.split('/').slice(-1)[0] : '', mode, work]
         .filter(Boolean).join(' · ');
+      if (s.host) card.dataset.host = s.host;
       if (work) card.dataset.work = work;
 
       card.append(head, meta);

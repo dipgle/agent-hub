@@ -36,26 +36,23 @@ const check = (name, ok, detail = "") => {
   if (!ok) problems.push(`${name}${detail ? `: ${detail}` : ""}`);
 };
 
-// ── CỔNG GIÁ ────────────────────────────────────────────────────────────────
-// Bước dưới đây gọi `claude` THẬT trên bản fork, và giá tỉ lệ độ dài nhật ký
-// (đo thật: 0.986 MB → $1.72). Đêm 2026-08-08 kịch bản này chạy 5 lượt cho cùng
-// một bằng chứng và tiêu $5.65 — tiền của kịch bản, không phải của hub: vòng
-// chạy của hub từ hôm nay là $0.
+// ── CỔNG HẠN MỨC ────────────────────────────────────────────────────────────
+// Bước dưới đây gọi `claude` THẬT trên bản fork, lượng dùng tỉ lệ độ dài nhật ký.
 //
-// Nên: ước tính TRƯỚC, và nếu vượt trần thì KHÔNG gọi. Bỏ qua được ghi rõ ra
-// màn và đếm vào ô "bỏ qua" — một kịch bản lặng lẽ nhảy cóc rồi báo xanh còn
-// tệ hơn một kịch bản đắt.
+// ⚠ ĐƠN VỊ: `$` ở đây là `total_cost_usd` của CLI — giá QUY ĐỔI theo bảng giá
+// API cho lượng token, KHÔNG phải tiền bị trừ: máy này chạy gói Max, cái bị
+// tiêu là hạn mức của gói. Xem chú thích đầy đủ trong fe-stream-uc.mjs.
 const USD_PER_MB = 1.75;                      // mốc đo thật 2026-08-08
-const MAX_USD = Number(process.env.HUB_UC_MAX_USD || 0.25);
+const MAX_USD = Number(process.env.HUB_UC_MAX_USD || 0.25); // đơn vị quy đổi, không phải tiền
 const PAY = process.env.HUB_UC_PAY === "1";   // chấp nhận trả tiền lượt này
 const skipped = [];
 const affordable = (mb, what) => {
   const est = mb * USD_PER_MB;
   if (PAY || est <= MAX_USD) return true;
-  const msg = `${what}: ước tính $${est.toFixed(2)} > trần $${MAX_USD.toFixed(2)}`;
+  const msg = `${what}: ước tính ${est.toFixed(2)} > trần ${MAX_USD.toFixed(2)} đơn vị hạn mức`;
   skipped.push(msg);
   console.log(`\n⏭  BỎ QUA (không gọi claude) — ${msg}`);
-  console.log(`   Muốn nghiệm thu lại đường tốn tiền: HUB_UC_PAY=1 node ${process.argv[1].split("/").pop()} …\n`);
+  console.log(`   Muốn nghiệm thu lại đường tốn hạn mức: HUB_UC_PAY=1 node ${process.argv[1].split("/").pop()} …\n`);
   return false;
 };
 
@@ -134,7 +131,7 @@ try {
   const { s: target, file, mb } = sized[0];
   console.log(`chạm vào phiên: ${target.name} (${target.account}, đứng yên ${Math.round(idleFor(target))} phút)`);
   console.log(`nhật ký: ${file}`);
-  console.log(`kích thước: ${mb.toFixed(2)} MB ≈ $${(mb * USD_PER_MB).toFixed(2)} cho một câu hỏi\n`);
+  console.log(`kích thước: ${mb.toFixed(2)} MB ≈ ${(mb * USD_PER_MB).toFixed(2)} đơn vị hạn mức cho một câu hỏi\n`);
 
   const before = fingerprint(file);
   const activityBefore = target.last_activity;
@@ -278,12 +275,12 @@ try {
 const failed = checks.filter((c) => !c.ok).length;
 console.log(
   `\n${checks.length - failed}/${checks.length} đạt` +
-  (skipped.length ? ` · ${skipped.length} BỎ QUA vì tốn tiền` : "")
+  (skipped.length ? ` · ${skipped.length} BỎ QUA vì tốn hạn mức` : "")
 );
 if (skipped.length) {
   console.log("\nCHƯA NGHIỆM THU (không gọi claude lượt này):");
   skipped.forEach((s) => console.log(`  ⏭ ${s}`));
-  console.log("  → chạy lại với HUB_UC_PAY=1 khi cần bằng chứng đường tốn tiền.");
+  console.log("  → chạy lại với HUB_UC_PAY=1 khi cần bằng chứng đường tốn hạn mức.");
 }
 if (problems.length) {
   console.log("\nVẤN ĐỀ:");

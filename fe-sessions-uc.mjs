@@ -74,6 +74,56 @@ try {
   const cards = await page.locator("#sessList .sess").count();
   check("số phiên trên màn khớp với máy", cards === liveCount, `màn ${cards} / máy ${liveCount}`);
 
+  // ——— NƠI phiên sống, không chỉ SỐ phiên ———
+  // Hỏi thật 2026-08-09: "máy chỉ mở 3 terminal sao màn hiện 13 phiên?" Cả hai
+  // đều đúng — 3 terminal, 8 phiên trong VS Code/Cursor, 2 dòng đã dừng mà
+  // `claude agents` vẫn liệt kê. Con số tổng không sai, nó chỉ không nói ra.
+  // Đối chiếu với SỰ THẬT trên máy (hub sessions --json), không tự suy từ màn.
+  const byHost = {};
+  truth.sessions.forEach((x) => { byHost[x.host] = (byHost[x.host] || 0) + 1; });
+  const summary = (await page.locator("#sessSummary").innerText()).trim();
+  console.log(`nơi phiên sống: ${JSON.stringify(byHost)}`);
+
+  check(
+    "màn nói rõ phiên sống Ở ĐÂU, không gộp hết làm một",
+    Object.keys(byHost).filter((h) => byHost[h]).length < 2 ||
+      /terminal|trong editor|chạy nền|đã dừng/.test(summary),
+    summary
+  );
+  if (byHost.terminal) {
+    check(
+      "số phiên terminal trên màn khớp máy",
+      summary.includes(`${byHost.terminal} terminal`),
+      `máy có ${byHost.terminal} terminal · màn: ${summary}`
+    );
+  }
+  if (byHost.editor) {
+    check(
+      "phiên chạy trong editor được gọi đúng tên",
+      summary.includes(`${byHost.editor} trong editor`),
+      `máy có ${byHost.editor} phiên trong editor`
+    );
+  }
+  // Dòng đã dừng: phải còn trên màn (để dọn) nhưng KHÔNG được tính là đang sống
+  // và KHÔNG được trông như việc đang chạy.
+  if (byHost.dead) {
+    const dead = await page.evaluate(() => {
+      const els = [...document.querySelectorAll('#sessList .sess[data-host="dead"]')];
+      return {
+        n: els.length,
+        marked: els.every((e) => e.classList.contains("sess-dead")),
+        explained: els.every((e) => /không còn tiến trình/.test(e.innerText)),
+      };
+    });
+    check("phiên đã dừng vẫn hiện để còn dọn", dead.n === byHost.dead, `${dead.n}/${byHost.dead}`);
+    check("phiên đã dừng KHÔNG trông như đang chạy", dead.marked && dead.explained);
+    check(
+      "số 'đang sống' đã trừ phiên đã dừng",
+      summary.startsWith(`${truth.sessions.length - byHost.dead} phiên đang sống`),
+      summary
+    );
+  }
+
   const shown = await page.evaluate(() =>
     [...document.querySelectorAll("#sessList .sess")].map((el) => ({
       name: el.querySelector("strong")?.textContent || "",

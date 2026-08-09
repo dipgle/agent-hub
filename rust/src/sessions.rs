@@ -52,6 +52,17 @@ pub struct LiveSession {
     pub cwd: String,
     /// "interactive" (a terminal / editor) or "background".
     pub kind: String,
+    /// WHERE the session actually lives: `"terminal"`, `"editor"` (the VS Code
+    /// / Cursor extension), `"background"`, or `"dead"` when no process is
+    /// behind it any more.
+    ///
+    /// `kind` alone reads "interactive" for a terminal window and for an
+    /// editor-hosted session alike, and on 2026-08-09 that cost a real
+    /// question: the phone said 13 sessions while the owner had 3 terminals
+    /// open. He was right and so was hub — 3 terminals, 8 sessions inside VS
+    /// Code, 2 dead rows the CLI still reports. A screen that cannot tell those
+    /// apart is a screen that gets argued with instead of read.
+    pub host: String,
     pub pid: i64,
     pub started_at_ms: i64,
     /// Last write to the transcript, RFC3339. `None` = no transcript found.
@@ -193,6 +204,53 @@ pub const DENIED_TOOLS: [&str; 17] = [
     "WebFetch",
     "WebSearch",
 ];
+
+/// Where a live session is hosted, decided by the process behind its pid.
+///
+/// `claude agents` says "interactive" for a terminal window and for a session
+/// the VS Code / Cursor extension is running — the extension ships its own
+/// `claude` binary under `~/.vscode/extensions/…`, so the command PATH is what
+/// separates them, not the process name. A pid that answers nothing at all is
+/// a row the CLI still lists for a process that is gone: `"dead"`, so the phone
+/// can show it as something to clean up rather than as work in progress.
+fn host_of(pid: i64, kind: &str) -> String {
+    if pid <= 0 {
+        // Background rows come back with pid 0 once stopped; `claude agents`
+        // keeps listing them. Both dead rows seen on 2026-08-09 were exactly
+        // this — stopped on 08-07, still on the list two days later.
+        return "dead".into();
+    }
+    let out = run(
+        "ps",
+        &["-p", &pid.to_string(), "-o", "command="],
+        RunOpts {
+            timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        },
+    );
+    let cmd = match out {
+        Ok(r) if r.code == Some(0) => r.stdout,
+        // `ps` exits non-zero when the pid is gone — that is the answer, not a
+        // failure. A spawn error is different: say "unknown" rather than
+        // claiming a session is dead on the strength of a broken probe.
+        Ok(_) => return "dead".into(),
+        Err(e) => {
+            logging::warn(
+                "session_host_probe_failed",
+                json!({ "pid": pid, "err": e.to_string() }),
+            );
+            return "unknown".into();
+        }
+    };
+    if kind == "background" {
+        return "background".into();
+    }
+    if cmd.contains("/.vscode") || cmd.contains("/.cursor") || cmd.contains("Cursor.app") {
+        "editor".into()
+    } else {
+        "terminal".into()
+    }
+}
 
 /// Hits that must suppress a preview, or empty if it is safe to carry.
 pub fn preview_risk(text: &str) -> Vec<String> {
@@ -370,6 +428,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown")
                     .to_string(),
+                host: String::new(), // set below, once `kind` and `pid` are read
                 pid: s.get("pid").and_then(|v| v.as_i64()).unwrap_or(0),
                 started_at_ms: s.get("startedAt").and_then(|v| v.as_i64()).unwrap_or(0),
                 status: s.get("status").and_then(|v| v.as_str()).map(str::to_string),
@@ -382,6 +441,15 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 cwd: cwd.clone(),
                 session_id: session_id.clone(),
             };
+
+            row.host = host_of(row.pid, &row.kind);
+            if row.host == "dead" {
+                // Never silently: the row stays visible (a stuck session is
+                // something to clean up), but it must not read as live work.
+                row.note = Some(
+                    "không còn tiến trình — phiên đã dừng, `claude agents` vẫn liệt kê".into(),
+                );
+            }
 
             if session_id.is_empty() {
                 row.note = Some("phiên không có sessionId".into());

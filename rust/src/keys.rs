@@ -93,6 +93,35 @@ end tell"#,
     )
 }
 
+/// Chữ vừa gõ đã đi đâu — đọc từ màn, không phải từ mã trả về của osascript.
+///
+/// Đây là bài học đắt nhất của cả tính năng này (2026-08-10): `osascript` trả
+/// về 0, log ghi `keys_typed`, hub báo "⌨ đã bấm" — mà Hà **không thấy hiện
+/// tượng gì**. Vì `do script` chỉ nói "đã đẩy được byte vào tab", nó không nói
+/// chương trình bên trong làm gì với byte ấy. Muốn biết thì phải NHÌN.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Landed {
+    /// `claude` đang chạy dở nên xếp chữ vào hàng chờ, sẽ xử lý khi xong.
+    Queued,
+    /// Phiên đang làm việc (có đồng hồ) — chữ đã khởi động một lượt.
+    Running,
+    /// Phiên đang đứng ở dấu nhắc.
+    Idle,
+}
+
+/// Phân loại thuần từ chữ trên màn, để test được không cần Terminal.
+pub fn landed(screen: &str) -> Landed {
+    // Chính `claude` in dòng này khi có tin trong hàng chờ (đo trên máy:
+    // "Press up to edit queued messages").
+    if screen.contains("queued message") {
+        return Landed::Queued;
+    }
+    if is_busy(screen) {
+        return Landed::Running;
+    }
+    Landed::Idle
+}
+
 /// Cửa sổ Terminal đang chạy `tty` này, nếu có.
 ///
 /// `Terminal` công bố `tty` của từng tab qua AppleScript (đo 2026-08-09:
@@ -393,7 +422,7 @@ fn b64(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{as_string, window_script};
+    use super::{as_string, landed, window_script, Landed};
 
     /// Chuỗi AppleScript sinh ra phải ĐÓNG ĐỦ dấu nháy và kết thúc đúng chỗ.
     ///
@@ -406,6 +435,17 @@ mod tests {
     /// Hộp chọn nhận ra bằng HÌNH DẠNG, và phải từ chối những thứ chỉ trông
     /// giống. Đây là chỗ dễ nhận nhầm nhất: mọi đoạn văn đều có thể chứa "1.".
     /// "Đang chạy dở" phải bắt theo ĐỒNG HỒ, không theo chữ — chữ đổi mỗi lần.
+    #[test]
+    fn landed_reads_the_queue_line_the_cli_actually_prints() {
+        // Nguyên văn từ màn thật lúc gõ vào phiên đang chạy.
+        let busy_with_queue = "❯ Press up to edit queued messages\n  (2m 5s · ↑ 1.2k tokens)";
+        assert_eq!(landed(busy_with_queue), Landed::Queued);
+        // Đang chạy mà chưa có hàng chờ.
+        assert_eq!(landed("  (1m 2s · esc to interrupt)"), Landed::Running);
+        // Đứng ở dấu nhắc.
+        assert_eq!(landed("❯ \n  ⏵⏵ auto mode on"), Landed::Idle);
+    }
+
     #[test]
     fn busy_is_read_from_the_clock_not_the_word() {
         use super::is_busy;

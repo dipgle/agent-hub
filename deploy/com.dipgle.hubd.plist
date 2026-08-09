@@ -33,14 +33,26 @@
     <string>/Users/hanguyen/Documents/projects/AI/hub/rust/target/release/hubd</string>
   </array>
 
+  <!-- Thư mục làm việc phải nằm NGOÀI ~/Documents. Đo 2026-08-10: để nó ở
+       trong, tiến trình do launchd sinh ra treo cứng ngay tại `getcwd()` —
+       `open$NOCANCEL` chờ một hộp thoại TCC không bao giờ hiện lên cho tiến
+       trình nền. Không có log, không có mã lỗi, chỉ là một pid nằm im. -->
   <key>WorkingDirectory</key>
-  <string>/Users/hanguyen/Documents/projects/AI/hub</string>
+  <string>/Users/hanguyen/Library/Application Support/hub</string>
 
   <key>EnvironmentVariables</key>
   <dict>
     <!-- gh, claude, git and sqlite3 live outside launchd's default PATH -->
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/Users/hanguyen/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Thư mục làm việc không còn nằm trong repo, nên hub không thể tìm
+         `hub.config.json` bằng cách đi ngược lên từ cwd nữa. Chỉ thẳng đường:
+         thiếu dòng này, hub rơi về cấu hình mặc định và ghi
+         `adapter_skipped reason=disabled` — chạy, nhưng không nối với phòng
+         chat nào cả (đo 2026-08-10). -->
+    <key>HUB_CONFIG</key>
+    <string>/Users/hanguyen/Documents/projects/AI/hub/hub.config.json</string>
+
     <key>HUB_LOG_LEVEL</key>
     <string>info</string>
   </dict>

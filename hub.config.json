@@ -10,6 +10,11 @@
     "max_budget_usd": 0.5,
     "timeout_sec": 240
   },
+  "auto_handover": {
+    "enabled": true,
+    "at_percent": 80,
+    "idle_sec": 120
+  },
   "adapters": {
     "tfl5": {
       "enabled": true,

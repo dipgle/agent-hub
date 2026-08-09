@@ -2180,6 +2180,59 @@
     typeIntoSession(e);
   }
 
+  // Nút gửi phải có tay bấm. Nghe thì hiển nhiên, nhưng nó đã KHÔNG có: đợt bỏ
+  // hàng nút phím (Hà 2026-08-09 "bỏ các nút đi") cắt luôn chỗ nối, `sendSay`
+  // nằm đó không ai gọi, và trên điện thoại chạm "⌨ Gõ" thì tuyệt đối không có
+  // gì xảy ra — đúng câu Hà báo hôm sau: *"không thấy hiện tượng gì"*. Cả hai
+  // kịch bản UI lúc ấy đều xanh, vì không cái nào bấm thử chính cái nút này.
+  $('sessSay').addEventListener('click', (e) => sendSay(e));
+
+  /// UC-S05 — nói tiếp vào chính phiên đó. Không phải hỏi bên lề: lượt này ở
+  /// lại trên thread cũ, nên phiên gốc DÀI RA (ngược hẳn với `/ask`).
+  function tellSession(e) {
+    if (!wantSession) return;
+    const input = $('sessSayInput');
+    const text = input.value.trim();
+    if (!text) { input.focus(); return; }
+    $('sessTellBox').classList.remove('hidden');
+    $('sessTellBox').textContent = 'Đang nói tiếp vào phiên — lượt này ở lại trên chính phiên đó…';
+    waitingFor = 'tell';
+    sendCommand(`/tell ${text}`, e && e.target);
+    input.value = '';
+  }
+
+  // UC-S06 — mở phiên làm việc mới cho một dự án, ngay từ điện thoại.
+  $('sessNew').addEventListener('click', (e) => {
+    const project = $('sessNewProject').value;
+    const account = $('sessNewAccount').value;
+    const task = $('sessNewTask').value.trim();
+    const note = $('sessNewNote');
+    if (!project || !task) {
+      note.classList.remove('hidden');
+      note.textContent = 'Chọn dự án và nói việc cần làm.';
+      return;
+    }
+    note.classList.remove('hidden');
+    note.textContent = 'Đang mở phiên nền trên máy…';
+    // hub trả lời trong phòng chat. Không nhận nó về đây thì lời báo hỏng nằm
+    // ở TAB KHÁC với cái nút vừa bấm, và màn này đứng im như đang chạy tốt.
+    waitingFor = 'new';
+    // Tài khoản đi kèm LUÔN, kể cả tài khoản mặc định: Hà chọn acc2 mà lệnh vẫn
+    // chạy `claude` là lỗi đã gặp thật (2026-08-10), và một tên viết ra rõ ràng
+    // thì hub từ chối được khi sai, còn tên bỏ trống thì lặng lẽ rơi về mặc định.
+    const at = account ? `@${account} ` : '';
+    sendCommand(`/new ${project} ${at}${task}`, e.target);
+    $('sessNewTask').value = '';
+  });
+
+  $('sessStop').addEventListener('click', (e) => {
+    if (!wantSession) return;
+    $('sessTellBox').classList.remove('hidden');
+    $('sessTellBox').textContent = 'Đang dừng phiên…';
+    waitingFor = 'tell';
+    sendCommand(`/stop ${wantSession}`, e.target);
+  });
+
   /// `/type` — gõ thẳng vào cửa sổ terminal của phiên.
   function typeIntoSession(e) {
     if (!wantSession) return;
@@ -2334,6 +2387,12 @@
       ev.preventDefault();
       sendCommand(`/session ${wantSession}`, null);
       sendCommand('/key enter', null);
+      return;
+    }
+    // Enter khi ĐÃ có chữ = gửi. Đường này cũng đứt trong cùng lần cắt ấy.
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      sendSay(ev);
     }
   });
 

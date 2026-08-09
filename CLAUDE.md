@@ -122,6 +122,29 @@ or drive a session from a phone?** If not, it does not belong here.
 11. **The phone page is the only UI.** There is no local console any more. If you
     add a surface, it must go through the same room commands — one path, one set
     of books.
+12. **macOS facts that cost a night to learn** (2026-08-10). Typing into a live
+    session goes through Terminal's own `do script`, NOT `System Events keystroke`
+    — the latter is refused outright (*"osascript is not allowed to send
+    keystrokes (1002)"*) and no amount of granting Accessibility fixes it,
+    because the process asking is `/usr/bin/osascript`, a system binary. `do
+    script` needs only **Automation**, which hub already has. It **always
+    appends a newline** and that cannot be turned off: fine for `claude`'s
+    prompt box, but it means an arrow key both MOVES and CONFIRMS, so hub
+    refuses to send arrows while a choice dialog is up and asks for the number
+    instead. And when the session is mid-run, `claude` **queues** the text
+    rather than showing it — so a reply must read the screen back and say WHERE
+    the text landed. `osascript` returning 0 proves only that bytes reached the
+    tab.
+    **Autostart is not durable across rebuilds.** TCC pins its grants to the
+    binary's code signature (`csreq` = a `cdhash` pin), and `cargo` ad-hoc-signs
+    with an identifier derived from the build UUID — so every `cargo build`
+    makes `hubd` a *different program* to macOS, and the launchd copy silently
+    loses both Documents access and Automation. The failure mode is the worst
+    kind: `getcwd()`/`open()` block forever waiting on a dialog no background
+    process can show — no log, no exit code, just a pid sitting there. `hubd`
+    now prints `hubd_boot` to stderr as its first instruction so "never entered
+    main" is distinguishable from "stuck on permission". Durable fix (not built
+    yet): sign the binary with a stable self-signed certificate.
 
 ## When you change something
 

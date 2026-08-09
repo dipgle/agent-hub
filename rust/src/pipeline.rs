@@ -118,7 +118,16 @@ fn auto_handover(db: &Db, cfg: &Config) {
             1_000_000
         };
         let pct = ((s.context_tokens * 100) / window).min(100) as u8;
-        let screen = crate::keys::screen_of(&s.tty, 40);
+        // Chỉ đọc màn khi phiên ĐÃ đủ đầy. Mỗi lần đọc là một lần gọi
+        // AppleScript vào Terminal, và đọc cho mọi phiên mỗi vòng đã kéo một
+        // vòng từ ~18 giây lên **90 giây** (đo 2026-08-10) — đủ chậm để một
+        // lệnh gõ từ điện thoại nằm chờ hơn một phút. Phiên còn 5% ngữ cảnh thì
+        // màn của nó không đổi được quyết định nào, nên đừng hỏi.
+        let screen = if pct >= cfg.auto_handover.at_percent {
+            crate::keys::screen_of(&s.tty, 40)
+        } else {
+            None
+        };
         let idle_sec = s
             .last_activity
             .as_deref()
@@ -868,6 +877,28 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 }
                             } else {
                             let is_key = matches!(cmd.kind, CommandKind::Key);
+                            let arrow = matches!(
+                                cmd.arg.trim(),
+                                "up" | "down" | "left" | "right"
+                            );
+                            // `do script` LUÔN kèm một dấu xuống dòng, không tắt
+                            // được — nên trên hộp chọn, một phím mũi tên vừa DI
+                            // vừa CHỐT. Chốt nhầm một lựa chọn của người khác là
+                            // thứ không lùi lại được, nên thà không gửi.
+                            let asking = crate::keys::screen_of(&s.tty, 24)
+                                .is_some_and(|(_, c)| !c.is_empty());
+                            if is_key && arrow && asking {
+                                logging::info(
+                                    "keys_arrow_refused",
+                                    json!({ "session": s.session_id, "key": cmd.arg.trim() }),
+                                );
+                                format!(
+                                    "⚠ {} đang có hộp chọn, nên tôi KHÔNG gửi mũi tên: đường gõ của \
+                                     Terminal luôn kèm một dấu xuống dòng, tức mũi tên vừa di vừa CHỐT \
+                                     — dễ chọn nhầm hộ Hà. Gõ thẳng SỐ của mục cần chọn thì an toàn.",
+                                    s.name
+                                )
+                            } else {
                             let res = if is_key {
                                 crate::keys::press(w, cmd.arg.trim())
                             } else {
@@ -884,16 +915,39 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                 "kind": if is_key { "key" } else { "text" },
                                                 "len": cmd.arg.trim().len() }),
                                     );
-                                    if is_key {
-                                        format!("⌨ đã bấm '{}' vào {}", cmd.arg.trim(), s.name)
+                                    // Soi lại màn rồi mới nói. Mã trả về 0 chỉ
+                                    // chứng minh byte đã vào tab, KHÔNG chứng minh
+                                    // `claude` làm gì với nó — chính chỗ này từng
+                                    // báo "đã bấm" trong khi Hà không thấy gì.
+                                    std::thread::sleep(std::time::Duration::from_millis(900));
+                                    let what = match crate::keys::screen_of(&s.tty, 24) {
+                                        Some((sc, _)) => crate::keys::landed(&sc),
+                                        None => crate::keys::Landed::Idle,
+                                    };
+                                    let did = if is_key {
+                                        format!("đã bấm '{}'", cmd.arg.trim())
                                     } else {
-                                        format!("⌨ đã gõ vào {} ({} ký tự)", s.name, cmd.arg.trim().len())
+                                        format!("đã gõ {} ký tự", cmd.arg.trim().len())
+                                    };
+                                    match what {
+                                        crate::keys::Landed::Queued => format!(
+                                            "⌨ {} vào {} — phiên đang chạy dở nên chữ nằm ở HÀNG CHỜ, \
+                                             `claude` sẽ xử lý ngay khi xong việc.",
+                                            did, s.name
+                                        ),
+                                        crate::keys::Landed::Running => {
+                                            format!("⌨ {} vào {} — phiên đã nhận và bắt đầu chạy.", did, s.name)
+                                        }
+                                        crate::keys::Landed::Idle => {
+                                            format!("⌨ {} vào {} — phiên đang đứng ở dấu nhắc.", did, s.name)
+                                        }
                                     }
                                 }
                                 Err(e) => format!(
                                     "⚠ không gõ được: {}",
                                     crate::exec::truncate(&e.to_string(), 300)
                                 ),
+                            }
                             }
                             }
                         }

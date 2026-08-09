@@ -151,10 +151,20 @@ try {
   check("phiên mới xuất hiện mà không cần chạm vào máy", true, fresh.session_id.slice(0, 8));
   started = fresh;
   check("phiên mới là phiên NỀN", fresh.kind === "background", fresh.kind);
+  // Phiên mở ở GỐC WORKSPACE, không phải trong thư mục dự án — Hà 2026-08-10:
+  // *"ngay từ đầu tôi bảo mọi phiên đều bắt đầu từ thư mục projects rồi mà"*.
+  // Mở trong thư mục con là mở vào chỗ chưa tài khoản nào duyệt, nên phiên kẹt
+  // ngay ở hộp thoại MCP rồi chết. Dự án được nói trong ĐỀ BÀI thay vì bằng
+  // thư mục, nên phép đo cũng chuyển sang đo đúng chỗ ấy.
   check(
-    "phiên mới nằm đúng thư mục dự án",
-    (fresh.cwd || "").endsWith(project),
+    "phiên mới mở ở gốc workspace",
+    (fresh.cwd || "").replace(/\/+$/, "").endsWith("/Documents/projects"),
     fresh.cwd
+  );
+  check(
+    "đề bài mang tên dự án",
+    (fresh.name || "").includes(`[${project}]`),
+    fresh.name
   );
 
   // Màn phải thấy nó, không chỉ máy thấy.

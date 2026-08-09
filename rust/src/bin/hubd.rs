@@ -167,6 +167,21 @@ fn config_mtime(path: &std::path::Path) -> Option<(i64, u32)> {
 }
 
 fn main() {
+    // Dòng đầu tiên của cả tiến trình, in THẲNG ra stderr — chưa đọc cấu hình,
+    // chưa mở sổ, chưa chạm vào `~/Documents`.
+    //
+    // Vì sao phải sớm đến thế (đo 2026-08-10): dưới launchd, một binary vừa
+    // build lại KHÔNG còn quyền TCC vào `~/Documents` — macOS neo quyền theo
+    // dấu vân tay binary, mà `cargo` ký ad-hoc với định danh sinh từ UUID nên
+    // mỗi lần build là một chương trình khác trong mắt nó. Hệ quả không phải
+    // một lỗi: lời gọi `getcwd()`/`open()` TREO CÂM chờ một hộp thoại không bao
+    // giờ hiện cho tiến trình nền. Không log, không mã thoát, chỉ một pid nằm
+    // im — thứ khó chẩn đoán nhất. Có dòng này thì phân biệt được ngay "chưa
+    // vào nổi main" với "vào rồi nhưng kẹt ở quyền".
+    eprintln!(
+        "{{\"level\":\"info\",\"msg\":\"hubd_boot\",\"pid\":\"{}\"}}",
+        std::process::id()
+    );
     if let Err(e) = real_main() {
         eprintln!("hubd: {}", logging::err_chain(&e));
         std::process::exit(70);

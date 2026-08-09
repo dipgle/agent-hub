@@ -57,9 +57,27 @@
   <key>LowPriorityIO</key>
   <true/>
 
+  <!--
+    Log NGOÀI ~/Documents.
+
+    Đo 2026-08-09: bootstrap xong, `launchctl list` báo `- 78 com.dipgle.hubd`,
+    `runs = 105`, và KHÔNG có một dòng nào của bản launchd trong log — tức
+    launchd chưa spawn nổi chứ không phải hubd thoát (hubd chỉ trả 70/3/1).
+    Mọi thứ khác đều đúng: plist hợp lệ, binary có quyền chạy, không đăng ký cũ
+    kẹt, và bỏ khoá pid 70 giây vẫn không dựng lên.
+
+    Thứ còn lại là TCC: `~/Documents` là thư mục macOS bảo vệ, và launchd phải
+    MỞ ĐƯỢC StandardOutPath trước khi chạy chương trình. Không mở được thì hỏng
+    ở đúng bước dựng stdio, và đó là `EX_CONFIG` (78). `~/Library/Logs` không bị
+    bảo vệ, nên log ra đó.
+
+    Nếu vẫn 78 sau khi đổi: cấp Full Disk Access cho chính binary
+    (System Settings → Privacy & Security → Full Disk Access → thêm
+    …/hub/rust/target/release/hubd), vì WorkingDirectory vẫn nằm trong Documents.
+  -->
   <key>StandardOutPath</key>
-  <string>/Users/hanguyen/Documents/projects/AI/hub/logs/hubd.out</string>
+  <string>/Users/hanguyen/Library/Logs/hubd.out</string>
   <key>StandardErrorPath</key>
-  <string>/Users/hanguyen/Documents/projects/AI/hub/logs/hubd.err</string>
+  <string>/Users/hanguyen/Library/Logs/hubd.err</string>
 </dict>
 </plist>

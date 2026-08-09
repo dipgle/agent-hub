@@ -582,6 +582,14 @@
     max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* Chú thích cuối cùng: chữ nhỏ, một hàng, không đội chỗ. */
+  #sessKeys {
+    display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;
+  }
+  #sessKeys button {
+    min-width: 40px; height: 36px; padding: 0 8px;
+    font-family: var(--mono); font-size: 13px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+  }
   #sessNote {
     display: flex; align-items: center; gap: 10px;
     margin-top: 4px; flex-wrap: nowrap;
@@ -887,6 +895,19 @@
                    mở trong terminal/VS Code (Hà chốt 08-08). -->
               <button type="button" id="sessStop" class="hidden">⏹ Dừng</button>
             </div>
+          </div>
+          <!-- Phím điều khiển: hộp chọn của `claude` đi bằng mũi tên + Enter,
+               gửi chữ "xuống" vào đó thì nó gõ ra chữ chứ không di chuyển. Đây
+               là thứ trả lời được một phiên đang dừng lại hỏi — thứ mà tới
+               2026-08-09 từ điện thoại hoàn toàn bó tay. -->
+          <div id="sessKeys" class="hidden">
+            <button type="button" data-key="up" title="Lên">↑</button>
+            <button type="button" data-key="down" title="Xuống">↓</button>
+            <button type="button" data-key="enter" title="Chọn">⏎</button>
+            <button type="button" data-key="esc" title="Bỏ qua">esc</button>
+            <button type="button" data-key="1">1</button>
+            <button type="button" data-key="2">2</button>
+            <button type="button" data-key="3">3</button>
           </div>
           <!-- Chú thích về màn, MỘT hàng, dưới cùng: trạng thái luồng bên trái
                (cắt đuôi nếu dài), cách hiển thị bên phải. Nó là chú thích, nên
@@ -2023,11 +2044,20 @@
     // Phiên hub quản được: mặc định NÓI TIẾP, muốn hỏi bên lề thì tự tích.
     // Phiên khác: hỏi bên lề là đường DUY NHẤT, nên tích sẵn và khoá lại — cho
     // chọn một thứ chắc chắn hỏng còn tệ hơn không cho chọn.
+    // BA đường, không phải hai (từ 2026-08-09):
+    //  · phiên nền hub mở  → `/tell`  (mở một lượt mới trên nhật ký)
+    //  · phiên có cửa sổ   → `/type`  (gõ THẲNG vào terminal đang chạy)
+    //  · còn lại           → `/ask`   (hỏi trên bản sao)
+    // Phiên có cửa sổ mới là phiên trả lời được hộp chọn đang chờ, nên hàng
+    // phím điều khiển chỉ hiện ở đó.
+    const canType = !!s.tty && s.tty !== '??' && s.host === 'terminal';
+    sayMode = mine ? 'tell' : (canType ? 'type' : 'ask');
     const cb = $('sessAside');
-    cb.checked = !mine;
-    cb.disabled = !mine;
-    $('sessAsideLabel').classList.toggle('forced', !mine);
-    applySayMode(mine);
+    cb.checked = sayMode === 'ask';
+    cb.disabled = !(mine || canType);
+    $('sessAsideLabel').classList.toggle('forced', cb.disabled);
+    $('sessKeys').classList.toggle('hidden', !canType);
+    applySayMode(mine || canType);
     // An answer that arrives after the reader moved on belongs to the session
     // they left, not the one they are looking at.
     waitingFor = null;
@@ -2093,18 +2123,29 @@
   /// Không đổi placeholder/nhãn theo chế độ thì gõ xong không biết câu vừa gõ
   /// sẽ CHEN VÀO phiên hay chạy trên bản sao — hai kết quả khác hẳn nhau, và
   /// một trong hai làm nhật ký phiên gốc dài ra.
+  /// Chế độ hiện tại của ô nhập: 'tell' · 'type' · 'ask'.
+  let sayMode = 'ask';
+
   function applySayMode(canTell) {
     const aside = $('sessAside').checked;
+    if (!aside && sayMode === 'ask') sayMode = 'type';
+    if (aside) sayMode = 'ask';
     const input = $('sessSayInput');
     const btn = $('sessSay');
     const hint = $('sessAskHint');
-    input.placeholder = aside ? 'Hỏi bên lề phiên này…' : 'Nói tiếp vào phiên này…';
-    btn.textContent = aside ? '💬 Hỏi' : 'Gửi';
-    hint.textContent = aside
-      ? (canTell === false
-          ? 'Phiên này hub không gõ vào được (bạn mở ở terminal), nên chỉ hỏi bên lề: câu hỏi chạy trên một bản sao, phiên gốc không bị đụng và không dừng lại.'
-          : 'Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.')
-      : 'Lượt này ở lại trên chính phiên đó, nên nhật ký phiên dài ra.';
+    input.placeholder = {
+      ask: 'Hỏi bên lề phiên này…',
+      type: 'Gõ thẳng vào cửa sổ phiên…',
+      tell: 'Nói tiếp vào phiên này…',
+    }[sayMode];
+    btn.textContent = { ask: '💬 Hỏi', type: '⌨ Gõ', tell: 'Gửi' }[sayMode];
+    hint.textContent = {
+      ask: canTell === false
+        ? 'Phiên này không gõ vào được, nên chỉ hỏi bên lề: câu hỏi chạy trên một bản sao, phiên gốc không bị đụng.'
+        : 'Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.',
+      type: 'Gõ THẲNG vào cửa sổ terminal của phiên (sẽ kéo cửa sổ đó lên trước trên máy).',
+      tell: 'Lượt này ở lại trên chính phiên đó, nên nhật ký phiên dài ra.',
+    }[sayMode];
   }
   $('termMode').addEventListener('change', () => {
     $('sessStream').classList.toggle('term', $('termMode').checked);
@@ -2119,9 +2160,33 @@
 
   /// Gửi: chế độ nào thì đi verb đó. Cùng một ô, hai đường hoàn toàn khác nhau.
   function sendSay(e) {
-    if ($('sessAside').checked) askAside(e);
-    else tellSession(e);
+    if (sayMode === 'ask') { askAside(e); return; }
+    if (sayMode === 'tell') { tellSession(e); return; }
+    typeIntoSession(e);
   }
+
+  /// `/type` — gõ thẳng vào cửa sổ terminal của phiên.
+  function typeIntoSession(e) {
+    if (!wantSession) return;
+    const input = $('sessSayInput');
+    const text = input.value.trim();
+    if (!text) { input.focus(); return; }
+    $('sessTellBox').classList.remove('hidden');
+    $('sessTellBox').textContent = 'Đang gõ vào cửa sổ phiên…';
+    waitingFor = 'tell';
+    sendCommand(`/type ${text}`, e && e.target);
+    input.value = '';
+  }
+
+  // Phím điều khiển: một cú bấm = một phím, không có ô nhập nào ở giữa.
+  $('sessKeys').addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-key]');
+    if (!b || !wantSession) return;
+    $('sessTellBox').classList.remove('hidden');
+    $('sessTellBox').textContent = `Đang bấm '${b.dataset.key}'…`;
+    waitingFor = 'tell';
+    sendCommand(`/key ${b.dataset.key}`, b);
+  });
   $('sessSay').addEventListener('click', sendSay);
   // Phím "go" của bàn phím điện thoại là cách gửi tự nhiên nhất; bắt người ta
   // với tay sang nút là thứ ma sát giết tính năng.

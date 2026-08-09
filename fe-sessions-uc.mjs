@@ -178,6 +178,27 @@ try {
   check("trang không tràn ngang", over.w <= over.inner + 1, `${over.w}/${over.inner}`);
 
   // A withheld preview must say so; silence would read as "phiên im lặng".
+  // Phiên chạy trong editor bị bỏ khỏi danh sách — màn phải NÓI RA, và nói
+  // đúng số. Đo 2026-08-09: hub ẩn 8 phiên mỗi vòng suốt 601 lần ghi log, mà
+  // màn hình không có một chữ nào về chúng; câu hỏi gốc của Hà ("3 terminal sao
+  // hiện 13 phiên?") khi ấy chỉ đổi chiều chứ chưa được trả lời.
+  const hiddenEditor = truth.hidden_editor || 0;
+  const summaryTxt = (await page.locator("#sessSummary").innerText()).trim();
+  const onScreenEditors = await page.evaluate(() =>
+    [...document.querySelectorAll("#sessList .sess")].filter((e) => e.dataset.host === "editor").length
+  );
+  check("không dòng phiên editor nào lọt lên màn", onScreenEditors === 0, `${onScreenEditors} dòng`);
+  if (hiddenEditor > 0) {
+    check(
+      "màn nói đúng số phiên editor bị ẩn — khớp với máy",
+      new RegExp(`${hiddenEditor} phiên trong editor không hiện`).test(summaryTxt),
+      `máy ẩn ${hiddenEditor} · màn: ${summaryTxt}`
+    );
+  } else {
+    check("máy không có phiên editor thì màn không bịa ra con số",
+      !/không hiện ở đây/.test(summaryTxt), summaryTxt);
+  }
+
   const hidden = truth.sessions.filter((s) => (s.note || "").startsWith("ẩn phần xem trước"));
   if (hidden.length) {
     const noteShown = await page.evaluate(

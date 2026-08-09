@@ -245,6 +245,23 @@
   #board textarea { font: inherit; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-family: var(--mono); font-size: 12px; min-height: 90px; resize: vertical; }
   #board select { font: inherit; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
   #board .row-flex { display: flex; gap: 8px; align-items: center; }
+  /* Ô nhập trong hàng ngang phải CO được. Mặc định flex cho mỗi item
+     `min-width: auto`, nên ô giữ nguyên bề rộng nội dung tối thiểu của nó và
+     đẩy cả hàng rộng hơn khung — đo 2026-08-09 trên màn chi tiết phiên:
+     `div.row-flex 300 → 368px`, kéo theo cả `main 390 → 413px`. Lỗi chỉ lộ khi
+     có phiên nền (hàng "nói tiếp" mới hiện), nên nó nằm im tới tận hôm nay. */
+  /// `flex-basis: 0`, KHÔNG phải `auto`: `#board input` có `width: 100%`, nên
+  /// với basis `auto` ô chiếm trọn 300px của hàng rồi nút vẫn cộng thêm ~68px
+  /// nữa — vá lần đầu vì thế không ăn (đo lại: vẫn 368/300).
+  #board .row-flex > input,
+  #board .row-flex > select,
+  #board .row-flex > textarea { min-width: 0; width: auto; flex: 1 1 0; }
+  /* Nút được PHÉP xuống dòng và co lại. Thủ phạm thật của cú tràn 368/300 là
+     hàng chứa nút "📋 Đóng sổ & tiếp tục ở phiên mới" — nhãn dài hơn 300px, và
+     `flex: 0 0 auto` (bản vá đầu của chính tôi) khoá luôn khả năng co của nó.
+     Đoán hai lần mới hỏi trình duyệt xem phần tử ấy là gì; hỏi trước thì đỡ. */
+  #board .row-flex { flex-wrap: wrap; }
+  #board .row-flex > button { flex: 0 1 auto; min-width: 0; white-space: normal; }
   #board .grid { display: grid; gap: 12px; }
   #board .g2 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
   #board .g3 { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
@@ -1208,8 +1225,18 @@
       .map((k) => `${byHost[k]} ${LABEL[k]}`)
       .join(' · ');
     const live = rows.length - (byHost.dead || 0);
-    summary.textContent = rows.length
-      ? `${live} phiên đang sống${per ? ` — ${per}` : ''}`
+    // Phiên chạy trong editor bị bỏ khỏi danh sách — và PHẢI nói ra ngay đây.
+    //
+    // Câu hỏi gốc là "máy chỉ mở 3 terminal sao màn hiện 13 phiên?". Ẩn đi mà
+    // im lặng thì dựng lên đúng câu hỏi ngược lại: lúc này máy chạy 11 phiên,
+    // màn liệt kê 3. Đo được 2026-08-09: hub ẩn 8 phiên mỗi vòng, con số ấy chỉ
+    // vào log — nơi không ai cầm điện thoại đọc được.
+    const hiddenEditor = sessions.hidden_editor || 0;
+    const hiddenNote = hiddenEditor
+      ? ` · ${hiddenEditor} phiên trong editor không hiện ở đây (hub không gõ vào được)`
+      : '';
+    summary.textContent = rows.length || hiddenEditor
+      ? `${live} phiên đang sống${per ? ` — ${per}` : ''}${hiddenNote}`
       : 'Không có phiên nào đang chạy.';
 
     // An account that failed to answer is not an account with no sessions.

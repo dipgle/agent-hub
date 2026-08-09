@@ -111,6 +111,10 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
             // An account that failed to answer is NOT an account with zero
             // sessions; the page must be able to say which.
             "notes": live.notes,
+            // Số phiên bị bỏ khỏi danh sách vì chạy trong editor. Trước đây con
+            // số này chỉ đi vào log — nơi Hà không đọc — nên màn hình rút ngắn
+            // danh sách mà không nói vì sao.
+            "hidden_editor": live.hidden_editor,
             "focus": focus,
             // The last closing note, so the phone can show where the thread
             // went and how to pick it up on the machine.

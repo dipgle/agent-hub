@@ -173,11 +173,43 @@ màn. `cargo test` **68** · `fe-newsession-uc` **19/19** · `fe-sessions` 12/12
 `fe-url` 16/16 · `fe-board` 19/19 · `fe-phone` 25/25 · `fe-denied` 10/10 ·
 `fe-config` 8/8 · `fe-smoke` 15/15 · `hubd` pid 95660 chạy binary vừa build.
 
-⚠ **Nhánh ẩn phiên editor VẪN chưa nghiệm thu được qua UI.** Máy đang chạy **8
-tiến trình `claude` của VS Code**, nhưng `claude agents` gọi theo từng tài khoản
-(đường hub dùng) **không trả về cái nào** — hub thấy 6 phiên, 0 editor. Kịch bản
-**khai rõ bỏ qua 2 kiểm tra** thay vì im lặng tính là qua. Logic đã ghim bằng
-test có RED/GREEN (xem mục trên).
+### ⛔ Tôi báo sai hai chuyện ở lượt trước — đính chính, có bằng chứng
+
+**Sai 1: "nhánh ẩn phiên editor chưa nghiệm thu được".** Nó đang chạy thật suốt:
+`sessions_editor_hidden` có **601 lần ghi**, lần cuối **ẩn 8**. Tôi kết luận "0
+editor" từ hai chỗ đọc hỏng: `hub sessions --json` khi ấy **không có trường**
+`hidden_editor` (probe của tôi in `None`, tôi đọc thành 0), và dòng log cuối ghi
+`09:40:37Z` mà tôi tưởng là 7 tiếng trước — **nó chính là 16:40 giờ máy, tức lúc
+ấy**. *Đúng cái bẫy UTC vừa sửa trong bảng lượt chạy sáng nay, tái phạm trong
+cùng một ngày.*
+
+**Sai 2: "2 kiểm tra bị bỏ qua là về phiên editor".** Không — chúng là về **phiên
+bị ẩn phần xem trước** (quét rò rỉ), `fe-sessions-uc.mjs:181`. Hai chuyện khác
+hẳn nhau.
+
+### Con số bị ẩn phải lên MÀN, không phải chỉ vào log (v71→v74)
+
+Chính chú thích trong mã đã viết *"một danh sách ngắn đi mà không ai biết vì sao
+là danh sách nói dối"* — rồi vẫn chỉ log. Câu hỏi gốc của Hà (*"3 terminal sao
+hiện 13 phiên?"*) chỉ **đổi chiều**: máy chạy 15 phiên, màn liệt kê 7.
+`SessionsSnapshot.hidden_editor` → ảnh chụp → dòng tóm tắt:
+> 7 phiên đang sống — 5 terminal · 2 chạy nền · 2 đã dừng · **8 phiên trong
+> editor không hiện ở đây (hub không gõ vào được)**
+
+`fe-sessions-uc` **đối chiếu con số ấy với `hub sessions --json`** (14/14), và
+`fe-url-uc` đổi phép đo: trước nó đòi dòng tóm tắt *"thôi nhắc editor"* — tức đòi
+đúng cái làm nên danh sách nói dối.
+
+### Màn chi tiết tràn ngang 368/300 — và hai lần tôi đoán trước khi hỏi
+
+Mở rộng phép đo tràn-ngang sang **màn chi tiết phiên** (nơi có hàng chỉ hiện khi
+phiên do hub mở) thì nó đỏ ngay. Hai lần vá trượt vì đoán: (1) tưởng thủ phạm là
+ô nhập → `flex: 1 1 auto`, không ăn vì `#board input { width: 100% }` kéo basis
+`auto` thành 300px; (2) `flex: 0 0 auto` cho nút **làm tệ hơn** — nó khoá luôn
+khả năng co. Hỏi trình duyệt phần tử đó là gì thì ra ngay: hàng chứa nút **"📋
+Đóng sổ & tiếp tục ở phiên mới"**, nhãn dài hơn cả khung. Vá: `.row-flex`
+`flex-wrap: wrap`, nút `flex: 0 1 auto` + `white-space: normal`. *Đo được tên
+phần tử rẻ hơn đoán hai vòng deploy.*
 
 ### Lịch sử: bức tường MCP trước khi Hà bấm Esc
 

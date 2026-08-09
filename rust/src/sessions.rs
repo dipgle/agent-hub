@@ -99,6 +99,16 @@ pub struct SessionsSnapshot {
     /// Per-account problems: CLI missing, not logged in, unparseable output.
     /// An account that failed must not look like an account with no sessions.
     pub notes: Vec<String>,
+    /// How many editor-hosted sessions were left out of `sessions`.
+    ///
+    /// This number has to reach the SCREEN, not just the log. The whole reason
+    /// the editor rows are hidden is a question Hà asked on 2026-08-09 — *"máy
+    /// đang chỉ mở 3 phiên terminal mà giao diện vẫn hiện 13 phiên?"* — and
+    /// hiding them silently sets up the mirror image of it: right now the
+    /// machine runs 11 sessions and the phone lists 3. A list that got shorter
+    /// without saying why is a list that gets argued with.
+    #[serde(default)]
+    pub hidden_editor: usize,
 }
 
 /// `~/Documents/projects` → `-Users-hanguyen-Documents-projects`.
@@ -548,6 +558,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
         }
     }
 
+    out.hidden_editor = hidden_editor;
     if hidden_editor > 0 {
         logging::info(
             "sessions_editor_hidden",

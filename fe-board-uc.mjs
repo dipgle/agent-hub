@@ -167,6 +167,31 @@ try {
         .map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""} ${e.scrollWidth}/${e.clientWidth}`)
     );
   }
+  // Màn CHI TIẾT phiên cũng phải đo — nó là màn dày nhất và có những hàng chỉ
+  // xuất hiện khi phiên do hub mở (ô "nói tiếp"). Đúng chỗ ấy có lỗi tràn thật
+  // 2026-08-09 (`div.row-flex 300 → 368px`) mà vòng quét 4 tab không thấy, vì
+  // nó chỉ đứng ở danh sách.
+  await page.click('#panelTabs button[data-panel="sessions"]');
+  await page.waitForSelector("#panel-sessions:not(.hidden)", { timeout: 5000 });
+  const liveId = await page.evaluate(
+    () => document.querySelector('#sessList .sess:not([data-host="dead"])')?.dataset.session
+  );
+  if (!liveId) {
+    console.log("  · không có phiên sống nào — bỏ qua đo màn chi tiết");
+  } else {
+    await page.locator(`.sess[data-session="${liveId}"]`).click();
+    await page.waitForSelector("#sessDetail:not(.hidden)", { timeout: 10000 });
+    await page.waitForTimeout(1500);
+    sideways["chi-tiết-phiên"] = await page.evaluate(() =>
+      [...document.querySelectorAll("#board *")]
+        .filter((e) => !/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName))
+        .filter((e) => e.clientWidth > 0 && e.scrollWidth > e.clientWidth + 2)
+        .map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""} ${e.scrollWidth}/${e.clientWidth}`)
+    );
+    await page.click("#sessBack");
+    await page.waitForSelector("#sessListPanel:not(.hidden)", { timeout: 10000 });
+  }
+
   const overflowing = Object.entries(sideways).filter(([, v]) => v.length);
   check("không khối nào rộng hơn khung của nó (nội dung không trốn sang bên phải)",
     overflowing.length === 0,

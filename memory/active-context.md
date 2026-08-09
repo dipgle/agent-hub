@@ -1,5 +1,44 @@
 # active context — hub
 
+## ⚙️ 2026-08-10 (rạng sáng) — hub TỰ CHẠY khi bật máy, sau khi lần ra EX_CONFIG
+
+**Xong: `launchctl list` → `8111 · com.dipgle.hubd`**, tiến trình `ppid 1` do
+launchd sở hữu, vòng poll chạy ngay lúc nó dựng lên. Panel Tình trạng tự đổi từ
+*"CHƯA cài"* sang **`plist đã cài: True · launchd đã nạp: True`**.
+
+**Đường lần ra, vì nó sẽ còn gặp lại.** Bootstrap báo `Input/output error 5` —
+đó chỉ là nạp lại thứ đã nạp. Bệnh thật: `runs = 105`, `last exit code = 78
+(EX_CONFIG)`, và **không một dòng log nào của bản launchd** ⟹ launchd chưa spawn
+nổi, chứ không phải hubd thoát (hubd chỉ trả 70/3/1). Loại từng khả năng:
+
+| Nghi ngờ | Kết quả |
+|---|---|
+| plist sai cú pháp | `plutil -lint` OK |
+| đường dẫn không có | binary + WorkingDirectory đều có, `-rwxr-xr-x` |
+| đăng ký cũ / trùng nhãn | `/Library/LaunchAgents` sạch |
+| macOS chặn Background Item | `sfltool dumpbtm` → `[enabled, allowed, notified]` |
+| khoá pid | bỏ khoá **70 giây**, vẫn không dựng |
+
+⟹ Còn **TCC**: `~/Documents` là thư mục macOS bảo vệ, mà launchd phải **mở được
+`StandardOutPath` TRƯỚC khi chạy chương trình**. Không mở được thì hỏng đúng ở
+bước dựng stdio — và đó là `EX_CONFIG`. Đổi log sang `~/Library/Logs/hubd.{out,
+err}` ⟹ mã đổi **78 → 3**, tức đã spawn được và giờ chỉ vướng khoá pid của bản
+chạy tay. Dừng bản tay ⟹ launchd dựng lên sau **10 giây**.
+
+📌 *Mã thoát đổi từ 78 sang 3 chính là bằng chứng chẩn đoán đúng — không phải
+"thử cái khác rồi tự nhiên chạy".*
+
+⚠ **Tôi làm hub tắt ~70 giây** trong lúc thử (dừng bản chạy tay để nhường khoá,
+lúc launchd còn chưa spawn được). Đã bật lại ngay. Lần sau: sửa plist TRƯỚC, rồi
+mới nhường khoá.
+
+**Nghiệm thu:** `fe-smoke` 15/15 · `fe-sessions` 18/18 · `fe-url` 16/16, chạy
+trên daemon do launchd sở hữu.
+
+📍 **`hub.env` nằm ở `<hub>/hub.env`** (chmod 600, đã gitignore) — hub đọc tại
+`hub_home/hub.env` (`config.rs:516`), và bản launchd đọc được vì
+`WorkingDirectory` trỏ đúng gốc project. Log chỉ ghi TÊN khoá.
+
 ## 📟 2026-08-09 (khuya) — bộ thu trạng thái + luồng nhìn như terminal (v96→v99)
 
 **`runtime.rs` — "tool chụp tình trạng liên tục"** (Hà xin đúng một câu). Chạy

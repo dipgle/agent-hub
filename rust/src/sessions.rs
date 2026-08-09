@@ -242,13 +242,29 @@ fn host_of(pid: i64, kind: &str) -> String {
             return "unknown".into();
         }
     };
+    classify_host(&cmd, kind).to_string()
+}
+
+/// The half of `host_of` that is a decision rather than a probe.
+///
+/// Split out so it can be tested: the editor branch is the one the phone acts
+/// on — those rows are hidden — and on a machine with no editor session open
+/// there is no way to exercise it through the UI. `host_of` still owns the
+/// `ps` call and the pid-is-gone answer; this owns only "given this command
+/// line, whose session is it".
+pub fn classify_host(cmd: &str, kind: &str) -> &'static str {
+    // A background session hub started is `--bg`, never an editor's, whatever
+    // binary is on the path — the kind is the stronger signal, so it wins.
     if kind == "background" {
-        return "background".into();
+        return "background";
     }
+    // The extension ships its own `claude` under the editor's extension dir, so
+    // the PATH is what separates it from a terminal — the process name is
+    // `claude` in both cases.
     if cmd.contains("/.vscode") || cmd.contains("/.cursor") || cmd.contains("Cursor.app") {
-        "editor".into()
+        "editor"
     } else {
-        "terminal".into()
+        "terminal"
     }
 }
 

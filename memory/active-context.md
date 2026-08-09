@@ -81,11 +81,54 @@ MECHANICAL GATES PASSED · `fe-url-uc` **16/16** · `fe-board-uc` **19/19** (+1
 phép đo mới) · `fe-sessions-uc` 12/12 · `fe-smoke` 15/15 · `fe-config-uc` 8/8 ·
 `fe-denied-uc` 10/10 · `fe-shots` 5 màn, 0 lỗi console.
 
-**CHƯA XONG, có sổ:** lượt chạy này **không có phiên editor nào** nên
-`fe-sessions-uc` **khai bỏ qua 2 kiểm tra** ẩn-phiên-editor (đường ẩn đã nghiệm
-thu hôm trước với 13 phiên → ẩn 8). `fe-stream-uc`/`fe-aside-uc` **chưa chạy lượt
-này** vì cổng hạn mức. `/tell` + `/stop` vẫn chưa nghiệm thu qua UI. Bảng cũ
-trong `hub.sqlite` vẫn còn dữ liệu — **cố ý không xoá**.
+### "làm nốt đi" — trả nợ ergonomics + ghim logic ẩn phiên editor (v66→v69)
+
+**`fe-phone-uc` 18/25 → 25/25, 9 ghi chú → 3.** Nợ này đỏ từ trước đợt dọn hộp
+thư. Sửa **11 khai báo cỡ chữ dưới 12px** (nhỏ nhất là `#status` **9.92px**) và
+**ô tích 13px → 32px** (công tắc bật/tắt cả một kênh mà là vùng chạm nhỏ nhất
+trang), rồi đặt **chuẩn chạm 44px** cho nút chính + ô nhập — trừ nút phụ chen
+giữa dòng chữ (`.replybtn`), kéo lên 44px sẽ xé dòng.
+
+⚠ **Chữ to lên đẻ ra lỗi mới ngay trong cùng lượt:** header **tràn 15px**
+(390→405). Đo ra thủ phạm: 4 tab **270px** + huy hiệu **113px** + lề/khe 29px =
+412px. **Không** hạ cỡ chữ lại (vừa trả nợ đó xong) mà lấy phần thừa ở khe chữ +
+lề tab ⇒ **390/390**. `fe-phone-uc` chỉ **ghi chú** chuyện cuộn-ngang-bên-trong
+chứ không đỏ, nên nó suýt trôi.
+
+**Ẩn phiên editor: không nghiệm thu được qua UI hôm nay, nên ghim bằng test.**
+Máy đang chạy **3 tiến trình `claude` của VS Code** (`~/.vscode/extensions/…/
+native-binary/claude`) mà `claude agents` **không liệt kê cái nào** ⇒ 0 phiên
+editor trên màn ⇒ nhánh ẩn không có đường đi qua giao diện. Tách
+`sessions::classify_host(cmd, kind)` (thuần quyết định, `host_of` giữ phần gọi
+`ps`) + test dùng **chuỗi lệnh THẬT copy từ `ps -o command=`** của cả hai loại.
+**Chứng minh test cắn thật:** bẻ `/.vscode` → `/.vscodeX` ⇒ **FAILED**
+(`tests/sessions.rs:236`), trả lại ⇒ 12/12. `kind == "background"` **thắng
+đường dẫn** — thiếu vế đó thì phiên nền mở từ binary của editor sẽ bị xếp loại
+"editor" và **biến mất khỏi đúng màn có thể dừng nó**.
+
+**Nghiệm thu lượt này (bundle v69, `hubd` pid 27396 chạy binary vừa build):**
+`cargo test` **68** (+1) · 0 warning · `fe-url` 16/16 · `fe-board` 19/19 ·
+`fe-sessions` 12/12 · `fe-stream` 13/13 · `fe-aside` 9/9 · `fe-newsession` 9/9 ·
+`fe-denied` 10/10 · `fe-config` 8/8 · `fe-phone` **25/25** · `fe-smoke` 15/15 ·
+`fe-shots` 5 màn, 0 lỗi console.
+
+**CÒN LẠI ĐÚNG MỘT VIỆC, và nó là của Hà.** `/tell` + `/stop` chưa nghiệm thu qua
+UI vì phiên nền mở ở đâu trong workspace cũng kẹt ở hộp thoại duyệt MCP. Kiểm lại
+hôm nay chứ không tin ghi chú cũ: `~/.claude.json` có `hasTrustDialogAccepted:
+true` cho thư mục gốc nhưng `enabledMcpjsonServers: []` và
+`disabledMcpjsonServers: []`, trong khi `.mcp.json` khai **2 server**
+(`project-agent`, `vault`) ⇒ mọi phiên mới vẫn hỏi. **Tôi không tự duyệt MCP thay
+Hà** — đó là quyết định cho phép chạy tiến trình, không phải cấu hình giao diện.
+Một lần, rồi `/new` → `/tell` → `/stop` chạy được qua UI:
+
+```
+cd ~/Documents/projects/AI/hub-act-demo && claude   → Esc → thoát
+```
+
+**Còn nợ khác, có sổ:** `fe-stream-uc`/`fe-aside-uc` vẫn **BỎ QUA bước gọi thật**
+— nhật ký rẻ nhất trên máy là 0.94 MB ≈ thước đo **$1.65**, quá trần $0.25; muốn
+mua bằng chứng thì `HUB_UC_PAY=1`. Bảng cũ trong `hub.sqlite` vẫn còn dữ liệu —
+**cố ý không xoá**.
 
 ## 💸 2026-08-09 (rạng sáng) — "bỏ mọi đường github rồi sao vẫn mất tiền thế"
 

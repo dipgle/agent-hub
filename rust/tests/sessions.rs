@@ -214,3 +214,53 @@ fn the_background_id_is_the_first_token_not_the_rest_of_the_line() {
     assert_eq!(parse_backgrounded_id(""), None);
     assert_eq!(parse_backgrounded_id("backgrounded · "), None);
 }
+
+/// Whose session is this — the decision the phone acts on.
+///
+/// The screen HIDES editor rows (Hà, 2026-08-09: *"bỏ các phiên của editor đi
+/// vì có quản lý được tin nhắn của nó đâu?"*), so getting this wrong either
+/// hides a session he can drive or shows one he cannot. It is also the branch
+/// that CANNOT be exercised through the UI on a machine with no editor session
+/// listed — on 2026-08-09 three VS Code `claude` processes were running and
+/// `claude agents` listed none of them.
+///
+/// Both command lines below are copied from `ps -o command=` on this machine,
+/// not invented: the extension ships its own binary under `~/.vscode/…`, so the
+/// PATH is the only thing separating it from a terminal session — the process
+/// name is `claude` on both sides.
+#[test]
+fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
+    use hub::sessions::classify_host;
+
+    let vscode = "/Users/hanguyen/.vscode/extensions/anthropic.claude-code-2.1.220-darwin-arm64/resources/native-binary/claude --output-format stream-json --verbose --input-format stream-json";
+    assert_eq!(classify_host(vscode, "interactive"), "editor");
+    assert_eq!(
+        classify_host("/Users/x/.cursor/extensions/anthropic.claude-code/claude", "interactive"),
+        "editor"
+    );
+    assert_eq!(
+        classify_host("/Applications/Cursor.app/Contents/Resources/claude", "interactive"),
+        "editor"
+    );
+
+    // A real terminal row, verbatim: no editor path anywhere in it.
+    assert_eq!(
+        classify_host("claude tiếp /Users/hanguyen/Documents/projects/AI/hub", "interactive"),
+        "terminal"
+    );
+    assert_eq!(classify_host("claude tiếp tfl5", "interactive"), "terminal");
+
+    // `kind` beats the path: a session hub started with `--bg` is hub's to
+    // drive no matter which binary happens to be first on the PATH. Without
+    // this, a background session launched from an editor-installed `claude`
+    // would be filed as "editor" and hidden from the one screen that can stop
+    // it.
+    assert_eq!(classify_host(vscode, "background"), "background");
+
+    // A path merely MENTIONING a project called "vscode-something" is not an
+    // editor session; the marker is the dot-directory.
+    assert_eq!(
+        classify_host("claude tiếp /Users/hanguyen/Documents/projects/vscode-notes", "interactive"),
+        "terminal"
+    );
+}

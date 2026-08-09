@@ -55,6 +55,11 @@
     border: 0; background: none; border-radius: 0; color: var(--muted);
     border-bottom: 2px solid transparent; font-weight: 500;
   }
+  /* Rê chuột vào tab phải THẤY được. Bản trước chỉ đổi con trỏ — trên máy tính
+     đó là menu không phản hồi (Hà 2026-08-09). Trên điện thoại `:hover` không
+     kích hoạt nên không ảnh hưởng gì. */
+  header #panelTabs .tab:hover { color: var(--ink); border-bottom-color: var(--line); }
+  header #panelTabs .tab:active { opacity: .7; }
   header #panelTabs .tab.on {
     color: var(--ink); border-bottom-color: var(--accent);
     background: none; font-weight: 650;
@@ -266,10 +271,15 @@
   #board input { font: inherit; width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
   /* Hộp tích mặc định của trình duyệt cao 13px: đo được là vùng chạm nhỏ
      nhất trên cả trang, mà nó lại là công tắc BẬT/TẮT cả một kênh. */
+  /* Ô tích cỡ THƯỜNG. Bản trước ép 32×32 để lọt luật "vùng chạm ≥32px" của
+     fe-phone-uc — tức là để phép đo quyết định thẩm mỹ, và ra một mảng màu to
+     đùng (Hà 2026-08-09: *"checkbox hiện to đùng thế"*). Vùng chạm đúng ra là
+     CẢ HÀNG NHÃN: bấm vào chữ cũng đổi trạng thái, đó là hành vi sẵn có của
+     `<label>`, và hàng ấy cao 44px. Phép đo phải đo đúng thứ ngón tay chạm. */
   #board input[type="checkbox"] {
-    width: 32px; height: 32px; flex: none; margin: 0; accent-color: var(--accent);
-    border-radius: 8px;   /* vuông đặc 32px đọc như một mảng màu, không như công tắc */
+    width: 18px; height: 18px; flex: none; margin: 0; accent-color: var(--accent);
   }
+  #board label:has(> input[type="checkbox"]) { cursor: pointer; }
   #board .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
   #board .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
   #board table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -428,9 +438,33 @@
   #sessSayRow > button { flex: 0 0 auto; white-space: nowrap; }
   #sessCompose {
     position: sticky; bottom: 0; z-index: 3;
-    background: var(--panel); padding: 6px 0 2px;
+    background: var(--panel);
+    padding: 8px 0 6px;
     border-top: 1px solid var(--line); margin-top: 8px;
   }
+  #scrollDock {
+    position: fixed; right: 10px; z-index: 6;
+    display: flex; flex-direction: column; gap: 8px;
+    bottom: 16px;
+  }
+  /* Đang mở một phiên thì ô nhập chiếm đáy — nâng bong bóng lên khỏi nó. */
+  body:has(#sessDetail:not(.hidden)) #scrollDock { bottom: 124px; }
+  /* Vòng ngoài là THƯỚC: cung tô đậm = phần đã cuộn qua. `conic-gradient` vẽ
+     thẳng trên nền của lớp bọc, nút nằm đè lên giữa nên chỉ còn thấy vành. */
+  .dock-ring {
+    display: block; padding: 3px; border-radius: 50%;
+    background: conic-gradient(var(--accent) calc(var(--p, 0) * 360deg), var(--line) 0);
+    box-shadow: 0 2px 8px rgba(0,0,0,.14);
+  }
+  .dock-ring.hidden { display: none; }
+  #scrollDock button {
+    width: 40px; height: 40px; border-radius: 50%;
+    border: 0; background: var(--panel); color: var(--ink);
+    font-size: 17px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+  }
+  #sessActs { margin-top: 4px; gap: 6px; }
+  #sessActs button { font-size: 12.5px; padding: 6px 10px; min-height: 36px; }
   .sess-mode {
     display: flex; align-items: center; gap: 8px; margin: 6px 0 2px;
     font-size: 13px; color: var(--muted); min-height: 44px;
@@ -466,12 +500,62 @@
   /* Sticky không đi quá khối cha: ở đáy trang, ô nhập dừng lại ở mép dưới của
      `#sessDetail` chứ không phải mép màn hình — đo được hụt 87px, đúng bằng
      lề dưới của panel + `#board`. Cắt phần thừa ấy ở màn Phiên. */
-  #board.on-sessions { padding-bottom: 8px; }
-  #board.on-sessions #sessDetail { margin-bottom: 0; padding-bottom: 4px; }
+  /* Hai khe 8px trên–dưới là lề của `main`; nội dung cuộn qua đó nên nhìn
+     thấy chữ chạy phía trên head và phía dưới ô nhập. Chuyển lề ấy vào trong
+     `#board` để thanh ghim dính sát mép. */
+  body:has(#board.on-sessions) main { padding-top: 0; padding-bottom: 0; }
+  #board.on-sessions { padding-top: 0; padding-bottom: 0; }
+  /* Cao trọn khung nhìn, xếp dọc: luồng giãn ra, ô nhập bị đẩy xuống CHÂN.
+     Không có nó thì phiên ít sự kiện sẽ hiện ô nhập lửng lơ giữa trang với
+     một mảng trắng bên dưới — `sticky` chỉ ghim khi nội dung ĐỦ DÀI để tràn,
+     nên màn ngắn trông như ô nhập "chưa hiện dưới chân trang" (Hà, 08-09). */
+  #board.on-sessions #sessDetail {
+    /* padding-bottom = 0: `sticky` dừng ở mép dưới KHỐI CHA, nên mỗi pixel lề
+       dưới của panel là một pixel nội dung lọt ra dưới ô nhập khi cuộn hết. */
+    margin-bottom: 0; padding-bottom: 0;
+    display: flex; flex-direction: column;
+    min-height: calc(100dvh - 150px);
+  }
+  #board.on-sessions #sessStream { flex: 1 1 auto; }
+  /* Head khi đang mở một phiên: MỘT dòng, và nút quay ra thôi làm hộp viền.
+     Đo bản trước: hàng này cao 89px vì xuống hai dòng, và cái nút viền to lấn
+     át dòng chữ bên cạnh (Hà 2026-08-09: *"nút danh sách hiện không cân đối,
+     ui hơi tệ"*). Nút điều hướng nên đọc như đường quay ra, không như một
+     hành động ngang hàng với "Gửi".
+     Thanh ghim tràn HẾT bề ngang khung nhìn: bản trước rộng 334/390px và
+     `main` còn 8px lề trên–dưới, nên nội dung cuộn LỌT QUA cả bốn khe — thấy
+     chữ chạy phía trên head và phía dưới ô nhập. */
   #board.on-sessions .boardbar {
     position: sticky; top: 0; z-index: 4;
-    background: var(--panel); margin-bottom: 8px;
-    padding: 6px 0 5px; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    padding: 8px 0 7px;
+    margin-bottom: 8px; border-bottom: 1px solid var(--line);
+    flex-wrap: nowrap; gap: 8px; align-items: center; line-height: 1.2;
+  }
+  /* Ba thành phần cùng một đường: `min-height` khác nhau đẩy hộp chữ lệch
+     nhau dù `align-items: center` — nút có hộp 40px, tên và giờ chỉ cao bằng
+     dòng chữ (Hà 2026-08-09: *"các thành phần head lệch dòng"*). Cho cả ba
+     cùng `line-height` và cùng cách canh, vùng chạm 40px lấy bằng padding. */
+  #board.on-sessions .boardbar > * { align-self: center; line-height: 1.2; }
+  /* Bỏ khoảng đệm giữa: nó nằm SAU dấu thời gian nên đẩy dấu ấy vào giữa hàng.
+     Không có nó thì tên phiên (flex:1) nuốt hết chỗ dư và dấu thời gian dạt
+     hẳn sang phải — đúng chỗ mắt tìm nó. */
+  #board.on-sessions .boardbar .spacer { display: none; }
+  #board.on-sessions .boardbar #sessBack {
+    border: 0; background: none; padding: 10px 6px 10px 0;
+    min-height: 0; flex: 0 0 auto;
+    color: var(--muted); font-size: 14px; font-weight: 500; white-space: nowrap;
+  }
+  #board.on-sessions .boardbar #sessTitle {
+    flex: 1 1 auto; min-width: 0; font-size: 14.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Co được + cắt đuôi: đo bản trước, ô này giữ nguyên 244px chữ đầy đủ và đẩy
+     cả hàng tràn 352/334, bóp tên phiên còn 0px. Chữ ngắn là chuyện của JS;
+     CSS phải bảo đảm dù chữ dài cỡ nào hàng cũng không tràn. */
+  #board.on-sessions .boardbar #boardStamp {
+    flex: 0 1 auto; min-width: 0; font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   #board .boardbar .spacer { flex: 1; }
   #board .boardnote { margin: 0 0 12px; font-size: 12px; }
@@ -627,12 +711,6 @@
         <!-- UC-S07: đóng sổ phiên này để mở phiên mới làm tiếp. Không giết
              tiến trình nào — mạch việc nằm ở nhật ký, cái cần là bản bàn giao
              và id để nối tiếp. -->
-        <div class="row-flex">
-          <button type="button" id="sessHandover">📋 Đóng sổ &amp; tiếp tục ở phiên mới</button>
-          <!-- Chỉ hiện với phiên do hub mở: hub không lái phiên người khác mở
-               trong terminal/VS Code (Hà chốt 08-08). -->
-          <button type="button" id="sessStop" class="hidden">⏹ Dừng phiên</button>
-        </div>
         <!-- MỘT ô nhập, hai việc. Hà 2026-08-09: *"làm gọn 2 input… mặc định
              là hỏi phiên nếu đó là phiên có thể gõ vào được, còn muốn hỏi bên
              lề thì tích chọn checkbox"*.
@@ -664,9 +742,29 @@
             <input type="checkbox" id="sessAside" />
             <span id="sessAsideText">Hỏi bên lề (chạy trên bản sao)</span>
           </label>
+          <!-- Hai nút thao tác nặng xuống chân trang cùng ô nhập (Hà
+               2026-08-09): chúng là VIỆC LÀM VỚI PHIÊN, cùng họ với ô nhập,
+               chứ không phải nội dung để đọc. Đứng giữa màn thì mỗi lần cuộn
+               qua lại phải lướt qua chúng. -->
+          <div class="row-flex" id="sessActs">
+            <button type="button" id="sessHandover">📋 Đóng sổ &amp; tiếp tục ở phiên mới</button>
+            <!-- Chỉ hiện với phiên do hub mở: hub không lái phiên người khác
+                 mở trong terminal/VS Code (Hà chốt 08-08). -->
+            <button type="button" id="sessStop" class="hidden">⏹ Dừng phiên</button>
+          </div>
         </div>
 
       </div>
+    </div>
+    <!-- Bong bóng cuộn nhanh (Hà 2026-08-09). Luồng một phiên dài vài nghìn
+         pixel; vuốt tay từ giữa về đầu hay về cuối là việc lặp đi lặp lại.
+         Đặt `fixed` để không dính vào ô nhập ghim đáy, và tự ẩn từng nút khi
+         đã ở sẵn đầu/cuối — một nút bấm mà không đi đâu là một nút nói dối. -->
+    <div id="scrollDock" class="hidden" aria-hidden="true">
+      <!-- Viền bong bóng khép dần theo tỉ lệ đã cuộn (Hà 2026-08-09), nên nó
+           vừa là nút vừa là thước đo "đang ở đoạn nào của luồng". -->
+      <span class="dock-ring" id="dockRingTop"><button type="button" id="dockTop" title="Lên đầu">↑</button></span>
+      <span class="dock-ring" id="dockRingEnd"><button type="button" id="dockEnd" title="Xuống cuối">↓</button></span>
     </div>
 
     <!-- Same shape as the console: ask-box on top, then list + detail. -->
@@ -1208,6 +1306,10 @@
   // so nothing here can drive an approval.
   const RESOURCE_MA = 'hub_status';
   let boardLoaded = false;
+  // Hai dạng của cùng một dấu thời gian: đầy đủ cho màn danh sách, ngắn cho
+  // head khi đang mở phiên (head còn phải chứa nút quay ra + tên phiên).
+  let stampFull = '';
+  let stampShort = '';
 
   const fmtStamp = (iso) => {
     const d = new Date(iso);
@@ -1296,7 +1398,12 @@
     // 5 minutes means it is not running.
     const ageMin = (Date.now() - Date.parse(snap.generated_at)) / 60000;
     const stale = !(ageMin < 5);   // NaN (unparseable stamp) counts as stale
-    const when = `Ảnh chụp lúc ${fmtStamp(snap.generated_at)} (${agoOf(snap.generated_at)})`;
+    // Trong một phiên, head phải chứa cả nút quay ra + tên phiên, nên dấu
+    // thời gian rút về đúng phần người ta cần liếc: ảnh chụp CŨ bao lâu. Bản
+    // đầy đủ giữ cho màn danh sách, nơi hàng này chỉ có mình nó.
+    stampFull = `Ảnh chụp lúc ${fmtStamp(snap.generated_at)} (${agoOf(snap.generated_at)})`;
+    stampShort = agoOf(snap.generated_at);
+    const when = wantSession ? stampShort : stampFull;
     stamp.classList.toggle('stale', stale);
     stamp.textContent = stale
       ? `⚠ hub chưa đẩy dữ liệu mới — ${when}. Số dưới đây là của lúc đó, không phải bây giờ.`
@@ -1646,6 +1753,9 @@
     // vào một phiên thì mang luôn đường quay ra và tên phiên đang đọc.
     $('sessBack').classList.remove('hidden');
     $('sessTitle').classList.remove('hidden');
+    // Đổi NGAY, không chờ lượt vẽ sau: lượt vẽ hiện tại đã xong trước khi
+    // `wantSession` được đặt, nên lần sơn đầu vẫn là chữ dài và hàng tràn.
+    if (stampShort) $('boardStamp').textContent = stampShort;
     $('sessStream').textContent = '';
     $('sessHandoverBox').classList.add('hidden');
     $('sessHandoverBox').textContent = '';
@@ -1706,6 +1816,7 @@
     $('sessBack').classList.add('hidden');
     $('sessTitle').classList.add('hidden');
     $('sessTitle').textContent = '';
+    if (stampFull) $('boardStamp').textContent = stampFull;
   }
 
   $('sessBack').addEventListener('click', () => {
@@ -1747,7 +1858,12 @@
           : 'Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.')
       : 'Lượt này ở lại trên chính phiên đó, nên nhật ký phiên dài ra.';
   }
-  $('sessAside').addEventListener('change', () => applySayMode(!$('sessAside').disabled));
+  $('sessAside').addEventListener('change', () => {
+    applySayMode(!$('sessAside').disabled);
+    // Đổi chế độ xong là sắp gõ: đưa con trỏ vào ô luôn, đừng bắt chạm thêm
+    // một lần nữa (Hà 2026-08-09).
+    $('sessSayInput').focus();
+  });
 
   /// Gửi: chế độ nào thì đi verb đó. Cùng một ô, hai đường hoàn toàn khác nhau.
   function sendSay(e) {
@@ -2213,7 +2329,10 @@
           box.append(miss);
           return;
         }
-        const wrap = document.createElement('div');
+        // `<label>` chứ không `<div>`: bấm vào CHỮ cũng đổi trạng thái. Bản
+        // trước là `div` + một `<label>` không có `for`, nên nhãn chỉ để nhìn —
+        // và vùng chạm thật chỉ là cái hộp 18px.
+        const wrap = document.createElement(kind === 'bool' ? 'label' : 'div');
         if (kind === 'bool') {
           wrap.className = 'switch';
           const cb = document.createElement('input');
@@ -2273,6 +2392,35 @@
       `Đã gửi ${changed.length} thay đổi (${changed.map((c) => c.key).join(', ')}) — xem hub xác nhận trong phòng chat.`;
     setTimeout(loadBoard, 8000);
   });
+
+  /// Bong bóng cuộn nhanh: hiện khi trang ĐỦ DÀI để cần, ẩn từng nút khi đã ở
+  /// sẵn đầu/cuối. Bám `main` — khung cuộn duy nhất của trang.
+  (() => {
+    const dock = $('scrollDock');
+    const up = $('dockTop');
+    const down = $('dockEnd');
+    const scroller = () => document.querySelector('main');
+    function refresh() {
+      const m = scroller();
+      if (!m) return;
+      const canScroll = m.scrollHeight > m.clientHeight + 40;
+      const onBoard = !$('board').classList.contains('hidden');
+      dock.classList.toggle('hidden', !(canScroll && onBoard));
+      const max = m.scrollHeight - m.clientHeight;
+      const frac = max > 0 ? Math.min(1, Math.max(0, m.scrollTop / max)) : 0;
+      // Cùng một con số cho cả hai vòng: nó nói "đang ở đoạn nào", không phải
+      // "còn bao xa tới đích".
+      dock.style.setProperty('--p', frac.toFixed(3));
+      up.parentElement.classList.toggle('hidden', m.scrollTop <= 24);
+      down.parentElement.classList.toggle('hidden', max - m.scrollTop <= 24);
+    }
+    up.addEventListener('click', () => scroller().scrollTo({ top: 0, behavior: 'smooth' }));
+    down.addEventListener('click', () =>
+      scroller().scrollTo({ top: scroller().scrollHeight, behavior: 'smooth' }));
+    document.addEventListener('scroll', refresh, true);
+    setInterval(refresh, 1000);   // nội dung tự dài ra khi luồng về thêm
+    refresh();
+  })();
 
   function cmdNote(text, bad) {
     const el = $('cmdStatus');

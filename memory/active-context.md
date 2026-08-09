@@ -1,5 +1,41 @@
 # active context — hub
 
+## 🪟 2026-08-09 (khuya) — dọn màn chi tiết theo phản hồi liên tục (v90→v95)
+
+Hà xem trực tiếp và chỉ ra từng chỗ; mỗi chỗ đều đo được.
+
+| Hà nói | Đo ra | Vá |
+|---|---|---|
+| *"checkbox to đùng thế, không test ui à?"* | ô tích 32×32 — do CHÍNH TÔI ép cho lọt luật "vùng chạm ≥32px" | ô tích **18px**, vùng chạm là **cả hàng nhãn 312×44**; sửa luôn PHÉP ĐO: ô tích trong `<label>` thì đo cả nhãn |
+| *"click vào hỏi bên lề thì focus vào input luôn"* | — | tích xong con trỏ nhảy vào ô nhập |
+| *"chưa hiện dưới chân trang"* | phiên ít sự kiện: `sticky` không có gì để ghim | `#sessDetail` cao trọn khung + luồng `flex:1` ⇒ ô nhập xuống chân cả khi màn ngắn (đo 823/844 và 871/900) |
+| *"vẫn nhìn thấy nội dung phía trên head và dưới footer"* | **8px trên + 8px dưới** là lề của `main`, nội dung cuộn qua đó | chuyển lề vào trong `#board` ⇒ khe **0/0** |
+| *"nút danh sách không cân đối"* | head cao **89px = hai dòng**, nút viền lấn át | nút **không viền**, head **một dòng 53px** |
+| *"các thành phần head lệch dòng"* | `min-height` khác nhau đẩy hộp chữ lệch dù đã `align-items:center` | cùng `line-height`, vùng chạm lấy bằng `padding` |
+| *"cuộn xuống dưới cùng vẫn hở"* | `sticky` dừng ở mép dưới KHỐI CHA ⇒ mỗi px lề panel là một px hở | `padding-bottom: 0` |
+| *"nút đóng sổ, dừng phiên để xuống footer"* | — | chuyển vào `#sessCompose` (chúng là VIỆC LÀM VỚI PHIÊN, cùng họ ô nhập) |
+| *"thêm bong bóng cuộn nhanh"* | — | `#scrollDock` ↑/↓ cố định, tự ẩn từng nút khi đã ở đầu/cuối |
+| *"viền bong bóng đóng kín theo tỉ lệ cuộn"* | — | vòng `conic-gradient`, `--p` = tỉ lệ đã cuộn (đo: 0.965 → 1.000 → 0.010) |
+| *"menu trên di chuột không thay đổi gì"* | tab chỉ đổi con trỏ | thêm `:hover` + `:active` |
+
+⚠ **Hai lỗi do chính bản vá của tôi đẻ ra, bắt được bằng phép đo:**
+1. **Bleed `100vw`** cho thanh ghim (để "kín hai bên") làm **khung cha tràn ngang**
+   351/334 — `fe-board` đỏ. Bỏ bleed: nội dung vốn không rộng hơn thanh, hai khe
+   thật chỉ là lề dọc của `main`.
+2. **`#boardStamp` giữ nguyên 244px** chữ đầy đủ trong head, bóp tên phiên còn
+   **0px**. Bản rút gọn của tôi phụ thuộc thứ tự vẽ nên lượt sơn đầu vẫn dài.
+   Vá hai vế: CSS cho nó **co được + cắt đuôi** (dù chữ dài cỡ nào cũng không
+   tràn) và JS đổi chữ **ngay khi vào phiên**.
+
+🔎 **Một lỗi UI cũ lộ ra nhân tiện:** ô tích ở tab Cấu hình nằm trong `<div>` với
+một `<label>` **không có `for`** — bấm vào chữ không ăn, vùng chạm thật chỉ là
+cái hộp 18px. Nay bọc bằng `<label>`.
+
+**Nghiệm thu (bundle v95, 10/10 kịch bản xanh):** `fe-phone` 31/31 ·
+`fe-newsession` 21/21 · `fe-stream` 16/16 · `fe-sessions` 19/19 · `fe-url` 16/16 ·
+`fe-board` 19/19 · `fe-aside` 10/10 · `fe-smoke` 15/15 · `fe-denied` 10/10 ·
+`fe-config` 8/8 · 0 lỗi console.
+
 ## 🧰 2026-08-09 (khuya) — màn chi tiết phiên gọn lại (v84→v89)
 
 Bốn yêu cầu liền của Hà, làm trong một mạch.

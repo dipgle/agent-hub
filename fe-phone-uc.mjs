@@ -101,7 +101,13 @@ const ergonomics = () =>
       const tooSmall = [];
       const belowHig = [];
       for (const el of tappable) {
-        const h = Math.round(el.getBoundingClientRect().height);
+        // Ô tích nằm trong <label>: bấm vào CHỮ cũng đổi trạng thái (hành vi
+        // sẵn có của label), nên vùng chạm thật là cả hàng nhãn. Đo riêng cái
+        // hộp 18px rồi bắt nó ≥32px là bắt sản phẩm xấu đi để phép đo xanh —
+        // đúng lỗi đã gây ra ô tích 32×32 "to đùng" (Hà, 2026-08-09).
+        const target =
+          el.type === "checkbox" || el.type === "radio" ? el.closest("label") || el : el;
+        const h = Math.round(target.getBoundingClientRect().height);
         if (h < minTap) tooSmall.push(`${label(el)} = ${h}px`);
         else if (h < wantTap) belowHig.push(`${label(el)} = ${h}px`);
       }

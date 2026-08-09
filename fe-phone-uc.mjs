@@ -126,7 +126,23 @@ const ergonomics = () =>
         .map((el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : "." + (el.className || "").toString().split(" ")[0]} ${el.clientWidth}→${el.scrollWidth}px`)
         .slice(0, 6);
 
-      return { tapCount: tappable.length, tooSmall, belowHig, tiny: tiny.slice(0, 8), innerScroll };
+      // Cuộn lồng cuộn: trang cuộn, mà khung bên trong cũng cuộn. Trên điện
+      // thoại đó là cái bẫy "vuốt trúng khung trong thì trang không nhúc
+      // nhích" — Hà 2026-08-09: *"ui đang bị hiện quá nhiều thanh cuộn"*. Đo
+      // được: mỗi tab có 2–3 khối cuộn dọc cùng lúc.
+      //
+      // Bỏ qua ô nhập nhiều dòng: `textarea` tự cao lên theo chữ đang gõ, đó là
+      // hành vi của ô nhập chứ không phải một vùng cuộn của trang.
+      const nested = [...document.querySelectorAll("body *")]
+        .filter(vis)
+        .filter((el) => !/^(TEXTAREA|SELECT|INPUT)$/.test(el.tagName))
+        .filter((el) => {
+          const oy = getComputedStyle(el).overflowY;
+          return (oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight + 2;
+        })
+        .map((el) => `${el.tagName.toLowerCase()}${el.id ? "#" + el.id : ""} ${el.clientHeight}→${el.scrollHeight}`);
+
+      return { tapCount: tappable.length, tooSmall, belowHig, tiny: tiny.slice(0, 8), innerScroll, nested };
     },
     { minTap: MIN_TAP, wantTap: WANT_TAP, minFont: MIN_FONT }
   );
@@ -143,6 +159,11 @@ const auditScreen = async (name) => {
   const e = await ergonomics();
   check(`[${name}] mọi nút/ô chạm được (>=${MIN_TAP}px)`, e.tooSmall.length === 0, e.tooSmall.slice(0, 4).join(" · "));
   check(`[${name}] không có chữ dưới ${MIN_FONT}px`, e.tiny.length === 0, e.tiny.slice(0, 3).join(" · "));
+  check(
+    `[${name}] chỉ MỘT khối cuộn dọc (là trang)`,
+    e.nested.length <= 1,
+    e.nested.join(" · ")
+  );
   if (e.belowHig.length) note(`[${name}] ${e.belowHig.length} vùng chạm 32–43px (dưới chuẩn 44px): ${e.belowHig.slice(0, 3).join(" · ")}`);
   if (e.innerScroll.length) note(`[${name}] cuộn ngang bên trong: ${e.innerScroll.join(" · ")}`);
   await page.screenshot({ path: `${SHOTS}phone-${name}.png`, fullPage: false });

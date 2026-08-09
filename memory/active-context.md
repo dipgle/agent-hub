@@ -1,5 +1,40 @@
 # active context — hub
 
+## 🎚 2026-08-09 (tối) — "ui đang bị hiện quá nhiều thanh cuộn" (v80)
+
+Đo ra đúng vậy, và tệ hơn tưởng: **mỗi tab có 2–3 vùng cuộn dọc cùng lúc** —
+thanh của trang CỘNG thanh của khung bên trong (`#sessList` 574→1211 · `#thread`
+574→6866 · `#configBody` 338→1460). Trên điện thoại đó là cái bẫy *"vuốt trúng
+khung trong thì trang không nhúc nhích"*.
+
+**Gốc:** ba trần chiều cao `68vh` / `72vh` / `340px` sinh ra cho **màn rộng**,
+nơi khung trái-phải đứng cạnh nhau và mỗi cột cần cuộn riêng. Trên 390px chúng
+chỉ đẻ ra cuộn-lồng-cuộn. Bỏ trần ở `@media (max-width: 560px)` ⟹ nội dung chảy
+vào trang, **một màn hình một thanh cuộn**.
+
+⚠ **Bỏ trần làm hỏng "bám đáy"** — `el.scrollTop = el.scrollHeight` thành lệnh
+rỗng khi `el` thôi tự cuộn, nên phòng chat và luồng phiên sẽ đứng im ở đầu. Thêm
+`scrollerFor(el)` (tìm khối THẬT SỰ cuộn được: chính nó hoặc tổ tiên gần nhất),
+`atBottomOf(el)` và `stickToBottom(el)` — khối tự cuộn thì cuộn nó, còn không thì
+`lastElementChild.scrollIntoView`. *Bám đáy phải cuộn đúng cái đang cuộn, không
+phải cái mình MONG là đang cuộn.*
+
+**Phép đo mới, hạng cứng** (`fe-phone-uc`, 25/25 → **31/31**): mỗi màn chỉ được
+có **≤1 khối cuộn dọc**, bỏ qua `textarea/input/select` vì ô nhập tự cao lên theo
+chữ là hành vi của ô nhập chứ không phải vùng cuộn của trang.
+
+🎲 **Một cú đỏ không tái hiện được, đã siết thay vì bỏ qua:** `fe-smoke` báo
+`#thread` không hiện đúng một lần; hai lần chạy sau xanh, và probe cho thấy thẻ
+đó `312×6887, display:flex`. Nguyên nhân là phép đo suy "phòng đã mở" từ `#foot`
+rồi hỏi ngay `#thread` — hai lớp `hidden` rơi ở hai nhịp khác nhau. Nay chờ đúng
+`#thread:not(.hidden)`. *Phép đo không tái hiện được thì siết phép đo, đừng gọi
+là may.*
+
+**Nghiệm thu (bundle v80):** `fe-phone` **31/31** · `fe-sessions` 20/20 ·
+`fe-newsession` 20/20 · `fe-url` 16/16 · `fe-board` 19/19 · `fe-smoke` 15/15 ·
+`fe-denied` 10/10 · `fe-config` 8/8 · `fe-stream` 13/13 · `fe-aside` 9/9 ·
+`cargo test` 68 · clippy 0.
+
 ## 🗂 2026-08-09 (tối) — phiên nền truy được CHA, danh sách gộp nhóm (v77→v79)
 
 Hà hỏi hai câu: *"những phiên chạy nền có map được nó là do phiên nào tạo hay

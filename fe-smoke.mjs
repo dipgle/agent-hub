@@ -66,6 +66,11 @@ try {
   // The conversation is its own tab now.
   await page.click('#panelTabs button[data-panel="chat"]');
   await page.waitForSelector("#foot:not(.hidden)", { timeout: 15000 });
+  // Chờ ĐÚNG thứ sắp hỏi. `#foot` và `#thread` bỏ lớp `hidden` ở hai nhịp khác
+  // nhau, nên suy "phòng đã mở" từ `#foot` rồi hỏi ngay `#thread` là một cuộc
+  // đua — đỏ đúng một lần ngày 2026-08-09 và không tái hiện được trong 2 lần
+  // chạy sau. Phép đo không tái hiện được thì siết phép đo, đừng gọi là may.
+  await page.waitForSelector("#thread:not(.hidden)", { timeout: 15000 });
   check("đăng nhập đúng thì vào phòng", await page.locator("#thread").isVisible());
 
   // ---- 4. the socket really opens --------------------------------------

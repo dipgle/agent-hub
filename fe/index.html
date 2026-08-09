@@ -449,6 +449,18 @@
     #board > .panel, #board .panel { padding: 11px 10px; }
     .sess { padding: 9px 10px; }
     .boardbar { margin-bottom: 6px; }
+
+    /* MỘT màn hình, MỘT thanh cuộn.
+       Hà 2026-08-09: *"ui đang bị hiện quá nhiều thanh cuộn"*. Đo ra đúng vậy:
+       mỗi tab có thanh của trang CỘNG thêm một thanh của khối bên trong —
+       `#sessList` (574→1211), `#thread` (574→6866), `#configBody` (338→1460).
+       Trần `68vh/72vh/340px` sinh ra cho màn rộng, nơi khung trái-phải đứng
+       cạnh nhau và mỗi cột cần cuộn riêng; trên điện thoại nó chỉ tạo ra cái
+       bẫy "vuốt trúng khung trong thì trang không nhúc nhích".
+       Bỏ trần ⟹ nội dung chảy vào trang, trang cuộn như mọi trang khác. */
+    #board .wrap, #board .scroll, #sessStream, #board pre {
+      max-height: none; overflow: visible;
+    }
   }
 </style>
 </head>
@@ -807,10 +819,38 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
+  /// Khối THẬT SỰ cuộn được cho `el`: chính nó, hoặc tổ tiên gần nhất.
+  ///
+  /// Trên điện thoại các khung trong đã bỏ trần chiều cao (xem media query),
+  /// nên `el.scrollTop = el.scrollHeight` thành lệnh rỗng — bám đáy phải cuộn
+  /// đúng cái đang cuộn, chứ không cuộn cái mình MONG là đang cuộn.
+  function scrollerFor(el) {
+    let n = el;
+    while (n && n !== document.body) {
+      const cs = getComputedStyle(n);
+      if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 2) return n;
+      n = n.parentElement;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
+
+  /// Đáy của `el` đang trong tầm nhìn? (dùng cho cả hai kiểu cuộn)
+  function atBottomOf(el) {
+    const sc = scrollerFor(el);
+    if (sc === el) return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    return el.getBoundingClientRect().bottom <= window.innerHeight + 40;
+  }
+
+  /// Đưa dòng cuối của `el` vào tầm nhìn, dù `el` tự cuộn hay trang cuộn.
+  function stickToBottom(el) {
+    const sc = scrollerFor(el);
+    if (sc === el) { el.scrollTop = el.scrollHeight; return; }
+    const last = el.lastElementChild;
+    if (last) last.scrollIntoView({ block: 'nearest' });
+  }
+
   function scrollDown() {
-    // The conversation scrolls inside its own panel now; scrolling <main>
-    // left the newest message hidden below the fold.
-    thread.scrollTop = thread.scrollHeight;
+    stickToBottom(thread);
   }
 
   async function api(path, body) {
@@ -1798,8 +1838,11 @@
 
     // Refreshing every few seconds must not yank a reader who scrolled up:
     // follow the tail only when they were already at it, like a terminal.
-    const atTail = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-    const keepTop = box.scrollTop;
+    // Làm mới vài giây một lần KHÔNG được giật người đang đọc dở: chỉ bám đuôi
+    // khi họ vốn đã ở đuôi, như một terminal.
+    const atTail = atBottomOf(box);
+    const sc = scrollerFor(box);
+    const keepTop = sc.scrollTop;
 
     box.textContent = '';
     events.forEach((e) => {
@@ -1823,7 +1866,8 @@
       row.append(body);
       box.append(row);
     });
-    box.scrollTop = atTail ? box.scrollHeight : keepTop;
+    if (atTail) stickToBottom(box);
+    else scrollerFor(box).scrollTop = keepTop;
   }
 
   /** "3p" / "5g" / "2ng" — same scale the CLI prints, so both agree. */

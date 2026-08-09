@@ -110,13 +110,7 @@
     color: var(--bad, #a33); font-size: 12px; padding-top: 0; padding-bottom: 8px;
     white-space: normal; overflow-wrap: anywhere;
   }
-  /* Trên 390px, mỗi 12px lề là 3% bề ngang. Thẻ phiên cần bề ngang hơn cần
-     đường viền của khung bao ngoài. */
-  @media (max-width: 560px) {
-    main { padding: .5rem; }
-    #board > .panel, #board .panel { padding: .7rem .6rem; }
-    .sess { padding: 9px 10px; }
-  }
+  /* Luật cho màn hẹp nằm ở CUỐI bảng kiểu — xem ghi chú ở đó. */
   .wrap { max-width: 46rem; margin: 0 auto; display: flex; flex-direction: column; gap: .7rem; }
 
   .msg {
@@ -346,6 +340,27 @@
   .sess[data-host="dead"] .sess-kind {
     color: var(--muted); border-style: dashed; background: transparent;
   }
+  /* Gộp theo NHÓM thay vì rắc huy hiệu lên từng thẻ.
+     Hà 2026-08-09, sau khi xem bản có huy hiệu: *"cách hiển thị dễ nhìn dễ hiểu
+     hơn được không?"*. Huy hiệu trả lời đúng câu hỏi nhưng bắt mắt đọc lại nhãn
+     ở MỌI thẻ; tiêu đề nhóm trả lời một lần cho cả cụm, và tự nó xếp những
+     phiên làm-gì-được-giống-nhau đứng cạnh nhau. */
+  .sess-group {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    margin: 16px 0 8px; padding-bottom: 5px;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  }
+  .sess-group:first-child { margin-top: 2px; }
+  .sess-group .n { font-weight: 600; color: var(--muted); }
+  .sess-group .what { font-weight: 500; color: var(--muted); font-size: 12px; }
+  .sess-group[data-g="hub"] { color: var(--accent, #2f6f4e); border-color: #b9dcc7; }
+  .sess-group[data-g="terminal"] { color: #1f5f8b; border-color: #bcd7e8; }
+  .sess-group[data-g="background"] { color: #6b4fa8; border-color: #d4c9ec; }
+  .sess-group[data-g="detached"] { color: #8a6100; border-color: #ead4a3; }
+  .sess-group[data-g="dead"] { color: var(--muted); border-style: dashed; }
+  /* "do «X» mở": quan hệ cha-con, chữ nhỏ, không tranh chỗ với nội dung. */
+  .sess-from { font-size: 12px; margin-top: 2px; }
   .sess-kindrow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
   .sess-dot {
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
@@ -422,6 +437,19 @@
   #login h2 { font-family: var(--mono); font-size: 1rem; margin: 0 0 .3rem; }
   #login p { margin: 0; color: var(--muted); font-size: .85rem; }
   .hidden { display: none !important; }
+
+  /* ── Màn hẹp: luật này PHẢI đứng cuối ────────────────────────────────────
+     Bản đầu đặt khối này ngay dưới `main {}`, tức TRƯỚC `#board .panel
+     { padding: 16px }`. Cùng độ đặc hiệu thì luật sau thắng, nên nó chưa từng
+     có tác dụng — đo ngày 2026-08-09 mới lộ: `getComputedStyle` trên
+     `#sessListPanel` ở khung 390px vẫn trả về `padding-top: 16px`.
+     *Viết CSS xong phải ĐO computed style, không tin vào việc mình đã gõ.* */
+  @media (max-width: 560px) {
+    main { padding: .5rem; }
+    #board > .panel, #board .panel { padding: 11px 10px; }
+    .sess { padding: 9px 10px; }
+    .boardbar { margin-bottom: 6px; }
+  }
 </style>
 </head>
 <body>
@@ -1268,10 +1296,15 @@
     // vào log — nơi không ai cầm điện thoại đọc được.
     const hiddenEditor = sessions.hidden_editor || 0;
     const hiddenNote = hiddenEditor
-      ? ` · ${hiddenEditor} phiên trong editor không hiện ở đây (hub không gõ vào được)`
+      ? ` · ${hiddenEditor} phiên trong editor không hiện ở đây`
       : '';
+    // Chia theo loại đã nằm ở TIÊU ĐỀ TỪNG NHÓM ngay bên dưới, nên nhắc lại ở
+    // đây là nói hai lần cùng một điều — và trên 390px nó ngốn 3 dòng, đẩy thẻ
+    // phiên đầu tiên từ 300px xuống 336px. Giữ lại đúng phần các nhóm KHÔNG
+    // nói được: tổng số đang sống, và số phiên bị ẩn hẳn khỏi danh sách.
+    void per;
     summary.textContent = rows.length || hiddenEditor
-      ? `${live} phiên đang sống${per ? ` — ${per}` : ''}${hiddenNote}`
+      ? `${live} phiên đang sống${hiddenNote}`
       : 'Không có phiên nào đang chạy.';
 
     // An account that failed to answer is not an account with no sessions.
@@ -1283,43 +1316,51 @@
       notes.append(p);
     });
 
-    rows.forEach((s) => {
+    // Thứ tự nhóm = thứ tự người ta cần: thứ ĐIỀU KHIỂN được trước, thứ chỉ xem
+    // được sau, thứ cần dọn xuống cuối. Trong mỗi nhóm vẫn vừa-động-trước.
+    const GROUPS = [
+      { g: 'hub',        title: '📱 hub mở từ điện thoại', what: 'điều khiển được',
+        pick: (x) => x.started_by_hub && x.host !== 'dead' },
+      { g: 'terminal',   title: '⌨ Bạn mở ở terminal',     what: 'hub không gõ vào được',
+        pick: (x) => x.host === 'terminal' },
+      { g: 'background', title: '⚙ Chạy nền',              what: 'không có cửa sổ',
+        pick: (x) => x.host === 'background' },
+      { g: 'detached',   title: '❓ Không gắn cửa sổ',      what: 'không tty',
+        pick: (x) => x.host === 'detached' },
+      { g: 'dead',       title: '⏹ Đã dừng',               what: 'dọn được',
+        pick: (x) => x.host === 'dead' },
+    ];
+    const taken = new Set();
+    const buckets = GROUPS.map((grp) => {
+      const items = rows.filter((x) => !taken.has(x.session_id) && grp.pick(x));
+      items.forEach((x) => taken.add(x.session_id));
+      return { g: grp.g, title: grp.title, what: grp.what, items };
+    });
+    // Phiên không rơi vào nhóm nào vẫn PHẢI hiện: mất một dòng còn tệ hơn một
+    // dòng khó phân loại.
+    const leftover = rows.filter((x) => !taken.has(x.session_id));
+    if (leftover.length) buckets.push({ g: 'unknown', title: '• Chưa phân loại', what: '', items: leftover });
+
+    buckets.filter((b) => b.items.length).forEach((b) => {
+      const h = document.createElement('div');
+      h.className = 'sess-group';
+      h.dataset.g = b.g;
+      h.dataset.count = String(b.items.length);
+      const t = document.createElement('span'); t.textContent = b.title;
+      const n = document.createElement('span'); n.className = 'n'; n.textContent = b.items.length;
+      h.append(t, n);
+      if (b.what) { const w = document.createElement('span'); w.className = 'what'; w.textContent = b.what; h.append(w); }
+      list.append(h);
+      b.items.forEach(renderSessionCard);
+    });
+
+    function renderSessionCard(s) {
       const card = document.createElement('div');
       card.className = s.host === 'dead' ? 'sess sess-dead' : 'sess';
       card.dataset.session = s.session_id;
       // Đo được từ DOM: thứ tự "vừa động trước" là tính chất phải kiểm được
       // mà không cần chọc vào biến nội bộ của trang.
       card.dataset.activity = s.last_activity || '';
-
-      // Một dòng huy hiệu ĐỨNG TRƯỚC tên: loại phiên + ai mở nó.
-      //
-      // `started_by_hub` do hub tự ghi sổ lúc `/new`, KHÔNG suy từ `kind` —
-      // `claude --bg` gõ tay cũng ra `background` y hệt. Nhãn đoán còn tệ hơn
-      // không có nhãn, nên phiên nền hub không nhận là của mình thì nói đúng
-      // như vậy: "chạy nền" trống chủ.
-      const KIND_BADGE = {
-        terminal:   { icon: '⌨', text: 'bạn mở ở terminal' },
-        background: { icon: '⚙', text: 'chạy nền' },
-        detached:   { icon: '❓', text: 'không gắn cửa sổ' },
-        dead:       { icon: '⏹', text: 'đã dừng' },
-        editor:     { icon: '🧩', text: 'trong editor' },
-      };
-      const badge = s.started_by_hub && s.host !== 'dead'
-        ? { icon: '📱', text: 'hub mở từ điện thoại' }
-        : (KIND_BADGE[s.host] || { icon: '•', text: s.kind || 'chưa rõ' });
-      const kindRow = document.createElement('div');
-      kindRow.className = 'sess-kindrow';
-      const chip = document.createElement('span');
-      chip.className = 'sess-kind';
-      chip.textContent = `${badge.icon} ${badge.text}`;
-      // Nói luôn LÀM GÌ ĐƯỢC với nó — đó là lý do người ta cần phân biệt.
-      chip.title = s.started_by_hub
-        ? 'hub mở phiên này: nói tiếp và dừng được từ đây'
-        : (s.host === 'terminal'
-            ? 'bạn mở ở cửa sổ terminal: xem và hỏi bên lề được, hub không gõ vào được'
-            : (s.host === 'dead' ? 'không còn tiến trình — dọn đi được' : ''));
-      kindRow.append(chip);
-      card.append(kindRow);
 
       const head = document.createElement('div');
       head.className = 'sess-head';
@@ -1353,11 +1394,29 @@
       // khoản và chế độ quyền, thứ huy hiệu không nói.
       void where;
       meta.textContent = [s.account, mode].filter(Boolean).join(' · ');
+      // Phiên không cửa sổ thì "ở đâu ra?" không có chỗ nào trả lời — trừ cây
+      // tiến trình. Đo 2026-08-09: cả hai phiên nền trên máy đều truy được về
+      // đúng một phiên đang nằm trong danh sách (dwork ← projects-a0 ở ttys003,
+      // tfl5 ← projects-11 ở ttys006).
+      let fromLine = null;
+      if (s.parent_name) {
+        fromLine = document.createElement('div');
+        fromLine.className = 'muted sess-from';
+        fromLine.append(document.createTextNode('↳ do '));
+        const who = document.createElement('b');
+        who.textContent = s.parent_name;
+        fromLine.append(who, document.createTextNode(' mở'));
+      } else if (s.host === 'background' && !s.started_by_hub) {
+        fromLine = document.createElement('div');
+        fromLine.className = 'muted sess-from';
+        fromLine.textContent = '↳ không truy được phiên đã mở nó';
+      }
       if (s.host) card.dataset.host = s.host;
       if (s.started_by_hub) card.dataset.hub = '1';
       if (work) card.dataset.work = work;
 
       card.append(head, meta);
+      if (fromLine) card.append(fromLine);
 
       if (s.last_text) {
         const body = document.createElement('p');
@@ -1385,7 +1444,7 @@
       // reads what hub pushes.
       card.addEventListener('click', () => openSession(s));
       list.append(card);
-    });
+    }
 
     // F5 giữa lúc đang theo một phiên: địa chỉ mang id, danh sách vừa về, nên
     // đây là thời điểm sớm nhất dựng lại được. Một lần duy nhất — mỗi ảnh chụp

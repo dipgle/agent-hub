@@ -84,17 +84,28 @@ try {
   const summary = (await page.locator("#sessSummary").innerText()).trim();
   console.log(`nơi phiên sống: ${JSON.stringify(byHost)}`);
 
+  // Từ v78 việc chia-theo-loại nằm ở TIÊU ĐỀ TỪNG NHÓM, không còn ở dòng tóm
+  // tắt — nhắc hai lần thì trên 390px nó ngốn 3 dòng và đẩy thẻ đầu tiên xuống
+  // 336px. Phép đo phải theo sản phẩm về chỗ mới, chứ đòi dòng tóm tắt kể lại
+  // là đòi lại đúng thứ vừa bỏ đi (lần thứ năm dính bẫy "phép đo lạc hậu").
+  const headers = await page.evaluate(() =>
+    [...document.querySelectorAll("#sessList .sess-group")]
+      .map((e) => `${e.dataset.g}=${e.dataset.count}`)
+      .join(" ")
+  );
   check(
     "màn nói rõ phiên sống Ở ĐÂU, không gộp hết làm một",
-    Object.keys(byHost).filter((h) => byHost[h]).length < 2 ||
-      /terminal|trong editor|chạy nền|đã dừng/.test(summary),
-    summary
+    Object.keys(byHost).filter((h) => byHost[h]).length < 2 || headers.length > 0,
+    headers
   );
   if (byHost.terminal) {
+    // Nhóm 'terminal' chỉ chứa phiên KHÔNG do hub mở; phiên hub mở nằm nhóm
+    // riêng dù nó cũng chạy trong terminal.
+    const expectTerm = truth.sessions.filter((x) => x.host === "terminal" && !x.started_by_hub).length;
     check(
       "số phiên terminal trên màn khớp máy",
-      summary.includes(`${byHost.terminal} terminal`),
-      `máy có ${byHost.terminal} terminal · màn: ${summary}`
+      headers.includes(`terminal=${expectTerm}`),
+      `máy có ${expectTerm} terminal · tiêu đề nhóm: ${headers}`
     );
   }
   if (byHost.editor) {
@@ -156,9 +167,27 @@ try {
     order.length === cards && order.filter(Boolean).length === expectMarks && expectMarks > 1,
     `${order.filter(Boolean).length}/${expectMarks} dòng có mốc, ${cards} dòng`
   );
-  const marks = order.filter(Boolean);
-  const sortedDesc = marks.every((v, i) => i === 0 || marks[i - 1] >= v);
-  check("danh sách sắp theo vừa-động-trước", sortedDesc, `${marks[0]?.slice(11,19)} ≥ … ≥ ${marks[marks.length-1]?.slice(11,19)}`);
+  // Từ 2026-08-09 danh sách GỘP THEO NHÓM, nên "vừa-động-trước" là tính chất
+  // TRONG mỗi nhóm — so toàn cục sẽ đỏ vì lý do sai (nhóm "đã dừng" luôn đứng
+  // cuối dù mốc của nó có thể mới hơn).
+  const perGroup = await page.evaluate(() => {
+    const out = [];
+    let cur = null;
+    for (const el of document.querySelectorAll("#sessList > *")) {
+      if (el.classList.contains("sess-group")) { cur = { g: el.dataset.g, marks: [] }; out.push(cur); }
+      else if (cur) cur.marks.push(el.dataset.activity || "");
+    }
+    return out;
+  });
+  const unsorted = perGroup.filter((grp) => {
+    const m = grp.marks.filter(Boolean);
+    return !m.every((v, i) => i === 0 || m[i - 1] >= v);
+  });
+  check(
+    "trong mỗi nhóm, phiên vừa động đứng trước",
+    unsorted.length === 0,
+    perGroup.map((g) => `${g.g}:${g.marks.length}`).join(" · ")
+  );
 
   // The point of the screen: work visible without scrolling past chrome.
   const fold = await page.evaluate(() => {
@@ -178,35 +207,53 @@ try {
   check("trang không tràn ngang", over.w <= over.inner + 1, `${over.w}/${over.inner}`);
 
   // A withheld preview must say so; silence would read as "phiên im lặng".
-  // Nhìn qua một cái là biết loại nào, ai mở — Hà 2026-08-09. Phép đo: MỖI thẻ
-  // phải có huy hiệu, và huy hiệu phải khớp với thứ máy nói, không phải với
-  // thứ trang tự nghĩ ra. Nhãn "hub mở" chỉ được xuất hiện khi `started_by_hub`
-  // là true trong sổ — nhãn đoán còn tệ hơn không nhãn.
-  const badges = await page.evaluate(() =>
-    [...document.querySelectorAll("#sessList .sess")].map((e) => ({
-      id: e.dataset.session,
-      host: e.dataset.host,
-      hub: e.dataset.hub === "1",
-      badge: (e.querySelector(".sess-kind")?.textContent || "").trim(),
+  // Nhìn qua một cái là biết loại nào, ai mở — Hà 2026-08-09. Bản đầu làm bằng
+  // huy hiệu trên từng thẻ; Hà xem xong bảo *"dễ nhìn dễ hiểu hơn được không?"*,
+  // nên đổi sang GỘP NHÓM: tiêu đề nói một lần cho cả cụm.
+  //
+  // Phép đo đối chiếu với MÁY, không hỏi lại trang: số phiên mỗi nhóm phải khớp
+  // `hub sessions --json`, và nhãn "hub mở" chỉ được xuất hiện đúng bằng sổ.
+  const groups = await page.evaluate(() =>
+    [...document.querySelectorAll("#sessList .sess-group")].map((e) => ({
+      g: e.dataset.g,
+      n: Number(e.dataset.count),
+      text: e.textContent.replace(/\s+/g, " ").trim(),
     }))
   );
-  check("mọi thẻ phiên đều có huy hiệu loại", badges.every((b) => b.badge.length > 2),
-    badges.map((b) => b.badge).join(" | ").slice(0, 90));
-  const WORDS = {
-    terminal: "bạn mở ở terminal", background: "chạy nền",
-    detached: "không gắn cửa sổ", dead: "đã dừng",
+  check("danh sách được gộp thành nhóm có tiêu đề", groups.length > 0,
+    groups.map((g) => `${g.g}:${g.n}`).join(" · "));
+  const expect = {
+    hub: truth.sessions.filter((x) => x.started_by_hub && x.host !== "dead").length,
+    terminal: truth.sessions.filter((x) => x.host === "terminal" && !(x.started_by_hub)).length,
+    background: truth.sessions.filter((x) => x.host === "background" && !(x.started_by_hub)).length,
+    detached: truth.sessions.filter((x) => x.host === "detached" && !(x.started_by_hub)).length,
+    dead: truth.sessions.filter((x) => x.host === "dead").length,
   };
-  const wrong = badges.filter((b) => (b.hub && b.host !== "dead")
-    ? !/hub mở/.test(b.badge)
-    : !b.badge.includes(WORDS[b.host] || "\u0000"));
-  check("huy hiệu nói đúng loại của từng phiên", wrong.length === 0,
-    wrong.map((b) => `${b.host}→${b.badge}`).join(", "));
-  const hubClaims = badges.filter((b) => /hub mở/.test(b.badge)).map((b) => b.id);
-  const hubTruth = truth.sessions.filter((s) => s.started_by_hub).map((s) => s.session_id);
-  check("chỉ phiên hub THẬT SỰ mở mới mang nhãn 'hub mở'",
-    hubClaims.every((id) => hubTruth.includes(id)) && hubTruth.filter((id) =>
-      truth.sessions.find((s) => s.session_id === id && s.host !== "editor")).every((id) => hubClaims.includes(id)),
-    `màn: ${hubClaims.length} · sổ: ${hubTruth.length}`);
+  const mismatch = Object.entries(expect)
+    .filter(([g, n]) => n > 0 && (groups.find((x) => x.g === g)?.n ?? 0) !== n)
+    .map(([g, n]) => `${g}: máy ${n} / màn ${groups.find((x) => x.g === g)?.n ?? 0}`);
+  check("số phiên mỗi nhóm khớp với máy", mismatch.length === 0, mismatch.join(" · "));
+  const hubGroup = groups.find((g) => g.g === "hub");
+  check(
+    "nhóm 'hub mở' chỉ xuất hiện khi sổ CÓ phiên hub mở",
+    (expect.hub > 0) === !!hubGroup,
+    `sổ ${expect.hub} · màn ${hubGroup ? hubGroup.n : "không có nhóm"}`
+  );
+
+  // Phiên nền không có cửa sổ nào, nên "ở đâu ra?" phải được trả lời ngay trên
+  // thẻ. Đo 2026-08-09: cả hai đều truy được về một phiên trong danh sách.
+  const bg = truth.sessions.filter((x) => x.host === "background" && x.parent_name);
+  if (bg.length) {
+    const fromLines = await page.evaluate((ids) =>
+      ids.map((id) => (document.querySelector(`.sess[data-session="${id}"] .sess-from`)?.textContent || "").trim()),
+      bg.map((x) => x.session_id)
+    );
+    const wrong = bg.filter((x, i) => !fromLines[i].includes(x.parent_name));
+    check("phiên nền ghi rõ do phiên nào mở", wrong.length === 0,
+      fromLines.join(" | ").slice(0, 90));
+  } else {
+    console.log("  · không phiên nền nào truy được cha — bỏ qua 1 kiểm tra");
+  }
 
   // "terminal" phải THẬT SỰ là terminal — Hà hỏi thẳng 2026-08-09: *"danh sách
   // phiên thực sự đang liệt kê terminal hay chỉ claude?"*. Nhãn ấy từng được

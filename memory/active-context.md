@@ -1,5 +1,56 @@
 # active context — hub
 
+## 🗂 2026-08-09 (tối) — phiên nền truy được CHA, danh sách gộp nhóm (v77→v79)
+
+Hà hỏi hai câu: *"những phiên chạy nền có map được nó là do phiên nào tạo hay
+đang quản lý không?"* và *"cách hiển thị dễ nhìn dễ hiểu hơn được không?"*.
+
+**Map được, và sạch.** Phiên nền không có cửa sổ nên "ở đâu ra?" không chỗ nào
+trả lời — trừ **cây tiến trình**. Đi ngược `ppid` từ mỗi phiên nền thì 3–4 bước
+là chạm đúng một phiên ĐANG NẰM TRONG DANH SÁCH:
+
+| Phiên nền | Tổ tiên | = phiên |
+|---|---|---|
+| Tiếp tục dwork | pid 59558, ttys003 | `claude tiếp dwork` (**projects-a0**) |
+| Tự chạy lại khi gặp lỗi | pid 60045, ttys006 | `claude tiếp tfl5` (**projects-11**) |
+
+`sessions::link_parents` đọc **một lần** `ps -eo pid=,ppid=` (không phải một
+`ps` mỗi bước: mỗi bước là một lần spawn, và tệ hơn — cây đang đổi trong lúc
+đọc, một pid có thể đã bị tái sử dụng). Kết quả lên thẻ: **"↳ do «projects-a0»
+mở"**; không truy được thì nói thẳng *"không truy được phiên đã mở nó"*.
+
+**Hiển thị: bỏ huy hiệu rắc từng thẻ, chuyển sang GỘP NHÓM.** Huy hiệu (v76) trả
+lời đúng câu hỏi nhưng bắt mắt đọc lại nhãn ở **mọi** thẻ. Nhóm nói một lần cho
+cả cụm, và tự nó xếp những phiên **làm-gì-được-giống-nhau** cạnh nhau — thứ tự
+nhóm = thứ tự cần dùng: điều khiển được → chỉ xem được → cần dọn.
+
+**Ba lỗi/nợ lộ ra trong lúc làm:**
+1. **Tôi thay nhầm vòng lặp** — `rows.forEach` đầu tiên là vòng ĐẾM, không phải
+   vòng vẽ thẻ. `git checkout` trả file rồi làm lại bằng mốc dài hơn.
+2. **Luật `@media (max-width:560px)` thêm sáng nay CHƯA TỪNG CÓ TÁC DỤNG**: nó
+   đứng trước `#board .panel { padding: 16px }`, cùng độ đặc hiệu thì luật sau
+   thắng. `getComputedStyle` mới lộ (`padding-top: 16px` ở khung 390px). *Viết
+   CSS xong phải ĐO computed style, đừng tin vào việc mình đã gõ.*
+3. **Tiêu đề nhóm đẩy thẻ đầu 300→336px** (`fe-url-uc` đỏ). Không hạ ngưỡng mà
+   đi tìm chỗ lãng phí thật: dòng tóm tắt **lặp lại** chia-theo-loại mà tiêu đề
+   nhóm vừa nói (ngốn 3 dòng), khoảng trống 43px do `.boardbar` + padding panel
+   chết, tiêu đề nhóm 2 dòng. Cắt cả ba ⟹ **284px**.
+
+⚠ **Phép đo lạc hậu, lần thứ NĂM:** `fe-sessions-uc` đòi dòng tóm tắt kể lại
+"N terminal" — đúng thứ vừa bỏ đi. Trỏ nó về `data-count` của tiêu đề nhóm
+(nhóm `terminal` chỉ đếm phiên **không** do hub mở).
+
+**Nghiệm thu (bundle v79):** `cargo clippy -D warnings` **0** · `cargo test`
+**68** · `fe-sessions` **20/20** (gồm: gộp nhóm · số mỗi nhóm khớp máy · nhóm
+"hub mở" chỉ hiện khi sổ có · phiên nền ghi rõ cha · trong mỗi nhóm vừa-động
+trước) · `fe-newsession` **20/20** (phiên mới nằm dưới đúng tiêu đề "📱 hub mở
+từ điện thoại") · `fe-url` 16/16 · `fe-board` 19/19 · `fe-phone` 25/25 ·
+`fe-denied` 10/10 · `fe-config` 8/8 · `fe-smoke` 15/15 · `fe-stream` 13/13 ·
+`fe-aside` 9/9.
+
+💡 **clippy bắt được thứ build+test bỏ lọt** (`manual_contains`) — lượt đó tôi
+chạy build+test mà quên clippy, và gate `quality-gate` là chỗ lòi ra.
+
 ## 🏷 2026-08-09 (chiều) — huy hiệu "loại + ai tạo" trên từng thẻ (v76)
 
 Hà: *"cần một kiểu đánh dấu… nhìn qua cái là biết nó là kiểu nào ai tạo"*. Chấm

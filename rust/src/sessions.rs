@@ -103,6 +103,18 @@ pub struct LiveSession {
     /// inferred.
     #[serde(default)]
     pub started_by_hub: bool,
+    /// The listed session whose process tree this one hangs off, if any.
+    ///
+    /// A background session has no window, so "where did this come from?" has
+    /// no answer on screen — but the OS knows: walking `ppid` from a background
+    /// row lands on the `claude` that spawned it. Measured 2026-08-09, both
+    /// background sessions on this machine resolved in 3-4 hops to a session
+    /// already in the list (`Tiếp tục dwork` → `claude tiếp dwork` on ttys003;
+    /// `Tự chạy lại khi gặp lỗi` → `claude tiếp tfl5` on ttys006).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -438,6 +450,80 @@ fn list_account(account: &ClaudeAccountCfg, cli: &str) -> Result<Vec<Value>> {
     Ok(value.as_array().cloned().unwrap_or_default())
 }
 
+/// Every process on the machine as `pid -> ppid`, in one `ps` call.
+///
+/// One call, not one per session: walking a parent chain with a `ps` per hop
+/// costs a process spawn per hop and — worse — reads a tree that is moving
+/// while it is read, so a chain could point at a pid that has already been
+/// recycled.
+fn parent_map() -> std::collections::HashMap<i64, i64> {
+    let mut map = std::collections::HashMap::new();
+    let out = run(
+        "ps",
+        &["-eo", "pid=,ppid="],
+        RunOpts {
+            timeout: Some(Duration::from_secs(10)),
+            ..Default::default()
+        },
+    );
+    match out {
+        Ok(r) if r.code == Some(0) => {
+            for line in r.stdout.lines() {
+                let mut it = line.split_whitespace();
+                if let (Some(pid), Some(ppid)) = (it.next(), it.next()) {
+                    if let (Ok(pid), Ok(ppid)) = (pid.parse::<i64>(), ppid.parse::<i64>()) {
+                        map.insert(pid, ppid);
+                    }
+                }
+            }
+        }
+        Ok(r) => logging::warn("ps_tree_failed", json!({ "code": r.code })),
+        Err(e) => logging::warn("ps_tree_failed", json!({ "err": e.to_string() })),
+    }
+    map
+}
+
+/// Which listed session spawned each windowless one.
+///
+/// Only rows with no window need this — a terminal session's origin is the
+/// window it sits in. Depth is capped: a cycle in the table (or a pid recycled
+/// between the two reads) must not spin forever.
+fn link_parents(rows: &mut [LiveSession]) {
+    let needs = rows
+        .iter()
+        .any(|r| matches!(r.host.as_str(), "background" | "detached"));
+    if !needs {
+        return;
+    }
+    let tree = parent_map();
+    let by_pid: std::collections::HashMap<i64, (String, String)> = rows
+        .iter()
+        .filter(|r| r.pid > 0)
+        .map(|r| (r.pid, (r.session_id.clone(), r.name.clone())))
+        .collect();
+
+    for row in rows.iter_mut() {
+        if !matches!(row.host.as_str(), "background" | "detached") || row.pid <= 0 {
+            continue;
+        }
+        let mut pid = row.pid;
+        for _ in 0..12 {
+            let Some(&ppid) = tree.get(&pid) else { break };
+            if ppid <= 1 {
+                break;
+            }
+            if let Some((id, name)) = by_pid.get(&ppid) {
+                if *id != row.session_id {
+                    row.parent_session_id = Some(id.clone());
+                    row.parent_name = Some(name.clone());
+                    break;
+                }
+            }
+            pid = ppid;
+        }
+    }
+}
+
 /// Every live session across every configured account, newest activity first.
 pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     let mut out = SessionsSnapshot::default();
@@ -501,6 +587,10 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 // Điền ở tầng có `Db` (`pipeline::mark_started_by_hub`); ở đây
                 // không có sổ để tra, mà đoán thì thà để trống.
                 started_by_hub: false,
+                // Điền sau khi đã có đủ mọi hàng: quan hệ cha-con chỉ tra được
+                // khi biết pid của TẤT CẢ các phiên.
+                parent_session_id: None,
+                parent_name: None,
             };
 
             row.host = host_of(row.pid, &row.kind);
@@ -592,6 +682,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
         }
     }
 
+    link_parents(&mut out.sessions);
     out.hidden_editor = hidden_editor;
     if hidden_editor > 0 {
         logging::info(

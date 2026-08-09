@@ -168,11 +168,16 @@ try {
   // Phiên vừa mở phải TỰ NÓI nó do hub mở — đó là điểm khác biệt duy nhất giữa
   // nó và một `claude --bg` gõ tay, và là thứ quyết định người dùng có nói tiếp
   // / dừng được từ điện thoại hay không.
-  const newBadge = await page.evaluate(
-    (id) => (document.querySelector(`.sess[data-session="${id}"] .sess-kind`)?.textContent || "").trim(),
-    fresh.session_id
-  );
-  check("thẻ phiên mới mang nhãn 'hub mở'", /hub mở/.test(newBadge), newBadge);
+  const newGroup = await page.evaluate((id) => {
+    // Đi ngược lên từ thẻ tới tiêu đề nhóm gần nhất — đúng thứ người dùng thấy
+    // phía trên nó.
+    let el = document.querySelector(`.sess[data-session="${id}"]`);
+    while (el && !(el.classList && el.classList.contains("sess-group"))) el = el.previousElementSibling;
+    return el ? { g: el.dataset.g, text: el.textContent.replace(/\s+/g, " ").trim() } : null;
+  }, fresh.session_id);
+  check("phiên mới nằm dưới tiêu đề 'hub mở từ điện thoại'",
+    !!newGroup && newGroup.g === "hub" && /hub mở/.test(newGroup.text),
+    newGroup ? newGroup.text : "(không thấy tiêu đề nhóm)");
 
   await page.locator(`.sess[data-session="${fresh.session_id}"]`).click();
   check("mở được màn chi tiết của phiên mới", await page.locator("#sessDetail").isVisible());

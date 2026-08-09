@@ -147,7 +147,7 @@ pub fn mark_started_by_hub(db: &Db, snap: &mut crate::sessions::SessionsSnapshot
         return;
     }
     for s in snap.sessions.iter_mut() {
-        s.started_by_hub = ids.iter().any(|i| *i == s.session_id);
+        s.started_by_hub = ids.contains(&s.session_id);
     }
 }
 

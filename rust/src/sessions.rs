@@ -106,6 +106,11 @@ pub struct LiveSession {
     /// Subagent đang chạy (xem `TranscriptTail::pending_subagents`).
     #[serde(default)]
     pub pending_subagents: usize,
+    /// Cỡ ngữ cảnh lượt gần nhất, và model để biết cửa sổ rộng bao nhiêu.
+    #[serde(default)]
+    pub context_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// The listed session whose process tree this one hangs off, if any.
     ///
     /// A background session has no window, so "where did this come from?" has
@@ -340,6 +345,20 @@ pub struct TranscriptTail {
     pub last_ts: Option<String>,
     /// Newest `permission-mode` seen in the window.
     pub permission_mode: Option<String>,
+    /// Cỡ NGỮ CẢNH của lượt gần nhất, tính bằng token.
+    ///
+    /// `cache_read_input_tokens + cache_creation_input_tokens + input_tokens`
+    /// của bản ghi `usage` cuối cùng chính là số token model vừa phải đọc để
+    /// trả lời — tức là toàn bộ hội thoại đang mang theo. Đây là con số quyết
+    /// định khi nào nên đóng sổ: phiên đầy ngữ cảnh thì mỗi lượt sau vừa chậm
+    /// vừa tốn, và tới ngưỡng thì tự nén, mất chi tiết.
+    ///
+    /// KHÔNG suy ra được "còn bao nhiêu hạn mức" từ đây — đó là con số phía
+    /// Anthropic giữ, CLI không có lệnh nào hỏi (đã tra `claude --help`
+    /// 2026-08-09: `usage` là lệnh trong REPL, không phải lệnh dòng lệnh).
+    pub context_tokens: u64,
+    /// Model của lượt gần nhất, để biết cửa sổ ngữ cảnh rộng bao nhiêu.
+    pub model: Option<String>,
     /// Subagent calls in this window that have no result yet.
     ///
     /// Hà 2026-08-09: *"một phiên đang chạy subagents thì cũng hiển thị được"*.
@@ -358,6 +377,35 @@ pub struct TranscriptTail {
 /// the situation the number exists for. Anything whose result fell outside the
 /// 256KB window counts as finished — better to under-report than to leave a
 /// phantom subagent running on the screen forever.
+/// Ngữ cảnh của lượt gần nhất + model của nó.
+///
+/// Đọc XUÔI và giữ cái cuối cùng thấy được: bản ghi mới nhất là bản ghi đúng.
+fn last_usage(tail: &str) -> (u64, Option<String>) {
+    let mut ctx = 0u64;
+    let mut model = None;
+    for line in tail.lines() {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(msg) = record.get("message") else {
+            continue;
+        };
+        let Some(u) = msg.get("usage") else {
+            continue;
+        };
+        let n = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+        // Ba khoản cộng lại mới là cỡ ngữ cảnh thật: phần đọc từ cache là phần
+        // lớn nhất và cũng là phần dễ quên nhất.
+        ctx = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+        model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .map(str::to_string)
+            .or(model);
+    }
+    (ctx, model)
+}
+
 fn pending_subagents(tail: &str) -> usize {
     use std::collections::HashSet;
     let mut started: Vec<String> = Vec::new();
@@ -397,8 +445,11 @@ fn pending_subagents(tail: &str) -> usize {
 
 /// Walk the tail backwards to the newest real conversation turn.
 pub fn parse_tail(tail: &str) -> TranscriptTail {
+    let (context_tokens, model) = last_usage(tail);
     let mut out = TranscriptTail {
         pending_subagents: pending_subagents(tail),
+        context_tokens,
+        model,
         ..Default::default()
     };
     for line in tail.lines().rev() {
@@ -647,6 +698,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 // không có sổ để tra, mà đoán thì thà để trống.
                 started_by_hub: false,
                 pending_subagents: 0,
+                context_tokens: 0,
+                model: None,
                 // Điền sau khi đã có đủ mọi hàng: quan hệ cha-con chỉ tra được
                 // khi biết pid của TẤT CẢ các phiên.
                 parent_session_id: None,
@@ -708,6 +761,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     }
                     row.permission_mode = parsed.permission_mode.clone();
                     row.pending_subagents = parsed.pending_subagents;
+                    row.context_tokens = parsed.context_tokens;
+                    row.model = parsed.model.clone();
                     row.last_role = parsed.last_role;
                     // Suppressed HERE, at the source, so no downstream surface
                     // can forget: the snapshot, the portal doc and the phone

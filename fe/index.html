@@ -389,7 +389,7 @@
   .sess-group[data-g="detached"] { color: #8a6100; border-color: #ead4a3; }
   .sess-group[data-g="dead"] { color: var(--muted); border-style: dashed; }
   /* "do «X» mở": quan hệ cha-con, chữ nhỏ, không tranh chỗ với nội dung. */
-  .sess-from { font-size: 12px; margin-top: 2px; }
+  .sess-from, .sess-warn { font-size: 12px; margin-top: 2px; }
   /* Phiên con thụt vào dưới phiên cha, có vạch nối như một lượt trả lời
      (Hà 2026-08-09). Quan hệ này là THẬT — truy từ cây tiến trình — nên nó
      đáng được vẽ ra chứ không chỉ ghi thành một dòng chữ. */
@@ -1141,7 +1141,10 @@
     // thúc phía trên ô nhập ghim đáy, nên "mép dưới đã vào tầm nhìn" là đúng
     // ngay cả khi còn cả trăm pixel chưa cuộn tới. Ngưỡng nới lên 72px để cái
     // ô nhập ấy không tự biến người đang ở đáy thành người đã cuộn lên.
-    return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 72;
+    // 24px: đủ để bù sai số làm tròn, KHÔNG đủ để coi người vừa cuộn lên một
+    // đoạn là đang ở đáy. Ngưỡng 72px của bản trước biến mọi lần làm mới gần
+    // đáy thành một cú kéo xuống.
+    return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 24;
   }
 
   /// Đưa dòng cuối của `el` vào tầm nhìn, dù `el` tự cuộn hay trang cuộn.
@@ -1799,7 +1802,29 @@
       const kid = s.pending_subagents
         ? `${s.pending_subagents} subagent đang chạy`
         : '';
-      meta.textContent = [s.account, mode, kid].filter(Boolean).join(' · ');
+      // THƯỚC NGỮ CẢNH. `cache_read + cache_creation + input` của lượt gần nhất
+      // chính là số token model phải đọc để trả lời — tức cả hội thoại đang
+      // mang theo. Phiên đầy ngữ cảnh thì mỗi lượt sau vừa chậm vừa tốn, và
+      // tới ngưỡng thì tự nén, mất chi tiết. Đây là con số nói "nên đóng sổ".
+      const WIN = { haiku: 200000 };
+      const win = Object.entries(WIN).find(([k]) => (s.model || '').includes(k))?.[1] || 1000000;
+      const pct = s.context_tokens ? Math.round((s.context_tokens / win) * 100) : 0;
+      const ctx = pct ? `ngữ cảnh ${pct}%` : '';
+      meta.textContent = [s.account, mode, kid, ctx].filter(Boolean).join(' · ');
+      if (pct) card.dataset.ctx = String(pct);
+      // ≥60%: đủ đầy để nên đóng sổ khi vừa xong một việc — nói ra ngay trên
+      // thẻ chứ không bắt người ta tự nhẩm.
+      if (pct >= 60 && s.host !== 'dead') {
+        const warn = document.createElement('div');
+        // Lớp RIÊNG, không dùng lại `sess-from`: dòng ấy là "do phiên nào mở",
+        // và phép đo đọc đúng nó — thêm một phần tử cùng lớp là làm phép đo
+        // đọc nhầm (đỏ ngay lần chạy đầu, 2026-08-09).
+        warn.className = 'muted sess-warn';
+        warn.style.color = 'var(--warn, #9a6b1f)';
+        warn.textContent = `⚠ ngữ cảnh ${pct}% — xong việc thì nên đóng sổ để mở phiên mới`;
+        card.dataset.ctxWarn = '1';
+        card.append(warn);
+      }
       if (kid) card.dataset.subagents = String(s.pending_subagents);
       // Phiên không cửa sổ thì "ở đâu ra?" không có chỗ nào trả lời — trừ cây
       // tiến trình. Đo 2026-08-09: cả hai phiên nền trên máy đều truy được về
@@ -2291,7 +2316,14 @@
 
     // Làm mới vài giây một lần KHÔNG được giật người đang đọc dở: chỉ bám đuôi
     // khi họ vốn đã ở đuôi, như một terminal.
-    const atTail = atBottomOf(box);
+    // CHỈ đụng vào vị trí cuộn khi màn chi tiết ĐANG MỞ. `renderStream` chạy
+    // theo mọi ảnh chụp, kể cả lúc người ta đang ở tab Trao đổi hay Sức khoẻ —
+    // và `scrollerFor` lúc ấy trả về khung cuộn CHUNG của trang, nên "đang ở
+    // đáy" thành đúng ở mọi tab và trang tự nhảy xuống cuối. Hà thấy ngay:
+    // *"trang nào nó cũng tự nhảy xuống cuối"*, *"cứ cuộn lên nó lại nhảy
+    // xuống"*. Bản vá bám-đáy trước đó đúng ý nhưng thiếu đúng cái cổng này.
+    const detailOpen = !!wantSession && !$('sessDetail').classList.contains('hidden');
+    const atTail = detailOpen && atBottomOf(box);
 
     // NEO theo dòng đang nhìn, không theo con số scrollTop.
     //
@@ -2303,7 +2335,7 @@
     // cách ấy.
     let anchor = null;
     let anchorTop = 0;
-    if (!atTail) {
+    if (detailOpen && !atTail) {
       for (const n of box.children) {
         const r = n.getBoundingClientRect();
         if (r.bottom > 0) { anchor = n; anchorTop = r.top; break; }
@@ -2382,7 +2414,9 @@
         row.append(more);
       }
     });
-    if (atTail) {
+    if (!detailOpen) {
+      // Không mở màn chi tiết thì KHÔNG chạm vào vị trí cuộn của người ta.
+    } else if (atTail) {
       stickToBottom(box);
     } else if (anchor && anchor.isConnected) {
       const sc = scrollerFor(box);

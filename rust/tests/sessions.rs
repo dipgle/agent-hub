@@ -297,3 +297,41 @@ fn pending_subagents_are_counted_by_id_not_by_name() {
     assert_eq!(parse_tail("").pending_subagents, 0);
     assert_eq!(parse_tail("{ đây không phải json").pending_subagents, 0);
 }
+
+/// Tự đóng sổ: từng điều kiện một, vì đây là cơ chế TỰ CHẠY.
+///
+/// Hà chốt bật 2026-08-10 kèm ràng buộc *"phải đảm bảo đã chạy hết chỗ dở"* —
+/// và đó mới là phần khó. Một cơ chế tự động cắt ngang việc đang làm thì tệ hơn
+/// hẳn việc không có cơ chế nào.
+#[test]
+fn auto_handover_only_fires_when_the_session_is_truly_done() {
+    use hub::pipeline::{auto_handover_why, AutoWhy};
+
+    // đủ đầy · có cửa sổ · không bận · không hỏi · không subagent · đã im đủ lâu
+    let go = |pct, busy, asking, subs, idle| {
+        auto_handover_why(pct, 80, false, true, busy, asking, subs, idle, 120)
+    };
+    assert_eq!(go(85, false, false, 0, 300), AutoWhy::Do);
+
+    // Chưa đầy thì thôi.
+    assert_eq!(go(79, false, false, 0, 300), AutoWhy::NotFull(79));
+    // ĐANG CHẠY DỞ — đây là điều kiện Hà đặt ra.
+    assert_eq!(go(95, true, false, 0, 300), AutoWhy::Busy);
+    // Đang hỏi thì đóng sổ là trả lời thay người dùng.
+    assert_eq!(go(95, false, true, 0, 300), AutoWhy::Asking);
+    // Subagent còn chạy thì việc chưa xong, dù màn trông rảnh.
+    assert_eq!(go(95, false, false, 2, 300), AutoWhy::Subagents(2));
+    // Vừa im được 30 giây chưa đủ chắc: giữa hai lệnh cũng im.
+    assert_eq!(go(95, false, false, 0, 30), AutoWhy::TooFresh(30));
+
+    // Không đọc được màn thì KHÔNG đoán là rảnh.
+    assert_eq!(
+        auto_handover_why(95, 80, false, false, false, false, 0, 300, 120),
+        AutoWhy::NoWindow
+    );
+    // Đã đóng rồi thì thôi, kể cả mọi thứ khác đều thoả.
+    assert_eq!(
+        auto_handover_why(95, 80, true, true, false, false, 0, 300, 120),
+        AutoWhy::AlreadyDone
+    );
+}

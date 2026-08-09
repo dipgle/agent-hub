@@ -1420,14 +1420,27 @@ pub fn start_background(
     // came up with no task at all, reporting itself as
     // "idle — send a prompt to start", and hub cheerfully called it started.
     // Prompt first, variadic last.
-    let mut args: Vec<&str> = vec!["--bg", task, "--disallowedTools"];
+    // Mở ở GỐC WORKSPACE, không phải trong thư mục dự án.
+    //
+    // Hà 2026-08-10: *"ngay từ đầu tôi bảo mọi phiên đều bắt đầu từ thư mục
+    // projects rồi mà"* — và đo lại thì đúng: MỌI phiên đang chạy trên máy đều
+    // có `cwd = ~/Documents/projects`, còn cả ba tài khoản đều đã duyệt đúng
+    // thư mục ấy (`hasTrustDialogAccepted: true`).
+    //
+    // Mở trong thư mục con là mở vào một chỗ CHƯA tài khoản nào duyệt, nên
+    // phiên dựng lên rồi kẹt ngay ở hộp thoại MCP và chết — đúng lỗi Hà gặp khi
+    // chọn acc2. Việc thuộc dự án nào thì nói trong ĐỀ BÀI, chứ không cần đổi
+    // thư mục làm việc: `claude` đọc `CLAUDE.md` của cả cây từ gốc.
+    let root = cfg.workspace_root.clone();
+    let task_with_project = format!("[{project}] {task}");
+    let mut args: Vec<&str> = vec!["--bg", &task_with_project, "--disallowedTools"];
     args.extend_from_slice(&DENIED_TOOLS);
 
     let out = run(
         &cfg.claude_cli,
         &args,
         RunOpts {
-            cwd: Some(dir),
+            cwd: Some(root.as_path()),
             input: None,
             timeout: Some(Duration::from_secs(120)),
             env: vec![(

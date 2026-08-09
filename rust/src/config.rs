@@ -21,6 +21,30 @@ use serde::{Deserialize, Serialize};
 // that matters now is `sessions::DENIED_TOOLS`, which is enforced on the CLI
 // call itself rather than described in a config file.
 
+/// Tự đóng sổ khi ngữ cảnh đầy.
+///
+/// Hà chốt bật 2026-08-10, kèm điều kiện: *"phải đảm bảo đã chạy hết chỗ dở"*.
+/// Đó là ràng buộc quan trọng hơn cái ngưỡng — cắt ngang một phiên đang làm là
+/// mất đúng thứ nó đang làm.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AutoHandoverCfg {
+    pub enabled: bool,
+    /// Ngưỡng ngữ cảnh (%) để bắt đầu nghĩ tới việc đóng sổ.
+    pub at_percent: u8,
+    /// Phải đứng yên bao lâu mới coi là "đã chạy hết chỗ dở".
+    ///
+    /// Chỉ nhìn màn hình là chưa đủ: giữa hai lệnh, màn cũng không có đồng hồ
+    /// trong tích tắc. Đòi thêm nhật ký im lặng đủ lâu thì mới chắc.
+    pub idle_sec: u64,
+}
+
+impl Default for AutoHandoverCfg {
+    fn default() -> Self {
+        Self { enabled: true, at_percent: 80, idle_sec: 120 }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct CallCfg {
@@ -189,6 +213,8 @@ pub struct Config {
     /// went with it on 2026-08-08. An unknown key in an existing file is ignored
     /// by serde, so an old `hub.config.json` still loads; the next save drops it.
     pub call: CallCfg,
+    /// Tự đóng sổ khi ngữ cảnh đầy — xem [`AutoHandoverCfg`].
+    pub auto_handover: AutoHandoverCfg,
     pub adapters: Adapters,
     pub trust: Trust,
     /// THE project registry, keyed by folder name under `project_roots`.
@@ -225,6 +251,7 @@ impl Default for Config {
             project_roots: default_project_roots(), // filled in by load(): <hub_home>/../..
             poll_interval_sec: 120,
             call: CallCfg::default(),
+            auto_handover: AutoHandoverCfg::default(),
             adapters: Adapters::default(),
             trust: Trust::default(),
             projects: BTreeMap::new(),

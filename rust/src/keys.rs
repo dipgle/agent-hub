@@ -296,6 +296,49 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// Phiên có đang chạy dở không, đọc từ màn hình.
+///
+/// `claude` chạy dở thì in một dòng đếm giờ — `✶ Unravelling… (2m 36s · ↓ 2.0k
+/// tokens · …)`. Chữ đầu đổi liên tục (Unravelling, Pondering, Herding…), nên
+/// bắt theo chữ là bắt trượt; thứ KHÔNG đổi là cái đồng hồ `(<số>m <số>s ·`.
+///
+/// Đây là tín hiệu cho câu "đã chạy hết chỗ dở chưa" (Hà 2026-08-10). Nhật ký
+/// không trả lời được: nó chỉ ghi SAU khi lượt xong, nên một phiên đang nghĩ ba
+/// phút trông y hệt một phiên đã nghỉ.
+pub fn is_busy(screen: &str) -> bool {
+    screen.lines().any(|l| {
+        let b = l.as_bytes();
+        // tìm "(<số>m <số>s ·" — quét tay cho rẻ, không kéo regex vào đây.
+        let mut i = 0;
+        while let Some(p) = l[i..].find('(') {
+            let rest = &l[i + p + 1..];
+            let mut it = rest.chars();
+            let mut digits = 0;
+            for c in it.by_ref() {
+                if c.is_ascii_digit() {
+                    digits += 1;
+                } else {
+                    if digits > 0 && c == 'm' && rest[digits..].starts_with("m ") {
+                        // "<số>m " — kiểm tiếp "<số>s"
+                        let after = &rest[digits + 2..];
+                        let secs = after.chars().take_while(|c| c.is_ascii_digit()).count();
+                        if secs > 0 && after[secs..].starts_with('s') {
+                            return true;
+                        }
+                    }
+                    break;
+                }
+            }
+            i += p + 1;
+            if i >= l.len() {
+                break;
+            }
+        }
+        let _ = b;
+        false
+    })
+}
+
 /// Chữ trên màn của phiên, đã gác bí mật và cắt gọn — dạng dùng được ngay.
 ///
 /// `None` khi phiên không có cửa sổ, hoặc khi màn có dấu hiệu chứa bí mật:
@@ -360,6 +403,21 @@ mod tests {
     /// không chia hết cho 3, và byte 0xFF (dễ lộ lỗi dấu).
     /// Hộp chọn nhận ra bằng HÌNH DẠNG, và phải từ chối những thứ chỉ trông
     /// giống. Đây là chỗ dễ nhận nhầm nhất: mọi đoạn văn đều có thể chứa "1.".
+    /// "Đang chạy dở" phải bắt theo ĐỒNG HỒ, không theo chữ — chữ đổi mỗi lần.
+    #[test]
+    fn busy_is_read_from_the_clock_not_the_word() {
+        use super::is_busy;
+        assert!(is_busy("✶ Unravelling… (2m 36s · ↓ 2.0k tokens · thinking)"));
+        assert!(is_busy("✻ Pondering… (12m 4s · ↑ 900 tokens)"));
+        assert!(is_busy("· Herding cats… (0m 8s ·)"));
+        // Rảnh: dấu nhắc trống, dòng gợi ý, không có đồng hồ.
+        assert!(!is_busy("❯ \n⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt"));
+        assert!(!is_busy(""));
+        // Ngoặc có số nhưng KHÔNG phải đồng hồ thì không tính.
+        assert!(!is_busy("Đã sửa 3 tệp (xem lại 2 chỗ)"));
+        assert!(!is_busy("chạy trong (500ms)"));
+    }
+
     #[test]
     fn choices_are_recognised_by_shape_only() {
         use super::parse_choices;

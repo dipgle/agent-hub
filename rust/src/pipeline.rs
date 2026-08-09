@@ -87,6 +87,179 @@ pub const ASIDE_KEY: &str = "aside:last";
 /// and the account that owns it, which is exactly what this row carries.
 pub const STOPPED_KEY: &str = "stopped:session";
 
+/// Đóng sổ hộ, cho phiên đã đầy ngữ cảnh VÀ đã chạy xong chỗ dở.
+///
+/// Chạy mỗi vòng. Không có nút nào bấm ra nó — đó là điểm: một phiên đầy 80%
+/// thì mỗi lượt sau vừa chậm vừa tốn, và người ta thường chỉ nhận ra khi đã
+/// muộn. Nhưng nó chỉ ra tay khi CHẮC CHẮN phiên đang rảnh; mọi lý do giữ lại
+/// đều được ghi log, vì một cơ chế tự chạy mà im lặng là một cơ chế không ai
+/// dám tin.
+fn auto_handover(db: &Db, cfg: &Config) {
+    if !cfg.auto_handover.enabled {
+        return;
+    }
+    let mut live = crate::sessions::snapshot(cfg);
+    mark_started_by_hub(db, &mut live);
+    let done: Vec<String> = db
+        .get_cursor(AUTO_DONE_KEY)
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+
+    for s in &live.sessions {
+        if s.host == "dead" || s.context_tokens == 0 {
+            continue;
+        }
+        // Cửa sổ ngữ cảnh theo model; không biết model thì lấy mức phổ biến.
+        let window: u64 = if s.model.as_deref().is_some_and(|m| m.contains("haiku")) {
+            200_000
+        } else {
+            1_000_000
+        };
+        let pct = ((s.context_tokens * 100) / window).min(100) as u8;
+        let screen = crate::keys::screen_of(&s.tty, 40);
+        let idle_sec = s
+            .last_activity
+            .as_deref()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds().max(0) as u64)
+            .unwrap_or(0);
+
+        let why = auto_handover_why(
+            pct,
+            cfg.auto_handover.at_percent,
+            done.iter().any(|d| d == &s.session_id),
+            screen.is_some(),
+            screen.as_ref().is_some_and(|(t, _)| crate::keys::is_busy(t)),
+            screen.as_ref().is_some_and(|(_, c)| !c.is_empty()),
+            s.pending_subagents,
+            idle_sec,
+            cfg.auto_handover.idle_sec,
+        );
+        if why != AutoWhy::Do {
+            // Chỉ log khi ĐÃ đủ đầy — dưới ngưỡng thì im, không thì mỗi vòng
+            // sinh một dòng cho mọi phiên.
+            if pct >= cfg.auto_handover.at_percent {
+                logging::info(
+                    "auto_handover_held",
+                    json!({ "session": s.session_id, "pct": pct, "why": format!("{why:?}") }),
+                );
+            }
+            continue;
+        }
+
+        logging::info(
+            "auto_handover_firing",
+            json!({ "session": s.session_id, "name": s.name, "pct": pct, "idle_sec": idle_sec }),
+        );
+        match crate::sessions::handover(cfg, s) {
+            Ok(h) => {
+                let mut next = done.clone();
+                next.push(s.session_id.clone());
+                if next.len() > 50 {
+                    let cut = next.len() - 50;
+                    next.drain(..cut);
+                }
+                if let Ok(v) = serde_json::to_string(&next) {
+                    let _ = db.set_cursor(AUTO_DONE_KEY, &v);
+                }
+                if let Err(e) = db.record_spend("auto_handover", &h.new_session_id, h.cost_usd, &s.name) {
+                    logging::error("spend_record_failed", json!({ "err": e.to_string() }));
+                }
+                let msg = format!(
+                    "📋 Tự đóng sổ {} (ngữ cảnh {}%, đã rảnh {} phút).\nPhiên mới: {}\n{}",
+                    s.name,
+                    pct,
+                    idle_sec / 60,
+                    &h.new_session_id[..8.min(h.new_session_id.len())],
+                    h.resume_command
+                );
+                // Báo vào phòng: mọi thứ hub tự làm đều phải có vết ở nơi đọc
+                // được, nhất là thứ chạy khi không ai bấm.
+                if let Err(e) = crate::adapters::tfl5::send(
+                    &cfg.adapters.tfl5,
+                    &cfg.adapters.tfl5.room,
+                    None,
+                    &msg,
+                ) {
+                    logging::error("auto_handover_notice_failed", json!({ "err": e.to_string() }));
+                }
+            }
+            Err(e) => logging::error(
+                "auto_handover_failed",
+                json!({ "session": s.session_id, "err": e.to_string() }),
+            ),
+        }
+        // MỘT phiên mỗi vòng: đóng sổ tốn hạn mức, và làm hàng loạt trong một
+        // nhịp là thứ không ai kịp can.
+        break;
+    }
+}
+
+/// Phiên nào đã được hub tự đóng sổ rồi — để không đóng hai lần.
+pub const AUTO_DONE_KEY: &str = "auto_handover:done";
+
+/// Vì sao MỘT phiên nên (hoặc không nên) được tự đóng sổ lúc này.
+///
+/// Trả về `Err(lý do)` khi chưa nên — lý do là chữ, để log nói được điều gì đã
+/// giữ nó lại. Một cơ chế tự động mà không giải thích được vì sao nó im lặng là
+/// một cơ chế không ai dám tin.
+#[derive(Debug, PartialEq)]
+pub enum AutoWhy {
+    Do,
+    NotFull(u8),
+    Busy,
+    Asking,
+    Subagents(usize),
+    TooFresh(u64),
+    AlreadyDone,
+    NoWindow,
+}
+
+/// Quyết định thuần: không đọc đĩa, không gọi ai — để test được từng điều kiện.
+///
+/// Thứ tự kiểm là có chủ ý: những lý do RẺ và CHẮC đứng trước, để log ghi đúng
+/// nguyên nhân đầu tiên chứ không phải nguyên nhân cuối cùng.
+#[allow(clippy::too_many_arguments)]
+pub fn auto_handover_why(
+    pct: u8,
+    at_percent: u8,
+    already_done: bool,
+    has_window: bool,
+    busy: bool,
+    asking: bool,
+    subagents: usize,
+    idle_sec: u64,
+    need_idle_sec: u64,
+) -> AutoWhy {
+    if already_done {
+        return AutoWhy::AlreadyDone;
+    }
+    if pct < at_percent {
+        return AutoWhy::NotFull(pct);
+    }
+    // Không đọc được màn thì KHÔNG đoán là rảnh. Đóng sổ giữa chừng làm mất
+    // đúng thứ phiên đang làm, nên thiếu tín hiệu là lý do để KHÔNG làm.
+    if !has_window {
+        return AutoWhy::NoWindow;
+    }
+    if busy {
+        return AutoWhy::Busy;
+    }
+    // Đang hỏi thì càng không: đóng sổ lúc ấy là trả lời thay người dùng.
+    if asking {
+        return AutoWhy::Asking;
+    }
+    if subagents > 0 {
+        return AutoWhy::Subagents(subagents);
+    }
+    if idle_sec < need_idle_sec {
+        return AutoWhy::TooFresh(idle_sec);
+    }
+    AutoWhy::Do
+}
+
 /// Ids of the sessions THIS hub started, newest last.
 ///
 /// Nothing in `claude agents` says who opened a session: a background row looks
@@ -1073,6 +1246,7 @@ pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String>
 pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     let started = std::time::Instant::now();
     let ingested = ingest(db, cfg)?;
+    auto_handover(db, cfg);
     // No triage, and nothing to flush. hub used to spend money on its own here:
     // every line typed in the room went through a `claude -p` call to be sorted
     // into an inbox, and a daily ceiling existed to stop that from running away.

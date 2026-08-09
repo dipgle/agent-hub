@@ -1,5 +1,46 @@
 # active context — hub
 
+## 🧵 2026-08-09 (tối) — luồng phiên: thôi nhảy, thôi cuộn lồng (v81→v83)
+
+Hai báo lỗi liền của Hà, và cả hai đều đúng.
+
+**1. *"view bị nhảy khi đã cuộn xuống dưới cùng, có vẻ đang tải lại và render
+toàn bộ danh sách"*** — đúng nguyên văn cơ chế: cứ 4 giây `renderStream` chạy
+`box.textContent = ''` rồi dựng lại cả trăm sự kiện. Hồi khung tự cuộn còn giấu
+được bằng cách đặt lại `scrollTop`; từ v80 **TRANG** cuộn nên chiều cao tụt về 0
+rồi mọc lại giữa hai khung hình — mắt thấy đúng một cú nhảy.
+⟹ Dựng **theo khoá, chỉ thêm cái mới**: `keyOf(e) = ts|kind|name|len|32 ký tự
+đầu`, giữ nguyên node cũ, chỉ tạo node mới, gỡ node đã rụng. Đo: **65/69 node
+được giữ** qua một nhịp làm mới (trước là 0).
+⟹ Và **neo vị trí theo DÒNG ĐANG NHÌN, không theo `scrollTop`**: cửa sổ luồng
+trượt (hub đọc 256KB cuối nhật ký) nên sự kiện cũ rụng khỏi đầu — đo được một
+nhịp bỏ 4 dòng, trang ngắn đi **667px**. Khôi phục bằng con số `scrollTop` cũ là
+giữ đúng CON SỐ và mất đúng CHỖ ĐANG ĐỌC.
+
+**2. *"vẫn đang hiện một đống thanh cuộn trong danh sách của 1 phiên"*** — lần
+trước tôi đo ở **390px** thấy 0 và tưởng xong; đo lại ở **1280px** thì ra **5
+khối cuộn**: 4 `pre.ev-body` + 1 `.scroll`. Gốc: `#board pre { max-height: 340px;
+overflow: auto }` — luật sinh ra cho bãi JSON tab Cấu hình nhưng tóm **mọi**
+`<pre>`, kể cả thân từng sự kiện; cộng `.ev-tool/.ev-result .ev-body
+{ max-height: 12em; overflow: auto }`.
+⟹ Bỏ trần ở **mọi bề ngang** (không chỉ điện thoại), trần 340px chỉ còn cho
+`#configBody`. Đoạn dài **kẹp 12em + nút "▾ xem đầy đủ"**, không hộp cuộn.
+⚠ Bản vá đầu để **kẽ hở**: kẹp từ 281px trong khi trần cũ 144px ⟹ đoạn cao
+144–281px không ai kẹp mà vẫn cuộn. Ngưỡng kẹp phải **khớp đúng** trần `.clamp`.
+
+📐 **Bài học đo:** *"đo ở khung mình quen"* là chưa đo. 390px sạch trong khi
+1280px có 5 thanh cuộn — Hà nhìn ở máy tính.
+
+**Phép đo mới** (`fe-stream-uc` 13/13 → **16/16**): đang đọc dở thì làm mới
+KHÔNG đẩy chỗ đọc (bám **chữ + toạ độ y** của dòng đang nhìn, không bám
+`scrollTop` — bám `scrollTop` sẽ xanh giả khi cửa sổ trượt) · đang ở đáy thì vẫn
+ở đáy · không hộp cuộn nào trong `#sessDetail`. Đo thật: cùng dòng đứng y nguyên
+`y=-4` qua 2 nhịp; ở đáy **cách đáy 0px** suốt.
+
+**Nghiệm thu (v83):** `fe-stream` 16/16 · `fe-sessions` 20/20 · `fe-newsession`
+20/20 · `fe-phone` 31/31 · `fe-url` 16/16 · `fe-board` 19/19 · `fe-smoke` 15/15 ·
+`fe-denied` 10/10 · `fe-config` 8/8 · `fe-aside` 9/9 · 0 lỗi console.
+
 ## 🎚 2026-08-09 (tối) — "ui đang bị hiện quá nhiều thanh cuộn" (v80)
 
 Đo ra đúng vậy, và tệ hơn tưởng: **mỗi tab có 2–3 vùng cuộn dọc cùng lúc** —

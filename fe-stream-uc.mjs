@@ -169,6 +169,65 @@ try {
     `màn ${shown.total} / ảnh chụp ${focus ? focus.events.length : "?"}`
   );
 
+  // ĐỌC DỞ THÌ PHẢI Ở YÊN. Hà 2026-08-09: *"vào một phiên… view bị nhảy khi đã
+  // cuộn xuống dưới cùng, có vẻ đang tải lại và render toàn bộ danh sách"*.
+  // Đúng: cứ 4 giây `renderStream` xoá sạch rồi dựng lại cả trăm sự kiện.
+  //
+  // Phép đo bám vào thứ MẮT thấy, không bám `scrollTop`: chọn dòng đầu tiên
+  // còn trong khung nhìn, nhớ CHỮ của nó và toạ độ y, chờ qua ít nhất một nhịp
+  // làm mới, rồi đòi vẫn đúng dòng ấy ở đúng chỗ ấy. Bám `scrollTop` sẽ xanh
+  // giả khi cửa sổ luồng trượt (sự kiện cũ rụng khỏi đầu, trang ngắn lại).
+  const readAnchor = () =>
+    page.evaluate(() => {
+      const el = [...document.querySelectorAll("#sessStream .ev")]
+        .find((n) => n.getBoundingClientRect().bottom > 0);
+      const m = document.querySelector("main");
+      return {
+        text: (el?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40),
+        y: el ? Math.round(el.getBoundingClientRect().top) : null,
+        toBottom: Math.round(m.scrollHeight - m.scrollTop - m.clientHeight),
+      };
+    });
+
+  await page.evaluate(() => {
+    const m = document.querySelector("main");
+    m.scrollTop = Math.round(m.scrollHeight * 0.55);
+  });
+  await page.waitForTimeout(400);
+  const beforeMid = await readAnchor();
+  await page.waitForTimeout(9500);            // qua ít nhất hai nhịp 4s
+  const afterMid = await readAnchor();
+  check(
+    "đang đọc dở thì làm mới KHÔNG đẩy chỗ đọc đi",
+    beforeMid.text.length > 0 &&
+      afterMid.text === beforeMid.text &&
+      Math.abs(afterMid.y - beforeMid.y) <= 4,
+    `"${beforeMid.text}" y=${beforeMid.y} → "${afterMid.text}" y=${afterMid.y}`
+  );
+
+  await page.evaluate(() => {
+    const m = document.querySelector("main");
+    m.scrollTop = m.scrollHeight;
+  });
+  await page.waitForTimeout(9500);
+  const atBottom = await readAnchor();
+  check("đang ở đáy thì làm mới vẫn giữ ở đáy", atBottom.toBottom <= 4, `cách đáy ${atBottom.toBottom}px`);
+
+  // Không hộp cuộn nào bên trong màn này: một trang, một thanh cuộn.
+  const innerScrolls = await page.evaluate(() =>
+    [...document.querySelectorAll("#sessDetail *")]
+      .filter((e) => !/^(TEXTAREA|SELECT|INPUT)$/.test(e.tagName))
+      .filter((e) => {
+        const cs = getComputedStyle(e);
+        if (cs.display === "none") return false;
+        const cy = /(auto|scroll)/.test(cs.overflowY) && e.scrollHeight > e.clientHeight + 2;
+        const cx = /(auto|scroll)/.test(cs.overflowX) && e.scrollWidth > e.clientWidth + 2;
+        return cy || cx;
+      })
+      .map((e) => `${e.tagName.toLowerCase()}.${(e.className || "").toString().split(" ")[0]}`)
+  );
+  check("không hộp cuộn nào trong luồng phiên", innerScrolls.length === 0, innerScrolls.join(" · "));
+
   // "Giống như ngồi máy" nghĩa là thấy LỆNH và KẾT QUẢ, không chỉ lời nói.
   check("có hiện lệnh đã chạy", (shown.kinds["ev-tool"] || 0) > 0, `${shown.kinds["ev-tool"] || 0} lệnh`);
   check("có hiện kết quả của lệnh", (shown.kinds["ev-result"] || 0) > 0, `${shown.kinds["ev-result"] || 0} kết quả`);

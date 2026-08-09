@@ -192,7 +192,7 @@
   #board.denied .split { grid-template-columns: minmax(0, 1fr); }
 
   /* conversation inside the board column */
-  #board .wrap { max-width: none; margin: 0; max-height: 68vh; overflow-y: auto; }
+  #board .wrap { max-width: none; margin: 0; }
   #board .msg { border-color: var(--line); background: var(--bg); max-width: 92%; }
   #board .msg.mine { background: var(--accent-soft); }
   #board .note { color: var(--muted); }
@@ -284,7 +284,14 @@
   #board .tag.ok { border-color: var(--accent); color: var(--accent); }
   #board .mono { font-family: var(--mono); font-size: 12px; }
   #board .nowrap { white-space: nowrap; }
-  #board pre { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 12px; margin: 0; max-height: 340px; overflow: auto; }
+  /* `max-height + overflow` từng nằm ở ĐÂY, tức áp cho MỌI <pre> trong bảng —
+     kể cả `.ev-body`, thân của từng sự kiện trong luồng phiên. Hệ quả: mỗi sự
+     kiện dài là MỘT hộp cuộn riêng. Hà 2026-08-09: *"vẫn đang hiện một đống
+     thanh cuộn trong danh sách của 1 phiên"* — đo ở khung 1280px: 4 `pre.ev-body`
+     + 1 khung `.scroll` = 5 thanh cuộn lồng nhau trong một màn.
+     Trần đó chỉ dành cho ĐÚNG một chỗ: bãi JSON thô ở tab Cấu hình. */
+  #board pre { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 12px; margin: 0; }
+  #configBody { max-height: 340px; overflow: auto; }
   #board .muted { color: var(--muted); }
   /* Stale data must not look like fresh data (UC-S09). */
   #board .muted.stale { color: var(--bad, #a33a2c); font-weight: 600; }
@@ -295,7 +302,10 @@
   @media (min-width: 1800px) { #board .split { grid-template-columns: 760px minmax(0, 1fr); } }
   /* Five columns of Vietnamese in a fixed-width panel overflow before they
      wrap; let the table scroll inside its own box instead of clipping. */
-  #board .scroll { max-height: 68vh; overflow: auto; }
+  /* Không còn khung nào tự cuộn: TRANG cuộn, ở mọi bề ngang. Trần `68vh/72vh`
+     sinh ra cho bố cục hai cột; hub chỉ có một cột, nên nó chỉ đẻ ra cuộn lồng
+     cuộn — trên điện thoại là bẫy vuốt, trên máy tính là một rừng thanh cuộn. */
+  #board .scroll { max-height: none; overflow: visible; }
   /* Session cards, not a table: on a 390px phone a table forces sideways
      scrolling, and this is the one screen that must read at a glance. */
   /* On the sessions screen the surrounding chrome is noise: it pushed the
@@ -384,7 +394,7 @@
   .sess:active { background: var(--soft, #eef2ee); }
   /* The stream reads like a terminal: monospace, tight, output indented under
      the command that produced it. */
-  #sessStream { display: flex; flex-direction: column; gap: 6px; max-height: 72vh; }
+  #sessStream { display: flex; flex-direction: column; gap: 6px; }
   .ev-head {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
@@ -395,11 +405,24 @@
     font-size: 12.5px; line-height: 1.45;
   }
   .ev-say .ev-body { font-family: inherit; font-size: 14px; }
+  /* KHÔNG trần + KHÔNG overflow ở đây: `max-height: 12em; overflow: auto` từng
+     nằm đúng chỗ này và là nguồn cuối cùng của "một đống thanh cuộn" — nó tóm
+     mọi đoạn cao 144px trở lên, tức gần như mọi kết quả lệnh. Việc kẹp giao
+     hẳn cho `.clamp` + nút mở, để chỉ có MỘT cơ chế và không có kẽ hở giữa
+     hai ngưỡng (bản trước kẹp từ 281px, nên khoảng 144–281px vẫn cuộn). */
   .ev-tool .ev-body, .ev-result .ev-body {
     background: var(--soft, #f2f5f2); border: 1px solid var(--line);
-    border-radius: 6px; padding: 6px 8px; max-height: 12em; overflow: auto;
+    border-radius: 6px; padding: 6px 8px;
   }
   .ev-result { padding-left: 10px; border-left: 2px solid var(--line); }
+  /* Đầu ra dài thì KẸP rồi cho bấm mở, chứ không nhét vào hộp cuộn: một hộp
+     cuộn trong trang cuộn là hai thứ tranh nhau ngón tay. */
+  .ev-body.clamp { max-height: 12em; overflow: hidden; }
+  .ev-more {
+    align-self: flex-start; margin-top: 4px; padding: 2px 8px;
+    font-size: 12px; color: var(--muted); background: none;
+    border: 1px solid var(--line); border-radius: 999px; min-height: 32px;
+  }
   .ev-think .ev-body { opacity: .72; font-style: italic; }
   .ev-hidden .ev-body { color: var(--bad, #a33a2c); }
   /* 520px là dấu vết của bảng NĂM cột hồi còn hộp thư: nó ép bảng rộng gấp
@@ -458,9 +481,9 @@
        cạnh nhau và mỗi cột cần cuộn riêng; trên điện thoại nó chỉ tạo ra cái
        bẫy "vuốt trúng khung trong thì trang không nhúc nhích".
        Bỏ trần ⟹ nội dung chảy vào trang, trang cuộn như mọi trang khác. */
-    #board .wrap, #board .scroll, #sessStream, #board pre {
-      max-height: none; overflow: visible;
-    }
+    /* Trần chiều cao đã bỏ ở luật gốc cho MỌI bề ngang; chỉ còn bãi JSON thô
+       là vẫn có trần, và trên điện thoại thì nó cũng nên chảy vào trang. */
+    #configBody { max-height: none; overflow: visible; }
   }
 </style>
 </head>
@@ -1836,17 +1859,62 @@
       ? `${events.length} sự kiện gần nhất · ${focus.older_hidden} sự kiện cũ hơn không tải`
       : `${events.length} sự kiện`;
 
-    // Refreshing every few seconds must not yank a reader who scrolled up:
-    // follow the tail only when they were already at it, like a terminal.
     // Làm mới vài giây một lần KHÔNG được giật người đang đọc dở: chỉ bám đuôi
     // khi họ vốn đã ở đuôi, như một terminal.
     const atTail = atBottomOf(box);
-    const sc = scrollerFor(box);
-    const keepTop = sc.scrollTop;
 
-    box.textContent = '';
+    // NEO theo dòng đang nhìn, không theo con số scrollTop.
+    //
+    // Cửa sổ luồng trượt: hub đọc 256KB cuối nhật ký, nên phiên càng chạy thì
+    // các sự kiện CŨ càng rụng khỏi ĐẦU danh sách — đo được 2026-08-09: một
+    // nhịp làm mới bỏ 4 dòng, trang ngắn đi 667px. Khôi phục bằng `scrollTop`
+    // cũ là giữ đúng CON SỐ và mất đúng CHỖ ĐANG ĐỌC. Nên nhớ một dòng cụ thể
+    // và khoảng cách của nó tới mép trên khung nhìn, rồi trả lại đúng khoảng
+    // cách ấy.
+    let anchor = null;
+    let anchorTop = 0;
+    if (!atTail) {
+      for (const n of box.children) {
+        const r = n.getBoundingClientRect();
+        if (r.bottom > 0) { anchor = n; anchorTop = r.top; break; }
+      }
+    }
+
+    // DỰNG THEO KHOÁ, KHÔNG XOÁ SẠCH RỒI VẼ LẠI.
+    //
+    // Hà 2026-08-09: *"vào một phiên… view bị nhảy khi đã cuộn xuống dưới cùng,
+    // có vẻ đang tải lại và render toàn bộ danh sách"*. Đúng: cứ 4 giây là
+    // `box.textContent = ''` rồi dựng lại cả 120 sự kiện. Hồi khung tự cuộn thì
+    // còn giấu được bằng cách đặt lại `scrollTop`; từ khi TRANG cuộn (v80),
+    // chiều cao trang tụt về 0 rồi mọc lại giữa hai khung hình — mắt thấy đúng
+    // một cú nhảy.
+    //
+    // Sự kiện là nhật ký: đã ghi thì không đổi, chỉ thêm vào đuôi và rụng ở
+    // đầu khi cửa sổ 120 trượt. Nên giữ nguyên node cũ, chỉ dựng node MỚI.
+    // Khoá phải ổn định giữa hai lần đẩy: mốc thời gian + loại + tên công cụ +
+    // độ dài + 32 ký tự đầu. Trùng khoá thì cùng lắm là vẽ lại một dòng, không
+    // bao giờ là vẽ lại cả màn.
+    const keyOf = (e) =>
+      `${e.ts}|${e.kind}|${e.name || ''}|${(e.text || '').length}|${(e.text || '').slice(0, 32)}`;
+    const have = new Map();
+    for (const n of box.children) have.set(n.dataset.k, n);
+    const wantKeys = new Set(events.map(keyOf));
+    for (const n of [...box.children]) if (!wantKeys.has(n.dataset.k)) n.remove();
+
+    let prev = null;
     events.forEach((e) => {
+      const k = keyOf(e);
+      const kept = have.get(k);
+      if (kept) {
+        // Đúng chỗ rồi thì ĐỪNG đụng vào: mỗi lần chèn lại là một lần trình
+        // duyệt tính lại bố cục, và với ảnh/khối cao thì lại nhảy.
+        const shouldBeAfter = prev ? prev.nextSibling : box.firstChild;
+        if (kept !== shouldBeAfter) box.insertBefore(kept, shouldBeAfter);
+        prev = kept;
+        return;
+      }
       const row = document.createElement('div');
+      row.dataset.k = k;
       row.className = `ev ev-${e.kind}${e.withheld ? ' ev-hidden' : ''}`;
 
       const head = document.createElement('div');
@@ -1864,10 +1932,34 @@
       body.textContent = e.kind === 'tool' ? toolLine(e) : e.text;
       if (e.kind === 'tool' && body.textContent !== e.text) body.title = e.text;
       row.append(body);
-      box.append(row);
+      box.insertBefore(row, prev ? prev.nextSibling : box.firstChild);
+      prev = row;
+      // Đo SAU khi đã gắn vào cây — trước đó `scrollHeight` chưa có nghĩa.
+      // Ngưỡng phải khớp ĐÚNG trần của `.clamp` (12em), nếu không sẽ có một dải
+      // chiều cao không ai kẹp mà cũng không ai cho cuộn.
+      const capPx = 12 * parseFloat(getComputedStyle(body).fontSize);
+      if (body.scrollHeight > capPx + 4) {
+        body.classList.add('clamp');
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'ev-more';
+        more.textContent = '▾ xem đầy đủ';
+        more.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const open = body.classList.toggle('clamp');
+          more.textContent = open ? '▾ xem đầy đủ' : '▴ thu gọn';
+        });
+        row.append(more);
+      }
     });
-    if (atTail) stickToBottom(box);
-    else scrollerFor(box).scrollTop = keepTop;
+    if (atTail) {
+      stickToBottom(box);
+    } else if (anchor && anchor.isConnected) {
+      const sc = scrollerFor(box);
+      sc.scrollTop += anchor.getBoundingClientRect().top - anchorTop;
+    }
+    // Neo mất (chính dòng ấy vừa rụng) thì KHÔNG đụng vào vị trí cuộn: để
+    // nguyên còn hơn nhảy tới một chỗ đoán.
   }
 
   /** "3p" / "5g" / "2ng" — same scale the CLI prints, so both agree. */

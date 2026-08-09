@@ -2178,6 +2178,8 @@
     $('sessTellBox').classList.remove('hidden');
     $('sessTellBox').textContent = 'Đang gõ vào cửa sổ phiên…';
     waitingFor = 'tell';
+    // Cùng lý do với hàng phím: khẳng định lại phiên trước khi gõ.
+    sendCommand(`/session ${wantSession}`, null);
     sendCommand(`/type ${text}`, e && e.target);
     input.value = '';
   }
@@ -2189,6 +2191,14 @@
     $('sessTellBox').classList.remove('hidden');
     $('sessTellBox').textContent = `Đang bấm '${b.dataset.key}'…`;
     waitingFor = 'tell';
+    // Khẳng định lại phiên đang theo NGAY TRƯỚC khi bấm.
+    //
+    // `/key` lấy đích từ con trỏ `focus:session`, mà con trỏ ấy do cú chạm vào
+    // thẻ đặt — nếu socket rớt đúng lúc chạm (ví dụ daemon vừa khởi động lại)
+    // thì cú chạm không gửi được gì, và phím rơi vào hư không: hub đáp *"chưa
+    // mở phiên nào"* trong khi màn hình rõ ràng đang mở một phiên (đo
+    // 2026-08-10). Gửi lại `/session` là rẻ và không đổi gì khi nó vốn đã đúng.
+    sendCommand(`/session ${wantSession}`, null);
     sendCommand(`/key ${b.dataset.key}`, b);
   });
   $('sessSay').addEventListener('click', sendSay);
@@ -2929,14 +2939,17 @@
       cmdNote('Chưa kết nối tới phòng chat — mở lại tab Trò chuyện rồi thử lại.', true);
       return;
     }
-    btn.disabled = true;
+    // `btn` được phép RỖNG: có lệnh gửi kèm mà không nút nào đứng sau nó (ví
+    // dụ `/session` khẳng định lại trước khi bấm phím). Không chịu được `null`
+    // thì chính cái lệnh phụ ấy ném lỗi và giết luôn lệnh chính.
+    if (btn) btn.disabled = true;
     ws.send(JSON.stringify({ type: 'msg', text }));
     cmdNote(`Đã gửi "${text}" — chờ hub trả lời trong phòng chat…`);
     // hub trả lời trong phòng, còn TRẠNG THÁI thì về theo ảnh chụp kế tiếp —
     // và ảnh ấy đến muộn hơn câu trả lời. Một cú làm mới sau 6 giây là canh
     // đúng vào lúc hub CHƯA xong: `/new` mất tới ~14 giây. Hỏi lại vài nhịp,
     // có hạn, thay vì đặt cược vào một mốc thời gian.
-    setTimeout(() => { btn.disabled = false; }, 6000);
+    setTimeout(() => { if (btn) btn.disabled = false; }, 6000);
     let tries = 0;
     const after = setInterval(() => {
       tries += 1;

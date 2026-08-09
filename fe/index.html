@@ -1038,7 +1038,36 @@
     $('foot').classList.toggle('hidden', stopped);
     if (panel !== 'sessions' && panel !== 'chat') goPanel('sessions');
     if (!boardLoaded) loadBoard();
+    startBoardPoll();
   }
+
+  /// Màn theo dõi phải tự làm mới, nếu không nó là ảnh chụp một lần rồi thôi.
+  ///
+  /// Lỗi thật, bắt được 2026-08-09 khi `/new` lần đầu chạy qua được hộp thoại
+  /// MCP: bấm "Mở phiên mới" xong thì phiên KHÔNG BAO GIỜ hiện lên danh sách.
+  /// Lý do: cả trang chỉ có đúng một cú `loadBoard()` sau 6 giây kể từ lúc gửi
+  /// lệnh, mà hub cần tới ~14 giây mới dựng xong phiên nền (nó còn phải rình
+  /// xem phiên có kẹt ở hộp thoại không). Sau 6 giây ấy thì không còn gì làm
+  /// mới danh sách nữa — người dùng phải bấm "Tải lại" hoặc F5 mới thấy.
+  ///
+  /// Vòng làm mới này KHÔNG tốn hạn mức: nó đọc một tài liệu tfl5 đã có sẵn,
+  /// không gọi `claude`. Dừng khi tab bị ẩn (điện thoại khoá màn hình) và khi
+  /// đang theo một phiên — đường đó đã có vòng 4 giây riêng.
+  const BOARD_REFRESH_MS = 15000;
+  let boardPoll = null;
+  function stopBoardPoll() { clearInterval(boardPoll); boardPoll = null; }
+  function startBoardPoll() {
+    stopBoardPoll();
+    boardPoll = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (wantSession) return;                 // màn chi tiết tự lo, 4s/lần
+      if (panel !== 'sessions') return;        // tab khác thì không cần
+      loadBoard();
+    }, BOARD_REFRESH_MS);
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && panel === 'sessions' && !wantSession) loadBoard();
+  });
 
   $('boardReload').addEventListener('click', () => loadBoard());
   $('btnIngest').addEventListener('click', (e) => sendCommand('/ingest', e.target));
@@ -1860,12 +1889,17 @@
     btn.disabled = true;
     ws.send(JSON.stringify({ type: 'msg', text }));
     cmdNote(`Đã gửi "${text}" — chờ hub trả lời trong phòng chat…`);
-    // hub answers in the room and the next snapshot carries the new state;
-    // refresh once it has had time to run.
-    setTimeout(() => {
-      btn.disabled = false;
+    // hub trả lời trong phòng, còn TRẠNG THÁI thì về theo ảnh chụp kế tiếp —
+    // và ảnh ấy đến muộn hơn câu trả lời. Một cú làm mới sau 6 giây là canh
+    // đúng vào lúc hub CHƯA xong: `/new` mất tới ~14 giây. Hỏi lại vài nhịp,
+    // có hạn, thay vì đặt cược vào một mốc thời gian.
+    setTimeout(() => { btn.disabled = false; }, 6000);
+    let tries = 0;
+    const after = setInterval(() => {
+      tries += 1;
       loadBoard();
-    }, 6000);
+      if (tries >= 8) clearInterval(after);   // 8 × 5s = 40 giây
+    }, 5000);
   }
 
   /// Switch panels the same way a click on the tab would.

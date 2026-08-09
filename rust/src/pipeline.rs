@@ -77,6 +77,74 @@ pub const HANDOVER_KEY: &str = "handover:last";
 /// Cursor holding the most recent side question and its answer.
 pub const ASIDE_KEY: &str = "aside:last";
 
+/// The session hub stopped most recently, kept whole so `/tell` can resume it.
+///
+/// `/stop` answers "hội thoại vẫn còn — nói tiếp bằng /tell", and that promise used to
+/// break on the very next command: `claude agents` drops a stopped background
+/// session from its list within seconds, and `/tell` gated on that list, so the
+/// reply was "không thấy phiên đang chạy nữa" for the session hub had just
+/// stopped ON PURPOSE. Resuming does not need a process — it needs a transcript
+/// and the account that owns it, which is exactly what this row carries.
+pub const STOPPED_KEY: &str = "stopped:session";
+
+/// Keep a stopped session whole, minus the fields that only make sense while a
+/// process is behind it.
+///
+/// `status`/`state`/`pid` are cleared on purpose: `sessions::tell` refuses a
+/// session whose status is `busy`, and a row frozen at the instant of stopping
+/// still says `busy` — the session would be unreachable forever on the strength
+/// of a field describing a process that no longer exists.
+fn remember_stopped(db: &Db, s: &crate::sessions::LiveSession) {
+    let mut row = s.clone();
+    row.status = None;
+    row.state = None;
+    row.pid = 0;
+    row.host = "dead".to_string();
+    match serde_json::to_string(&row) {
+        Ok(json) => {
+            if let Err(e) = db.set_cursor(STOPPED_KEY, &json) {
+                logging::error(
+                    "stopped_session_not_saved",
+                    json!({ "session": row.session_id, "err": e.to_string() }),
+                );
+            }
+        }
+        Err(e) => logging::error(
+            "stopped_session_not_encodable",
+            json!({ "session": row.session_id, "err": e.to_string() }),
+        ),
+    }
+}
+
+/// The session hub stopped a moment ago, if it is the one being asked for.
+///
+/// Returns `None` — never a guess — when the stored row is for some other
+/// session: telling the WRONG session would be worse than refusing.
+fn stopped_session(db: &Db, want: &str) -> Option<crate::sessions::LiveSession> {
+    if want.is_empty() {
+        return None;
+    }
+    let raw = match db.get_cursor(STOPPED_KEY) {
+        Ok(Some(v)) => v,
+        Ok(None) => return None,
+        Err(e) => {
+            logging::warn("stopped_session_unreadable", json!({ "err": e.to_string() }));
+            return None;
+        }
+    };
+    match serde_json::from_str::<crate::sessions::LiveSession>(&raw) {
+        Ok(s) if s.session_id == want => Some(s),
+        Ok(_) => None,
+        Err(e) => {
+            logging::warn(
+                "stopped_session_unparseable",
+                json!({ "err": e.to_string() }),
+            );
+            None
+        }
+    }
+}
+
 pub fn project_pin_key(thread_key: &str) -> String {
     format!("pin:project:{thread_key}")
 }
@@ -385,6 +453,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     ),
                     Some(s) => match crate::sessions::stop_background(cfg, s) {
                         Ok(()) => {
+                            remember_stopped(db, s);
                             logging::info("session_stopped", json!({ "session": s.session_id }));
                             format!(
                                 "⏹ Đã dừng phiên {}. Hội thoại vẫn còn — nói tiếp bằng /tell hoặc mở lại trên máy.",
@@ -407,7 +476,17 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     .flatten()
                     .unwrap_or_default();
                 let live = crate::sessions::snapshot(cfg);
-                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                // Đã dừng KHÔNG phải là đã mất: `--resume` nối vào nhật ký, nó
+                // không cần tiến trình nào đang sống. Và dừng-rồi-nói-tiếp
+                // chính là đường DUY NHẤT — claude từ chối resume một phiên nền
+                // đang chạy (đo 2026-08-08).
+                let target = live
+                    .sessions
+                    .iter()
+                    .find(|s| s.session_id == want)
+                    .cloned()
+                    .or_else(|| stopped_session(db, &want));
+                let ack = match target.as_ref() {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi nói tiếp.".to_string()
                     }
@@ -531,9 +610,22 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // stale page must not send the reader to an empty screen
                     // with no explanation.
                     let live = crate::sessions::snapshot(cfg);
-                    match live.sessions.iter().find(|s| s.session_id == want) {
+                    // Phiên VỪA DỪNG vẫn phải theo được: màn chi tiết đang mở
+                    // chính nó, và `/tell` sau đó cần đúng con trỏ này. Không có
+                    // vế dưới thì bấm Dừng xong là màn tự đá mình ra — đo được
+                    // 2026-08-09, và nó nuốt luôn cả đường /tell.
+                    let target = live
+                        .sessions
+                        .iter()
+                        .find(|s| s.session_id == want)
+                        .cloned()
+                        .or_else(|| stopped_session(db, want));
+                    match target {
                         Some(s) => match db.set_cursor(FOCUS_SESSION_KEY, want) {
-                            Ok(()) => format!("👁 Đang theo phiên {} ({})", s.name, s.account),
+                            Ok(()) => {
+                                let how = if s.pid == 0 { " — đã dừng, vẫn nói tiếp được" } else { "" };
+                                format!("👁 Đang theo phiên {} ({}){}", s.name, s.account, how)
+                            }
                             Err(e) => format!("⚠ không theo được: {e}"),
                         },
                         None => format!(

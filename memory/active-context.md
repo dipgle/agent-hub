@@ -136,7 +136,52 @@ chứ không phải phiên gốc `02b48c21`. UC-S07 sinh bản bàn giao mới +
 Tổng lượt này: **9.42 đơn vị** (aside 4.7148 + handover 4.7039), thấp hơn ~12 mà
 tôi báo trước khi chạy.
 
-**CÒN LẠI ĐÚNG MỘT VIỆC, và môi trường CỐ Ý không cho tôi làm.** `/tell` +
+### ✅ Hà bấm Esc xong — `/new` → `/stop` → `/tell` nghiệm thu TRỌN qua UI (v70)
+
+**19/19.** Lần đầu tiên đường thành công của UC-S06/S05b-mức-1 đi hết được, và
+đúng lúc đi được thì lòi ra **ba lỗi thật** mà hai tháng test xanh chưa từng
+chạm tới — vì trước nay `/new` luôn dừng ở hộp thoại MCP.
+
+**1. Màn danh sách KHÔNG BAO GIỜ tự tải lại.** Cả trang chỉ có đúng một cú
+`loadBoard()` sau **6 giây** kể từ khi gửi lệnh, mà `/new` cần tới **~14 giây**
+(hub còn rình xem phiên có kẹt không). Sau mốc 6 giây ấy không còn gì làm mới
+danh sách nữa ⟹ bấm "Mở phiên mới" xong, phiên **không hiện lên** cho tới khi
+bấm "Tải lại" hoặc F5. Vá: danh sách tự làm mới **15s/lần** khi đang mở (dừng
+khi tab ẩn, khi đang theo phiên — đường đó có vòng 4s riêng), và sau một lệnh thì
+hỏi lại **8 nhịp × 5s** thay vì đặt cược vào một mốc. Không tốn hạn mức: đọc một
+tài liệu tfl5 có sẵn, không gọi `claude`.
+
+**2. `/stop` hứa một đằng, `/tell` làm một nẻo.** `/stop` trả lời *"Hội thoại vẫn
+còn — nói tiếp bằng /tell"*, rồi `/tell` đáp *"không thấy phiên đang chạy nữa"*
+cho **chính phiên hub vừa cố ý dừng**. Gốc: `claude agents` **bỏ hẳn** phiên nền
+đã dừng khỏi danh sách trong vài giây, mà `/tell` lại gác bằng danh sách ấy —
+trong khi `--resume` **không cần tiến trình nào sống**, nó nối vào nhật ký. Và
+dừng-rồi-nói-tiếp là đường **DUY NHẤT** (claude từ chối resume phiên nền đang
+chạy). Vá: `/stop` ghi lại nguyên hàng phiên vào cursor `stopped:session` (xoá
+`status`/`state`/`pid` — hàng đóng băng lúc dừng vẫn ghi `busy`, mà `tell()` từ
+chối `busy` ⟹ phiên sẽ kẹt vĩnh viễn vì một trường tả tiến trình không còn tồn
+tại), `/tell` dùng nó khi danh sách sống không có.
+
+**3. Cùng cái gác ấy nằm ở cả verb `/session`.** Dừng xong là màn chi tiết tự đá
+mình ra, kéo sập luôn `/tell` phía sau. *Cách nhận ra: câu lỗi kết thúc bằng
+`(6 phiên đang sống)` — mẫu câu của `/session`, không phải của `/tell`. Đọc kỹ
+chuỗi lỗi rẻ hơn đoán.*
+
+**Bằng chứng nghiệm thu:** nhật ký **cùng một phiên** dài ra `24483 → 28751
+byte`, **không đẻ phiên mới**, `⏹ Đã dừng` rồi `➡️ Đã nói tiếp` đều hiện trên
+màn. `cargo test` **68** · `fe-newsession-uc` **19/19** · `fe-sessions` 12/12 ·
+`fe-url` 16/16 · `fe-board` 19/19 · `fe-phone` 25/25 · `fe-denied` 10/10 ·
+`fe-config` 8/8 · `fe-smoke` 15/15 · `hubd` pid 95660 chạy binary vừa build.
+
+⚠ **Nhánh ẩn phiên editor VẪN chưa nghiệm thu được qua UI.** Máy đang chạy **8
+tiến trình `claude` của VS Code**, nhưng `claude agents` gọi theo từng tài khoản
+(đường hub dùng) **không trả về cái nào** — hub thấy 6 phiên, 0 editor. Kịch bản
+**khai rõ bỏ qua 2 kiểm tra** thay vì im lặng tính là qua. Logic đã ghim bằng
+test có RED/GREEN (xem mục trên).
+
+### Lịch sử: bức tường MCP trước khi Hà bấm Esc
+
+**`/tell` +
 `/stop` chưa nghiệm thu qua UI vì phiên nền mở ở đâu trong workspace cũng kẹt ở
 hộp thoại duyệt MCP. Lượt này **đo lại tận nơi** chứ không tin ghi chú cũ:
 
@@ -152,12 +197,10 @@ hộp thoại duyệt MCP. Lượt này **đo lại tận nơi** chứ không ti
 dòng** cho nhanh, mở đúng thứ hàng rào ấy sinh ra để chặn. Hook chặn, và chặn
 đúng. *Phép thử phải dùng đúng hàng rào của sản phẩm, không phải bản rút gọn.*
 
-⟹ Việc của Hà, một lần, 5 giây:
-```
-cd ~/Documents/projects/AI/hub-act-demo && claude   → Esc → thoát
-```
-Xong là `/new` → `/tell` → `/stop` nghiệm thu được qua UI — và phiên mới sinh ra
-có nhật ký gần rỗng, nên hỏi trên đó gần như **không tốn hạn mức**.
+⟹ Hà đã bấm (2026-08-09 ~10:00) và `/new` chạy được ngay sau đó. Lạ ở chỗ
+`~/.claude.json` vẫn ghi `enabledMcpjsonServers: []` · `disabledMcpjsonServers:
+[]` · `hasTrustDialogAccepted: false` cho `AI/hub-act-demo` — **lựa chọn không
+nằm ở mấy trường đó**, nên đừng lấy chúng làm phép đo "đã duyệt chưa".
 
 Bảng cũ trong `hub.sqlite` vẫn còn dữ liệu — **cố ý không xoá**.
 

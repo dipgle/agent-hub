@@ -127,21 +127,33 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
 /// `enter = false` cho các lựa chọn cần phím riêng (mũi tên, Esc) — xem
 /// [`press`].
 pub fn type_into(window: i64, text: &str, enter: bool) -> Result<()> {
-    let script = format!(
-        r#"tell application "Terminal"
-  activate
-  set index of window id {window} to 1
-end tell
-delay 0.25
-tell application "System Events"
-  keystroke {}
-  {}
-end tell"#,
-        as_string(text),
-        if enter { "key code 36" } else { "" }
-    );
-    osascript(&script)?;
+    let _ = enter;
+    osascript(&do_script(window, &as_string(text)))?;
     Ok(())
+}
+
+/// Gửi chữ vào cửa sổ bằng `do script` — API CỦA CHÍNH Terminal.
+///
+/// Đường cũ đi qua `System Events keystroke`, và macOS chặn thẳng:
+/// *"osascript is not allowed to send keystrokes (1002)"*. Cấp Accessibility
+/// cho `hubd` không gỡ được, vì thứ gọi AXAPI là `/usr/bin/osascript` —
+/// một binary hệ thống, không gán quyền cho nó qua đường daemon được (đo
+/// 2026-08-10: cấp quyền rồi khởi động lại daemon, vẫn 1002).
+///
+/// `do script` thì khác hẳn: nó là scripting API của Terminal, chỉ cần quyền
+/// **Automation** — thứ hub đã có, bằng chứng là nó đang đọc được `contents of
+/// selected tab`. Nó đẩy chữ vào đúng tab như người gõ, kể cả khi có chương
+/// trình đang chạy phía trước.
+///
+/// ⚠ `do script` LUÔN kèm một dấu xuống dòng — không tắt được. Với ô nhập của
+/// `claude` thì đó đúng là điều ta muốn (gõ xong là gửi), nhưng nó cũng có
+/// nghĩa: không có cách "gõ mà chưa gửi" qua đường này.
+fn do_script(window: i64, applescript_string: &str) -> String {
+    format!(
+        r#"tell application "Terminal"
+  do script {applescript_string} in selected tab of window id {window}
+end tell"#
+    )
 }
 
 /// Một phím điều khiển: `up` `down` `enter` `esc` `tab` `space`, hoặc `1`–`9`.
@@ -149,31 +161,21 @@ end tell"#,
 /// Hộp chọn của `claude` đi bằng mũi tên + Enter, và gửi chữ "xuống" vào đó thì
 /// nó gõ ra chữ chứ không di chuyển.
 pub fn press(window: i64, keyname: &str) -> Result<()> {
-    let code = match keyname {
-        "up" => "key code 126",
-        "down" => "key code 125",
-        "left" => "key code 123",
-        "right" => "key code 124",
-        "enter" => "key code 36",
-        "esc" => "key code 53",
-        "tab" => "key code 48",
-        "space" => "key code 49",
-        d if d.len() == 1 && d.chars().all(|c| c.is_ascii_digit()) => {
-            return type_into(window, d, false)
-        }
+    // Ký tự điều khiển gửi qua `do script` như mọi chuỗi khác. Mũi tên là dãy
+    // thoát ANSI: ESC [ A/B/C/D — đúng thứ terminal nhận khi người ta bấm.
+    let payload = match keyname {
+        "enter" => "\"\"".to_string(),          // chuỗi rỗng: `do script` tự kèm xuống dòng
+        "esc" => "(ASCII character 27)".to_string(),
+        "up" => "((ASCII character 27) & \"[A\")".to_string(),
+        "down" => "((ASCII character 27) & \"[B\")".to_string(),
+        "right" => "((ASCII character 27) & \"[C\")".to_string(),
+        "left" => "((ASCII character 27) & \"[D\")".to_string(),
+        "tab" => "(ASCII character 9)".to_string(),
+        "space" => as_string(" "),
+        d if d.len() == 1 && d.chars().all(|c| c.is_ascii_digit()) => as_string(d),
         other => return Err(anyhow!("không biết phím '{other}'")),
     };
-    let script = format!(
-        r#"tell application "Terminal"
-  activate
-  set index of window id {window} to 1
-end tell
-delay 0.25
-tell application "System Events"
-  {code}
-end tell"#
-    );
-    osascript(&script)?;
+    osascript(&do_script(window, &payload))?;
     Ok(())
 }
 

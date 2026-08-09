@@ -715,6 +715,8 @@ pub fn parse_command(
                 .unwrap_or_default();
             (!what.is_empty()).then_some((CommandKind::Type, 0, what))
         }
+        // `/shot` — chụp cửa sổ của phiên đang theo.
+        "shot" | "chup" => Some((CommandKind::Shot, 0, String::new())),
         // `/key <tên phím>` — một phím điều khiển.
         "key" | "phim" => {
             let what = t[1..]

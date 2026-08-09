@@ -75,6 +75,12 @@ pub enum CommandKind {
     /// ⚠ Đường này **bỏ qua `DENIED_TOOLS`**: chữ gõ vào terminal không đi qua
     /// bộ khoá nào. Hà chốt 2026-08-09 sau khi được nêu rõ đánh đổi.
     Type,
+    /// `/shot` — chụp cửa sổ terminal của phiên đang theo và đẩy ảnh lên màn.
+    ///
+    /// Đây là đường DUY NHẤT nhìn thấy thứ đang hiện trên màn mà chưa vào nhật
+    /// ký: hộp chọn đang chờ, thanh tiến trình, lỗi vừa in ra. `sessions::
+    /// stream` đọc tệp, mà tệp chỉ có sau khi lượt kết thúc.
+    Shot,
     /// `/key <tên phím>` — một phím điều khiển: up · down · enter · esc · tab ·
     /// space · 1-9. Hộp chọn của `claude` đi bằng mũi tên, gửi chữ "xuống" vào
     /// đó thì nó gõ ra chữ chứ không di chuyển.

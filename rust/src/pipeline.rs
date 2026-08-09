@@ -618,7 +618,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }
-            CommandKind::Type | CommandKind::Key => {
+            CommandKind::Type | CommandKind::Key | CommandKind::Shot => {
                 // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
                 // khác, và đó là hàng rào duy nhất còn lại ở đường này.
@@ -638,6 +638,62 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     ),
                     Some(s) => match crate::keys::window_of(&s.tty) {
                         Ok(Some(w)) => {
+                            // `/shot` đi đường riêng: nó không gõ gì, chỉ nhìn.
+                            if matches!(cmd.kind, CommandKind::Shot) {
+                                // Trả về CHỮ đang hiện, không phải ảnh. Hà
+                                // 2026-08-10: ảnh chỉ nhìn được; cái cần là
+                                // biết nó đang hỏi gì rồi bấm số trả lời — và
+                                // hàng phím đã có sẵn.
+                                match crate::keys::screen_text(w) {
+                                    Ok(screen) => {
+                                        // Chữ trên màn CŨNG phải qua cổng quét
+                                        // rò rỉ: nó rời máy này y như phần xem
+                                        // trước của phiên (điều 5).
+                                        let risk = crate::sessions::preview_risk(&screen);
+                                        if !risk.is_empty() {
+                                            format!(
+                                                "📷 Màn của {} có thể chứa bí mật ({}) — không đưa ra ngoài.",
+                                                s.name,
+                                                risk.join(", ")
+                                            )
+                                        } else {
+                                            let choices = crate::keys::parse_choices(&screen);
+                                            let tail: Vec<&str> = screen
+                                                .lines()
+                                                .filter(|l| !l.trim().is_empty())
+                                                .rev()
+                                                .take(14)
+                                                .collect();
+                                            let body: String = tail
+                                                .into_iter()
+                                                .rev()
+                                                .collect::<Vec<_>>()
+                                                .join("\n");
+                                            if choices.is_empty() {
+                                                format!("📷 Màn của {}:\n\n{}", s.name, body)
+                                            } else {
+                                                // Có hộp chọn thì nói THẲNG các
+                                                // lựa chọn: đó là thứ người ta
+                                                // mở lên để xem.
+                                                let list: Vec<String> = choices
+                                                    .iter()
+                                                    .map(|(n, l)| format!("  {n}. {l}"))
+                                                    .collect();
+                                                format!(
+                                                    "📷 {} đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{}",
+                                                    s.name,
+                                                    list.join("\n"),
+                                                    body
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Err(e) => format!(
+                                        "⚠ không đọc được màn: {}",
+                                        crate::exec::truncate(&e.to_string(), 300)
+                                    ),
+                                }
+                            } else {
                             let is_key = matches!(cmd.kind, CommandKind::Key);
                             let res = if is_key {
                                 crate::keys::press(w, cmd.arg.trim())
@@ -665,6 +721,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     "⚠ không gõ được: {}",
                                     crate::exec::truncate(&e.to_string(), 300)
                                 ),
+                            }
                             }
                         }
                         // Phiên nền không có cửa sổ nào — nói đúng lý do thay vì

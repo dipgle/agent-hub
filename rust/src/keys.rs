@@ -208,6 +208,18 @@ pub fn capture(window: i64, out_dir: &std::path::Path) -> Result<PathBuf> {
             crate::exec::truncate(out.stderr.trim(), 200)
         ));
     }
+    // Thu nhỏ TRƯỚC khi gửi đi. Ảnh Retina của một cửa sổ terminal là 1–3 MB;
+    // base64 hoá lên gấp rưỡi và nhét vào một doc thì mỗi lần chụp là vài MB
+    // đi qua mạng cho một thứ chỉ để LIẾC. 1200px vẫn đọc rõ chữ terminal.
+    // `sips` có sẵn trong macOS, không thêm phụ thuộc nào.
+    let _ = run(
+        "sips",
+        &["-Z", "1200", &path.display().to_string()],
+        RunOpts {
+            timeout: Some(Duration::from_secs(20)),
+            ..Default::default()
+        },
+    );
     let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
     if size < 2048 {
         logging::warn(
@@ -222,6 +234,96 @@ pub fn capture(window: i64, out_dir: &std::path::Path) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// CHỮ đang hiện trên màn của cửa sổ ấy.
+///
+/// Hà 2026-08-10: *"sao lại đẩy ảnh, dựng lại đúng option chứ? thì mới có nhiều
+/// lựa chọn thao tác hơn, ví dụ dùng chuột để chọn"*. Đúng — ảnh chỉ NHÌN được,
+/// còn cái người ta cần là BẤM được.
+///
+/// Và hoá ra không cần ảnh: Terminal cho đọc thẳng `contents of selected tab`,
+/// tức đúng chữ đang hiện. Không OCR, không vài trăm KB base64, và chữ thì đi
+/// qua được `redaction::leak_scan` — ảnh thì không.
+pub fn screen_text(window: i64) -> Result<String> {
+    let script = format!(
+        r#"tell application "Terminal"
+  return contents of selected tab of window id {window}
+end tell"#
+    );
+    osascript(&script)
+}
+
+/// Hộp chọn đang chờ trên màn, nếu có.
+///
+/// `claude` vẽ hộp chọn dạng:
+///
+/// ```text
+///   Câu hỏi ở đây?
+///   ❯ 1. Phương án một
+///     2. Phương án hai
+/// ```
+///
+/// Nhận diện bằng HÌNH DẠNG (`❯` hoặc `N.` đứng đầu dòng), không bằng cách
+/// đoán nội dung: câu hỏi là chữ của người khác viết, hình dạng mới là thứ
+/// `claude` bảo đảm.
+pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    for line in screen.lines() {
+        let t = line.trim();
+        // Bỏ dấu con trỏ ❯ nếu có, rồi tìm "<số>." ở đầu.
+        let t = t.strip_prefix('❯').map(str::trim_start).unwrap_or(t);
+        let Some((num, rest)) = t.split_once('.') else { continue };
+        let Ok(n) = num.trim().parse::<usize>() else { continue };
+        if n == 0 || n > 9 {
+            continue;
+        }
+        let label = rest.trim();
+        // Một dòng "1." trống không phải lựa chọn; một dòng dài lê thê cũng
+        // không — hộp chọn của claude là nhãn ngắn.
+        if label.is_empty() || label.len() > 120 {
+            continue;
+        }
+        out.push((n, label.to_string()));
+    }
+    // Số phải liên tiếp từ 1: "3. xong" trong một đoạn văn không phải hộp chọn.
+    if out.is_empty() || out[0].0 != 1 {
+        return Vec::new();
+    }
+    for (i, (n, _)) in out.iter().enumerate() {
+        if *n != i + 1 {
+            return Vec::new();
+        }
+    }
+    out
+}
+
+/// Ảnh cửa sổ, đã thu nhỏ, dưới dạng base64 để đi trong một doc.
+///
+/// Doc chứ KHÔNG phải file: `portal.rs` đã bỏ `/app/file/save` vì tệp nằm dưới
+/// cây asset công khai với ACL rỗng — ai cũng đọc được. Ảnh chụp một cửa sổ
+/// terminal có thể chứa mật khẩu, token, đường dẫn riêng; nó phải đi đúng con
+/// đường mà ảnh chụp trạng thái đang đi, tức doc gác bằng ACL của app.
+pub fn capture_base64(window: i64, tmp_dir: &std::path::Path) -> Result<(String, u64)> {
+    let path = capture(window, tmp_dir)?;
+    let bytes = std::fs::read(&path)?;
+    let n = bytes.len() as u64;
+    Ok((b64(&bytes), n))
+}
+
+/// base64 chuẩn, tự viết để khỏi thêm một crate cho 20 dòng.
+fn b64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let b = [c[0], *c.get(1).unwrap_or(&0), *c.get(2).unwrap_or(&0)];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{as_string, window_script};
@@ -232,6 +334,46 @@ mod tests {
     /// `r#"…"#` của Rust, bị cắt thành `return "` — AppleScript hỏng ngay dòng
     /// đầu (*"Expected string but found end of script. (-2741)"*) và cả tính
     /// năng chết. Không phép đo nào bắt được vì test cũ chỉ soi phần thoát chuỗi.
+    /// base64 tự viết thì phải kiểm bằng những ca người ta hay sai: độ dài
+    /// không chia hết cho 3, và byte 0xFF (dễ lộ lỗi dấu).
+    /// Hộp chọn nhận ra bằng HÌNH DẠNG, và phải từ chối những thứ chỉ trông
+    /// giống. Đây là chỗ dễ nhận nhầm nhất: mọi đoạn văn đều có thể chứa "1.".
+    #[test]
+    fn choices_are_recognised_by_shape_only() {
+        use super::parse_choices;
+        let box_ = "Chọn cách đi tiếp?\n❯ 1. Sửa tại chỗ\n  2. Mở phiên mới\n  3. Bỏ qua";
+        assert_eq!(
+            parse_choices(box_),
+            vec![
+                (1, "Sửa tại chỗ".to_string()),
+                (2, "Mở phiên mới".to_string()),
+                (3, "Bỏ qua".to_string())
+            ]
+        );
+        // Không bắt đầu từ 1 thì không phải hộp chọn.
+        assert!(parse_choices("3. xong rồi\n4. tiếp").is_empty());
+        // Số nhảy cóc cũng không.
+        assert!(parse_choices("1. một\n3. ba").is_empty());
+        // Đoạn văn có dấu chấm không phải lựa chọn.
+        assert!(parse_choices("Tôi đã sửa 2 tệp. Xong.").is_empty());
+        // Màn trống thì không có gì.
+        assert!(parse_choices("").is_empty());
+    }
+
+    #[test]
+    fn base64_matches_the_standard() {
+        use super::b64;
+        assert_eq!(b64(b""), "");
+        assert_eq!(b64(b"f"), "Zg==");
+        assert_eq!(b64(b"fo"), "Zm8=");
+        assert_eq!(b64(b"foo"), "Zm9v");
+        assert_eq!(b64(b"foob"), "Zm9vYg==");
+        assert_eq!(b64(b"fooba"), "Zm9vYmE=");
+        assert_eq!(b64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(b64(&[0xff, 0xff, 0xff]), "////");
+        assert_eq!(b64(&[0x00, 0x00, 0x00]), "AAAA");
+    }
+
     #[test]
     fn window_script_is_well_formed() {
         let s = window_script("/dev/ttys005");

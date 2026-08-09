@@ -901,6 +901,7 @@
                là thứ trả lời được một phiên đang dừng lại hỏi — thứ mà tới
                2026-08-09 từ điện thoại hoàn toàn bó tay. -->
           <div id="sessKeys" class="hidden">
+            <button type="button" id="sessShot" title="Xem màn hình phiên">📷</button>
             <button type="button" data-key="up" title="Lên">↑</button>
             <button type="button" data-key="down" title="Xuống">↓</button>
             <button type="button" data-key="enter" title="Chọn">⏎</button>
@@ -2185,6 +2186,17 @@
   }
 
   // Phím điều khiển: một cú bấm = một phím, không có ô nhập nào ở giữa.
+  // 📷 đọc CHỮ đang hiện trên màn của phiên — thứ chưa vào nhật ký nên luồng
+  // sự kiện không thấy: hộp chọn đang chờ, thanh tiến trình, lỗi vừa in.
+  $('sessShot').addEventListener('click', (e) => {
+    if (!wantSession) return;
+    $('sessTellBox').classList.remove('hidden');
+    $('sessTellBox').textContent = 'Đang đọc màn hình phiên…';
+    waitingFor = 'tell';
+    sendCommand(`/session ${wantSession}`, null);
+    sendCommand('/shot', e.target);
+  });
+
   $('sessKeys').addEventListener('click', (ev) => {
     const b = ev.target.closest('button[data-key]');
     if (!b || !wantSession) return;
@@ -2303,7 +2315,7 @@
     // lời từ chối là câu trả lời cho đúng cái vừa hỏi.
     const MARKS = {
       ask: /^(💬|⚠)/,
-      tell: /^(➡️|⏹|⌨|⚠)/,
+      tell: /^(➡️|⏹|⌨|📷|⚠)/,
       new: /^(🚀|⚠)/,
       handover: /^(📋|⚠)/,
     };

@@ -24,4 +24,5 @@ pub mod portal;
 /// product that needed a full outbound leak gate is gone; the gate that stops a
 /// password from leaving this Mac is not optional.
 pub mod redaction;
+pub mod runtime;
 pub mod sessions;

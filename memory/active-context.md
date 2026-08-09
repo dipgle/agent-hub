@@ -1,5 +1,56 @@
 # active context — hub
 
+## 📟 2026-08-09 (khuya) — bộ thu trạng thái + luồng nhìn như terminal (v96→v99)
+
+**`runtime.rs` — "tool chụp tình trạng liên tục"** (Hà xin đúng một câu). Chạy
+trong `portal::push` nên đi kèm ảnh chụp trang vẫn hỏi, không phải một nút bấm.
+Bốn khối: `daemon` (pid, mốc khởi động, uptime) · `accounts[]` (mỗi tài khoản:
+thư mục cấu hình có thật không, mấy phiên, còn sống mấy, note khi `claude
+agents` không trả lời) · `errors[]` (5 lượt hỏng gần nhất, đọc từ bảng `runs`
+chứ KHÔNG tail log — log là text vài MB) · `slow` (thứ tốn spawn tiến trình,
+cache 10 phút).
+
+📌 **Câu trả lời đầu tiên nó đưa ra là một sự thật khó chịu:** *tự chạy khi bật
+máy = **CHƯA***. `deploy/com.dipgle.hubd.plist` nằm trong repo, **chưa bao giờ
+được cài** vào `~/Library/LaunchAgents`, và `hubd` sống chỉ vì có người khởi
+động tay (ppid 1). Reboot là mất. Panel in luôn lệnh cài. Tôi thử cài thì
+**classifier chặn `launchctl`** — dừng, đưa lệnh cho Hà.
+
+**Luồng phiên nhìn như terminal thật** (*"làm sao giống như đang nhìn thực sự
+trên terminal cli"*): nền tối liền mạch, bỏ hết thẻ/viền/nhãn in hoa, lệnh có
+dấu nhắc `$`, đầu ra mờ một bậc, lời người `❯`. Có ô tắt cho ai thích bản cũ,
+**mặc định bật** vì đó là câu hỏi gốc của màn này.
+
+**Phiên con nằm dưới phiên cha như một lượt trả lời** — quan hệ này là THẬT
+(truy từ cây tiến trình), nên vẽ ra chứ không chỉ ghi một dòng chữ. Con bị loại
+khỏi các nhóm; chỉ đứng riêng khi cha không có mặt trên màn.
+
+**Subagent đang chạy** (*"một phiên đang chạy subagents thì cũng hiển thị
+được"*): đếm `Agent`/`Task` có `tool_use_id` chưa nhận `tool_result`. Đếm theo
+**ID chứ không theo tên** — tung 5 nhận về 3 mà báo "5 đang chạy" là sai đúng
+lúc con số ấy cần đúng nhất. Kết quả rơi ngoài cửa sổ 256KB coi như xong: thà
+thiếu còn hơn để một subagent ma chạy mãi. Có test riêng (13 test trong
+`tests/sessions.rs`). *Lúc nghiệm thu không phiên nào đang chạy subagent, nên
+đường hiển thị mới chỉ được ghim bằng unit test — nói đúng như vậy.*
+
+⚠ **Hai vòng bong bóng từng CÙNG một con số** — Hà bắt: *"lẽ ra phải ngược nhau,
+viền càng ngắn tức là sắp bị ẩn"*. Mỗi vòng nay đo **quãng đường nút ấy sẽ đi**
+(lên = phần đã cuộn, xuống = phần còn lại): đo 0.974 / 0.026.
+
+🔁 **Lỗi tự đẻ, lần thứ n:** chữ lệnh gợi ý 11.5px và ô tích "kiểu terminal"
+23px — đúng hai luật vừa sửa hôm nay. Thêm hàng mới là quên chuẩn cũ.
+
+**Nghiệm thu (v99, 10/10 xanh):** `cargo test` **69** (+1) · clippy 0 ·
+`fe-sessions` 19/19 · `fe-newsession` 21/21 · `fe-stream` 16/16 · `fe-phone`
+31/31 · `fe-url` 16/16 · `fe-board` 19/19 · `fe-aside` 10/10 · `fe-smoke` 15/15 ·
+`fe-denied` 10/10 · `fe-config` 8/8 · 0 lỗi console.
+
+**Việc của Hà, 5 giây, để hub sống qua reboot:**
+```
+cp ~/Documents/projects/AI/hub/deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist
+```
+
 ## 🪟 2026-08-09 (khuya) — dọn màn chi tiết theo phản hồi liên tục (v90→v95)
 
 Hà xem trực tiếp và chỉ ra từng chỗ; mỗi chỗ đều đo được.

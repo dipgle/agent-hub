@@ -386,6 +386,18 @@
   .sess-group[data-g="dead"] { color: var(--muted); border-style: dashed; }
   /* "do «X» mở": quan hệ cha-con, chữ nhỏ, không tranh chỗ với nội dung. */
   .sess-from { font-size: 12px; margin-top: 2px; }
+  /* Phiên con thụt vào dưới phiên cha, có vạch nối như một lượt trả lời
+     (Hà 2026-08-09). Quan hệ này là THẬT — truy từ cây tiến trình — nên nó
+     đáng được vẽ ra chứ không chỉ ghi thành một dòng chữ. */
+  .sess-kid {
+    margin-left: 14px; border-left: 2px solid var(--line);
+    border-top-left-radius: 0; border-bottom-left-radius: 0;
+    padding-left: 10px; position: relative;
+  }
+  .sess-kid::before {
+    content: '↳'; position: absolute; left: -12px; top: 10px;
+    color: var(--muted); font-size: 12px;
+  }
   .sess-kindrow { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; flex-wrap: wrap; }
   .sess-dot {
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
@@ -420,6 +432,64 @@
     font-size: 12.5px; line-height: 1.45;
   }
   .ev-say .ev-body { font-family: inherit; font-size: 14px; }
+
+  /* ── Nhìn như đang ngồi trước terminal ────────────────────────────────
+     Hà 2026-08-09: *"làm sao giống như đang nhìn thực sự trên terminal cli"*.
+     Bản trước mỗi sự kiện là một cái thẻ có viền, nhãn in hoa, nền sáng — đọc
+     ra một BẢNG BÁO CÁO về phiên, không phải phiên. Terminal thì: một nền
+     tối liền mạch, chữ đều một cỡ, lệnh có dấu nhắc `$`, đầu ra không viền,
+     và không có gì đóng khung từng lượt.
+     Giữ lại đúng hai thứ không phải terminal nhưng cần thiết: dòng bị ẩn vì
+     nghi có bí mật (đỏ), và nút mở đoạn dài. */
+  #sessStream.term {
+    background: #14161a; border: 1px solid #2a2d34; border-radius: 8px;
+    padding: 10px 12px; gap: 0;
+  }
+  #sessStream.term .ev { display: block; margin: 0 0 2px; }
+  #sessStream.term .ev-head { display: none; }
+  #sessStream.term .ev-body {
+    background: none; border: 0; border-radius: 0; padding: 0; margin: 0;
+    color: #c8ccd4; font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  /* Lệnh: dấu nhắc `$` như mọi terminal, chữ sáng hơn đầu ra. */
+  #sessStream.term .ev-tool .ev-body { color: #e8eaef; }
+  #sessStream.term .ev-tool .ev-body::before { content: '$ '; color: #6ee7a8; }
+  /* Đầu ra: mờ hơn một bậc, đúng như chữ máy in ra. */
+  #sessStream.term .ev-result .ev-body { color: #9aa1ad; }
+  /* Lời người và lời máy: có dấu nhắc riêng để phân biệt mà không cần nhãn. */
+  #sessStream.term .ev-say .ev-body { color: #dfe3ea; font-family: inherit; font-size: 13.5px; }
+  #sessStream.term .ev-say .ev-body::before { content: '❯ '; color: #7aa2f7; }
+  #sessStream.term .ev-think .ev-body { color: #6b7280; font-style: italic; }
+  #sessStream.term .ev-hidden .ev-body { color: #f08c7a; }
+  #sessStream.term .ev-more {
+    color: #9aa1ad; border-color: #2a2d34; background: none; margin: 2px 0 6px;
+  }
+  /* Ô chọn cách hiển thị nằm cạnh dòng đếm sự kiện. */
+  /* Hàng nhãn phải đủ cao để chạm: đo được 23px, dưới ngưỡng 32px — cùng
+     lỗi với ô tích ở màn cấu hình, lặp lại vì tôi thêm hàng mới mà quên. */
+  .term-toggle {
+    display: flex; align-items: center; gap: 6px; font-size: 12px;
+    min-height: 36px; cursor: pointer;
+  }
+
+  /* Bảng tình trạng: mỗi dòng một câu hỏi có câu trả lời dứt khoát. */
+  .rt { margin-bottom: 14px; }
+  .rt-row {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .rt-row:last-child { border-bottom: 0; }
+  .rt-k { color: var(--muted); flex: 0 0 auto; min-width: 116px; }
+  .rt-v { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+  .rt-v.ok { color: var(--accent, #2f6f4e); font-weight: 600; }
+  .rt-v.bad { color: var(--danger, #a33a2c); font-weight: 600; }
+  .rt-v.warn { color: var(--warn, #9a6b1f); font-weight: 600; }
+  .rt-fix {
+    display: block; margin-top: 4px; font-family: var(--mono);
+    font-size: 12px; color: var(--ink); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
   /* KHÔNG trần + KHÔNG overflow ở đây: `max-height: 12em; overflow: auto` từng
      nằm đúng chỗ này và là nguồn cuối cùng của "một đống thanh cuộn" — nó tóm
      mọi đoạn cao 144px trở lên, tức gần như mọi kết quả lệnh. Việc kẹp giao
@@ -702,7 +772,15 @@
              Lý do thật là chỗ ngồi: trên 390px một hàng riêng chỉ để chứa một
              nút và một cái tên ngốn ~44px, đẩy nội dung phiên xuống — trong
              khi hàng ảnh-chụp ngay trên nó còn trống hơn nửa bề ngang. -->
-        <p class="muted" id="sessStatus"></p>
+        <div class="row-flex" style="justify-content: space-between; align-items: baseline;">
+          <p class="muted" id="sessStatus" style="margin:0"></p>
+          <!-- Mặc định BẬT: câu hỏi gốc của màn này là "cho tôi thấy đúng thứ
+               đang hiện trên terminal". Ai thích bản có nhãn thì tắt đi. -->
+          <label class="term-toggle muted">
+            <input type="checkbox" id="termMode" checked />
+            <span>kiểu terminal</span>
+          </label>
+        </div>
         <!-- Luồng phiên đứng TRƯỚC các nút. Màn này để ĐỌC việc đang chạy; đặt
              "Đóng sổ" và ô hỏi lên đầu thì mỗi lần mở ra phải lướt qua hai
              thao tác mới tới thứ mình vào xem — và càng nhiều sự kiện, thao
@@ -794,6 +872,7 @@
     <div class="hidden" id="panel-health">
       <div class="panel">
         <h2>Kênh &amp; công cụ</h2>
+        <div id="runtimeBox"></div>
         <div id="healthProbe" class="muted"></div>
         <button type="button" id="btnDoctor" class="primary" style="margin-top:12px">Kiểm tra</button>
       </div>
@@ -1411,6 +1490,7 @@
     renderSessions(snap.sessions || {});
     renderProjectPicker((snap.config || {}).projects);
     renderHealth(snap.health || {});
+    renderRuntime(snap.runtime);
     renderConfig(snap.config || {});
   }
 
@@ -1563,15 +1643,32 @@
       { g: 'dead',       title: '⏹ Đã dừng',               what: 'dọn được',
         pick: (x) => x.host === 'dead' },
     ];
+    // Con gắn vào CHA, không đứng riêng trong nhóm. Chỉ khi cha không có mặt
+    // trên màn (ví dụ cha là phiên editor đã bị ẩn) thì con mới đứng một mình —
+    // mất hẳn một phiên còn tệ hơn một phiên hiển thị lệch chỗ.
+    const onScreen = new Set(rows.map((x) => x.session_id));
+    const kidsOf = new Map();
+    rows.forEach((x) => {
+      const pid = x.parent_session_id;
+      if (pid && onScreen.has(pid) && pid !== x.session_id) {
+        if (!kidsOf.has(pid)) kidsOf.set(pid, []);
+        kidsOf.get(pid).push(x);
+      }
+    });
+    const isKid = (x) => {
+      const pid = x.parent_session_id;
+      return !!(pid && onScreen.has(pid) && pid !== x.session_id);
+    };
+
     const taken = new Set();
     const buckets = GROUPS.map((grp) => {
-      const items = rows.filter((x) => !taken.has(x.session_id) && grp.pick(x));
+      const items = rows.filter((x) => !taken.has(x.session_id) && !isKid(x) && grp.pick(x));
       items.forEach((x) => taken.add(x.session_id));
       return { g: grp.g, title: grp.title, what: grp.what, items };
     });
     // Phiên không rơi vào nhóm nào vẫn PHẢI hiện: mất một dòng còn tệ hơn một
     // dòng khó phân loại.
-    const leftover = rows.filter((x) => !taken.has(x.session_id));
+    const leftover = rows.filter((x) => !taken.has(x.session_id) && !isKid(x));
     if (leftover.length) buckets.push({ g: 'unknown', title: '• Chưa phân loại', what: '', items: leftover });
 
     buckets.filter((b) => b.items.length).forEach((b) => {
@@ -1584,12 +1681,17 @@
       h.append(t, n);
       if (b.what) { const w = document.createElement('span'); w.className = 'what'; w.textContent = b.what; h.append(w); }
       list.append(h);
-      b.items.forEach(renderSessionCard);
+      b.items.forEach((x) => {
+        renderSessionCard(x);
+        // Con vẽ NGAY SAU cha, thụt vào — đọc như một lượt trả lời.
+        (kidsOf.get(x.session_id) || []).forEach((kid) => renderSessionCard(kid, true));
+      });
     });
 
-    function renderSessionCard(s) {
+    function renderSessionCard(s, asKid) {
       const card = document.createElement('div');
       card.className = s.host === 'dead' ? 'sess sess-dead' : 'sess';
+      if (asKid) card.classList.add('sess-kid');
       card.dataset.session = s.session_id;
       // Đo được từ DOM: thứ tự "vừa động trước" là tính chất phải kiểm được
       // mà không cần chọc vào biến nội bộ của trang.
@@ -1626,7 +1728,14 @@
       // `where` giờ nằm ở huy hiệu, nên hàng phụ thôi lặp lại nó — chỉ còn tài
       // khoản và chế độ quyền, thứ huy hiệu không nói.
       void where;
-      meta.textContent = [s.account, mode].filter(Boolean).join(' · ');
+      // Subagent đang chạy: phiên giao việc cho subagent trông ĐỨNG IM từ bên
+      // ngoài — lượt hội thoại cuối đã vài phút và không có gì mới cho tới khi
+      // subagent quay về. Con số này là khác biệt giữa "đang chạy" và "treo".
+      const kid = s.pending_subagents
+        ? `${s.pending_subagents} subagent đang chạy`
+        : '';
+      meta.textContent = [s.account, mode, kid].filter(Boolean).join(' · ');
+      if (kid) card.dataset.subagents = String(s.pending_subagents);
       // Phiên không cửa sổ thì "ở đâu ra?" không có chỗ nào trả lời — trừ cây
       // tiến trình. Đo 2026-08-09: cả hai phiên nền trên máy đều truy được về
       // đúng một phiên đang nằm trong danh sách (dwork ← projects-a0 ở ttys003,
@@ -1858,6 +1967,10 @@
           : 'Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.')
       : 'Lượt này ở lại trên chính phiên đó, nên nhật ký phiên dài ra.';
   }
+  $('termMode').addEventListener('change', () => {
+    $('sessStream').classList.toggle('term', $('termMode').checked);
+  });
+
   $('sessAside').addEventListener('change', () => {
     applySayMode(!$('sessAside').disabled);
     // Đổi chế độ xong là sắp gõ: đưa con trỏ vào ô luôn, đừng bắt chạm thêm
@@ -2069,6 +2182,7 @@
 
   function renderStream(focus) {
     const box = $('sessStream');
+    box.classList.toggle('term', $('termMode').checked);
     const status = $('sessStatus');
     if (!focus || focus.session_id !== wantSession) {
       status.textContent = 'Đang mở phiên — hub đọc nhật ký và đẩy về…';
@@ -2410,7 +2524,13 @@
       const frac = max > 0 ? Math.min(1, Math.max(0, m.scrollTop / max)) : 0;
       // Cùng một con số cho cả hai vòng: nó nói "đang ở đoạn nào", không phải
       // "còn bao xa tới đích".
-      dock.style.setProperty('--p', frac.toFixed(3));
+      // Hai vòng NGƯỢC nhau, không chung một con số (Hà 2026-08-09: *"lẽ ra
+      // nó phải ngược nhau chứ, viền càng ngắn tức là sắp bị ẩn"*). Mỗi vòng
+      // đo QUÃNG ĐƯỜNG NÚT ẤY SẼ ĐI: nút lên đo phần đã cuộn qua, nút xuống đo
+      // phần còn lại. Cùng một con số thì hai nút nói cùng một điều, và điều
+      // ấy sai với một trong hai.
+      up.parentElement.style.setProperty('--p', frac.toFixed(3));
+      down.parentElement.style.setProperty('--p', (1 - frac).toFixed(3));
       up.parentElement.classList.toggle('hidden', m.scrollTop <= 24);
       down.parentElement.classList.toggle('hidden', max - m.scrollTop <= 24);
     }
@@ -2421,6 +2541,80 @@
     setInterval(refresh, 1000);   // nội dung tự dài ra khi luồng về thêm
     refresh();
   })();
+
+  /// "Cỗ máy đang theo dõi có sống không" — câu hỏi phải trả lời được từ điện
+  /// thoại, không phải bằng cách mở terminal ra xem.
+  ///
+  /// Mọi số liệu ở đây do `runtime.rs` thu mỗi vòng và đi kèm ảnh chụp, nên
+  /// nó tươi đúng bằng ảnh chụp — không có đường gọi riêng nào từ trang.
+  function renderRuntime(rt) {
+    const box = $('runtimeBox');
+    box.textContent = '';
+    if (!rt) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'rt';
+
+    const row = (k, v, cls, fix) => {
+      const r = document.createElement('div');
+      r.className = 'rt-row';
+      const kk = document.createElement('span');
+      kk.className = 'rt-k';
+      kk.textContent = k;
+      const vv = document.createElement('span');
+      vv.className = 'rt-v' + (cls ? ' ' + cls : '');
+      vv.textContent = v;
+      if (fix) {
+        const f = document.createElement('code');
+        f.className = 'rt-fix';
+        f.textContent = fix;
+        vv.append(f);
+      }
+      r.append(kk, vv);
+      wrap.append(r);
+    };
+
+    const d = rt.daemon || {};
+    // `uptime_sec` rỗng nghĩa là ảnh chụp này do CLI dựng, không phải daemon —
+    // nói đúng như vậy thay vì in "0 phút", thứ đọc ra như vừa sập xong.
+    const up = d.uptime_sec == null
+      ? 'không rõ (ảnh chụp dựng từ CLI, không phải daemon)'
+      : `${Math.floor(d.uptime_sec / 60)} phút · pid ${d.pid}`;
+    row('hubd đang chạy', up, d.uptime_sec == null ? 'warn' : 'ok');
+
+    const auto = (rt.slow || {}).autostart || {};
+    if (auto.loaded === true) {
+      row('tự chạy khi bật máy', 'có — launchd đã nạp', 'ok');
+    } else if (auto.loaded === false) {
+      row(
+        'tự chạy khi bật máy',
+        auto.plist_installed ? 'CHƯA — đã cài plist nhưng launchd chưa nạp' : 'CHƯA cài',
+        'bad',
+        auto.how_to_install
+      );
+    } else {
+      // Dò hỏng KHÁC với "không bật": đừng báo đỏ cho thứ mình không hỏi được.
+      row('tự chạy khi bật máy', 'chưa hỏi được launchd', 'warn');
+    }
+
+    (rt.accounts || []).forEach((a) => {
+      const v = `${a.alive}/${a.sessions} phiên đang sống`;
+      row(
+        `tài khoản ${a.name}`,
+        a.ok ? v : `${v} · ${a.note || 'không trả lời'}`,
+        a.ok ? '' : 'bad'
+      );
+    });
+
+    const errs = rt.errors || [];
+    row(
+      'lỗi gần đây',
+      errs.length ? `${errs.length} lượt hỏng` : 'không có',
+      errs.length ? 'bad' : 'ok',
+      errs.length ? errs.map((e) => `${String(e.at).slice(11, 19)} ${e.adapter}: ${e.err || 'không rõ'}`).join('\n') : ''
+    );
+
+    box.append(wrap);
+  }
 
   function cmdNote(text, bad) {
     const el = $('cmdStatus');

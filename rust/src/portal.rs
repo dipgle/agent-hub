@@ -137,6 +137,11 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
                 .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
         },
         "health": health(db, cfg)?,
+        // Tình trạng của chính cỗ máy đang theo dõi: daemon còn sống không, có
+        // tự chạy lại sau reboot không, tài khoản nào không trả lời, lỗi gần
+        // đây là gì. Trước 2026-08-09 mọi câu ấy đều có đáp án trên máy mà
+        // không có đường nào tới điện thoại.
+        "runtime": crate::runtime::snapshot(cfg, db, &live),
         // No inbox, no counts, no money. Everything this snapshot used to carry
         // about a queue of mail went with the queue (2026-08-08), and the two
         // numbers that outlived it — a ceiling, then a price tag — were thrown

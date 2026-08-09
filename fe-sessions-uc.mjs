@@ -221,12 +221,17 @@ try {
     let cur = null;
     for (const el of document.querySelectorAll("#sessList > *")) {
       if (el.classList.contains("sess-group")) { cur = { g: el.dataset.g, marks: [] }; out.push(cur); }
-      else if (cur) cur.marks.push(el.dataset.activity || "");
+      else if (cur) cur.marks.push({ mark: el.dataset.activity || "", kid: el.classList.contains("sess-kid") });
     }
+    // Bỏ thẻ con khỏi phép so thứ tự.
+    out.forEach((g) => { g.marks = g.marks.filter((x) => !x.kid); });
     return out;
   });
+  // Từ v97 phiên CON vẽ ngay dưới phiên cha (như một lượt trả lời), nên thứ
+  // tự "vừa động trước" chỉ đúng giữa các thẻ CHA — con đi theo chỗ của cha
+  // chứ không theo mốc hoạt động của chính nó.
   const unsorted = perGroup.filter((grp) => {
-    const m = grp.marks.filter(Boolean);
+    const m = grp.marks.filter((x) => x && x.mark).map((x) => x.mark);
     return !m.every((v, i) => i === 0 || m[i - 1] >= v);
   });
   check(
@@ -268,12 +273,19 @@ try {
   );
   check("danh sách được gộp thành nhóm có tiêu đề", groups.length > 0,
     groups.map((g) => `${g.g}:${g.n}`).join(" · "));
+  // Phiên CÓ CHA đang hiện trên màn thì được vẽ LỒNG dưới cha, không đếm vào
+  // nhóm nào (v97). Máy và màn phải cùng luật ấy, nếu không phép đo sẽ đòi lại
+  // đúng cái thiết kế vừa bỏ.
+  const onScreenIds = new Set(truth.sessions.map((x) => x.session_id));
+  const nested = (x) =>
+    !!(x.parent_session_id && onScreenIds.has(x.parent_session_id) && x.parent_session_id !== x.session_id);
+  const top = truth.sessions.filter((x) => !nested(x));
   const expect = {
-    hub: truth.sessions.filter((x) => x.started_by_hub && x.host !== "dead").length,
-    terminal: truth.sessions.filter((x) => x.host === "terminal" && !(x.started_by_hub)).length,
-    background: truth.sessions.filter((x) => x.host === "background" && !(x.started_by_hub)).length,
-    detached: truth.sessions.filter((x) => x.host === "detached" && !(x.started_by_hub)).length,
-    dead: truth.sessions.filter((x) => x.host === "dead").length,
+    hub: top.filter((x) => x.started_by_hub && x.host !== "dead").length,
+    terminal: top.filter((x) => x.host === "terminal" && !(x.started_by_hub)).length,
+    background: top.filter((x) => x.host === "background" && !(x.started_by_hub)).length,
+    detached: top.filter((x) => x.host === "detached" && !(x.started_by_hub)).length,
+    dead: top.filter((x) => x.host === "dead").length,
   };
   const mismatch = Object.entries(expect)
     .filter(([g, n]) => n > 0 && (groups.find((x) => x.g === g)?.n ?? 0) !== n)

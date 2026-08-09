@@ -174,6 +174,9 @@ fn main() {
 }
 
 fn real_main() -> Result<()> {
+    // Mốc khởi động: để màn nói được "chạy liên tục N phút" thay vì đoán từ
+    // vòng đầu tiên.
+    hub::runtime::mark_start();
     let cfg = config::load(None)?;
     logging::set_log_file(&cfg.log_file);
     if let Ok(level) = std::env::var("HUB_LOG_LEVEL") {

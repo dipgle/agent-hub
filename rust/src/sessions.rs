@@ -103,6 +103,9 @@ pub struct LiveSession {
     /// inferred.
     #[serde(default)]
     pub started_by_hub: bool,
+    /// Subagent đang chạy (xem `TranscriptTail::pending_subagents`).
+    #[serde(default)]
+    pub pending_subagents: usize,
     /// The listed session whose process tree this one hangs off, if any.
     ///
     /// A background session has no window, so "where did this come from?" has
@@ -337,11 +340,67 @@ pub struct TranscriptTail {
     pub last_ts: Option<String>,
     /// Newest `permission-mode` seen in the window.
     pub permission_mode: Option<String>,
+    /// Subagent calls in this window that have no result yet.
+    ///
+    /// Hà 2026-08-09: *"một phiên đang chạy subagents thì cũng hiển thị được"*.
+    /// A session that farmed its work out to subagents looks IDLE from the
+    /// outside — the last conversational turn was minutes ago and nothing new
+    /// lands until the subagents come back. Counting `Agent` calls whose
+    /// `tool_use_id` never got a `tool_result` is the difference between "đang
+    /// chạy" and "đứng im", and it is the one thing a phone cannot guess.
+    pub pending_subagents: usize,
+}
+
+/// Subagent calls still waiting for their answer, inside this tail window.
+///
+/// Matched by `tool_use_id`, not by counting names: a session can fan out five
+/// subagents and get three back, and "5 đang chạy" would be wrong in exactly
+/// the situation the number exists for. Anything whose result fell outside the
+/// 256KB window counts as finished — better to under-report than to leave a
+/// phantom subagent running on the screen forever.
+fn pending_subagents(tail: &str) -> usize {
+    use std::collections::HashSet;
+    let mut started: Vec<String> = Vec::new();
+    let mut finished: HashSet<String> = HashSet::new();
+    for line in tail.lines() {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(blocks) = record
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+        else {
+            continue;
+        };
+        for b in blocks {
+            match b.get("type").and_then(|t| t.as_str()) {
+                Some("tool_use") => {
+                    let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    if name == "Agent" || name == "Task" {
+                        if let Some(id) = b.get("id").and_then(|i| i.as_str()) {
+                            started.push(id.to_string());
+                        }
+                    }
+                }
+                Some("tool_result") => {
+                    if let Some(id) = b.get("tool_use_id").and_then(|i| i.as_str()) {
+                        finished.insert(id.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    started.iter().filter(|id| !finished.contains(*id)).count()
 }
 
 /// Walk the tail backwards to the newest real conversation turn.
 pub fn parse_tail(tail: &str) -> TranscriptTail {
-    let mut out = TranscriptTail::default();
+    let mut out = TranscriptTail {
+        pending_subagents: pending_subagents(tail),
+        ..Default::default()
+    };
     for line in tail.lines().rev() {
         let line = line.trim();
         if line.is_empty() {
@@ -587,6 +646,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 // Điền ở tầng có `Db` (`pipeline::mark_started_by_hub`); ở đây
                 // không có sổ để tra, mà đoán thì thà để trống.
                 started_by_hub: false,
+                pending_subagents: 0,
                 // Điền sau khi đã có đủ mọi hàng: quan hệ cha-con chỉ tra được
                 // khi biết pid của TẤT CẢ các phiên.
                 parent_session_id: None,
@@ -647,6 +707,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                         row.last_activity = Some(ts);
                     }
                     row.permission_mode = parsed.permission_mode.clone();
+                    row.pending_subagents = parsed.pending_subagents;
                     row.last_role = parsed.last_role;
                     // Suppressed HERE, at the source, so no downstream surface
                     // can forget: the snapshot, the portal doc and the phone

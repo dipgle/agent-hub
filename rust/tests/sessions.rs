@@ -271,3 +271,29 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
         "terminal"
     );
 }
+
+/// Subagent đang chạy: đếm theo `tool_use_id`, không đếm theo tên.
+///
+/// Một phiên có thể tung ra nhiều subagent và nhận về vài cái; đếm tên sẽ báo
+/// "5 đang chạy" đúng vào lúc con số ấy cần đúng nhất. Kết quả rơi ra ngoài
+/// cửa sổ 256KB thì coi như đã xong — thà thiếu còn hơn để một subagent ma
+/// chạy mãi trên màn.
+#[test]
+fn pending_subagents_are_counted_by_id_not_by_name() {
+    use hub::sessions::parse_tail;
+
+    let started_two = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a1","name":"Agent","input":{}},{"type":"tool_use","id":"a2","name":"Agent","input":{}}]}}"#;
+    let one_came_back = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a1","content":"xong"}]}}"#;
+    let other_tool = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{}}]}}"#;
+
+    assert_eq!(parse_tail(started_two).pending_subagents, 2);
+    assert_eq!(
+        parse_tail(&format!("{started_two}\n{one_came_back}")).pending_subagents,
+        1
+    );
+    // Công cụ khác không phải subagent.
+    assert_eq!(parse_tail(other_tool).pending_subagents, 0);
+    // Không có gì thì không có gì — và một dòng hỏng không được làm hỏng cả bộ.
+    assert_eq!(parse_tail("").pending_subagents, 0);
+    assert_eq!(parse_tail("{ đây không phải json").pending_subagents, 0);
+}

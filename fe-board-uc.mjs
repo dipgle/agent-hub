@@ -164,6 +164,14 @@ try {
       [...document.querySelectorAll("#board *")]
         .filter((e) => !/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName))
         .filter((e) => e.clientWidth > 0 && e.scrollWidth > e.clientWidth + 2)
+        // Chữ CẮT ĐUÔI có chủ ý (`text-overflow: ellipsis` + `overflow:
+        // hidden`) luôn có `scrollWidth` lớn hơn khung — đó là thiết kế, không
+        // phải tràn: tên phiên dài và dòng trạng thái đều cố tình cắt. Đòi
+        // chúng vừa khít là đòi bỏ dấu "…".
+        .filter((e) => {
+          const cs = getComputedStyle(e);
+          return !(cs.textOverflow === "ellipsis" && cs.overflowX !== "visible");
+        })
         .map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""} ${e.scrollWidth}/${e.clientWidth}`)
     );
   }
@@ -186,6 +194,13 @@ try {
       [...document.querySelectorAll("#board *")]
         .filter((e) => !/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName))
         .filter((e) => e.clientWidth > 0 && e.scrollWidth > e.clientWidth + 2)
+        // Cùng lý do với vòng quét bốn tab: chữ cắt đuôi có chủ ý không phải
+        // tràn. Bản trước chỉ lọc ở MỘT trong hai chỗ quét, nên `#sessStatus`
+        // (cố tình cắt) vẫn báo đỏ.
+        .filter((e) => {
+          const cs = getComputedStyle(e);
+          return !(cs.textOverflow === "ellipsis" && cs.overflowX !== "visible");
+        })
         .map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""} ${e.scrollWidth}/${e.clientWidth}`)
     );
     await page.click("#sessBack");

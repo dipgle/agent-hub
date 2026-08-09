@@ -533,8 +533,44 @@
     font-size: 17px; line-height: 1;
     display: flex; align-items: center; justify-content: center; padding: 0;
   }
-  #sessActs { margin-top: 4px; gap: 6px; }
-  #sessActs button { font-size: 12.5px; padding: 6px 10px; min-height: 36px; }
+  /* Chân trang GỌN: ô tích và hai nút thao tác đứng CHUNG một hàng, ô tích
+     bên trái, nút dạt phải. Ba hàng chồng nhau (nhập · tích · nút) ngốn ~130px
+     đáy màn 844px — một phần sáu màn hình chỉ để chứa thao tác, trong khi màn
+     này sinh ra để ĐỌC (Hà 2026-08-09: *"làm gọn lại thành phần footer"*). */
+  /* MỌI thứ trong chân trang cao bằng nhau. Trước đó ô nhập 44px, nút Gửi
+     44px, hàng tích 36px, nút thao tác 34px — bốn chiều cao trong một khung
+     nhỏ đọc ra lộn xộn (Hà 2026-08-09: *"các thành phần footer đang không cân
+     đối chiều cao"*). Một con số duy nhất, khai ở đây. */
+  #sessCompose { --ctl: 40px; }
+  #sessCompose #sessSayRow > input,
+  #sessCompose #sessSayRow > button,
+  #sessCompose #sessActs button,
+  #sessCompose .sess-mode {
+    height: var(--ctl); min-height: var(--ctl); box-sizing: border-box;
+  }
+  #sessFootRow {
+    display: flex; align-items: center; gap: 8px; flex-wrap: nowrap;
+    margin-top: 6px;
+  }
+  #sessFootRow .sess-mode { margin: 0; flex: 0 0 auto; }
+  #sessActs { margin: 0 0 0 auto; gap: 6px; flex-wrap: nowrap; }
+  #sessActs button {
+    font-size: 12px; padding: 0 10px;
+    max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Chú thích cuối cùng: chữ nhỏ, một hàng, không đội chỗ. */
+  #sessNote {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 4px; flex-wrap: nowrap;
+  }
+  #sessNote p {
+    margin: 0; font-size: 12px; flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  /* Vẫn phải đủ cao để chạm. `min-height: 0` (bản trước, để cho gọn) kéo
+     hàng xuống 23px — đúng cái ngưỡng vừa sửa hai lần hôm nay. Gọn không được
+     đổi bằng việc không bấm trúng. */
+  #sessNote .term-toggle { min-height: 32px; flex: 0 0 auto; }
   .sess-mode {
     display: flex; align-items: center; gap: 8px; margin: 6px 0 2px;
     font-size: 13px; color: var(--muted); min-height: 44px;
@@ -772,15 +808,9 @@
              Lý do thật là chỗ ngồi: trên 390px một hàng riêng chỉ để chứa một
              nút và một cái tên ngốn ~44px, đẩy nội dung phiên xuống — trong
              khi hàng ảnh-chụp ngay trên nó còn trống hơn nửa bề ngang. -->
-        <div class="row-flex" style="justify-content: space-between; align-items: baseline;">
-          <p class="muted" id="sessStatus" style="margin:0"></p>
-          <!-- Mặc định BẬT: câu hỏi gốc của màn này là "cho tôi thấy đúng thứ
-               đang hiện trên terminal". Ai thích bản có nhãn thì tắt đi. -->
-          <label class="term-toggle muted">
-            <input type="checkbox" id="termMode" checked />
-            <span>kiểu terminal</span>
-          </label>
-        </div>
+        <!-- Dòng trạng thái và ô chọn cách hiển thị đã dọn XUỐNG CHÂN TRANG
+             (Hà 2026-08-09): chúng là chú thích về màn, không phải nội dung
+             của phiên, mà lại đứng chắn ngay trên thứ người ta vào để đọc. -->
         <!-- Luồng phiên đứng TRƯỚC các nút. Màn này để ĐỌC việc đang chạy; đặt
              "Đóng sổ" và ô hỏi lên đầu thì mỗi lần mở ra phải lướt qua hai
              thao tác mới tới thứ mình vào xem — và càng nhiều sự kiện, thao
@@ -816,19 +846,31 @@
             <input type="text" id="sessSayInput" placeholder="Nói tiếp vào phiên này…" autocomplete="off" />
             <button type="button" id="sessSay">Gửi</button>
           </div>
-          <label class="sess-mode" id="sessAsideLabel">
-            <input type="checkbox" id="sessAside" />
-            <span id="sessAsideText">Hỏi bên lề (chạy trên bản sao)</span>
-          </label>
-          <!-- Hai nút thao tác nặng xuống chân trang cùng ô nhập (Hà
-               2026-08-09): chúng là VIỆC LÀM VỚI PHIÊN, cùng họ với ô nhập,
-               chứ không phải nội dung để đọc. Đứng giữa màn thì mỗi lần cuộn
-               qua lại phải lướt qua chúng. -->
-          <div class="row-flex" id="sessActs">
-            <button type="button" id="sessHandover">📋 Đóng sổ &amp; tiếp tục ở phiên mới</button>
-            <!-- Chỉ hiện với phiên do hub mở: hub không lái phiên người khác
-                 mở trong terminal/VS Code (Hà chốt 08-08). -->
-            <button type="button" id="sessStop" class="hidden">⏹ Dừng phiên</button>
+          <!-- Một hàng: chế độ bên trái, thao tác dạt phải. -->
+          <div id="sessFootRow">
+            <label class="sess-mode" id="sessAsideLabel">
+              <input type="checkbox" id="sessAside" />
+              <span id="sessAsideText">Hỏi bên lề</span>
+            </label>
+            <!-- Hai nút thao tác nặng nằm cùng chân trang với ô nhập (Hà
+                 2026-08-09): chúng là VIỆC LÀM VỚI PHIÊN, cùng họ với ô nhập,
+                 chứ không phải nội dung để đọc. -->
+            <div class="row-flex" id="sessActs">
+              <button type="button" id="sessHandover" title="Đóng sổ &amp; tiếp tục ở phiên mới">📋 Đóng sổ</button>
+              <!-- Chỉ hiện với phiên do hub mở: hub không lái phiên người khác
+                   mở trong terminal/VS Code (Hà chốt 08-08). -->
+              <button type="button" id="sessStop" class="hidden">⏹ Dừng</button>
+            </div>
+          </div>
+          <!-- Chú thích về màn, MỘT hàng, dưới cùng: trạng thái luồng bên trái
+               (cắt đuôi nếu dài), cách hiển thị bên phải. Nó là chú thích, nên
+               nó xuống cuối và không bao giờ được chiếm hai dòng. -->
+          <div id="sessNote">
+            <p class="muted" id="sessStatus"></p>
+            <label class="term-toggle muted">
+              <input type="checkbox" id="termMode" checked />
+              <span>kiểu terminal</span>
+            </label>
           </div>
         </div>
 
@@ -1657,7 +1699,10 @@
     });
     const isKid = (x) => {
       const pid = x.parent_session_id;
-      return !!(pid && onScreen.has(pid) && pid !== x.session_id);
+      // Con đã đóng KHÔNG được tính là con nữa — nếu tính, nó vừa bị loại khỏi
+      // nhóm (vì là con) vừa bị loại khỏi chỗ của cha (vì đã đóng) và biến mất
+      // hẳn khỏi màn. Mất một phiên êm ru là thứ tệ nhất một danh sách làm được.
+      return !!(pid && onScreen.has(pid) && pid !== x.session_id && x.host !== 'dead');
     };
 
     const taken = new Set();
@@ -1684,7 +1729,14 @@
       b.items.forEach((x) => {
         renderSessionCard(x);
         // Con vẽ NGAY SAU cha, thụt vào — đọc như một lượt trả lời.
-        (kidsOf.get(x.session_id) || []).forEach((kid) => renderSessionCard(kid, true));
+        // Con ĐÃ ĐÓNG thì thôi liệt kê (Hà 2026-08-09). Một phiên con đã chết
+        // không còn gì để làm với nó: không nói tiếp, không dừng, và mở ra
+        // cũng không thấy việc đang chạy. Nó chỉ làm dài danh sách của phiên
+        // cha đang sống. Phiên ĐỘC LẬP đã chết thì vẫn giữ, vì nhóm "Đã dừng"
+        // chính là danh sách cần dọn.
+        (kidsOf.get(x.session_id) || [])
+          .filter((kid) => kid.host !== 'dead')
+          .forEach((kid) => renderSessionCard(kid, true));
       });
     });
 

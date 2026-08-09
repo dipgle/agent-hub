@@ -121,13 +121,23 @@ try {
     });
   const beforeList = await readCard();
   await page.waitForTimeout(17000);            // qua ít nhất một nhịp làm mới
-  const afterList = await readCard();
-  check(
-    "làm mới danh sách KHÔNG đẩy chỗ đang đọc đi",
-    beforeList.id.length > 0 && afterList.id === beforeList.id &&
-      Math.abs(afterList.y - beforeList.y) <= 4,
-    `${beforeList.name} y=${beforeList.y} → ${afterList.name} y=${afterList.y}`
-  );
+  // Đo ĐÚNG cái thẻ đã ghi, không phải "thẻ đầu tiên còn thấy": danh sách sắp
+  // theo vừa-động-trước, nên một phiên khác vừa động là thứ tự đổi và thẻ đầu
+  // đổi theo — đó là dữ liệu đổi, không phải màn nhảy. Cái phải giữ nguyên là
+  // vị trí của thẻ NGƯỜI TA ĐANG NHÌN.
+  const afterY = await page.evaluate((id) => {
+    const el = document.querySelector(`.sess[data-session="${id}"]`);
+    return el ? Math.round(el.getBoundingClientRect().top) : null;
+  }, beforeList.id);
+  if (afterY === null) {
+    console.log("  · thẻ đang nhìn đã rời danh sách — bỏ qua 1 kiểm tra");
+  } else {
+    check(
+      "làm mới danh sách KHÔNG đẩy chỗ đang đọc đi",
+      beforeList.id.length > 0 && Math.abs(afterY - beforeList.y) <= 4,
+      `${beforeList.name} y=${beforeList.y} → y=${afterY}`
+    );
+  }
   await page.evaluate(() => { document.querySelector("main").scrollTop = 0; });
 
   // Từ v78 việc chia-theo-loại nằm ở TIÊU ĐỀ TỪNG NHÓM, không còn ở dòng tóm

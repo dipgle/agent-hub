@@ -91,13 +91,25 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
         Ok(Some(id)) if !id.is_empty() => {
             match live.sessions.iter().find(|s| s.session_id == id) {
                 Some(s) => Some(crate::sessions::stream(cfg, &s.session_id, &s.cwd, 120)),
-                // Followed a session that has since ended: say so rather than
-                // leaving the page on a stream that silently stopped growing.
-                None => Some(crate::sessions::SessionStream {
-                    session_id: id,
-                    note: Some("phiên này không còn chạy".into()),
-                    ..Default::default()
-                }),
+                // Phiên đã kết thúc: `claude agents` bỏ nó khỏi danh sách sau vài
+                // giây, NHƯNG nhật ký vẫn nằm nguyên trên đĩa. Bản trước dừng ở
+                // đây và trả về một dòng ghi chú, nên mở phiên vừa xong là màn
+                // trống trơn — Hà 2026-08-09: *"phiên này mở ra không thấy tải
+                // được lịch sử"*. Đọc thẳng từ nhật ký: cái người ta vào xem là
+                // VIỆC ĐÃ CHẠY, không phải cái tiến trình.
+                // `stream` TỰ tìm nhật ký theo id khi đường dựng từ `cwd` không
+                // có, nên chỉ cần gọi nó với cwd rỗng — không phải dựng lại
+                // đường dẫn ở đây.
+                None => {
+                    let mut st = crate::sessions::stream(cfg, &id, "", 120);
+                    st.note = Some(if st.events.is_empty() {
+                        "phiên đã kết thúc và không còn nhật ký trên đĩa".into()
+                    } else {
+                        "phiên đã kết thúc — đây là nhật ký còn lại, không cập nhật thêm"
+                            .to_string()
+                    });
+                    Some(st)
+                }
             }
         }
         _ => None,

@@ -450,13 +450,40 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     .split_once(char::is_whitespace)
                     .unwrap_or((&cmd.arg, ""));
                 let name = name.trim();
+                // `@tài-khoản` đứng ngay sau tên dự án: `/new hub @acc2 việc…`.
+                // Không có thì dùng tài khoản mặc định — giữ nguyên cách gõ cũ.
+                let (account, task) = match task.trim().strip_prefix('@') {
+                    Some(rest) => {
+                        let (acc, rest) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
+                        (Some(acc.trim().to_string()), rest)
+                    }
+                    None => (None, task),
+                };
+                // Tài khoản lạ thì TỪ CHỐI, đừng lặng lẽ rơi về mặc định: mở
+                // phiên nhầm tài khoản là mở nhầm cả kho phiên.
+                let known_accounts: Vec<String> = cfg
+                    .claude_accounts_or_ambient()
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .collect();
+                let bad_account = account
+                    .as_ref()
+                    .filter(|a| !known_accounts.contains(a))
+                    .cloned();
                 let known = known_projects(cfg);
                 let dir = crate::config::project_dir(cfg, name);
-                let ack = match dir {
+                let ack = if let Some(a) = bad_account {
+                    format!(
+                        "⚠ không biết tài khoản '{}'. Đang có: {}",
+                        crate::exec::truncate(&a, 24),
+                        known_accounts.join(", ")
+                    )
+                } else {
+                    match dir {
                     Some(d)
                         if known.contains(&name.to_string()) || cfg.projects.contains_key(name) =>
                     {
-                        match crate::sessions::start_background(cfg, name, &d, task) {
+                        match crate::sessions::start_background(cfg, name, &d, task, account.as_deref()) {
                             Ok(s) => {
                                 // Follow it straight away: the person who just
                                 // started a job wants to watch it, and making
@@ -495,6 +522,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         crate::exec::truncate(name, 40),
                         known.join(", ")
                     ),
+                    }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)

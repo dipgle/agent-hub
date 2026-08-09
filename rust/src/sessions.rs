@@ -1311,7 +1311,22 @@ pub fn parse_backgrounded_id(stdout: &str) -> Option<&str> {
 ///   `claude agents` reports none, so there is nothing to add up. What hub can
 ///   do is show that it is running and offer a stop — control and visibility
 ///   instead of a number that would be invented.
-pub fn start_background(cfg: &Config, project: &str, dir: &Path, task: &str) -> Result<Started> {
+///
+/// # Tài khoản
+///
+/// Mở phiên **trên tài khoản được chọn**.
+///
+/// `account = None` là tài khoản mặc định (biến `CLAUDE_CONFIG_DIR` bị XOÁ —
+/// trỏ nó vào `~/.claude` sẽ báo "not logged in", xem chú thích đầu tệp).
+/// Trước 2026-08-09 hàm này luôn xoá biến, tức máy có ba tài khoản mà từ điện
+/// thoại chỉ mở được phiên trên acc1 — Hà hỏi đúng chỗ đó.
+pub fn start_background(
+    cfg: &Config,
+    project: &str,
+    dir: &Path,
+    task: &str,
+    account: Option<&str>,
+) -> Result<Started> {
     let task = task.trim();
     if task.is_empty() {
         anyhow::bail!("chưa nói việc cần làm");
@@ -1337,7 +1352,10 @@ pub fn start_background(cfg: &Config, project: &str, dir: &Path, task: &str) -> 
             cwd: Some(dir),
             input: None,
             timeout: Some(Duration::from_secs(120)),
-            env: vec![("CLAUDE_CONFIG_DIR".into(), None)],
+            env: vec![(
+                "CLAUDE_CONFIG_DIR".into(),
+                account.and_then(|a| account_dir(cfg, a)),
+            )],
         },
     )?;
     if out.code != Some(0) {
@@ -1438,7 +1456,12 @@ pub fn start_background(cfg: &Config, project: &str, dir: &Path, task: &str) -> 
                 cwd: None,
                 input: None,
                 timeout: Some(Duration::from_secs(30)),
-                env: vec![("CLAUDE_CONFIG_DIR".into(), None)],
+                // Dừng trên ĐÚNG tài khoản vừa mở phiên: `claude stop` ở tài
+                // khoản khác sẽ báo "no job matching".
+                env: vec![(
+                    "CLAUDE_CONFIG_DIR".into(),
+                    account.and_then(|a| account_dir(cfg, a)),
+                )],
             },
         ) {
             if out.code != Some(0) {

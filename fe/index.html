@@ -328,6 +328,10 @@
      dọn lên hàng này (2026-08-09) nó bị vạ lây — `display: none` trong khi
      `class` vẫn sạch, nên nhìn DOM tưởng đang hiện. Đo mới thấy: 0×0px. */
   #board.on-sessions .boardbar #sessBack { display: inline-flex; }
+  #sessNewWho { gap: 6px; }
+  #sessNewWho select { flex: 1 1 0; min-width: 0; }
+  #sessNewBox #sessNewHint { font-size: 12px; margin: 6px 0 0; }
+  #sessNewBox .row-flex { margin-top: 6px; }
   #sessList { display: flex; flex-direction: column; gap: 8px; }
   /* Một dòng đã chết không được đọc như việc đang chạy. */
   .sess.sess-dead { opacity: .62; border-style: dashed; }
@@ -784,16 +788,19 @@
              chứ không phải trang trí. -->
         <details id="sessNewBox">
           <summary>➕ Mở phiên làm việc mới</summary>
-          <div class="row-flex">
-            <select id="sessNewProject"></select>
+          <!-- Hai hàng: dự án + TÀI KHOẢN chung một hàng, việc + nút Mở một
+               hàng. Ô chọn tài khoản là thứ còn thiếu hẳn — máy có ba tài khoản
+               mà `/new` luôn chạy trên acc1 (Hà nhắc 2026-08-09, đã yêu cầu từ
+               trước và tôi bỏ sót). -->
+          <div class="row-flex" id="sessNewWho">
+            <select id="sessNewProject" aria-label="Dự án"></select>
+            <select id="sessNewAccount" aria-label="Tài khoản"></select>
           </div>
           <div class="row-flex">
             <input type="text" id="sessNewTask" placeholder="Việc cần làm…" autocomplete="off" />
             <button type="button" id="sessNew">Mở</button>
           </div>
-          <p class="muted boardnote" id="sessNewHint">
-            Phiên nền chạy không hỏi ai — nhớ dừng khi xong.
-          </p>
+          <p class="muted" id="sessNewHint">Phiên nền chạy không hỏi ai — nhớ dừng khi xong.</p>
         </details>
         <div id="sessNewNote" class="hidden"></div>
         <div id="sessList" class="scroll"></div>
@@ -1130,16 +1137,22 @@
   /// Đáy của `el` đang trong tầm nhìn? (dùng cho cả hai kiểu cuộn)
   function atBottomOf(el) {
     const sc = scrollerFor(el);
-    if (sc === el) return el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    return el.getBoundingClientRect().bottom <= window.innerHeight + 40;
+    // Đo trên KHUNG CUỘN, không đo mép dưới của khối nội dung: khối luồng kết
+    // thúc phía trên ô nhập ghim đáy, nên "mép dưới đã vào tầm nhìn" là đúng
+    // ngay cả khi còn cả trăm pixel chưa cuộn tới. Ngưỡng nới lên 72px để cái
+    // ô nhập ấy không tự biến người đang ở đáy thành người đã cuộn lên.
+    return sc.scrollHeight - sc.scrollTop - sc.clientHeight < 72;
   }
 
   /// Đưa dòng cuối của `el` vào tầm nhìn, dù `el` tự cuộn hay trang cuộn.
   function stickToBottom(el) {
     const sc = scrollerFor(el);
-    if (sc === el) { el.scrollTop = el.scrollHeight; return; }
-    const last = el.lastElementChild;
-    if (last) last.scrollIntoView({ block: 'nearest' });
+    // Cuộn tới ĐÁY THẬT của khung cuộn, không phải "đưa dòng cuối vào tầm
+    // nhìn". `scrollIntoView({block:'nearest'})` KHÔNG làm gì khi dòng ấy đã
+    // hơi ló ra — mà "hơi ló" là đúng trạng thái khi ô nhập ghim đáy che mất
+    // 132px cuối. Kết quả: có nội dung mới mà màn đứng im, đúng như Hà thấy
+    // (2026-08-09).
+    sc.scrollTop = sc.scrollHeight;
   }
 
   function scrollDown() {
@@ -1879,6 +1892,25 @@
   /// Which projects `/new` will accept — the same list hub validates against,
   /// so the picker can never offer a name the command will reject.
   function renderProjectPicker(projects) {
+    // Tài khoản lấy từ chính cấu hình trong ảnh chụp — không gõ cứng ở trang,
+    // vì thêm tài khoản thứ tư là việc của `hub.config.json`.
+    const accSel = $('sessNewAccount');
+    // `renderProjectPicker` chỉ nhận danh sách dự án, nên đọc cấu hình từ ảnh
+    // chụp gần nhất — biến chung của trang, luôn là bản vừa vẽ.
+    const accounts = (((lastSnap || {}).config || {}).value || {}).claude_accounts || [];
+    if (accSel && accSel.options.length !== accounts.length) {
+      const keep = accSel.value;
+      accSel.textContent = '';
+      accounts.forEach((a, i) => {
+        const o = document.createElement('option');
+        o.value = a.name;
+        // Tài khoản đầu là mặc định của máy — nói ra để không ai phải đoán.
+        o.textContent = i === 0 ? `${a.name} (mặc định)` : a.name;
+        accSel.append(o);
+      });
+      if (keep) accSel.value = keep;
+    }
+
     const sel = $('sessNewProject');
     const names = projects || [];
     if (sel.dataset.filled === names.join(',')) return;   // don't fight the user's choice
@@ -2112,7 +2144,12 @@
     // hub trả lời trong phòng chat. Không nhận nó về đây thì lời báo hỏng nằm
     // ở TAB KHÁC với cái nút vừa bấm, và màn này đứng im như đang chạy tốt.
     waitingFor = 'new';
-    sendCommand(`/new ${project} ${task}`, e.target);
+    // `@tài-khoản` chỉ gửi khi KHÁC mặc định: giữ nguyên câu lệnh cũ cho
+    // trường hợp thường gặp, và không bịa ra một tham số hub phải bỏ qua.
+    const acc = $('sessNewAccount');
+    const first = acc && acc.options.length ? acc.options[0].value : '';
+    const at = acc && acc.value && acc.value !== first ? `@${acc.value} ` : '';
+    sendCommand(`/new ${project} ${at}${task}`, e.target);
     $('sessNewTask').value = '';
   });
 

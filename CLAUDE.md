@@ -131,10 +131,18 @@ or drive a session from a phone?** If not, it does not belong here.
 - E2E runs against the DEPLOYED bundle, as `alice_local` (the owner). Logging in
   as `hubbot` tests a permission nobody uses — every command comes back
   `tfl5_command_from_non_owner`.
-- `fe-stream-uc` and `fe-aside-uc` make REAL `claude` calls: each run costs
-  money, and the first touch of a session costs the most (0.99 MB → $1.70; the
-  second question on the same session, $0.10). Both scripts aim at the shortest
-  transcript on purpose.
+- `fe-stream-uc` and `fe-aside-uc` make REAL `claude` calls on the owner's
+  account. **They are gated on price and skip by default.** Each script sizes the
+  transcript first (`USD_PER_MB = 1.75`, from a measured 0.99 MB → $1.72); if the
+  estimate is over `HUB_UC_MAX_USD` (default **$0.25**) the paid step does not
+  run, the checks behind it are NOT counted as passed, and the summary prints
+  `N BỎ QUA vì tốn tiền` plus what was not verified. To actually buy the
+  evidence: `HUB_UC_PAY=1 node fe-stream-uc.mjs …`.
+  Why the gate exists: on 2026-08-08 these two scripts were re-run after every
+  bundle bump and spent **$6.75 in one evening** re-proving the same thing —
+  including $1.70 lost to a mid-run server restart, and $1.10 spent by a
+  half-finished version of this very gate that printed the estimate and then
+  called anyway. A price printed is not a price stopped.
 
 ## Project layout
 

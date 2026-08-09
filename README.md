@@ -134,10 +134,20 @@ bằng tài khoản chủ:
 ```bash
 node fe-board-uc.mjs                 # 4 tab · sức khoẻ · cấu hình · KHÔNG có hộp việc/tiền
 node fe-sessions-uc.mjs  <app> <user> <pass>
-node fe-stream-uc.mjs    <app> <user> <pass>   # ⚠ gọi claude thật, tốn tiền
-node fe-aside-uc.mjs     <app> <user> <pass>   # ⚠ gọi claude thật, tốn tiền
+node fe-stream-uc.mjs    <app> <user> <pass>   # bước /handover: có cổng giá
+node fe-aside-uc.mjs     <app> <user> <pass>   # bước /ask: có cổng giá
 node fe-newsession-uc.mjs <app> <user> <pass>
 node fe-config-uc.mjs · fe-denied-uc.mjs · fe-smoke.mjs · fe-phone-uc.mjs
+```
+
+**Cổng giá.** Hai kịch bản trên có một bước gọi `claude` thật, giá tỉ lệ độ dài
+nhật ký (mốc đo: 0.99 MB → $1.72). Chúng **ước tính trước và mặc định KHÔNG
+tiêu**: quá `HUB_UC_MAX_USD` (mặc định $0.25) thì bỏ qua bước đó, không tính là
+đạt, và in rõ *"N BỎ QUA vì tốn tiền"* kèm thứ chưa nghiệm thu. Muốn mua bằng
+chứng ấy:
+
+```bash
+HUB_UC_PAY=1 node fe-stream-uc.mjs <app> <user> <pass>
 ```
 
 ## Test

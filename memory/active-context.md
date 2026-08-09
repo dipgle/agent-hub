@@ -1,5 +1,27 @@
 # active context — hub
 
+## 💸 2026-08-09 (rạng sáng) — "bỏ mọi đường github rồi sao vẫn mất tiền thế"
+
+Hỏi lại lần thứ hai, và lần này câu trả lời **không phải github**. Sổ nói rõ:
+13 khoản chi trong ngày, **tất cả** đều `aside`/`handover` — tức fork do **bấm
+nút**; không một dòng triage nào từ lúc gỡ, `cycle_done` không còn trường tiền.
+**Vòng chạy của hub = $0.** Tiền là **của Hà**, do **tôi** tiêu: 6 lượt chạy
+`fe-stream-uc`/`fe-aside-uc` để nghiệm thu = **$6.75**, trong đó
+**$1.70 mất trắng** (server tfl5 restart giữa chừng) và tôi **trả hai lần cho
+cùng một bằng chứng** vì chạy lại sau mỗi bundle.
+
+**Sửa bằng cơ chế, không bằng lời hứa — cổng giá trong cả hai kịch bản:** ước
+tính theo kích thước nhật ký (`USD_PER_MB=1.75`) **trước** khi bấm; quá
+`HUB_UC_MAX_USD` (mặc định **$0.25**) thì **không gọi**, các check phía sau
+**không tính là đạt**, và bản tóm tắt in `N BỎ QUA vì tốn tiền` + thứ chưa
+nghiệm thu. Mua bằng chứng thì `HUB_UC_PAY=1`.
+
+⚠ **Bản đầu của chính cái cổng này tiêu thêm $1.0969**: nó chỉ *in* ước tính rồi
+vẫn bấm — `fe-aside-uc` chưa được nối cổng. *Một cái giá được in ra không phải
+một cái giá bị chặn.* Đã nối, chạy lại với trần $0.01: **không sinh dòng chi
+nào**, 9/9 đạt · 1 BỎ QUA. Với trần mặc định, phiên rẻ nhất còn 0.58 MB ≈ $1.02
+⟹ **mặc định là không tiêu**.
+
 ## 🔥 2026-08-08 (khuya) — XOÁ HOÀN TOÀN nhánh hộp thư, kể cả cái xác
 
 Hà nói ba lần trong một tối, mỗi lần một tầng sâu hơn:

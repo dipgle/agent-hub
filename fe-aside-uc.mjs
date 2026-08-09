@@ -35,6 +35,30 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "✓" : "✗"} ${name}${detail ? ` — ${detail}` : ""}`);
   if (!ok) problems.push(`${name}${detail ? `: ${detail}` : ""}`);
 };
+
+// ── CỔNG GIÁ ────────────────────────────────────────────────────────────────
+// Bước dưới đây gọi `claude` THẬT trên bản fork, và giá tỉ lệ độ dài nhật ký
+// (đo thật: 0.986 MB → $1.72). Đêm 2026-08-08 kịch bản này chạy 5 lượt cho cùng
+// một bằng chứng và tiêu $5.65 — tiền của kịch bản, không phải của hub: vòng
+// chạy của hub từ hôm nay là $0.
+//
+// Nên: ước tính TRƯỚC, và nếu vượt trần thì KHÔNG gọi. Bỏ qua được ghi rõ ra
+// màn và đếm vào ô "bỏ qua" — một kịch bản lặng lẽ nhảy cóc rồi báo xanh còn
+// tệ hơn một kịch bản đắt.
+const USD_PER_MB = 1.75;                      // mốc đo thật 2026-08-08
+const MAX_USD = Number(process.env.HUB_UC_MAX_USD || 0.25);
+const PAY = process.env.HUB_UC_PAY === "1";   // chấp nhận trả tiền lượt này
+const skipped = [];
+const affordable = (mb, what) => {
+  const est = mb * USD_PER_MB;
+  if (PAY || est <= MAX_USD) return true;
+  const msg = `${what}: ước tính $${est.toFixed(2)} > trần $${MAX_USD.toFixed(2)}`;
+  skipped.push(msg);
+  console.log(`\n⏭  BỎ QUA (không gọi claude) — ${msg}`);
+  console.log(`   Muốn nghiệm thu lại đường tốn tiền: HUB_UC_PAY=1 node ${process.argv[1].split("/").pop()} …\n`);
+  return false;
+};
+
 const hub = (args) =>
   JSON.parse(
     execFileSync(HERE + "rust/target/release/hub", args, {
@@ -110,7 +134,7 @@ try {
   const { s: target, file, mb } = sized[0];
   console.log(`chạm vào phiên: ${target.name} (${target.account}, đứng yên ${Math.round(idleFor(target))} phút)`);
   console.log(`nhật ký: ${file}`);
-  console.log(`kích thước: ${mb.toFixed(2)} MB\n`);
+  console.log(`kích thước: ${mb.toFixed(2)} MB ≈ $${(mb * USD_PER_MB).toFixed(2)} cho một câu hỏi\n`);
 
   const before = fingerprint(file);
   const activityBefore = target.last_activity;
@@ -139,6 +163,14 @@ try {
   // Câu hỏi chỉ trả lời được nếu CÓ ngữ cảnh phiên gốc — nếu không thì "trả lời
   // trôi chảy" chẳng chứng minh điều gì về fork cả.
   const question = "Tóm tắt trong 1 câu: phiên này đang làm việc gì?";
+  // Cổng giá đứng TRƯỚC cú bấm, không phải sau: bản đầu chỉ in ước tính rồi vẫn
+  // bấm, và lượt chạy đó tiêu $1.0969 trong lúc đang sửa đúng cái lỗ ấy.
+  const willPay = affordable(mb, "UC-S05b /ask");
+  // Khai báo NGOÀI khối: các phép đo bên dưới ("phiên gốc y nguyên") vẫn chạy
+  // khi bỏ qua bước hỏi, và chúng đọc mấy biến này.
+  let a = null;
+  let shown = { box: "", note: "" };
+  if (willPay) {
   await page.fill("#sessAskInput", question);
   await page.click("#sessAsk");
   check("ô hỏi được dọn sau khi gửi", (await page.inputValue("#sessAskInput")) === "");
@@ -164,7 +196,7 @@ try {
     if ((after.sessions.aside?.ts || "") !== asideBefore) break;
     await page.waitForTimeout(3000);
   }
-  const a = after.sessions.aside;
+  a = after.sessions.aside;
   // Rồi mới chờ MÀN bắt kịp đúng câu trả lời ấy (nhận diện bằng bản fork).
   if (a && a.new_session_id) {
     await page.waitForFunction(
@@ -173,12 +205,16 @@ try {
       { timeout: 60000, polling: 1000 }
     ).catch(() => {});
   }
-  const shown = await page.evaluate(() => ({
+  shown = await page.evaluate(() => ({
     box: document.getElementById("sessAskBox").textContent || "",
     note: document.getElementById("cmdNote")?.textContent || "",
   }));
 
+  }
+
   // ——— LỜI HỨA CỦA UC, đo trên tệp thật ———
+  // Chạy cả khi bỏ qua bước hỏi: "phiên gốc y nguyên" vẫn là điều phải đúng, và
+  // đo nó không tốn đồng nào.
   const now = fingerprint(file);
   check(
     "phiên gốc không thêm một byte nào",
@@ -193,6 +229,9 @@ try {
     `${activityBefore} → ${liveNow ? liveNow.last_activity : "(không còn trong danh sách)"}`
   );
 
+  // Các phép đo dưới đây chỉ có nghĩa khi thật sự đã hỏi. Khi cổng giá chặn,
+  // chúng KHÔNG được tính là đạt — bỏ qua thì phải hiện ra là bỏ qua.
+  if (willPay) {
   check("có câu hỏi bên lề MỚI trong ảnh chụp", !!a && a.ts !== asideBefore && a.source_id === target.session_id);
   check("câu hỏi được giữ nguyên văn", a && a.question === question, a ? a.question : "");
   check("có câu trả lời", !!(a && a.answer && a.answer.length > 0), a ? a.answer.slice(0, 80) : "");
@@ -208,6 +247,7 @@ try {
     !/\$\s?\d/.test(shown.box),
     shown.box.slice(-60)
   );
+  }
 
 
   const over = await page.evaluate(() => ({
@@ -236,7 +276,15 @@ try {
 }
 
 const failed = checks.filter((c) => !c.ok).length;
-console.log(`\n${checks.length - failed}/${checks.length} đạt`);
+console.log(
+  `\n${checks.length - failed}/${checks.length} đạt` +
+  (skipped.length ? ` · ${skipped.length} BỎ QUA vì tốn tiền` : "")
+);
+if (skipped.length) {
+  console.log("\nCHƯA NGHIỆM THU (không gọi claude lượt này):");
+  skipped.forEach((s) => console.log(`  ⏭ ${s}`));
+  console.log("  → chạy lại với HUB_UC_PAY=1 khi cần bằng chứng đường tốn tiền.");
+}
 if (problems.length) {
   console.log("\nVẤN ĐỀ:");
   problems.forEach((p) => console.log(`  · ${p}`));

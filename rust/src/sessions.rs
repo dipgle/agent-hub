@@ -847,6 +847,17 @@ pub struct StreamEvent {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionStream {
+    /// Chữ đang hiện trên cửa sổ terminal của phiên, đã gác bí mật.
+    ///
+    /// Khác `events` ở chỗ căn bản: `events` đọc từ NHẬT KÝ, chỉ có sau khi một
+    /// lượt kết thúc. Màn hình là thứ đang hiện NGAY BÂY GIỜ — kể cả hộp chọn
+    /// đang chờ, thanh tiến trình, dòng lỗi vừa in. Một phiên dừng lại hỏi thì
+    /// nhật ký đứng yên và chỉ trường này nói ra được.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen: Option<String>,
+    /// Các lựa chọn nhận ra trên màn, nếu phiên đang hỏi.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<serde_json::Value>,
     pub session_id: String,
     pub events: Vec<StreamEvent>,
     /// Events dropped off the front because the window is bounded.
@@ -979,6 +990,9 @@ pub fn parse_stream(tail: &str, limit: usize) -> SessionStream {
         events,
         older_hidden,
         note: None,
+        // Màn hình do `portal` gắn vào (nó biết `tty`); ở đây chỉ có nhật ký.
+        screen: None,
+        choices: Vec::new(),
     }
 }
 

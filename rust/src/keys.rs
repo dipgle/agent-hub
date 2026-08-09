@@ -296,6 +296,28 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// Chữ trên màn của phiên, đã gác bí mật và cắt gọn — dạng dùng được ngay.
+///
+/// `None` khi phiên không có cửa sổ, hoặc khi màn có dấu hiệu chứa bí mật:
+/// chữ này rời khỏi máy y như phần xem trước của phiên, nên nó phải đi qua
+/// đúng cái cổng ấy (điều 5 trong CLAUDE.md).
+pub fn screen_of(tty: &str, lines: usize) -> Option<(String, Vec<(usize, String)>)> {
+    let w = window_of(tty).ok().flatten()?;
+    let screen = screen_text(w).ok()?;
+    if !crate::sessions::preview_risk(&screen).is_empty() {
+        return None;
+    }
+    let choices = parse_choices(&screen);
+    let tail: Vec<&str> = screen
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .rev()
+        .take(lines)
+        .collect();
+    let body = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+    Some((body, choices))
+}
+
 /// Ảnh cửa sổ, đã thu nhỏ, dưới dạng base64 để đi trong một doc.
 ///
 /// Doc chứ KHÔNG phải file: `portal.rs` đã bỏ `/app/file/save` vì tệp nằm dưới

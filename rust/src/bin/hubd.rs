@@ -409,6 +409,15 @@ fn follow_sleep(cfg: &hub::config::Config, db: &Db, waker: &hub::live::Waker, de
 
     let started = Instant::now();
     let mut seen = path.as_deref().and_then(hub::sessions::transcript_mtime);
+    // `tty` của phiên đang theo, đọc MỘT LẦN: nó không đổi trong đời phiên, và
+    // hỏi lại mỗi 2 giây là một lần `claude agents` vô ích.
+    let tty = hub::sessions::snapshot(cfg)
+        .sessions
+        .iter()
+        .find(|s| s.session_id == session_id)
+        .map(|s| s.tty.clone())
+        .filter(|t| !t.is_empty() && t != "??");
+    let mut screen_seen: Option<u64> = None;
     let mut last_push = Instant::now();
     while started.elapsed() < delay {
         let slice = FOLLOW_TICK.min(delay.saturating_sub(started.elapsed()));
@@ -438,11 +447,31 @@ fn follow_sleep(cfg: &hub::config::Config, db: &Db, waker: &hub::live::Waker, de
             // for a second write.
             seen = None;
         }
+        // Hai nguồn tin, không phải một.
+        //
+        // `mtime` của nhật ký bắt được việc phiên LÀM; nó không bắt được việc
+        // phiên DỪNG LẠI HỎI — lúc ấy tệp đứng yên hàng phút trong khi màn hình
+        // đang chờ một phím. Nên vòng bám nhìn cả chữ trên màn, và đổi chữ cũng
+        // là tin đáng đẩy. Băm cho rẻ: so chuỗi vài KB mỗi 2 giây thì không
+        // đáng gì, nhưng giữ nguyên chuỗi trong bộ nhớ thì đáng.
         let now = path.as_deref().and_then(hub::sessions::transcript_mtime);
-        if now == seen || last_push.elapsed() < FOLLOW_MIN_GAP {
+        let screen_now = tty
+            .as_deref()
+            .and_then(|t| hub::keys::screen_of(t, 16))
+            .map(|(s, _)| {
+                let mut h: u64 = 1469598103934665603;
+                for b in s.as_bytes() {
+                    h ^= *b as u64;
+                    h = h.wrapping_mul(1099511628211);
+                }
+                h
+            });
+        let changed = now != seen || (screen_now.is_some() && screen_now != screen_seen);
+        if !changed || last_push.elapsed() < FOLLOW_MIN_GAP {
             continue;
         }
         seen = now;
+        screen_seen = screen_now;
         last_push = Instant::now();
         match portal::push(cfg, db) {
             Ok(p) => logging::info(

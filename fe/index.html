@@ -455,6 +455,22 @@
      và không có gì đóng khung từng lượt.
      Giữ lại đúng hai thứ không phải terminal nhưng cần thiết: dòng bị ẩn vì
      nghi có bí mật (đỏ), và nút mở đoạn dài. */
+  #sessScreenBox {
+    border: 1px solid var(--line); border-radius: 8px;
+    background: #14161a; padding: 8px 10px; margin-bottom: 8px;
+  }
+  #sessScreen {
+    margin: 0; background: none; border: 0; padding: 0;
+    color: #c8ccd4; font-family: var(--mono); font-size: 12px; line-height: 1.4;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  /* Đang hỏi thì phải nhìn ra ngay: viền vàng, chữ sáng, đứng trên cùng. */
+  #sessChoices {
+    margin-bottom: 6px; padding-bottom: 6px;
+    border-bottom: 1px solid #3a3320; color: #f0c674;
+    font-size: 13px; font-weight: 600;
+  }
+  #sessChoices div { padding: 2px 0; }
   #sessStream.term {
     background: #14161a; border: 1px solid #2a2d34; border-radius: 8px;
     padding: 10px 12px; gap: 0;
@@ -582,14 +598,6 @@
     max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   /* Chú thích cuối cùng: chữ nhỏ, một hàng, không đội chỗ. */
-  #sessKeys {
-    display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;
-  }
-  #sessKeys button {
-    min-width: 40px; height: 36px; padding: 0 8px;
-    font-family: var(--mono); font-size: 13px;
-    border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
-  }
   #sessNote {
     display: flex; align-items: center; gap: 10px;
     margin-top: 4px; flex-wrap: nowrap;
@@ -849,6 +857,14 @@
              "Đóng sổ" và ô hỏi lên đầu thì mỗi lần mở ra phải lướt qua hai
              thao tác mới tới thứ mình vào xem — và càng nhiều sự kiện, thao
              tác càng đẩy nội dung xuống xa. -->
+        <!-- MÀN HÌNH SỐNG: chữ đang hiện trên cửa sổ terminal của phiên, tự
+             cập nhật theo ảnh chụp. Đứng TRÊN luồng sự kiện vì nó là hiện tại,
+             còn luồng là quá khứ — và nó là thứ DUY NHẤT nói được rằng phiên
+             đang dừng lại hỏi (nhật ký lúc ấy đứng yên). -->
+        <div id="sessScreenBox" class="hidden">
+          <div id="sessChoices" class="hidden"></div>
+          <pre id="sessScreen"></pre>
+        </div>
         <div id="sessStream" class="scroll"></div>
         <!-- UC-S07: đóng sổ phiên này để mở phiên mới làm tiếp. Không giết
              tiến trình nào — mạch việc nằm ở nhật ký, cái cần là bản bàn giao
@@ -900,16 +916,11 @@
                gửi chữ "xuống" vào đó thì nó gõ ra chữ chứ không di chuyển. Đây
                là thứ trả lời được một phiên đang dừng lại hỏi — thứ mà tới
                2026-08-09 từ điện thoại hoàn toàn bó tay. -->
-          <div id="sessKeys" class="hidden">
-            <button type="button" id="sessShot" title="Xem màn hình phiên">📷</button>
-            <button type="button" data-key="up" title="Lên">↑</button>
-            <button type="button" data-key="down" title="Xuống">↓</button>
-            <button type="button" data-key="enter" title="Chọn">⏎</button>
-            <button type="button" data-key="esc" title="Bỏ qua">esc</button>
-            <button type="button" data-key="1">1</button>
-            <button type="button" data-key="2">2</button>
-            <button type="button" data-key="3">3</button>
-          </div>
+          <!-- KHÔNG có hàng nút. Hà 2026-08-10: *"bỏ các nút đi… vì tôi muốn
+               mọi thao tác là đồng bộ giống như remote desktop"*. Phím đi thẳng
+               từ bàn phím vào phiên, và màn hình tự phản chiếu về — nút bấm chỉ
+               là một lớp trung gian nữa. Nút 📷 cũng bỏ: màn đã tự cập nhật,
+               không còn gì để "xem". -->
           <!-- Phím điều khiển: hộp chọn của `claude` đi bằng mũi tên + Enter,
                gửi chữ "xuống" vào đó thì nó gõ ra chữ chứ không di chuyển. Đây
                là thứ trả lời được một phiên đang dừng lại hỏi — thứ mà tới
@@ -2061,7 +2072,6 @@
     cb.checked = sayMode === 'ask';
     cb.disabled = !(mine || canType);
     $('sessAsideLabel').classList.toggle('forced', cb.disabled);
-    $('sessKeys').classList.toggle('hidden', !canType);
     applySayMode(mine || canType);
     // An answer that arrives after the reader moved on belongs to the session
     // they left, not the one they are looking at.
@@ -2186,195 +2196,33 @@
   }
 
   // Phím điều khiển: một cú bấm = một phím, không có ô nhập nào ở giữa.
-  // 📷 đọc CHỮ đang hiện trên màn của phiên — thứ chưa vào nhật ký nên luồng
-  // sự kiện không thấy: hộp chọn đang chờ, thanh tiến trình, lỗi vừa in.
-  $('sessShot').addEventListener('click', (e) => {
-    if (!wantSession) return;
-    $('sessTellBox').classList.remove('hidden');
-    $('sessTellBox').textContent = 'Đang đọc màn hình phiên…';
-    waitingFor = 'tell';
-    sendCommand(`/session ${wantSession}`, null);
-    sendCommand('/shot', e.target);
-  });
-
-  $('sessKeys').addEventListener('click', (ev) => {
-    const b = ev.target.closest('button[data-key]');
-    if (!b || !wantSession) return;
-    $('sessTellBox').classList.remove('hidden');
-    $('sessTellBox').textContent = `Đang bấm '${b.dataset.key}'…`;
-    waitingFor = 'tell';
-    // Khẳng định lại phiên đang theo NGAY TRƯỚC khi bấm.
-    //
-    // `/key` lấy đích từ con trỏ `focus:session`, mà con trỏ ấy do cú chạm vào
-    // thẻ đặt — nếu socket rớt đúng lúc chạm (ví dụ daemon vừa khởi động lại)
-    // thì cú chạm không gửi được gì, và phím rơi vào hư không: hub đáp *"chưa
-    // mở phiên nào"* trong khi màn hình rõ ràng đang mở một phiên (đo
-    // 2026-08-10). Gửi lại `/session` là rẻ và không đổi gì khi nó vốn đã đúng.
-    sendCommand(`/session ${wantSession}`, null);
-    sendCommand(`/key ${b.dataset.key}`, b);
-  });
-  $('sessSay').addEventListener('click', sendSay);
-  // Phím "go" của bàn phím điện thoại là cách gửi tự nhiên nhất; bắt người ta
-  // với tay sang nút là thứ ma sát giết tính năng.
+  /// Bàn phím đi THẲNG vào phiên: phím điều hướng gửi ngay, chữ gửi khi Enter.
+  ///
+  /// Đây là chỗ "giống remote desktop" nằm ở: không nút trung gian, không bảng
+  /// điều khiển. Mũi tên và Esc phải gửi NGAY lúc bấm — chúng là điều hướng,
+  /// giữ lại tới lúc Enter thì vô nghĩa. Chữ thì gom cả dòng rồi mới gửi, vì
+  /// mỗi lệnh là một tin trong phòng chat: gửi từng ký tự là hàng trăm tin cho
+  /// một câu, và phòng chat không phải đường truyền phím.
+  const NAV = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    Escape: 'esc', Tab: 'tab',
+  };
   $('sessSayInput').addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') { ev.preventDefault(); sendSay(ev); }
-  });
-
-  // UC-S05b mức 2. The question runs on a fork, so the session being watched
-  // keeps working and gains no turn — which is exactly the thing a person
-  // cannot see from a phone, so the screen has to keep saying it.
-  function askAside(e) {
-    if (!wantSession) return;
-    const input = $('sessSayInput');
-    const q = input.value.trim();
-    if (!q) { input.focus(); return; }
-    $('sessAskBox').classList.remove('hidden');
-    $('sessAskBox').textContent =
-      'Đang hỏi bên lề — hub mở một bản sao của phiên, mất khoảng nửa phút. Phiên gốc vẫn chạy bình thường…';
-    waitingFor = 'ask';
-    // Remember which answer was already on screen. Snapshots keep arriving
-    // while hub is still thinking, and each one carries the PREVIOUS answer —
-    // repainting it over "đang hỏi…" would show a stale reply as if it were the
-    // new one. Ask the same question twice and the screen would answer
-    // instantly with yesterday's text.
-    askedAfterTs = lastAsideTs;
-    sendCommand(`/ask ${q}`, e && e.target);
-    input.value = '';
-  }
-
-  // Which session button is waiting for hub: 'ask' | 'handover' | null.
-  let waitingFor = null;
-  // `ts` of the answer currently on screen, and the one a pending question must
-  // beat before its result may be painted.
-  let lastAsideTs = '';
-  let askedAfterTs = '';
-
-  /// hub answers in the ROOM, and a refusal ("hết ngân sách", "chưa mở phiên
-  /// nào") never becomes a snapshot row — so a box that only listens to
-  /// snapshots spins forever on exactly the cases a person most needs to read.
-  /// That spinner was already paid for once on 2026-08-07; this is the same
-  /// bug, so it gets the same fix rather than a second discovery.
-  ///
-  /// On success the room's line is a real answer too — show it now, and let the
-  /// snapshot replace it a moment later with the richer version (question,
-  /// fork id, cost).
-  /// Lý lịch phiên, hiện ngay khi mở (Hà 2026-08-09: *"khi mở 1 phiên nên hiện
-  /// thêm các thông tin chi tiết của phiên đó lên để tiện theo dõi"*).
-  ///
-  /// Trước đó màn chi tiết chỉ có tên + luồng sự kiện: muốn biết phiên chạy tài
-  /// khoản nào, ngữ cảnh đầy chưa, có subagent không thì phải quay ra danh sách
-  /// đọc thẻ. Toàn bộ số liệu này đã đi kèm ảnh chụp rồi — chỉ là chưa ai bày ra.
-  function renderSessInfo(s) {
-    const box = $('sessInfo');
-    if (!box) return;
-    box.textContent = '';
-    const WIN = { haiku: 200000 };
-    const win = Object.entries(WIN).find(([k]) => (s.model || '').includes(k))?.[1] || 1000000;
-    const pct = s.context_tokens ? Math.round((s.context_tokens / win) * 100) : 0;
-    const WHERE = {
-      terminal: 'cửa sổ terminal', editor: 'trong editor',
-      background: 'chạy nền', detached: 'không gắn cửa sổ', dead: 'đã dừng',
-    };
-    const rows = [
-      ['tài khoản', s.account],
-      ['nơi chạy', (WHERE[s.host] || s.host) + (s.tty && s.tty !== '??' ? ` · ${s.tty}` : '')],
-      ['mở bởi', s.started_by_hub ? 'hub (từ điện thoại)' : (s.parent_name ? `phiên «${s.parent_name}»` : 'bạn')],
-      ['model', s.model || '(chưa rõ)'],
-      // Ngữ cảnh là con số quyết định "khi nào nên đóng sổ", nên nó đứng đây
-      // chứ không chỉ nằm trên thẻ ở danh sách.
-      ['ngữ cảnh', pct ? `${pct}% · ${s.context_tokens.toLocaleString('vi-VN')} token` : '(chưa đọc được)'],
-      ['chế độ quyền', { auto: 'tự duyệt', dontAsk: 'không hỏi', default: 'hỏi trước' }[s.permission_mode] || s.permission_mode || '(chưa rõ)'],
-      ['thư mục', s.cwd || '—'],
-    ];
-    if (s.pending_subagents) rows.splice(4, 0, ['subagent', `${s.pending_subagents} đang chạy`]);
-    rows.forEach(([k, v]) => {
-      if (!v) return;
-      const r = document.createElement('div');
-      r.className = 'rt-row';
-      const kk = document.createElement('span');
-      kk.className = 'rt-k';
-      kk.textContent = k;
-      const vv = document.createElement('span');
-      vv.className = 'rt-v';
-      vv.textContent = v;
-      if (k === 'ngữ cảnh' && pct >= 60) vv.classList.add('warn');
-      r.append(kk, vv);
-      box.append(r);
-    });
-  }
-
-  function noteSessionReply(f) {
-    if (!waitingFor || f.from === me) return;
-    const text = String(f.text || '');
-    // Trả lời phải KHỚP LỆNH đã hỏi, không phải "bất kỳ trả lời nào của hub".
-    //
-    // Bản trước nhận mọi câu bắt đầu bằng một trong sáu dấu rồi đổ vào ô đang
-    // chờ — nên bấm "Đóng sổ" mà màn hiện *"🚀 Đã mở phiên nền cho
-    // hub-act-demo…"*, tức lời đáp của một lệnh KHÁC (Hà gặp 2026-08-09).
-    // Mỗi loại chờ nay chỉ nhận dấu của chính nó; `⚠` thì ai cũng nhận, vì một
-    // lời từ chối là câu trả lời cho đúng cái vừa hỏi.
-    const MARKS = {
-      ask: /^(💬|⚠)/,
-      tell: /^(➡️|⏹|⌨|📷|⚠)/,
-      new: /^(🚀|⚠)/,
-      handover: /^(📋|⚠)/,
-    };
-    const want = MARKS[waitingFor] || MARKS.handover;
-    if (!want.test(text)) return;
-    const box = $({ ask: 'sessAskBox', tell: 'sessTellBox', new: 'sessNewNote' }[waitingFor] || 'sessHandoverBox');
-    waitingFor = null;
-    box.classList.remove('hidden');
-    box.textContent = '';
-    const p = document.createElement('pre');
-    p.className = 'ev-body';
-    p.style.whiteSpace = 'pre-wrap';
-    p.textContent = text;
-    box.append(p);
-  }
-
-  // UC-S06 — mở phiên làm việc mới cho một dự án, ngay từ điện thoại.
-  $('sessNew').addEventListener('click', (e) => {
-    const project = $('sessNewProject').value;
-    const task = $('sessNewTask').value.trim();
-    const note = $('sessNewNote');
-    if (!project || !task) {
-      note.classList.remove('hidden');
-      note.textContent = 'Chọn dự án và nói việc cần làm.';
+    if (sayMode !== 'type' || !wantSession) return;
+    const nav = NAV[ev.key];
+    if (nav) {
+      ev.preventDefault();
+      sendCommand(`/session ${wantSession}`, null);
+      sendCommand(`/key ${nav}`, null);
       return;
     }
-    note.classList.remove('hidden');
-    note.textContent = 'Đang mở phiên nền trên máy…';
-    // hub trả lời trong phòng chat. Không nhận nó về đây thì lời báo hỏng nằm
-    // ở TAB KHÁC với cái nút vừa bấm, và màn này đứng im như đang chạy tốt.
-    waitingFor = 'new';
-    // `@tài-khoản` chỉ gửi khi KHÁC mặc định: giữ nguyên câu lệnh cũ cho
-    // trường hợp thường gặp, và không bịa ra một tham số hub phải bỏ qua.
-    const acc = $('sessNewAccount');
-    const first = acc && acc.options.length ? acc.options[0].value : '';
-    const at = acc && acc.value && acc.value !== first ? `@${acc.value} ` : '';
-    sendCommand(`/new ${project} ${at}${task}`, e.target);
-    $('sessNewTask').value = '';
-  });
-
-  // UC-S05 — nói tiếp vào chính phiên đó. Không phải hỏi bên lề: lượt này ở
-  // lại trên thread cũ, nên phiên gốc DÀI RA (ngược hẳn với /ask).
-  function tellSession(e) {
-    if (!wantSession) return;
-    const input = $('sessSayInput');
-    const text = input.value.trim();
-    if (!text) { input.focus(); return; }
-    $('sessTellBox').classList.remove('hidden');
-    $('sessTellBox').textContent = 'Đang nói tiếp vào phiên — lượt này ở lại trên chính phiên đó…';
-    waitingFor = 'tell';
-    sendCommand(`/tell ${text}`, e && e.target);
-    input.value = '';
-  }
-  $('sessStop').addEventListener('click', (e) => {
-    if (!wantSession) return;
-    $('sessTellBox').classList.remove('hidden');
-    $('sessTellBox').textContent = 'Đang dừng phiên…';
-    waitingFor = 'tell';
-    sendCommand(`/stop ${wantSession}`, e.target);
+    // Enter trên ô TRỐNG = phím Enter (chọn mục đang sáng), không phải gửi một
+    // dòng rỗng đi đâu cả.
+    if (ev.key === 'Enter' && !ev.target.value.trim()) {
+      ev.preventDefault();
+      sendCommand(`/session ${wantSession}`, null);
+      sendCommand('/key enter', null);
+    }
   });
 
   /// A side question and its answer — labelled, never mixed into the stream.
@@ -2436,6 +2284,39 @@
   }
 
   /// One session rendered as a terminal would: say · tool · result · think.
+  /// Chữ đang hiện trên cửa sổ phiên, và các lựa chọn nếu nó đang hỏi.
+  ///
+  /// Không có nút "xem": hub đọc màn mỗi lần đẩy ảnh chụp, và vòng bám đẩy ngay
+  /// khi chữ trên màn đổi — kể cả khi nhật ký đứng yên, vốn đúng là lúc phiên
+  /// dừng lại hỏi. Bắt người ta bấm để biết có gì mới là hỏng cả ý sản phẩm.
+  function renderScreen(focus) {
+    const box = $('sessScreenBox');
+    const pre = $('sessScreen');
+    const ch = $('sessChoices');
+    const text = focus && focus.screen;
+    box.classList.toggle('hidden', !text);
+    if (!text) { pre.textContent = ''; ch.textContent = ''; return; }
+    if (pre.textContent !== text) pre.textContent = text;
+    const list = (focus.choices || []);
+    ch.classList.toggle('hidden', list.length === 0);
+    // Vẽ lại chỉ khi ĐỔI: gán lại mỗi 2 giây làm mất vệt chọn của người đọc.
+    const want = list.map((c) => `${c.n}. ${c.label}`).join('\n');
+    if (ch.dataset.want !== want) {
+      ch.dataset.want = want;
+      ch.textContent = '';
+      if (list.length) {
+        const head = document.createElement('div');
+        head.textContent = '⌨ Phiên đang hỏi — bấm số ở hàng phím:';
+        ch.append(head);
+        list.forEach((c) => {
+          const d = document.createElement('div');
+          d.textContent = `${c.n}. ${c.label}`;
+          ch.append(d);
+        });
+      }
+    }
+  }
+
   /// Một lệnh, viết như người gõ nó.
   ///
   /// UC-S02 đặt vạch đích là "thấy đúng thứ terminal đang hiện". Hàng lệnh
@@ -2473,6 +2354,8 @@
   }
 
   function renderStream(focus) {
+    // Màn hình sống vẽ trước luồng: nó là HIỆN TẠI, luồng là quá khứ.
+    renderScreen(focus);
     const box = $('sessStream');
     box.classList.toggle('term', $('termMode').checked);
     const status = $('sessStatus');

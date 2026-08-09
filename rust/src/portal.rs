@@ -90,7 +90,24 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
     let focus = match db.get_cursor(crate::pipeline::FOCUS_SESSION_KEY) {
         Ok(Some(id)) if !id.is_empty() => {
             match live.sessions.iter().find(|s| s.session_id == id) {
-                Some(s) => Some(crate::sessions::stream(cfg, &s.session_id, &s.cwd, 120)),
+                Some(s) => {
+                    let mut st = crate::sessions::stream(cfg, &s.session_id, &s.cwd, 120);
+                    // MÀN HÌNH đi kèm ảnh chụp, không phải chờ ai bấm.
+                    //
+                    // Hà 2026-08-10: *"tại sao lại phải bấm, rõ ràng phải tự
+                    // cập nhật mọi thay đổi trên terminal rồi đồng bộ lên ui"*.
+                    // Đúng — và đây là thứ nhật ký KHÔNG bao giờ có: một phiên
+                    // dừng lại hỏi thì tệp đứng yên, nên vòng bám theo mtime
+                    // không hề biết. Chỉ màn hình mới nói được điều đó.
+                    if let Some((screen, choices)) = crate::keys::screen_of(&s.tty, 16) {
+                        st.screen = Some(screen);
+                        st.choices = choices
+                            .into_iter()
+                            .map(|(n, l)| json!({ "n": n, "label": l }))
+                            .collect();
+                    }
+                    Some(st)
+                }
                 // Phiên đã kết thúc: `claude agents` bỏ nó khỏi danh sách sau vài
                 // giây, NHƯNG nhật ký vẫn nằm nguyên trên đĩa. Bản trước dừng ở
                 // đây và trả về một dòng ghi chú, nên mở phiên vừa xong là màn

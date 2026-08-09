@@ -130,6 +130,16 @@
     color: var(--muted); display: flex; gap: .5rem;
   }
   .msg .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Lệnh do CHÍNH TRANG gửi (`/session`, `/ask`, `/stop`…) thu về một dòng
+     nhỏ. Chúng là dấu vết máy, không phải lời người: để nguyên khối bong bóng
+     thì phòng chat toàn lệnh, và câu người thật lẫn vào giữa (rà 2026-08-09,
+     đếm được 3 bong bóng lệnh liên tiếp trên một màn). */
+  .msg.cmdline { background: none; border: 0; padding: 2px 0; max-width: none; }
+  .msg.cmdline .who { display: none; }
+  .msg.cmdline .body {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
 
   .note {
     align-self: center; color: var(--muted); font-size: .82rem;
@@ -911,7 +921,7 @@
             <button type="button" id="replyCancel" title="Bỏ trả lời">✕</button>
           </div>
           <form class="composer" id="composer">
-            <textarea id="text" placeholder="Viết câu hỏi… (Enter để gửi, Shift+Enter xuống dòng)" rows="1"></textarea>
+            <textarea id="text" placeholder="Viết câu hỏi… (Enter để gửi)" rows="1"></textarea>
             <button type="submit" id="send">Gửi</button>
           </form>
         </div>
@@ -923,10 +933,10 @@
         <h2>Kênh &amp; công cụ</h2>
         <div id="runtimeBox"></div>
         <div id="healthProbe" class="muted"></div>
-        <button type="button" id="btnDoctor" class="primary" style="margin-top:12px">Kiểm tra</button>
+        <button type="button" id="btnDoctor" style="margin-top:12px">Kiểm tra</button>
       </div>
       <div class="panel">
-        <h2>Lần poll gần đây</h2>
+        <h2>Lần poll gần đây <span id="runsSummary" class="muted"></span></h2>
         <div class="scroll">
           <table id="runsTable">
             <!-- Ba cột, không phải năm. Trên 390px, năm cột đẩy hai cột cuối ra
@@ -970,21 +980,25 @@
         </p>
       </div>
 
-      <div class="panel">
-        <h2>JSON thô (chỉ xem)</h2>
-        <p class="muted boardnote">
-          Tệp: <span id="configFile" class="mono"></span> · sửa từng trường ở trên rồi bấm Lưu;
-          mỗi thay đổi đi qua phòng chat dưới dạng <code>/set &lt;trường&gt; &lt;giá trị&gt;</code>
-          và được hub kiểm tra kiểu + validate trước khi ghi.
-        </p>
-        <pre id="configBody"></pre>
-      </div>
-
+      <!-- Nút Lưu đứng NGAY SAU các trường, TRƯỚC bãi JSON. Trước đây nó nằm
+           tít dưới cùng: sửa một ô ở trên rồi phải cuộn qua ~800px JSON thô mới
+           tới chỗ bấm Lưu (rà 2026-08-09). -->
       <div class="panel">
         <div class="row-flex">
           <button type="button" id="cfgSave" class="primary">Lưu cấu hình</button>
           <span id="cfgMsg" class="muted"></span>
         </div>
+        <p class="muted boardnote">
+          Tệp: <span id="configFile" class="mono"></span> · mỗi thay đổi đi qua phòng chat
+          dưới dạng <code>/set &lt;trường&gt; &lt;giá trị&gt;</code> và được hub kiểm tra kiểu
+          + validate trước khi ghi.
+        </p>
+        <!-- JSON thô GẤP LẠI: nó là bản đối chiếu khi nghi ngờ, không phải thứ
+             đọc mỗi lần mở tab — mở ra là hàng trăm dòng nuốt cả màn. -->
+        <details id="configRaw">
+          <summary class="muted">Xem JSON thô</summary>
+          <pre id="configBody"></pre>
+        </details>
       </div>
     </div>
   </section>
@@ -1073,18 +1087,18 @@
 
     // Reply = "this is about that". No command to remember, and hub inherits
     // the project of the message being answered.
-    if (tid) {
-      const row = document.createElement('div');
-      row.className = 'msgtools';
-      const reply = document.createElement('button');
-      reply.className = 'replybtn';
-      reply.type = 'button';
-      reply.textContent = '↩ Trả lời';
-      reply.addEventListener('click', () => setReplyTarget(tid, shown));
-      row.append(reply);
+    // Nút "↩ Trả lời" trên MỌI tin đã bỏ (rà 2026-08-09).
+    //
+    // Nó là di sản của sản phẩm hộp thư, nơi mỗi tin là một VIỆC và trả lời
+    // đúng việc nào là chuyện quan trọng. Phòng này chỉ có hai người nói: chủ
+    // máy và hub. Đo được: 51 nút trên một màn, mỗi nút một vùng chạm 35px,
+    // và không lần nào cần tới — hub thừa hưởng dự án từ tin trước đó rồi.
+    void tid;
 
-      el.append(row);
-    }
+    // Một dòng bắt đầu bằng `/` và do chính chủ máy gửi là LỆNH của trang,
+    // không phải câu nói. Nhận ra bằng hình dạng chứ không bằng cờ: trang gửi
+    // lệnh qua cùng một đường với tin thường, nên không có cờ nào để đọc.
+    if (/^\/[a-z]/.test((shown || '').trim())) el.classList.add('cmdline');
 
     thread.insertBefore(el, pending);
     scrollDown();
@@ -2481,9 +2495,29 @@
       return d.toLocaleTimeString('vi-VN', { hour12: false });
     };
 
+    // Bảng "lần poll gần đây" từng liệt kê 12 dòng `ok · 0` chiếm hai phần ba
+    // màn để nói đúng một điều: vẫn chạy bình thường (rà 2026-08-09). Nay một
+    // dòng tóm tắt, và CHỈ dòng hỏng mới được kê tên — cái đáng đọc là cái
+    // khác thường.
+    const allRuns = health.runs || [];
+    const badRuns = allRuns.filter(
+      (r) => r.ok === 0 || r.ok === false || (r.err && String(r.err).length)
+    );
+    const sum = $('runsSummary');
+    if (sum) {
+      sum.textContent = allRuns.length
+        ? (badRuns.length
+            ? `${allRuns.length} lượt gần nhất · ${badRuns.length} hỏng`
+            : `${allRuns.length} lượt gần nhất · tất cả ok`)
+        : 'chưa có lượt nào';
+      sum.classList.toggle('bad', badRuns.length > 0);
+    }
+    const runsWrap = $('runsTable');
+    if (runsWrap) runsWrap.classList.toggle('hidden', badRuns.length === 0);
+
     const body = $('runsRows');
     body.textContent = '';
-    (health.runs || []).forEach((r) => {
+    badRuns.forEach((r) => {
       const tr = document.createElement('tr');
       // `ok` về từ sqlite là số 0/1, nên `=== false` không bao giờ đúng: một
       // lượt hỏng mà không kèm `err` sẽ được tô là "ok".

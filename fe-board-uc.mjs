@@ -89,12 +89,27 @@ try {
   check("không còn kênh đã gỡ",
     !/github|telegram|mailler|devlog/i.test(probe), probe.replace(/\s+/g, " ").slice(0, 90));
   check("nói rõ đo lúc nào (số liệu có thể cũ vài phút)", /Đo lúc/.test(probe));
+  // Bảng lượt chạy nay CHỈ kê lượt HỎNG (rà ba tab, 2026-08-09): 12 dòng
+  // `ok · 0` chiếm hai phần ba màn để nói một điều duy nhất. Cái phải kiểm bây
+  // giờ là dòng tóm tắt — nó luôn có, và nó là chỗ nói "tất cả ok" hay "N hỏng".
+  const runsSummary = (await page.locator("#runsSummary").innerText()).trim();
   const runRows = await page.locator("#runsRows tr").count();
-  check("có lịch sử lượt chạy", runRows > 0, `${runRows} dòng`);
+  check(
+    "có lịch sử lượt chạy",
+    // `innerText` trả về chữ đã HOA HOÁ vì `<h2>` có `text-transform:
+    // uppercase` — đúng bẫy mà `fe-denied-uc` đã ghi chú, và tôi vừa đạp lại.
+    /lượt gần nhất|chưa có lượt nào/i.test(runsSummary),
+    `${runsSummary} · ${runRows} dòng hỏng được kê`
+  );
 
   // ---- config ------------------------------------------------------------
   await page.click('#panelTabs button[data-panel="config"]');
   await page.waitForSelector("#panel-config:not(.hidden)", { timeout: 5000 });
+  // JSON thô nay GẤP LẠI trong `<details>` — mở ra là hàng trăm dòng nuốt cả
+  // màn. Phép đo phải MỞ nó ra như người dùng làm, chứ đọc `innerText` của một
+  // khối đang đóng thì được chuỗi rỗng và báo "config trống".
+  await page.locator("#configRaw summary").click();
+  await page.waitForTimeout(300);
   const cfgText = await page.locator("#configBody").innerText();
   check("tab Cấu hình hiện config thật", cfgText.length > 200, `${cfgText.length} ký tự`);
   check("cấu hình chỉ chứa TÊN biến môi trường, không có giá trị bí mật",

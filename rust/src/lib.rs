@@ -15,6 +15,13 @@ pub mod adapters;
 pub mod config;
 pub mod db;
 pub mod exec;
+/// Gõ phím vào cửa sổ terminal của một phiên, và chụp lại cửa sổ ấy.
+///
+/// Hà chốt 2026-08-09 sau khi tôi nêu rõ đánh đổi. Đọc đầu tệp `keys.rs` trước
+/// khi sửa: đường này **bỏ qua `DENIED_TOOLS`**, và nó là đường DUY NHẤT nhìn
+/// thấy một phiên đang dừng lại hỏi — câu hỏi ấy nằm trên màn hình chứ chưa vào
+/// nhật ký.
+pub mod keys;
 pub mod live;
 pub mod logging;
 pub mod pipeline;

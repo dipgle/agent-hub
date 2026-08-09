@@ -182,7 +182,13 @@ try {
   await page.locator(`.sess[data-session="${fresh.session_id}"]`).click();
   check("mở được màn chi tiết của phiên mới", await page.locator("#sessDetail").isVisible());
   check("phiên do hub mở thì CÓ nút Dừng", await page.locator("#sessStop").isVisible());
-  check("phiên do hub mở thì CÓ ô nói tiếp", await page.locator("#sessTellRow").isVisible());
+  // v85 gộp hai ô làm một. Với phiên hub mở, mặc định PHẢI là "nói tiếp":
+  // ô tích "hỏi bên lề" bỏ trống và mở cho người dùng tự chọn.
+  check("phiên do hub mở thì CÓ ô nhập", await page.locator("#sessSayInput").isVisible());
+  check("mặc định là NÓI TIẾP, không phải hỏi bên lề",
+    (await page.locator("#sessAside").isChecked()) === false &&
+      (await page.locator("#sessAside").isDisabled()) === false,
+    await page.locator("#sessSayInput").getAttribute("placeholder"));
 
   const file = transcriptOf(fresh.session_id);
   check("phiên mới có nhật ký trên đĩa", !!file, file || "");
@@ -203,8 +209,8 @@ try {
 
   // ——— UC-S05: nói tiếp vào CHÍNH phiên đó ———
   const sizeBefore = sizeOf(file);
-  await page.fill("#sessTellInput", "Nội dung README bạn vừa đọc nói về cái gì? Trả lời một dòng.");
-  await page.click("#sessTell");
+  await page.fill("#sessSayInput", "Nội dung README bạn vừa đọc nói về cái gì? Trả lời một dòng.");
+  await page.click("#sessSay");
   await page.waitForFunction(
     () => {
       const t = document.getElementById("sessTellBox").textContent || "";

@@ -84,6 +84,52 @@ try {
   const summary = (await page.locator("#sessSummary").innerText()).trim();
   console.log(`nơi phiên sống: ${JSON.stringify(byHost)}`);
 
+  // MÀN THEO DÕI PHẢI TỰ LÀM MỚI — và phải ĐO thấy nó chạy.
+  //
+  // v70 thêm vòng 15 giây nhưng móc vào `showTab()`, một hàm KHÔNG AI GỌI; nó
+  // chưa từng chạy suốt 14 bản bundle trong khi tôi đã báo là "danh sách tự làm
+  // mới". Không phép đo nào bắt được, vì mọi kịch bản đều tự bấm "Tải lại" hoặc
+  // đổi tab. Nên đếm thẳng số lần trang đi hỏi ảnh chụp.
+  const hits = [];
+  const onReq = (r) => { if (/\/app\/doc\/list/.test(r.url())) hits.push(Date.now()); };
+  page.on("request", onReq);
+  await page.waitForTimeout(34000);            // đủ cho 2 nhịp 15s
+  page.off("request", onReq);
+  check(
+    "danh sách tự làm mới, không cần bấm gì",
+    hits.length >= 2,
+    `${hits.length} lần đọc ảnh chụp trong 34s`
+  );
+
+  // ...và tự làm mới KHÔNG được đẩy chỗ đang đọc đi. `renderSessions` dựng lại
+  // toàn bộ thẻ, nên phải neo theo THẺ đang nhìn (nhận diện bằng session_id,
+  // không bằng vị trí — thứ tự đổi khi một phiên vừa động).
+  await page.evaluate(() => {
+    const m = document.querySelector("main");
+    m.scrollTop = Math.round(m.scrollHeight * 0.6);
+  });
+  await page.waitForTimeout(400);
+  const readCard = () =>
+    page.evaluate(() => {
+      const el = [...document.querySelectorAll("#sessList .sess")]
+        .find((n) => n.getBoundingClientRect().bottom > 0);
+      return {
+        id: el?.dataset.session || "",
+        name: (el?.querySelector("strong")?.textContent || "").trim().slice(0, 24),
+        y: el ? Math.round(el.getBoundingClientRect().top) : null,
+      };
+    });
+  const beforeList = await readCard();
+  await page.waitForTimeout(17000);            // qua ít nhất một nhịp làm mới
+  const afterList = await readCard();
+  check(
+    "làm mới danh sách KHÔNG đẩy chỗ đang đọc đi",
+    beforeList.id.length > 0 && afterList.id === beforeList.id &&
+      Math.abs(afterList.y - beforeList.y) <= 4,
+    `${beforeList.name} y=${beforeList.y} → ${afterList.name} y=${afterList.y}`
+  );
+  await page.evaluate(() => { document.querySelector("main").scrollTop = 0; });
+
   // Từ v78 việc chia-theo-loại nằm ở TIÊU ĐỀ TỪNG NHÓM, không còn ở dòng tóm
   // tắt — nhắc hai lần thì trên 390px nó ngốn 3 dòng và đẩy thẻ đầu tiên xuống
   // 336px. Phép đo phải theo sản phẩm về chỗ mới, chứ đòi dòng tóm tắt kể lại

@@ -1,5 +1,57 @@
 # active context — hub
 
+## 🧰 2026-08-09 (khuya) — màn chi tiết phiên gọn lại (v84→v89)
+
+Bốn yêu cầu liền của Hà, làm trong một mạch.
+
+**1. Vòng tự làm mới của danh sách CHƯA TỪNG CHẠY.** Trước khi làm gì khác, đo
+lại lời mình đã nói: 40 giây đứng ở tab Phiên sinh **0** lần đọc ảnh chụp. v70
+móc `startBoardPoll()` vào `showTab()` — một hàm **không ai gọi**; tôi vẫn báo
+"danh sách tự làm mới 15s/lần" và nó sai suốt 14 bản bundle. Không kịch bản nào
+bắt được vì mọi kịch bản đều tự bấm "Tải lại" hoặc đổi tab. Nay móc vào
+`enterRoom()` (đường vào phòng DUY NHẤT), xoá hẳn `showTab` chết, và **đếm thẳng
+request**: `fe-sessions-uc` đòi ≥2 lần đọc ảnh chụp trong 34s. *Móc xong phải ĐO
+thấy nó chạy.*
+⟹ Vòng sống thì `renderSessions` (dựng lại toàn bộ thẻ) sẽ đẻ lại đúng cú nhảy
+vừa vá cho luồng, nên **neo theo THẺ đang nhìn** (nhận diện bằng `session_id`,
+không bằng vị trí — thứ tự đổi khi một phiên vừa động). Đo: node bị dựng lại
+(`giữ 0/6`) mà vị trí **y đứng im tuyệt đối**.
+
+**2. Gộp hai ô nhập làm một** (*"mặc định là hỏi phiên nếu đó là phiên có thể gõ
+vào được, còn muốn hỏi bên lề thì tích chọn checkbox"*). Hai việc ấy loại trừ
+nhau, và với phần lớn phiên thì một trong hai **không dùng được**:
+- phiên hub quản được → tích **bỏ trống**, mở cho chọn: gửi = `/tell`;
+- phiên khác → tích **bật sẵn + khoá**, kèm lý do trên màn: gửi = `/ask`.
+Placeholder, nhãn nút và dòng chú thích đổi theo chế độ — không thì gõ xong
+không biết câu vừa gõ sẽ CHEN VÀO phiên hay chạy trên bản sao.
+
+**3. Ô nhập ghim đáy, chỉ nội dung cuộn** — `position: sticky`, KHÔNG dựng khung
+cuộn riêng, nên vẫn đúng "một màn một thanh cuộn". Đo: đáy ô nhập 444px → 444px
+sau khi cuộn. Câu trả lời xếp **trên** ô nhập và ô nhập là phần tử **cuối**.
+
+**4. Nút "← Danh sách" + tên phiên lên hàng "Ảnh chụp lúc…"** — tiết kiệm một
+hàng 44px trên 390px. Hai lỗi lộ ra ngay khi đo:
+- nút bị `#board.on-sessions .boardbar button { display: none }` **vạ lây** (luật
+  giấu ba nút thao tác): `class` sạch mà `display:none`, nhìn DOM tưởng đang
+  hiện — đo mới thấy **0×0px**;
+- head **cuộn mất** khi đọc luồng dài ⟹ ghim đỉnh; nay nút đứng yên `y=73` và
+  bấm được từ đáy.
+
+**5. Ô nhập + nút Gửi MỘT dòng** — `.row-flex` có `flex-wrap: wrap` (cần cho nút
+"Đóng sổ" nhãn dài) nên nút rơi xuống dòng dưới, ngốn thêm 44px ngay chỗ ngón
+tay chạm. Riêng hàng nhập khoá `nowrap`.
+
+🎲 **Một phép đo đỏ vì tranh tiêu điểm, đã siết:** hub chỉ **theo được một
+phiên**; chạy `fe-aside` rồi `fe-stream` liên tiếp thì kịch bản sau đọc ảnh chụp
+còn mang tiêu điểm của kịch bản trước. Chạy riêng 16/16, chạy liên tiếp đỏ 2.
+Nay `fe-stream` **chờ tiêu điểm chuyển hẳn** rồi mới đo. Lỗi ở phép đo, không ở
+sản phẩm.
+
+**Nghiệm thu (bundle v89):** `fe-newsession` **21/21** · `fe-aside` **10/10** ·
+`fe-stream` **16/16** · `fe-sessions` 19/19 · `fe-phone` 31/31 · `fe-url` 16/16 ·
+`fe-board` 19/19 · `fe-smoke` 15/15 · `fe-denied` 10/10 · `fe-config` 8/8 ·
+0 lỗi console.
+
 ## 🧵 2026-08-09 (tối) — luồng phiên: thôi nhảy, thôi cuộn lồng (v81→v83)
 
 Hai báo lỗi liền của Hà, và cả hai đều đúng.

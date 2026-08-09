@@ -138,7 +138,15 @@ try {
 
   await page.locator(`.sess[data-session="${target.session_id}"]`).click();
   check("chạm vào phiên thì mở màn chi tiết", await page.locator("#sessDetail").isVisible());
-  check("màn phiên có ô hỏi bên lề", await page.locator("#sessAskInput").isVisible());
+  // Từ v85 hai ô nhập gộp làm một: mặc định là "nói tiếp", tích ô để chuyển
+  // sang "hỏi bên lề". Với phiên KHÔNG gõ vào được thì ô tích đã bật sẵn và bị
+  // khoá — nên phép đo phải bật nó khi cần, chứ không giả định.
+  check("màn phiên có ô nhập", await page.locator("#sessSayInput").isVisible());
+  const asideBox = page.locator("#sessAside");
+  if (!(await asideBox.isChecked())) await asideBox.check();
+  check("đã ở chế độ hỏi bên lề",
+    await asideBox.isChecked(),
+    await page.locator("#sessSayInput").getAttribute("placeholder"));
   check("màn nói rõ phiên gốc không bị đụng", (await page.locator("#sessAskHint").textContent()).includes("không bị đụng"));
 
   // Chờ luồng về trước đã, để chắc hub đã theo đúng phiên này.
@@ -168,9 +176,9 @@ try {
   let a = null;
   let shown = { box: "", note: "" };
   if (willPay) {
-  await page.fill("#sessAskInput", question);
-  await page.click("#sessAsk");
-  check("ô hỏi được dọn sau khi gửi", (await page.inputValue("#sessAskInput")) === "");
+  await page.fill("#sessSayInput", question);
+  await page.click("#sessSay");
+  check("ô hỏi được dọn sau khi gửi", (await page.inputValue("#sessSayInput")) === "");
 
   // Hai bước, vì màn có HAI trạng thái và chỉ trạng thái sau mới là cái người
   // dùng rốt cuộc nhìn thấy: lời đáp về qua phòng chat trước (nhanh, thô), rồi

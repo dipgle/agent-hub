@@ -313,6 +313,11 @@
      The snapshot stamp stays — how old the data is still matters (UC-S09). */
   #board.on-sessions .boardnote,
   #board.on-sessions .boardbar button { display: none; }
+  /* …TRỪ nút quay ra danh sách. Luật trên sinh ra để giấu ba nút thao tác
+     (Đọc phòng · Chạy 1 vòng · Tải lại) khỏi màn Phiên; khi nút "← Danh sách"
+     dọn lên hàng này (2026-08-09) nó bị vạ lây — `display: none` trong khi
+     `class` vẫn sạch, nên nhìn DOM tưởng đang hiện. Đo mới thấy: 0×0px. */
+  #board.on-sessions .boardbar #sessBack { display: inline-flex; }
   #sessList { display: flex; flex-direction: column; gap: 8px; }
   /* Một dòng đã chết không được đọc như việc đang chạy. */
   .sess.sess-dead { opacity: .62; border-style: dashed; }
@@ -414,6 +419,23 @@
     background: var(--soft, #f2f5f2); border: 1px solid var(--line);
     border-radius: 6px; padding: 6px 8px;
   }
+  /* Ô nhập và nút Gửi đứng MỘT dòng (Hà 2026-08-09). `.row-flex` có
+     `flex-wrap: wrap` — cần cho hàng nút "Đóng sổ" nhãn dài — nhưng ở hàng
+     nhập thì nó đẩy nút xuống dòng dưới, ngốn thêm 44px ngay chỗ ngón tay
+     đang chạm. Hàng này khoá `nowrap`: ô co lại, nút giữ nguyên. */
+  #sessSayRow { flex-wrap: nowrap; }
+  #sessSayRow > input { flex: 1 1 0; min-width: 0; }
+  #sessSayRow > button { flex: 0 0 auto; white-space: nowrap; }
+  #sessCompose {
+    position: sticky; bottom: 0; z-index: 3;
+    background: var(--panel); padding: 6px 0 2px;
+    border-top: 1px solid var(--line); margin-top: 8px;
+  }
+  .sess-mode {
+    display: flex; align-items: center; gap: 8px; margin: 6px 0 2px;
+    font-size: 13px; color: var(--muted); min-height: 44px;
+  }
+  .sess-mode.forced { opacity: .85; }
   .ev-result { padding-left: 10px; border-left: 2px solid var(--line); }
   /* Đầu ra dài thì KẸP rồi cho bấm mở, chứ không nhét vào hộp cuộn: một hộp
      cuộn trong trang cuộn là hai thứ tranh nhau ngón tay. */
@@ -437,6 +459,20 @@
   #board nav.subtabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
   #board nav.subtabs button.on { background: var(--accent-soft); border-color: var(--accent); font-weight: 600; }
   #board .boardbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  /* Hàng trên cùng GHIM ĐỈNH ở màn Phiên. Nó nay mang nút "← Danh sách" và tên
+     phiên đang đọc (Hà 2026-08-09) — mà một luồng dài thì cuộn vài màn là nút
+     ấy biến mất, tức đưa lên head xong lại với không tới. Sticky chứ không
+     phải khung riêng: trang vẫn một thanh cuộn. */
+  /* Sticky không đi quá khối cha: ở đáy trang, ô nhập dừng lại ở mép dưới của
+     `#sessDetail` chứ không phải mép màn hình — đo được hụt 87px, đúng bằng
+     lề dưới của panel + `#board`. Cắt phần thừa ấy ở màn Phiên. */
+  #board.on-sessions { padding-bottom: 8px; }
+  #board.on-sessions #sessDetail { margin-bottom: 0; padding-bottom: 4px; }
+  #board.on-sessions .boardbar {
+    position: sticky; top: 0; z-index: 4;
+    background: var(--panel); margin-bottom: 8px;
+    padding: 6px 0 5px; border-bottom: 1px solid var(--line);
+  }
   #board .boardbar .spacer { flex: 1; }
   #board .boardnote { margin: 0 0 12px; font-size: 12px; }
   #board .boardnote code { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
@@ -521,6 +557,10 @@
        command, so every action leaves a trace where a person can read it. -->
   <section class="board hidden" id="board">
     <div class="boardbar">
+      <!-- Chỉ hiện khi đang mở một phiên; lúc ở danh sách thì hàng này chỉ có
+           dấu thời gian như cũ. -->
+      <button type="button" id="sessBack" class="hidden">← Danh sách</button>
+      <strong id="sessTitle" class="hidden"></strong>
       <span id="boardStamp" class="muted">đang tải…</span>
       <span class="spacer"></span>
       <button type="button" id="btnIngest">Đọc phòng</button>
@@ -573,10 +613,11 @@
       <!-- UC-S02: one session the way the terminal shows it — what was said,
            every command with its arguments, and every command's output. -->
       <div class="panel hidden" id="sessDetail">
-        <div class="row-flex">
-          <button type="button" id="sessBack">← Danh sách</button>
-          <strong id="sessTitle"></strong>
-        </div>
+        <!-- Nút "← Danh sách" và tên phiên KHÔNG còn ở đây: chúng lên hàng
+             `boardbar`, đứng cùng dòng với "Ảnh chụp lúc…" (Hà 2026-08-09).
+             Lý do thật là chỗ ngồi: trên 390px một hàng riêng chỉ để chứa một
+             nút và một cái tên ngốn ~44px, đẩy nội dung phiên xuống — trong
+             khi hàng ảnh-chụp ngay trên nó còn trống hơn nửa bề ngang. -->
         <p class="muted" id="sessStatus"></p>
         <!-- Luồng phiên đứng TRƯỚC các nút. Màn này để ĐỌC việc đang chạy; đặt
              "Đóng sổ" và ô hỏi lên đầu thì mỗi lần mở ra phải lướt qua hai
@@ -592,28 +633,38 @@
                trong terminal/VS Code (Hà chốt 08-08). -->
           <button type="button" id="sessStop" class="hidden">⏹ Dừng phiên</button>
         </div>
-        <!-- UC-S05: nói tiếp vào CHÍNH phiên đó (khác hẳn hỏi bên lề, vốn tách
-             ra bản sao). claude từ chối nối vào phiên đang chạy, nên ô này chỉ
-             mở khi phiên đã dừng — và nói rõ lý do khi chưa. -->
-        <div class="row-flex hidden" id="sessTellRow">
-          <input type="text" id="sessTellInput" placeholder="Nói tiếp vào phiên này…" autocomplete="off" />
-          <button type="button" id="sessTell">Gửi</button>
-        </div>
+        <!-- MỘT ô nhập, hai việc. Hà 2026-08-09: *"làm gọn 2 input… mặc định
+             là hỏi phiên nếu đó là phiên có thể gõ vào được, còn muốn hỏi bên
+             lề thì tích chọn checkbox"*.
+             Trước đây hai ô đứng cạnh nhau và người dùng phải tự biết ô nào
+             làm gì — trong khi hai việc ấy loại trừ nhau, và với phần lớn
+             phiên thì một trong hai còn KHÔNG dùng được.
+             · nói tiếp = lượt ở lại trên chính phiên đó (phiên DÀI RA)
+             · hỏi bên lề = chạy trên bản sao (phiên gốc không thêm lượt nào)
+             claude từ chối nối vào phiên nền đang chạy, nên "nói tiếp" chỉ mở
+             cho phiên hub quản được; phiên khác thì ô tự khoá ở chế độ bên lề
+             và nói rõ vì sao. -->
+        <p class="muted boardnote" id="sessAskHint"></p>
+        <!-- Ô nhập GHIM ĐÁY, chỉ nội dung cuộn. Hà 2026-08-09: *"để phần input
+             đứng im thanh cuộn chỉ cuộn nội dung danh sách"*. Dùng `position:
+             sticky` chứ KHÔNG dựng thêm khung cuộn riêng — trang vẫn chỉ có
+             MỘT thanh cuộn, ô nhập chỉ thôi trôi khỏi tầm tay. -->
+        <!-- Câu trả lời đứng TRÊN ô nhập, và ô nhập là phần tử CUỐI. Đặt
+             ngược lại thì đáp án rơi xuống dưới chỗ vừa gõ, và ô nhập ghim đáy
+             bị chính mấy hộp ấy đội lên (đo: đáy 836 → 748px khi cuộn hết). -->
         <div id="sessTellBox" class="hidden"></div>
         <div id="sessHandoverBox" class="hidden"></div>
-        <!-- UC-S05b mức 2: hỏi CHEN NGANG mà không phá ngữ cảnh đang làm.
-             Câu hỏi chạy trên một bản fork, nên phiên gốc không thêm lượt nào
-             và không mất một giây nào. Đo 2026-08-08: phiên gốc y nguyên
-             7380 byte / 10 dòng / cùng mtime trước và sau. -->
-        <div class="row-flex" id="sessAskRow">
-          <input type="text" id="sessAskInput"
-                 placeholder="Hỏi bên lề phiên này…" autocomplete="off" />
-          <button type="button" id="sessAsk">💬 Hỏi</button>
-        </div>
-        <p class="muted boardnote" id="sessAskHint">
-          Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.
-        </p>
         <div id="sessAskBox" class="hidden"></div>
+        <div id="sessCompose">
+          <div class="row-flex" id="sessSayRow">
+            <input type="text" id="sessSayInput" placeholder="Nói tiếp vào phiên này…" autocomplete="off" />
+            <button type="button" id="sessSay">Gửi</button>
+          </div>
+          <label class="sess-mode" id="sessAsideLabel">
+            <input type="checkbox" id="sessAside" />
+            <span id="sessAsideText">Hỏi bên lề (chạy trên bản sao)</span>
+          </label>
+        </div>
 
       </div>
     </div>
@@ -928,6 +979,12 @@
     // opening the board.
     loadBoard();
     goPanel(panel);
+    // Vòng tự làm mới phải móc vào ĐÂY. Bản v70 móc nó vào `showTab()` — một
+    // hàm KHÔNG CÓ CHỖ NÀO GỌI, nên nó chưa từng chạy: đo 2026-08-09, 40 giây
+    // đứng ở tab Phiên sinh **0** lần đọc ảnh chụp. Tôi đã báo là "danh sách tự
+    // làm mới 15s/lần"; sai. *Móc xong phải ĐO thấy nó chạy, đừng tin vào việc
+    // mình đã gọi hàm.*
+    startBoardPoll();
     // Lần dựng đầu: ghi trạng thái vào địa chỉ mà KHÔNG đẩy thêm một bước —
     // người dùng chưa "đi" đâu cả, họ vừa mở trang.
     writeUrl({ tab: panel, session: urlGet('session') }, false);
@@ -949,6 +1006,7 @@
       clearInterval(streamPoll);
       $('sessDetail').classList.add('hidden');
       $('sessListPanel').classList.remove('hidden');
+      clearHeadSession();
       return;
     }
     const found = (lastSnap && (lastSnap.sessions || {}).list || []).find((r) => r.session_id === want);
@@ -1165,17 +1223,9 @@
     return `${Math.round(mins / 1440)}n`;
   };
 
-  /// One screen: the board IS the app, and the conversation is one of its
-  /// tabs. Kept as a function because entering the room has to land on a
-  /// visible panel whatever was remembered from last time.
-  function showTab(_which) {
-    $('board').classList.remove('hidden');
-    thread.classList.remove('hidden');
-    $('foot').classList.toggle('hidden', stopped);
-    if (panel !== 'sessions' && panel !== 'chat') goPanel('sessions');
-    if (!boardLoaded) loadBoard();
-    startBoardPoll();
-  }
+  // `showTab()` từng ở đây và KHÔNG AI GỌI — mã chết, nhưng đủ giống thật để
+  // tôi móc vòng tự-làm-mới vào nó và tưởng xong (v70→v83). Xoá hẳn: đường vào
+  // phòng duy nhất là `enterRoom()`.
 
   /// Màn theo dõi phải tự làm mới, nếu không nó là ảnh chụp một lần rồi thôi.
   ///
@@ -1328,6 +1378,19 @@
     const list = $('sessList');
     const notes = $('sessNotes');
     const summary = $('sessSummary');
+    // NEO trước khi dựng lại. Danh sách nay tự làm mới 15s/lần, mà `renderSessions`
+    // dựng lại toàn bộ thẻ — đúng cơ chế đã làm luồng phiên nhảy. Thẻ ít nên
+    // không cần dựng-theo-khoá như luồng; chỉ cần trả người đọc về đúng thẻ họ
+    // đang nhìn, nhận diện bằng `session_id` chứ không bằng vị trí (thứ tự có
+    // thể đổi khi một phiên vừa động).
+    const keepAnchor = (() => {
+      for (const n of list.querySelectorAll('.sess')) {
+        const r = n.getBoundingClientRect();
+        if (r.bottom > 0) return { id: n.dataset.session, top: r.top };
+      }
+      return null;
+    })();
+
     list.textContent = '';
     notes.textContent = '';
 
@@ -1509,6 +1572,16 @@
       list.append(card);
     }
 
+    // Trả về đúng thẻ đang nhìn, đúng khoảng cách cũ tới mép trên khung nhìn.
+    if (keepAnchor) {
+      const again = list.querySelector(`.sess[data-session="${keepAnchor.id}"]`);
+      if (again) {
+        const sc = scrollerFor(list);
+        sc.scrollTop += again.getBoundingClientRect().top - keepAnchor.top;
+      }
+      // Thẻ ấy biến mất (phiên vừa dừng hẳn) thì KHÔNG đoán chỗ mới: để nguyên.
+    }
+
     // F5 giữa lúc đang theo một phiên: địa chỉ mang id, danh sách vừa về, nên
     // đây là thời điểm sớm nhất dựng lại được. Một lần duy nhất — mỗi ảnh chụp
     // mà mở lại phiên là mỗi ảnh chụp gửi thêm một lệnh /session vào phòng.
@@ -1569,6 +1642,10 @@
     $('sessListPanel').classList.add('hidden');
     $('sessDetail').classList.remove('hidden');
     $('sessTitle').textContent = wantName;
+    // Hàng trên cùng đổi vai theo màn: ở danh sách thì chỉ là dấu thời gian,
+    // vào một phiên thì mang luôn đường quay ra và tên phiên đang đọc.
+    $('sessBack').classList.remove('hidden');
+    $('sessTitle').classList.remove('hidden');
     $('sessStream').textContent = '';
     $('sessHandoverBox').classList.add('hidden');
     $('sessHandoverBox').textContent = '';
@@ -1576,17 +1653,23 @@
     // session's answer, so clear it with everything else.
     $('sessAskBox').classList.add('hidden');
     $('sessAskBox').textContent = '';
-    $('sessAskInput').value = '';
+    $('sessSayInput').value = '';
     $('sessTellBox').classList.add('hidden');
     $('sessTellBox').textContent = '';
-    $('sessTellInput').value = '';
     // Steering is only offered for sessions hub started. Showing "Dừng phiên"
     // on a terminal session would be a button that can only fail — and a
     // button that cannot work is worse than no button, because it says hub is
     // in charge of something it is not.
     const mine = s.kind === 'background';
     $('sessStop').classList.toggle('hidden', !mine);
-    $('sessTellRow').classList.toggle('hidden', !mine);
+    // Phiên hub quản được: mặc định NÓI TIẾP, muốn hỏi bên lề thì tự tích.
+    // Phiên khác: hỏi bên lề là đường DUY NHẤT, nên tích sẵn và khoá lại — cho
+    // chọn một thứ chắc chắn hỏng còn tệ hơn không cho chọn.
+    const cb = $('sessAside');
+    cb.checked = !mine;
+    cb.disabled = !mine;
+    $('sessAsideLabel').classList.toggle('forced', !mine);
+    applySayMode(mine);
     // An answer that arrives after the reader moved on belongs to the session
     // they left, not the one they are looking at.
     waitingFor = null;
@@ -1618,6 +1701,13 @@
     }, 4000);
   }
 
+  /// Trả hàng trên cùng về vai "chỉ có dấu thời gian".
+  function clearHeadSession() {
+    $('sessBack').classList.add('hidden');
+    $('sessTitle').classList.add('hidden');
+    $('sessTitle').textContent = '';
+  }
+
   $('sessBack').addEventListener('click', () => {
     // Stop following: otherwise hub keeps carrying a stream nobody reads.
     if (wantSession && ws && ws.readyState === WebSocket.OPEN) {
@@ -1627,6 +1717,7 @@
     clearInterval(streamPoll);
     $('sessDetail').classList.add('hidden');
     $('sessListPanel').classList.remove('hidden');
+    clearHeadSession();
     writeUrl({ tab: 'sessions', session: null }, true);
   });
 
@@ -1638,12 +1729,44 @@
     sendCommand(`/handover ${wantSession}`, e.target);
   });
 
+  /// Một ô, hai việc — chữ trên màn phải nói rõ đang là việc nào.
+  ///
+  /// Không đổi placeholder/nhãn theo chế độ thì gõ xong không biết câu vừa gõ
+  /// sẽ CHEN VÀO phiên hay chạy trên bản sao — hai kết quả khác hẳn nhau, và
+  /// một trong hai làm nhật ký phiên gốc dài ra.
+  function applySayMode(canTell) {
+    const aside = $('sessAside').checked;
+    const input = $('sessSayInput');
+    const btn = $('sessSay');
+    const hint = $('sessAskHint');
+    input.placeholder = aside ? 'Hỏi bên lề phiên này…' : 'Nói tiếp vào phiên này…';
+    btn.textContent = aside ? '💬 Hỏi' : 'Gửi';
+    hint.textContent = aside
+      ? (canTell === false
+          ? 'Phiên này hub không gõ vào được (bạn mở ở terminal), nên chỉ hỏi bên lề: câu hỏi chạy trên một bản sao, phiên gốc không bị đụng và không dừng lại.'
+          : 'Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.')
+      : 'Lượt này ở lại trên chính phiên đó, nên nhật ký phiên dài ra.';
+  }
+  $('sessAside').addEventListener('change', () => applySayMode(!$('sessAside').disabled));
+
+  /// Gửi: chế độ nào thì đi verb đó. Cùng một ô, hai đường hoàn toàn khác nhau.
+  function sendSay(e) {
+    if ($('sessAside').checked) askAside(e);
+    else tellSession(e);
+  }
+  $('sessSay').addEventListener('click', sendSay);
+  // Phím "go" của bàn phím điện thoại là cách gửi tự nhiên nhất; bắt người ta
+  // với tay sang nút là thứ ma sát giết tính năng.
+  $('sessSayInput').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); sendSay(ev); }
+  });
+
   // UC-S05b mức 2. The question runs on a fork, so the session being watched
   // keeps working and gains no turn — which is exactly the thing a person
   // cannot see from a phone, so the screen has to keep saying it.
   function askAside(e) {
     if (!wantSession) return;
-    const input = $('sessAskInput');
+    const input = $('sessSayInput');
     const q = input.value.trim();
     if (!q) { input.focus(); return; }
     $('sessAskBox').classList.remove('hidden');
@@ -1716,7 +1839,7 @@
   // lại trên thread cũ, nên phiên gốc DÀI RA (ngược hẳn với /ask).
   function tellSession(e) {
     if (!wantSession) return;
-    const input = $('sessTellInput');
+    const input = $('sessSayInput');
     const text = input.value.trim();
     if (!text) { input.focus(); return; }
     $('sessTellBox').classList.remove('hidden');
@@ -1725,24 +1848,12 @@
     sendCommand(`/tell ${text}`, e && e.target);
     input.value = '';
   }
-  $('sessTell').addEventListener('click', tellSession);
-  $('sessTellInput').addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') { ev.preventDefault(); tellSession(ev); }
-  });
-
   $('sessStop').addEventListener('click', (e) => {
     if (!wantSession) return;
     $('sessTellBox').classList.remove('hidden');
     $('sessTellBox').textContent = 'Đang dừng phiên…';
     waitingFor = 'tell';
     sendCommand(`/stop ${wantSession}`, e.target);
-  });
-
-  $('sessAsk').addEventListener('click', askAside);
-  // A phone keyboard's "go" key is the natural way to send; making people
-  // reach for the button instead is the kind of friction that kills a feature.
-  $('sessAskInput').addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') { ev.preventDefault(); askAside(ev); }
   });
 
   /// A side question and its answer — labelled, never mixed into the stream.

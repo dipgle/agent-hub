@@ -159,9 +159,21 @@ try {
     };
   });
 
-  // The machine's own answer, read independently.
-  const snap = hub(["portal-push", "--dry-run"]);
-  const focus = snap.sessions.focus;
+  // Câu trả lời của chính cái máy, đọc độc lập.
+  //
+  // ⚠ Chờ, đừng đọc ngay. hub chỉ THEO ĐƯỢC MỘT phiên: kịch bản chạy trước
+  // (fe-aside) để lại tiêu điểm ở phiên của nó, và ảnh chụp kế tiếp vẫn mang
+  // tiêu điểm cũ trong vài giây sau cú bấm. Đọc ngay là đo trúng trạng thái
+  // của kịch bản khác — đỏ hai lần ngày 2026-08-09 khi chạy cả bộ liên tiếp,
+  // trong khi chạy riêng thì 16/16. Lỗi nằm ở PHÉP ĐO, không ở sản phẩm.
+  let snap = null;
+  let focus = null;
+  for (let i = 0; i < 40; i += 1) {
+    snap = hub(["portal-push", "--dry-run"]);
+    focus = snap.sessions.focus;
+    if (focus && focus.session_id === target.session_id) break;
+    await page.waitForTimeout(3000);
+  }
   check("hub đang theo đúng phiên vừa chạm", focus && focus.session_id === target.session_id);
   check(
     "số sự kiện trên màn khớp ảnh chụp",

@@ -1,5 +1,92 @@
 # active context — hub
 
+## 👀 2026-08-09 (sáng) — nhìn bằng mắt bắt được 5 lỗi mà 80 assert xanh bỏ lọt
+
+Ba yêu cầu của Hà trong một mạch: *"chuyển 4 tab lên header… bỏ các phiên của
+editor đi vì có quản lý được tin nhắn của nó đâu?"* → *"kích vào tab giống như
+menu phải thay đổi url theo → tải lại trang không mất trạng thái đang làm
+việc"* → *"chỉnh style cho đẹp hợp lý, đúng với ngữ cảnh, công việc nội dung
+hiển thị"*. Bundle **v65** đang phục vụ.
+
+### Đơn vị bị gọi sai suốt nhiều ngày — đã sửa khắp tài liệu
+
+Hà: *"giá tiền tính kiểu gì vậy, đang dùng gói claude code pro mà"*. Kiểm:
+`claude auth status` → **`subscriptionType: max`**. ⟹ **không có hoá đơn tính
+theo từng lần gọi**; `total_cost_usd` CLI trả về được quy theo **giá API niêm
+yết**, nên nó là **thước đo một cú gọi TO cỡ nào**, không phải tiền bị trừ. Cái
+thật sự bị tiêu là **hạn mức của gói** — y như ngồi gõ ở terminal. Trần
+mỗi-lần-gọi **vẫn có tác dụng** vì CLI tự tính đúng con số ấy bất kể gói nào.
+Đã sửa `CLAUDE.md` (điều 8), `README.md`, `PLAN.md`, `UC.md` (ghi chú đầu sổ) —
+và tài liệu vốn đang **lệch với mã**: kịch bản in `tốn hạn mức` từ lâu, chỉ tài
+liệu còn viết `tốn tiền`.
+
+### Năm lỗi chỉ lòi ra khi MỞ ẢNH RA NHÌN
+
+Mọi kịch bản đều xanh, 0 lỗi console, trong lúc màn hình có:
+
+| Lỗi | Vì sao assert không bắt |
+|---|---|
+| cột `adapter` hiện `—` mọi dòng — mã đọc `r.source`, dữ liệu là `r.adapter` | không assert nào đọc **nội dung** ô |
+| hàng lệnh in nguyên JSON tham số, nửa màn cho một chữ "chạy lệnh" | `.ev-body` có chữ ⇒ xanh |
+| **giờ lệch 7 tiếng**: `01:16` trong khi ngay trên ghi `08:16` — `slice(11,19)` cắt thẳng chuỗi UTC | không assert nào so hai mốc thời gian trên cùng màn |
+| bảng rộng **520px trong khung 300px** ⇒ cột cuối nằm ngoài màn (`min-width:520px` sót lại từ bảng NĂM cột của hộp thư) | `scrollWidth` của **trang** vẫn 390/390 — khối con cuộn ngang bên trong |
+| đường dẫn tuyệt đối không ngắt dòng ⇒ khối tràn 412/300 | như trên |
+
+Hai cái cuối nay **có phép đo**: `fe-board-uc` quét mọi phần tử trong `#board`
+tìm `scrollWidth > clientWidth` trên cả 4 tab (bỏ qua `input/textarea/select` vì
+`scrollWidth` của chúng phản ánh độ dài giá trị, không phải bố cục). Đo trước khi
+vá: **config đỏ** (`div#panel-config 429/334`, `p.boardnote 412/300`); sau khi
+vá: sạch cả 4 tab. Và `fe-shots.mjs` (mới) chụp cả 5 màn ở 390×844 để lần sau
+**nhìn** chứ không chỉ đọc số — chỉ đọc, không gọi `claude`, chạy bao nhiêu lần
+cũng không tiêu hạn mức.
+
+### ⚠ Bài học công cụ: dấu ✓ in ra KHÔNG phải dấu ✓ đã ghi
+
+Script sửa file kiểu `sub()` in `✓` sau mỗi `str.replace` **trong bộ nhớ**, rồi
+`open(p,'w').write(s)` **một lần ở cuối**. Bước 3 `assert` trượt ⇒ script chết ⇒
+**hai bước đầu đã in ✓ nhưng chưa bao giờ chạm đĩa**. Tôi tin vào ✓ và deploy
+`v60`/`v61` tưởng đã có `toolLine`, trong khi `grep -c 'function toolLine'` trên
+**trang đang phục vụ** trả về **0**. Nay: **ghi ngay từng bước**, và verify bằng
+`curl` chính URL thật chứ không bằng dòng log của chính mình.
+Cùng họ với bẫy cũ *"deploy báo ĐẠT mà không deploy gì"*.
+
+### Đã làm
+
+- **4 tab lên `<header>`**, kiểu gạch chân (điều hướng, không phải 4 nút hành
+  động), vùng chạm **44px** — trả nợ ergonomics của `fe-phone-uc`.
+- **Bỏ phiên của editor khỏi màn** (`sessions.rs::host_of` đọc `ps -o command=`
+  phân biệt terminal · editor · background · dead). Giải thích được câu *"máy chỉ
+  mở 3 terminal sao giao diện hiện 13 phiên?"*: 8 phiên là của VS Code/Cursor —
+  hub **không gõ vào được**, nên không đáng nằm trên màn. Dòng tổng kết nói rõ số
+  bị ẩn.
+- **URL là trạng thái**: `?tab=…&session=…` qua `pushState`; F5 về đúng chỗ, Back
+  đi ngược đúng thứ tự, không văng khỏi app. Bẫy đã vá: `goPanel()` lúc khởi động
+  bắn handler với `wantSession = null` và **xoá `&session=` khỏi URL** ⇒ F5 mất
+  phiên; nay có `restoredFromUrl` chặn đúng lượt đầu.
+- **`toolLine()`**: lệnh hiện như dòng terminal, và **chịu được JSON bị cắt cụt**
+  — `sessions.rs:687 truncate(raw, cap)` cắt tham số dài giữa chuỗi nên
+  `JSON.parse` ném; bản đầu rơi về in nguyên văn, tức **đúng lúc chuỗi dài nhất
+  thì màn xấu nhất**. Nay moi tham số chính bằng regex trên chuỗi thô.
+- Bảng lượt chạy: **giờ máy** (`toLocaleTimeString('vi-VN')`), 3 cột vừa khít
+  390px, lỗi xuống **dòng riêng** thay vì nhét vào ô hẹp.
+
+🔒 **Bảo mật không đổi bởi lượt này, đã kiểm tận nơi:** `sessions.rs:680` quét
+`preview_risk` **từng sự kiện** trước khi vào ảnh chụp; sự kiện nghi có bí mật bị
+thay hẳn bằng `[hub ẩn: …]`, nên `toolLine` chỉ nhận chuỗi đã lọc (chuỗi ấy không
+mở đầu bằng `{` ⇒ trả nguyên văn).
+
+**Nghiệm thu (exit code đọc trực tiếp, trên bundle v65 đang phục vụ):**
+`cargo build --release` 0 warning · `cargo test` **67** · audit `quality-gate`
+MECHANICAL GATES PASSED · `fe-url-uc` **16/16** · `fe-board-uc` **19/19** (+1
+phép đo mới) · `fe-sessions-uc` 12/12 · `fe-smoke` 15/15 · `fe-config-uc` 8/8 ·
+`fe-denied-uc` 10/10 · `fe-shots` 5 màn, 0 lỗi console.
+
+**CHƯA XONG, có sổ:** lượt chạy này **không có phiên editor nào** nên
+`fe-sessions-uc` **khai bỏ qua 2 kiểm tra** ẩn-phiên-editor (đường ẩn đã nghiệm
+thu hôm trước với 13 phiên → ẩn 8). `fe-stream-uc`/`fe-aside-uc` **chưa chạy lượt
+này** vì cổng hạn mức. `/tell` + `/stop` vẫn chưa nghiệm thu qua UI. Bảng cũ
+trong `hub.sqlite` vẫn còn dữ liệu — **cố ý không xoá**.
+
 ## 💸 2026-08-09 (rạng sáng) — "bỏ mọi đường github rồi sao vẫn mất tiền thế"
 
 Hỏi lại lần thứ hai, và lần này câu trả lời **không phải github**. Sổ nói rõ:

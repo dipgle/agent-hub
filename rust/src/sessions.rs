@@ -385,6 +385,7 @@ fn list_account(account: &ClaudeAccountCfg, cli: &str) -> Result<Vec<Value>> {
 pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     let mut out = SessionsSnapshot::default();
     let root = cfg.claude_transcript_root();
+    let mut hidden_editor = 0usize;
 
     for account in &cfg.claude_accounts_or_ambient() {
         let raw = match list_account(account, &cfg.claude_cli) {
@@ -443,6 +444,27 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
             };
 
             row.host = host_of(row.pid, &row.kind);
+
+            // Phiên do extension VS Code/Cursor chạy KHÔNG lên màn.
+            //
+            // Hà chốt 2026-08-09: *"bỏ các phiên của editor đi, có quản lý được
+            // tin nhắn của nó đâu"*. Đúng phần cốt lõi — trên máy này 8/13 dòng
+            // là phiên editor, chúng đẩy 3 cửa sổ terminal (thứ Hà thực sự theo)
+            // xuống dưới màn, và `/stop` không dừng được chúng.
+            //
+            // Ghi rõ chỗ chưa đúng hẳn, để đừng ai coi đây là "không làm gì
+            // được với phiên editor": `/ask` và `/handover` CHẠY được trên
+            // chúng — nghiệm thu tối 08-08 fork chính phiên editor `projects-cd`
+            // và trả lời đúng ngữ cảnh. Đây là lựa chọn về MÀN HÌNH (bớt nhiễu),
+            // không phải giới hạn kỹ thuật. Bỏ dòng dưới là chúng hiện lại ngay.
+            //
+            // Đếm rồi log, không lặng lẽ nuốt: một danh sách ngắn đi mà không ai
+            // biết vì sao là danh sách nói dối.
+            if row.host == "editor" {
+                hidden_editor += 1;
+                continue;
+            }
+
             if row.host == "dead" {
                 // Never silently: the row stays visible (a stuck session is
                 // something to clean up), but it must not read as live work.
@@ -508,6 +530,13 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
             }
             out.sessions.push(row);
         }
+    }
+
+    if hidden_editor > 0 {
+        logging::info(
+            "sessions_editor_hidden",
+            json!({ "count": hidden_editor, "why": "editor-hosted sessions are not shown on the phone" }),
+        );
     }
 
     // Newest first: half the live sessions had not moved in 40 hours, so a flat

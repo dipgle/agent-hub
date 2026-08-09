@@ -1,7 +1,7 @@
 # PLAN — hub
 
 **Mục tiêu duy nhất:** từ điện thoại, xem và điều khiển các phiên `claude` đang
-chạy trên Mac này. Không hộp thư, không triage, không tự tiêu tiền.
+chạy trên Mac này. Không hộp thư, không triage, không tự tiêu hạn mức.
 
 Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhánh hộp thư bị xoá:
 `CLAUDE.md` §"What hub is NOT".
@@ -42,5 +42,5 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 - Mọi thứ đổi trạng thái đi qua **lệnh trong phòng chat** → luôn có dấu vết.
 - Phiên nền chạy sau `DENIED_TOOLS`; hỏi/bàn giao chạy trên **fork** read-only.
-- hub **không tự tiêu tiền**; chỉ nút bấm của chủ máy mới gọi `claude`.
-- Không con số tiền nào trên màn hình (sổ `spend` vẫn ghi, im lặng).
+- hub **không tự tiêu hạn mức**; chỉ nút bấm của chủ máy mới gọi `claude`.
+- Không con số `$` nào trên màn hình (sổ `spend` vẫn ghi, im lặng).

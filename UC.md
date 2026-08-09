@@ -11,9 +11,16 @@ file bị sửa, lúc nào phiên xin quyền.
 
 Luồng kỹ thuật: `fe/flow.html`. Hướng và lý do: `memory/active-context.md`.
 
-> **Đọc phần "tiền" trong sổ này thế nào (chốt cuối 2026-08-08).** Các con số
-> `$…` bên dưới là **bằng chứng đo thật** của những lần chạy đã diễn ra — giữ vì
-> chúng trả lời được "cái này đắt bao nhiêu" khi cần. Nhưng **sản phẩm không còn
+> **Đọc mọi con số `$` trong sổ này thế nào (chốt 2026-08-09).** Máy này chạy
+> gói **Max** (`claude auth status` → `subscriptionType: max`): **không có hoá
+> đơn tính theo từng lần gọi**. Con số `total_cost_usd` mà CLI trả về được quy
+> theo **giá API niêm yết**, nên mọi `$…` dưới đây là **thước đo độ lớn của một
+> cú gọi**, không phải tiền bị trừ khỏi tài khoản Hà. Cái thật sự bị tiêu là
+> **hạn mức của gói** — đúng như khi ngồi gõ ở terminal. (Trần mỗi-lần-gọi vẫn
+> có tác dụng, vì CLI tự tính đúng con số ấy bất kể gói nào.)
+>
+> **Vì sao vẫn giữ các con số ấy.** Chúng là **bằng chứng đo thật** của những lần
+> chạy đã diễn ra — giữ vì chúng trả lời được "cú này to bao nhiêu" khi cần. Nhưng **sản phẩm không còn
 > hiện đồng nào**: không trần chặn tay chủ máy, không giá cạnh câu trả lời,
 > không tab Chi phí, không dải tổng chi. Hà, hai nhịp trong một ngày: *"bỏ hết
 > github rồi sao vẫn trần chuồng gì thế"* → gỡ trần; *"sao vẫn nhắc tới tiền
@@ -166,7 +173,7 @@ trong `fe-stream-uc.mjs` **12/12**.
 Hai nửa, phải có cả hai:
 - **Phía hub:** `follow_sleep` cắt giấc ngủ chu kỳ thành lát **2 giây**; mỗi lát chỉ
   đọc **mtime** của đúng tệp phiên đang theo — không gọi `claude`, không chạy
-  pipeline, không tốn tiền. Tệp đổi thì đẩy ngay, có sàn **4 giây** giữa hai lần
+  pipeline, không gọi `claude`. Tệp đổi thì đẩy ngay, có sàn **4 giây** giữa hai lần
   để một phiên bận không biến thành cơn lũ đẩy. Tin chat tới thì trả quyền lại
   cho vòng chính chạy trọn chu kỳ.
 - **Phía trang:** đang mở phiên thì tự hỏi lại mỗi **4 giây**, và **giữ chỗ cuộn** —
@@ -299,7 +306,7 @@ lệnh         claude -p --resume 0172a51b-… --fork-session
 session_id   5750d578-78fc-4c12-a0e1-d9c135fd4a16   ← KHÁC id truyền vào
 trả lời      "…chưa có chủ đề — bạn mới chỉ chào 'alo'…"  ← CÓ ngữ cảnh gốc
 SAU          15222 byte · 11 dòng                   ← phiên gốc KHÔNG đổi
-chi phí      $0.0826
+thước đo     $0.0826
 ```
 
 Ba điều cùng đúng một lúc: **có** ngữ cảnh phiên gốc · **không** thêm lượt nào vào
@@ -350,15 +357,15 @@ Hà chốt 08-08, hai nhịp: *"bỏ hết github rồi sao vẫn trần chuồn
 *"liên quan gì tới tiền"* (⟹ gỡ trần), rồi *"sao vẫn nhắc tới tiền vậy, đã bảo
 xóa hết github rồi mà"* (⟹ gỡ nốt **giá** đã hiện cạnh câu trả lời, dải tổng chi
 ở hộp việc, và cả **tab Chi phí + hai biểu đồ**). Bấm nút trên điện thoại là **Hà
-đang làm việc** — cùng việc, cùng giá với gõ ở terminal, nơi không ai dán bảng giá
-lên từng câu. Sổ `spend` **vẫn ghi**, im lặng, để còn trả lời được nếu có ngày ai
+đang làm việc** — cùng việc, cùng mức tiêu hạn mức như gõ ở terminal, nơi không
+ai dán bảng giá lên từng câu. Sổ `spend` **vẫn ghi**, im lặng, để còn trả lời được nếu có ngày ai
 hỏi; nó chỉ thôi tự hỏi trên mọi màn. Ảnh chụp không mang `owner_spend`,
 `owner_budget` hay `cost_days` nữa — và `portal.rs` có assert **đòi vắng mặt**,
 vì thứ này đã mọc lại một lần rồi (trần → giá).
 Trần mỗi-lần-gọi (bảo vệ khỏi cú chạy vượt tầm, không phải để hỏi tiền người dùng)
 vẫn còn và **tự đo theo độ dài phiên** (`fork_cost_estimate`) chứ không mượn con
 số cứng $0.50 của triage — con số ấy nhỏ hơn giá nạp của 13/14 phiên, mà cú chết
-vì trần **vẫn bị tính tiền**.
+vì trần **vẫn tiêu hạn mức** (đã nạp xong nhật ký rồi mới bị chặn).
 
 **Nghiệm thu THẬT (2026-08-08, bundle v45):** phiên `projects-cd` 0.47 MB —
 ước tính **$0.83**, thực tế **$0.8735** (lệch 5%); phiên gốc **474.525 byte ·

@@ -86,10 +86,17 @@ or drive a session from a phone?** If not, it does not belong here.
    doctor · set · help. A verb that already answered must end its arm with
    `Some(ack)` — the fall-through that used to exist logged "Không tìm thấy
    decision #0" as the reply for every `/session` and `/ask` ever issued.
-8. **hub does not spend money on its own.** There is no triage, so a cycle costs
+8. **hub consumes nothing on its own.** There is no triage, so a cycle costs
    nothing; the only calls are `/ask`, `/handover`, `/new`, `/tell` — a person
-   pressing a button, at the same price as typing it in the terminal. They are
-   **counted in `spend`, never refused**. A daily ceiling on them was built and
+   pressing a button, at the same cost as typing it in the terminal. They are
+   **counted in `spend`, never refused**.
+   **What that cost IS, exactly** (settled 2026-08-09, after this file said
+   "money" once too often): this Mac is on **Max** — `claude auth status` →
+   `subscriptionType: max`. Nothing is invoiced per call; a call spends **plan
+   quota**. The `total_cost_usd` the CLI hands back is computed at API LIST
+   price, so read every `$` in this repo as a **size gauge** — "how big was that
+   call" — never as a bill. The per-call cap still bites, because the CLI
+   computes that same number internally regardless of subscription. A daily ceiling on them was built and
    thrown out the same day (2026-08-08). The per-call cap stays and is
    **measured, not guessed**: `sessions::fork_cost_estimate` sizes it from the
    transcript (`USD_PER_MB`, from a real 0.986 MB → $1.72), because a flat cap
@@ -132,11 +139,11 @@ or drive a session from a phone?** If not, it does not belong here.
   as `hubbot` tests a permission nobody uses — every command comes back
   `tfl5_command_from_non_owner`.
 - `fe-stream-uc` and `fe-aside-uc` make REAL `claude` calls on the owner's
-  account. **They are gated on price and skip by default.** Each script sizes the
+  account. **They are gated on that size gauge and skip by default.** Each script sizes the
   transcript first (`USD_PER_MB = 1.75`, from a measured 0.99 MB → $1.72); if the
   estimate is over `HUB_UC_MAX_USD` (default **$0.25**) the paid step does not
   run, the checks behind it are NOT counted as passed, and the summary prints
-  `N BỎ QUA vì tốn tiền` plus what was not verified. To actually buy the
+  `N BỎ QUA vì tốn hạn mức` plus what was not verified. To actually buy the
   evidence: `HUB_UC_PAY=1 node fe-stream-uc.mjs …`.
   Why the gate exists: on 2026-08-08 these two scripts were re-run after every
   bundle bump and spent **$6.75 in one evening** re-proving the same thing —

@@ -42,6 +42,32 @@
     display: flex; align-items: center; gap: .75rem;
     padding: .7rem 1rem; border-bottom: 1px solid var(--rule);
     background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header #panelTabs { display: flex; gap: 2px; margin: 0; flex-wrap: nowrap; }
+  /* 44px là chuẩn vùng chạm; hàng tab cũ cao 35px nên trượt tay là chuyện
+     thường (fe-phone-uc đã báo đỏ chỗ này). */
+  /* Tab là ĐIỀU HƯỚNG, không phải nút hành động. Bốn cái hộp viền cạnh nhau
+     đọc như bốn nút bấm ngang hàng với "Chạy 1 vòng" — nên bỏ viền, đánh dấu
+     cái đang mở bằng gạch chân. Vùng chạm vẫn giữ 44px. */
+  header #panelTabs .tab {
+    min-height: 44px; padding: 0 .55rem; font-size: .84rem; white-space: nowrap;
+    border: 0; background: none; border-radius: 0; color: var(--muted);
+    border-bottom: 2px solid transparent; font-weight: 500;
+  }
+  header #panelTabs .tab.on {
+    color: var(--ink); border-bottom-color: var(--accent);
+    background: none; font-weight: 650;
+  }
+  @media (max-width: 560px) {
+    /* Trên điện thoại nhường hết bề ngang cho 4 tab: tên phòng và dự án đã có
+       ở tiêu đề phòng chat, còn trạng thái kết nối đủ nhỏ để ở lại. */
+    header { gap: .4rem; padding: .45rem .5rem; }
+    header h1 { display: none; }
+    header .room { display: none; }
+    header #panelTabs { flex: 1; }
+    header #panelTabs .tab { flex: 1; padding: 0 .25rem; font-size: .78rem; }
+    #status { font-size: .62rem; padding: .15rem .3rem; }
   }
   header h1 {
     font-family: var(--mono); font-size: 1rem; font-weight: 600; margin: 0;
@@ -62,6 +88,21 @@
   #status[data-state="wait"] { color: var(--warn); border-color: var(--warn); }
 
   main { flex: 1; overflow-y: auto; padding: 1rem; }
+  /* Đường dẫn tuyệt đối không có chỗ nào để xuống dòng, nên nó đẩy cả khối
+     rộng hơn màn (đo được: p.boardnote 412 / khung 300). Cho phép ngắt giữa
+     chữ — đường dẫn bị ngắt vẫn đọc được, khối tràn ngang thì không. */
+  .boardnote, .boardnote code { overflow-wrap: anywhere; }
+  td.runerr {
+    color: var(--bad, #a33); font-size: 12px; padding-top: 0; padding-bottom: 8px;
+    white-space: normal; overflow-wrap: anywhere;
+  }
+  /* Trên 390px, mỗi 12px lề là 3% bề ngang. Thẻ phiên cần bề ngang hơn cần
+     đường viền của khung bao ngoài. */
+  @media (max-width: 560px) {
+    main { padding: .5rem; }
+    #board > .panel, #board .panel { padding: .7rem .6rem; }
+    .sess { padding: 9px 10px; }
+  }
   .wrap { max-width: 46rem; margin: 0 auto; display: flex; flex-direction: column; gap: .7rem; }
 
   .msg {
@@ -238,7 +279,22 @@
   .sess-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
   .sess-head strong { font-size: 15px; overflow-wrap: anywhere; }
   .sess-head span { white-space: nowrap; font-size: 12.5px; }
-  .sess-meta { font-size: 12.5px; margin-top: 2px; }
+  /* Trạng thái đọc bằng MẮT trước khi đọc bằng chữ: xanh = đang chạy, hổ phách
+     = đang rảnh (chờ mình), xám = đã dừng. Trên màn 390px, ba chấm này thay
+     được cả cột chữ mà vẫn quét được trong một cái liếc. */
+  .sess-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 7px; vertical-align: 1px; background: var(--muted); flex: none;
+  }
+  .sess[data-work="đang chạy"] .sess-dot { background: var(--ok, #2f6f4e); }
+  .sess[data-work="đang rảnh"] .sess-dot { background: #c98a1e; }
+  .sess[data-host="dead"] .sess-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
+  /* Hàng phụ là chú thích, không phải nội dung — một dòng, cắt đuôi, không
+     bao giờ được chiếm hai dòng như trước. */
+  .sess-meta {
+    font-size: 11.5px; margin-top: 3px; letter-spacing: .01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .sess-body {
     margin: 6px 0 0; font-size: 13.5px; line-height: 1.45;
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
@@ -266,7 +322,14 @@
   .ev-result { padding-left: 10px; border-left: 2px solid var(--line); }
   .ev-think .ev-body { opacity: .72; font-style: italic; }
   .ev-hidden .ev-body { color: var(--bad, #a33a2c); }
-  #board .scroll table { min-width: 520px; }
+  /* 520px là dấu vết của bảng NĂM cột hồi còn hộp thư: nó ép bảng rộng gấp
+     rưỡi khung 300px, nên cột cuối trôi hẳn khỏi màn và người đọc tưởng bảng
+     chỉ có hai cột (thấy trên ảnh v62/v63 — đo được: table 520 / khung 300).
+     Ba cột ngắn bây giờ vừa khít; cột giờ giữ nguyên chiều, hai cột còn lại
+     chia phần dư. */
+  #board #runsTable { min-width: 0; table-layout: fixed; }
+  #board #runsTable th:first-child, #board #runsTable td:first-child { width: 42%; }
+  #board #runsTable th:last-child, #board #runsTable td:last-child { width: 22%; text-align: right; }
   #board .scroll td { padding: 7px 6px; }
   #board nav.subtabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
   #board nav.subtabs button.on { background: var(--accent-soft); border-color: var(--accent); font-weight: 600; }
@@ -300,9 +363,18 @@
 
 <header>
   <h1>hub</h1>
+  <!-- Bốn tab sống ở đây, không phải trong thân trang: trên màn 390px, một
+       hàng nav riêng + thanh công cụ + ghi chú đẩy phiên đầu tiên xuống quá
+       nửa màn. Header vốn đã luôn hiện, nên đây là chỗ rẻ nhất để đặt chúng. -->
+  <nav id="panelTabs" class="subtabs">
+    <button type="button" class="tab on" data-panel="sessions">Phiên</button>
+    <button type="button" class="tab" data-panel="chat">Trao đổi</button>
+    <button type="button" class="tab" data-panel="health">Sức khoẻ</button>
+    <button type="button" class="tab" data-panel="config">Cấu hình</button>
+  </nav>
+  <span class="spacer"></span>
   <span class="room" id="roomLabel"></span>
   <span class="room" id="ctxLabel" title="Dự án mà hub hiểu là chủ đề của phòng này"></span>
-  <span class="spacer"></span>
   <span id="status" data-state="off">chưa kết nối</span>
 </header>
 
@@ -327,27 +399,26 @@
       <button type="button" id="btnCycle" class="primary">Chạy 1 vòng</button>
       <button type="button" id="boardReload">Tải lại</button>
     </div>
-    <p class="muted boardnote">
-      Nút bấm ở đây gửi đúng lệnh vào phòng chat (<code>/session</code> ·
-      <code>/new</code> · <code>/ask</code> · <code>/tell</code> ·
-      <code>/stop</code> · <code>/handover</code>), nên mọi thao tác đều để lại
-      dấu vết trong phòng. Chỉ chủ máy mới ra lệnh được; hub bỏ qua lệnh của
-      người khác.
-    </p>
-
-    <nav id="panelTabs" class="subtabs">
-      <button type="button" class="tab on" data-panel="sessions">Phiên</button>
-      <button type="button" class="tab" data-panel="chat">Trao đổi</button>
-      <button type="button" class="tab" data-panel="health">Sức khoẻ</button>
-      <button type="button" class="tab" data-panel="config">Cấu hình</button>
-    </nav>
+    <!-- Đoạn này là tài liệu, không phải trạng thái: đọc một lần rồi thôi,
+         nhưng trước đây nó chiếm 5 dòng đầu của MỌI tab. Gấp lại. -->
+    <details class="boardnote">
+      <summary class="muted">Nút bấm ở đây làm gì?</summary>
+      <p class="muted">
+        Mỗi nút gửi đúng một lệnh vào phòng chat (<code>/session</code> ·
+        <code>/new</code> · <code>/ask</code> · <code>/tell</code> ·
+        <code>/stop</code> · <code>/handover</code>), nên mọi thao tác đều để
+        lại dấu vết ở nơi đọc được. Chỉ chủ máy ra lệnh được; hub bỏ qua lệnh
+        của người khác.
+      </p>
+    </details>
 
     <!-- What `claude` is doing on the Mac right now. Read-only: this screen
          shows, it does not steer (UC-S01). Previews are already leak-gated in
          `sessions.rs`, so nothing is re-filtered here. -->
     <div id="panel-sessions">
       <div class="panel" id="sessListPanel">
-        <h2>Phiên đang chạy</h2>
+        <!-- Tab đã tên là "Phiên"; một chữ H2 "Phiên đang chạy" ngay dưới nó
+             chỉ lấy mất một dòng của màn 844px mà không thêm thông tin nào. -->
         <p class="muted" id="sessSummary">đang tải…</p>
         <div id="sessNotes"></div>
         <!-- UC-S06: mở một phiên làm việc mới ngay từ điện thoại. Nó chạy
@@ -379,6 +450,11 @@
           <strong id="sessTitle"></strong>
         </div>
         <p class="muted" id="sessStatus"></p>
+        <!-- Luồng phiên đứng TRƯỚC các nút. Màn này để ĐỌC việc đang chạy; đặt
+             "Đóng sổ" và ô hỏi lên đầu thì mỗi lần mở ra phải lướt qua hai
+             thao tác mới tới thứ mình vào xem — và càng nhiều sự kiện, thao
+             tác càng đẩy nội dung xuống xa. -->
+        <div id="sessStream" class="scroll"></div>
         <!-- UC-S07: đóng sổ phiên này để mở phiên mới làm tiếp. Không giết
              tiến trình nào — mạch việc nằm ở nhật ký, cái cần là bản bàn giao
              và id để nối tiếp. -->
@@ -410,7 +486,7 @@
           Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.
         </p>
         <div id="sessAskBox" class="hidden"></div>
-        <div id="sessStream" class="scroll"></div>
+
       </div>
     </div>
 
@@ -448,7 +524,12 @@
         <h2>Lần poll gần đây</h2>
         <div class="scroll">
           <table id="runsTable">
-            <thead><tr><th>lúc</th><th>adapter</th><th>kết quả</th><th>ghi chú</th></tr></thead>
+            <!-- Ba cột, không phải năm. Trên 390px, năm cột đẩy hai cột cuối ra
+                 khỏi màn (thấy trên ảnh v62): người đọc tưởng bảng chỉ có bấy
+                 nhiêu. Cột "kênh" bỏ hẳn vì tfl5 là kênh DUY NHẤT còn lại —
+                 một cột hằng số không phân biệt được dòng nào với dòng nào.
+                 Lỗi không nhét vào cột hẹp mà xuống hẳn một dòng riêng. -->
+            <thead><tr><th>lúc</th><th>kết quả</th><th>mới</th></tr></thead>
             <tbody id="runsRows"></tbody>
           </table>
         </div>
@@ -691,7 +772,32 @@
     // opening the board.
     loadBoard();
     goPanel(panel);
+    // Lần dựng đầu: ghi trạng thái vào địa chỉ mà KHÔNG đẩy thêm một bước —
+    // người dùng chưa "đi" đâu cả, họ vừa mở trang.
+    writeUrl({ tab: panel, session: urlGet('session') }, false);
   }
+
+  // Nút Back của trình duyệt là một cái menu nữa: nó phải đưa về đúng màn
+  // trước đó, không phải nhảy ra khỏi app.
+  window.addEventListener('popstate', () => {
+    const tab = urlGet('tab');
+    if (tab && PANELS.includes(tab) && tab !== panel) goPanel(tab);
+    const want = urlGet('session') || null;
+    if (want === wantSession) return;
+    if (!want) {
+      // Quay về danh sách: thôi theo phiên, đúng như bấm "← Danh sách".
+      if (wantSession && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'msg', text: '/session -' }));
+      }
+      wantSession = null;
+      clearInterval(streamPoll);
+      $('sessDetail').classList.add('hidden');
+      $('sessListPanel').classList.remove('hidden');
+      return;
+    }
+    const found = (lastSnap && (lastSnap.sessions || {}).list || []).find((r) => r.session_id === want);
+    if (found) openSession(found, { fromUrl: true });
+  });
 
   /// The room refused this account. Nothing to retry: say who was refused,
   /// on what, and what fixes it — then stop.
@@ -967,11 +1073,36 @@
   }
 
   // ---- sub-panels ---------------------------------------------------------
-  // Remember the open tab across reloads: F5 dropping you off the screen you
-  // were reading (and taking the composer with it) gets old fast.
+  //
+  // ĐỊA CHỈ LÀ TRẠNG THÁI. Trước đây tab nằm trong localStorage: URL không đổi
+  // khi bấm, nút Back của trình duyệt nhảy ra khỏi app, và gửi link cho chính
+  // mình thì mở ra một màn khác. Nay tab và phiên đang theo đều nằm trong query
+  // (`?room=hub&tab=phien&session=<id>`), nên F5 về đúng chỗ đang làm, Back đi
+  // ngược đúng thứ tự, và một cái link mở đúng cái người gửi đang nhìn.
+  //
+  // Query chứ không phải hash: trang này đã đọc `?room=` từ trước, giữ một quy
+  // ước thay vì hai.
+  const url = () => new URL(location.href);
+  const urlGet = (k) => url().searchParams.get(k);
+
+  /// Ghi trạng thái vào địa chỉ. `push` cho một thao tác của người (bấm tab, mở
+  /// phiên) để Back quay lại được; `replace` cho lần dựng đầu, thứ người dùng
+  /// không "đi tới".
+  function writeUrl({ tab, session }, push) {
+    const u = url();
+    if (tab) u.searchParams.set('tab', tab);
+    if (session) u.searchParams.set('session', session);
+    else u.searchParams.delete('session');
+    const next = u.pathname + u.search;
+    if (next === location.pathname + location.search) return;
+    history[push ? 'pushState' : 'replaceState']({ tab, session: session || null }, '', next);
+  }
+
   let panel = (() => {
-    // Sessions is the landing screen: it is what the owner opens the phone for.
-    // A remembered choice still wins — that stays a per-person preference.
+    // Địa chỉ trước, rồi mới tới lựa chọn ghi nhớ, rồi mới tới mặc định —
+    // "Phiên" là màn Hà mở điện thoại lên để xem.
+    const fromUrl = urlGet('tab');
+    if (fromUrl && PANELS.includes(fromUrl)) return fromUrl;
     try { return localStorage.getItem('hub.panel') || 'sessions'; } catch (_) { return 'sessions'; }
   })();
   let lastSnap = null;
@@ -981,6 +1112,16 @@
     if (!btn) return;
     panel = btn.dataset.panel;
     try { localStorage.setItem('hub.panel', panel); } catch (_) { /* private mode */ }
+    // Giữ id phiên trong địa chỉ cho tới khi trang dựng lại xong.
+    //
+    // Lúc mở trang, `goPanel()` bấm tab bằng mã và chạy đúng handler này — khi
+    // đó `wantSession` còn null vì ảnh chụp chưa về, nên ghi thẳng nó vào địa
+    // chỉ là XOÁ MẤT phiên người dùng đang theo, ngay trước khi khôi phục. Đó
+    // chính là con F5-mất-chỗ mà kịch bản bắt được (2026-08-09).
+    writeUrl(
+      { tab: panel, session: wantSession || (restoredFromUrl ? null : urlGet('session')) },
+      true
+    );
     [...$('panelTabs').querySelectorAll('button')].forEach((b) => b.classList.toggle('on', b === btn));
     PANELS.forEach((p) => {
       $(`panel-${p}`).classList.toggle('hidden', p !== panel);
@@ -1042,7 +1183,9 @@
       const head = document.createElement('div');
       head.className = 'sess-head';
       const name = document.createElement('strong');
-      name.textContent = s.name || '(không tên)';
+      const dot = document.createElement('span');
+      dot.className = 'sess-dot';
+      name.append(dot, document.createTextNode(s.name || '(không tên)'));
       const when = document.createElement('span');
       when.className = 'muted';
       when.textContent = agoOf(s.last_activity);
@@ -1061,9 +1204,11 @@
         || ({ done: 'đã xong' })[s.state] || '';
       // `kind` nói "interactive" cho cả cửa sổ terminal lẫn phiên do extension
       // của VS Code/Cursor chạy — nên hàng này hiện `host`, thứ phân biệt được.
-      const where = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', dead: 'ĐÃ DỪNG' }[s.host] || s.kind;
-      meta.textContent = [s.account, where, s.cwd ? s.cwd.split('/').slice(-1)[0] : '', mode, work]
-        .filter(Boolean).join(' · ');
+      const where = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', dead: 'đã dừng' }[s.host] || s.kind;
+      // `cwd` bỏ đi: mọi phiên trên máy này đều mở từ ~/Documents/projects nên
+      // nó giống hệt nhau ở mọi dòng — chiếm chỗ mà không phân biệt được gì.
+      // `work` cũng bỏ khỏi chữ: đã có chấm màu nói điều đó rồi.
+      meta.textContent = [s.account, where, mode].filter(Boolean).join(' · ');
       if (s.host) card.dataset.host = s.host;
       if (work) card.dataset.work = work;
 
@@ -1072,7 +1217,16 @@
       if (s.last_text) {
         const body = document.createElement('p');
         body.className = 'sess-body';
-        body.textContent = s.last_role ? `${s.last_role}: ${s.last_text}` : s.last_text;
+        // Dòng xem trước là để biết phiên ĐANG NÓI GÌ. Bảng markdown lọt vào
+        // đây thành "| |---|---|---| | 1. Chi phí…" — đúng ký tự, vô nghĩa với
+        // mắt. Ép về một dòng văn xuôi; "assistant:" cũng bỏ, vì mặc định phiên
+        // nói là máy nói — chỉ khi lượt cuối là NGƯỜI gõ mới đáng nêu ra.
+        const flat = s.last_text
+          .replace(/\|\s*-{2,}[-|\s]*\|/g, ' ')   // đường kẻ bảng
+          .replace(/[|`*_#>]+/g, ' ')             // ký hiệu markdown
+          .replace(/\s+/g, ' ')
+          .trim();
+        body.textContent = s.last_role === 'user' ? `bạn: ${flat}` : flat;
         card.append(body);
       }
       if (s.note) {
@@ -1087,6 +1241,25 @@
       card.addEventListener('click', () => openSession(s));
       list.append(card);
     });
+
+    // F5 giữa lúc đang theo một phiên: địa chỉ mang id, danh sách vừa về, nên
+    // đây là thời điểm sớm nhất dựng lại được. Một lần duy nhất — mỗi ảnh chụp
+    // mà mở lại phiên là mỗi ảnh chụp gửi thêm một lệnh /session vào phòng.
+    if (!wantSession && !restoredFromUrl) {
+      const want = urlGet('session');
+      const found = want && rows.find((r) => r.session_id === want);
+      restoredFromUrl = true;
+      if (found) {
+        openSession(found, { fromUrl: true });
+        return;
+      }
+      if (want) {
+        // Phiên trong link không còn trên máy: nói ra, đừng im lặng bỏ qua rồi
+        // để người ta tưởng link hỏng.
+        cmdNote(`Phiên ${want.slice(0, 8)} trong địa chỉ không còn chạy nữa.`, true);
+        writeUrl({ tab: 'sessions', session: null }, false);
+      }
+    }
 
     if (wantSession) {
       renderStream(sessions.focus || null);
@@ -1115,12 +1288,17 @@
 
   let wantSession = null;   // session id the reader asked for
   let wantName = '';
+  /// Địa chỉ chỉ được dựng lại một lần cho mỗi lần tải trang.
+  let restoredFromUrl = false;
 
   let streamPoll = null;
 
-  function openSession(s) {
+  function openSession(s, opts) {
     wantSession = s.session_id;
     wantName = s.name || s.session_id.slice(0, 8);
+    // Mở một phiên là một bước đi, trừ khi chính địa chỉ vừa yêu cầu nó (dựng
+    // lại sau F5 hoặc Back) — lúc đó ghi đè, đừng đẩy thêm một bước vào lịch sử.
+    writeUrl({ tab: 'sessions', session: wantSession }, !(opts && opts.fromUrl));
     $('sessListPanel').classList.add('hidden');
     $('sessDetail').classList.remove('hidden');
     $('sessTitle').textContent = wantName;
@@ -1182,6 +1360,7 @@
     clearInterval(streamPoll);
     $('sessDetail').classList.add('hidden');
     $('sessListPanel').classList.remove('hidden');
+    writeUrl({ tab: 'sessions', session: null }, true);
   });
 
   $('sessHandover').addEventListener('click', (e) => {
@@ -1358,6 +1537,42 @@
   }
 
   /// One session rendered as a terminal would: say · tool · result · think.
+  /// Một lệnh, viết như người gõ nó.
+  ///
+  /// UC-S02 đặt vạch đích là "thấy đúng thứ terminal đang hiện". Hàng lệnh
+  /// trước đây in nguyên tham số JSON — nửa màn hình để nói một việc là "chạy
+  /// một lệnh". Nên: lấy đúng THAM SỐ CÓ NGHĨA của từng công cụ, cắt đường dẫn
+  /// về phần người ta nhận ra. Bản đầy đủ vẫn ở `title`.
+  function toolLine(e) {
+    const raw = (e.text || '').trim();
+    if (!raw.startsWith('{')) return raw;
+    const KEYS = ['command', 'file_path', 'path', 'notebook_path',
+                  'pattern', 'url', 'query', 'prompt'];
+    let arg = null;
+    try {
+      const o = JSON.parse(raw);
+      for (const k of KEYS) if (o[k] != null) { arg = String(o[k]); break; }
+      if (arg == null) {
+        // Công cụ lạ: nêu tên tham số, đừng đổ cả JSON ra màn.
+        const ks = Object.keys(o);
+        return ks.length ? ks.join(', ') : raw;
+      }
+    } catch (_) {
+      // Tham số dài BỊ CẮT CỤT ở tầng dưới (sessions.rs cắt theo `cap`) nên
+      // JSON không còn đóng ngoặc — `JSON.parse` ném, và bản cũ rơi về in
+      // nguyên văn: đúng lúc chuỗi dài nhất thì màn xấu nhất. Đọc thẳng chuỗi
+      // để vẫn moi được phần đầu của tham số chính.
+      for (const k of KEYS) {
+        const m = raw.match(new RegExp('"' + k + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)'));
+        if (m) { arg = m[1].replace(/\\[nrt]/g, ' ').replace(/\\(.)/g, '$1'); break; }
+      }
+      if (arg == null) return raw.length > 200 ? raw.slice(0, 199) + '…' : raw;
+    }
+    arg = arg.replace(/\s+/g, ' ').trim()
+      .replace(/\/Users\/[^/\s]+\/Documents\/projects\//g, '');
+    return arg.length > 200 ? arg.slice(0, 199) + '…' : arg;
+  }
+
   function renderStream(focus) {
     const box = $('sessStream');
     const status = $('sessStatus');
@@ -1399,7 +1614,8 @@
 
       const body = document.createElement('pre');
       body.className = 'ev-body';
-      body.textContent = e.text;
+      body.textContent = e.kind === 'tool' ? toolLine(e) : e.text;
+      if (e.kind === 'tool' && body.textContent !== e.text) body.title = e.text;
       row.append(body);
       box.append(row);
     });
@@ -1451,16 +1667,27 @@
     });
     box.append(chips);
 
+    // Giờ trên màn phải là giờ NGƯỜI ĐANG CẦM MÁY đọc được. `started_at` là
+    // UTC (`2026-08-09T01:16:43.143Z`); bản trước cắt thẳng `slice(11,19)` nên
+    // in ra 01:16 trong khi dòng "Ảnh chụp lúc" ngay phía trên ghi 08:16 —
+    // cùng một khoảnh khắc, hai con số, lệch đúng 7 tiếng.
+    const runClock = (iso) => {
+      const d = new Date(iso || '');
+      if (isNaN(d)) return String(iso || '').slice(11, 19) || '—';
+      return d.toLocaleTimeString('vi-VN', { hour12: false });
+    };
+
     const body = $('runsRows');
     body.textContent = '';
     (health.runs || []).forEach((r) => {
       const tr = document.createElement('tr');
+      // `ok` về từ sqlite là số 0/1, nên `=== false` không bao giờ đúng: một
+      // lượt hỏng mà không kèm `err` sẽ được tô là "ok".
+      const bad = r.ok === 0 || r.ok === false || !!r.err;
       [
-        [String(r.started_at || r.ts || '').slice(0, 19).replace('T', ' '), 'mono'],
-        [r.source || '—', 'mono'],
-        [r.ok === false || r.err ? 'lỗi' : 'ok', 'mono'],
+        [runClock(r.started_at || r.ts), 'mono'],
+        [bad ? 'lỗi' : 'ok', bad ? 'mono bad' : 'mono'],
         [String(r.n_new ?? '—'), 'mono nowrap'],
-        [r.err || '', ''],
       ].forEach(([text, cls]) => {
         const td = document.createElement('td');
         if (cls) td.className = cls;
@@ -1468,6 +1695,17 @@
         tr.append(td);
       });
       body.append(tr);
+      // Lỗi được một dòng riêng, đủ rộng để đọc hết — nhét vào ô hẹp thì nó bị
+      // cắt đúng chỗ đang nói vì sao hỏng.
+      if (r.err) {
+        const errRow = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 3;
+        td.className = 'runerr';
+        td.textContent = r.err;
+        errRow.append(td);
+        body.append(errRow);
+      }
     });
   }
 

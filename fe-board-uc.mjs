@@ -113,14 +113,20 @@ try {
   for (const t of tabs) {
     await page.click(`#panelTabs button[data-panel="${t}"]`);
     await page.waitForSelector(`#panel-${t}:not(.hidden)`, { timeout: 5000 });
-    // What the PRODUCT draws, not what was said in the room months ago. The
-    // conversation is a log: it still holds hub's old "$0.8735" replies from
-    // before the prices were removed, and rewriting history to make a test
-    // green would be the dishonest fix. Everything else on screen is the app's
-    // own chrome, and that is what must be free of money.
+    // What the PRODUCT draws, not text it merely displays.
+    //
+    // Bỏ ra hai loại nội dung KHÔNG do hub viết: (1) lịch sử phòng chat — vẫn
+    // còn nguyên các câu "$0.8735" hub trả lời hồi chưa gỡ giá, và sửa lịch sử
+    // cho phép đo xanh mới là gian; (2) chữ lấy từ chính phiên Claude (xem
+    // trước, luồng sự kiện, câu trả lời fork) — một phiên đang bàn "Chi phí
+    // engine" thì màn phải hiện đúng như thế. Bắt được thật ngày 2026-08-09:
+    // phép đo báo đỏ vì một dòng transcript, không phải vì hub hiện tiền.
+    // Phần còn lại là chrome do hub tự vẽ — chỗ phải sạch bóng tiền.
     const txt = await page.evaluate(() => {
       const el = document.getElementById('board').cloneNode(true);
-      el.querySelectorAll('#thread, .msg').forEach((n) => n.remove());
+      el.querySelectorAll(
+        '#thread, .msg, .sess-body, .sess-note, #sessStream, #sessAskBox, #sessHandoverBox'
+      ).forEach((n) => n.remove());
       return el.innerText;
     });
     moneyPerTab[t] = /\$\s?\d|chi phí|trần tiền|đã tiêu/i.test(txt);
@@ -141,6 +147,30 @@ try {
     inner: window.innerWidth,
   }));
   check("trang không tràn ngang trên điện thoại", over.w <= over.inner + 1, `${over.w}/${over.inner}`);
+
+  // Trang không tràn KHÔNG có nghĩa là không có gì tràn: một khối con vẫn có
+  // thể rộng hơn khung của nó và cuộn ngang bên trong, và người đọc chỉ thấy
+  // phần đầu — tưởng đó là tất cả. Bắt thật ngày 2026-08-09: bảng "lần poll"
+  // rộng 520px trong khung 300px vì còn `min-width` của bảng NĂM cột đã bỏ, nên
+  // cột "mới" nằm ngoài màn suốt hai bản deploy mà mọi kiểm tra vẫn xanh.
+  //
+  // Bỏ qua input/textarea/select: `scrollWidth` của chúng phản ánh độ dài giá
+  // trị đang gõ, không phải lỗi bố cục.
+  const sideways = {};
+  for (const t of tabs) {
+    await page.click(`#panelTabs button[data-panel="${t}"]`);
+    await page.waitForSelector(`#panel-${t}:not(.hidden)`, { timeout: 5000 });
+    sideways[t] = await page.evaluate(() =>
+      [...document.querySelectorAll("#board *")]
+        .filter((e) => !/^(INPUT|TEXTAREA|SELECT)$/.test(e.tagName))
+        .filter((e) => e.clientWidth > 0 && e.scrollWidth > e.clientWidth + 2)
+        .map((e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""} ${e.scrollWidth}/${e.clientWidth}`)
+    );
+  }
+  const overflowing = Object.entries(sideways).filter(([, v]) => v.length);
+  check("không khối nào rộng hơn khung của nó (nội dung không trốn sang bên phải)",
+    overflowing.length === 0,
+    overflowing.map(([k, v]) => `${k}: ${v.join(", ")}`).join(" | "));
   await page.screenshot({ path: `${SHOTS}board-01-phone.png`, fullPage: true });
 
   check("trang không gọi ra ngoài origin của app", offOrigin.length === 0, offOrigin.slice(0, 2).join(" "));

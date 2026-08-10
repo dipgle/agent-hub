@@ -239,6 +239,17 @@ or drive a session from a phone?** If not, it does not belong here.
   2026-08-07). `cargo build` alone updates `target/`, which nothing runs.
 - A verb that parses must have a handler. A verb with no handler is worse than
   an unknown one: the room accepts it, nothing happens, nothing says so.
+- **Look at the picture. Every deploy ends with one.** `fe-deploy.mjs` now runs
+  `fe-shots.mjs` after a successful activate and prints
+  `ui-shots/after-<version>-*.png`; open them before saying anything is done.
+  This is mechanical on purpose. Twice on 2026-08-10 the assertions were green
+  while the screen was wrong: the "snapshot is stale" warning was **cut off**
+  mid-sentence (7/7 checks passed — they read `textContent`, which holds the
+  whole string even when the screen truncates it), and the "what is it doing"
+  line rendered **above** the session name, so the eye read `Brewing…` before
+  knowing which session. An assertion tests what you thought to check; a picture
+  shows what you didn't. `fe-shots` only reads — it never calls `claude`, so
+  there is no reason to skip it.
 - Deploying the page: `node fe-deploy.mjs <version> "<notes>"`. Bundle versions
   are IMMUTABLE — re-using a name after editing the page ships nothing. The
   script compares the served bytes against what it packed and fails loudly;

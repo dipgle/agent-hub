@@ -184,3 +184,37 @@ if (problems.length) {
   process.exit(1);
 }
 console.log(`\nĐẠT: ${version} đang phục vụ thật tại http://${APP_TID}.test.localhost:8090/`);
+
+// ẢNH CHỤP NGAY SAU MỖI LẦN DEPLOY — không chờ ai nhớ ra phải nhìn.
+//
+// Hà 2026-08-10: *"sao không sử dụng tool chụp ảnh để phân tích"*. Đúng, và
+// hôm ấy có hai bằng chứng: lời cảnh báo "ảnh chụp cũ" bị CẮT CỤT trong khi
+// 7/7 assert vẫn xanh (chúng đọc `textContent`, thứ có đủ chữ kể cả khi màn
+// cắt), và dòng "đang làm gì" nằm TRÊN tên phiên. Cả hai chỉ lộ khi mở ảnh ra.
+//
+// Assert chỉ kiểm được thứ mình NGHĨ RA để kiểm; bức ảnh cho thấy thứ mình
+// không nghĩ tới. Nên việc nhìn phải là một bước cơ học của deploy, không phải
+// một thói quen tốt. `fe-shots` chỉ đọc, không gọi `claude`, chạy bao nhiêu lần
+// cũng không tốn hạn mức — không có lý do gì để bỏ.
+try {
+  const { spawnSync } = await import("node:child_process");
+  const tag = `after-${version}`;
+  // Chụp bằng TÀI KHOẢN CHỦ (`alice_local`), không phải tài khoản bot dùng cho
+  // console admin: màn của chủ máy mới là màn cần nhìn.
+  const r = spawnSync(
+    "node",
+    [HERE + "fe-shots.mjs", APP_TID, "alice_local", env.HUB_TFL5_ALICE_PASSWORD || "", tag],
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+  if (r.status === 0) {
+    console.log(`\nẢnh 5 màn sau deploy: ui-shots/${tag}-*.png — MỞ RA NHÌN trước khi nói xong.`);
+  } else {
+    // Không chụp được thì nói ra; im lặng ở đây là quay về đúng thói quen cũ.
+    console.log(`\n⚠ không chụp được ảnh sau deploy (exit ${r.status}) — hãy tự chạy fe-shots.mjs.`);
+  }
+} catch (e) {
+  console.log(`\n⚠ không chụp được ảnh sau deploy: ${e.message}`);
+}

@@ -114,26 +114,33 @@ function pendingSubagents(path) {
   const started = [];
   const finished = new Set();
   const stopped = new Set();
+  // Thông báo kết thúc tới bằng BA đường (xem `sessions.rs`): lượt `user` bình
+  // thường, `queue-operation.content`, và `attachment.prompt` — hai đường sau là
+  // khi agent về đúng lúc phiên cha đang chạy dở một lệnh.
+  const noticeText = (rec) => {
+    const out = [];
+    if (rec?.type === "queue-operation" && typeof rec.content === "string") out.push(rec.content);
+    if (typeof rec?.attachment?.prompt === "string") out.push(rec.attachment.prompt);
+    return out;
+  };
+  const eat = (text) => {
+    for (const blk of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+      for (const m of blk[1].matchAll(/<tool-use-id>([^<]+)<\/tool-use-id>/g)) stopped.add(m[1]);
+    }
+  };
   for (const line of readTail(path).split("\n")) {
     let rec;
     try { rec = JSON.parse(line); } catch { continue; } // dòng đầu bị cắt giữa chừng là bình thường
+    noticeText(rec).forEach(eat);
     const blocks = rec?.message?.content;
     if (!Array.isArray(blocks)) continue;
     for (const b of blocks) {
       if (b?.type === "tool_use" && (b.name === "Agent" || b.name === "Task") && b.id) started.push(b.id);
       else if (b?.type === "tool_result" && b.tool_use_id) finished.add(b.tool_use_id);
-      else if (typeof b?.text === "string" && b.text.includes("<task-notification>")) {
-        // Chỉ đọc BÊN TRONG từng khối thông báo. Quét cả đoạn thì một phiên
-        // đang bàn về chính tính năng này (lời văn có nhắc hai thứ thẻ) sẽ
-        // đóng nhầm một lệnh gọi đang chạy — và bản đếm "độc lập" này sẽ đồng
-        // ý với con bug thay vì bắt nó.
-        // ĐÒI thẻ đóng, y như bản Rust: khối mở mà không đóng là lời văn, không
-        // phải thông báo — mỗi bản ghi là một dòng JSON trọn vẹn, dòng bị cắt
-        // thì trượt JSON.parse và bị bỏ cả dòng.
-        for (const blk of b.text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
-          for (const m of blk[1].matchAll(/<tool-use-id>([^<]+)<\/tool-use-id>/g)) stopped.add(m[1]);
-        }
-      }
+      // Chỉ đọc BÊN TRONG từng khối thông báo, và ĐÒI thẻ đóng: quét cả đoạn
+      // thì một phiên đang bàn về chính tính năng này sẽ đóng nhầm một lệnh gọi
+      // đang chạy — và bản đếm "độc lập" này sẽ đồng ý với con bug thay vì bắt nó.
+      else if (typeof b?.text === "string") eat(b.text);
     }
   }
   return started.filter((id) => (background.has(id) ? !stopped.has(id) : !finished.has(id))).length;

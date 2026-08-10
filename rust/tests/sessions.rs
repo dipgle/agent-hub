@@ -459,3 +459,29 @@ fn prose_that_merely_mentions_the_notice_closes_nothing() {
     let dangling = r#"{"type":"user","message":{"content":[{"type":"text","text":"nói về <task-notification> rồi trích <tool-use-id>b1</tool-use-id> mà không đóng khối"}]}}"#;
     assert_eq!(parse_tail(&format!("{launched}\n{dangling}"), &bg).pending_subagents, 1);
 }
+
+/// Thông báo kết thúc tới bằng BA đường, không phải một.
+///
+/// Đo trên máy 2026-08-10, SAU khi bản vá đầu đã xanh cả bộ kịch bản: một agent
+/// đã về từ lâu vẫn nằm trên màn. Lý do là nó về đúng lúc phiên cha đang chạy dở
+/// một lệnh, nên CLI không giao thông báo thành một lượt `user` mà xếp vào sổ
+/// (`queue-operation` với chữ ở `content`, rồi `attachment` với chữ ở
+/// `attachment.prompt`). Bộ kịch bản không bắt được vì nó chỉ đo lúc agent đang
+/// chạy thật — con ma chỉ hiện ra khi đi kiểm trạng thái sống.
+#[test]
+fn a_stop_notice_arrives_by_three_different_roads() {
+    let bg: HashSet<String> = ["q1", "a1"].iter().map(|s| s.to_string()).collect();
+    let launched = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q1","name":"Agent","input":{}},{"type":"tool_use","id":"a1","name":"Agent","input":{}}]}}"#;
+    assert_eq!(parse_tail(launched, &bg).pending_subagents, 2);
+
+    // Đường 2: xếp hàng, chữ nằm thẳng ở `content`.
+    let queued = r#"{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<tool-use-id>q1</tool-use-id>\n<status>completed</status>\n</task-notification>"}"#;
+    assert_eq!(parse_tail(&format!("{launched}\n{queued}"), &bg).pending_subagents, 1);
+
+    // Đường 3: đính kèm, chữ nằm ở `attachment.prompt`.
+    let attached = r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>\n<tool-use-id>a1</tool-use-id>\n<status>completed</status>\n</task-notification>"}}"#;
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{queued}\n{attached}"), &bg).pending_subagents,
+        0
+    );
+}

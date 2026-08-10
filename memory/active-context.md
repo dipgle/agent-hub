@@ -53,7 +53,16 @@ trang xuống đúng một chiều cao thẻ, đẩy đi mất chính cái vừa
 sách thì neo là đúng; ở **đỉnh** thì thứ người ta đang nhìn là cái đỉnh. Đo lại
 trong đúng điều kiện ấy: **0px**.
 
-**Nghiệm thu:** `cargo test` **89** (+4) · clippy 0 · bundle **v132** · daemon do
+👻 **Và một con ma nữa, chỉ lộ ra vì tôi đi kiểm trạng thái SỐNG sau khi cả bộ
+kịch bản đã xanh:** `projects-28` khai `pending=1` trong khi không còn agent nào
+chạy. Lý do: thông báo kết thúc tới bằng **ba** hình dạng bản ghi chứ không phải
+một — lượt `user` bình thường khi phiên cha đang rảnh, còn khi nó về đúng lúc
+phiên cha đang chạy dở một lệnh thì CLI xếp vào sổ (`queue-operation.content`,
+rồi `attachment.prompt`). Bản vá chỉ đọc hình dạng thứ nhất ⟹ agent nào về "sai
+lúc" thì ở lại trên màn mãi mãi. **Không kịch bản nào bắt được**, vì tất cả đều
+đo lúc agent đang chạy thật. *Bộ kịch bản xanh không phải là trạng thái sống.*
+
+**Nghiệm thu:** `cargo test` **90** (+5) · clippy 0 · bundle **v132** · daemon do
 launchd sở hữu, `kind: cert`, đã `install.sh` · `fe-subagent` **6/6 trên subagent
 THẬT** · `fe-board` 31/31 · `fe-phone` · `fe-smoke` · `fe-url` · `fe-denied` ·
 `fe-config` · `fe-sessions` · `fe-newsession` 17/17 (5 kiểm tra khai rõ là chưa

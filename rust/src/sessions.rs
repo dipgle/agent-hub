@@ -510,17 +510,39 @@ fn stopped_background_calls(tail: &str) -> HashSet<String> {
         };
         // Đọc qua serde chứ không quét chuỗi thô: trong file các thẻ nằm trong
         // một chuỗi JSON đã escape, quét thô là tự viết lại bộ giải escape.
-        let Some(blocks) = record
+        //
+        // BA chỗ mang thông báo, không phải một — đo trên máy 2026-08-10 sau khi
+        // bản vá đầu đã "xanh" cả bộ kịch bản:
+        //   1. lượt `user` bình thường (`message.content[].text`) — khi agent về
+        //      lúc phiên cha đang rảnh;
+        //   2. `type: "queue-operation"`, chữ nằm thẳng ở `content` — khi nó về
+        //      lúc phiên cha đang chạy dở một lệnh nên bị xếp hàng;
+        //   3. `type: "attachment"`, chữ nằm ở `attachment.prompt`.
+        // Chỉ đọc chỗ (1) thì agent nào về đúng lúc phiên cha đang bận sẽ ở lại
+        // trên màn MÃI MÃI — đúng con ma mà cả hàm này sinh ra để tránh, và bộ
+        // kịch bản không bắt được vì nó chỉ đo lúc agent đang chạy thật.
+        //
+        // Vẫn KHÔNG quét cả dòng thô: (2) và (3) là sổ sách của CLI, còn lời văn
+        // của người và của trợ lý nằm ở (1) — mà lời văn thì hay nhắc tới đúng
+        // thứ thẻ này (chính commit này là ví dụ).
+        let mut texts: Vec<&str> = Vec::new();
+        if let Some(blocks) = record
             .get("message")
             .and_then(|m| m.get("content"))
             .and_then(|c| c.as_array())
-        else {
-            continue;
-        };
-        for b in blocks {
-            let Some(text) = b.get("text").and_then(|t| t.as_str()) else {
-                continue;
-            };
+        {
+            texts.extend(blocks.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())));
+        }
+        if record.get("type").and_then(|t| t.as_str()) == Some("queue-operation") {
+            texts.extend(record.get("content").and_then(|c| c.as_str()));
+        }
+        texts.extend(
+            record
+                .get("attachment")
+                .and_then(|a| a.get("prompt"))
+                .and_then(|p| p.as_str()),
+        );
+        for text in texts {
             // CHỈ đọc bên TRONG từng khối thông báo, không quét cả đoạn văn.
             //
             // Bản đầu chỉ hỏi "đoạn này có chứa chữ <task-notification> không?"

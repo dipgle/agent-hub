@@ -130,8 +130,14 @@ or drive a session from a phone?** If not, it does not belong here.
     `<slug>/<session_id>/subagents/agent-<agentId>.jsonl` (`isSidechain: true`)
     beside `agent-<agentId>.meta.json`, whose `toolUseId` names the call that
     spawned it; the parent transcript later receives a `<task-notification>`
-    block whose `<tool-use-id>` is that same id; and a subagent is NOT a
-    process, so `ps` will never find one. A dead session's un-notified agents
+    block whose `<tool-use-id>` is that same id — carried by **three different
+    record shapes**, not one: a normal `user` turn
+    (`message.content[].text`) when the parent was idle, and
+    `queue-operation.content` then `attachment.prompt` when the agent finished
+    while the parent was mid-command. Reading only the first shape leaves a
+    ghost on the screen forever, and no acceptance script catches it, because
+    they all measure while an agent is genuinely running; and a subagent is NOT
+    a process, so `ps` will never find one. A dead session's un-notified agents
     are NOT running — the process took them with it — so liveness gates the
     count (`sessions::pending_for_display`), or the screen grows ghosts.
 11. **The phone page is the only UI.** There is no local console any more. If you

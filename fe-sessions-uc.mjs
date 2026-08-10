@@ -33,14 +33,23 @@ const check = (name, ok, detail = "") => {
 };
 
 // Ground truth, read straight from the machine, not from the page.
-const truth = JSON.parse(
-  execFileSync(HERE + "rust/target/release/hub", ["sessions", "--json"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  })
-);
-const liveCount = truth.sessions.length;
-const liveAccounts = [...new Set(truth.sessions.map((s) => s.account))].sort();
+const readTruth = () =>
+  JSON.parse(
+    execFileSync(HERE + "rust/target/release/hub", ["sessions", "--json"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+  );
+/// Dấu vân tay của tập phiên — đổi khi có phiên mở/dừng/đổi nơi chạy.
+const fingerprint = (t) =>
+  t.sessions
+    .map((s) => `${s.session_id}:${s.host}`)
+    .sort()
+    .join("|");
+
+let truth = readTruth();
+let liveCount = truth.sessions.length;
+let liveAccounts = [...new Set(truth.sessions.map((s) => s.account))].sort();
 console.log(`máy đang có ${liveCount} phiên · tài khoản: ${liveAccounts.join(", ")}\n`);
 
 const browser = await chromium.launch({ headless: true });
@@ -71,7 +80,35 @@ try {
   await page.waitForFunction(() => document.querySelectorAll("#sessList .sess").length > 0, {
     timeout: 25000,
   });
-  const cards = await page.locator("#sessList .sess").count();
+
+  // ——— KẸP phép đo trước khi so ———
+  //
+  // Ảnh chụp trên trang trễ tới ~25 giây (một nhịp đẩy của daemon + một nhịp đọc
+  // của trang). Trong khoảng ấy một phiên có thể mở ra hoặc dừng hẳn, và lúc đó
+  // màn KHÁC máy mà **không bên nào sai**. Đo 2026-08-10: chạy cả bộ liên tiếp
+  // thì kịch bản này đỏ 3 dòng (`màn 6 / máy 5`), chờ 45 giây chạy lại thì xanh
+  // — tức nó đang tố cáo sản phẩm cho một chuyện của phép đo, và đỏ giả thì
+  // người ta sẽ bỏ qua cả những lần đỏ thật.
+  //
+  // Khuôn lấy từ `fe-subagent-uc.mjs`: đọc sự thật — chờ màn bắt kịp — đọc lại
+  // sự thật; chỉ so khi hai đầu kẹp bằng nhau. Sự thật đổi giữa chừng thì lấy
+  // bản mới và chờ tiếp. Hết trần vẫn lệch thì ĐỎ THẬT, không nới nữa.
+  let cards = 0;
+  let settled = false;
+  for (let round = 0; round < 12 && !settled; round++) {
+    const before = fingerprint(truth);
+    cards = await page.locator("#sessList .sess").count();
+    const after = readTruth();
+    if (fingerprint(after) !== before) {
+      truth = after;
+      liveCount = truth.sessions.length;
+      liveAccounts = [...new Set(truth.sessions.map((s) => s.account))].sort();
+      console.log(`  … tập phiên vừa đổi (${liveCount} phiên) — đọc lại rồi chờ màn bắt kịp`);
+    } else if (cards === liveCount) {
+      settled = true;
+    }
+    if (!settled) await page.waitForTimeout(6000);
+  }
   check("số phiên trên màn khớp với máy", cards === liveCount, `màn ${cards} / máy ${liveCount}`);
 
   // ——— NƠI phiên sống, không chỉ SỐ phiên ———

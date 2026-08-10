@@ -93,18 +93,42 @@ try {
   // Khuôn lấy từ `fe-subagent-uc.mjs`: đọc sự thật — chờ màn bắt kịp — đọc lại
   // sự thật; chỉ so khi hai đầu kẹp bằng nhau. Sự thật đổi giữa chừng thì lấy
   // bản mới và chờ tiếp. Hết trần vẫn lệch thì ĐỎ THẬT, không nới nữa.
+  // Đọc CẢ số thẻ lẫn chấm màu trong cùng một nhịp: chỉ chờ số thẻ khớp là
+  // chưa đủ. Đo 2026-08-10: một phiên vừa bắt đầu chạy thì SỐ thẻ không đổi
+  // (nó đã có trong danh sách từ trước) nhưng ảnh chụp trên trang vẫn mang
+  // `working` của nhịp cũ ⟹ máy nói "đang chạy", thẻ nói "đang rảnh", và phép
+  // đo đỏ cho một độ trễ chứ không cho một lỗi.
+  const readScreen = () =>
+    page.evaluate(() => ({
+      cards: document.querySelectorAll("#sessList .sess").length,
+      dots: Object.fromEntries(
+        [...document.querySelectorAll("#sessList .sess")].map((c) => [
+          c.dataset.session,
+          c.dataset.work || "",
+        ])
+      ),
+    }));
+  const dotsAgree = (screen, t) =>
+    t.sessions.every((x) => {
+      const d = screen.dots[x.session_id];
+      if (d === undefined) return false;
+      return x.working ? d === "đang chạy" : d !== "đang chạy";
+    });
+
   let cards = 0;
+  let screen = { cards: 0, dots: {} };
   let settled = false;
   for (let round = 0; round < 12 && !settled; round++) {
     const before = fingerprint(truth);
-    cards = await page.locator("#sessList .sess").count();
+    screen = await readScreen();
+    cards = screen.cards;
     const after = readTruth();
     if (fingerprint(after) !== before) {
       truth = after;
       liveCount = truth.sessions.length;
       liveAccounts = [...new Set(truth.sessions.map((s) => s.account))].sort();
       console.log(`  … tập phiên vừa đổi (${liveCount} phiên) — đọc lại rồi chờ màn bắt kịp`);
-    } else if (cards === liveCount) {
+    } else if (cards === liveCount && dotsAgree(screen, truth)) {
       settled = true;
     }
     if (!settled) await page.waitForTimeout(6000);
@@ -118,14 +142,7 @@ try {
   // nào bắt được, vì không ai đối chiếu nó với máy. Nay `working` trả lời cho
   // mọi phiên (mtime nhật ký + số subagent + `status`), và phép đo đi HAI CHIỀU
   // trên dữ liệu thật: đang chạy phải xanh, không chạy thì không được xanh.
-  const dots = await page.evaluate(() =>
-    Object.fromEntries(
-      [...document.querySelectorAll("#sessList .sess")].map((c) => [
-        c.dataset.session,
-        c.dataset.work || "",
-      ])
-    )
-  );
+  const dots = screen.dots;
   const shouldRun = truth.sessions.filter((s) => s.working);
   const shouldNot = truth.sessions.filter((s) => !s.working && s.host !== "dead");
   const missRun = shouldRun.filter((s) => dots[s.session_id] !== "đang chạy");

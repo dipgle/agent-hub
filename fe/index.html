@@ -431,6 +431,10 @@
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
   }
   .sess-note { margin: 6px 0 0; font-size: 12.5px; }
+  /* Dòng "đang làm gì": cùng cỡ hàng phụ, một dòng, cắt đuôi. Nó thay đổi mỗi
+     nhịp làm mới nên phải đứng yên một chỗ, không được đẩy bố cục. */
+  .sess-act { margin: 4px 0 0; font-size: 12px; font-variant-numeric: tabular-nums;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Hàng thao tác ngay trên thẻ phiên. Vùng chạm 44px là chuẩn của trang này
      (`fe-phone-uc`), và ở đây nó đáng giá hơn mọi chỗ khác: hai nút đứng cạnh
      nhau mà một trong hai là "Dừng". */
@@ -1984,6 +1988,20 @@
         card.append(warn);
       }
       if (kid) card.dataset.subagents = String(s.pending_subagents);
+      // ĐANG LÀM GÌ — chữ terminal đang hiện, không phải chữ hub tự nghĩ ra.
+      //
+      // Hà 2026-08-10: *"ui chưa thể hiện được phiên đang làm gì ví dụ Brewing…;
+      // Perambulating"*. Chấm màu mới trả lời CÓ/KHÔNG chạy; cái người ta nhìn
+      // trên terminal là động từ đang quay cùng đồng hồ. Chỉ có ở phiên đang
+      // chạy (hub chỉ đọc màn của những phiên ấy), nên nó không ngốn dòng nào
+      // của các thẻ đang rảnh.
+      let actLine = null;
+      if (s.activity) {
+        actLine = document.createElement('div');
+        actLine.className = 'muted sess-act';
+        actLine.textContent = `⏳ ${s.activity}`;
+        card.dataset.activity2 = s.activity;
+      }
       // Phiên không cửa sổ thì "ở đâu ra?" không có chỗ nào trả lời — trừ cây
       // tiến trình. Đo 2026-08-09: cả hai phiên nền trên máy đều truy được về
       // đúng một phiên đang nằm trong danh sách (dwork ← projects-a0 ở ttys003,
@@ -2006,6 +2024,10 @@
       if (work) card.dataset.work = work;
 
       card.append(head, meta);
+      // Dòng "đang làm gì" đứng NGAY DƯỚI tên và hàng phụ. Đặt nó trước `head`
+      // (như dòng cảnh báo ngữ cảnh đang làm) thì mắt đọc "Brewing…" trước khi
+      // biết đó là phiên nào — đúng thứ tự ngược.
+      if (actLine) card.append(actLine);
       if (fromLine) card.append(fromLine);
 
       if (s.last_text) {
@@ -2480,6 +2502,7 @@
       ['thư mục', s.cwd || '—'],
     ];
     if (s.pending_subagents) rows.splice(4, 0, ['subagent', `${s.pending_subagents} đang chạy`]);
+    if (s.activity) rows.splice(2, 0, ['đang làm', s.activity]);
     rows.forEach(([k, v]) => {
       if (!v) return;
       const r = document.createElement('div');

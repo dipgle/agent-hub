@@ -97,6 +97,18 @@ pub struct LiveSession {
     /// là còn làm; đứng im quá `IDLE_AFTER_SEC` nghĩa là lượt đã xong. Không
     /// thêm một lời gọi AppleScript nào.
     pub working: bool,
+    /// Phiên đang làm gì, bằng đúng chữ terminal hiện — `"Brewing… 10m43s"`.
+    ///
+    /// Hà 2026-08-10: *"ui chưa thể hiện được phiên đang làm gì ví dụ Brewing…;
+    /// Perambulating"*. `working` mới trả lời CÓ/KHÔNG; cái người ta nhìn trên
+    /// terminal là động từ đang quay cùng đồng hồ.
+    ///
+    /// Chỉ đọc màn cho phiên ĐANG CHẠY — thường 1–3 phiên, không phải cả danh
+    /// sách. Đó là cái khác với lần đo cũ (đọc màn MỌI phiên MỖI vòng kéo một
+    /// vòng từ ~18 giây lên 90 giây): phiên rảnh không có gì để hiện, nên đừng
+    /// hỏi. `None` khi không đọc được màn hoặc màn có dấu hiệu bí mật — không
+    /// đoán, và cũng không đưa chữ nào ra ngoài.
+    pub activity: Option<String>,
     /// The permission mode the session is running under ("auto", "dontAsk",
     /// "default"…).
     ///
@@ -617,6 +629,64 @@ fn stopped_background_calls(tail: &str) -> HashSet<String> {
     out
 }
 
+/// Đọc dòng "đang làm gì", có nhớ tạm — và ĐỒNG HỒ VẪN ĐÚNG.
+///
+/// Vì sao cần nhớ tạm: `snapshot()` chạy nhiều lần trong một vòng (tự đóng sổ,
+/// đẩy ảnh chụp, mỗi lệnh từ phòng chat), còn vòng bám phiên thì đẩy mỗi 4
+/// giây. Đọc màn ở mỗi lần gọi đã đẩy **trung vị một vòng từ 10.7s lên 16.8s**
+/// (đo 2026-08-10 trên 504 vòng cũ / 19 vòng mới) — mà mỗi vòng là một nhịp hub
+/// đọc lệnh từ điện thoại, nên cái giá không phải "số liệu chậm" mà là "lệnh
+/// của chủ máy nằm chờ lâu hơn". Đúng bài học đã ghi hồi phép dò hạn mức.
+///
+/// Vì sao nhớ tạm mà đồng hồ không sai: cache giữ **động từ + số giây lúc đọc**,
+/// rồi khi trả về thì cộng thêm tuổi của bản cache. Động từ đổi chậm (vài chục
+/// giây), còn đồng hồ thì là phép cộng — không cần hỏi Terminal để biết thêm 3
+/// giây đã trôi qua.
+fn activity_cached(tty: &str) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+
+    /// Đọc lúc nào, và đọc ra gì (`None` = màn không có dòng trạng thái nào).
+    type Seen = (Instant, Option<crate::keys::Activity>);
+
+    const TTL: Duration = Duration::from_secs(10);
+    static CACHE: OnceLock<Mutex<HashMap<String, Seen>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Khoá hỏng (một luồng panic khi đang giữ) thì đọc thẳng, đừng kéo cả tiến
+    // trình xuống theo — nhưng phải nói ra.
+    let mut map = match cache.lock() {
+        Ok(m) => m,
+        Err(e) => {
+            logging::warn("activity_cache_poisoned", json!({ "err": e.to_string() }));
+            return read_activity(tty).map(|a| a.label());
+        }
+    };
+    if let Some((at, act)) = map.get(tty) {
+        if at.elapsed() < TTL {
+            return act.as_ref().map(|a| {
+                crate::keys::Activity {
+                    verb: a.verb.clone(),
+                    elapsed_sec: a.elapsed_sec + at.elapsed().as_secs(),
+                }
+                .label()
+            });
+        }
+    }
+    let fresh = read_activity(tty);
+    map.insert(tty.to_string(), (Instant::now(), fresh.clone()));
+    fresh.map(|a| a.label())
+}
+
+fn read_activity(tty: &str) -> Option<crate::keys::Activity> {
+    match crate::keys::look(tty, 6) {
+        crate::keys::Look::Saw { body, .. } => crate::keys::activity(&body),
+        // Màn có bí mật hoặc không đọc được ⟹ không đoán, và không đưa chữ nào ra.
+        _ => None,
+    }
+}
+
 /// Nhật ký đứng im bao nhiêu giây, tính từ mốc hoạt động cuối.
 ///
 /// `None` khi không đọc được mốc — và `None` KHÔNG được đọc thành 0 (đang chạy)
@@ -986,6 +1056,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 state: s.get("state").and_then(|v| v.as_str()).map(str::to_string),
                 // Tính ở dưới, sau khi đọc xong mốc hoạt động của nhật ký.
                 working: false,
+                activity: None,
                 last_activity: None,
                 last_role: None,
                 last_text: None,
@@ -1080,6 +1151,13 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                             row.pending_subagents,
                             idle_seconds(row.last_activity.as_deref()),
                         );
+                    // Đọc màn CHỈ cho phiên đang chạy: thường 1–3 phiên. Phiên
+                    // rảnh không có dòng trạng thái nào để đọc, nên hỏi nó là
+                    // trả cái giá đã biết (18s → 90s một vòng) để lấy về chuỗi
+                    // rỗng.
+                    if row.working && !row.tty.is_empty() {
+                        row.activity = activity_cached(&row.tty);
+                    }
                     row.context_tokens = parsed.context_tokens;
                     row.model = parsed.model.clone();
                     row.last_role = parsed.last_role;

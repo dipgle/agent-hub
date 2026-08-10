@@ -336,6 +336,65 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
 /// Đây là tín hiệu cho câu "đã chạy hết chỗ dở chưa" (Hà 2026-08-10). Nhật ký
 /// không trả lời được: nó chỉ ghi SAU khi lượt xong, nên một phiên đang nghĩ ba
 /// phút trông y hệt một phiên đã nghỉ.
+/// Phiên đang làm gì, bằng đúng chữ terminal đang hiện.
+///
+/// Hà 2026-08-10: *"ui chưa thể hiện được phiên đang làm gì ví dụ Brewing…;
+/// Perambulating"*. Màn danh sách mới nói "đang chạy" — đúng nhưng rỗng; chữ
+/// người ta thật sự nhìn là cái động từ đang quay cùng đồng hồ.
+///
+/// Hình dạng thật, chụp trên máy này: `· Brewing… (10m 43s · ↓ 7.4k tokens)`.
+/// Neo vào **cái đồng hồ**, không vào động từ — y như `is_busy`: động từ đổi
+/// liên tục (Brewing, Perambulating, Unravelling, Herding…) nên bắt theo chữ là
+/// bắt trượt, còn `(<số>m <số>s` thì `claude` giữ nguyên.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Activity {
+    /// "Brewing", "Perambulating"… — đã bỏ dấu chấm lửng và ký hiệu quay.
+    pub verb: String,
+    pub elapsed_sec: u64,
+}
+
+impl Activity {
+    /// Câu ngắn cho thẻ phiên: `Brewing… 10m43s`.
+    pub fn label(&self) -> String {
+        let (m, s) = (self.elapsed_sec / 60, self.elapsed_sec % 60);
+        format!("{}… {m}m{s:02}s", self.verb)
+    }
+}
+
+/// Đọc dòng trạng thái đang quay, nếu có.
+pub fn activity(screen: &str) -> Option<Activity> {
+    for line in screen.lines().rev() {
+        let Some(open) = line.find(" (") else { continue };
+        let inside = &line[open + 2..];
+        // "<số>m <số>s" — cùng cái neo `is_busy` dùng.
+        let mins: String = inside.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if mins.is_empty() || !inside[mins.len()..].starts_with("m ") {
+            continue;
+        }
+        let after = &inside[mins.len() + 2..];
+        let secs: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if secs.is_empty() || !after[secs.len()..].starts_with('s') {
+            continue;
+        }
+        // Động từ = phần trước dấu "(", bỏ ký hiệu quay ở đầu và "…" ở cuối.
+        let verb = line[..open]
+            .trim()
+            .trim_start_matches(|c: char| !c.is_alphanumeric())
+            .trim()
+            .trim_end_matches(['…', '.'])
+            .trim()
+            .to_string();
+        if verb.is_empty() || verb.chars().count() > 24 {
+            continue;
+        }
+        return Some(Activity {
+            verb,
+            elapsed_sec: mins.parse::<u64>().ok()? * 60 + secs.parse::<u64>().ok()?,
+        });
+    }
+    None
+}
+
 pub fn is_busy(screen: &str) -> bool {
     screen.lines().any(|l| {
         let b = l.as_bytes();
@@ -510,7 +569,38 @@ fn b64(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{arrow_verdict, as_string, landed, window_script, Arrow, Landed, Look};
+    use super::{activity, arrow_verdict, as_string, landed, window_script, Arrow, Landed, Look};
+
+    /// Đọc ĐÚNG chữ terminal đang hiện, và neo vào đồng hồ chứ không vào động từ.
+    ///
+    /// Hà 2026-08-10: *"ui chưa thể hiện được phiên đang làm gì ví dụ Brewing…;
+    /// Perambulating"*. Động từ đổi liên tục nên bắt theo chữ là bắt trượt —
+    /// cùng lý do `is_busy` neo vào `(<số>m <số>s`.
+    #[test]
+    fn the_spinner_line_is_read_by_its_clock_not_by_its_verb() {
+        // Dòng thật, chụp trên máy này 2026-08-10.
+        let real = "· Brewing… (10m 43s · ↓ 7.4k tokens)";
+        let a = activity(real).expect("phải đọc được");
+        assert_eq!(a.verb, "Brewing");
+        assert_eq!(a.elapsed_sec, 10 * 60 + 43);
+        assert_eq!(a.label(), "Brewing… 10m43s");
+
+        // Động từ khác, ký hiệu quay khác — vẫn đọc được.
+        let other = activity("✶ Perambulating… (0m 8s · ↓ 12 tokens)").unwrap();
+        assert_eq!(other.verb, "Perambulating");
+        assert_eq!(other.label(), "Perambulating… 0m08s");
+
+        // Màn đứng yên thì KHÔNG bịa ra hoạt động nào.
+        assert!(activity("❯ ").is_none());
+        assert!(activity("  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt").is_none());
+        assert!(activity("").is_none());
+        // Có ngoặc, có chữ, nhưng không có đồng hồ ⟹ không phải dòng trạng thái.
+        assert!(activity("Đã sửa 2 tệp (xem lại 2 chỗ)").is_none());
+
+        // Dòng cuối cùng thắng: màn cuộn thì cái mới nhất nằm dưới.
+        let two = "· Cũ… (1m 00s · x)\n· Mới… (2m 05s · y)";
+        assert_eq!(activity(two).unwrap().verb, "Mới");
+    }
 
     /// Chốt mũi tên chỉ được mở khi BIẾT CHẮC không có hộp chọn.
     ///

@@ -54,23 +54,19 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
    tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm lúc ấy đang cư xử
    đúng. (Câu này trước đây là **ý định chứ không phải hành vi**: đo 2026-08-10
    chiều thì nó báo đỏ 3 dòng, vì hai lỗi đã vá cùng ngày — xem "Đã trả xong".)
-4. **Bí mật cũ còn trong lịch sử `.git` — cần một lệnh của Hà.** `2b6ea80` từng
-   commit `.env` kèm `HUB_TFL5_USER` + `HUB_TFL5_PASSWORD`; đã `git rm --cached`
-   + `chmod 600` + gitignore, nên **cây làm việc sạch**, và repo **chưa từng có
-   remote** nên giá trị ấy chưa rời máy này.
-   **Hà chốt 2026-08-10:** *"mật khẩu tfl5 đã rời máy đâu mà đổi, bỏ commit liên
-   quan đi"* ⟹ KHÔNG đổi mật khẩu; gỡ tệp khỏi lịch sử.
-   Claude **không chạy được** phần này: guard `cred-pre-tool` chặn mọi lệnh nêu
-   tên tệp ấy (kể cả `git rm --cached`, vì nó không phân biệt được gỡ-khỏi-index
-   với đọc-nội-dung), và guard thứ hai chặn `filter-branch` trên `main`. Không
-   lách — lệnh nằm ở cuối mục này, điểm lùi đã dựng sẵn:
-   `hub-before-rewrite.bundle` (1.2M, `git bundle`, khôi phục được mọi ref).
-   Chỉ có 2 commit mang tệp ấy (`2b6ea80` thêm, `236a53b` gỡ khỏi index), và
-   `2b6ea80` còn mang 9 tệp việc thật nên **không bỏ cả commit được** — phải gỡ
-   đúng một tệp ra khỏi lịch sử.
-
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
+
+- ~~Bí mật cũ nằm trong lịch sử `.git`~~ → **đã gỡ hẳn 2026-08-10**. Hà chốt
+  *"mật khẩu tfl5 đã rời máy đâu mà đổi, bỏ commit liên quan đi"* — repo chưa
+  từng có remote nên giá trị ấy chưa rời máy này, và đó là lý do xoay khoá không
+  cần thiết. Hà tự chạy `filter-branch` + `gc` (Claude bị guard chặn ba lần và
+  không lách). **Đo lại sau khi xong:** 0 commit còn mang tệp ấy · 0 tệp nào
+  trong TOÀN BỘ lịch sử còn dòng gán mật khẩu · `.git` **8.8M → 1.3M** (object
+  cũ bị vứt thật, không chỉ bị bỏ tham chiếu) · `git fsck` sạch · commit
+  `2b6ea80` giữ nguyên **9 tệp việc thật**, chỉ mất đúng tệp bí mật · tệp thật
+  vẫn nằm trong cây làm việc `chmod 600` và git chỉ theo dõi bản `*.example` ·
+  `fe-smoke` exit 0 và daemon vẫn đẩy được ảnh chụp, tức hub còn đăng nhập tfl5.
 
 - ~~`fe-sessions-uc` đỏ giả khi tập phiên vừa đổi~~ → đã cắm kẹp cùng khuôn với
   `fe-subagent-uc` (đọc sự thật — chờ màn bắt kịp — đọc lại; chỉ so khi hai đầu

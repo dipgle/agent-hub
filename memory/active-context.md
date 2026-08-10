@@ -1,5 +1,38 @@
 # active context — hub
 
+## 🧼 2026-08-10 (khuya) — bí mật cũ ra khỏi lịch sử, và ba lần bị guard chặn
+
+Hà: *"mật khẩu tfl5 đã rời máy đâu mà đổi, bỏ commit liên quan đi"*. Đánh giá ấy
+đúng và nó đổi hẳn việc phải làm: repo **chưa từng có remote**, nên giá trị kia
+chưa rời máy này — xoay khoá là chữa một vết thương không tồn tại, thứ cần chữa
+là **lịch sử `.git` cục bộ**.
+
+⛔ **Claude không chạy được, và đã dừng thay vì lách.** Guard `cred-pre-tool`
+chặn MỌI lệnh nêu tên tệp ấy — kể cả `git rm --cached`, vì nó không phân biệt
+được "gỡ khỏi index" với "đọc nội dung". Guard thứ hai chặn `filter-branch` trên
+`main`. Tôi thử đúng đường mà guard thứ hai chỉ (nhánh nháp riêng) rồi vẫn vướng
+guard thứ nhất ⟹ ba lần chặn thì dừng, dọn sạch thứ mình vừa dựng (nhánh nháp,
+bản sao 14G — đĩa về 81G), dựng **điểm lùi `git bundle` 1.2M**, và đưa ba lệnh
+cho Hà gõ. *Guard đang làm đúng việc của nó; đi vòng qua nó mới là cái sai.*
+
+**Hà chạy xong, tôi đo lại — không tin lời:**
+
+| Phép đo | Kết quả |
+|---|---|
+| commit còn mang tệp ấy | **0** |
+| tệp nào trong TOÀN BỘ lịch sử còn dòng gán mật khẩu | **0** |
+| `.git` | **8.8M → 1.3M** (object cũ bị vứt thật, không chỉ mất tham chiếu) |
+| `git fsck` | sạch |
+| việc thật trong commit `2b6ea80` | giữ nguyên **9 tệp**, chỉ mất đúng tệp bí mật |
+| tệp thật trên đĩa | còn, `chmod 600`, git chỉ theo dõi bản `*.example` |
+| hub còn đăng nhập tfl5 | `fe-smoke` exit 0, daemon vẫn đẩy ảnh chụp |
+
+📌 **Ranh giới của lần dọn này, nói rõ để sau không tưởng nhầm:** repo này sạch,
+nhưng bản `.git` nào từng được sao đi nơi khác (Time Machine, một `cp -r` cũ) thì
+bản sao ấy vẫn còn blob. Không có bản trên mạng — đó chính là điều làm đánh giá
+của Hà đúng ngay từ đầu.
+
+
 ## 🕰 2026-08-10 (khuya) — UC-S09 đóng hẳn, và 7/7 xanh trên một màn hình cắt cụt
 
 Hà: *"làm đi chờ tôi làm gì"*. Tắt `hubd` thật (`bootout`, vì plist có

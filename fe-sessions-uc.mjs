@@ -141,9 +141,13 @@ try {
   // ...và tự làm mới KHÔNG được đẩy chỗ đang đọc đi. `renderSessions` dựng lại
   // toàn bộ thẻ, nên phải neo theo THẺ đang nhìn (nhận diện bằng session_id,
   // không bằng vị trí — thứ tự đổi khi một phiên vừa động).
+  // Đứng GIỮA danh sách, không dính đáy. `scrollHeight * 0.6` bị trình duyệt
+  // kẹp về đúng trần cuộn khi danh sách ngắn, và đứng ở trần thì mọi lệch đều
+  // "giải thích được" — phép đo hết đỏ nổi. Nửa trần thì còn chỗ phía dưới để
+  // giữ neo, tức phép đo mới đo được thứ nó định đo.
   await page.evaluate(() => {
     const m = document.querySelector("main");
-    m.scrollTop = Math.round(m.scrollHeight * 0.6);
+    m.scrollTop = Math.round((m.scrollHeight - m.clientHeight) * 0.5);
   });
   await page.waitForTimeout(400);
   const readCard = () =>
@@ -157,22 +161,51 @@ try {
       };
     });
   const beforeList = await readCard();
+  const heightBefore = await page.evaluate(() => document.querySelector("main").scrollHeight);
   await page.waitForTimeout(17000);            // qua ít nhất một nhịp làm mới
   // Đo ĐÚNG cái thẻ đã ghi, không phải "thẻ đầu tiên còn thấy": danh sách sắp
   // theo vừa-động-trước, nên một phiên khác vừa động là thứ tự đổi và thẻ đầu
   // đổi theo — đó là dữ liệu đổi, không phải màn nhảy. Cái phải giữ nguyên là
   // vị trí của thẻ NGƯỜI TA ĐANG NHÌN.
-  const afterY = await page.evaluate((id) => {
+  const after = await page.evaluate((id) => {
+    const m = document.querySelector("main");
     const el = document.querySelector(`.sess[data-session="${id}"]`);
-    return el ? Math.round(el.getBoundingClientRect().top) : null;
+    return {
+      y: el ? Math.round(el.getBoundingClientRect().top) : null,
+      scrollTop: m.scrollTop,
+      max: m.scrollHeight - m.clientHeight,
+      height: m.scrollHeight,
+    };
   }, beforeList.id);
+  const afterY = after.y;
+  // Danh sách NGẮN LẠI đúng lúc đang ở gần đáy thì không giữ nổi toạ độ cũ, và
+  // đó không phải lỗi: `renderSessions` bù bằng `sc.scrollTop += delta`
+  // (`fe/index.html`), nhưng trần cuộn `scrollHeight - clientHeight` vừa tụt
+  // đúng một chiều cao thẻ, nên trình duyệt kẹp lệnh ghi ngược về trần mới —
+  // không có cách nào tạo ra chỗ cuộn không tồn tại. Dựng lại được đúng số đo
+  // 2026-08-10: y=-98 → y=53, lệch 151px = một thẻ, và khung cuộn nằm đúng
+  // trần mới. Cú xê dịch ấy có trần (≤ một thẻ), tự lành ở nhịp sau, và chỉ xảy
+  // ra đúng lúc một phiên biến mất.
+  //
+  // Nới ĐÚNG một ca ấy, nhận diện bằng bằng chứng chứ không bằng lòng tin:
+  // khung cuộn phải đang nằm ngay tại trần mới của chính nó. Mọi lệch khác vẫn
+  // đỏ.
+  //
+  // ⚠ Và phải đòi CẢ HAI vế. Bản nới đầu tiên của tôi chỉ hỏi "có đang ở trần
+  // không" — mà test khi ấy cuộn tới `scrollHeight*0.6`, con số bị kẹp về đúng
+  // trần, nên vế ấy LUÔN đúng và phép đo hết đỏ nổi (đo 2026-08-10: xanh với
+  // `y=-98 → y=-98 (đã ở đáy mới)`, tức nới cho một ca không hề xảy ra). Nay
+  // đòi thêm bằng chứng danh sách THẬT SỰ ngắn đi.
+  const shrank = after.height < heightBefore - 8;
+  const atNewCeiling = shrank && Math.abs(after.scrollTop - after.max) <= 1;
   if (afterY === null) {
     console.log("  · thẻ đang nhìn đã rời danh sách — bỏ qua 1 kiểm tra");
   } else {
     check(
-      "làm mới danh sách KHÔNG đẩy chỗ đang đọc đi",
-      beforeList.id.length > 0 && Math.abs(afterY - beforeList.y) <= 4,
-      `${beforeList.name} y=${beforeList.y} → y=${afterY}`
+      "làm mới danh sách KHÔNG đẩy chỗ đang đọc đi (hoặc đã hết chỗ để giữ)",
+      beforeList.id.length > 0 && (Math.abs(afterY - beforeList.y) <= 4 || atNewCeiling),
+      `${beforeList.name} y=${beforeList.y} → y=${afterY}` +
+        (atNewCeiling ? " (danh sách ngắn lại, khung cuộn đã ở đáy mới)" : "")
     );
   }
   await page.evaluate(() => { document.querySelector("main").scrollTop = 0; });

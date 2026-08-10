@@ -151,11 +151,82 @@ fn slow_block(cfg: &Config, now: i64) -> Value {
         "checked_at": now,
         "autostart": autostart_state(),
         "claude_cli": cfg.claude_cli.clone(),
+        "auth": auth_block(cfg),
     });
     if let Ok(mut guard) = cell.lock() {
         *guard = Some((now, v.clone()));
     }
     v
+}
+
+/// **Tài khoản này là AI** — hỏi `claude auth status` cho từng cấu hình.
+///
+/// Hà, 2026-08-10, nhìn màn: *"danh sách acc đang thiếu nhiều thông tin"*. Đúng:
+/// màn in `acc2 — 2/2 phiên đang sống`, còn ô chọn lúc mở phiên mới in trần
+/// `acc1 (mặc định) · acc2 · acc3`. Ba cái tên ấy **không nói được acc nào là
+/// hòm thư nào**, mà đó chính là lý do có ba tài khoản: chia hạn mức. Chọn
+/// nhầm acc từ điện thoại thì phải mở terminal ra mới biết mình vừa chọn ai.
+///
+/// Lấy được: `logged_in`, `email`, `subscription`, `org`. **Không** lấy được
+/// *hạn mức còn lại* — `claude` CLI không có lệnh nào trả nó ngoài phiên tương
+/// tác (`/usage`), nên đừng bịa một con số ra màn.
+///
+/// Nằm trong khối chậm vì mỗi tài khoản là một lần spawn tiến trình; câu trả
+/// lời đổi theo ngày chứ không theo giây. Tài khoản mặc định chọn bằng cách
+/// KHÔNG có `CLAUDE_CONFIG_DIR` — trỏ nó vào `~/.claude` là một chuyện khác.
+fn auth_block(cfg: &Config) -> Value {
+    let mut map = serde_json::Map::new();
+    for acc in cfg.claude_accounts_or_ambient() {
+        let env = match acc.config_dir.as_ref() {
+            Some(d) => vec![(
+                "CLAUDE_CONFIG_DIR".to_string(),
+                Some(
+                    crate::config::expand_home(Path::new(d))
+                        .display()
+                        .to_string(),
+                ),
+            )],
+            None => vec![("CLAUDE_CONFIG_DIR".to_string(), None)],
+        };
+        let out = run(
+            &cfg.claude_cli,
+            &["auth", "status"],
+            RunOpts {
+                timeout: Some(Duration::from_secs(20)),
+                env,
+                ..Default::default()
+            },
+        );
+        let row = match out {
+            Ok(r) => match serde_json::from_str::<Value>(r.stdout.trim()) {
+                Ok(j) => json!({
+                    "logged_in": j.get("loggedIn").and_then(Value::as_bool),
+                    "email": j.get("email").and_then(Value::as_str),
+                    "subscription": j.get("subscriptionType").and_then(Value::as_str),
+                    "org": j.get("orgName").and_then(Value::as_str),
+                }),
+                // Trả lời không đọc được KHÁC với chưa đăng nhập. Ghi lại chữ
+                // thật để màn nói "chưa hỏi được" thay vì dựng một tài khoản
+                // hỏng ra từ chỗ không có gì.
+                Err(e) => {
+                    crate::logging::warn(
+                        "claude_auth_status_unparsed",
+                        json!({ "account": acc.name, "err": e.to_string(), "code": r.code }),
+                    );
+                    json!({ "err": r.stderr.lines().next().unwrap_or("không đọc được") })
+                }
+            },
+            Err(e) => {
+                crate::logging::warn(
+                    "claude_auth_status_failed",
+                    json!({ "account": acc.name, "err": e.to_string() }),
+                );
+                json!({ "err": e.to_string() })
+            }
+        };
+        map.insert(acc.name.clone(), row);
+    }
+    Value::Object(map)
 }
 
 /// Will hub come back by itself after a reboot?

@@ -89,6 +89,34 @@ try {
   check("không còn kênh đã gỡ",
     !/github|telegram|mailler|devlog/i.test(probe), probe.replace(/\s+/g, " ").slice(0, 90));
   check("nói rõ đo lúc nào (số liệu có thể cũ vài phút)", /Đo lúc/.test(probe));
+
+  // Hai cách hub chết lặng mà mọi màn khác vẫn xanh (2026-08-10):
+  //  · bản cài rơi về chữ ký ad-hoc ⇒ bật máy lại là macOS không nhận ra
+  //    chương trình, hub không dậy — và không có lỗi nào để đọc;
+  //  · bản cài cũ hơn mã đã build ⇒ daemon chạy mã hôm qua trong khi test xanh
+  //    và trang đã deploy.
+  // Cả hai chỉ tồn tại dưới dạng MỘT DÒNG CHỮ trên màn này, nên phải kiểm bằng
+  // chữ trên màn chứ không bằng trường JSON — chính cái bẫy "hàng có class sạch
+  // mà display:none" đã bắt được ở nút ← Danh sách.
+  const runtimeText = (await page.locator("#runtimeBox").innerText()).trim();
+  check(
+    "Tình trạng nói bản cài mang chữ ký gì",
+    /chữ ký bản cài/i.test(runtimeText),
+    runtimeText.split("\n").find((l) => /chữ ký/i.test(l)) || "(không có hàng nào)"
+  );
+  check(
+    "chữ ký là loại cố định, không phải ad-hoc",
+    /chữ ký bản cài[\s\S]{0,40}cố định/i.test(runtimeText),
+    runtimeText.split("\n").find((l) => /chữ ký/i.test(l)) || ""
+  );
+  // Hàng "bản đang chạy CŨ hơn" chỉ hiện khi có chuyện — vắng mặt là tin tốt.
+  // Kiểm đúng chiều đó: nếu nó hiện thì phải kèm cách sửa, đừng chỉ báo động.
+  const staleRow = runtimeText.split("\n").find((l) => /bản đang chạy/i.test(l));
+  check(
+    "không có cảnh báo daemon chạy mã cũ (hoặc nếu có thì kèm cách sửa)",
+    !staleRow || /install\.sh/.test(runtimeText),
+    staleRow || "(vắng mặt — daemon đang chạy đúng mã)"
+  );
   // Bảng lượt chạy nay CHỈ kê lượt HỎNG (rà ba tab, 2026-08-09): 12 dòng
   // `ok · 0` chiếm hai phần ba màn để nói một điều duy nhất. Cái phải kiểm bây
   // giờ là dòng tóm tắt — nó luôn có, và nó là chỗ nói "tất cả ok" hay "N hỏng".
@@ -149,6 +177,64 @@ try {
   check("KHÔNG tab nào hiện con số tiền / chữ chi phí",
     Object.values(moneyPerTab).every((v) => !v),
     Object.entries(moneyPerTab).map(([k, v]) => `${k}:${v ? "CÓ" : "sạch"}`).join(" "));
+
+  // ---- bốn tab dùng chung một khung cuộn ----------------------------------
+  // Hà 2026-08-10: *"các ui theo menu đang bị ảnh hưởng nhau … luôn bị nhảy
+  // cuộn xuống cuối trang rất khó chịu"*. Cơ chế: `main` là khung cuộn DUY NHẤT
+  // cho cả bốn tab, tab Trao đổi dán đáy (đúng), nên mọi tab mở sau đó kế thừa
+  // `scrollTop` ấy và mở ra đã ở đáy. Đo được: Sức khoẻ `68/68`, Cấu hình
+  // `68/589`, Phiên `68/148`.
+  //
+  // Đo trên `main` chứ không phải `window`: `window.scrollY` đứng im ở 0 trên
+  // mọi màn, nên phép đo cũ nhìn vào đó không thể đỏ được.
+  const mainScroll = () => page.evaluate(() => {
+    const m = document.querySelector("main");
+    return { top: Math.round(m.scrollTop), max: Math.round(m.scrollHeight - m.clientHeight) };
+  });
+  const goTab = async (t) => {
+    await page.click(`#panelTabs button[data-panel="${t}"]`);
+    await page.waitForSelector(`#panel-${t}:not(.hidden)`, { timeout: 5000 });
+    await page.waitForTimeout(700);
+  };
+  await goTab("chat");
+  await page.waitForTimeout(400);
+  const chatScroll = await mainScroll();
+  check("tab Trao đổi vẫn dán đáy (tin mới nằm dưới cùng)",
+    chatScroll.max === 0 || chatScroll.max - chatScroll.top < 8,
+    `${chatScroll.top}/${chatScroll.max}`);
+
+  // Điều PHẢI chứng minh là "tab này không mang vị trí của tab kia sang", KHÔNG
+  // phải "mọi tab luôn mở ở đầu" — thiết kế là mỗi tab nhớ chỗ của chính nó, và
+  // quay lại đúng chỗ mình rời đi là ĐÚNG. Bản đo đầu của tôi đòi `top === 0`
+  // nên báo đỏ cho `config` khi nó trả người đọc về đúng 589 — một phép đo đòi
+  // sản phẩm sai thiết kế thì không bao giờ xanh được.
+  for (const t of ["health", "config", "sessions"]) {
+    await goTab(t);
+    await page.evaluate(() => { document.querySelector("main").scrollTop = 0; });
+    await page.waitForTimeout(200);
+    await goTab("chat");                       // dán đáy: 3000+ px
+    await goTab(t);                            // quay lại
+    const s = await mainScroll();
+    check(`tab ${t} về đúng chỗ mình rời đi, không dính đáy của Trao đổi`,
+      s.top === 0, `scrollTop ${s.top}/${s.max}`);
+  }
+
+  // ---- nút trong header chung phải TRẢ LỜI -------------------------------
+  // Cùng lời báo trên: *"header chung dẫn đến hiện mà bấm không có tác dụng"*.
+  // Gốc là `#cmdStatus` bị xoá cùng đợt gỡ nhánh hộp thư (393db8f) trong khi
+  // `cmdNote()` vẫn gọi tới rồi `return` im lặng — lệnh vẫn đi, màn không nói gì
+  // suốt hai ngày. Kiểm bằng CHỮ HIỆN RA, không bằng "hàm có được gọi không".
+  await page.click('#panelTabs button[data-panel="health"]');
+  await page.waitForSelector("#panel-health:not(.hidden)", { timeout: 5000 });
+  await page.click("#btnCycle");
+  await page.waitForTimeout(1200);
+  const cmdSaid = await page.evaluate(() => {
+    const el = document.getElementById("cmdStatus");
+    if (!el) return "(không có #cmdStatus trên trang)";
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 ? el.textContent.trim() : "(có phần tử nhưng không hiện)";
+  });
+  check("bấm nút lệnh ở tab khác vẫn thấy hub trả lời", /Đã gửi|Chưa kết nối/.test(cmdSaid), cmdSaid.slice(0, 70));
 
   // ---- the room still takes orders ---------------------------------------
   await page.click('#panelTabs button[data-panel="chat"]');

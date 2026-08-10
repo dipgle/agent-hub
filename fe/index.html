@@ -638,6 +638,10 @@
   #board nav.subtabs { display: flex; gap: 4px; margin-bottom: 16px; flex-wrap: wrap; }
   #board nav.subtabs button.on { background: var(--accent-soft); border-color: var(--accent); font-weight: 600; }
   #board .boardbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  /* Chỗ trả lời của các nút gửi lệnh. 12.5px là sàn của trang (luật ≥12px), và
+     nó ăn `.hidden` như mọi thứ khác nên khi rỗng thì không chiếm dòng nào. */
+  #cmdStatus { margin: -6px 0 10px; font-size: 12.5px; line-height: 1.4; }
+  #cmdStatus.bad { color: var(--danger, #a33a2c); font-weight: 600; }
   /* Hàng trên cùng GHIM ĐỈNH ở màn Phiên. Nó nay mang nút "← Danh sách" và tên
      phiên đang đọc (Hà 2026-08-09) — mà một luồng dài thì cuộn vài màn là nút
      ấy biến mất, tức đưa lên head xong lại với không tới. Sticky chứ không
@@ -796,6 +800,14 @@
       <button type="button" id="btnCycle" class="primary">Chạy 1 vòng</button>
       <button type="button" id="boardReload">Tải lại</button>
     </div>
+    <!-- Chỗ trả lời cho mọi nút gửi lệnh. Nó từng tồn tại, bị xoá nhầm cùng
+         đợt gỡ nhánh hộp thư (393db8f, 2026-08-08) trong khi `cmdNote()` vẫn
+         gọi tới — nên từ hôm ấy bấm "Đọc phòng"/"Chạy 1 vòng" là bấm vào hư
+         không: lệnh có đi, mà màn không nói một chữ. Hà 2026-08-10: *"header
+         chung dẫn đến hiện mà bấm không có tác dụng"*.
+         Nằm NGOÀI mọi panel nên nó nói được ở bất cứ tab nào — cùng chỗ với
+         cái nút vừa bấm. -->
+    <p id="cmdStatus" class="muted hidden" role="status" aria-live="polite"></p>
     <!-- Đoạn này là tài liệu, không phải trạng thái: đọc một lần rồi thôi,
          nhưng trước đây nó chiếm 5 dòng đầu của MỌI tab. Gấp lại. -->
     <details class="boardnote">
@@ -1653,9 +1665,41 @@
   })();
   let lastSnap = null;
 
+  /// Bốn tab dùng CHUNG một khung cuộn (`main`), nên chỗ đang đứng của tab này
+  /// là chỗ mở đầu của tab kia. Đo 2026-08-10, đúng thứ Hà tả *"các ui theo menu
+  /// đang bị ảnh hưởng nhau … luôn bị nhảy cuộn xuống cuối trang"*:
+  ///
+  /// | thao tác | `main.scrollTop` / tối đa |
+  /// |---|---|
+  /// | mở tab Phiên | 0 / 148 |
+  /// | sang Trao đổi (tự dán đáy) | **3006 / 3006** |
+  /// | sang Sức khoẻ ngay sau đó | **68 / 68** ⇒ mở ra đã ở ĐÁY |
+  /// | sang Cấu hình | 68 / 589 |
+  /// | quay lại Phiên | 68 / 148 |
+  ///
+  /// Gốc: `stickToBottom(thread)` đặt `scrollTop = scrollHeight` trên khung cuộn
+  /// tìm được — và khung ấy là `main`, không phải riêng luồng chat. Không sửa
+  /// bằng cách bỏ dán đáy (chat PHẢI dán đáy), mà bằng cách cho mỗi tab một
+  /// chỗ đứng riêng.
+  const scrollMemory = Object.create(null);
+  const mainEl = () => document.querySelector('main');
+  function rememberScroll(p) {
+    const m = mainEl();
+    if (m && p) scrollMemory[p] = m.scrollTop;
+  }
+  function restoreScroll(p) {
+    const m = mainEl();
+    if (!m) return;
+    // Sau khi đổi lớp `hidden`, chiều cao mới chưa được tính xong — đặt
+    // `scrollTop` ngay lúc này thì trình duyệt kẹp nó về tối đa CŨ. Chờ một
+    // khung hình rồi mới đặt.
+    requestAnimationFrame(() => { m.scrollTop = scrollMemory[p] || 0; });
+  }
+
   $('panelTabs').addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-panel]');
     if (!btn) return;
+    rememberScroll(panel);
     panel = btn.dataset.panel;
     try { localStorage.setItem('hub.panel', panel); } catch (_) { /* private mode */ }
     // Giữ id phiên trong địa chỉ cho tới khi trang dựng lại xong.
@@ -1678,7 +1722,10 @@
     if (panel === 'chat' && me && !stopped) {
       $('foot').classList.remove('hidden');
       thread.classList.remove('hidden');
+      // Trao đổi là tab DUY NHẤT có lý do dán đáy: tin mới nằm dưới cùng.
       scrollDown();
+    } else {
+      restoreScroll(panel);
     }
   });
 
@@ -3013,11 +3060,23 @@
     box.append(wrap);
   }
 
+  let cmdNoteTimer = null;
   function cmdNote(text, bad) {
     const el = $('cmdStatus');
-    if (!el) return;
+    if (!el) {
+      // Đây CHÍNH LÀ lỗi vừa sửa: chỗ báo bị xoá, hàm này im lặng `return`, và
+      // hai ngày liền mọi nút gửi lệnh bấm vào hư không. Nếu nó mất lần nữa thì
+      // console phải kêu, đừng để lặp lại một lỗi câm.
+      console.warn('cmdNote: không tìm thấy #cmdStatus — lệnh đã gửi nhưng màn không báo được');
+      return;
+    }
     el.textContent = text;
     el.classList.toggle('bad', !!bad);
+    el.classList.remove('hidden');
+    clearTimeout(cmdNoteTimer);
+    // Báo lỗi thì Ở LẠI cho tới khi có tin khác; báo thành công thì tự dọn, vì
+    // một dòng "đã gửi…" nằm mãi trên đầu màn 390px là rác.
+    if (!bad) cmdNoteTimer = setTimeout(() => el.classList.add('hidden'), 12000);
   }
 
   /// Commands ride the chat socket. If it is not open the command would be

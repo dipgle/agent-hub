@@ -72,7 +72,16 @@ sát còn lòi ra **lỗ thứ hai của cùng bản vá**: `message.content` l�
 Và 250 khối thiếu `tool-use-id` hoá ra là `Monitor event` — cơ chế khác, không
 được đóng theo `task-id` (có test riêng).
 
-**Nghiệm thu:** `cargo test` **91** (+6) · clippy 0 · bundle **v132** · daemon do
+🔬 **Đội review còn trả lời dứt điểm câu tôi lo nhất — panic biên UTF-8:** không
+thể xảy ra, và lý do là *cấu trúc* chứ không phải may: bốn thẻ đều thuần ASCII,
+mà byte của ký tự nhiều byte trong UTF-8 luôn ≥ 0x80, nên `find` không bao giờ
+trả về một offset rơi vào giữa một ký tự tiếng Việt. Nó cũng tìm ra một chỗ **hai
+bản cài đặt nói khác nhau** trên chuỗi thẻ hỏng (`<tool-use-id>A<tool-use-id>B
+</...>`): Rust sinh id rác và bỏ sót `B`, JS đồng bộ lại và bắt được. Lệch nhau
+thì chính cái đối chứng độc lập của E2E mất tác dụng — đã cho khớp bằng cấu trúc
+(id chạy tới dấu `<` kế tiếp, dấu ấy phải mở đúng thẻ đóng), có test.
+
+**Nghiệm thu:** `cargo test` **92** (+7) · clippy 0 · bundle **v132** · daemon do
 launchd sở hữu, `kind: cert`, đã `install.sh` · `fe-subagent` **6/6 trên subagent
 THẬT** · `fe-board` 31/31 · `fe-phone` · `fe-smoke` · `fe-url` · `fe-denied` ·
 `fe-config` · `fe-sessions` · `fe-newsession` 17/17 (5 kiểm tra khai rõ là chưa

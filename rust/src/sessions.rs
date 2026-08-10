@@ -577,9 +577,25 @@ fn stopped_background_calls(tail: &str) -> HashSet<String> {
                 let mut scan = inside;
                 while let Some(k) = scan.find(OPEN) {
                     scan = &scan[k + OPEN.len()..];
-                    let Some(j) = scan.find(CLOSE) else { break };
-                    out.insert(scan[..j].to_string());
-                    scan = &scan[j + CLOSE.len()..];
+                    // Id chạy tới dấu `<` KẾ TIẾP, và dấu ấy phải mở đúng thẻ
+                    // đóng. Bản trước tìm thẻ đóng ở bất cứ đâu phía sau, nên
+                    // một chuỗi hỏng kiểu `<tool-use-id>A<tool-use-id>B</...>`
+                    // cho ra id rác `A<tool-use-id>B` và bỏ sót `B` — trong khi
+                    // bản đếm JS (regex `[^<]+`) lại đồng bộ lại và bắt được B.
+                    // Hai bản cài đặt nói khác nhau thì chính cái đối chứng độc
+                    // lập của kịch bản E2E mất tác dụng: nó sẽ báo lệch cho một
+                    // chuyện không phải lỗi sản phẩm.
+                    let Some(j) = scan.find('<') else { break };
+                    if scan[j..].starts_with(CLOSE) {
+                        // Id rỗng thì bỏ — không lệnh gọi thật nào mang id rỗng,
+                        // và JS cũng không bắt (`[^<]+` đòi ít nhất một ký tự).
+                        if j > 0 {
+                            out.insert(scan[..j].to_string());
+                        }
+                        scan = &scan[j + CLOSE.len()..];
+                    } else {
+                        scan = &scan[j..];
+                    }
                 }
                 rest = after;
             }

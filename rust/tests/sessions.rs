@@ -503,3 +503,25 @@ fn a_notice_without_a_tool_use_id_closes_nothing() {
     let monitor = r#"{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event</summary>\n</task-notification>"}"#;
     assert_eq!(parse_tail(&format!("{launched}\n{monitor}"), &bg).pending_subagents, 1);
 }
+
+/// Chuỗi thẻ HỎNG không được sinh id rác, và không được bỏ sót id thật.
+///
+/// Bản đếm bằng JS trong `fe-subagent-uc.mjs` là ĐỐI CHỨNG ĐỘC LẬP của kịch bản
+/// E2E; hai bản cài đặt mà xử khác nhau thì cái đối chứng ấy sẽ báo lệch cho một
+/// chuyện không phải lỗi sản phẩm. Regex `[^<]+` bên JS đồng bộ lại ở thẻ mở kế
+/// tiếp, nên bản Rust cũng phải vậy: id chạy tới dấu `<` kế tiếp và dấu ấy phải
+/// mở đúng thẻ đóng.
+#[test]
+fn a_malformed_id_sequence_matches_the_javascript_twin() {
+    let bg: HashSet<String> = ["real".to_string()].into_iter().collect();
+    let launched = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"real","name":"Agent","input":{}}]}}"#;
+
+    // Thẻ mở lồng nhau: `real` vẫn phải được nhận ra là ĐÃ XONG.
+    let broken = r#"{"type":"queue-operation","content":"<task-notification><tool-use-id>UNCLOSED<tool-use-id>real</tool-use-id></task-notification>"}"#;
+    assert_eq!(parse_tail(&format!("{launched}\n{broken}"), &bg).pending_subagents, 0);
+
+    // Id RỖNG không đóng gì (và không được làm hỏng vòng quét).
+    let bg2: HashSet<String> = ["".to_string(), "real".to_string()].into_iter().collect();
+    let empty = r#"{"type":"queue-operation","content":"<task-notification><tool-use-id></tool-use-id></task-notification>"}"#;
+    assert_eq!(parse_tail(&format!("{launched}\n{empty}"), &bg2).pending_subagents, 1);
+}

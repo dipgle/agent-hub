@@ -578,8 +578,25 @@ pub fn project_bases(cfg: &Config) -> Vec<PathBuf> {
 /// environment always win, so an interactive shell can still override.
 ///
 /// Returns the NAMES that were loaded — never the values.
+/// Bí mật cho bản chạy dưới launchd, đọc từ `<hub_home>/hub.env` **và**
+/// `<hub_home>/.env`.
+///
+/// Hai file chứ không một, vì 2026-08-10 Hà để khoá Telegram vào `.env` —
+/// cái tên mà mọi công cụ khác trên máy đều dùng — rồi báo "cho vào file .env
+/// rồi", trong khi hub chỉ nhìn `hub.env` và im lặng không thấy gì. Bắt người
+/// dùng nhớ đúng một cái tên riêng của hub là bắt sai người: hub biết đọc cả hai
+/// thì rẻ hơn nhiều so với một buổi ngồi hỏi "sao không nhận khoá".
+///
+/// `hub.env` đọc trước nên nó thắng khi trùng khoá; và **môi trường thật luôn
+/// thắng cả hai** — luật cũ, giữ nguyên.
 pub fn load_env_file(hub_home: &Path) -> Vec<String> {
-    let path = hub_home.join("hub.env");
+    let mut loaded = load_one_env_file(&hub_home.join("hub.env"));
+    loaded.extend(load_one_env_file(&hub_home.join(".env")));
+    loaded
+}
+
+fn load_one_env_file(path: &Path) -> Vec<String> {
+    let path = path.to_path_buf();
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => return vec![], // absent is the normal case
@@ -593,7 +610,10 @@ pub fn load_env_file(hub_home: &Path) -> Vec<String> {
             if mode != 0 {
                 crate::logging::warn(
                     "hub_env_too_open",
-                    serde_json::json!({ "file": path.display().to_string(), "advice": "chmod 600 hub.env" }),
+                    serde_json::json!({
+                        "file": path.display().to_string(),
+                        "advice": format!("chmod 600 {}", path.display()),
+                    }),
                 );
             }
         }

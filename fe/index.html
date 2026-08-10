@@ -2012,10 +2012,21 @@
           acts.append(b);
           return b;
         };
+        // ⏹ Dừng CHỈ hiện với phiên do hub mở. `sessions::stop_background` từ
+        // chối thẳng phiên terminal (*"chỉ dừng được phiên do hub mở"*), nên đặt
+        // nút ấy lên mọi dòng là đặt một nút chỉ biết báo lỗi — đúng cái Hà vừa
+        // mắng sáng nay. Màn chi tiết đã có luật này từ trước và tôi vẫn chép
+        // thiếu; luật ghi ở `#sessStop`: *một cái nút không thể chạy còn tệ hơn
+        // không có nút, vì nó bảo rằng hub đang nắm một thứ nó không nắm*.
+        //
         // Dừng đi qua chốt xác nhận Telegram ở phía hub (`confirm.rs`); trang
         // KHÔNG tự dựng hộp thoại "chắc chưa?" — hỏi lại trên cùng cái điện
         // thoại vừa chạm nhầm thì chỉ chặn được tay nhầm, không chặn được mất máy.
-        act('⏹ Dừng', 'danger', (e) => sendCommand(`/stop ${s.session_id}`, e.target));
+        if (s.kind === 'background') {
+          act('⏹ Dừng', 'danger', (e) => sendCommand(`/stop ${s.session_id}`, e.target));
+        }
+        // Đóng sổ chạy trên BẢN FORK nên dùng được với mọi phiên, kể cả phiên
+        // terminal hub không điều khiển.
         act('📋 Đóng sổ', '', (e) => sendCommand(`/handover ${s.session_id}`, e.target));
         card.append(acts);
       }

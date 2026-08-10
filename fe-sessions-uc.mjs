@@ -400,8 +400,26 @@ try {
       const el = document.querySelector(`${q} .sess-acts`);
       return el ? [...el.querySelectorAll("button")].map((b) => b.textContent.trim()) : [];
     }, sel);
-    check("mỗi phiên sống có hàng thao tác ngay trên danh sách", acts.length === 2, acts.join(" · "));
-    check("có nút Dừng và nút Đóng sổ", /Dừng/.test(acts.join(" ")) && /Đóng sổ/.test(acts.join(" ")), acts.join(" · "));
+    check("mỗi phiên sống có hàng thao tác ngay trên danh sách", acts.length >= 1, acts.join(" · "));
+    check("phiên nào cũng đóng sổ được (chạy trên bản fork)", /Đóng sổ/.test(acts.join(" ")), acts.join(" · "));
+
+    // ⏹ Dừng chỉ được có mặt ở nơi nó CHẠY ĐƯỢC. `stop_background` từ chối
+    // phiên terminal, nên một nút Dừng trên dòng terminal là nút chỉ biết báo
+    // lỗi. Kiểm cả hai chiều, vì "không bao giờ hiện" cũng sai như "hiện khắp nơi".
+    const stopWhere = await page.evaluate(() =>
+      [...document.querySelectorAll("#sessList .sess")]
+        .filter((e) => e.dataset.host !== "dead")
+        .map((e) => ({
+          kind: e.dataset.host,
+          hasStop: [...e.querySelectorAll(".sess-acts button")].some((b) => /Dừng/.test(b.textContent)),
+        }))
+    );
+    const wrong = stopWhere.filter((r) => (r.kind === "background") !== r.hasStop);
+    check(
+      "nút Dừng chỉ nằm trên phiên hub mở được, và nằm trên MỌI phiên như vậy",
+      wrong.length === 0,
+      stopWhere.map((r) => `${r.kind}:${r.hasStop ? "có" : "không"}`).join(" · ")
+    );
 
     // Bấm tới được THẬT, không phải "có mặt trong DOM": nút nằm bên trong một
     // thẻ vốn là vùng chạm lớn, nên đây đúng là chỗ dễ bị đè nhất.

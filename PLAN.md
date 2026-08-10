@@ -19,6 +19,18 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S07 | Đóng sổ → bản bàn giao + phiên mới + lệnh `--resume` | `fe-stream-uc` |
 | S08 | Bí mật không rò ra trang (quét trước khi đẩy) | `redaction` tests |
 | S09 | Ảnh chụp cũ thì nói là cũ | `fe-board-uc` |
+| S10 | Dừng / đóng sổ **ngay từ danh sách**, không phải mở phiên ra | `fe-sessions-uc` 25/25 |
+| S11 | Lệnh dừng phải **xác nhận qua Telegram** mới chạy | chạy thật 2026-08-10 (dưới) |
+
+**UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
+
+| | hỏi lúc | Hà bấm | kết cục | phiên sau đó |
+|---|---|---|---|---|
+| đường thuận | 04:56:58 | ✅ Xác nhận (38s) | `Confirmed` → `session_stopped` | biến khỏi danh sách |
+| đường chặn | 04:59:26 | ✖ Huỷ (48s) | `Declined` | **CÒN SỐNG · working** |
+
+Phòng chat nói đúng cả chuỗi: `🔒 Đã gửi yêu cầu xác nhận sang Telegram… Chưa dừng
+gì cho tới khi bấm nút.` → `✋ Đã huỷ trên Telegram — không dừng phiên nào.`
 
 Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghiệm thu ở **390×844**.
 
@@ -36,9 +48,16 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
    (2026-08-10): đã đo hai build khác byte cùng một designated requirement, và
    `hubd` tự khai `kind: cert` khi chạy. Chưa đo được vế cuối — **bật lại máy thì
    hub có tự lên không** — vì việc đó phải reboot thật.
-5. **Hai hàng mới ở tab Sức khoẻ** (`chữ ký bản cài`, `bản đang chạy CŨ hơn`)
-   mới có unit test + đo bằng `portal-push --dry-run` đủ ba trạng thái; chưa
-   nhìn thấy trên UI thật vì cần daemon chạy mã mới.
+5. ~~Hai hàng mới ở tab Sức khoẻ chưa nhìn thấy trên UI thật~~ → đã thấy:
+   `fe-board` 27/27 trên daemon do launchd sở hữu.
+6. **`fe-newsession-uc` không còn tự chạy trọn vẹn được.** Bước `/stop` nay cần
+   một ngón tay thật bấm Telegram; không ai bấm thì kịch bản in "BỎ QUA 2 kiểm
+   tra" thay vì báo đỏ — sản phẩm lúc ấy đang cư xử đúng. Đây là **cái giá của
+   chốt chặn**, không phải hỏng, nhưng nghĩa là UC-S06 từ nay là bán tự động.
+7. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
+   `HUB_TFL5_PASSWORD`; repo chưa từng có remote nên nó chưa rời máy này. Đã
+   `git rm --cached`, đã `chmod 600`, đã thêm vào `.gitignore`. **Còn nợ: đổi
+   mật khẩu tfl5**, vì giá trị cũ vẫn nằm trong lịch sử `.git`.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
 

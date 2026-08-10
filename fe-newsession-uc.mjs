@@ -204,6 +204,12 @@ try {
   check("phiên mới có nhật ký trên đĩa", !!file, file || "");
 
   // ——— Dừng phiên: claude không cho nối vào phiên đang chạy ———
+  //
+  // Từ 2026-08-10 bước này CẦN MỘT NGÓN TAY THẬT: `/stop` đi qua chốt xác nhận
+  // Telegram (`confirm.rs`), nên hub sẽ đứng chờ tới 90 giây một cú bấm. Đó là
+  // cái giá của chốt chặn, và nó phải hiện ra ở đây chứ không núp sau một dòng
+  // đỏ khó hiểu: không ai bấm thì kịch bản nói "BỎ QUA vì chưa ai xác nhận",
+  // KHÔNG tính là hỏng — vì sản phẩm lúc ấy đang cư xử đúng.
   await page.click("#sessStop");
   await page.waitForFunction(
     () => {
@@ -214,8 +220,19 @@ try {
     { timeout: 180000, polling: 1000 }
   ).catch(() => {});
   const stopMsg = await page.textContent("#sessTellBox");
-  check("màn báo đã dừng phiên", /Đã dừng phiên/.test(stopMsg), stopMsg.trim().slice(0, 70));
-  check("dừng rồi thì hội thoại vẫn còn", sizeOf(file) > 0, `${sizeOf(file)} byte`);
+  if (/Đã dừng phiên/.test(stopMsg)) {
+    check("màn báo đã dừng phiên", true, stopMsg.trim().slice(0, 70));
+    check("dừng rồi thì hội thoại vẫn còn", sizeOf(file) > 0, `${sizeOf(file)} byte`);
+  } else if (/xác nhận|Telegram|Hết hạn|huỷ/i.test(stopMsg)) {
+    console.log(
+      `  · BỎ QUA 2 kiểm tra: /stop đang chờ xác nhận trên Telegram và không ai bấm ` +
+      `("${stopMsg.trim().slice(0, 60)}"). Chưa nghiệm thu: "màn báo đã dừng phiên", ` +
+      `"dừng rồi thì hội thoại vẫn còn".`
+    );
+  } else {
+    check("màn báo đã dừng phiên", false, stopMsg.trim().slice(0, 70));
+    check("dừng rồi thì hội thoại vẫn còn", sizeOf(file) > 0, `${sizeOf(file)} byte`);
+  }
 
   // ——— UC-S05: nói tiếp vào CHÍNH phiên đó ———
   const sizeBefore = sizeOf(file);

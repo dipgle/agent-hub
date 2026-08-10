@@ -4,6 +4,9 @@ rust/target/
 node_modules/
 ui-shots/
 hub.env
+# Hà để khoá Telegram ở đây 2026-08-10 và nó CHƯA từng được bỏ qua — một dòng
+# `git add -A` là token vào repo. Bịt trước, rồi mới bàn chuyện đọc nó ở đâu.
+.env
 hub.config.json.bak*
 *.sqlite
 *.sqlite-shm

@@ -1,5 +1,66 @@
 # active context — hub
 
+## 🔒 2026-08-10 (trưa) — danh sách làm được việc; dừng phiên phải qua Telegram
+
+**UC-S10 + UC-S11 xong, chạy thật cả hai đường.** Hà: *"thêm uc cho danh sách
+các phiên, hiện tại bắt buộc mở nó mới có hơi bất tiện"* + *"riêng một số lệnh
+dừng hoặc tắt phiên cần có xác thực qua tele"*.
+
+| | hỏi lúc | Hà bấm | kết cục | phiên sau đó |
+|---|---|---|---|---|
+| thuận | 04:56:58 | ✅ Xác nhận (38s) | `Confirmed` → `session_stopped` | biến khỏi danh sách |
+| chặn | 04:59:26 | ✖ Huỷ (48s) | `Declined` | **CÒN SỐNG · working** |
+
+Toàn bộ đi qua UI thật: mở phiên nền bằng form `➕ Mở phiên mới`, bấm `⏹ Dừng`
+trên thẻ, đọc câu trả lời trong phòng chat. Không gọi API nào.
+
+📌 **`.env` từng nằm trong git.** Hà báo *"cho vào file .env rồi"* ⟹ đi kiểm thì
+`2b6ea80` (đêm qua) đã commit `.env` kèm `HUB_TFL5_USER` + `HUB_TFL5_PASSWORD`,
+file `644`, `.gitignore` không có nó. Token Telegram vừa thêm thì **chưa kịp vào
+git** (còn ở cây làm việc). Repo **không có remote** nên chưa rời máy này. Đã
+`git rm --cached` + `chmod 600` + thêm `.gitignore`. **Nợ còn lại: đổi mật khẩu
+tfl5** — giá trị cũ vẫn nằm trong lịch sử `.git`.
+
+🔁 **Tôi lặp lại đúng lỗi Hà vừa mắng sáng nay.** Đặt `⏹ Dừng` lên MỌI dòng, trong
+khi `sessions::stop_background` từ chối thẳng phiên terminal (*"chỉ dừng được
+phiên do hub mở"*) — tức một cái nút chỉ biết báo lỗi trên 4/5 phiên. Màn chi
+tiết đã có luật này từ trước, ghi ngay cạnh `#sessStop`: *"một cái nút không thể
+chạy còn tệ hơn không có nút, vì nó bảo rằng hub đang nắm một thứ nó không nắm"*.
+Tôi đọc chưa hết trước khi chép. Nay nút chỉ hiện với `kind === 'background'`, và
+`fe-sessions-uc` kiểm **cả hai chiều** (có ở phiên nền, vắng ở phiên terminal).
+
+⚠ **Và một lỗi tốn hạn mức thật:** bản đầu của kiểm tra UC-S10 bấm thẳng "Đóng
+sổ" = `/handover` = gọi `claude` trên fork. Ba lượt chạy tiêu **3.19 + 4.44**
+(thước đo) và đẻ hai phiên mới — một fork từ chính phiên đang trò chuyện. Chúng
+làm các phép đếm phía trên lệch ở lượt sau (`màn 5 / máy 6`) và tôi suýt đi sửa
+sản phẩm vì một phép đo chập chờn do chính mình gây ra. Bước bấm thật nay nằm sau
+`HUB_UC_ACT=1` — đúng khuôn `fe-stream`/`fe-aside` đã có sẵn mà tôi không theo.
+
+**Ba quyết định trong `confirm.rs`:** (1) bật mà thiếu khoá thì TỪ CHỐI lệnh,
+không âm thầm tháo chốt — câu từ chối nói rõ thiếu khoá nào và chỉ đường thoát
+`claude stop`; (2) chỉ `from.id` khớp `chat_id` mới xác nhận được (tinh thần luật
+§7); (3) đặt mốc nước `getUpdates` TRƯỚC khi hỏi, nếu không một cú bấm cũ trong
+hàng đợi sẽ bị tính là câu trả lời cho câu hỏi lần này.
+
+**Cái giá phải ghi sổ:** `fe-newsession-uc` từ nay **bán tự động** — bước `/stop`
+cần ngón tay thật; không ai bấm thì in "BỎ QUA 2 kiểm tra", không báo đỏ.
+
+**Danh sách tài khoản** (*"đang thiếu nhiều thông tin"*): mỗi hàng nay có hòm thư
++ gói + trạng thái đăng nhập + thư mục cấu hình, lấy từ `claude auth status`
+trong khối chậm. Ô chọn lúc mở phiên hiện `acc2 — nguyenha.momochan@gmail.com`.
+KHÔNG có "hạn mức còn lại": CLI không trả nó ngoài phiên tương tác. Một chi tiết
+chứng minh mã đúng: `acc1` ra `phuongdt1189@gmail.com`, khác với khi tôi gõ tay
+(ra `trogiup.gdk` vì shell đang set `CLAUDE_CONFIG_DIR=acc3`) — bộ thu **gỡ hẳn**
+biến môi trường cho tài khoản mặc định.
+
+**hub cũng đọc `.env`** (ngoài `hub.env`) từ bản này: bắt người dùng nhớ đúng một
+cái tên riêng của hub là bắt sai người. `hub.env` thắng khi trùng khoá, và môi
+trường thật vẫn thắng cả hai.
+
+**Nghiệm thu:** cargo test **81** · clippy 0 · bundle **v127** · `fe-sessions`
+25/25 · `fe-board` 27/27 · `fe-phone` 31/31 · 0 lỗi console · daemon do launchd
+sở hữu, `kind: cert`.
+
 ## 🔏 2026-08-10 (sáng) — chữ ký cố định cho hubd, và ba phép đo sai của chính tôi
 
 **Việc:** đóng nốt món `CLAUDE.md` §12 ghi *"Durable fix (not built yet)"*.

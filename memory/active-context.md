@@ -39,6 +39,13 @@ hỏi `scrollWidth` chứ không đếm ký tự, nên chúng đỏ được.
 daemon pid mới, `kind: cert`, ảnh chụp vẫn đẩy, **0 dòng lỗi mới** trong log ·
 `fe-subagent` **8/8** trên subagent thật.
 
+📸 **Và một lượt nghiệm thu mạnh hơn hẳn, chộp được đúng lúc:** hai phiên cùng
+chạy subagent với **hai con số khác nhau** — `projects-28` **3**, `projects-7f`
+**4** — ba phiên còn lại sạch. `fe-subagent` **12/12**, và ảnh chụp màn cho thấy
+cả hai hàng phụ vừa khít 390px: *"acc2 · tự duyệt · 3 subagent · ngữ cảnh 49%"*
+và *"… 4 subagent · ngữ cảnh 42%"*. Một phiên đúng có thể là may; hai phiên hai
+số thì bộ đếm đang thật sự đếm.
+
 
 ## 🏹 2026-08-10 (tối) — vá chốt phím mũi tên: mù không được đọc thành "không có"
 

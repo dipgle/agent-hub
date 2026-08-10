@@ -726,20 +726,50 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         "⚠ không thấy phiên '{}' đang chạy",
                         crate::exec::truncate(&want, 40)
                     ),
-                    Some(s) => match crate::sessions::stop_background(cfg, s) {
-                        Ok(()) => {
-                            remember_stopped(db, s);
-                            logging::info("session_stopped", json!({ "session": s.session_id }));
-                            format!(
-                                "⏹ Đã dừng phiên {}. Hội thoại vẫn còn — nói tiếp bằng /tell hoặc mở lại trên máy.",
-                                s.name
-                            )
+                    Some(s) => {
+                        // Chốt chặn thứ hai, qua Telegram (Hà 2026-08-10). Dừng
+                        // một phiên là thứ không lùi lại được, và cái nút gây ra
+                        // nó nay nằm ngay trên danh sách — một chạm nhầm là mất
+                        // tiến trình đang chạy dở.
+                        //
+                        // Nói TRƯỚC khi chờ: `confirm::ask` đứng chờ tới 90
+                        // giây, và một cái màn im 90 giây là một cái màn hỏng.
+                        let what = format!("Dừng phiên {} ({})?", s.name, s.account);
+                        if cfg.confirm.enabled {
+                            reply_in_channel(
+                                db,
+                                cfg,
+                                adapter,
+                                cmd,
+                                &format!(
+                                    "🔒 Đã gửi yêu cầu xác nhận sang Telegram: {what} \
+                                     Chưa dừng gì cho tới khi bấm nút."
+                                ),
+                            );
                         }
-                        Err(e) => format!(
-                            "⚠ không dừng được: {}",
-                            crate::exec::truncate(&e.to_string(), 200)
-                        ),
-                    },
+                        let verdict = crate::confirm::ask(cfg, &what);
+                        if !verdict.allows() {
+                            verdict.refusal()
+                        } else {
+                            match crate::sessions::stop_background(cfg, s) {
+                                Ok(()) => {
+                                    remember_stopped(db, s);
+                                    logging::info(
+                                        "session_stopped",
+                                        json!({ "session": s.session_id }),
+                                    );
+                                    format!(
+                                        "⏹ Đã dừng phiên {}. Hội thoại vẫn còn — nói tiếp bằng /tell hoặc mở lại trên máy.",
+                                        s.name
+                                    )
+                                }
+                                Err(e) => format!(
+                                    "⚠ không dừng được: {}",
+                                    crate::exec::truncate(&e.to_string(), 200)
+                                ),
+                            }
+                        }
+                    }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)

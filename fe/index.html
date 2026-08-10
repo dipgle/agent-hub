@@ -431,6 +431,11 @@
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
   }
   .sess-note { margin: 6px 0 0; font-size: 12.5px; }
+  /* Hàng thao tác ngay trên thẻ phiên. Vùng chạm 44px là chuẩn của trang này
+     (`fe-phone-uc`), và ở đây nó đáng giá hơn mọi chỗ khác: hai nút đứng cạnh
+     nhau mà một trong hai là "Dừng". */
+  .sess-acts { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .sess-acts button { min-height: 44px; font-size: 13px; }
   .sess { cursor: pointer; }
   .sess:active { background: var(--soft, #eef2ee); }
   /* The stream reads like a terminal: monospace, tight, output indented under
@@ -1984,6 +1989,37 @@
         note.textContent = `⚠ ${s.note}`;
         card.append(note);
       }
+      // Hai việc làm được NGAY TỪ DANH SÁCH (Hà 2026-08-10: *"hiện tại bắt buộc
+      // mở nó mới có hơi bất tiện"*). Chỉ hai — và đúng hai thứ Hà chọn:
+      // "Dừng" và "Đóng sổ". Gõ vào phiên và hỏi bên lề vẫn ở màn chi tiết, vì
+      // chúng cần chỗ để đọc câu trả lời.
+      //
+      // Phiên đã chết thì không có gì để dừng cũng không có gì để bàn giao.
+      if (s.host !== 'dead') {
+        const acts = document.createElement('div');
+        acts.className = 'sess-acts';
+        const act = (label, cls, run) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = cls;
+          b.textContent = label;
+          b.addEventListener('click', (e) => {
+            // Thẻ phiên là một vùng chạm lớn mở màn chi tiết; không chặn ở đây
+            // thì mỗi lần bấm Dừng là một lần vừa gửi lệnh vừa nhảy màn.
+            e.stopPropagation();
+            run(e);
+          });
+          acts.append(b);
+          return b;
+        };
+        // Dừng đi qua chốt xác nhận Telegram ở phía hub (`confirm.rs`); trang
+        // KHÔNG tự dựng hộp thoại "chắc chưa?" — hỏi lại trên cùng cái điện
+        // thoại vừa chạm nhầm thì chỉ chặn được tay nhầm, không chặn được mất máy.
+        act('⏹ Dừng', 'danger', (e) => sendCommand(`/stop ${s.session_id}`, e.target));
+        act('📋 Đóng sổ', '', (e) => sendCommand(`/handover ${s.session_id}`, e.target));
+        card.append(acts);
+      }
+
       // Tapping asks hub to follow this session; the stream arrives with the
       // next snapshot. There is no direct call to the Mac — the page only ever
       // reads what hub pushes.
@@ -2036,14 +2072,31 @@
     // `renderProjectPicker` chỉ nhận danh sách dự án, nên đọc cấu hình từ ảnh
     // chụp gần nhất — biến chung của trang, luôn là bản vừa vẽ.
     const accounts = (((lastSnap || {}).config || {}).value || {}).claude_accounts || [];
-    if (accSel && accSel.options.length !== accounts.length) {
+    // Dựng lại khi NHÃN đổi, không chỉ khi số lượng đổi. Hòm thư đến từ khối
+    // chậm (cache 10 phút) nên nó về MUỘN hơn danh sách tài khoản: bản cũ so
+    // `options.length` nên ô chọn đứng nguyên "acc2" mãi mãi và email không bao
+    // giờ hiện — đúng thứ vừa thêm vào lại không thấy đâu.
+    const wantLabels = accounts
+      .map((a, i) => {
+        const mail = ((((lastSnap || {}).runtime || {}).slow || {}).auth || {})[a.name]?.email;
+        const who = i === 0 ? `${a.name} (mặc định)` : a.name;
+        return mail ? `${who} — ${mail}` : who;
+      })
+      .join('|');
+    const haveLabels = accSel ? [...accSel.options].map((o) => o.textContent).join('|') : '';
+    if (accSel && wantLabels !== haveLabels) {
       const keep = accSel.value;
       accSel.textContent = '';
+      const authAll = ((lastSnap || {}).runtime || {}).slow?.auth || {};
       accounts.forEach((a, i) => {
         const o = document.createElement('option');
         o.value = a.name;
         // Tài khoản đầu là mặc định của máy — nói ra để không ai phải đoán.
-        o.textContent = i === 0 ? `${a.name} (mặc định)` : a.name;
+        // Và kèm HÒM THƯ: chọn tài khoản mà chỉ thấy "acc2" thì phải mở
+        // terminal ra mới biết vừa chọn ai (Hà 2026-08-10).
+        const mail = (authAll[a.name] || {}).email;
+        const who = i === 0 ? `${a.name} (mặc định)` : a.name;
+        o.textContent = mail ? `${who} — ${mail}` : who;
         accSel.append(o);
       });
       if (keep) accSel.value = keep;
@@ -3040,12 +3093,31 @@
       );
     }
 
+    // Hà 2026-08-10: *"danh sách acc đang thiếu nhiều thông tin"*. Đúng — hàng
+    // cũ chỉ có "2/2 phiên đang sống", ba cái tên acc1/acc2/acc3 không nói được
+    // acc nào là hòm thư nào, mà đó chính là lý do có ba tài khoản.
+    //
+    // KHÔNG có "hạn mức còn lại": `claude` CLI không trả nó ngoài phiên tương
+    // tác (`/usage`), và bịa một con số ra màn còn tệ hơn để trống.
+    const authAll = (rt.slow || {}).auth || {};
     (rt.accounts || []).forEach((a) => {
-      const v = `${a.alive}/${a.sessions} phiên đang sống`;
+      const auth = authAll[a.name] || {};
+      const bits = [`${a.alive}/${a.sessions} phiên đang sống`];
+      if (auth.email) bits.push(auth.email);
+      if (auth.subscription) bits.push(`gói ${auth.subscription}`);
+      if (auth.logged_in === false) bits.push('CHƯA đăng nhập');
+      if (auth.err) bits.push('chưa hỏi được trạng thái đăng nhập');
+      if (!a.ok) bits.push(a.note || 'không trả lời');
+      const bad = !a.ok || auth.logged_in === false;
       row(
         `tài khoản ${a.name}`,
-        a.ok ? v : `${v} · ${a.note || 'không trả lời'}`,
-        a.ok ? '' : 'bad'
+        bits.join(' · '),
+        bad ? 'bad' : '',
+        // Thư mục cấu hình là thứ phân biệt ba tài khoản trên cùng một máy;
+        // hiện nó ra khi có, vì "acc2 là cái nào" trả lời được bằng đúng dòng này.
+        a.config_dir && a.config_dir_exists === false
+          ? `thiếu thư mục ${a.config_dir}`
+          : a.config_dir || ''
       );
     });
 

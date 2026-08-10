@@ -388,6 +388,55 @@ try {
     console.log("  · lần chạy này không có phiên nào bị ẩn — bỏ qua 2 kiểm tra");
   }
 
+  // ── UC-S10 · làm được việc NGAY TỪ DANH SÁCH ────────────────────────────
+  // Hà 2026-08-10: *"thêm uc cho danh sách các phiên, hiện tại bắt buộc mở nó
+  // mới có hơi bất tiện"*. Hai việc, đúng hai việc Hà chọn: Dừng và Đóng sổ.
+  const liveRow = truth.sessions.find((s) => s.host !== "dead");
+  if (!liveRow) {
+    console.log("  · không có phiên sống nào — bỏ qua 4 kiểm tra của UC-S10");
+  } else {
+    const sel = `.sess[data-session="${liveRow.session_id}"]`;
+    const acts = await page.evaluate((q) => {
+      const el = document.querySelector(`${q} .sess-acts`);
+      return el ? [...el.querySelectorAll("button")].map((b) => b.textContent.trim()) : [];
+    }, sel);
+    check("mỗi phiên sống có hàng thao tác ngay trên danh sách", acts.length === 2, acts.join(" · "));
+    check("có nút Dừng và nút Đóng sổ", /Dừng/.test(acts.join(" ")) && /Đóng sổ/.test(acts.join(" ")), acts.join(" · "));
+
+    // Bấm tới được THẬT, không phải "có mặt trong DOM": nút nằm bên trong một
+    // thẻ vốn là vùng chạm lớn, nên đây đúng là chỗ dễ bị đè nhất.
+    let reachable = true;
+    try {
+      await page.locator(`${sel} .sess-acts button`).first().click({ trial: true, timeout: 3000 });
+    } catch (e) {
+      reachable = false;
+    }
+    check("nút trên danh sách bấm tới được (không bị thẻ phiên đè)", reachable);
+
+    // Bấm nút KHÔNG được kéo theo cú chạm "mở phiên" của cả thẻ — quên
+    // `stopPropagation` thì mỗi lần dừng là một lần nhảy sang màn chi tiết.
+    //
+    // ⚠ BƯỚC NÀY GỌI THẬT NÊN MẶC ĐỊNH KHÔNG CHẠY. Bản đầu của tôi bấm thẳng
+    // "Đóng sổ", và đó là `/handover` = một lời gọi `claude` trên fork: ba lượt
+    // chạy kịch bản đã tiêu 3.19 + 4.44 (thước đo) và đẻ ra hai phiên mới, làm
+    // chính các phép đếm phía trên lệch ở lượt sau. Đúng cái bẫy `CLAUDE.md` đã
+    // ghi bằng máu ($6.75 một tối). Nút "Dừng" còn tệ hơn: nó phá trạng thái.
+    if (process.env.HUB_UC_ACT === "1") {
+      await page.locator(`${sel} .sess-acts button`).nth(1).click();   // Đóng sổ
+      await page.waitForTimeout(900);
+      const stillOnList = await page.evaluate(() =>
+        !document.getElementById("sessDetail") ||
+        document.getElementById("sessDetail").classList.contains("hidden")
+      );
+      check("bấm nút trên dòng KHÔNG nhảy sang màn chi tiết", stillOnList);
+    } else {
+      console.log(
+        "  · BỎ QUA 1 kiểm tra vì nó gọi thật (tốn hạn mức + đẻ phiên mới): " +
+        "'bấm nút trên dòng KHÔNG nhảy sang màn chi tiết'. Muốn chạy: HUB_UC_ACT=1"
+      );
+    }
+  }
+
   await page.screenshot({ path: `${SHOTS}sessions-01-phone.png` });
 } catch (e) {
   problems.push(`ngoại lệ: ${e.message}`);

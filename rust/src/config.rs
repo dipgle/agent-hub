@@ -45,6 +45,41 @@ impl Default for AutoHandoverCfg {
     }
 }
 
+/// Xác nhận lần hai qua Telegram cho những lệnh KHÔNG lùi lại được.
+///
+/// Hà 2026-08-10: *"riêng một số lệnh dừng hoặc tắt phiên cần có xác thực qua
+/// tele"*. Đây không phải kênh hộp thư quay lại — nó không đọc gì, không tạo
+/// việc, không tiêu hạn mức. Nó chỉ hỏi đúng một câu và chờ một cái bấm.
+///
+/// Vì sao là kênh KHÁC: nút "Dừng" nằm ngay trên danh sách phiên, một ngón tay
+/// chạm nhầm là mất tiến trình đang chạy. Hỏi lại trên cùng cái điện thoại ấy
+/// chỉ chặn được tay nhầm; hỏi qua Telegram còn chặn được cả trường hợp mất
+/// máy — người cầm điện thoại vẫn phải mở được hòm Telegram của chủ.
+///
+/// Theo luật §4: ở đây chỉ có TÊN biến môi trường, không bao giờ có giá trị.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ConfirmCfg {
+    /// Tắt thì lệnh huỷ chạy thẳng như trước. Bật mà thiếu khoá thì hub TỪ
+    /// CHỐI lệnh chứ không lặng lẽ bỏ qua chốt chặn — xem `confirm.rs`.
+    pub enabled: bool,
+    pub bot_token_env: String,
+    pub chat_id_env: String,
+    /// Chờ bấm nút bao lâu rồi coi như không đồng ý.
+    pub timeout_sec: u64,
+}
+
+impl Default for ConfirmCfg {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bot_token_env: "HUB_TELEGRAM_BOT_TOKEN".to_string(),
+            chat_id_env: "HUB_TELEGRAM_CHAT_ID".to_string(),
+            timeout_sec: 90,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct CallCfg {
@@ -215,6 +250,9 @@ pub struct Config {
     pub call: CallCfg,
     /// Tự đóng sổ khi ngữ cảnh đầy — xem [`AutoHandoverCfg`].
     pub auto_handover: AutoHandoverCfg,
+    /// Xác nhận lần hai cho lệnh không lùi lại được — xem [`ConfirmCfg`].
+    #[serde(default)]
+    pub confirm: ConfirmCfg,
     pub adapters: Adapters,
     pub trust: Trust,
     /// THE project registry, keyed by folder name under `project_roots`.
@@ -252,6 +290,7 @@ impl Default for Config {
             poll_interval_sec: 120,
             call: CallCfg::default(),
             auto_handover: AutoHandoverCfg::default(),
+            confirm: ConfirmCfg::default(),
             adapters: Adapters::default(),
             trust: Trust::default(),
             projects: BTreeMap::new(),

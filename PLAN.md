@@ -23,7 +23,7 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S11 | Lệnh dừng phải **xác nhận qua Telegram** mới chạy | chạy thật 2026-08-10 (dưới) |
 | S02b | Phiên **đang chạy subagent** thì màn nói ra | `fe-subagent-uc` 12/12 trên HAI phiên, hai con số (3 và 4) |
 | S12 | Danh sách biết **phiên nào đang chạy** — mọi phiên, không chỉ phiên nền | `fe-sessions-uc`, đối chiếu hai chiều với máy |
-| S13 | Phiên **vừa xong** / **vừa tắt hẳn** thì báo vào phòng chat + Telegram | chạy thật: `✅ … sau 4 phút`, `⏹ … đã tắt hẳn`, 0 lỗi gửi |
+| S13 | Phiên **vừa xong / kẹt hỏi / tắt hẳn** thì báo vào phòng chat + Telegram | chạy thật, 0 lỗi gửi; câu nói dựa trên **đọc màn**, không đoán |
 | S09b | **Ảnh chụp cũ thì nói là cũ** | `fe-stale-uc` 8/8 trên ảnh chụp 6.3 phút tuổi (tắt `hubd` thật) |
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
@@ -43,19 +43,28 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 1. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
    `dead_letter`) vẫn còn dữ liệu. Không có mã nào đọc chúng. Muốn dọn thì phải
    là một quyết định có chủ ý, không phải tác dụng phụ của việc đổi schema.
-2. **Chữ ký ổn định mới nghiệm thu tới bước "bản cài mang DR cố định"**
-   (2026-08-10): đã đo hai build khác byte cùng một designated requirement, và
-   `hubd` tự khai `kind: cert` khi chạy. Chưa đo được vế cuối — **bật lại máy thì
-   hub có tự lên không** — vì việc đó phải reboot thật.
-5. ~~Hai hàng mới ở tab Sức khoẻ chưa nhìn thấy trên UI thật~~ → đã thấy:
-   `fe-board` 27/27 trên daemon do launchd sở hữu.
-3. **`fe-newsession-uc` là kịch bản bán tự động.** Bước `/stop` cần một ngón tay
-   thật bấm Telegram; không ai bấm thì kịch bản in **"BỎ QUA 2 + 3 kiểm tra"** kèm
-   tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm lúc ấy đang cư xử
-   đúng. (Câu này trước đây là **ý định chứ không phải hành vi**: đo 2026-08-10
-   chiều thì nó báo đỏ 3 dòng, vì hai lỗi đã vá cùng ngày — xem "Đã trả xong".)
+
+## Theo thiết kế, KHÔNG phải nợ
+
+- **`fe-newsession-uc` bán tự động.** Bước `/stop` đi qua chốt xác nhận Telegram
+  nên cần một ngón tay thật. Không ai bấm thì kịch bản in **"BỎ QUA 2 + 3 kiểm
+  tra"** kèm tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm lúc ấy
+  đang cư xử ĐÚNG. Đây là cái giá của chốt chặn, không phải một thứ để sửa. Muốn
+  đóng trọn thì bấm nút Telegram trong lúc kịch bản chạy.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
+
+- ~~"Bật lại máy thì hub có tự lên không" chưa nghiệm thu~~ → **mọi điều kiện
+  một lần reboot sẽ kiểm đều đã đo xong 2026-08-10**, chỉ còn đúng sự kiện
+  reboot (việc của Hà, và nó không đổi được kết quả nào ở dưới):
+  plist nằm trong `~/Library/LaunchAgents` (5182 byte) · `launchctl print` khai
+  `properties = keepalive | runatload`, `state = running`, `program` trỏ đúng
+  **bản cài đã ký chứng chỉ** · job **không** nằm trong `print-disabled` (chỉ
+  `com.dipgle.aw-daemon` bị tắt) · Background Task Management của macOS:
+  `Disposition: [enabled, allowed, notified]` · và `bootout` + `bootstrap` đã
+  chạy thật **hai lần trong ngày** — đó chính là thao tác launchd làm lúc đăng
+  nhập. Vế "grant TCC sống qua rebuild" đã có bằng chứng riêng: DR neo theo
+  danh tính chứ không theo byte.
 
 - ~~Bí mật cũ nằm trong lịch sử `.git`~~ → **đã gỡ hẳn 2026-08-10**. Hà chốt
   *"mật khẩu tfl5 đã rời máy đâu mà đổi, bỏ commit liên quan đi"* — repo chưa

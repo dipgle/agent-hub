@@ -1,5 +1,40 @@
 # active context — hub
 
+## 🔇 2026-08-10 (khuya) — cái loa nói dối, và Hà bắt được ngay tin thứ ba
+
+Hà đọc Telegram: *"rõ ràng là lỗi mà sao tele tôi nhận được lại là phiên đang
+đứng ở dấu nhắc, chờ lượt sau"*, rồi *"toàn thông báo giống nhau"*. Cả hai đúng,
+và vế đầu là lỗi nặng của chính thứ tôi vừa dựng vài giờ trước.
+
+**Câu ấy là một KHẲNG ĐỊNH hub không hề biết.** Thứ hub biết chỉ là *"nhật ký
+thôi lớn lên sau 3 phút"* — mà nhật ký cũng thôi lớn lên khi phiên **kẹt ở hộp
+thoại**, khi **lỗi**, khi **hết hạn mức**. Tôi đã lấy một quan sát hẹp
+("im lặng") rồi dán lên nó một kết luận rộng ("xong việc, đang chờ lượt sau").
+Đúng cái bẫy dự án này viết đi viết lại: *không tuyên bố điều chưa nhìn thấy*.
+
+**Vá 1 — nhìn, đừng đoán.** Lúc CHUYỂN trạng thái (hiếm: vài lần một giờ) hub bỏ
+ra **đúng một lần đọc màn cho riêng phiên ấy**, rồi nói thứ nhìn thấy: `⚠ DỪNG
+LẠI HỎI (N lựa chọn)` · `✅ im sau N phút chạy` · hoặc thẳng thắn `❓ tôi không
+đọc được màn của nó`. Điều làm chuyện này rẻ: đọc màn cho MỌI phiên MỖI vòng mới
+là thứ từng kéo một vòng lên 90 giây — một lần cho một phiên lúc nó vừa im thì
+gần như không tốn gì.
+
+**Vá 2 — mỗi tin phải khác nhau.** Tin nay mang câu cuối phiên vừa nói ra (đã
+qua cổng quét rò rỉ từ trước). Tin nào cũng một khuôn thì người ta thôi đọc, và
+lúc ấy cái loa coi như không tồn tại.
+
+**Vá 3 — thôi kêu vào mặt người đang nhìn.** Đo từ log: một phiên terminal Hà
+đang ngồi gõ bắn **ba tin trong mười sáu phút**. Loa chỉ có giá trị ở phiên
+KHÔNG ai nhìn (phiên hub tự mở từ điện thoại) hoặc khi phiên KẸT — kẹt thì dù
+đang ngồi trước máy cũng đáng được gọi. Trường hợp im vẫn ghi
+`session_change_muted`, không im lặng giấu.
+
+**Nghiệm thu:** `cargo test` **103** · clippy 0 · đã cài, daemon `kind: cert`.
+⚠ **CHƯA nhìn thấy câu mới chạy thật:** từ lúc cài (~14:20) chưa phiên nào
+chuyển trạng thái, nên hình dạng tin mới mới chỉ được ghim bằng test. Nói đúng
+như vậy.
+
+
 ## 🧼 2026-08-10 (khuya) — bí mật cũ ra khỏi lịch sử, và ba lần bị guard chặn
 
 Hà: *"mật khẩu tfl5 đã rời máy đâu mà đổi, bỏ commit liên quan đi"*. Đánh giá ấy

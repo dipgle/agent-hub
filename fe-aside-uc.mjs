@@ -174,7 +174,7 @@ try {
   // Khai báo NGOÀI khối: các phép đo bên dưới ("phiên gốc y nguyên") vẫn chạy
   // khi bỏ qua bước hỏi, và chúng đọc mấy biến này.
   let a = null;
-  let shown = { box: "", note: "" };
+  let shown = { box: "" };
   if (willPay) {
   await page.fill("#sessSayInput", question);
   await page.click("#sessSay");
@@ -210,9 +210,12 @@ try {
       { timeout: 60000, polling: 1000 }
     ).catch(() => {});
   }
+  // Chỉ đọc `#sessAskBox`. Bản trước còn đọc `#cmdNote` — mà `cmdNote` là tên
+  // một HÀM trong `fe/index.html`, không phải id phần tử (id thật là
+  // `#cmdStatus`), nên trường ấy luôn rỗng và không assert nào đọc tới. Mã chết
+  // trong một kịch bản đo là thứ khiến người đọc tưởng có gì đó đang được đo.
   shown = await page.evaluate(() => ({
     box: document.getElementById("sessAskBox").textContent || "",
-    note: document.getElementById("cmdNote")?.textContent || "",
   }));
 
   }

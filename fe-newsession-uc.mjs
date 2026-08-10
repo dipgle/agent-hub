@@ -254,6 +254,9 @@ try {
     );
   } else {
   const sizeBefore = sizeOf(file);
+  const idsBefore = new Set(
+    hub(["sessions", "--json"]).sessions.map((s) => s.session_id)
+  );
   await page.fill("#sessSayInput", "Nội dung README bạn vừa đọc nói về cái gì? Trả lời một dòng.");
   await page.click("#sessSay");
   await page.waitForFunction(
@@ -274,13 +277,21 @@ try {
     sizeAfter > sizeBefore,
     `${sizeBefore} → ${sizeAfter} byte`
   );
-  const stillThere = hub(["sessions", "--json"]).sessions.find(
-    (s) => s.session_id === fresh.session_id
+  // Hỏi DANH SÁCH, đừng hỏi lại thứ vừa hỏi.
+  //
+  // Bản trước là `!!stillThere || sizeAfter > sizeBefore`, mà vế sau CHÍNH LÀ
+  // điều kiện đã assert hai dòng trên ("nhật ký phiên DÀI RA"). Nên hễ phép đo
+  // kia xanh thì phép đo này xanh theo, bất kể có đẻ ra phiên lạ hay không —
+  // nó không bao giờ bắt được đúng thứ tên nó nói. Nay so tập id trước/sau:
+  // `/tell` phải ở LẠI trên phiên cũ, không được sinh phiên nào khác.
+  const idsAfter = new Set(
+    hub(["sessions", "--json"]).sessions.map((s) => s.session_id)
   );
+  const strays = [...idsAfter].filter((id) => !idsBefore.has(id) && id !== fresh.session_id);
   check(
     "KHÔNG đẻ ra phiên mới ngoài ý muốn",
-    !!stillThere || sizeAfter > sizeBefore,
-    stillThere ? "phiên cũ vẫn là phiên cũ" : "(đã rời danh sách sống, nhật ký vẫn là của nó)"
+    strays.length === 0,
+    strays.length ? `phiên lạ: ${strays.map((i) => i.slice(0, 8)).join(", ")}` : "không có phiên nào lạ"
   );
   }
 

@@ -6,10 +6,14 @@
 //!
 //! It used to hold four more tables — `messages`, `decisions`, `outbox`,
 //! `dead_letter` — the whole inbox. They went on 2026-08-08 with the product
-//! that filled them. An existing `hub.sqlite` still HAS those tables and their
-//! rows; nothing here drops them, because deleting a person's data to tidy up a
-//! schema is not a decision code gets to make. New databases simply never grow
-//! them, and no query here can see them.
+//! that filled them, but the ROWS stayed. This header used to say "nothing here
+//! drops them, because deleting a person's data to tidy up a schema is not a
+//! decision code gets to make" — right, until the owner made the decision. He
+//! made it 2026-08-10, once the rows had been counted: 379 dead rows no query
+//! can reach, stopped dead on 08-08, three of them matching the leak-scan
+//! patterns. Data nobody reads that might carry a secret is not tidiness, it is
+//! a liability — so schema step 4 drops the four tables, once, logging each
+//! table with its row count (`drop_legacy_inbox`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -18,7 +22,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -94,6 +98,65 @@ pub struct Db {
     pub conn: Connection,
 }
 
+/// Bốn bảng của sản phẩm hộp thư đã bị xoá — dọn ở bước nâng cấp lược đồ 4.
+///
+/// Vì sao chúng còn nằm đó tới hôm nay: `CLAUDE.md` từng ghi *"nothing drops
+/// them, and no query can see them"*, tức cố ý để lại chứ không phải quên. Đo
+/// lại 2026-08-10 thì lý do "để lại cũng chẳng sao" không còn đứng được:
+/// **379 dòng chết** (messages 200 · outbox 90 · decisions 87 · dead_letter 2),
+/// dừng đúng ngày 08-08 khi nhánh hộp thư bị xoá, và **3 dòng khớp mẫu bí mật**.
+/// Dữ liệu không ai đọc mà có thể mang bí mật thì giữ chỉ là gánh nợ.
+///
+/// Làm bằng BƯỚC NÂNG CẤP chứ không phải một lệnh gõ tay: nó nằm trong mã, có
+/// test, có log, chạy đúng một lần trên mọi máy, và ai đọc lịch sử cũng thấy
+/// được vì sao. Hà chốt 2026-08-10; điểm lùi `data/hub-before-legacy-drop.sqlite`
+/// đã dựng và đã qua `PRAGMA integrity_check` trước khi bước này ra đời.
+fn drop_legacy_inbox(conn: &Connection) -> Result<()> {
+    // TẮT kiểm khoá ngoại trong lúc dọn, rồi bật lại — kể cả khi hỏng.
+    //
+    // Bốn bảng ấy tham chiếu lẫn nhau (outbox → decisions → messages), mà
+    // `open()` bật `foreign_keys = ON` ngay phía trên. Bản đầu bỏ qua điều đó
+    // và daemon CHẾT NGAY LÚC DỰNG LÊN: `FOREIGN KEY constraint failed`
+    // (Error 787), `last exit code = 70`, hub nằm im — đo thật 2026-08-10.
+    // Sửa bằng cách tắt kiểm chứ không phải xếp thứ tự xoá: thứ tự đúng hôm nay
+    // là thứ tự sai vào ngày ai đó thêm một tham chiếu, còn cái này thì không.
+    //
+    // 📌 Con lỗi này lộ ra trong 20 giây là nhờ bản vá sáng nay cho
+    // `bin/hubd.rs`: trước đó nó chết bằng `eprintln!` và lý do sẽ chỉ nằm ở
+    // stderr của launchd, nơi không ai đọc.
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    let out = drop_legacy_inbox_inner(conn);
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    out
+}
+
+fn drop_legacy_inbox_inner(conn: &Connection) -> Result<()> {
+    for t in ["messages", "outbox", "decisions", "dead_letter"] {
+        let exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                params![t],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if !exists {
+            continue;
+        }
+        // Đếm TRƯỚC khi xoá: một dòng log nói "đã bỏ 200 dòng" là thứ đọc lại
+        // được sau này; "đã dọn xong" thì không nói gì cả.
+        let rows: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0))
+            .unwrap_or(-1);
+        conn.execute_batch(&format!("DROP TABLE {t}"))?;
+        crate::logging::info(
+            "schema_legacy_table_dropped",
+            serde_json::json!({ "table": t, "rows": rows }),
+        );
+    }
+    Ok(())
+}
+
 impl Db {
     pub fn open(path: &Path) -> Result<Db> {
         if let Some(dir) = path.parent() {
@@ -106,6 +169,21 @@ impl Db {
         conn.pragma_update(None, "busy_timeout", 5000)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.execute_batch(SCHEMA)?;
+
+        // Phiên bản CŨ phải đọc trước khi dán phiên bản mới lên.
+        let was: i64 = conn
+            .query_row(
+                "SELECT v FROM schema_meta WHERE k = 'version'",
+                [],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        if was < 4 {
+            drop_legacy_inbox(&conn)?;
+        }
+
         conn.execute(
             "INSERT INTO schema_meta (k, v) VALUES ('version', ?1) ON CONFLICT(k) DO UPDATE SET v = excluded.v",
             params![SCHEMA_VERSION.to_string()],

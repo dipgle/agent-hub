@@ -42,10 +42,14 @@ or drive a session from a phone?** If not, it does not belong here.
 - Deps: `rusqlite` (bundled), `reqwest` (blocking + rustls), `serde`/`serde_json`,
   `clap`, `regex`, `chrono`, `anyhow`, `tungstenite`. All in the local cargo
   cache → `cargo build --offline` works.
-- Store: `data/hub.sqlite` (WAL). Three tables — `runs`, `cursors`, `spend`.
-  An existing file still HAS the four inbox tables and their rows; nothing drops
-  them, and no query can see them.
-- Tests: `cd rust && cargo test --offline` → 89 tests, 0 warnings.
+- Store: `data/hub.sqlite` (WAL). Three tables — `runs`, `cursors`, `spend`
+  (plus `schema_meta`). The four inbox tables are GONE as of schema step 4
+  (2026-08-10): they had outlived the product by two days and held 379 rows no
+  query could reach. Two facts worth keeping from that migration — the four
+  reference each other, so it has to run with `foreign_keys` OFF (the first
+  version died at boot on `FOREIGN KEY constraint failed`, exit 70), and it
+  logs each table with its row count rather than a silent "cleaned up".
+- Tests: `cd rust && cargo test --offline` → 104 tests, 0 warnings.
 - `./hub …` is a wrapper that builds on first use then execs `rust/target/release/hub`.
 
 ## Non-negotiables

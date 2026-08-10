@@ -131,3 +131,59 @@ fn a_missing_cursor_is_silent_but_a_broken_read_is_not() {
     db.set_cursor("focus:session", "").unwrap();
     assert_eq!(db.cursor_or_log("focus:session").as_deref(), Some(""));
 }
+
+/// Bước nâng cấp 4 dọn bốn bảng của sản phẩm hộp thư đã xoá — và CHỈ chúng.
+///
+/// Làm bằng bước nâng cấp chứ không phải một lệnh gõ tay: nằm trong mã, có
+/// test, có log, chạy đúng một lần trên mọi máy, và ai đọc lịch sử cũng thấy vì
+/// sao. Hà chốt 2026-08-10 sau khi đếm được 379 dòng chết không truy vấn nào
+/// chạm tới, dừng đúng ngày nhánh hộp thư bị xoá.
+///
+/// Fixture dựng bằng chính `sqlite3` — đúng cách một người vận hành làm, và
+/// cũng là đường duy nhất ở đây vì bộ test không có rusqlite.
+#[test]
+fn schema_step_4_drops_the_dead_inbox_tables_and_nothing_else() {
+    use std::process::Command;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy.sqlite");
+
+    // Một cơ sở dữ liệu ĐỜI CŨ: có bảng hộp thư, có dữ liệu, phiên bản 3.
+    let seed = "
+      CREATE TABLE schema_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+      INSERT INTO schema_meta VALUES ('version','3');
+      CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT);
+      INSERT INTO messages (body) VALUES ('tin cũ'),('tin thường');
+      CREATE TABLE outbox (id INTEGER PRIMARY KEY);
+      INSERT INTO outbox DEFAULT VALUES;
+      CREATE TABLE decisions (id INTEGER PRIMARY KEY);
+      CREATE TABLE dead_letter (id INTEGER PRIMARY KEY);
+      CREATE TABLE cursors (k TEXT PRIMARY KEY, v TEXT, updated_at TEXT NOT NULL);
+      INSERT INTO cursors VALUES ('focus:session','abc','2026-08-10T00:00:00Z');
+    ";
+    let out = Command::new("sqlite3").arg(&path).arg(seed).output().unwrap();
+    assert!(out.status.success(), "dựng fixture hỏng: {out:?}");
+
+    // Mở bằng chính hub — bước nâng cấp chạy ở đây.
+    let db = hub::db::Db::open(&path).unwrap();
+    // Dữ liệu SỐNG phải còn nguyên: dọn nhầm thứ đang dùng thì hỏng nặng hơn
+    // hẳn việc để lại thứ đã chết.
+    assert_eq!(db.cursor_or_log("focus:session").as_deref(), Some("abc"));
+    drop(db);
+
+    let names = Command::new("sqlite3")
+        .arg(&path)
+        .arg("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .output()
+        .unwrap();
+    let names = String::from_utf8_lossy(&names.stdout);
+    for gone in ["messages", "outbox", "decisions", "dead_letter"] {
+        assert!(!names.split('\n').any(|l| l.trim() == gone), "còn {gone}: {names}");
+    }
+    for kept in ["cursors", "runs", "spend", "schema_meta"] {
+        assert!(names.split('\n').any(|l| l.trim() == kept), "mất {kept}: {names}");
+    }
+
+    // Chạy lại lần nữa: không nổ, không làm gì thêm (phiên bản đã là 4).
+    let db = hub::db::Db::open(&path).unwrap();
+    assert_eq!(db.cursor_or_log("focus:session").as_deref(), Some("abc"));
+}

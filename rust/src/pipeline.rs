@@ -633,6 +633,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước)\n\
                      /stop [id] — dừng phiên nền, hội thoại vẫn giữ\n\
                      /handover [id] — đóng sổ, lấy bản bàn giao + id để làm tiếp\n\
+                     — Gõ thẳng vào cửa sổ phiên —\n\
+                     /type <chữ> — gõ chữ vào phiên đang theo (Terminal, kèm Enter)\n\
+                     /key <up|down|left|right|enter|esc|tab|space|1-9> — bấm một phím\n\
+                     /shot — đọc chữ đang hiện trên màn của phiên\n\
                      — Vận hành —\n\
                      /project [tên] — xem / ghim dự án cho phòng (bỏ ghim: /project -)\n\
                      /ingest · /run · /doctor — poll kênh · chạy một vòng · kiểm tra thật\n\

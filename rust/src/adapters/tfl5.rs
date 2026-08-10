@@ -595,28 +595,6 @@ impl Live {
     }
 }
 
-/// Turn a live `msg` frame into the same row shape the poller produces, so a
-/// message is identical whichever path delivered it. `external_id` is the chat
-/// `tid` either way, and `UNIQUE(source, external_id)` makes the overlap free.
-/// Pull a reply marker off the front of a chat line.
-///
-/// tfl5's chat has no reply/parent field (`chat_message` is tid + text), so a
-/// reply is encoded in the text as `↩[<tid>] …`. The page writes it and hides
-/// it again when rendering; here it is stripped so the model never sees the
-/// plumbing, and the tid travels in `raw.reply_to`.
-pub fn split_reply_marker(text: &str) -> (Option<String>, &str) {
-    let t = text.trim_start();
-    let Some(rest) = t.strip_prefix("↩[") else {
-        return (None, text);
-    };
-    match rest.split_once(']') {
-        Some((tid, body)) if !tid.trim().is_empty() => {
-            (Some(tid.trim().to_string()), body.trim_start())
-        }
-        _ => (None, text),
-    }
-}
-
 /// A slash command typed in the room, if this text is one AND the author is
 /// allowed to give hub orders.
 ///

@@ -540,24 +540,3 @@ fn project_pin_reads_shows_and_clears() {
     assert!(tfl5::parse_command("/project sdvi", "u-stranger", &owners()).is_none());
 }
 
-#[test]
-fn a_reply_marker_is_stripped_and_carried_separately() {
-    // tfl5's chat has no reply field, so the page encodes it in the text.
-    // The model must never see the plumbing, and the tid must survive.
-    let (tid, body) = tfl5::split_reply_marker("↩[cm-abc123] còn cái này thì sao");
-    assert_eq!(tid.as_deref(), Some("cm-abc123"));
-    assert_eq!(body, "còn cái này thì sao");
-
-    // Ordinary text is untouched — including text that merely mentions the
-    // arrow, or a malformed marker.
-    for plain in [
-        "bình thường",
-        "↩ không có ngoặc",
-        "↩[] rỗng",
-        "dùng ↩[x] ở giữa",
-    ] {
-        let (tid, body) = tfl5::split_reply_marker(plain);
-        assert!(tid.is_none(), "không được coi là reply: {plain}");
-        assert_eq!(body, plain);
-    }
-}

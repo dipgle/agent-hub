@@ -40,9 +40,10 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-1. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
-   `dead_letter`) vẫn còn dữ liệu. Không có mã nào đọc chúng. Muốn dọn thì phải
-   là một quyết định có chủ ý, không phải tác dụng phụ của việc đổi schema.
+**Rỗng** (2026-08-10). Mục cuối — bốn bảng hộp thư chết — đã dọn bằng bước nâng
+cấp lược đồ 4; xem "Đã trả xong". Món nào mới phát sinh thì ghi vào đây, đừng để
+danh sách này có sẵn vài dòng thường trực: một sổ nợ không bao giờ rỗng thì thôi
+là sổ việc, thành cái nền để biện minh.
 
 ## Theo thiết kế, KHÔNG phải nợ
 
@@ -53,6 +54,19 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
   đóng trọn thì bấm nút Telegram trong lúc kịch bản chạy.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
+
+- ~~Bốn bảng hộp thư chết trong `data/hub.sqlite`~~ → **đã dọn 2026-08-10** bằng
+  **bước nâng cấp lược đồ 4**, không phải một lệnh gõ tay: nằm trong mã, có test,
+  có log, chạy đúng một lần trên mọi máy. Chạy thật trên DB sống:
+  `messages 200 · outbox 90 · decisions 87 · dead_letter 2`, mỗi bảng một dòng
+  log kèm số dòng; còn lại đúng `cursors runs schema_meta spend`, lược đồ lên 4.
+  ⚠ Bản đầu **giết daemon ngay lúc dựng lên**: bốn bảng ấy tham chiếu lẫn nhau
+  mà `open()` bật `foreign_keys = ON` ngay trên đó — `FOREIGN KEY constraint
+  failed` (787), `last exit code = 70`. Vá bằng cách TẮT kiểm khoá ngoại trong
+  lúc dọn rồi bật lại kể cả khi hỏng, chứ không xếp thứ tự xoá: thứ tự đúng hôm
+  nay là thứ tự sai vào ngày ai đó thêm một tham chiếu.
+  📌 Lỗi ấy lộ ra trong 20 giây **nhờ đúng bản vá cùng ngày** cho `bin/hubd.rs`
+  — trước đó nó chết bằng `eprintln!`, lý do chỉ nằm ở stderr của launchd.
 
 - ~~"Bật lại máy thì hub có tự lên không" chưa nghiệm thu~~ → **mọi điều kiện
   một lần reboot sẽ kiểm đều đã đo xong 2026-08-10**, chỉ còn đúng sự kiện

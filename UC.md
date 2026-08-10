@@ -445,13 +445,30 @@ không làm gì**. `--strict-mcp-config` **không** gỡ được; `--mcp-config
 **dừng phiên đó và báo hỏng kèm cách gỡ**, chứ không báo "🚀 đã mở phiên" cho một
 phiên chẳng bao giờ chạy.
 
-**Cách gỡ, làm MỘT LẦN cho mỗi dự án, trên máy:**
-`cd <thư mục dự án> && claude` → **Esc** (bỏ hết) hoặc **Enter** (duyệt) → thoát.
+**Cách gỡ hoá ra KHÔNG phải bắt người dùng duyệt** (chốt 2026-08-10, Hà hỏi
+*"duyệt thế nào?"* và câu trả lời đúng là *"không cần"*). Hộp thoại ấy chỉ nổi
+lên khi mở phiên trong một **thư mục con chưa được duyệt**. Mọi phiên trên máy
+này vốn chạy từ **gốc workspace**, và cả ba tài khoản đã duyệt gốc ấy từ lâu
+(`hasTrustDialogAccepted: true`). Nên `start_background` mở ở **gốc workspace**,
+nói việc thuộc dự án nào trong ĐỀ BÀI (`[dự án] việc…`) thay vì đổi thư mục —
+`claude` vẫn đọc `CLAUDE.md` của cả cây từ gốc (`sessions.rs:1811`).
 
-**Cơ chế:** ✅ đo thật · **Sản phẩm:** ✅ mở + phát hiện kẹt + dừng ·
-**Kịch bản:** ✅ `fe-newsession-uc.mjs` **9/9** — nhưng mới là **đường KẸT**
-(hub nói đúng sự thật, không để lại phiên lơ lửng). Đường **thành công** cần Hà
-duyệt MCP một lần rồi chạy lại.
+**Cơ chế:** ✅ đo thật · **Sản phẩm:** ✅ · **Kịch bản:** ✅ `fe-newsession-uc.mjs`.
+
+✅ **Đường THÀNH CÔNG đã chạy thật 2026-08-10** — bốn phiên nền do hub tự mở,
+mỗi phiên chạy lệnh thật rồi trả lời:
+
+| Phiên | Số lệnh | Câu cuối |
+|---|---|---|
+| `5602abc4` | 3 | *"[hub] `hub` là công cụ đưa các phiên Claude CLI…"* |
+| `2254aec2` | 4 | *"[hub-act-demo] …"* |
+| `4bbd6d74` | 5 | *"[hub-act-demo] `hub-act-demo` là repo git dùng-một-lần…"* |
+| `f7926139` | 3 | *"[hub] `hub` là công cụ Rust chạy trên Mac…"* |
+
+📌 Mục này từng ghi *"đường thành công cần Hà duyệt MCP một lần rồi chạy lại"* và
+câu ấy sống sót nhiều ngày sau khi nó hết đúng — đủ lâu để một đội soi sổ đọc lại
+và báo cáo nó như việc còn nợ, rồi tôi chép lại cho Hà. *Sổ lạc hậu không nằm im:
+nó quay lại thành một việc không có thật.*
 
 ---
 

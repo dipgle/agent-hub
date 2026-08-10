@@ -92,7 +92,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
         .cursor_or_log(WATCH_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
-    let (changes, next) = crate::watch::changes(&prev, live);
+    let (changes, next) = crate::watch::changes(&prev, live, chrono::Utc::now().timestamp());
 
     match serde_json::to_string(&next) {
         // Ghi sổ TRƯỚC khi nói: nói xong mới ghi mà sập giữa chừng thì lượt sau

@@ -35,8 +35,18 @@ Telegram). Chấm màu trên danh sách nay đối chiếu HAI CHIỀU với má
 `fe-sessions-uc`: 2 phiên đang chạy hiện đúng, 2 phiên không chạy không bị nhận
 nhầm.
 
-**Nghiệm thu:** `cargo test` **101** (+7 test cho `watch`) · clippy 0 · bundle
-**v134** · daemon `kind: cert`.
+🔁 **Và loa vừa bật đã dạy một bài ngay trong 5 phút đầu:** `hub-bd` bắn "vừa
+chạy xong" **hai lần cách nhau 75 giây**. Đo lại thì **cả hai đều ĐÚNG** — nó
+chạy hai lượt ngắn thật (mốc hoạt động nhảy tới 12:38:00). Đúng mà vẫn sai chỗ:
+phiên ấy đang có người ngồi gõ, và người ta đang nhìn thẳng vào nó. Giá trị của
+cái loa nằm ở phiên KHÔNG ai nhìn. Thêm **cửa thời lượng** `MIN_RUN_SEC = 120`:
+sổ nay ghi `working@<mốc>` nên biết nó chạy được bao lâu; chạy chớp nhoáng thì
+im, chạy đủ lâu thì nói kèm luôn "sau N phút".
+📌 *Bài học: một cái loa đúng vẫn có thể sai chỗ. "Có bắt được không" và "có
+đáng gọi người ta không" là hai câu hỏi khác nhau.*
+
+**Nghiệm thu:** `cargo test` **102** (+8 test cho `watch`) · clippy 0 · bundle
+**v134** · daemon `kind: cert` · sổ chạy thật ghi `working@<mốc>`, 0 lỗi.
 
 ⛔ **Và một chuyện về hàng rào:** hook chặn `bash deploy/install.sh` vì nó là
 "script đục". Tôi KHÔNG gọi lại lần nữa mà chạy đúng các bước ấy ở dạng nhìn

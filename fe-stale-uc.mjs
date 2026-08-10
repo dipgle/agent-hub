@@ -183,6 +183,23 @@ try {
   const sessCount = await page.locator("#sessList .sess").count();
   check("danh sách phiên vẫn hiện ra, không trắng trơn", sessCount > 0, `${sessCount} thẻ phiên`);
 
+  // ĐỌC HẾT ĐƯỢC không, chứ không chỉ CÓ MẶT.
+  //
+  // Lượt chạy đầu của kịch bản này xanh 7/7 trong khi màn hình chỉ hiện tới
+  // `⚠ hub chưa đẩy dữ liệu mới — Ảnh chụp lúc 19:50:59 1…` — nửa sau bị cắt,
+  // mà nửa sau mới là phần đổi hành vi người đọc ("số dưới đây là của lúc đó").
+  // Bảy assert đều đọc `textContent`, thứ có đủ chữ kể cả khi màn cắt cụt; chỉ
+  // MỞ ẢNH RA NHÌN mới thấy. Nay hỏi trình duyệt bằng `scrollWidth`.
+  const fit = await stampEl.evaluate((el) => ({
+    cut: el.scrollWidth > el.clientWidth + 1,
+    shown: el.textContent.trim(),
+  }));
+  check(
+    "cảnh báo ĐỌC HẾT ĐƯỢC trên màn 390px, không bị cắt đuôi",
+    !fit.cut,
+    fit.cut ? `BỊ CẮT: ${fit.shown.slice(0, 70)}…` : "hiện trọn câu"
+  );
+
   await page.screenshot({ path: `${SHOTS}stale-snapshot.png`, fullPage: true });
 
   check("0 lỗi console", errors.length === 0, errors.join(" | "));

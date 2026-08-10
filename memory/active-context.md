@@ -1,5 +1,28 @@
 # active context — hub
 
+## 🕰 2026-08-10 (khuya) — UC-S09 đóng hẳn, và 7/7 xanh trên một màn hình cắt cụt
+
+Hà: *"làm đi chờ tôi làm gì"*. Tắt `hubd` thật (`bootout`, vì plist có
+`KeepAlive` nên `kill` sẽ bị dựng lại ngay), chờ qua 5 phút, chạy `fe-stale-uc`.
+
+**Lượt 1: 7/7 đạt — và màn hình đang nói dối một nửa.** Ảnh chụp 6.9 phút tuổi,
+trang gắn đúng class `stale`, đúng chữ, đúng tuổi, và vế âm (chữ "còn tươi" vắng
+mặt) cũng đúng. Nhưng mở ảnh ra nhìn thì màn chỉ hiện tới
+`⚠ hub chưa đẩy dữ liệu mới — Ảnh chụp lúc 19:50:59 1…` — **nửa sau bị cắt**, mà
+nửa sau (*"Số dưới đây là của lúc đó, không phải bây giờ"*) mới là phần đổi hành
+vi người đọc. Bảy assert đều đọc `textContent`, thứ có đủ chữ **kể cả khi màn
+cắt cụt**.
+📌 *Một lời cảnh báo không đọc hết được thì chưa phải lời cảnh báo. Và `textContent`
+không phải cái mắt nhìn thấy.*
+
+**Vá:** luật "một dòng, cắt đuôi" của `#boardStamp` sinh ra cho dòng mốc thời
+gian bình thường — thứ không đọc hết cũng không sao. Cảnh báo thì ngược lại, nên
+`.stale` được xuống dòng. Thêm phép đo hỏi `scrollWidth` chứ không đọc chữ.
+
+**Lượt 2: 8/8**, ảnh chụp 6.3 phút tuổi, cảnh báo hiện trọn ba dòng. Hub bật lại
+ngay sau mỗi lượt; tổng thời gian mù ~12 phút, chia hai lần.
+
+
 ## 🔔 2026-08-10 (khuya) — hub biết nói "nó xong rồi" và "nó tắt rồi"
 
 Hà: *"có bắt được trường hợp đang chạy và dừng lại hoàn toàn không? nếu có thì

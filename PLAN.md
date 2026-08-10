@@ -23,7 +23,8 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S11 | Lệnh dừng phải **xác nhận qua Telegram** mới chạy | chạy thật 2026-08-10 (dưới) |
 | S02b | Phiên **đang chạy subagent** thì màn nói ra | `fe-subagent-uc` 12/12 trên HAI phiên, hai con số (3 và 4) |
 | S12 | Danh sách biết **phiên nào đang chạy** — mọi phiên, không chỉ phiên nền | `fe-sessions-uc`, đối chiếu hai chiều với máy |
-| S13 | Phiên **vừa xong** / **vừa tắt hẳn** thì báo vào phòng chat + Telegram | chạy thật 2026-08-10: `⏹ phiên eab9932e đã tắt hẳn`, 0 lỗi gửi |
+| S13 | Phiên **vừa xong** / **vừa tắt hẳn** thì báo vào phòng chat + Telegram | chạy thật: `✅ … sau 4 phút`, `⏹ … đã tắt hẳn`, 0 lỗi gửi |
+| S09b | **Ảnh chụp cũ thì nói là cũ** | `fe-stale-uc` 8/8 trên ảnh chụp 6.3 phút tuổi (tắt `hubd` thật) |
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
 
@@ -39,34 +40,40 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-1. **UC-S09 nửa "ảnh chụp đã cũ"** — phải tắt `hubd` rồi chờ qua 5 phút mới thấy;
-   chưa chạy.
-2. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
+1. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
    `dead_letter`) vẫn còn dữ liệu. Không có mã nào đọc chúng. Muốn dọn thì phải
    là một quyết định có chủ ý, không phải tác dụng phụ của việc đổi schema.
-3. **Chữ ký ổn định mới nghiệm thu tới bước "bản cài mang DR cố định"**
+2. **Chữ ký ổn định mới nghiệm thu tới bước "bản cài mang DR cố định"**
    (2026-08-10): đã đo hai build khác byte cùng một designated requirement, và
    `hubd` tự khai `kind: cert` khi chạy. Chưa đo được vế cuối — **bật lại máy thì
    hub có tự lên không** — vì việc đó phải reboot thật.
 5. ~~Hai hàng mới ở tab Sức khoẻ chưa nhìn thấy trên UI thật~~ → đã thấy:
    `fe-board` 27/27 trên daemon do launchd sở hữu.
-4. **`fe-sessions-uc` đỏ giả khi tập phiên vừa đổi.** Nó đọc sự thật từ
+3. **`fe-sessions-uc` đỏ giả khi tập phiên vừa đổi.** Nó đọc sự thật từ
    `hub sessions --json` một lần rồi so với màn, mà ảnh chụp trên trang trễ tới
    ~25 giây ⟹ dừng/mở một phiên ngay trước lúc chạy là ra `màn 6 / máy 5`. Đo
    2026-08-10: đỏ 3 dòng, chờ 45 giây chạy lại thì **xanh, exit 0**. Cách chữa đã
    có sẵn khuôn trong `fe-subagent-uc.mjs`: đọc sự thật — đọc màn — đọc lại sự
    thật, chỉ so khi hai đầu kẹp bằng nhau.
-5. **`fe-newsession-uc` là kịch bản bán tự động.** Bước `/stop` cần một ngón tay
+4. **`fe-newsession-uc` là kịch bản bán tự động.** Bước `/stop` cần một ngón tay
    thật bấm Telegram; không ai bấm thì kịch bản in **"BỎ QUA 2 + 3 kiểm tra"** kèm
    tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm lúc ấy đang cư xử
    đúng. (Câu này trước đây là **ý định chứ không phải hành vi**: đo 2026-08-10
    chiều thì nó báo đỏ 3 dòng, vì hai lỗi đã vá cùng ngày — xem "Đã trả xong".)
-6. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
+5. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
    `HUB_TFL5_PASSWORD`; repo chưa từng có remote nên nó chưa rời máy này. Đã
    `git rm --cached`, đã `chmod 600`, đã thêm vào `.gitignore`. **Còn nợ: đổi
    mật khẩu tfl5**, vì giá trị cũ vẫn nằm trong lịch sử `.git`.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
+
+- ~~UC-S09 nửa "ảnh chụp đã cũ" chưa chạy~~ → **8/8** trên ảnh chụp **6.3 phút
+  tuổi**, dựng bằng cách `bootout` `hubd` thật (hub mù ~6 phút, hai lượt). Và
+  lượt đầu dạy đúng bài của dự án này: **7/7 xanh trong khi màn hình cắt cụt**
+  câu cảnh báo — bảy assert đều đọc `textContent`, thứ có đủ chữ kể cả khi màn
+  chỉ hiện tới `…Ảnh chụp lúc 19:50:59 1…`. Chỉ MỞ ẢNH RA NHÌN mới thấy nửa
+  quan trọng nhất (*"Số dưới đây là của lúc đó, không phải bây giờ"*) không bao
+  giờ tới mắt. Nay `.stale` được xuống dòng, và có phép đo hỏi `scrollWidth`.
 
 - ~~Năm chỗ "lỗi im lặng"~~ → vá hết 2026-08-10 (Hà: *"làm nốt đi"*).
   **12 chỗ** đọc `db.get_cursor` nay đi qua `Db::cursor_or_log` — đặt chốt ở MỘT

@@ -711,6 +711,17 @@
     flex: 0 1 auto; min-width: 0; font-size: 12px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  /* CẢNH BÁO thì được xuống dòng — luật "một dòng, cắt đuôi" ở trên sinh ra cho
+     dòng mốc thời gian bình thường, thứ không đọc hết cũng không sao. Câu cảnh
+     báo thì ngược lại: nửa sau của nó (*"Số dưới đây là của lúc đó, không phải
+     bây giờ"*) mới là phần đổi hành vi người đọc. Đo 2026-08-10 trên ảnh chụp
+     cũ THẬT: màn chỉ hiện tới `⚠ hub chưa đẩy dữ liệu mới — Ảnh chụp lúc
+     19:50:59 1…`, tức đúng nửa quan trọng bị cắt. Một lời cảnh báo không đọc
+     hết được thì chưa phải lời cảnh báo. */
+  #board.on-sessions .boardbar #boardStamp.stale {
+    white-space: normal; overflow: visible; text-overflow: clip;
+    flex: 1 1 100%; line-height: 1.35;
+  }
   #board .boardbar .spacer { flex: 1; }
   #board .boardnote { margin: 0 0 12px; font-size: 12px; }
   #board .boardnote code { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }

@@ -957,14 +957,22 @@
           <!-- Chú thích về màn, MỘT hàng, dưới cùng: trạng thái luồng bên trái
                (cắt đuôi nếu dài), cách hiển thị bên phải. Nó là chú thích, nên
                nó xuống cuối và không bao giờ được chiếm hai dòng. -->
+          <!-- Lý lịch phiên: gấp sẵn để không đẩy luồng xuống, mở một chạm khi
+               cần đối chiếu. Số liệu vốn đã đi kèm ảnh chụp.
+               ⚠ Khối này NẰM NGOÀI `#sessNote`, và chỗ đứng ấy là cả một con
+               bug: `#sessNote` là một HÀNG NGANG (`display:flex; nowrap`) dựng
+               cho hai thứ — dòng trạng thái co giãn và ô tích "kiểu terminal".
+               Bản trước nhét `<details>` vào trong hàng ấy, nên nó thành đứa con
+               thứ ba và bị bóp còn **108px trên màn 390px**: mọi giá trị gãy
+               dòng, đường dẫn vỡ giữa từ, nửa phải màn bỏ trống. Không assert
+               nào bắt được vì tất cả đều đọc CHỮ, mà chữ thì vẫn đủ — chỉ mở
+               ảnh ra nhìn mới thấy (Hà 2026-08-10: *"tự mở playwright lên"*). -->
+          <details id="sessInfoBox">
+            <summary class="muted">Thông tin phiên</summary>
+            <div id="sessInfo" class="rt"></div>
+          </details>
           <div id="sessNote">
-            <!-- Lý lịch phiên: gấp sẵn để không đẩy luồng xuống, mở một chạm khi
-             cần đối chiếu. Số liệu vốn đã đi kèm ảnh chụp. -->
-        <details id="sessInfoBox">
-          <summary class="muted">Thông tin phiên</summary>
-          <div id="sessInfo" class="rt"></div>
-        </details>
-        <p class="muted" id="sessStatus"></p>
+            <p class="muted" id="sessStatus"></p>
             <label class="term-toggle muted">
               <input type="checkbox" id="termMode" checked />
               <span>kiểu terminal</span>

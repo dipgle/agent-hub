@@ -350,6 +350,28 @@ try {
     !!row,
     rows.map(([k]) => k).join(", ")
   );
+  // Bảng lý lịch phải RỘNG BẰNG KHUNG, không bị bóp thành một cột.
+  //
+  // Bug thật, chỉ thấy khi mở ảnh ra nhìn (Hà 2026-08-10: *"tự mở playwright
+  // lên"*): khối `<details>` bị đặt BÊN TRONG `#sessNote` — một hàng ngang
+  // `display:flex; nowrap` dựng cho dòng trạng thái + ô tích — nên nó thành đứa
+  // con thứ ba và co còn **108px trên màn 390px**: mọi giá trị gãy dòng, đường
+  // dẫn vỡ giữa từ, nửa phải màn bỏ trống. Không assert nào bắt được vì tất cả
+  // đều đọc CHỮ, mà chữ thì vẫn đủ; và nó cũng không TRÀN nên phép quét tràn
+  // ngang của `fe-board` cũng không thấy. Phải đo BỀ RỘNG.
+  const wide = await page.evaluate(() => {
+    const info = document.getElementById('sessInfo');
+    const host = document.getElementById('sessDetail');
+    if (!info || !host) return null;
+    const iw = info.getBoundingClientRect().width;
+    const hw = host.getBoundingClientRect().width;
+    return { info: Math.round(iw), host: Math.round(hw), ratio: iw / hw };
+  });
+  check(
+    "bảng lý lịch rộng bằng khung, không bị bóp thành cột",
+    !!wide && wide.ratio >= 0.9,
+    wide ? `${wide.info}px / khung ${wide.host}px` : "không thấy bảng"
+  );
   check(
     "hàng «subagent» nói đúng con số",
     row?.[1] === `${nTarget} đang chạy`,

@@ -24,19 +24,28 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-1. **`/tell` + `/stop` chưa nghiệm thu qua UI.** Cơ chế có test thật, nhưng cần
-   một phiên nền chạy được — mà mọi phiên nền mở trong workspace này đều kẹt ở
-   hộp thoại duyệt MCP. **Việc của Hà, một lần cho mỗi dự án:**
-   `cd ~/Documents/projects/AI/<dự án> && claude` → **Esc** → thoát.
-2. **UC-S02b (phiên có subagent)** — chưa có mẫu thật để biết nên hiện thế nào.
-3. **UC-S09 nửa "ảnh chụp đã cũ"** — phải tắt `hubd` rồi chờ qua 5 phút mới thấy;
+1. **UC-S02b (phiên có subagent)** — đường hiển thị mới chỉ ghim bằng unit test
+   (13 test trong `tests/sessions.rs`); lúc nghiệm thu không phiên nào đang chạy
+   subagent nên chưa thấy nó vẽ ra trên màn thật.
+2. **UC-S09 nửa "ảnh chụp đã cũ"** — phải tắt `hubd` rồi chờ qua 5 phút mới thấy;
    chưa chạy.
-4. **`fe-phone-uc` (kiểm ergonomics) còn đỏ**, và đỏ từ trước đợt dọn: chữ 11.2px
-   (`span.room`, trạng thái kết nối) và các nút tab cao 35px < chuẩn chạm 44px.
-   Đây là nợ thiết kế thật, không phải hỏng do đợt xoá.
-5. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
+3. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
    `dead_letter`) vẫn còn dữ liệu. Không có mã nào đọc chúng. Muốn dọn thì phải
    là một quyết định có chủ ý, không phải tác dụng phụ của việc đổi schema.
+4. **Chữ ký ổn định mới nghiệm thu tới bước "bản cài mang DR cố định"**
+   (2026-08-10): đã đo hai build khác byte cùng một designated requirement, và
+   `hubd` tự khai `kind: cert` khi chạy. Chưa đo được vế cuối — **bật lại máy thì
+   hub có tự lên không** — vì việc đó phải reboot thật.
+5. **Hai hàng mới ở tab Sức khoẻ** (`chữ ký bản cài`, `bản đang chạy CŨ hơn`)
+   mới có unit test + đo bằng `portal-push --dry-run` đủ ba trạng thái; chưa
+   nhìn thấy trên UI thật vì cần daemon chạy mã mới.
+
+## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
+
+- ~~`/tell` + `/stop` chưa nghiệm thu qua UI~~ → `fe-newsession` **22/22**
+  (2026-08-10): mở phiên `58f37f0c` → dừng → nói tiếp, nhật ký dài ra
+  32509→38438 byte.
+- ~~`fe-phone-uc` còn đỏ~~ → **31/31**.
 
 ## Nguyên tắc còn giữ
 

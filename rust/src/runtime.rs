@@ -190,12 +190,178 @@ fn autostart_state() -> Value {
     } else {
         Some(false)
     };
+    let (signature, stale) = installed_binary_state();
     json!({
         "plist_installed": installed,
         "loaded": loaded,
         "plist_path": plist.display().to_string(),
+        "signature": signature,
+        "stale": stale,
         "how_to_install":
-            "cp ~/Documents/projects/AI/hub/deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/ && \
+            "deploy/install.sh && \
+             cp ~/Documents/projects/AI/hub/deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/ && \
              launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist",
     })
+}
+
+/// Đường dẫn bản hubd mà launchd chạy. KHÔNG phải bản `cargo` vừa build.
+const INSTALLED_HUBD: &str = "~/Library/Application Support/hub/bin/hubd";
+
+/// Hai câu hỏi mà thiết kế "cài bản đã ký ra đường riêng" vừa đẻ ra, và cả hai
+/// đều im lặng nếu không ai hỏi:
+///
+/// 1. **Bản cài có còn mang chữ ký cố định không** (`cert`)? Nếu là `adhoc` thì
+///    quyền TCC sẽ mất ở lần build kế tiếp — hub vẫn chạy ngon cho tới lúc khởi
+///    động lại máy, rồi im.
+/// 2. **Bản cài có cũ hơn bản vừa build không**? Đây là cái giá của việc tách
+///    hai file: sửa mã, `cargo build`, test xanh, deploy trang — và daemon vẫn
+///    đang chạy mã của hôm qua vì không ai chạy `deploy/install.sh`. Không có
+///    dòng này thì không gì phát hiện ra.
+///
+/// Trả `None` cho câu nào không hỏi được, không đoán bừa (`unknown` ≠ `sai`).
+fn installed_binary_state() -> (Value, Value) {
+    let bin = crate::config::expand_home(Path::new(INSTALLED_HUBD));
+    if !bin.exists() {
+        return (Value::Null, Value::Null);
+    }
+
+    let signature = match run(
+        "codesign",
+        &["-d", "-r-", &bin.display().to_string()],
+        RunOpts {
+            timeout: Some(Duration::from_secs(10)),
+            ..Default::default()
+        },
+    ) {
+        // codesign prints the requirement on stderr; `run` keeps them apart.
+        Ok(r) => {
+            let text = format!("{}{}", r.stdout, r.stderr);
+            if text.contains("certificate root") {
+                Value::from("cert")
+            } else if text.contains("cdhash") {
+                Value::from("adhoc")
+            } else {
+                crate::logging::warn(
+                    "codesign_probe_unreadable",
+                    json!({ "bin": bin.display().to_string(), "code": r.code }),
+                );
+                Value::Null
+            }
+        }
+        Err(e) => {
+            crate::logging::warn("codesign_probe_failed", json!({ "err": e.to_string() }));
+            Value::Null
+        }
+    };
+
+    (signature, stale_against_build())
+}
+
+/// Bản cài có còn là mã hiện tại không?
+///
+/// Hỏi **mã nguồn**, không hỏi sản phẩm build. Hai đường kia đều đã thử và đều
+/// sai (đo 2026-08-10):
+/// - *mtime của `target/release/hubd`*: `cargo test --release` link lại mỗi lượt
+///   test, mtime nhảy dù mã không đổi.
+/// - *cdhash của `target/release/hubd`*: tưởng ổn định vì build của Rust lặp
+///   lại đúng byte, nhưng `cargo test --release` cho ra một binary KHÁC hẳn
+///   (`2f624e8b…` so với `bbd8ba58…` của `cargo build --release`), và lệnh build
+///   sau đó lại trả về hash cũ. Cùng một mã, hai câu trả lời.
+///
+/// Một cảnh báo kêu oan sau mỗi lượt test là một cảnh báo bị phớt lờ, tức tệ
+/// hơn không có. Còn `.rs`/`Cargo.toml`/`Cargo.lock` thì chỉ đổi mtime khi có
+/// người thật sự sửa — đúng câu hỏi cần trả lời: *sửa mã xong đã cài lại chưa?*
+fn stale_against_build() -> Value {
+    let bin = crate::config::expand_home(Path::new(INSTALLED_HUBD));
+    let src = crate::config::expand_home(Path::new("~/Documents/projects/AI/hub/rust"));
+    let Some(installed_at) = mtime(&bin) else {
+        return Value::Null;
+    };
+    // Không có mã nguồn ở máy này (bản cài đem từ nơi khác) thì không có gì để
+    // so — im lặng, đừng doạ.
+    match newest_source_mtime(&src) {
+        Some(changed_at) => Value::from(changed_at > installed_at),
+        None => Value::Null,
+    }
+}
+
+fn mtime(p: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(p).ok()?.modified().ok()
+}
+
+/// mtime mới nhất trong cây nguồn Rust: mọi `.rs` dưới `src/`, cộng
+/// `Cargo.toml`/`Cargo.lock`. Bỏ qua `target/` — đó là sản phẩm, không phải mã.
+fn newest_source_mtime(rust_dir: &Path) -> Option<std::time::SystemTime> {
+    let mut newest: Option<std::time::SystemTime> = None;
+    let mut take = |p: &Path| {
+        if let Some(t) = mtime(p) {
+            if newest.is_none_or(|n| t > n) {
+                newest = Some(t);
+            }
+        }
+    };
+    take(&rust_dir.join("Cargo.toml"));
+    take(&rust_dir.join("Cargo.lock"));
+
+    // Duyệt tay thay vì kéo thêm một crate: cây này chỉ vài chục file.
+    let mut stack = vec![rust_dir.join("src")];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            match e.file_type() {
+                Ok(t) if t.is_dir() => stack.push(p),
+                Ok(_) if p.extension().is_some_and(|x| x == "rs") => take(&p),
+                _ => {}
+            }
+        }
+    }
+    newest
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Cái bẫy mà phép đo này sinh ra để tránh: đếm nhầm một file KHÔNG PHẢI mã
+    /// nguồn (sản phẩm build, ghi chú) thành "mã vừa đổi", rồi báo daemon đã cũ
+    /// sau mỗi lượt `cargo test`. Cảnh báo kêu oan là cảnh báo bị tắt.
+    #[test]
+    fn newest_source_mtime_counts_rust_sources_and_ignores_build_output() {
+        let root = std::env::temp_dir().join(format!("hub-rt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src/nested")).unwrap();
+        std::fs::create_dir_all(root.join("target/release")).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "// a").unwrap();
+
+        // File mã nguồn viết SAU CÙNG phải là mốc mới nhất.
+        std::fs::write(root.join("src/nested/late.rs"), "// b").unwrap();
+        let expected = mtime(&root.join("src/nested/late.rs")).unwrap();
+        assert_eq!(newest_source_mtime(&root), Some(expected));
+
+        // Rồi ghi hai thứ KHÔNG phải mã nguồn, muộn hơn: một file trong
+        // `target/` (sản phẩm build — `cargo test` đụng vào nó mỗi lượt) và một
+        // file không phải `.rs`. Mốc không được nhúc nhích.
+        std::fs::write(root.join("target/release/hubd.rs"), "// build output").unwrap();
+        std::fs::write(root.join("src/notes.txt"), "// not code").unwrap();
+        assert_eq!(
+            newest_source_mtime(&root),
+            Some(expected),
+            "mốc bị kéo theo một file không phải mã nguồn"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Không có cây nguồn trên máy (bản cài đem từ nơi khác) thì trả `None` để
+    /// màn nói "không rõ", KHÔNG phải `false` — đoán bừa là cách một phép đo
+    /// biến thành một lời nói dối yên tâm.
+    #[test]
+    fn newest_source_mtime_is_unknown_when_there_is_no_tree() {
+        let missing = std::env::temp_dir().join(format!("hub-rt-missing-{}", std::process::id()));
+        assert_eq!(newest_source_mtime(&missing), None);
+    }
 }

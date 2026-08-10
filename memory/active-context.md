@@ -1,5 +1,72 @@
 # active context — hub
 
+## 🔏 2026-08-10 (sáng) — chữ ký cố định cho hubd, và ba phép đo sai của chính tôi
+
+**Việc:** đóng nốt món `CLAUDE.md` §12 ghi *"Durable fix (not built yet)"*.
+
+**Chẩn đoán được xác nhận bằng số, không phải bằng lý thuyết:**
+`codesign -d -r-` trên `hubd` in ra `designated => cdhash H"fea4ff94…"` — DR neo
+theo **vân tay byte**, nên mỗi lần `cargo build` là một chương trình khác trong
+mắt TCC. Ký bằng chứng chỉ đổi DR thành `identifier "com.dipgle.hubd" and
+certificate root = H"9de8ec03…"` — neo theo **danh tính**.
+
+Chứng chỉ tự ký, nằm trong login keychain, **cố ý KHÔNG add vào trust store**:
+`codesign` ký ngon lành với identity chưa tin cậy (nó chỉ kêu
+`CSSMERR_TP_NOT_TRUSTED` khi bị bắt *thẩm định chuỗi tin cậy*), còn TCC thì khớp
+theo requirement. ⟹ không cần mật khẩu quản trị, không cần hộp thoại nào.
+
+**Ba lần phép đo của tôi trỏ sai chỗ, cả ba đều tự bắt được:**
+
+| Phép đo | Nói gì | Sự thật |
+|---|---|---|
+| `touch` file rồi build lại, so cdhash | "DR ổn định ✓" | **mù** — hằng số không ai dùng bị loại khỏi binary, byte y hệt, chưa chứng minh gì |
+| ký thẳng `target/release/hubd` | "xong" | `cargo test --release` + `clippy --all-targets` **link lại rồi ký đè ad-hoc**; `hubd_signature` đọc `cert` → `adhoc` sau 20 phút |
+| `stale` = so mtime `target/` | "daemon chạy mã cũ" | **kêu oan** sau mỗi lượt test |
+| `stale` = so cdhash `target/` | "chắc ăn, build lặp lại đúng byte" | `cargo test --release` cho ra binary **khác hẳn** (`2f624e8b…` vs `bbd8ba58…`), build sau lại trả về hash cũ |
+
+📌 Bằng chứng cuối cùng phải đi bằng **sửa chuỗi ký tự thật**: `6e9f7db7…` →
+`bb381cfe…` (byte đổi) mà DR đứng yên. Hai lần trước tôi suýt ghi "đạt" trên một
+phép đo không bao giờ đỏ được.
+
+**Thiết kế chốt lại:** launchd chạy **bản đã cài**
+`~/Library/Application Support/hub/bin/hubd`, ngoài tầm với của cargo.
+`deploy/install.sh` build → copy → ký → `kickstart`. `deploy/sign.sh` là nguyên
+thuỷ ký (tự import lại identity từ p12 nếu keychain trống, và **từ chối tự sinh
+chứng chỉ mới** — cert mới = mất sạch grant cũ). `deploy/make-signing-cert.sh`
+chạy đúng MỘT lần đời.
+
+**Cái giá của việc tách hai file, và cách trả:** sửa mã → build → test xanh →
+deploy trang → daemon **vẫn chạy mã hôm qua** vì quên `install.sh`. Không gì
+phát hiện ra. Nay tab Sức khoẻ có hai hàng: `chữ ký bản cài` (cert/ad-hoc) và
+`bản đang chạy CŨ hơn bản vừa build` — đo bằng **mtime của `.rs` mới nhất dưới
+`rust/src`** so với bản cài, vì mọi thứ đọc từ `target/` đều kêu oan (xem bảng).
+Đủ ba trạng thái đã đo: sửa mã→`True`, cài lại→`False`, chạy `cargo test`→**vẫn
+`False`**.
+
+⚠ **Một điều hai phiên trước tin là đúng, đo lại thì SAI:** TCC **không** chặn
+bản launchd đọc `~/Documents`. Bản launchd nạp được `hub.env` và khoá pid trong
+đó — có dòng `hub_env_loaded` làm chứng. Cú `EX_CONFIG` (78) là do
+`StandardOutPath`, thứ **launchd tự mở** trước khi chạy chương trình; dời log
+sang `~/Library/Logs` là hết, và không có gì khác từng bị chặn. Đã sửa lại
+`CLAUDE.md` §12 và chú thích trong plist.
+
+**Nghiệm thu:** `cargo test` **78** (+2 test mới cho phép đo `stale`) · clippy 0 ·
+bundle **v124** deploy thật, so byte ĐẠT · `fe-board` **19/19**, 0 lỗi console ·
+`hubd` bản cài chạy tay in `kind: cert`.
+
+**CHƯA xong, nói đúng như vậy:**
+- `launchctl bootstrap` bị classifier chặn (chạy được lúc 08:58, sau đó chặn;
+  allowlist daemon của hub không có `launchctl`, mà sửa allowlist là self-grant).
+  ⟹ **job chưa nạp**, hub vẫn sống bằng bản chạy tay pid 70017 (bản 03:50, mã cũ).
+  Lệnh để Hà gõ nằm ở cuối mục này.
+- Vì daemon còn là bản cũ nên **hai hàng mới ở tab Sức khoẻ chưa nhìn thấy trên
+  UI thật** — mới có unit test + `portal-push --dry-run`.
+- **Chưa reboot** nên vế "bật máy lên hub có tự dậy không" vẫn chưa có bằng chứng.
+
+```
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist && kill 70017 && sleep 12 && launchctl list | grep hubd && tail -4 ~/Library/Logs/hubd.err
+```
+
 ## ⚙️ 2026-08-10 (rạng sáng) — hub TỰ CHẠY khi bật máy, sau khi lần ra EX_CONFIG
 
 **Xong: `launchctl list` → `8111 · com.dipgle.hubd`**, tiến trình `ppid 1` do

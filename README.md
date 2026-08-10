@@ -36,11 +36,19 @@ trong `hub.config.json`. Xem `hub.env.example`.
 ## Tự chạy cùng máy (launchd)
 
 ```bash
+deploy/install.sh                                   # build → ký → cài → khởi động lại
 cp deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/
-launchctl load  ~/Library/LaunchAgents/com.dipgle.hubd.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist
 launchctl list | grep hubd
-tail -f logs/hubd.out
+tail -f ~/Library/Logs/hubd.err
 ```
+
+launchd chạy **bản đã cài** `~/Library/Application Support/hub/bin/hubd`, không
+phải bản `cargo` trong `target/`. Lý do nằm ở `CLAUDE.md` §12, tóm tắt: macOS
+neo quyền theo chữ ký, `cargo` ký ad-hoc lại sau **mỗi** lệnh build/test, nên
+bản trong `target/` đổi danh tính liên tục và mất quyền ngay lần bật máy sau.
+Sửa mã xong mà quên `deploy/install.sh` thì daemon vẫn chạy mã cũ — tab **Sức
+khoẻ** có một hàng nói thẳng điều đó.
 
 `hubd` giữ một pid-lock (`data/hubd.lock`) nên hai daemon không cùng chạy; lỗi
 vòng chạy được đếm và backoff luỹ thừa (tối đa 10 phút), sau 5 lần liên tiếp thì

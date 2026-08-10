@@ -166,6 +166,50 @@ fn config_mtime(path: &std::path::Path) -> Option<(i64, u32)> {
     Some((dur.as_secs() as i64, dur.subsec_nanos()))
 }
 
+/// Chữ ký của chính binary này, trả lời đúng một câu: **quyền TCC có sống qua
+/// lần build sau không?**
+///
+/// - `cert` — designated requirement neo theo *danh tính* (`identifier … and
+///   certificate root = H"…"`). Build lại bao nhiêu lần cũng vẫn là một chương
+///   trình, quyền còn nguyên. Đây là thứ `deploy/sign.sh` tạo ra.
+/// - `adhoc` — `cargo` ký ad-hoc, requirement là `cdhash H"…"` tức vân tay của
+///   ĐÚNG dãy byte ấy. Lần build tới macOS coi là chương trình khác và bản chạy
+///   dưới launchd mất sạch Full Disk Access lẫn Automation. Thấy dòng này ở bản
+///   launchd nghĩa là ai đó trỏ nó vào `target/release/` thay vì bản đã cài —
+///   **chạy `deploy/install.sh`**.
+///   (Bản chạy TAY trong terminal in `adhoc` là chuyện bình thường: nó mượn
+///   quyền của terminal, không cần danh tính riêng.)
+/// - `unreadable` — không đọc nổi chữ ký của chính mình trong 3 giây. Với binary
+///   nằm dưới `~/Documents` thì đó gần như chắc chắn là TCC đang chặn, và cũng
+///   là thứ sắp làm `config::load()` treo. Biết trước một dòng còn hơn một pid
+///   nằm im.
+///
+/// Chạy trong luồng riêng có hạn giờ: phép đo này KHÔNG được phép trở thành một
+/// chỗ treo mới ngay ở chỗ vừa dựng ra để chẩn đoán treo.
+fn signature_kind() -> &'static str {
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let out = std::env::current_exe().ok().and_then(|exe| {
+            std::process::Command::new("/usr/bin/codesign")
+                .args(["-d", "-r-", "--"])
+                .arg(exe)
+                .output()
+                .ok()
+        });
+        // codesign in requirement ra stderr; stdout để trống.
+        let _ = tx.send(out.map(|o| {
+            let mut s = String::from_utf8_lossy(&o.stderr).into_owned();
+            s.push_str(&String::from_utf8_lossy(&o.stdout));
+            s
+        }));
+    });
+    match rx.recv_timeout(Duration::from_secs(3)) {
+        Ok(Some(text)) if text.contains("certificate root") => "cert",
+        Ok(Some(text)) if text.contains("cdhash") => "adhoc",
+        _ => "unreadable",
+    }
+}
+
 fn main() {
     // Dòng đầu tiên của cả tiến trình, in THẲNG ra stderr — chưa đọc cấu hình,
     // chưa mở sổ, chưa chạm vào `~/Documents`.
@@ -181,6 +225,10 @@ fn main() {
     eprintln!(
         "{{\"level\":\"info\",\"msg\":\"hubd_boot\",\"pid\":\"{}\"}}",
         std::process::id()
+    );
+    eprintln!(
+        "{{\"level\":\"info\",\"msg\":\"hubd_signature\",\"kind\":\"{}\"}}",
+        signature_kind()
     );
     if let Err(e) = real_main() {
         eprintln!("hubd: {}", logging::err_chain(&e));

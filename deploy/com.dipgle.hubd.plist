@@ -1,16 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  launchd agent: starts hubd at login and keeps it alive. hubd runs BOTH the
-  poll loop and the web console (web.enabled in hub.config.json), so this is the
-  only unit you need.
+  launchd agent: starts hubd at login and keeps it alive. hubd is the whole
+  daemon — the poll loop, the held-open chat socket and the snapshot push — so
+  this is the only unit there is. (There is no local web console any more; the
+  phone page on tfl5 is the only UI.)
 
   Install:
+    deploy/install.sh                       (builds, installs a SIGNED copy)
     cp deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist
   Status / logs:
     launchctl print gui/$(id -u)/com.dipgle.hubd | head -20
-    tail -f ~/Documents/projects/AI/hub/logs/hubd.out
+    tail -f ~/Library/Logs/hubd.err
   Stop / uninstall:
     launchctl bootout gui/$(id -u)/com.dipgle.hubd
     rm ~/Library/LaunchAgents/com.dipgle.hubd.plist
@@ -19,18 +21,22 @@
   <hub>/hub.env (chmod 600) — hubd loads it at startup and logs only the KEY
   NAMES. Do not paste tokens into this file; it gets copied and backed up.
 
-  MONEY: an unattended daemon triages on its own. `daily_budget_usd` in
-  hub.config.json is the hard ceiling (default $5/day); when it is reached the
-  loop stops triaging and tells you once.
+  MONEY: none. hub spends nothing on its own — a cycle costs zero, and the only
+  calls to `claude` come from a person pressing a button on the phone.
 -->
 <plist version="1.0">
 <dict>
   <key>Label</key>
   <string>com.dipgle.hubd</string>
 
+  <!-- Bản ĐÃ CÀI, không phải bản cargo vừa build. Đo 2026-08-10: ký chứng chỉ
+       thẳng vào `target/release/hubd` chỉ sống được tới lệnh cargo kế tiếp —
+       `cargo test --release` và `cargo clippy --all-targets` LINK LẠI binary rồi
+       ký đè ad-hoc, im lặng, và chỉ lộ ở lần khởi động máy sau. Bản cài nằm
+       ngoài tầm với của cargo; đổi nó phải cố ý chạy `deploy/install.sh`. -->
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/hanguyen/Documents/projects/AI/hub/rust/target/release/hubd</string>
+    <string>/Users/hanguyen/Library/Application Support/hub/bin/hubd</string>
   </array>
 
   <!-- Thư mục làm việc phải nằm NGOÀI ~/Documents. Đo 2026-08-10: để nó ở
@@ -83,9 +89,14 @@
     ở đúng bước dựng stdio, và đó là `EX_CONFIG` (78). `~/Library/Logs` không bị
     bảo vệ, nên log ra đó.
 
-    Nếu vẫn 78 sau khi đổi: cấp Full Disk Access cho chính binary
-    (System Settings → Privacy & Security → Full Disk Access → thêm
-    …/hub/rust/target/release/hubd), vì WorkingDirectory vẫn nằm trong Documents.
+    Đo lại 2026-08-10 (sau khi ký chứng chỉ): bản launchd ĐỌC ĐƯỢC `~/Documents`
+    — nó nạp `hub.env` và khoá pid trong đó, có dòng `hub_env_loaded` làm chứng.
+    Nên phần "TCC chặn Documents" ở trên chỉ đúng cho `StandardOutPath`, thứ
+    launchd tự mở TRƯỚC khi chạy chương trình, chứ không đúng cho hubd.
+
+    Nếu một ngày nó đọc không nổi: cấp Full Disk Access cho
+    ~/Library/Application Support/hub/bin/hubd. Nay việc đó chỉ phải làm MỘT
+    lần, vì bản cài mang chữ ký cố định — trước đây mỗi lần build là mất quyền.
   -->
   <key>StandardOutPath</key>
   <string>/Users/hanguyen/Library/Logs/hubd.out</string>

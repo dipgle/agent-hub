@@ -2971,6 +2971,28 @@
       row('tự chạy khi bật máy', 'chưa hỏi được launchd', 'warn');
     }
 
+    // Hai cách hub chết lặng mà mọi màn khác vẫn xanh (đo 2026-08-10):
+    // chữ ký rơi về ad-hoc ⇒ lần bật máy sau macOS không nhận ra chương trình;
+    // bản cài cũ hơn bản build ⇒ daemon đang chạy mã của hôm qua.
+    if (auto.signature === 'adhoc') {
+      row(
+        'chữ ký bản cài',
+        'ad-hoc — bật máy lại là mất quyền',
+        'bad',
+        'deploy/install.sh'
+      );
+    } else if (auto.signature === 'cert') {
+      row('chữ ký bản cài', 'cố định (chứng chỉ riêng)', 'ok');
+    }
+    if (auto.stale === true) {
+      row(
+        'bản đang chạy',
+        'CŨ hơn bản vừa build',
+        'bad',
+        'deploy/install.sh'
+      );
+    }
+
     (rt.accounts || []).forEach((a) => {
       const v = `${a.alive}/${a.sessions} phiên đang sống`;
       row(

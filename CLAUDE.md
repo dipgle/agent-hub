@@ -135,22 +135,52 @@ or drive a session from a phone?** If not, it does not belong here.
     rather than showing it — so a reply must read the screen back and say WHERE
     the text landed. `osascript` returning 0 proves only that bytes reached the
     tab.
-    **Autostart is not durable across rebuilds.** TCC pins its grants to the
-    binary's code signature (`csreq` = a `cdhash` pin), and `cargo` ad-hoc-signs
-    with an identifier derived from the build UUID — so every `cargo build`
-    makes `hubd` a *different program* to macOS, and the launchd copy silently
-    loses both Documents access and Automation. The failure mode is the worst
-    kind: `getcwd()`/`open()` block forever waiting on a dialog no background
-    process can show — no log, no exit code, just a pid sitting there. `hubd`
-    now prints `hubd_boot` to stderr as its first instruction so "never entered
-    main" is distinguishable from "stuck on permission". Durable fix (not built
-    yet): sign the binary with a stable self-signed certificate.
+    **Autostart survives rebuilds now — and here is the whole mechanism, because
+    two of the three obvious ways to do it are wrong** (measured 2026-08-10).
+    TCC pins a grant to a binary's *designated requirement*. `cargo` ad-hoc-signs
+    everything it links, and an ad-hoc DR is `cdhash H"…"` — a hash of the bytes,
+    so every build is a different program to macOS. Signing with a certificate
+    changes the DR to `identifier "com.dipgle.hubd" and certificate root = H"…"`,
+    which is an *identity*: proven by two builds with different bytes
+    (`6e9f7db7…` → `bb381cfe…`) carrying the same DR. The cert is self-signed,
+    lives in the login keychain, and is deliberately **not** trusted — `codesign`
+    signs happily with an untrusted identity and TCC matches on the requirement,
+    so nothing here needs an admin password.
+    - **Signing `target/release/hubd` in place does not hold.** The next
+      `cargo test --release` or `cargo clippy --all-targets` relinks and stamps
+      its own ad-hoc signature over it, silently. Caught only because `hubd`
+      prints `hubd_signature` at boot and it read `adhoc` twenty minutes after
+      being signed `cert`. So launchd runs an **installed copy** at
+      `~/Library/Application Support/hub/bin/hubd`, out of cargo's reach; put it
+      there with `deploy/install.sh`, never by hand.
+    - **That split introduces its own silent failure** — build, test green,
+      deploy the page, and the daemon is still running yesterday's code because
+      nobody ran `install.sh`. The health panel answers it, by comparing the
+      newest `.rs` under `rust/src` against the installed binary's mtime.
+      **Not** by comparing the built artifact: `cargo test --release` produces a
+      *different binary* from `cargo build --release` (`2f624e8b…` vs
+      `bbd8ba58…`, and the next build flips it back), so any check reading
+      `target/` cries wolf after every test run, and a warning that cries wolf
+      is a warning nobody reads.
+    `hubd` prints `hubd_boot` before touching anything, then `hubd_signature`
+    (`cert` · `adhoc` · `unreadable`), so "never entered main", "will lose its
+    grants at the next build" and "cannot even read itself" are three
+    distinguishable lines instead of one pid sitting there.
+    **What was NOT true, though the last two sessions believed it:** that TCC
+    blocks the launchd copy from `~/Documents`. It does not — the launchd copy
+    loads `hub.env` and the pid lock from there, with `hub_env_loaded` as
+    evidence. The `EX_CONFIG` (78) hang was `StandardOutPath`, which **launchd
+    itself** opens before the program runs; moving the logs to `~/Library/Logs`
+    fixed that and nothing else was ever blocked. A binary running by hand from
+    a terminal borrows that terminal's grants and honestly reports `adhoc`; only
+    the launchd copy needs an identity of its own.
 
 ## When you change something
 
-- Changed the snapshot shape or a chat verb? Rebuild **release** and restart
-  `hubd` in the same pass: the running binary is the consumer, and a stale one
-  silently overwrites the new shape (twice on 2026-08-07).
+- Changed the snapshot shape or a chat verb? `deploy/install.sh` in the same
+  pass — it builds, signs and restarts the launchd job. The running binary is
+  the consumer, and a stale one silently overwrites the new shape (twice on
+  2026-08-07). `cargo build` alone updates `target/`, which nothing runs.
 - A verb that parses must have a handler. A verb with no handler is worse than
   an unknown one: the room accepts it, nothing happens, nothing says so.
 - Deploying the page: `node fe-deploy.mjs <version> "<notes>"`. Bundle versions
@@ -179,6 +209,9 @@ or drive a session from a phone?** If not, it does not belong here.
 ```
 hub                     wrapper script → rust/target/release/hub
 hub.config.json         config (no secrets — only env var NAMES)
+deploy/install.sh       build → install a SIGNED hubd where launchd runs it
+deploy/sign.sh          re-sign one binary with the stable identity
+deploy/make-signing-cert.sh  create that identity — ONCE, ever
 rust/src/main.rs        CLI: doctor init once ingest status sessions
                         tfl5-say tfl5-tail portal-push
 rust/src/bin/hubd.rs    daemon loop (pid lock, exponential backoff, local alarm)
@@ -198,5 +231,6 @@ fe-*.mjs                Playwright over the DEPLOYED bundle at 390×844:
                         -newsession (UC-S06), -config (form → /set → disk), -denied, -phone
 console-acl.mjs         grant/revoke app access through the tfl5 console UI
 hub.env(.example)       secrets for launchd runs — chmod 600, gitignored
-deploy/*.plist          launchd unit · legacy-node/ archived prototype
+deploy/*.plist          launchd unit (runs the INSTALLED hubd, not target/)
+legacy-node/            archived prototype
 ```

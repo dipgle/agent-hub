@@ -71,6 +71,56 @@ pub fn known_projects(cfg: &Config) -> Vec<String> {
 /// Cursor holding the Claude session the phone is currently reading.
 pub const FOCUS_SESSION_KEY: &str = "focus:session";
 
+/// Sổ ghi trạng thái từng phiên ở lượt trước, để thấy được CHUYỂN trạng thái.
+pub const WATCH_KEY: &str = "watch:sessions";
+
+/// Nói ra những phiên vừa xong việc / vừa tắt hẳn — một lần cho mỗi lần chuyển.
+///
+/// Hà 2026-08-10: *"có bắt được trường hợp đang chạy và dừng lại hoàn toàn
+/// không? nếu có thì thể hiện được trên ui và gửi vào tele"*.
+///
+/// Hai đường loa, cùng MỘT câu chữ (`Change::say`): phòng chat (nên nó nằm luôn
+/// trên tab Trao đổi của điện thoại, và có dấu vết đọc lại được) và Telegram
+/// (nên nó tới được lúc không ai mở trang). Khác câu ở hai nơi là sau này không
+/// ai đối chiếu được.
+///
+/// Không lời gọi `claude` nào ⟹ **không tốn hạn mức** (luật §8). Lỗi ở một
+/// đường không được làm câm đường kia, và cả hai đều log khi hỏng — một cái loa
+/// im lặng thì tệ hơn không có loa.
+pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSession]) {
+    let prev: BTreeMap<String, String> = db
+        .cursor_or_log(WATCH_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    let (changes, next) = crate::watch::changes(&prev, live);
+
+    match serde_json::to_string(&next) {
+        // Ghi sổ TRƯỚC khi nói: nói xong mới ghi mà sập giữa chừng thì lượt sau
+        // nói lại y hệt. Thà lỡ một lời báo còn hơn một cái loa lặp.
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(WATCH_KEY, &v) {
+                logging::error("watch_state_save_failed", json!({ "err": e.to_string() }));
+                return;
+            }
+        }
+        Err(e) => {
+            logging::error("watch_state_encode_failed", json!({ "err": e.to_string() }));
+            return;
+        }
+    }
+
+    for c in changes {
+        let text = c.say();
+        logging::info("session_change", json!({ "text": text }));
+        if let Err(e) = tfl5::send(&cfg.adapters.tfl5, "", None, &text) {
+            logging::error("session_change_room_failed", json!({ "err": logging::err_chain(&e) }));
+        }
+        if let Err(e) = crate::confirm::tell(cfg, &text) {
+            logging::error("session_change_telegram_failed", json!({ "err": e }));
+        }
+    }
+}
+
 /// Cursor holding the most recent handover, so the page can show it.
 pub const HANDOVER_KEY: &str = "handover:last";
 

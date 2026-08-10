@@ -35,3 +35,4 @@ pub mod portal;
 pub mod redaction;
 pub mod runtime;
 pub mod sessions;
+pub mod watch;

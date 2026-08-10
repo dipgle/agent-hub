@@ -1920,10 +1920,18 @@
       // Chế độ quyền: phiên chạy `auto`/`dontAsk` là phiên KHÔNG hỏi ai —
       // đứng từ xa mà không biết điều đó thì nguy hiểm hơn là không thấy gì.
       const mode = { auto: 'tự duyệt', dontAsk: 'không hỏi', default: 'hỏi trước' }[s.permission_mode] || s.permission_mode;
-      // `status`/`state` chỉ có ở phiên nền — thiếu nghĩa là KHÔNG BIẾT, không
-      // phải "đang rảnh", nên phiên interactive không hiện gì thay vì hiện sai.
-      const work = { busy: 'đang chạy', idle: 'đang rảnh' }[s.status]
-        || ({ done: 'đã xong' })[s.state] || '';
+      // `working` trả lời cho MỌI phiên, kể cả phiên terminal.
+      //
+      // Trước đây hàng này đọc `status`/`state`, mà hai trường ấy chỉ có ở phiên
+      // nền (`sessions.rs`) — nên mọi thẻ phiên terminal mang chấm xám vĩnh
+      // viễn: nhìn danh sách không biết cái nào đang chạy, đúng câu hỏi đầu tiên
+      // người ta mở điện thoại ra để hỏi. Đường đắt là đọc màn từng phiên (kéo
+      // một vòng từ ~18 giây lên 90 giây); đường rẻ là mtime nhật ký, thứ hub đã
+      // đọc sẵn mỗi vòng — `sessions::is_working` gộp nó với số subagent và
+      // `status`.
+      const work = s.working
+        ? 'đang chạy'
+        : (s.host === 'dead' ? '' : ({ done: 'đã xong' })[s.state] || 'đang rảnh');
       // `kind` nói "interactive" cho cả cửa sổ terminal lẫn phiên do extension
       // của VS Code/Cursor chạy — nên hàng này hiện `host`, thứ phân biệt được.
       const where = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', detached: 'không gắn cửa sổ', dead: 'đã dừng' }[s.host] || s.kind;

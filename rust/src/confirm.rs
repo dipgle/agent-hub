@@ -74,6 +74,54 @@ impl Verdict {
 ///
 /// `what` là câu mô tả việc sắp làm, đã đủ cụ thể để đọc trên điện thoại mà
 /// không cần mở gì thêm ("Dừng phiên sdvi-a1b2 (acc2)?").
+/// Gửi một tin THƯỜNG sang Telegram — không nút, không chờ, không hỏi gì.
+///
+/// Tách ra khỏi `ask` vì hai việc khác hẳn nhau: `ask` **đứng chờ tới 90 giây**
+/// một cú bấm và trả về phán quyết, còn cái này chỉ báo cho người đang không
+/// nhìn màn hình. Gọi `ask` để báo tin thì mỗi lời báo sẽ ghim vòng chạy của
+/// daemon lại một phút rưỡi.
+///
+/// Trả `Err` chứ không nuốt: một cái loa hỏng mà im lặng thì tệ hơn không có
+/// loa — chỗ gọi phải log.
+pub fn tell(cfg: &Config, text: &str) -> Result<(), String> {
+    let (token, chat_id) = match (
+        crate::config::secret_from_env(&cfg.confirm.bot_token_env),
+        crate::config::secret_from_env(&cfg.confirm.chat_id_env),
+    ) {
+        (Some(t), Some(c)) => (t, c),
+        (t, c) => {
+            // Chỉ TÊN khoá, không bao giờ giá trị (luật §4).
+            let missing: Vec<&str> = [
+                (t.is_none()).then_some(cfg.confirm.bot_token_env.as_str()),
+                (c.is_none()).then_some(cfg.confirm.chat_id_env.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            return Err(format!("thiếu {} trong hub.env", missing.join(" + ")));
+        }
+    };
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let r = client
+        .post(format!("https://api.telegram.org/bot{token}/sendMessage"))
+        .json(&json!({ "chat_id": chat_id, "text": text }))
+        .send()
+        .map_err(|e| e.to_string())?;
+    let v: Value = r.json().unwrap_or_else(|_| json!({}));
+    if v.get("ok").and_then(Value::as_bool) == Some(true) {
+        Ok(())
+    } else {
+        Err(v
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("Telegram từ chối sendMessage")
+            .to_string())
+    }
+}
+
 pub fn ask(cfg: &Config, what: &str) -> Verdict {
     if !cfg.confirm.enabled {
         // Tắt hẳn là một lựa chọn có chủ ý của chủ máy, không phải lỗi. Vẫn ghi

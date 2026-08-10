@@ -84,6 +84,12 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
     // Ai mở phiên là thứ chỉ cuốn sổ của hub biết — dán nhãn trước khi gói.
     crate::pipeline::mark_started_by_hub(db, &mut live);
 
+    // Bắt "vừa xong" / "vừa tắt" NGAY TẠI ĐÂY, không dựng thêm một ảnh chụp
+    // nữa: mỗi ảnh chụp là một lần gọi `claude agents` cho MỖI tài khoản, và
+    // vòng chạy này đã nặng sẵn. Việc so hai lượt thì rẻ — một dòng cursor và
+    // một phép so — nên nó bám theo dữ liệu thay vì bắt dữ liệu chạy theo nó.
+    crate::pipeline::announce_changes(db, cfg, &live.sessions);
+
     // Only the session being read carries its full stream. Pushing every
     // transcript every cycle would be megabytes for the one screen anybody is
     // looking at; `/session <id>` says which one that is.

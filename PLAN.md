@@ -21,7 +21,9 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S09 | Ảnh chụp cũ thì nói là cũ | `fe-board-uc` |
 | S10 | Dừng / đóng sổ **ngay từ danh sách**, không phải mở phiên ra | `fe-sessions-uc` 25/25 |
 | S11 | Lệnh dừng phải **xác nhận qua Telegram** mới chạy | chạy thật 2026-08-10 (dưới) |
-| S02b | Phiên **đang chạy subagent** thì màn nói ra | `fe-subagent-uc` 6/6 trên subagent THẬT (3 đường thông báo, đo trên 384 tệp) |
+| S02b | Phiên **đang chạy subagent** thì màn nói ra | `fe-subagent-uc` 12/12 trên HAI phiên, hai con số (3 và 4) |
+| S12 | Danh sách biết **phiên nào đang chạy** — mọi phiên, không chỉ phiên nền | `fe-sessions-uc`, đối chiếu hai chiều với máy |
+| S13 | Phiên **vừa xong** / **vừa tắt hẳn** thì báo vào phòng chat + Telegram | chạy thật 2026-08-10: `⏹ phiên eab9932e đã tắt hẳn`, 0 lỗi gửi |
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
 

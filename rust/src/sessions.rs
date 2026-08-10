@@ -42,7 +42,7 @@ const TAIL_BYTES: u64 = 256 * 1024;
 const PREVIEW_CHARS: usize = 240;
 const LIST_TIMEOUT: Duration = Duration::from_secs(30);
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct LiveSession {
     /// Which account owns it — the label from config, not a credential.
     pub account: String,
@@ -84,6 +84,19 @@ pub struct LiveSession {
     /// the transcript records neither a cost nor a completion marker.
     pub status: Option<String>,
     pub state: Option<String>,
+    /// Phiên có đang LÀM VIỆC ngay lúc này không — trả lời được cho MỌI phiên.
+    ///
+    /// `status`/`state` ở trên chỉ có ở phiên nền, nên trên danh sách mọi thẻ
+    /// phiên terminal đều mang chấm xám vĩnh viễn: nhìn vào không biết cái nào
+    /// đang chạy, mà đó là câu hỏi đầu tiên người ta mở điện thoại ra để hỏi.
+    ///
+    /// Đường đắt là đọc màn từng phiên — đo 2026-08-10, làm một vòng dài từ
+    /// ~18 giây lên **90 giây** (`pipeline.rs`), tức lệnh từ điện thoại nằm chờ
+    /// hơn một phút. Đường rẻ thì hub đã đọc sẵn mỗi vòng: **mtime của nhật
+    /// ký**. `claude` ghi vào nhật ký suốt lượt chạy, nên tệp còn lớn lên nghĩa
+    /// là còn làm; đứng im quá `IDLE_AFTER_SEC` nghĩa là lượt đã xong. Không
+    /// thêm một lời gọi AppleScript nào.
+    pub working: bool,
     /// The permission mode the session is running under ("auto", "dontAsk",
     /// "default"…).
     ///
@@ -604,6 +617,53 @@ fn stopped_background_calls(tail: &str) -> HashSet<String> {
     out
 }
 
+/// Nhật ký đứng im bao nhiêu giây, tính từ mốc hoạt động cuối.
+///
+/// `None` khi không đọc được mốc — và `None` KHÔNG được đọc thành 0 (đang chạy)
+/// hay thành vô cùng (đã xong); chỗ gọi phải tự quyết định, xem `is_working`.
+pub fn idle_seconds(last_activity: Option<&str>) -> Option<i64> {
+    let t = chrono::DateTime::parse_from_rfc3339(last_activity?).ok()?;
+    Some(
+        (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
+            .num_seconds()
+            .max(0),
+    )
+}
+
+/// Nhật ký đứng im bao lâu thì coi là lượt đã xong.
+///
+/// **180 giây, và con số này là một lời hứa về ĐỘ ĐÚNG, không phải về độ nhanh.**
+/// Giữa hai lần ghi nhật ký có thể là một lệnh đang chạy: `cargo test` của chính
+/// dự án này mất hơn hai phút. Ngưỡng ngắn (thử 60 giây đầu tiên) sẽ báo "phiên
+/// đã chạy xong" **trong khi nó đang chạy** — một câu sai, không phải một câu
+/// đến muộn. Và cái loa này bắn sang Telegram, nên một câu sai không chỉ là một
+/// dòng xấu: nó gọi người ta ra khỏi việc đang làm để xem một thứ chưa xảy ra.
+///
+/// Cái giá: tin "vừa xong" tới chậm tối đa 3 phút. Chấp nhận — muộn mà đúng còn
+/// hơn sớm mà sai. Phiên nào đang giao việc cho subagent thì không cần đợi
+/// ngưỡng này: `pending_subagents > 0` đã trả lời chắc chắn hơn (`is_working`).
+pub const IDLE_AFTER_SEC: i64 = 180;
+
+/// Phiên có đang làm việc không — ba nguồn, không nguồn nào cần đọc màn.
+///
+/// Thứ tự có ý nghĩa: `pending_subagents > 0` là bằng chứng CHẮC CHẮN nhất và
+/// cũng là ca mà mọi cách khác đều đọc sai — phiên giao hết việc ra ngoài thì
+/// nhật ký của chính nó đứng im, nhìn từ xa y như đã xong.
+pub fn is_working(status: Option<&str>, pending_subagents: usize, idle_sec: Option<i64>) -> bool {
+    if pending_subagents > 0 {
+        return true;
+    }
+    match status {
+        // Phiên nền: `claude agents` tự khai, tin thẳng.
+        Some("busy") => return true,
+        Some("idle") | Some("done") => return false,
+        _ => {}
+    }
+    // Còn lại (phiên terminal): hỏi nhật ký. Không đọc được mốc nào thì KHÔNG
+    // đoán là đang chạy — thà im còn hơn báo động giả.
+    idle_sec.is_some_and(|s| s < IDLE_AFTER_SEC)
+}
+
 /// Chữ "đang chạy" đòi một tiến trình còn sống.
 ///
 /// Đo thật 2026-08-10, ngay sau khi bộ đếm biết đọc agent nền: phiên "Tự chạy
@@ -924,6 +984,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 started_at_ms: s.get("startedAt").and_then(|v| v.as_i64()).unwrap_or(0),
                 status: s.get("status").and_then(|v| v.as_str()).map(str::to_string),
                 state: s.get("state").and_then(|v| v.as_str()).map(str::to_string),
+                // Tính ở dưới, sau khi đọc xong mốc hoạt động của nhật ký.
+                working: false,
                 last_activity: None,
                 last_role: None,
                 last_text: None,
@@ -1009,6 +1071,15 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // "subagent ma chạy mãi trên màn" mà bộ đếm này sinh ra để
                     // tránh; tiến trình còn sống là điều kiện cần của chữ "đang".
                     row.pending_subagents = pending_for_display(&row.host, parsed.pending_subagents);
+                    // "Đang làm việc" tính SAU khi đã có cả mốc hoạt động lẫn
+                    // số subagent — hai thứ này mới nói được, `status` thì im
+                    // với mọi phiên terminal.
+                    row.working = row.host != "dead"
+                        && is_working(
+                            row.status.as_deref(),
+                            row.pending_subagents,
+                            idle_seconds(row.last_activity.as_deref()),
+                        );
                     row.context_tokens = parsed.context_tokens;
                     row.model = parsed.model.clone();
                     row.last_role = parsed.last_role;

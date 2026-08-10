@@ -43,7 +43,7 @@ const readTruth = () =>
 /// Dấu vân tay của tập phiên — đổi khi có phiên mở/dừng/đổi nơi chạy.
 const fingerprint = (t) =>
   t.sessions
-    .map((s) => `${s.session_id}:${s.host}`)
+    .map((s) => `${s.session_id}:${s.host}:${s.working}`)
     .sort()
     .join("|");
 
@@ -110,6 +110,36 @@ try {
     if (!settled) await page.waitForTimeout(6000);
   }
   check("số phiên trên màn khớp với máy", cards === liveCount, `màn ${cards} / máy ${liveCount}`);
+
+  // ——— CHẤM MÀU phải nói đúng phiên nào đang chạy ———
+  //
+  // Trước v134 chấm màu đọc `status`/`state`, mà hai trường ấy chỉ có ở phiên
+  // nền — nên mọi thẻ phiên terminal mang chấm xám VĨNH VIỄN và không phép đo
+  // nào bắt được, vì không ai đối chiếu nó với máy. Nay `working` trả lời cho
+  // mọi phiên (mtime nhật ký + số subagent + `status`), và phép đo đi HAI CHIỀU
+  // trên dữ liệu thật: đang chạy phải xanh, không chạy thì không được xanh.
+  const dots = await page.evaluate(() =>
+    Object.fromEntries(
+      [...document.querySelectorAll("#sessList .sess")].map((c) => [
+        c.dataset.session,
+        c.dataset.work || "",
+      ])
+    )
+  );
+  const shouldRun = truth.sessions.filter((s) => s.working);
+  const shouldNot = truth.sessions.filter((s) => !s.working && s.host !== "dead");
+  const missRun = shouldRun.filter((s) => dots[s.session_id] !== "đang chạy");
+  const falseRun = shouldNot.filter((s) => dots[s.session_id] === "đang chạy");
+  check(
+    `phiên ĐANG CHẠY thì thẻ nói vậy (${shouldRun.length} phiên)`,
+    shouldRun.length === 0 || missRun.length === 0,
+    missRun.map((s) => `${s.name}=${dots[s.session_id] || "(trống)"}`).join(", ")
+  );
+  check(
+    `phiên KHÔNG chạy thì thẻ không nói đang chạy (${shouldNot.length} phiên)`,
+    falseRun.length === 0,
+    falseRun.map((s) => s.name).join(", ")
+  );
 
   // ——— NƠI phiên sống, không chỉ SỐ phiên ———
   // Hỏi thật 2026-08-09: "máy chỉ mở 3 terminal sao màn hiện 13 phiên?" Cả hai

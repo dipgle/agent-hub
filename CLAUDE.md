@@ -148,10 +148,25 @@ or drive a session from a phone?** If not, it does not belong here.
     a process, so `ps` will never find one. A dead session's un-notified agents
     are NOT running — the process took them with it — so liveness gates the
     count (`sessions::pending_for_display`), or the screen grows ghosts.
-11. **The phone page is the only UI.** There is no local console any more. If you
+11. **hub speaks only on a CHANGE, never on a state.** `watch.rs` compares this
+    cycle's snapshot with the previous one and announces only transitions — a
+    session that finished its turn, a session that ended. Announcing a *state*
+    from a loop that ticks every ~10s is a phone that buzzes forever, and a phone
+    that buzzes forever gets muted, taking the messages that mattered with it.
+    Three rules hold the line: say it once; say **nothing** on the first round
+    after a restart (an empty book means hub just woke up, not that everything
+    just changed); and treat *leaving the list* as the main "ended" signal,
+    because `claude agents` drops a stopped session within seconds and usually
+    never shows it as `dead`. `IDLE_AFTER_SEC` (180s) is a promise about TRUTH,
+    not speed: this repo's own `cargo test` runs over two minutes, so a shorter
+    window announces "finished" while the session is still working — a wrong
+    sentence, not a late one, and it goes to Telegram. Both mouths (the room and
+    Telegram) say the SAME sentence (`Change::say`), or nobody can reconcile them
+    later. Neither call spends quota.
+12. **The phone page is the only UI.** There is no local console any more. If you
     add a surface, it must go through the same room commands — one path, one set
     of books.
-12. **macOS facts that cost a night to learn** (2026-08-10). Typing into a live
+13. **macOS facts that cost a night to learn** (2026-08-10). Typing into a live
     session goes through Terminal's own `do script`, NOT `System Events keystroke`
     — the latter is refused outright (*"osascript is not allowed to send
     keystrokes (1002)"*) and no amount of granting Accessibility fixes it,
@@ -255,6 +270,7 @@ rust/src/bin/hubd.rs    daemon loop (pid lock, exponential backoff, local alarm)
 rust/src/{config,db}.rs config + validation + secret_from_env() · runs/cursors/spend
 rust/src/pipeline.rs    one cycle: read the room, run the orders, answer
 rust/src/sessions.rs    list · stream · fork (/ask, /handover) · background (/new, /tell, /stop)
+rust/src/watch.rs       "vừa xong" / "vừa tắt" — so hai lượt ảnh chụp, nói MỘT lần
 rust/src/portal.rs      read-only snapshot pushed to tfl5 (docs, not files — see its header)
 rust/src/redaction.rs   leak scan, used by session previews
 rust/src/live.rs        held-open /ws/chat socket: wakes the cycle when an order lands

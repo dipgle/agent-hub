@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use hub::sessions::LiveSession;
-use hub::watch::{changes, Change, DEAD, IDLE, MIN_RUN_SEC, WORKING};
+use hub::watch::{changes, Change, Idle, DEAD, IDLE, MIN_RUN_SEC, WORKING};
 
 /// Mốc thời gian giả, để test không phụ thuộc đồng hồ thật.
 const NOW: i64 = 1_800_000_000;
@@ -59,7 +59,7 @@ fn finishing_is_announced_once_not_every_cycle() {
     let (events, next) = changes(&prev, &now, NOW);
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], Change::Finished { id, .. } if id == "a"));
-    assert!(events[0].say().contains("chạy xong"));
+    assert!(events[0].say(&Idle::Prompt, None).contains("im sau"));
 
     // Vòng sau, cùng trạng thái: KHÔNG nói nữa. Đây là điều kiện sống còn —
     // vòng lặp chạy mỗi ~10 giây.
@@ -87,7 +87,7 @@ fn a_session_that_leaves_the_list_counts_as_ended() {
         }
         other => panic!("phải là Ended: {other:?}"),
     }
-    assert!(events[0].say().contains("TẮT HẲN"));
+    assert!(events[0].say(&Idle::Unknown, None).contains("TẮT HẲN"));
     assert!(!next.contains_key("a"), "đã tắt thì rời sổ, không nói lại lần nữa");
 
     let (again, _) = changes(&next, &now, NOW);
@@ -170,5 +170,33 @@ fn a_burst_of_short_turns_stays_quiet() {
     let long: BTreeMap<String, String> = [working_long("a")].into_iter().collect();
     let (events, _) = changes(&long, &now, NOW);
     assert_eq!(events.len(), 1);
-    assert!(events[0].say().contains("phút"), "{}", events[0].say());
+    assert!(events[0].say(&Idle::Prompt, None).contains("phút"), "{}", events[0].say(&Idle::Prompt, None));
+}
+
+/// Tin phải NÓI RA THỨ NHÌN THẤY, và mỗi tin phải khác nhau.
+///
+/// Hà 2026-08-10, đọc Telegram: *"rõ ràng là lỗi mà sao tele tôi nhận được lại
+/// là phiên đang đứng ở dấu nhắc, chờ lượt sau"* và *"toàn thông báo giống
+/// nhau"*. Vế đầu nặng hơn: câu ấy là một khẳng định hub không hề biết — thứ nó
+/// biết chỉ là "nhật ký thôi lớn lên", mà nhật ký cũng thôi lớn lên khi phiên
+/// KẸT ở hộp thoại. Vế sau: tin nào cũng một câu thì người ta thôi đọc.
+#[test]
+fn the_message_reports_what_was_seen_and_never_repeats_itself() {
+    let e = Change::Finished { id: "a".into(), name: "dwork".into(), ran_sec: 300 };
+
+    // Màn có hộp chọn ⟹ KHÔNG được nói "xong", phải nói là đang kẹt hỏi.
+    let asking = e.say(&Idle::Asking(3), None);
+    assert!(asking.contains("DỪNG LẠI HỎI"), "{asking}");
+    assert!(asking.contains('3'), "phải nói mấy lựa chọn: {asking}");
+    assert!(!asking.contains("dấu nhắc"), "không được khẳng định đang rảnh: {asking}");
+
+    // Không đọc được màn ⟹ nói thẳng là không đọc được, đừng đoán.
+    let blind = e.say(&Idle::Unknown, None);
+    assert!(blind.contains("không đọc được màn"), "{blind}");
+
+    // Câu cuối của phiên đi kèm ⟹ hai tin khác nhau đọc ra hai chuyện khác nhau.
+    let a = e.say(&Idle::Prompt, Some("[dwork] đã dựng phiếu chuyển thiết kế"));
+    let b = e.say(&Idle::Prompt, Some("[mailler] soak xong, 0 đỏ"));
+    assert!(a.contains("phiếu chuyển"), "{a}");
+    assert_ne!(a, b, "hai phiên khác nhau mà tin giống hệt nhau");
 }

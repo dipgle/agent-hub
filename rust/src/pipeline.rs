@@ -110,7 +110,54 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
     }
 
     for c in changes {
-        let text = c.say();
+        // Tra lại phiên để có `tty` (đọc màn), câu cuối nó nói, và ai mở nó.
+        let id = match &c {
+            crate::watch::Change::Finished { id, .. } => id.clone(),
+            crate::watch::Change::Ended { id, .. } => id.clone(),
+        };
+        let row = live.iter().find(|s| s.session_id == id);
+
+        // NHÌN màn đúng một lần, cho đúng phiên vừa im. Chuyện này hiếm (vài
+        // lần một giờ) nên nó rẻ; đọc màn cho mọi phiên mỗi vòng mới là thứ
+        // từng kéo một vòng lên 90 giây.
+        let idle = match (&c, row) {
+            (crate::watch::Change::Finished { .. }, Some(s)) => {
+                match crate::keys::look(&s.tty, 8) {
+                    crate::keys::Look::Saw { choices, .. } if !choices.is_empty() => {
+                        crate::watch::Idle::Asking(choices.len())
+                    }
+                    crate::keys::Look::Saw { .. } => crate::watch::Idle::Prompt,
+                    crate::keys::Look::Withheld { choices, .. } if choices > 0 => {
+                        crate::watch::Idle::Asking(choices)
+                    }
+                    crate::keys::Look::Withheld { .. } => crate::watch::Idle::Prompt,
+                    crate::keys::Look::Blind { .. } => crate::watch::Idle::Unknown,
+                }
+            }
+            _ => crate::watch::Idle::Unknown,
+        };
+
+        // IM cho phiên chủ máy đang ngồi gõ, TRỪ khi nó đang kẹt hỏi.
+        //
+        // Hà 2026-08-10: một phiên terminal anh đang nhìn thẳng vào bắn ba tin
+        // trong mười sáu phút. Cái loa này có giá trị ở phiên KHÔNG ai nhìn —
+        // phiên hub tự mở từ điện thoại — hoặc khi phiên KẸT, vì kẹt thì dù
+        // đang ngồi trước máy cũng đáng được gọi. Còn "một lượt vừa xong" trên
+        // phiên anh tự tay gõ thì anh thấy trước hub.
+        let stuck = matches!(idle, crate::watch::Idle::Asking(_));
+        let hub_opened = row.is_some_and(|s| s.started_by_hub);
+        if matches!(c, crate::watch::Change::Finished { .. }) && !stuck && !hub_opened {
+            logging::info(
+                "session_change_muted",
+                json!({ "session": id, "why": "phiên terminal của chủ máy, không kẹt" }),
+            );
+            continue;
+        }
+
+        // Câu cuối phiên nói ra — thứ làm mỗi tin KHÁC nhau. Nó đã qua cổng
+        // quét rò rỉ ở `sessions::snapshot` trước khi vào ảnh chụp.
+        let tail = row.and_then(|s| s.last_text.as_deref());
+        let text = c.say(&idle, tail);
         logging::info("session_change", json!({ "text": text }));
         if let Err(e) = tfl5::send(&cfg.adapters.tfl5, "", None, &text) {
             logging::error("session_change_room_failed", json!({ "err": logging::err_chain(&e) }));

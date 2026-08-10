@@ -57,15 +57,51 @@ pub enum Change {
     Ended { id: String, name: String, was_working: bool },
 }
 
+/// Phiên đang thật sự ở trạng thái nào lúc nó im — NHÌN, không đoán.
+///
+/// Hà 2026-08-10, đọc tin trên Telegram: *"rõ ràng là lỗi mà sao tele tôi nhận
+/// được lại là phiên đang đứng ở dấu nhắc, chờ lượt sau"* — và *"toàn thông báo
+/// giống nhau"*. Cả hai đều đúng, và vế đầu nặng hơn: câu ấy là một KHẲNG ĐỊNH
+/// hub không hề biết. Thứ hub biết là "nhật ký thôi lớn lên"; mà nhật ký cũng
+/// thôi lớn lên khi phiên kẹt ở hộp thoại, khi lỗi, khi hết hạn mức.
+///
+/// Nên lúc CHUYỂN trạng thái — chuyện hiếm, vài lần một giờ — hub bỏ ra đúng
+/// một lần đọc màn cho riêng phiên ấy. Đọc màn cho MỌI phiên MỖI vòng mới là
+/// thứ từng kéo một vòng lên 90 giây; một lần cho một phiên lúc nó vừa im thì
+/// gần như không tốn gì, và nó đổi một câu đoán thành một câu nhìn thấy.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Idle {
+    /// Màn đang có hộp chọn: phiên KHÔNG rảnh, nó đang chờ người trả lời.
+    Asking(usize),
+    /// Đứng ở dấu nhắc thật.
+    Prompt,
+    /// Không đọc được màn — nói đúng chừng ấy, đừng đoán hộ.
+    Unknown,
+}
+
 impl Change {
     /// Câu nói cho phòng chat và cho Telegram — cùng một câu, vì hai nơi ấy
     /// phải kể cùng một chuyện. Khác câu là sau này không ai đối chiếu được.
-    pub fn say(&self) -> String {
+    ///
+    /// `idle` là thứ NHÌN THẤY trên màn lúc phiên im; `tail` là câu cuối phiên
+    /// nói ra. Không có `tail` thì mọi tin giống hệt nhau và người ta thôi đọc
+    /// — đó là lời phàn nàn thứ hai của Hà, và nó đúng.
+    pub fn say(&self, idle: &Idle, tail: Option<&str>) -> String {
         match self {
-            Change::Finished { name, ran_sec, .. } => format!(
-                "✅ {name} vừa chạy xong sau {} phút — phiên đang đứng ở dấu nhắc, chờ lượt sau.",
-                ran_sec / 60
-            ),
+            Change::Finished { name, ran_sec, .. } => {
+                let what = match idle {
+                    Idle::Asking(n) => format!("⚠ {name} DỪNG LẠI HỎI ({n} lựa chọn trên màn)"),
+                    Idle::Prompt => format!("✅ {name} im sau {} phút chạy", ran_sec / 60),
+                    Idle::Unknown => format!(
+                        "❓ {name} im sau {} phút chạy — tôi không đọc được màn của nó",
+                        ran_sec / 60
+                    ),
+                };
+                match tail {
+                    Some(t) if !t.trim().is_empty() => format!("{what}\n\n«{}»", t.trim()),
+                    _ => what,
+                }
+            }
             Change::Ended { name, was_working: true, .. } => {
                 format!("⏹ {name} đã TẮT HẲN khi đang chạy dở — nếu không phải bạn dừng thì nên xem lại.")
             }

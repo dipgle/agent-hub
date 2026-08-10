@@ -1,5 +1,40 @@
 # active context — hub
 
+## 🏹 2026-08-10 (tối) — vá chốt phím mũi tên: mù không được đọc thành "không có"
+
+Hà: *"vá chốt phím mũi tên đi"*.
+
+**Bệnh:** `keys::screen_of` gộp **ba** kết cục vào `None` — phiên không có cửa
+sổ · `osascript`/Terminal không trả lời · **màn có dấu hiệu lộ bí mật** (điều 5
+bắt giữ chữ lại) — còn `pipeline.rs` đọc `None.is_some_and(..)` = `false` thành
+*"không có hộp chọn"* rồi GỬI. Tức chốt **hỏng về phía nguy hiểm**, và nặng nhất
+ở đường thứ ba: đúng lúc màn đang hiện một mật khẩu thì nó mở toang. Mà `do
+script` luôn kèm dấu xuống dòng, nên trên hộp chọn một phím mũi tên **vừa di vừa
+CHỐT** — chính chú thích tại chốt gọi đó là thứ "không lùi lại được".
+
+**Vá:** `keys::look` trả ba trạng thái `Saw` / `Withheld` / `Blind`, và
+`keys::arrow_verdict` (thuần, kiểm được không cần Terminal) chỉ cho gửi khi
+**chứng minh được không có hộp chọn**. Điểm đáng giữ: `Withheld` vẫn quyết đúng
+— số lựa chọn là một CON SỐ đếm từ hình dạng, không mang chữ nào ra khỏi máy,
+nên chốt không bị mù chỉ vì màn đang hiện bí mật. Câu từ chối tách làm hai, vì
+hai lý do khác nhau cần hai cách xử khác nhau (bấm lại vô ích vs. gõ số thay thế).
+
+**Hai lỗi im lặng cùng họ, vá kèm:** `window_of`/`screen_text` hỏng nay có
+`logging::warn` (trước là `.ok()?` câm); và sau khi gõ, câu trả lời thôi khai
+"phiên đang đứng ở dấu nhắc" khi thực ra **không đọc lại được màn** — bản cũ rơi
+về `Landed::Idle`, cùng họ "đọc mù thành một khẳng định".
+
+**Nghiệm thu:** `cargo test` **93** (+1, RED-trước: hạ `arrow_verdict` về ngữ
+nghĩa cũ thì test đỏ đúng dòng) · clippy 0 · `install.sh`, daemon `kind: cert`.
+Đường `Saw` chạy thật trên máy: `look()` đọc **780 ký tự** từ đúng cửa sổ Terminal
+của phiên đang theo, nhận diện **0 hộp chọn**.
+
+**Nói thẳng phần chưa chạy thật:** hai nhánh từ chối (`Blind`, `Withheld`) mới
+chỉ có unit test. Dựng chúng trên máy thật đòi hoặc ép `osascript` hỏng, hoặc
+một mật khẩu nằm trên màn phiên; còn chứng minh nhánh GỬI thì phải bắn một mũi
+tên thật vào phiên của Hà — đúng hành động không lùi lại được mà chốt này sinh
+ra để chặn. Không làm.
+
 ## 🧵 2026-08-10 (chiều muộn) — UC-S02b đóng được, và con bug nó lôi ra
 
 **Việc:** trả nốt món nợ 08-09 — *"phiên đang chạy subagent thì màn phải nói ra"*

@@ -150,9 +150,17 @@ or drive a session from a phone?** If not, it does not belong here.
     because the process asking is `/usr/bin/osascript`, a system binary. `do
     script` needs only **Automation**, which hub already has. It **always
     appends a newline** and that cannot be turned off: fine for `claude`'s
-    prompt box, but it means an arrow key both MOVES and CONFIRMS, so hub
-    refuses to send arrows while a choice dialog is up and asks for the number
-    instead. And when the session is mid-run, `claude` **queues** the text
+    prompt box, but it means an arrow key both MOVES and CONFIRMS, so hub sends
+    an arrow only when it can **prove there is no choice dialog** — not merely
+    when it fails to see one. That distinction is the whole gate: `screen_of`
+    used to fold three outcomes into `None` (no window · osascript failed ·
+    **the screen looks like it holds a secret**), and the gate read `None` as
+    "no dialog" and sent, so it failed OPEN exactly when hub was blindest —
+    including the case where a password was on screen. `keys::look` now returns
+    `Saw` / `Withheld` / `Blind`, and `keys::arrow_verdict` sends only on a
+    proven-empty choice list. `Withheld` still decides correctly: the choice
+    COUNT is a number, and a number carries no text off the machine.
+    And when the session is mid-run, `claude` **queues** the text
     rather than showing it — so a reply must read the screen back and say WHERE
     the text landed. `osascript` returning 0 proves only that bytes reached the
     tab.

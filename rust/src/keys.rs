@@ -370,26 +370,114 @@ pub fn is_busy(screen: &str) -> bool {
     })
 }
 
-/// Chữ trên màn của phiên, đã gác bí mật và cắt gọn — dạng dùng được ngay.
+/// Một lần nhìn màn phiên — BA kết cục, không phải hai.
 ///
-/// `None` khi phiên không có cửa sổ, hoặc khi màn có dấu hiệu chứa bí mật:
-/// chữ này rời khỏi máy y như phần xem trước của phiên, nên nó phải đi qua
-/// đúng cái cổng ấy (điều 5 trong CLAUDE.md).
-pub fn screen_of(tty: &str, lines: usize) -> Option<(String, Vec<(usize, String)>)> {
-    let w = window_of(tty).ok().flatten()?;
-    let screen = screen_text(w).ok()?;
-    if !crate::sessions::preview_risk(&screen).is_empty() {
-        return None;
-    }
+/// Vì sao phải là ba: `screen_of` cũ gộp cả ba vào `None`, và chỗ dùng nguy
+/// hiểm nhất (`pipeline`, chốt phím mũi tên) đọc `None` thành *"không có hộp
+/// chọn"* rồi GỬI. Tức đúng lúc hub mù nhất là lúc nó dám tay nhất — mà chú
+/// thích ngay tại chốt ấy nói rõ hậu quả là "không lùi lại được".
+#[derive(Debug, Clone, PartialEq)]
+pub enum Look {
+    /// Nhìn rõ: chữ đang hiện + các lựa chọn (rỗng = không có hộp chọn).
+    Saw {
+        body: String,
+        choices: Vec<(usize, String)>,
+    },
+    /// Màn có dấu hiệu chứa bí mật ⟹ chữ bị giữ lại (điều 5 trong CLAUDE.md).
+    ///
+    /// Nhưng **vẫn biết chắc có mấy lựa chọn**: đó là một con số đếm được từ
+    /// hình dạng, không mang chữ nào ra khỏi máy. Giữ được con số ấy nghĩa là
+    /// chốt an toàn không phải mù chỉ vì màn đang hiện một mật khẩu — đúng cái
+    /// tình huống mà mù là tệ nhất.
+    Withheld { choices: usize, risk: Vec<String> },
+    /// Không nhìn được: phiên không có cửa sổ, hoặc Terminal/osascript không
+    /// trả lời. Đây KHÔNG phải "không có hộp chọn".
+    Blind { why: String },
+}
+
+/// Nhìn màn phiên, nói thật là nhìn được tới đâu.
+pub fn look(tty: &str, lines: usize) -> Look {
+    let w = match window_of(tty) {
+        Ok(Some(w)) => w,
+        Ok(None) => {
+            return Look::Blind {
+                why: "phiên không gắn cửa sổ Terminal nào".into(),
+            }
+        }
+        Err(e) => {
+            // Không im lặng: hỏng ở đây làm chốt an toàn phía dưới mất căn cứ.
+            logging::warn("keys_window_probe_failed", json!({ "tty": tty, "err": e.to_string() }));
+            return Look::Blind {
+                why: format!("không hỏi được Terminal cửa sổ nào: {e}"),
+            };
+        }
+    };
+    let screen = match screen_text(w) {
+        Ok(s) => s,
+        Err(e) => {
+            logging::warn("keys_screen_read_failed", json!({ "window": w, "err": e.to_string() }));
+            return Look::Blind {
+                why: format!("không đọc được chữ trên màn: {e}"),
+            };
+        }
+    };
     let choices = parse_choices(&screen);
+    let risk = crate::sessions::preview_risk(&screen);
+    if !risk.is_empty() {
+        return Look::Withheld {
+            choices: choices.len(),
+            risk,
+        };
+    }
     let tail: Vec<&str> = screen
         .lines()
         .filter(|l| !l.trim().is_empty())
         .rev()
         .take(lines)
         .collect();
-    let body = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
-    Some((body, choices))
+    Look::Saw {
+        body: tail.into_iter().rev().collect::<Vec<_>>().join("\n"),
+        choices,
+    }
+}
+
+/// Phím mũi tên có được gửi không.
+///
+/// `do script` LUÔN kèm một dấu xuống dòng, không tắt được — nên trên hộp chọn
+/// một phím mũi tên vừa DI vừa CHỐT, và chốt nhầm hộ chủ máy là thứ không lùi
+/// lại được. Vậy nên điều kiện để gửi là **biết chắc KHÔNG có hộp chọn**, chứ
+/// không phải "không thấy hộp chọn nào".
+#[derive(Debug, Clone, PartialEq)]
+pub enum Arrow {
+    Send,
+    RefuseDialog,
+    RefuseBlind(String),
+}
+
+pub fn arrow_verdict(look: &Look) -> Arrow {
+    match look {
+        Look::Saw { choices, .. } if choices.is_empty() => Arrow::Send,
+        Look::Saw { .. } => Arrow::RefuseDialog,
+        // Chữ bị giữ lại nhưng con số thì chắc chắn — vẫn quyết được.
+        Look::Withheld { choices: 0, .. } => Arrow::Send,
+        Look::Withheld { .. } => Arrow::RefuseDialog,
+        Look::Blind { why } => Arrow::RefuseBlind(why.clone()),
+    }
+}
+
+/// Chữ trên màn của phiên, đã gác bí mật và cắt gọn — dạng dùng được ngay.
+///
+/// `None` khi phiên không có cửa sổ, khi không đọc được màn, hoặc khi màn có
+/// dấu hiệu chứa bí mật: chữ này rời khỏi máy y như phần xem trước của phiên,
+/// nên nó phải đi qua đúng cái cổng ấy (điều 5 trong CLAUDE.md).
+///
+/// Dạng gộp này chỉ hợp cho chỗ **hiển thị** — không có gì để hiện thì thôi.
+/// Chỗ nào phải RA QUYẾT ĐỊNH thì dùng `look` và phân biệt cho đủ ba kết cục.
+pub fn screen_of(tty: &str, lines: usize) -> Option<(String, Vec<(usize, String)>)> {
+    match look(tty, lines) {
+        Look::Saw { body, choices } => Some((body, choices)),
+        _ => None,
+    }
 }
 
 /// Ảnh cửa sổ, đã thu nhỏ, dưới dạng base64 để đi trong một doc.
@@ -422,7 +510,42 @@ fn b64(data: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{as_string, landed, window_script, Landed};
+    use super::{arrow_verdict, as_string, landed, window_script, Arrow, Landed, Look};
+
+    /// Chốt mũi tên chỉ được mở khi BIẾT CHẮC không có hộp chọn.
+    ///
+    /// Bug thật, tìm ra 2026-08-10: `screen_of` gộp ba kết cục vào `None`, và
+    /// chốt đọc `None` thành "không có hộp chọn" rồi GỬI — tức hỏng về phía
+    /// nguy hiểm, và hỏng nặng nhất đúng lúc màn đang hiện một mật khẩu (đó
+    /// cũng là một đường trả `None`). `do script` luôn kèm dấu xuống dòng nên
+    /// trên hộp chọn, mũi tên vừa di vừa CHỐT; chốt nhầm hộ chủ máy là thứ
+    /// không lùi lại được.
+    #[test]
+    fn an_arrow_goes_only_when_we_are_sure_there_is_no_dialog() {
+        let quiet = Look::Saw { body: "$ ".into(), choices: vec![] };
+        assert_eq!(arrow_verdict(&quiet), Arrow::Send);
+
+        let asking = Look::Saw {
+            body: "Chọn đi?".into(),
+            choices: vec![(1, "một".into()), (2, "hai".into())],
+        };
+        assert_eq!(arrow_verdict(&asking), Arrow::RefuseDialog);
+
+        // Màn có bí mật: CHỮ bị giữ lại, nhưng con số lựa chọn vẫn chắc chắn —
+        // nên chốt không bị mù chỉ vì màn đang hiện một mật khẩu.
+        let secret_quiet = Look::Withheld { choices: 0, risk: vec!["credential_word_vi".into()] };
+        assert_eq!(arrow_verdict(&secret_quiet), Arrow::Send);
+        let secret_asking = Look::Withheld { choices: 2, risk: vec!["credential_word_vi".into()] };
+        assert_eq!(arrow_verdict(&secret_asking), Arrow::RefuseDialog);
+
+        // Không nhìn được thì KHÔNG gửi — và câu từ chối phải mang theo lý do,
+        // không thì người ta không biết bấm lại có ích gì không.
+        let blind = Look::Blind { why: "osascript hết giờ".into() };
+        match arrow_verdict(&blind) {
+            Arrow::RefuseBlind(why) => assert!(why.contains("osascript"), "phải nói lý do: {why}"),
+            other => panic!("mù mà vẫn gửi: {other:?}"),
+        }
+    }
 
     /// Chuỗi AppleScript sinh ra phải ĐÓNG ĐỦ dấu nháy và kết thúc đúng chỗ.
     ///

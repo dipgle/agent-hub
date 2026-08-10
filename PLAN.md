@@ -37,24 +37,17 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-1. **Sáu chỗ "lỗi im lặng" đã được xác minh bằng file:line, chưa vá.** Nặng nhất:
-   `keys::screen_of` (`keys.rs:378-393`) trả `None` cho **ba** chuyện khác hẳn
-   nhau — không có cửa sổ, `osascript` hỏng (`.ok()?` hai lần), **và màn hình có
-   dấu hiệu lộ bí mật** (`keys.rs:381`) — còn `pipeline.rs:924` đọc cả ba thành
-   một: `None.is_some_and(..)` = `false` ⟹ chốt **hỏng về phía GỬI**, tức gửi
-   phím mũi tên đúng lúc đang có hộp thoại chọn, thứ mà chú thích ngay trên nó
-   gọi là "không lùi lại được". Đường thứ ba là tệ nhất: đúng lúc màn đang hiện
-   một mật khẩu thì chốt mở toang. Kế đó:
-**12 chỗ** đọc `db.get_cursor` làm "SQLite hỏng" và "chưa chọn phiên nào" nói
-   cùng một câu — tự đếm lại: **9** chỗ `.ok()` (`portal.rs:153,162` ·
-   `pipeline.rs:104,575,735,785,844,1014` · `bin/hubd.rs:457`) và **3** chỗ
-   `match … _ =>` (`portal.rs:90` · `pipeline.rs:1076` · `bin/hubd.rs:496`);
-   hai chỗ `match` còn lại (`pipeline.rs:285,373`) thì CÓ log, không tính.
-   Rồi: `bin/hubd.rs:233` chết bằng `eprintln!` nên lý do không vào sổ nào;
-   `sessions.rs:1758` bail! khẳng định "đã dừng lại" cả khi lệnh dừng chưa từng
-   chạy được; `config.rs:602` coi "không đọc được `hub.env`" y như "không có
-   file"; `adapters/tfl5.rs:405,527` bỏ rơi kết quả `set_read_timeout` (và chỉ
-   đặt cho nhánh **không TLS**).
+1. **Năm chỗ "lỗi im lặng" đã xác minh bằng file:line, chưa vá** (chốt phím mũi
+   tên đã vá — xem "Đã trả xong"): **12 chỗ** đọc `db.get_cursor` làm "SQLite
+   hỏng" và "chưa chọn phiên nào" nói cùng một câu — tự đếm lại: **9** chỗ
+   `.ok()` (`portal.rs:153,162` · `pipeline.rs:104,575,735,785,844,1014` ·
+   `bin/hubd.rs:457`) và **3** chỗ `match … _ =>` (`portal.rs:90` ·
+   `pipeline.rs:1076` · `bin/hubd.rs:496`); hai chỗ `match` còn lại
+   (`pipeline.rs:285,373`) thì CÓ log, không tính. Rồi: `bin/hubd.rs:233` chết
+   bằng `eprintln!` nên lý do không vào sổ nào; `sessions.rs:1758` bail! khẳng
+   định "đã dừng lại" cả khi lệnh dừng chưa từng chạy được; `config.rs:602` coi
+   "không đọc được `hub.env`" y như "không có file"; `adapters/tfl5.rs:405,527`
+   bỏ rơi kết quả `set_read_timeout` (và chỉ đặt cho nhánh **không TLS**).
 2. **UC-S09 nửa "ảnh chụp đã cũ"** — phải tắt `hubd` rồi chờ qua 5 phút mới thấy;
    chưa chạy.
 3. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
@@ -89,6 +82,16 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
    mật khẩu tfl5**, vì giá trị cũ vẫn nằm trong lịch sử `.git`.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
+
+- ~~Chốt phím mũi tên hỏng về phía GỬI~~ → vá 2026-08-10 (Hà chỉ đạo *"vá chốt
+  phím mũi tên đi"*). `screen_of` gộp **ba** kết cục vào `None` — không có cửa
+  sổ · `osascript` hỏng · **màn có dấu hiệu lộ bí mật** — và chốt đọc `None`
+  thành "không có hộp chọn" rồi GỬI, tức hỏng về phía nguy hiểm đúng lúc hub mù
+  nhất. Nay `keys::look` trả `Saw`/`Withheld`/`Blind`, và mũi tên chỉ đi khi
+  **chứng minh được không có hộp chọn**. `Withheld` vẫn quyết đúng: số lựa chọn
+  là một CON SỐ, không mang chữ nào ra khỏi máy. Hai lỗi im lặng cùng họ vá kèm:
+  `window_of`/`screen_text` hỏng nay có log, và câu trả lời sau khi gõ thôi khai
+  "phiên đang đứng ở dấu nhắc" khi thực ra không đọc lại được màn.
 
 - ~~UC-S02b chỉ có unit test~~ → `fe-subagent-uc` **6/6** trên subagent THẬT
   (2026-08-10). Trên đường đi lòi ra **bộ đếm sai với agent chạy nền** (nhận

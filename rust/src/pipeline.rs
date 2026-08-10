@@ -921,19 +921,52 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // được — nên trên hộp chọn, một phím mũi tên vừa DI
                             // vừa CHỐT. Chốt nhầm một lựa chọn của người khác là
                             // thứ không lùi lại được, nên thà không gửi.
-                            let asking = crate::keys::screen_of(&s.tty, 24)
-                                .is_some_and(|(_, c)| !c.is_empty());
-                            if is_key && arrow && asking {
-                                logging::info(
-                                    "keys_arrow_refused",
-                                    json!({ "session": s.session_id, "key": cmd.arg.trim() }),
-                                );
-                                format!(
-                                    "⚠ {} đang có hộp chọn, nên tôi KHÔNG gửi mũi tên: đường gõ của \
-                                     Terminal luôn kèm một dấu xuống dòng, tức mũi tên vừa di vừa CHỐT \
-                                     — dễ chọn nhầm hộ Hà. Gõ thẳng SỐ của mục cần chọn thì an toàn.",
-                                    s.name
-                                )
+                            // Điều kiện để gửi mũi tên là **biết chắc KHÔNG có
+                            // hộp chọn**, không phải "không thấy hộp chọn nào".
+                            //
+                            // Bản trước hỏi `screen_of(...).is_some_and(...)`, mà
+                            // `screen_of` gộp cả ba kết cục vào `None` — không có
+                            // cửa sổ, osascript hỏng, và **màn có dấu hiệu lộ bí
+                            // mật**. Cả ba đọc thành "không có hộp chọn" ⟹ GỬI.
+                            // Tức chốt hỏng về phía nguy hiểm, và hỏng nặng nhất
+                            // đúng lúc màn đang hiện một mật khẩu.
+                            let refusal = if is_key && arrow {
+                                match crate::keys::arrow_verdict(&crate::keys::look(&s.tty, 24)) {
+                                    crate::keys::Arrow::Send => None,
+                                    crate::keys::Arrow::RefuseDialog => {
+                                        logging::info(
+                                            "keys_arrow_refused",
+                                            json!({ "session": s.session_id, "key": cmd.arg.trim(),
+                                                    "why": "dialog" }),
+                                        );
+                                        Some(format!(
+                                            "⚠ {} đang có hộp chọn, nên tôi KHÔNG gửi mũi tên: đường gõ của \
+                                             Terminal luôn kèm một dấu xuống dòng, tức mũi tên vừa di vừa CHỐT \
+                                             — dễ chọn nhầm hộ Hà. Gõ thẳng SỐ của mục cần chọn thì an toàn.",
+                                            s.name
+                                        ))
+                                    }
+                                    crate::keys::Arrow::RefuseBlind(why) => {
+                                        logging::warn(
+                                            "keys_arrow_refused",
+                                            json!({ "session": s.session_id, "key": cmd.arg.trim(),
+                                                    "why": "blind", "detail": why }),
+                                        );
+                                        Some(format!(
+                                            "⚠ Lúc này tôi KHÔNG đọc được màn của {} ({}), nên KHÔNG gửi mũi \
+                                             tên. Không đọc được không có nghĩa là không có hộp chọn — mà nếu \
+                                             đang có thì mũi tên vừa di vừa CHỐT, và chốt nhầm hộ Hà là thứ \
+                                             không lùi lại được. Gõ thẳng SỐ của mục cần chọn thì an toàn dù \
+                                             màn có đọc được hay không.",
+                                            s.name, why
+                                        ))
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+                            if let Some(msg) = refusal {
+                                msg
                             } else {
                             let res = if is_key {
                                 crate::keys::press(w, cmd.arg.trim())
@@ -956,9 +989,17 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // `claude` làm gì với nó — chính chỗ này từng
                                     // báo "đã bấm" trong khi Hà không thấy gì.
                                     std::thread::sleep(std::time::Duration::from_millis(900));
-                                    let what = match crate::keys::screen_of(&s.tty, 24) {
-                                        Some((sc, _)) => crate::keys::landed(&sc),
-                                        None => crate::keys::Landed::Idle,
+                                    // Không đọc lại được màn thì nói là KHÔNG
+                                    // BIẾT. Bản trước rơi về `Landed::Idle`, tức
+                                    // trả lời "phiên đang đứng ở dấu nhắc" cho
+                                    // một chuyện chưa hề nhìn thấy — cùng họ với
+                                    // con bug chốt mũi tên ngay phía trên: đọc
+                                    // "mù" thành một khẳng định.
+                                    let what = match crate::keys::look(&s.tty, 24) {
+                                        crate::keys::Look::Saw { body, .. } => {
+                                            Some(crate::keys::landed(&body))
+                                        }
+                                        _ => None,
                                     };
                                     let did = if is_key {
                                         format!("đã bấm '{}'", cmd.arg.trim())
@@ -966,17 +1007,25 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         format!("đã gõ {} ký tự", cmd.arg.trim().len())
                                     };
                                     match what {
-                                        crate::keys::Landed::Queued => format!(
+                                        Some(crate::keys::Landed::Queued) => format!(
                                             "⌨ {} vào {} — phiên đang chạy dở nên chữ nằm ở HÀNG CHỜ, \
                                              `claude` sẽ xử lý ngay khi xong việc.",
                                             did, s.name
                                         ),
-                                        crate::keys::Landed::Running => {
+                                        Some(crate::keys::Landed::Running) => {
                                             format!("⌨ {} vào {} — phiên đã nhận và bắt đầu chạy.", did, s.name)
                                         }
-                                        crate::keys::Landed::Idle => {
+                                        Some(crate::keys::Landed::Idle) => {
                                             format!("⌨ {} vào {} — phiên đang đứng ở dấu nhắc.", did, s.name)
                                         }
+                                        // Byte đã vào tab (mã trả về 0), nhưng
+                                        // đọc lại màn thì không được — nói đúng
+                                        // chừng ấy, đừng đoán hộ.
+                                        None => format!(
+                                            "⌨ {} vào {} — nhưng tôi KHÔNG đọc lại được màn, nên chưa \
+                                             biết chữ đã rơi vào dấu nhắc hay vào hàng chờ.",
+                                            did, s.name
+                                        ),
                                     }
                                 }
                                 Err(e) => format!(

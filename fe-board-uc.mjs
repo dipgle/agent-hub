@@ -188,11 +188,16 @@ try {
   // daemon khởi động lại thì ảnh chụp đầu tiên chưa có nó. Chờ tới khi có (trang
   // tự làm mới 15s/lần) rồi hãy kết luận — bản đầu của phép đo này báo đỏ chỉ vì
   // chạy sớm hơn dữ liệu, và một phép đo đỏ vì lý do ấy sẽ bị bỏ qua sau vài lần.
+  //
+  // 180 giây chứ không phải 90: đo lại 2026-08-10 khi chạy cả bộ ngay sau
+  // `install.sh`, trần 90s vẫn hụt (0/3 hàng có số), còn chạy lại lúc daemon đã
+  // ấm thì 3/3 — tức trần cũ đang bắt đúng cái độ trễ ĐÃ BIẾT của lần khởi động
+  // lại, không bắt lỗi nào của sản phẩm. Hết 180s mà vẫn trống thì đỏ thật.
   await page
     .waitForFunction(
       () => /phiên \d+%/.test(document.getElementById("runtimeBox")?.innerText || ""),
       null,
-      { timeout: 90000, polling: 2000 }
+      { timeout: 180000, polling: 2000 }
     )
     .catch(() => {});
   const accountRows = await page.evaluate(() =>

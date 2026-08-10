@@ -29,6 +29,13 @@ nghĩa cũ thì test đỏ đúng dòng) · clippy 0 · `install.sh`, daemon `ki
 Đường `Saw` chạy thật trên máy: `look()` đọc **780 ký tự** từ đúng cửa sổ Terminal
 của phiên đang theo, nhận diện **0 hộp chọn**.
 
+📏 **Một phép đo chập chờn nữa, đã siết thay vì bỏ qua:** chạy cả bộ ngay sau
+`install.sh` thì `fe-board` đỏ hai dòng hạn mức (0/3 hàng có số), chạy lại lúc
+daemon ấm thì 3/3 — trần chờ 90 giây đang bắt đúng độ trễ ĐÃ BIẾT của lần khởi
+động lại (phép dò hạn mức phải spawn 3 lần `claude` sau khi cache trống), không
+bắt lỗi nào của sản phẩm. Nới lên 180s, rồi **dựng lại đúng điều kiện ấy để
+kiểm**: 31/31 ngay sau `kickstart`.
+
 **Nói thẳng phần chưa chạy thật:** hai nhánh từ chối (`Blind`, `Withheld`) mới
 chỉ có unit test. Dựng chúng trên máy thật đòi hoặc ép `osascript` hỏng, hoặc
 một mật khẩu nằm trên màn phiên; còn chứng minh nhánh GỬI thì phải bắn một mũi

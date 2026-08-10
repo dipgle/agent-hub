@@ -101,9 +101,7 @@ fn auto_handover(db: &Db, cfg: &Config) {
     let mut live = crate::sessions::snapshot(cfg);
     mark_started_by_hub(db, &mut live);
     let done: Vec<String> = db
-        .get_cursor(AUTO_DONE_KEY)
-        .ok()
-        .flatten()
+        .cursor_or_log(AUTO_DONE_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
 
@@ -572,10 +570,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // gated the way the unattended robot is (see `owner_budget_state`).
                 let want = cmd.arg.trim().to_string();
                 let want = if want.is_empty() {
-                    db.get_cursor(FOCUS_SESSION_KEY)
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default()
+                    db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default()
                 } else {
                     want
                 };
@@ -732,10 +727,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             CommandKind::Stop => {
                 let want = cmd.arg.trim().to_string();
                 let want = if want.is_empty() {
-                    db.get_cursor(FOCUS_SESSION_KEY)
-                        .ok()
-                        .flatten()
-                        .unwrap_or_default()
+                    db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default()
                 } else {
                     want
                 };
@@ -781,11 +773,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 Some(ack)
             }
             CommandKind::Tell => {
-                let want = db
-                    .get_cursor(FOCUS_SESSION_KEY)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
+                let want = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
                 let live = crate::sessions::snapshot(cfg);
                 // Đã dừng KHÔNG phải là đã mất: `--resume` nối vào nhật ký, nó
                 // không cần tiến trình nào đang sống. Và dừng-rồi-nói-tiếp
@@ -840,11 +828,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
                 // khác, và đó là hàng rào duy nhất còn lại ở đường này.
-                let want = db
-                    .get_cursor(FOCUS_SESSION_KEY)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
+                let want = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
                 let live = crate::sessions::snapshot(cfg);
                 let ack = match live.sessions.iter().find(|s| s.session_id == want) {
                     None if want.is_empty() => {
@@ -1059,11 +1043,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // No id in the verb: the target is the session being read.
                 // Asking with nothing open is a mistake worth naming, not a
                 // silent no-op.
-                let want = db
-                    .get_cursor(FOCUS_SESSION_KEY)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_default();
+                let want = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
                 let live = crate::sessions::snapshot(cfg);
                 let ack = match live.sessions.iter().find(|s| s.session_id == want) {
                     None if want.is_empty() => {
@@ -1122,8 +1102,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // builds it — carries that session's stream.
                 let want = cmd.arg.trim();
                 let ack = if want.is_empty() {
-                    match db.get_cursor(FOCUS_SESSION_KEY) {
-                        Ok(Some(id)) if !id.is_empty() => format!("👁 Đang theo phiên {id}"),
+                    match db.cursor_or_log(FOCUS_SESSION_KEY) {
+                        Some(id) if !id.is_empty() => format!("👁 Đang theo phiên {id}"),
                         _ => "Chưa theo phiên nào. Chọn một phiên trên màn Phiên.".to_string(),
                     }
                 } else if want == "-" || want.eq_ignore_ascii_case("off") {

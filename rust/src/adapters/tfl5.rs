@@ -401,8 +401,22 @@ pub fn send_text(
 
     // Bound the wait: a server that accepts the frame and then goes quiet must
     // not park this thread forever.
+    //
+    // Bản dựng này KHÔNG bật tính năng TLS của `tungstenite` (`Cargo.toml:30`,
+    // `default-features = false`), nên `MaybeTlsStream` chỉ có đúng biến thể
+    // `Plain` — `if let` ở đây là toàn phần, không phải bỏ sót nhánh `wss://`.
+    // (Địa chỉ `https://` sẽ hỏng ngay ở bước `connect`, một lỗi ồn ào, chứ
+    // không âm thầm mất trần đọc.)
     if let tungstenite::stream::MaybeTlsStream::Plain(stream) = socket.get_mut() {
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(cfg.reply_timeout_sec)));
+        // Lời hứa "không park thread mãi mãi" phải NÓI khi nó không giữ được:
+        // mất trần đọc thì một máy chủ nhận khung rồi im sẽ giữ luôn cả vòng
+        // chạy của daemon, tức lệnh từ điện thoại nằm chờ vô hạn.
+        if let Err(e) = stream.set_read_timeout(Some(Duration::from_secs(cfg.reply_timeout_sec))) {
+            crate::logging::warn(
+                "ws_read_timeout_unset",
+                serde_json::json!({ "err": e.to_string(), "secs": cfg.reply_timeout_sec }),
+            );
+        }
     }
 
     socket
@@ -523,8 +537,14 @@ impl Live {
     /// Bound how long a read blocks, so the caller can flush its debounce
     /// buffer and notice shutdown even while the room is quiet.
     pub fn set_read_timeout(&mut self, d: Duration) {
+        // Xem chú thích ở `say`: bản dựng này không có biến thể TLS nào.
         if let tungstenite::stream::MaybeTlsStream::Plain(s) = self.socket.get_mut() {
-            let _ = s.set_read_timeout(Some(d));
+            if let Err(e) = s.set_read_timeout(Some(d)) {
+                crate::logging::warn(
+                    "ws_read_timeout_unset",
+                    serde_json::json!({ "err": e.to_string(), "ms": d.as_millis() as u64 }),
+                );
+            }
         }
     }
 

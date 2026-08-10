@@ -1,5 +1,45 @@
 # active context — hub
 
+## 🧹 2026-08-10 (đêm) — trả nốt sổ nợ lỗi im lặng
+
+Hà: *"làm nốt đi"*. Năm món còn lại trong `PLAN.md` mục 1, vá hết.
+
+**1. Mười hai chỗ `db.get_cursor` gộp "SQLite hỏng" với "chưa đặt".** Thêm
+`Db::cursor_or_log` và chuyển hết 12 chỗ (9 chỗ `.ok().flatten()` + 3 chỗ
+`match … _ =>`) sang nó. Đặt chốt ở MỘT nơi là có chủ ý: mười hai chỗ gọi thì
+chỗ thứ mười ba sẽ quên — cùng lối nghĩ với `stickToBottom` và
+`pending_for_display`. Ba chỗ `get_cursor` còn lại thì Err có log hoặc thành câu
+trả lời cho người dùng, nên để nguyên.
+
+**2. `bin/hubd.rs` chết bằng `eprintln!`** ⟹ lý do chỉ nằm ở stderr của launchd,
+nơi không panel nào đọc. Nay `logging::error` — ghi ra CẢ stderr lẫn tệp log.
+
+**3. `sessions.rs` khẳng định "nên đã dừng lại"** kể cả khi lệnh dừng chưa chạy
+nổi (`if let Ok(out)` nuốt luôn `Err`, không log). Nay câu trả lời phụ thuộc mã
+thoát thật: dừng được thì nói vậy, không thì **nói thẳng phiên còn sống** kèm
+lệnh `claude stop <id>` để tự dọn; cả hai đường hỏng đều log.
+
+**4. `config.rs`** phân biệt "không có `hub.env`" (im — chuyện thường) với "có mà
+đọc không được" (log). Sai quyền sau một lần `chmod` trước đây hiện ra ở tận
+cuối đường dưới dạng "chưa đặt biến môi trường" — một chẩn đoán nghe hợp lý mà
+sai, không gì cãi lại được.
+
+**5. `adapters/tfl5.rs`** log khi mất trần đọc. 📌 Và kiểm được một điều báo cáo
+nói sai: bản dựng này **không bật TLS** cho `tungstenite` (`Cargo.toml:30`,
+`default-features = false`), nên `MaybeTlsStream` chỉ có biến thể `Plain` — cái
+gọi là "bỏ sót nhánh TLS" không đúng ở đây, và `https://` sẽ hỏng ồn ào ngay ở
+bước `connect` chứ không âm thầm mất trần.
+
+**Câu hỏi bố cục cũng chốt luôn:** giữ luật MỘT DÒNG của hàng phụ (quyết định cũ
+đã ghi), rút chữ còn `N subagent`. Đo ở 390px với subagent thật:
+*"acc2 · tự duyệt · 1 subagent · ngữ cảnh 46%"* — **vừa khít**. Hai phép đo mới
+hỏi `scrollWidth` chứ không đếm ký tự, nên chúng đỏ được.
+
+**Nghiệm thu:** `cargo test` **94** · clippy 0 · bundle **v133** · `install.sh`,
+daemon pid mới, `kind: cert`, ảnh chụp vẫn đẩy, **0 dòng lỗi mới** trong log ·
+`fe-subagent` **8/8** trên subagent thật.
+
+
 ## 🏹 2026-08-10 (tối) — vá chốt phím mũi tên: mù không được đọc thành "không có"
 
 Hà: *"vá chốt phím mũi tên đi"*.

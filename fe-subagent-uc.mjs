@@ -295,8 +295,27 @@ try {
     );
     check(
       `«${s.name}» — chữ trên thẻ nói ra bằng tiếng người`,
-      card.meta.includes(`${n} subagent đang chạy`),
+      card.meta.includes(`${n} subagent`),
       card.meta.slice(0, 90)
+    );
+    // Hàng phụ cố ý MỘT DÒNG cắt đuôi, nên thêm chữ vào đó là đẩy chữ khác ra
+    // khỏi màn. Đo thật ở 390px: bản dài "N subagent đang chạy" cắt mất `ngữ
+    // cảnh N%`, đúng con số dùng để quyết định có nên đóng sổ. Phép đo này hỏi
+    // trình duyệt (`scrollWidth` vs `clientWidth`) chứ không đếm ký tự.
+    const fit = await page.evaluate((sid) => {
+      const el = document.querySelector(`#sessList .sess[data-session="${sid}"] .sess-meta`);
+      if (!el) return null;
+      return { cut: el.scrollWidth > el.clientWidth + 1, text: el.textContent.trim() };
+    }, s.session_id);
+    check(
+      `«${s.name}» — hàng phụ không bị cắt mất chữ`,
+      fit && !fit.cut,
+      fit ? `${fit.cut ? "BỊ CẮT" : "vừa khít"}: ${fit.text}` : "không thấy hàng phụ"
+    );
+    check(
+      `«${s.name}» — vẫn đọc được ngữ cảnh bên cạnh subagent`,
+      /ngữ cảnh \d+%/.test(fit?.text || ""),
+      fit?.text || ""
     );
   }
 

@@ -599,7 +599,20 @@ fn load_one_env_file(path: &Path) -> Vec<String> {
     let path = path.to_path_buf();
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
-        Err(_) => return vec![], // absent is the normal case
+        // KHÔNG có tệp là chuyện thường (phần lớn máy không dùng `hub.env`) —
+        // im lặng đúng. Nhưng "có tệp mà đọc không được" là chuyện khác hẳn:
+        // sai quyền sau một lần `chmod`, sai chủ sau một lần `sudo`. Bản trước
+        // nuốt cả hai vào `Err(_)`, nên một tệp bí mật không đọc được sẽ hiện
+        // ra dưới dạng "chưa đặt biến môi trường" ở tận cuối đường — một chẩn
+        // đoán nghe hợp lý mà sai, và không dòng log nào cãi lại được.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return vec![],
+        Err(e) => {
+            crate::logging::warn(
+                "env_file_unreadable",
+                serde_json::json!({ "path": path.display().to_string(), "err": e.to_string() }),
+            );
+            return vec![];
+        }
     };
 
     #[cfg(unix)]

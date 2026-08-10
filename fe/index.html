@@ -1936,9 +1936,11 @@
       // Subagent đang chạy: phiên giao việc cho subagent trông ĐỨNG IM từ bên
       // ngoài — lượt hội thoại cuối đã vài phút và không có gì mới cho tới khi
       // subagent quay về. Con số này là khác biệt giữa "đang chạy" và "treo".
-      const kid = s.pending_subagents
-        ? `${s.pending_subagents} subagent đang chạy`
-        : '';
+      // Chữ NGẮN, vì hàng này cố ý một dòng cắt đuôi (`.sess-meta`): bản dài
+      // "N subagent đang chạy" đẩy `ngữ cảnh N%` ra khỏi màn 390px — mà con số
+      // ngữ cảnh chính là thứ quyết định "có nên đóng sổ chưa". Nghĩa không mất:
+      // hàng chỉ hiện khi CÓ subagent chưa về, và màn chi tiết nói đủ câu.
+      const kid = s.pending_subagents ? `${s.pending_subagents} subagent` : '';
       // THƯỚC NGỮ CẢNH. `cache_read + cache_creation + input` của lượt gần nhất
       // chính là số token model phải đọc để trả lời — tức cả hội thoại đang
       // mang theo. Phiên đầy ngữ cảnh thì mỗi lượt sau vừa chậm vừa tốn, và

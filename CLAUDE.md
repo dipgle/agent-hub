@@ -67,6 +67,14 @@ or drive a session from a phone?** If not, it does not belong here.
 3. **No silent failure.** Every error path logs (`rust/src/logging.rs`) *and*
    leaves a row where one exists (`runs.err`). An `Err` mapped to a default
    without a log line is a bug — same rule as a swallowed `catch {}`.
+   The shape that broke this rule twelve times is `db.get_cursor(k).ok()` —
+   `Ok(None)` means "never set" and `Err` means SQLite itself failed, and
+   folding them together made every phone command answer *"no session
+   selected"* on a broken database, with nothing in the log. Read cursors
+   through **`Db::cursor_or_log`**; the gate lives in one place because twelve
+   call sites means the thirteenth forgets. Same reasoning as the visibility
+   guard inside `stickToBottom` (`fe/index.html`) and `pending_for_display`
+   (`sessions.rs`): put the rule at the source, not at every caller.
 4. **Credentials come from env vars only.** The config holds the *name* of the
    env var (`user_env`, `password_env`), never the value. A missing secret means
    SKIP-WITH-LOG (`adapters::Skip`), not a crash and not a silent no-op. Secrets

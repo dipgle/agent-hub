@@ -37,51 +37,52 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-1. **Năm chỗ "lỗi im lặng" đã xác minh bằng file:line, chưa vá** (chốt phím mũi
-   tên đã vá — xem "Đã trả xong"): **12 chỗ** đọc `db.get_cursor` làm "SQLite
-   hỏng" và "chưa chọn phiên nào" nói cùng một câu — tự đếm lại: **9** chỗ
-   `.ok()` (`portal.rs:153,162` · `pipeline.rs:104,575,735,785,844,1014` ·
-   `bin/hubd.rs:457`) và **3** chỗ `match … _ =>` (`portal.rs:90` ·
-   `pipeline.rs:1076` · `bin/hubd.rs:496`); hai chỗ `match` còn lại
-   (`pipeline.rs:285,373`) thì CÓ log, không tính. Rồi: `bin/hubd.rs:233` chết
-   bằng `eprintln!` nên lý do không vào sổ nào; `sessions.rs:1758` bail! khẳng
-   định "đã dừng lại" cả khi lệnh dừng chưa từng chạy được; `config.rs:602` coi
-   "không đọc được `hub.env`" y như "không có file"; `adapters/tfl5.rs:405,527`
-   bỏ rơi kết quả `set_read_timeout` (và chỉ đặt cho nhánh **không TLS**).
-2. **UC-S09 nửa "ảnh chụp đã cũ"** — phải tắt `hubd` rồi chờ qua 5 phút mới thấy;
+1. **UC-S09 nửa "ảnh chụp đã cũ"** — phải tắt `hubd` rồi chờ qua 5 phút mới thấy;
    chưa chạy.
-3. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
+2. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
    `dead_letter`) vẫn còn dữ liệu. Không có mã nào đọc chúng. Muốn dọn thì phải
    là một quyết định có chủ ý, không phải tác dụng phụ của việc đổi schema.
-4. **Chữ ký ổn định mới nghiệm thu tới bước "bản cài mang DR cố định"**
+3. **Chữ ký ổn định mới nghiệm thu tới bước "bản cài mang DR cố định"**
    (2026-08-10): đã đo hai build khác byte cùng một designated requirement, và
    `hubd` tự khai `kind: cert` khi chạy. Chưa đo được vế cuối — **bật lại máy thì
    hub có tự lên không** — vì việc đó phải reboot thật.
 5. ~~Hai hàng mới ở tab Sức khoẻ chưa nhìn thấy trên UI thật~~ → đã thấy:
    `fe-board` 27/27 trên daemon do launchd sở hữu.
-6. **`fe-sessions-uc` đỏ giả khi tập phiên vừa đổi.** Nó đọc sự thật từ
+4. **`fe-sessions-uc` đỏ giả khi tập phiên vừa đổi.** Nó đọc sự thật từ
    `hub sessions --json` một lần rồi so với màn, mà ảnh chụp trên trang trễ tới
    ~25 giây ⟹ dừng/mở một phiên ngay trước lúc chạy là ra `màn 6 / máy 5`. Đo
    2026-08-10: đỏ 3 dòng, chờ 45 giây chạy lại thì **xanh, exit 0**. Cách chữa đã
    có sẵn khuôn trong `fe-subagent-uc.mjs`: đọc sự thật — đọc màn — đọc lại sự
    thật, chỉ so khi hai đầu kẹp bằng nhau.
-7. **`fe-newsession-uc` là kịch bản bán tự động.** Bước `/stop` cần một ngón tay
+5. **`fe-newsession-uc` là kịch bản bán tự động.** Bước `/stop` cần một ngón tay
    thật bấm Telegram; không ai bấm thì kịch bản in **"BỎ QUA 2 + 3 kiểm tra"** kèm
    tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm lúc ấy đang cư xử
    đúng. (Câu này trước đây là **ý định chứ không phải hành vi**: đo 2026-08-10
    chiều thì nó báo đỏ 3 dòng, vì hai lỗi đã vá cùng ngày — xem "Đã trả xong".)
-8. **Một quan sát trên màn, chưa quyết.** Hàng phụ của thẻ phiên cố ý **một dòng,
-   cắt đuôi** (`fe/index.html:425`). Khi có subagent, hàng thành `acc2 · tự duyệt ·
-   1 subagent đang chạy · ngữ cản…` — tức **mất con số ngữ cảnh**, thứ dùng để
-   quyết định "có nên đóng sổ chưa". Ba đường: cho hàng xuống hai dòng (tốn ~18px
-   mỗi thẻ), rút gọn chữ subagent, hoặc để nguyên vì màn chi tiết đã có đủ. Chưa
-   tự chọn — đây là đánh đổi bố cục, không phải lỗi.
-9. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
+6. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
    `HUB_TFL5_PASSWORD`; repo chưa từng có remote nên nó chưa rời máy này. Đã
    `git rm --cached`, đã `chmod 600`, đã thêm vào `.gitignore`. **Còn nợ: đổi
    mật khẩu tfl5**, vì giá trị cũ vẫn nằm trong lịch sử `.git`.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
+
+- ~~Năm chỗ "lỗi im lặng"~~ → vá hết 2026-08-10 (Hà: *"làm nốt đi"*).
+  **12 chỗ** đọc `db.get_cursor` nay đi qua `Db::cursor_or_log` — đặt chốt ở MỘT
+  nơi vì mười hai chỗ gọi thì chỗ thứ mười ba sẽ quên; `bin/hubd.rs` chết bằng
+  `logging::error` (ra cả stderr LẪN tệp log) thay vì `eprintln!` chỉ ra stderr
+  của launchd; `sessions.rs` thôi khẳng định "đã dừng lại" khi lệnh dừng chưa
+  chạy được — nay nói thẳng phiên còn sống kèm lệnh để tự dừng, và cả hai đường
+  hỏng đều log; `config.rs` phân biệt "không có `hub.env`" (im, chuyện thường)
+  với "có mà đọc không được" (log — sai quyền sẽ hiện ra dưới dạng "chưa đặt
+  biến môi trường" ở tận cuối đường); `adapters/tfl5.rs` log khi mất trần đọc.
+  *Ghi lại một điều đo được:* bản dựng này **không bật TLS** cho `tungstenite`
+  (`Cargo.toml:30`), nên `MaybeTlsStream` chỉ có biến thể `Plain` — cái gọi là
+  "bỏ sót nhánh TLS" không đúng với bản dựng này.
+- ~~Hàng phụ thẻ phiên mất chữ `ngữ cảnh N%` khi có subagent~~ → giữ luật MỘT
+  DÒNG (quyết định cũ, có ghi), rút chữ còn `N subagent`. Đo ở 390px với
+  subagent thật: *"acc2 · tự duyệt · 1 subagent · ngữ cảnh 46%"* — **vừa khít**,
+  không cắt. `fe-subagent-uc` **8/8** (thêm 2 phép đo hỏi `scrollWidth` chứ
+  không đếm ký tự).
 
 - ~~Chốt phím mũi tên hỏng về phía GỬI~~ → vá 2026-08-10 (Hà chỉ đạo *"vá chốt
   phím mũi tên đi"*). `screen_of` gộp **ba** kết cục vào `None` — không có cửa

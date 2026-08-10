@@ -87,8 +87,8 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
     // Only the session being read carries its full stream. Pushing every
     // transcript every cycle would be megabytes for the one screen anybody is
     // looking at; `/session <id>` says which one that is.
-    let focus = match db.get_cursor(crate::pipeline::FOCUS_SESSION_KEY) {
-        Ok(Some(id)) if !id.is_empty() => {
+    let focus = match db.cursor_or_log(crate::pipeline::FOCUS_SESSION_KEY) {
+        Some(id) if !id.is_empty() => {
             match live.sessions.iter().find(|s| s.session_id == id) {
                 Some(s) => {
                     let mut st = crate::sessions::stream(cfg, &s.session_id, &s.cwd, 120);
@@ -150,18 +150,14 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
             // The last closing note, so the phone can show where the thread
             // went and how to pick it up on the machine.
             "handover": db
-                .get_cursor(crate::pipeline::HANDOVER_KEY)
-                .ok()
-                .flatten()
+                .cursor_or_log(crate::pipeline::HANDOVER_KEY)
                 .filter(|s| !s.is_empty())
                 .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
             // The last side question and its answer. Kept next to `handover`
             // because they are the same shape of thing: something the phone
             // asked for that landed in a fork, not in the session itself.
             "aside": db
-                .get_cursor(crate::pipeline::ASIDE_KEY)
-                .ok()
-                .flatten()
+                .cursor_or_log(crate::pipeline::ASIDE_KEY)
                 .filter(|s| !s.is_empty())
                 .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
         },

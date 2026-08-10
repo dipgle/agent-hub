@@ -231,7 +231,19 @@ fn main() {
         signature_kind()
     );
     if let Err(e) = real_main() {
-        eprintln!("hubd: {}", logging::err_chain(&e));
+        // `logging::error`, KHÔNG phải `eprintln!`: nó ghi ra CẢ stderr lẫn tệp
+        // log khi tệp đã được đặt (`logging.rs`). Bản trước chỉ in stderr, mà
+        // stderr của một daemon do launchd chạy thì chỉ nằm trong
+        // `~/Library/Logs/hubd.err` — nơi không panel nào đọc và không ai theo
+        // dõi. Hậu quả: hubd chết lúc dựng lên (mở được DB không, ghi được khoá
+        // pid không) và LÝ DO không vào sổ nào cả.
+        //
+        // Hỏng trước khi `set_log_file` chạy thì vẫn ra stderr y như cũ — tức
+        // dùng hàm này không mất gì, chỉ được thêm.
+        logging::error(
+            "hubd_fatal",
+            serde_json::json!({ "err": logging::err_chain(&e) }),
+        );
         std::process::exit(70);
     }
 }
@@ -454,9 +466,7 @@ const FOLLOW_MIN_GAP: Duration = Duration::from_secs(4);
 /// an idle session costs one stat() every two seconds.
 fn follow_sleep(cfg: &hub::config::Config, db: &Db, waker: &hub::live::Waker, delay: Duration) {
     let focus = db
-        .get_cursor(hub::pipeline::FOCUS_SESSION_KEY)
-        .ok()
-        .flatten()
+        .cursor_or_log(hub::pipeline::FOCUS_SESSION_KEY)
         .filter(|id| !id.is_empty());
     let Some(session_id) = focus else {
         waker.sleep(delay);
@@ -493,8 +503,8 @@ fn follow_sleep(cfg: &hub::config::Config, db: &Db, waker: &hub::live::Waker, de
             return;
         }
         // Someone closed the session (or opened another one): stop following.
-        match db.get_cursor(hub::pipeline::FOCUS_SESSION_KEY) {
-            Ok(Some(id)) if id == session_id => {}
+        match db.cursor_or_log(hub::pipeline::FOCUS_SESSION_KEY) {
+            Some(id) if id == session_id => {}
             _ => return,
         }
 

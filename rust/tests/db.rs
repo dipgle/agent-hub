@@ -104,3 +104,30 @@ fn a_side_question_and_a_handover_share_one_set_of_books() {
         "both owner-initiated calls must land in the same day's total, got {spent}"
     );
 }
+
+/// `cursor_or_log` phân biệt "chưa đặt" với "đọc hỏng" — và chỉ im ở vế đầu.
+///
+/// Vì sao có hàm này: `get_cursor` trả `Result<Option<_>>`, và **12 chỗ** trong
+/// mã đã gộp `Err` với `Ok(None)` bằng `.ok().flatten()` hoặc `match … _ =>`.
+/// Nhìn từ điện thoại, hậu quả là bấm ⏹ Dừng trên một phiên đang mở thì hub trả
+/// lời *"chưa theo phiên nào"* — đúng câu nó nói khi chưa ai chọn gì — mà không
+/// dòng log nào cho biết cơ sở dữ liệu vừa không đọc được.
+///
+/// Vế `Err` không dựng được từ đây (không có API công khai nào phá được bảng
+/// đang mở), nên test này ghim vế "chưa đặt" và vế "đã đặt"; phần còn lại là ba
+/// dòng: log rồi trả `None`.
+#[test]
+fn a_missing_cursor_is_silent_but_a_broken_read_is_not() {
+    let (db, _dir) = fresh_db();
+
+    // Chưa đặt: im lặng, không log — đây là chuyện thường.
+    assert_eq!(db.cursor_or_log("focus:session"), None);
+
+    db.set_cursor("focus:session", "abc-123").unwrap();
+    assert_eq!(db.cursor_or_log("focus:session").as_deref(), Some("abc-123"));
+
+    // Đặt rỗng = "thôi theo phiên nào cả": vẫn là một giá trị ĐÃ ĐẶT, chỗ gọi
+    // tự lọc bằng `.filter(|s| !s.is_empty())` chứ hàm này không đoán hộ.
+    db.set_cursor("focus:session", "").unwrap();
+    assert_eq!(db.cursor_or_log("focus:session").as_deref(), Some(""));
+}

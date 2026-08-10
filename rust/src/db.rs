@@ -147,6 +147,32 @@ impl Db {
             .flatten())
     }
 
+    /// Mốc đã đặt, và **nói ra khi đọc hỏng**.
+    ///
+    /// `get_cursor` trả `Result<Option<_>>` với hai nghĩa rất khác nhau:
+    /// `Ok(None)` = chưa từng đặt (chuyện thường), còn `Err` = SQLite hỏng thật
+    /// — khoá, tệp hỏng, hết đĩa. Gộp cả hai thành "không có" là bug đã đếm được
+    /// **12 chỗ** trong mã này (9 chỗ `.ok().flatten()`, 3 chỗ `match … _ =>`),
+    /// và hậu quả nhìn từ điện thoại là: bấm ⏹ Dừng trên một phiên đang mở thì
+    /// hub trả lời *"chưa theo phiên nào"* — đúng câu nó nói khi chưa ai chọn gì
+    /// — mà **không dòng log nào** cho biết cơ sở dữ liệu vừa không đọc được.
+    ///
+    /// Đặt chốt Ở ĐÂY chứ không ở từng chỗ gọi: có mười hai chỗ gọi, và chỗ thứ
+    /// mười ba sẽ quên. Ai thật sự cần phân biệt `Err` với `Ok(None)` thì vẫn
+    /// gọi `get_cursor` như cũ.
+    pub fn cursor_or_log(&self, key: &str) -> Option<String> {
+        match self.get_cursor(key) {
+            Ok(v) => v,
+            Err(e) => {
+                crate::logging::error(
+                    "cursor_read_failed",
+                    serde_json::json!({ "key": key, "err": e.to_string() }),
+                );
+                None
+            }
+        }
+    }
+
     pub fn all_cursors(&self) -> Result<BTreeMap<String, String>> {
         let mut stmt = self.conn.prepare("SELECT k, v FROM cursors")?;
         let rows = stmt.query_map([], |r| {

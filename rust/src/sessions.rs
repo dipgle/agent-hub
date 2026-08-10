@@ -1779,7 +1779,13 @@ pub fn start_background(
         );
         // Leave nothing hanging: a blocked agent does no work and only clutters
         // the list the owner is trying to read.
-        if let Ok(out) = run(
+        //
+        // Và câu trả lời phải nói ĐÚNG chuyện đã xảy ra. Bản trước khẳng định
+        // "nên đã dừng lại" một cách vô điều kiện — kể cả khi `run` không spawn
+        // nổi (nhánh `if let Ok` nuốt luôn `Err`, không log) hoặc `claude stop`
+        // trả mã khác 0. Người đọc tin là máy đã sạch, trong khi một phiên kẹt
+        // vẫn nằm đó ăn chỗ trong danh sách.
+        let stopped = match run(
             &cfg.claude_cli,
             &["stop", short_id(&full)],
             RunOpts {
@@ -1794,15 +1800,37 @@ pub fn start_background(
                 )],
             },
         ) {
-            if out.code != Some(0) {
+            Ok(out) if out.code == Some(0) => true,
+            Ok(out) => {
                 logging::warn(
                     "blocked_session_stop_failed",
-                    json!({ "session": full, "stderr": truncate(out.stderr.trim(), 120) }),
+                    json!({ "session": full, "code": out.code,
+                            "stderr": truncate(out.stderr.trim(), 120) }),
                 );
+                false
             }
-        }
+            Err(e) => {
+                // Không chạy nổi lệnh dừng là chuyện phải nói: nó khác hẳn
+                // "chạy rồi mà không dừng được".
+                logging::warn(
+                    "blocked_session_stop_unrunnable",
+                    json!({ "session": full, "err": e.to_string() }),
+                );
+                false
+            }
+        };
+        let fate = if stopped {
+            "nên đã dừng lại".to_string()
+        } else {
+            format!(
+                "và tôi KHÔNG dừng được nó — phiên {} vẫn còn, tự dừng bằng: claude stop {}",
+                short_id(&full),
+                short_id(&full)
+            )
+        };
         anyhow::bail!(
-            "phiên mở ra nhưng KẸT ngay ở hộp thoại duyệt MCP của dự án (workspace có .mcp.json: project-agent, vault) — nó chờ một phím bấm mà điện thoại không gõ được, nên đã dừng lại. Cách gỡ, làm MỘT LẦN cho mỗi dự án trên máy: cd {} && claude  →  Enter (duyệt) hoặc Esc (bỏ hết), rồi thoát. Sau đó /new chạy được.",
+            "phiên mở ra nhưng KẸT ngay ở hộp thoại duyệt MCP của dự án (workspace có .mcp.json: project-agent, vault) — nó chờ một phím bấm mà điện thoại không gõ được, {}. Cách gỡ, làm MỘT LẦN cho mỗi dự án trên máy: cd {} && claude  →  Enter (duyệt) hoặc Esc (bỏ hết), rồi thoát. Sau đó /new chạy được.",
+            fate,
             dir.display()
         );
     }

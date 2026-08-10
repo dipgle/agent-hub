@@ -1,5 +1,61 @@
 # active context — hub
 
+## 📊 2026-08-10 (chiều) — hạn mức lên màn, và hai lỗi phía sau nó
+
+**Hạn mức từng tài khoản** (Hà: *"thông tin tài khoản không có thông tin
+usage?"*). Ba đường tĩnh đều chết — `auth status` không có, `auth --help` chỉ có
+login/logout/status, nhật ký chỉ ghi token TỪNG LƯỢT; và `~/.claude-accN/projects`
+là **symlink tới `~/.claude/projects`** nên không tách token theo thư mục được.
+Đường đúng lại rẻ nhất: `claude -p "/usage" --output-format json` →
+`num_turns: 0 · duration_api_ms: 0 · total_cost_usd: 0`, tức **không gọi model,
+không tốn hạn mức**, và không phải gõ vào cửa sổ nào của Hà.
+
+    acc1  phiên   6% · tuần  5%   acc2  phiên 100% (HẾT) · tuần 70%
+    acc3  phiên   8% · tuần 98%
+
+⚠ **Tôi tái phạm đúng bài học ghi trong CLAUDE.md đêm trước.** Gắn phép dò vào
+vòng chạy làm một vòng vọt lên **80 giây** — mà mỗi vòng là một nhịp hub đọc lệnh
+từ điện thoại, nên cái giá không phải "số liệu chậm" mà là "lệnh của chủ máy nằm
+chờ hơn một phút". Đúng thứ luật tự-đóng-sổ đã học (90s → 3,2s). Sửa: hết hạn thì
+**trả bản cũ ngay rồi làm mới ở luồng riêng**, một cờ nguyên tử chặn không cho đẻ
+nhiều lượt chồng nhau. Vòng về **~10 giây**.
+
+🐛 **Và lỗi thật sự đáng giá của ngày: `exec::run` rò tiến trình.** `claude` là
+một *wrapper* — nó spawn tiếp một binary native. `child.kill()` chỉ giết đứa con
+trực tiếp, **đứa cháu sống sót**: tìm thấy hai con `claude /usage` nằm im, một
+con treo từ bốn tiếng trước. Một phép dò chạy 5 phút một lần mà mỗi lần hết giờ
+lại bỏ lại một tiến trình thì tệ hơn không dò. Vá: mỗi lời gọi một **nhóm tiến
+trình riêng** (`process_group(0)` — API an toàn, không cần `unsafe`), hết giờ thì
+`/bin/kill -TERM -pgid` rồi `-KILL`. Có test dựng lại đúng hình dạng ấy (`sh`
+sinh `sleep` rồi đứng chờ) và đo `kill -0` sau khi hết giờ. Đo lại trên máy: **0
+tiến trình treo**.
+📌 Đây là lỗi của `exec.rs`, tức nó âm thầm đúng với MỌI lời gọi từ trước tới nay
+— `claude`, `osascript`, `launchctl`. Phép dò usage chỉ là thứ làm nó lộ ra.
+
+**Cú giật xuống cuối trang** (*"danh sách phiên bấm nút nào nó cũng kéo xuống cuối
+trang"*): phần đuôi của con bug sáng nay. `stickToBottom(thread)` ghi thẳng
+`main.scrollTop = scrollHeight` **kể cả khi tab Trao đổi đang ẩn**, mà `main` là
+khung cuộn dùng chung; bấm nút → hub trả lời trong phòng → mỗi tin mới kéo màn
+một lần, và `sendCommand` còn làm mới thêm 8 lượt trong 40 giây. Vá một chỗ duy
+nhất: `if (!el.offsetParent) return` — không dán đáy cho thứ không ở trên màn.
+Đo: điểm xa nhất bị kéo đi **0px trong 40 giây**, và phép đo đã được chứng minh
+là KHÔNG MÙ (ép dán đáy thì nó đọc ra 534px).
+
+**Đóng sổ nay cũng phải xác nhận** (Hà hỏi: *"nút đóng sổ chưa gửi xác nhận qua
+tele?"*). Nó không phá phiên gốc, nhưng gọi `claude` thật — hai lần lỡ tay của
+tôi sáng nay tốn 3.19 + 4.44, mà acc3 đang ở 98% tuần. Gộp cả hai lệnh vào một
+hàm `ask_owner()` trả `Option<String>`: hình dạng ấy khiến chỗ gọi không thể quên
+nhánh từ chối.
+
+**Nghiệm thu:** cargo test **85** · clippy 0 · bundle **v129** · fe-board 31/31 ·
+fe-sessions 25/25 · fe-phone 31/31 · fe-smoke 15/15 · fe-url 16/16 · fe-denied
+10/10 · fe-config 8/8 · 0 lỗi console.
+
+**Hai lần phép đo của tôi tự báo sai, ghi để nhớ:** (1) `fe-board` báo đỏ hạn mức
+chỉ vì chạy ngay sau khi daemon khởi động lại — nay nó CHỜ dữ liệu; (2) một regex
+`acc1[^\n]*phiên` không khớp vì `innerText` chèn xuống dòng giữa nhãn và giá trị,
+suýt làm tôi đi sửa một thứ đang chạy đúng.
+
 ## 🔒 2026-08-10 (trưa) — danh sách làm được việc; dừng phiên phải qua Telegram
 
 **UC-S10 + UC-S11 xong, chạy thật cả hai đường.** Hà: *"thêm uc cho danh sách

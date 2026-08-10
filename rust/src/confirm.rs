@@ -48,17 +48,22 @@ impl Verdict {
     }
 
     /// Câu nói cho phòng chat khi không đi tiếp được.
-    pub fn refusal(&self) -> String {
+    ///
+    /// `nothing_done` là việc đã KHÔNG xảy ra, viết như một mệnh đề ngắn:
+    /// `"dừng phiên nào"`, `"đóng sổ phiên nào"`. Nó phải nằm trong câu, vì một
+    /// lời từ chối không nói rõ cái gì đã không xảy ra sẽ bị đọc thành "hỏng
+    /// rồi, chắc mất phiên" — đúng nỗi lo mà chốt chặn này sinh ra để dập.
+    pub fn refusal(&self, nothing_done: &str) -> String {
         match self {
             Verdict::Confirmed => String::new(),
-            Verdict::Declined => "✋ Đã huỷ trên Telegram — không dừng phiên nào.".to_string(),
-            Verdict::TimedOut => {
-                "⌛ Hết hạn chờ xác nhận trên Telegram — không dừng phiên nào. Bấm lại nếu vẫn muốn."
-                    .to_string()
-            }
+            Verdict::Declined => format!("✋ Đã huỷ trên Telegram — không {nothing_done}."),
+            Verdict::TimedOut => format!(
+                "⌛ Hết hạn chờ xác nhận trên Telegram — không {nothing_done}. Bấm lại nếu vẫn muốn."
+            ),
             Verdict::Unavailable(why) => format!(
-                "⚠ Không hỏi được Telegram nên KHÔNG dừng phiên: {}. \
-                 Muốn dừng ngay thì ngồi vào máy gõ `claude stop`.",
+                "⚠ Không hỏi được Telegram nên KHÔNG {}: {}. \
+                 Đường thoát luôn còn: ngồi vào máy và làm thẳng trên terminal.",
+                nothing_done,
                 crate::exec::truncate(why, 160)
             ),
         }
@@ -289,21 +294,25 @@ mod tests {
             Verdict::TimedOut,
             Verdict::Unavailable("thiếu HUB_TELEGRAM_BOT_TOKEN trong hub.env".into()),
         ] {
-            let msg = v.refusal();
-            assert!(!msg.is_empty(), "{v:?} không có câu trả lời");
-            assert!(
-                msg.contains("không dừng") || msg.contains("KHÔNG dừng"),
-                "{v:?} không nói rõ là chưa dừng gì: {msg}"
-            );
+            for what in ["dừng phiên nào", "đóng sổ phiên nào"] {
+                let msg = v.refusal(what);
+                assert!(!msg.is_empty(), "{v:?} không có câu trả lời");
+                assert!(
+                    msg.contains(what),
+                    "{v:?} không nói rõ việc gì đã KHÔNG xảy ra: {msg}"
+                );
+            }
         }
         assert!(
-            Verdict::Unavailable("x".into()).refusal().contains("claude stop"),
+            Verdict::Unavailable("x".into())
+                .refusal("dừng phiên nào")
+                .contains("terminal"),
             "lúc hỏng đường hỏi phải chỉ ra đường thoát"
         );
     }
 
     #[test]
     fn a_confirmation_has_nothing_to_refuse() {
-        assert_eq!(Verdict::Confirmed.refusal(), "");
+        assert_eq!(Verdict::Confirmed.refusal("dừng phiên nào"), "");
     }
 }

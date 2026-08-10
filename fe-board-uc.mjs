@@ -254,6 +254,39 @@ try {
       s.top === 0, `scrollTop ${s.top}/${s.max}`);
   }
 
+  // ---- tin mới trong phòng KHÔNG được kéo tab đang xem ---------------------
+  // Hà 2026-08-10: *"danh sách phiên bấm nút nào nó cũng kéo xuống cuối trang"*.
+  // Cơ chế: mỗi tin mới trong phòng gọi `scrollDown()` → `stickToBottom(thread)`
+  // → ghi thẳng `main.scrollTop = scrollHeight`, mà `main` là khung cuộn dùng
+  // chung — nên nó kéo cả tab đang xem, dù Trao đổi đang ẩn.
+  //
+  // Bấm một thẻ phiên (gửi `/session`, miễn phí) rồi quay ra danh sách, đứng ở
+  // đầu và xem trang có tự đi không. Phép đo này đã được chứng minh là KHÔNG MÙ:
+  // ép `main.scrollTop = scrollHeight` thì nó đọc ra 534px.
+  await goTab("sessions");
+  const someCard = await page.evaluate(
+    () => document.querySelector('#sessList .sess:not([data-host="dead"])')?.dataset.session
+  );
+  if (someCard) {
+    await page.locator(`.sess[data-session="${someCard}"]`).click();
+    await page.waitForSelector("#sessDetail:not(.hidden)", { timeout: 10000 });
+    await page.click("#sessBack");
+    await page.waitForSelector("#sessListPanel:not(.hidden)", { timeout: 10000 });
+    await page.evaluate(() => { document.querySelector("main").scrollTop = 0; });
+    let worst = 0;
+    for (let i = 0; i < 8; i++) {
+      await page.waitForTimeout(2000);
+      worst = Math.max(worst, (await mainScroll()).top);
+    }
+    check(
+      "tin mới trong phòng KHÔNG kéo danh sách xuống đáy",
+      worst <= 2,
+      `điểm xa nhất bị kéo đi: ${worst}px trong 16s`
+    );
+  } else {
+    console.log("  · không có phiên sống nào — bỏ qua kiểm 'không bị kéo xuống đáy'");
+  }
+
   // ---- nút trong header chung phải TRẢ LỜI -------------------------------
   // Cùng lời báo trên: *"header chung dẫn đến hiện mà bấm không có tác dụng"*.
   // Gốc là `#cmdStatus` bị xoá cùng đợt gỡ nhánh hộp thư (393db8f) trong khi

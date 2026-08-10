@@ -585,7 +585,26 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         "⚠ không thấy phiên '{}' đang chạy",
                         crate::exec::truncate(&want, 40)
                     ),
-                    Some(s) => match crate::sessions::handover(cfg, s) {
+                    // Hà hỏi 2026-08-10: *"nút đóng sổ chưa gửi xác nhận qua
+                    // tele?"* — đúng, và nó nên có. Đóng sổ KHÔNG phá phiên gốc
+                    // (chạy trên bản fork), nhưng nó gọi `claude` thật: hai lần
+                    // lỡ tay trong CHÍNH kịch bản kiểm thử của tôi sáng nay tốn
+                    // 3.19 + 4.44 theo thước đo. Với acc3 đang ở 98% hạn mức
+                    // tuần, một cú chạm nhầm trên danh sách là một cú chạm đắt.
+                    // Cùng chốt chặn, khác câu hỏi: ở đây cái mất là HẠN MỨC.
+                    Some(s) => match ask_owner(
+                        db,
+                        cfg,
+                        adapter,
+                        cmd,
+                        &format!(
+                            "Đóng sổ phiên {} ({})? Việc này gọi claude trên bản fork và tốn hạn mức.",
+                            s.name, s.account
+                        ),
+                        "đóng sổ phiên nào",
+                    ) {
+                        Some(refusal) => refusal,
+                        None => match crate::sessions::handover(cfg, s) {
                         Ok(h) => {
                             if let Err(e) = db.record_spend(
                                 "handover",
@@ -618,6 +637,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             "⚠ bàn giao hỏng: {}",
                             crate::exec::truncate(&e.to_string(), 200)
                         ),
+                        },
                     },
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
@@ -731,25 +751,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         // một phiên là thứ không lùi lại được, và cái nút gây ra
                         // nó nay nằm ngay trên danh sách — một chạm nhầm là mất
                         // tiến trình đang chạy dở.
-                        //
-                        // Nói TRƯỚC khi chờ: `confirm::ask` đứng chờ tới 90
-                        // giây, và một cái màn im 90 giây là một cái màn hỏng.
                         let what = format!("Dừng phiên {} ({})?", s.name, s.account);
-                        if cfg.confirm.enabled {
-                            reply_in_channel(
-                                db,
-                                cfg,
-                                adapter,
-                                cmd,
-                                &format!(
-                                    "🔒 Đã gửi yêu cầu xác nhận sang Telegram: {what} \
-                                     Chưa dừng gì cho tới khi bấm nút."
-                                ),
-                            );
-                        }
-                        let verdict = crate::confirm::ask(cfg, &what);
-                        if !verdict.allows() {
-                            verdict.refusal()
+                        if let Some(refusal) =
+                            ask_owner(db, cfg, adapter, cmd, &what, "dừng phiên nào")
+                        {
+                            refusal
                         } else {
                             match crate::sessions::stop_background(cfg, s) {
                                 Ok(()) => {
@@ -1195,6 +1201,38 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
 /// Answer a command on the channel it came from. Failing to answer would leave
 /// the owner staring at a room that swallowed their command, so a send failure
 /// is logged rather than dropped.
+/// Hỏi chủ máy qua Telegram trước khi làm một việc đắt hoặc không lùi lại được.
+///
+/// Trả `None` khi được phép đi tiếp, `Some(câu từ chối)` khi không — hình dạng
+/// ấy khiến chỗ gọi không thể "quên" nhánh từ chối: nó phải trả lời một cái gì.
+///
+/// Trả lời trong phòng chat TRƯỚC khi đứng chờ, vì `confirm::ask` đứng tới 90
+/// giây và một cái màn im 90 giây là một cái màn hỏng.
+fn ask_owner(
+    db: &Db,
+    cfg: &Config,
+    adapter: &str,
+    cmd: &ChannelCommand,
+    what: &str,
+    nothing_done: &str,
+) -> Option<String> {
+    if cfg.confirm.enabled {
+        reply_in_channel(
+            db,
+            cfg,
+            adapter,
+            cmd,
+            &format!("🔒 Đã gửi yêu cầu xác nhận sang Telegram: {what} Chưa làm gì cho tới khi bấm nút."),
+        );
+    }
+    let verdict = crate::confirm::ask(cfg, what);
+    if verdict.allows() {
+        None
+    } else {
+        Some(verdict.refusal(nothing_done))
+    }
+}
+
 fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, text: &str) {
     let _ = db;
     if adapter != tfl5::NAME {

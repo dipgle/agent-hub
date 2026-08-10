@@ -1232,6 +1232,17 @@
 
   /// Đưa dòng cuối của `el` vào tầm nhìn, dù `el` tự cuộn hay trang cuộn.
   function stickToBottom(el) {
+    // KHÔNG dán đáy cho thứ đang không ở trên màn. Bốn tab dùng chung khung
+    // cuộn `main`, nên `stickToBottom(thread)` lúc tab Trao đổi đang ẩn sẽ kéo
+    // TAB ĐANG XEM xuống đáy. Đó là điều Hà thấy 2026-08-10: *"danh sách phiên
+    // bấm nút nào nó cũng kéo xuống cuối trang"* — bấm nút gửi một lệnh, hub trả
+    // lời trong phòng, mỗi tin mới gọi `scrollDown()`, và `sendCommand` còn làm
+    // mới thêm 8 lượt trong 40 giây nên nó giật đi giật lại.
+    //
+    // `offsetParent === null` nghĩa là có tổ tiên `display:none` — đúng trạng
+    // thái của panel bị ẩn. Đặt chốt Ở ĐÂY chứ không ở từng chỗ gọi: có bốn chỗ
+    // gọi và chỗ thứ năm sẽ quên.
+    if (!el.offsetParent) return;
     const sc = scrollerFor(el);
     // Cuộn tới ĐÁY THẬT của khung cuộn, không phải "đưa dòng cuối vào tầm
     // nhìn". `scrollIntoView({block:'nearest'})` KHÔNG làm gì khi dòng ấy đã

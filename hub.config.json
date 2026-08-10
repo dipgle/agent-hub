@@ -15,6 +15,12 @@
     "at_percent": 80,
     "idle_sec": 120
   },
+  "confirm": {
+    "enabled": true,
+    "bot_token_env": "HUB_TELEGRAM_BOT_TOKEN",
+    "chat_id_env": "HUB_TELEGRAM_CHAT_ID",
+    "timeout_sec": 90
+  },
   "adapters": {
     "tfl5": {
       "enabled": true,

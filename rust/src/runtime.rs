@@ -38,6 +38,10 @@ const USAGE_TTL_MS: i64 = 5 * 60 * 1000;
 static STARTED_AT: OnceLock<i64> = OnceLock::new();
 static SLOW_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
 static USAGE_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
+/// Đang có một luồng đi hỏi hạn mức hay chưa — để vòng chạy kế tiếp không đẻ
+/// thêm ba tiến trình `claude` nữa trong lúc lượt trước còn dở.
+static USAGE_REFRESHING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Called once by `hubd` at boot so "how long has it been up" is a fact rather
 /// than a guess from the first cycle.
@@ -167,21 +171,47 @@ fn slow_block(cfg: &Config, now: i64) -> Value {
     v
 }
 
-/// Hạn mức, cache 5 phút.
+/// Hạn mức, cache 5 phút — và **không bao giờ bắt vòng chạy đứng đợi**.
+///
+/// Hết hạn thì trả BẢN CŨ ngay rồi cho một luồng riêng đi hỏi lại. Vì sao không
+/// hỏi tại chỗ: ba lần spawn `claude` kéo một vòng lên **80 giây** (đo
+/// 2026-08-10 ngay sau khi thêm), mà mỗi vòng là một nhịp hub đọc lệnh từ điện
+/// thoại — nên cái giá không phải "số liệu chậm 30 giây" mà là "lệnh của chủ máy
+/// nằm chờ hơn một phút". Đúng bài học đã ghi trong `CLAUDE.md` đêm trước về
+/// luật tự đóng sổ (90s → 3,2s), và tôi vừa tái phạm bằng một phép dò mới.
+///
+/// Một số liệu trễ 5 phút mà màn vẫn mượt thì tốt hơn một số liệu tươi mà cả
+/// hub khựng lại.
 fn usage_cached(cfg: &Config, now: i64) -> Value {
     let cell = USAGE_CACHE.get_or_init(|| Mutex::new(None));
-    if let Ok(guard) = cell.lock() {
-        if let Some((at, v)) = &*guard {
-            if now - at < USAGE_TTL_MS {
-                return v.clone();
-            }
+    let cached = cell.lock().ok().and_then(|g| g.clone());
+    if let Some((at, v)) = &cached {
+        if now - at < USAGE_TTL_MS {
+            return v.clone();
         }
     }
-    let v = json!({ "checked_at": now, "accounts": usage_block(cfg) });
-    if let Ok(mut guard) = cell.lock() {
-        *guard = Some((now, v.clone()));
+
+    // Chỉ một luồng làm mới tại một thời điểm: vòng chạy tới trước khi lượt
+    // trước xong thì cứ dùng bản cũ, đừng đẻ thêm ba tiến trình `claude` nữa.
+    if !USAGE_REFRESHING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let cfg = cfg.clone();
+        std::thread::spawn(move || {
+            let v = json!({
+                "checked_at": chrono::Utc::now().timestamp_millis(),
+                "accounts": usage_block(&cfg),
+            });
+            if let Ok(mut guard) = USAGE_CACHE.get_or_init(|| Mutex::new(None)).lock() {
+                *guard = Some((chrono::Utc::now().timestamp_millis(), v));
+            }
+            USAGE_REFRESHING.store(false, std::sync::atomic::Ordering::SeqCst);
+        });
     }
-    v
+
+    // Lần đầu tiên thì chưa có gì để trả. Nói "đang đo" chứ đừng trả một đối
+    // tượng rỗng trông y hệt "đã đo xong và mọi thứ bằng 0".
+    cached
+        .map(|(_, v)| v)
+        .unwrap_or_else(|| json!({ "pending": true }))
 }
 
 /// **Còn bao nhiêu hạn mức** — hỏi `claude -p "/usage"` cho từng tài khoản.

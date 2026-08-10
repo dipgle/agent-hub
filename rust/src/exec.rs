@@ -40,6 +40,39 @@ pub struct RunOpts<'a> {
 const POLL: Duration = Duration::from_millis(50);
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
+/// Giết cả nhóm tiến trình của `pid` (con, cháu, chắt).
+///
+/// Dùng `/bin/kill` thay vì `libc::kill`: crate này không có `libc` trong danh
+/// sách phụ thuộc, và gọi thẳng syscall thì phải mở `unsafe` — thứ repo này cấm
+/// tuyệt đối. Một lần spawn `/bin/kill` khi HẾT GIỜ (chuyện hiếm) rẻ hơn nhiều
+/// so với việc nới luật ấy.
+///
+/// TERM trước rồi KILL: cho tiến trình cơ hội dọn dẹp, nhưng đừng chờ nó.
+/// Lỗi ở đây không báo ra ngoài vì "không giết được" gần như luôn có nghĩa là
+/// "nó chết rồi" — nhưng vẫn ghi log, vì một tiến trình không chịu chết là thứ
+/// đáng biết.
+#[cfg(unix)]
+fn kill_group(pid: u32) {
+    for sig in ["-TERM", "-KILL"] {
+        let out = Command::new("/bin/kill")
+            .args([sig, &format!("-{pid}")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if let Err(e) = out {
+            crate::logging::warn(
+                "kill_group_failed",
+                serde_json::json!({ "pid": pid, "sig": sig, "err": e.to_string() }),
+            );
+            return;
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_group(_pid: u32) {}
+
 /// Run a command, capture stdout/stderr, enforce a hard timeout.
 /// Never errors on a non-zero exit — the caller decides what failure means.
 /// Only a spawn failure is an `Err`.
@@ -53,6 +86,21 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Mỗi lời gọi một NHÓM TIẾN TRÌNH riêng, để lúc hết giờ giết được cả họ.
+    //
+    // Vì sao cần (đo 2026-08-10): `claude` là một wrapper — nó spawn tiếp một
+    // binary native, và `child.kill()` chỉ giết đúng đứa con trực tiếp. Đứa cháu
+    // sống sót, treo vô hạn, và mỗi lần hết giờ lại bỏ lại một tiến trình nữa:
+    // tìm ra hai con `claude /usage` nằm im, một con treo từ bốn tiếng trước.
+    // Một phép dò chạy 5 phút một lần mà rò tiến trình thì tệ hơn không dò.
+    //
+    // `process_group(0)` là API AN TOÀN (không cần `unsafe`, luật của repo);
+    // con thành trưởng nhóm với pgid = pid của chính nó.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     if let Some(dir) = opts.cwd {
         command.current_dir(dir);
     }
@@ -116,6 +164,7 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
                     // means the child is already gone, which is the same
                     // outcome. The timeout itself is never hidden.
                     timed_out = true;
+                    kill_group(child.id());
                     let _ = child.kill();
                     let _ = child.wait();
                     break None;
@@ -179,4 +228,57 @@ pub fn truncate(s: &str, n: usize) -> String {
         return s.to_string();
     }
     s.chars().take(n).collect::<String>() + "…"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Hết giờ phải giết CẢ HỌ, không chỉ đứa con trực tiếp.
+    ///
+    /// Đây là lỗi thật, tìm ra 2026-08-10: `claude` là một wrapper spawn tiếp
+    /// một binary native, nên `child.kill()` để lại đứa cháu treo vô hạn — hai
+    /// con `claude /usage` nằm im trên máy, một con sống bốn tiếng. Phép dò chạy
+    /// 5 phút một lần mà mỗi lần rò một tiến trình thì tệ hơn không dò.
+    ///
+    /// Dựng lại đúng hình dạng ấy: `sh` (con) sinh ra `sleep` (cháu) rồi đứng
+    /// chờ. Giết con mà không giết nhóm thì `sleep` sống tiếp.
+    #[test]
+    fn a_timeout_kills_grandchildren_not_just_the_child() {
+        let pidfile = std::env::temp_dir().join(format!("hub-exec-{}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&pidfile);
+        let script = format!("sleep 30 & echo $! > {}; wait", pidfile.display());
+
+        let out = run(
+            "/bin/sh",
+            &["-c", &script],
+            RunOpts {
+                timeout: Some(Duration::from_secs(2)),
+                ..Default::default()
+            },
+        )
+        .expect("spawn được");
+        assert!(out.timed_out, "phép thử vô nghĩa nếu nó không hết giờ");
+
+        let pid = std::fs::read_to_string(&pidfile)
+            .expect("đứa cháu phải kịp ghi pid — nếu không thì phép đo đang nhìn vào hư không")
+            .trim()
+            .to_string();
+        assert!(!pid.is_empty(), "không đọc được pid của đứa cháu");
+
+        // `kill -0` chỉ hỏi "còn sống không", không gửi tín hiệu nào.
+        std::thread::sleep(Duration::from_millis(400));
+        let alive = Command::new("/bin/kill")
+            .args(["-0", &pid])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        let _ = std::fs::remove_file(&pidfile);
+        if alive {
+            let _ = Command::new("/bin/kill").args(["-KILL", &pid]).status();
+        }
+        assert!(!alive, "đứa cháu {pid} vẫn sống sau khi hết giờ");
+    }
 }

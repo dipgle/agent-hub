@@ -212,8 +212,22 @@ try {
   if (r.status === 0) {
     console.log(`\nẢnh 5 màn sau deploy: ui-shots/${tag}-*.png — MỞ RA NHÌN trước khi nói xong.`);
   } else {
-    // Không chụp được thì nói ra; im lặng ở đây là quay về đúng thói quen cũ.
-    console.log(`\n⚠ không chụp được ảnh sau deploy (exit ${r.status}) — hãy tự chạy fe-shots.mjs.`);
+    // Thử LẠI một lần: bundle vừa đổi xong, trang có nhịp chuyển và lượt chụp
+    // đầu tiên có thể rơi đúng vào đó (gặp thật ở v141, chạy tay ngay sau đó thì
+    // exit 0). Một lần thử lại rẻ hơn hẳn việc bỏ luôn thói quen nhìn.
+    const again = spawnSync(
+      "node",
+      [HERE + "fe-shots.mjs", APP_TID, "alice_local", env.HUB_TFL5_ALICE_PASSWORD || "", tag],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+    );
+    if (again.status === 0) {
+      console.log(`\nẢnh 5 màn sau deploy (lượt thử lại): ui-shots/${tag}-*.png — MỞ RA NHÌN.`);
+    } else {
+      // In LÝ DO, không chỉ mã thoát. Một dòng "exit 1" trần trụi là đúng thứ
+      // dự án này gọi là lỗi im lặng — nó không nói được vì sao để mà sửa.
+      const why = `${again.stdout || ""}${again.stderr || ""}`.trim().split("\n").slice(-6).join("\n  ");
+      console.log(`\n⚠ không chụp được ảnh sau deploy (exit ${again.status}) — hãy tự chạy fe-shots.mjs.\n  ${why}`);
+    }
   }
 } catch (e) {
   console.log(`\n⚠ không chụp được ảnh sau deploy: ${e.message}`);

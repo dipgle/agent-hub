@@ -9,7 +9,8 @@ ngồi máy"*. Vậy vạch đích **không** phải "xem tóm tắt phiên" mà
 thứ terminal đang hiện**: lời nói, suy nghĩ, từng lệnh chạy và kết quả của nó,
 file bị sửa, lúc nào phiên xin quyền.
 
-Luồng kỹ thuật: `fe/flow.html`. Hướng và lý do: `memory/active-context.md`.
+Kiến trúc và *vì sao* nó có hình dạng này: `fe/flow.html` (ảnh chụp 8/8, KHÔNG phải
+bảng trạng thái). Hướng và lý do: `memory/active-context.md`.
 
 > **Đọc mọi con số `$` trong sổ này thế nào (chốt 2026-08-09).** Máy này chạy
 > gói **Max** (`claude auth status` → `subscriptionType: max`): **không có hoá

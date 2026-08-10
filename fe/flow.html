@@ -248,6 +248,19 @@
       là <strong>hub gọi ra, tfl5 làm điểm hẹn</strong>. Tất cả số liệu dưới đây đo
       trên máy thật lúc dựng, không phải ví dụ.
     </p>
+    <p class="lede" style="border-left:3px solid #a33a2c; padding-left:12px; color:#a33a2c">
+      <strong>Đây là tài liệu KIẾN TRÚC, không phải bảng trạng thái.</strong> Nó
+      giải thích <em>vì sao</em> hệ thống có hình dạng này, và mọi con số trong
+      đây đo ngày <strong>8/8/2026</strong>. Trạng thái sống — cái gì đã chạy
+      thật, cái gì còn nợ — nằm ở <code>PLAN.md</code> và <code>UC.md</code>,
+      cập nhật cùng ngày với mã.
+      <br /><br />
+      Bảng “làm được gì / chưa làm được gì” và đoạn “thứ tự tiếp theo” đã bị gỡ
+      khỏi đây ngày <strong>10/8/2026</strong>: chúng còn ghi “chưa” cho những
+      thứ đã chạy hàng tuần (xem phiên trên điện thoại, mở phiên mới, gõ vào
+      phiên, điều khiển). Một tài liệu dạy sai hình dạng sản phẩm thì tệ hơn
+      không có tài liệu — và hai chỗ kia đã làm việc ấy tốt hơn, mỗi ngày.
+    </p>
   </header>
 
   <hr class="rule" />
@@ -506,7 +519,7 @@
 
   <section>
     <div class="prose">
-      <h2>4. Điều khiển: phiên do hub nuôi <span class="chip todo">chưa làm</span></h2>
+      <h2>4. Điều khiển: phiên do hub nuôi <span class="chip done">đã chạy</span></h2>
       <p>
         Bước 2 là gõ vào phiên từ điện thoại. Đích của nó là <strong>những phiên hub tự khởi
         động</strong> — một đường thẳng, không có ngoại lệ nào phải xử lý riêng.
@@ -653,68 +666,6 @@
 
   <hr class="rule" />
 
-  <section>
-    <div class="prose">
-      <h2>6. Làm được gì, chưa làm được gì</h2>
-      <p>Bảng này là thứ nên đọc trước khi hứa bất cứ điều gì với người khác. Phiên mở trong VS Code nằm ở cột “theo dõi”, không nằm ở cột “điều khiển”.</p>
-    </div>
-
-    <div class="tablewrap">
-      <table>
-        <thead>
-          <tr>
-            <th scope="col">Việc</th>
-            <th scope="col">Trạng thái</th>
-            <th scope="col">Bằng cách nào</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Thấy mọi phiên đang chạy</td>
-            <td><span class="chip done">chạy rồi</span></td>
-            <td class="mono">claude agents --json × 3 tài khoản</td>
-          </tr>
-          <tr>
-            <td>Đọc phiên đang làm gì, tới đâu</td>
-            <td><span class="chip done">chạy rồi</span></td>
-            <td class="mono">đuôi 256 KB của tệp .jsonl</td>
-          </tr>
-          <tr>
-            <td>Chặn bí mật rò ra trang web</td>
-            <td><span class="chip done">chạy rồi</span></td>
-            <td>quét tại nguồn — ẩn 1/14, sót 0</td>
-          </tr>
-          <tr>
-            <td>Xem trên giao diện điện thoại</td>
-            <td><span class="chip todo">chưa</span></td>
-            <td>mới có CLI + JSON, chưa đẩy lên trang</td>
-          </tr>
-          <tr>
-            <td>Biết phiên nào đang chờ mình</td>
-            <td><span class="chip todo">chưa</span></td>
-            <td>bản ghi cuối không đủ để suy — chưa hứa</td>
-          </tr>
-          <tr>
-            <td>Mở phiên mới từ điện thoại</td>
-            <td><span class="chip todo">chưa</span></td>
-            <td class="mono">claude --bg</td>
-          </tr>
-          <tr>
-            <td>Gõ vào phiên do hub nuôi</td>
-            <td><span class="chip todo">chưa</span></td>
-            <td class="mono">-p --resume &lt;sessionId&gt;</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="prose">
-      <p>
-        Thứ tự tiếp theo: đẩy danh sách phiên vào ảnh chụp → dựng màn hình trên tfl5 → nghiệm thu thẳng ở
-        390&nbsp;px, rồi mới tới điều khiển.
-      </p>
-    </div>
-  </section>
 
   <footer class="prose">
     <hr class="rule" />

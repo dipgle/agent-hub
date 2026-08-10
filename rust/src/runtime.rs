@@ -32,8 +32,12 @@ use crate::sessions::SessionsSnapshot;
 /// login state change on the scale of days, not seconds.
 const SLOW_TTL_MS: i64 = 10 * 60 * 1000;
 
+/// Hạn mức đổi nhanh hơn "plist đã cài chưa", và Hà chỉ cần 5 phút một lần.
+const USAGE_TTL_MS: i64 = 5 * 60 * 1000;
+
 static STARTED_AT: OnceLock<i64> = OnceLock::new();
 static SLOW_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
+static USAGE_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
 
 /// Called once by `hubd` at boot so "how long has it been up" is a fact rather
 /// than a guess from the first cycle.
@@ -50,6 +54,10 @@ pub fn snapshot(cfg: &Config, db: &Db, live: &SessionsSnapshot) -> Value {
         "accounts": accounts_block(cfg, live),
         "errors": errors_block(db),
         "slow": slow_block(cfg, now),
+        // Nhịp RIÊNG, ngắn hơn khối chậm: Hà xin 5 phút cho hạn mức, còn
+        // "plist đã cài chưa" thì đổi theo ngày. Gộp chung là hoặc hỏi
+        // `launchctl` nhiều gấp đôi cần thiết, hoặc để hạn mức cũ gấp đôi.
+        "usage": usage_cached(cfg, now),
     })
 }
 
@@ -159,6 +167,155 @@ fn slow_block(cfg: &Config, now: i64) -> Value {
     v
 }
 
+/// Hạn mức, cache 5 phút.
+fn usage_cached(cfg: &Config, now: i64) -> Value {
+    let cell = USAGE_CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(guard) = cell.lock() {
+        if let Some((at, v)) = &*guard {
+            if now - at < USAGE_TTL_MS {
+                return v.clone();
+            }
+        }
+    }
+    let v = json!({ "checked_at": now, "accounts": usage_block(cfg) });
+    if let Ok(mut guard) = cell.lock() {
+        *guard = Some((now, v.clone()));
+    }
+    v
+}
+
+/// **Còn bao nhiêu hạn mức** — hỏi `claude -p "/usage"` cho từng tài khoản.
+///
+/// Hà 2026-08-10: *"thông tin tài khoản không có thông tin usage?"*. Không có
+/// thật, và ba đường tĩnh đều đã thử rồi loại bằng đo đạc:
+/// - `claude auth status` chỉ có hòm thư + gói, không có hạn mức;
+/// - `claude auth --help` chỉ có `login/logout/status`;
+/// - nhật ký phiên chỉ ghi token TỪNG LƯỢT (`usage.input_tokens`…), không ghi
+///   cửa sổ giới hạn; `stats-cache.json` thì cũ và chỉ có ở một tài khoản.
+///   Và cả ba tài khoản **dùng chung một kho nhật ký** (`~/.claude-accN/projects`
+///   là symlink tới `~/.claude/projects`), nên không thể tách token theo tài
+///   khoản bằng thư mục.
+///
+/// Đường lấy được số THẬT: `claude -p "/usage" --output-format json`. Đo
+/// 2026-08-10 — `num_turns: 0`, `duration_api_ms: 0`, `total_cost_usd: 0`: đây
+/// là lệnh phía client, **không gọi model, không tiêu hạn mức**. Trả về đúng cái
+/// Claude tự tính:
+///
+/// ```text
+/// Current session: 6% used · resets Aug 10 at 1:29pm (Asia/Saigon)
+/// Current week (all models): 98% used · resets Aug 11 at 12:59pm
+/// Current week (Fable): 50% used · resets Aug 11 at 1pm
+/// ```
+///
+/// Cache 5 phút (Hà: *"không cần thường xuyên, chỉ cần 5p 1 lần là được"*) —
+/// mỗi lượt là ba lần spawn tiến trình, nên đừng gắn nó vào mỗi vòng poll.
+fn usage_block(cfg: &Config) -> Value {
+    let mut map = serde_json::Map::new();
+    for acc in cfg.claude_accounts_or_ambient() {
+        let env = account_env(&acc);
+        let out = run(
+            &cfg.claude_cli,
+            &["-p", "/usage", "--output-format", "json"],
+            RunOpts {
+                timeout: Some(Duration::from_secs(60)),
+                env,
+                ..Default::default()
+            },
+        );
+        let row = match out {
+            Ok(r) => {
+                let text = serde_json::from_str::<Value>(r.stdout.trim())
+                    .ok()
+                    .and_then(|v| v.get("result").and_then(Value::as_str).map(str::to_string));
+                match text {
+                    Some(t) => parse_usage(&t),
+                    None => {
+                        crate::logging::warn(
+                            "usage_probe_unparsed",
+                            json!({ "account": acc.name, "code": r.code }),
+                        );
+                        json!({ "err": "không đọc được câu trả lời của /usage" })
+                    }
+                }
+            }
+            Err(e) => {
+                crate::logging::warn(
+                    "usage_probe_failed",
+                    json!({ "account": acc.name, "err": e.to_string() }),
+                );
+                json!({ "err": e.to_string() })
+            }
+        };
+        map.insert(acc.name.clone(), row);
+    }
+    Value::Object(map)
+}
+
+/// Bóc ba dòng phần trăm ra khỏi câu trả lời của `/usage`.
+///
+/// Giữ nguyên `raw` khi không khớp: câu chữ của CLI có thể đổi, và lúc ấy thà
+/// hiện một dòng thô còn hơn hiện `0%` — một con số bịa trông y hệt một con số
+/// thật, và đây là con số dùng để quyết định mở phiên bằng tài khoản nào.
+fn parse_usage(text: &str) -> Value {
+    let mut out = serde_json::Map::new();
+    let mut hit = false;
+    for line in text.lines() {
+        let line = line.trim();
+        let Some((head, rest)) = line.split_once(':') else {
+            continue;
+        };
+        let Some(pct_str) = rest.split('%').next() else {
+            continue;
+        };
+        let Ok(pct) = pct_str.trim().parse::<u32>() else {
+            continue;
+        };
+        let resets = rest
+            .split_once("resets")
+            .map(|(_, r)| r.trim().trim_end_matches('.').to_string());
+        let key = match head.trim() {
+            "Current session" => "session",
+            h if h.starts_with("Current week") && h.contains("all models") => "week",
+            h if h.starts_with("Current week") => "week_model",
+            _ => continue,
+        };
+        hit = true;
+        out.insert(format!("{key}_pct"), json!(pct));
+        if let Some(r) = resets {
+            out.insert(format!("{key}_resets"), json!(r));
+        }
+        if key == "week_model" {
+            // "Current week (Fable)" → "Fable"
+            if let Some(name) = head.split_once('(').and_then(|(_, n)| n.split_once(')')) {
+                out.insert("week_model_name".into(), json!(name.0));
+            }
+        }
+    }
+    if !hit {
+        return json!({ "raw": text.lines().take(3).collect::<Vec<_>>().join(" · ") });
+    }
+    Value::Object(out)
+}
+
+/// Môi trường chọn tài khoản cho một lời gọi `claude`.
+///
+/// Tài khoản mặc định chọn bằng cách KHÔNG có `CLAUDE_CONFIG_DIR` — trỏ nó vào
+/// `~/.claude` là một chuyện khác. Đo được ngay ngày đầu: gọi tay trong shell
+/// đang set `CLAUDE_CONFIG_DIR=acc3` thì "acc1" trả về hòm thư của acc3.
+fn account_env(acc: &crate::config::ClaudeAccountCfg) -> Vec<(String, Option<String>)> {
+    match acc.config_dir.as_ref() {
+        Some(d) => vec![(
+            "CLAUDE_CONFIG_DIR".to_string(),
+            Some(
+                crate::config::expand_home(Path::new(d))
+                    .display()
+                    .to_string(),
+            ),
+        )],
+        None => vec![("CLAUDE_CONFIG_DIR".to_string(), None)],
+    }
+}
+
 /// **Tài khoản này là AI** — hỏi `claude auth status` cho từng cấu hình.
 ///
 /// Hà, 2026-08-10, nhìn màn: *"danh sách acc đang thiếu nhiều thông tin"*. Đúng:
@@ -177,17 +334,7 @@ fn slow_block(cfg: &Config, now: i64) -> Value {
 fn auth_block(cfg: &Config) -> Value {
     let mut map = serde_json::Map::new();
     for acc in cfg.claude_accounts_or_ambient() {
-        let env = match acc.config_dir.as_ref() {
-            Some(d) => vec![(
-                "CLAUDE_CONFIG_DIR".to_string(),
-                Some(
-                    crate::config::expand_home(Path::new(d))
-                        .display()
-                        .to_string(),
-                ),
-            )],
-            None => vec![("CLAUDE_CONFIG_DIR".to_string(), None)],
-        };
+        let env = account_env(&acc);
         let out = run(
             &cfg.claude_cli,
             &["auth", "status"],
@@ -430,6 +577,41 @@ mod tests {
     /// Không có cây nguồn trên máy (bản cài đem từ nơi khác) thì trả `None` để
     /// màn nói "không rõ", KHÔNG phải `false` — đoán bừa là cách một phép đo
     /// biến thành một lời nói dối yên tâm.
+    /// Câu trả lời thật của `claude -p "/usage"`, chép nguyên văn 2026-08-10.
+    const USAGE_SAMPLE: &str = "You are currently using your subscription to power your Claude Code usage\n\nCurrent session: 6% used · resets Aug 10 at 1:29pm (Asia/Saigon)\nCurrent week (all models): 98% used · resets Aug 11 at 12:59pm (Asia/Saigon)\nCurrent week (Fable): 50% used · resets Aug 11 at 1pm (Asia/Saigon)\n\nWhat's contributing to your limits usage?";
+
+    #[test]
+    fn usage_is_read_out_of_the_real_answer() {
+        let v = parse_usage(USAGE_SAMPLE);
+        assert_eq!(v["session_pct"], 6);
+        assert_eq!(v["week_pct"], 98);
+        assert_eq!(v["week_model_pct"], 50);
+        assert_eq!(v["week_model_name"], "Fable");
+        assert!(v["week_resets"].as_str().unwrap().contains("Aug 11"));
+        assert!(v.get("raw").is_none());
+    }
+
+    /// Câu chữ của CLI đổi thì phải trả về NGUYÊN VĂN, tuyệt đối không trả 0%.
+    /// Một con số bịa trông y hệt một con số thật, và đây là con số dùng để
+    /// quyết định mở phiên bằng tài khoản nào.
+    #[test]
+    fn unknown_wording_keeps_the_raw_text_instead_of_inventing_zero() {
+        let v = parse_usage("Usage limits are not available for this account.\nSecond line.");
+        assert!(v.get("session_pct").is_none(), "bịa ra một con số: {v}");
+        assert!(v.get("week_pct").is_none());
+        assert!(v["raw"].as_str().unwrap().contains("not available"));
+    }
+
+    /// Một dòng đọc được, một dòng không, thì giữ dòng đọc được — đừng vứt cả
+    /// hai chỉ vì CLI thêm một mục mới.
+    #[test]
+    fn a_half_understood_answer_keeps_what_it_understood() {
+        let v = parse_usage("Current session: 12% used · resets tomorrow\nSomething new: yes");
+        assert_eq!(v["session_pct"], 12);
+        assert!(v.get("week_pct").is_none());
+        assert!(v.get("raw").is_none());
+    }
+
     #[test]
     fn newest_source_mtime_is_unknown_when_there_is_no_tree() {
         let missing = std::env::temp_dir().join(format!("hub-rt-missing-{}", std::process::id()));

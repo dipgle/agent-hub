@@ -2089,9 +2089,15 @@
     // giờ hiện — đúng thứ vừa thêm vào lại không thấy đâu.
     const wantLabels = accounts
       .map((a, i) => {
-        const mail = ((((lastSnap || {}).runtime || {}).slow || {}).auth || {})[a.name]?.email;
+        const rtx = ((lastSnap || {}).runtime || {});
+        const mail = ((rtx.slow || {}).auth || {})[a.name]?.email;
+        const uu = ((rtx.usage || {}).accounts || {})[a.name];
         const who = i === 0 ? `${a.name} (mặc định)` : a.name;
-        return mail ? `${who} — ${mail}` : who;
+        let s = mail ? `${who} — ${mail}` : who;
+        if (uu && (uu.session_pct != null || uu.week_pct != null)) {
+          s += ` · phiên ${uu.session_pct ?? '?'}% · tuần ${uu.week_pct ?? '?'}%`;
+        }
+        return s;
       })
       .join('|');
     const haveLabels = accSel ? [...accSel.options].map((o) => o.textContent).join('|') : '';
@@ -2108,6 +2114,13 @@
         const mail = (authAll[a.name] || {}).email;
         const who = i === 0 ? `${a.name} (mặc định)` : a.name;
         o.textContent = mail ? `${who} — ${mail}` : who;
+        // Hạn mức ngay trong ô chọn: chọn tài khoản là lúc DUY NHẤT con số ấy
+        // đổi được quyết định. Đo 2026-08-10: acc2 phiên 100% — mở phiên bằng
+        // nó là mở vào tường.
+        const uu = (((lastSnap || {}).runtime || {}).usage || {}).accounts?.[a.name];
+        if (uu && (uu.session_pct != null || uu.week_pct != null)) {
+          o.textContent += ` · phiên ${uu.session_pct ?? '?'}% · tuần ${uu.week_pct ?? '?'}%`;
+        }
         accSel.append(o);
       });
       if (keep) accSel.value = keep;
@@ -3111,25 +3124,43 @@
     // KHÔNG có "hạn mức còn lại": `claude` CLI không trả nó ngoài phiên tương
     // tác (`/usage`), và bịa một con số ra màn còn tệ hơn để trống.
     const authAll = (rt.slow || {}).auth || {};
+    const usageAll = ((rt.usage || {}).accounts) || {};
     (rt.accounts || []).forEach((a) => {
       const auth = authAll[a.name] || {};
-      const bits = [`${a.alive}/${a.sessions} phiên đang sống`];
+      const u = usageAll[a.name] || {};
+      // HẠN MỨC ĐỨNG TRƯỚC. Đây là con số quyết định "mở phiên bằng acc nào";
+      // số phiên đang sống thì chỉ để tham khảo. Đo 2026-08-10 ngay lần chạy
+      // đầu: acc2 phiên 100% (hết), acc3 tuần 98% — không nhìn thấy thì cứ mở
+      // đại rồi đâm vào tường.
+      const bits = [];
+      if (u.session_pct != null) bits.push(`phiên ${u.session_pct}%`);
+      if (u.week_pct != null) bits.push(`tuần ${u.week_pct}%`);
+      if (u.week_model_pct != null && u.week_model_name) {
+        bits.push(`${u.week_model_name} ${u.week_model_pct}%`);
+      }
+      if (u.raw) bits.push(u.raw);
+      if (u.err) bits.push('chưa đo được hạn mức');
+      bits.push(`${a.alive}/${a.sessions} phiên`);
       if (auth.email) bits.push(auth.email);
       if (auth.subscription) bits.push(`gói ${auth.subscription}`);
       if (auth.logged_in === false) bits.push('CHƯA đăng nhập');
       if (auth.err) bits.push('chưa hỏi được trạng thái đăng nhập');
       if (!a.ok) bits.push(a.note || 'không trả lời');
-      const bad = !a.ok || auth.logged_in === false;
-      row(
-        `tài khoản ${a.name}`,
-        bits.join(' · '),
-        bad ? 'bad' : '',
-        // Thư mục cấu hình là thứ phân biệt ba tài khoản trên cùng một máy;
-        // hiện nó ra khi có, vì "acc2 là cái nào" trả lời được bằng đúng dòng này.
-        a.config_dir && a.config_dir_exists === false
-          ? `thiếu thư mục ${a.config_dir}`
-          : a.config_dir || ''
-      );
+
+      const worst = Math.max(u.session_pct ?? 0, u.week_pct ?? 0);
+      let cls = '';
+      if (!a.ok || auth.logged_in === false || worst >= 95) cls = 'bad';
+      else if (worst >= 80) cls = 'warn';
+
+      // Mốc hồi hạn mức nằm ở dòng phụ: nó là thứ đọc MỘT LẦN khi đã thấy con
+      // số đỏ, không phải thứ phải đọc mỗi lần liếc màn.
+      const when = [];
+      if (u.session_resets) when.push(`phiên hồi ${u.session_resets}`);
+      if (u.week_resets) when.push(`tuần hồi ${u.week_resets}`);
+      if (a.config_dir_exists === false) when.push(`THIẾU thư mục ${a.config_dir}`);
+      else if (a.config_dir) when.push(a.config_dir);
+
+      row(`tài khoản ${a.name}`, bits.join(' · '), cls, when.join(' · '));
     });
 
     const errs = rt.errors || [];

@@ -178,6 +178,41 @@ try {
     Object.values(moneyPerTab).every((v) => !v),
     Object.entries(moneyPerTab).map(([k, v]) => `${k}:${v ? "CÓ" : "sạch"}`).join(" "));
 
+  // ---- hàng tài khoản phải nói được HẠN MỨC -------------------------------
+  // Hà 2026-08-10: *"thông tin tài khoản không có thông tin usage?"*. Con số này
+  // là thứ quyết định mở phiên bằng tài khoản nào — đo cùng ngày: acc2 phiên
+  // 100% (hết sạch), acc3 tuần 98%. Kiểm bằng CHỮ TRÊN MÀN, và đòi có ít nhất
+  // một tài khoản mang số thật: `usage` rỗng cho cả ba nghĩa là phép dò hỏng mà
+  // màn vẫn xanh.
+  // Hạn mức đo bằng 3 lần spawn `claude` và cache 5 phút, nên NGAY SAU khi
+  // daemon khởi động lại thì ảnh chụp đầu tiên chưa có nó. Chờ tới khi có (trang
+  // tự làm mới 15s/lần) rồi hãy kết luận — bản đầu của phép đo này báo đỏ chỉ vì
+  // chạy sớm hơn dữ liệu, và một phép đo đỏ vì lý do ấy sẽ bị bỏ qua sau vài lần.
+  await page
+    .waitForFunction(
+      () => /phiên \d+%/.test(document.getElementById("runtimeBox")?.innerText || ""),
+      null,
+      { timeout: 90000, polling: 2000 }
+    )
+    .catch(() => {});
+  const accountRows = await page.evaluate(() =>
+    [...document.querySelectorAll("#runtimeBox .rt-row")]
+      .map((r) => r.textContent.trim())
+      .filter((t) => /^tài khoản /.test(t))
+  );
+  check("có hàng cho từng tài khoản", accountRows.length >= 1, `${accountRows.length} hàng`);
+  const withUsage = accountRows.filter((t) => /phiên \d+%/.test(t) && /tuần \d+%/.test(t));
+  check(
+    "hàng tài khoản nói hạn mức đã dùng (phiên % + tuần %)",
+    withUsage.length === accountRows.length,
+    `${withUsage.length}/${accountRows.length} hàng có số · ví dụ: ${(accountRows[0] || "").slice(0, 90)}`
+  );
+  check(
+    "có kèm mốc hồi hạn mức để biết chờ tới bao giờ",
+    /hồi/.test(await page.locator("#runtimeBox").innerText()),
+    (accountRows[0] || "").slice(0, 60)
+  );
+
   // ---- bốn tab dùng chung một khung cuộn ----------------------------------
   // Hà 2026-08-10: *"các ui theo menu đang bị ảnh hưởng nhau … luôn bị nhảy
   // cuộn xuống cuối trang rất khó chịu"*. Cơ chế: `main` là khung cuộn DUY NHẤT

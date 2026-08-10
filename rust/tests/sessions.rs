@@ -1,8 +1,16 @@
 //! The read-only view of the Claude CLI sessions running on this machine.
 //! Every case here came from real output on 2026-08-08, not from imagination.
 
-use hub::sessions::{parse_stream, parse_tail, preview_risk, transcript_path, transcript_slug};
+use hub::sessions::{
+    parse_stream, parse_tail, pending_for_display, preview_risk, transcript_path, transcript_slug,
+};
+use std::collections::HashSet;
 use std::path::Path;
+
+/// Phiên chưa từng tung subagent chạy nền — trạng thái của phần lớn phiên.
+fn no_background() -> HashSet<String> {
+    HashSet::new()
+}
 
 #[test]
 fn cwd_maps_to_the_folder_the_cli_writes_transcripts_into() {
@@ -38,7 +46,7 @@ fn the_last_record_is_usually_not_the_last_turn() {
 {"type":"pr-link","url":"https://github.com/x/y/pull/1"}
 {"type":"file-history-snapshot","files":3}
 "#;
-    let t = parse_tail(tail);
+    let t = parse_tail(tail, &no_background());
     assert_eq!(t.last_role.as_deref(), Some("assistant"));
     assert_eq!(t.last_text.as_deref(), Some("Đã chạy, 162 test xanh."));
     assert_eq!(t.last_ts.as_deref(), Some("2026-08-08T01:02:00Z"));
@@ -49,7 +57,7 @@ fn a_turn_that_is_only_tool_calls_still_says_what_it_was_doing() {
     // Two of the live sessions were mid-tool-call, which has no text at all.
     // An empty row would read as "idle" when the session is actually working.
     let tail = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{}}]},"timestamp":"2026-08-08T02:00:00Z"}"#;
-    assert_eq!(parse_tail(tail).last_text.as_deref(), Some("[dùng Bash]"));
+    assert_eq!(parse_tail(tail, &no_background()).last_text.as_deref(), Some("[dùng Bash]"));
 }
 
 #[test]
@@ -57,14 +65,14 @@ fn a_half_line_at_the_start_of_the_tail_is_skipped_not_fatal() {
     // The tail starts mid-file by design (256 KB from the end), so the first
     // line is usually a fragment.
     let tail = "ontent\":\"cụt\"}}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ổn\"}]}}";
-    assert_eq!(parse_tail(tail).last_text.as_deref(), Some("ổn"));
+    assert_eq!(parse_tail(tail, &no_background()).last_text.as_deref(), Some("ổn"));
 }
 
 #[test]
 fn nothing_conversational_yields_nothing_rather_than_a_wrong_guess() {
     let tail = r#"{"type":"system","subtype":"init"}
 {"type":"queue-operation","op":"add"}"#;
-    let t = parse_tail(tail);
+    let t = parse_tail(tail, &no_background());
     assert_eq!(t.last_text, None);
     assert_eq!(t.last_role, None);
 }
@@ -286,16 +294,74 @@ fn pending_subagents_are_counted_by_id_not_by_name() {
     let one_came_back = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a1","content":"xong"}]}}"#;
     let other_tool = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{}}]}}"#;
 
-    assert_eq!(parse_tail(started_two).pending_subagents, 2);
+    assert_eq!(parse_tail(started_two, &no_background()).pending_subagents, 2);
     assert_eq!(
-        parse_tail(&format!("{started_two}\n{one_came_back}")).pending_subagents,
+        parse_tail(&format!("{started_two}\n{one_came_back}"), &no_background()).pending_subagents,
         1
     );
     // Công cụ khác không phải subagent.
-    assert_eq!(parse_tail(other_tool).pending_subagents, 0);
+    assert_eq!(parse_tail(other_tool, &no_background()).pending_subagents, 0);
     // Không có gì thì không có gì — và một dòng hỏng không được làm hỏng cả bộ.
-    assert_eq!(parse_tail("").pending_subagents, 0);
-    assert_eq!(parse_tail("{ đây không phải json").pending_subagents, 0);
+    assert_eq!(parse_tail("", &no_background()).pending_subagents, 0);
+    assert_eq!(parse_tail("{ đây không phải json", &no_background()).pending_subagents, 0);
+}
+
+/// Subagent CHẠY NỀN: `tool_result` về ngay, nên nó KHÔNG phải dấu kết thúc.
+///
+/// Bug thật, đo 2026-08-10 trên máy này: hai agent đang chạy mà `hub sessions`
+/// khai `pending 0`. Lý do là lệnh gọi nền nhận `tool_result` ngay lập tức —
+/// nội dung chỉ là "đã tung agent" — nên phép khớp tool_use↔tool_result tưởng
+/// nó xong. Đau nhất là chính chế độ nền mới là chế độ con số này sinh ra để
+/// bắt: agent chặn thì phiên cha đang bận nhìn là biết, agent nền thì phiên cha
+/// rảnh tay, từ điện thoại nhìn y hệt một phiên treo.
+///
+/// Dấu kết thúc đúng là khối `<task-notification>` mang cùng `tool-use-id`.
+/// Hai chuỗi dưới đây là hình dạng THẬT lấy từ nhật ký phiên hôm nay, không
+/// phải bịa.
+#[test]
+fn a_background_subagent_is_not_finished_just_because_the_call_returned() {
+    let bg: HashSet<String> = ["toolu_bg1".to_string()].into_iter().collect();
+
+    let launched = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_bg1","name":"Agent","input":{}}]}}"#;
+    // Câu trả lời tức thì của lệnh gọi nền: nó nói "đã tung", không nói "đã xong".
+    let ack = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_bg1","content":"Async agent launched successfully."}]}}"#;
+    let notified = r#"{"type":"user","message":{"content":[{"type":"text","text":"<task-notification>\n<task-id>a55b</task-id>\n<tool-use-id>toolu_bg1</tool-use-id>\n<status>completed</status>\n</task-notification>"}]}}"#;
+
+    let running = format!("{launched}\n{ack}");
+    // Trước bản vá, dòng này ra 0 — và 0 là câu trả lời sai cho "đang chạy không".
+    assert_eq!(parse_tail(&running, &bg).pending_subagents, 1);
+
+    let done = format!("{running}\n{notified}");
+    assert_eq!(parse_tail(&done, &bg).pending_subagents, 0);
+
+    // Cùng một nhật ký, nếu KHÔNG biết đó là lệnh gọi nền thì `tool_result` vẫn
+    // là dấu kết thúc đúng — hai chế độ không được lẫn vào nhau.
+    assert_eq!(parse_tail(&running, &no_background()).pending_subagents, 0);
+}
+
+/// Thông báo kết thúc chỉ đóng ĐÚNG lệnh gọi mà nó nói tới.
+///
+/// Cùng kỷ luật với phần đếm theo id ở trên: tung ba, một cái báo về, thì còn
+/// hai — chứ không phải "có thông báo nào đó nên coi như xong hết".
+#[test]
+fn a_stop_notice_closes_only_the_call_it_names() {
+    let bg: HashSet<String> = ["b1", "b2", "b3"].iter().map(|s| s.to_string()).collect();
+    let launched = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Agent","input":{}},{"type":"tool_use","id":"b2","name":"Task","input":{}},{"type":"tool_use","id":"b3","name":"Agent","input":{}}]}}"#;
+    let one_stopped = r#"{"type":"user","message":{"content":[{"type":"text","text":"<task-notification>\n<tool-use-id>b2</tool-use-id>\n<status>completed</status>\n</task-notification>"}]}}"#;
+
+    assert_eq!(parse_tail(launched, &bg).pending_subagents, 3);
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{one_stopped}"), &bg).pending_subagents,
+        2
+    );
+
+    // Một lượt chạy nền của Bash cũng sinh `<task-notification>` y hệt; nó
+    // không được đóng nhầm một agent nào cả.
+    let other_task = r#"{"type":"user","message":{"content":[{"type":"text","text":"<task-notification>\n<tool-use-id>bash-xyz</tool-use-id>\n<status>completed</status>\n</task-notification>"}]}}"#;
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{other_task}"), &bg).pending_subagents,
+        3
+    );
 }
 
 /// Tự đóng sổ: từng điều kiện một, vì đây là cơ chế TỰ CHẠY.
@@ -334,4 +400,62 @@ fn auto_handover_only_fires_when_the_session_is_truly_done() {
         auto_handover_why(95, 80, true, true, false, false, 0, 300, 120),
         AutoWhy::AlreadyDone
     );
+}
+
+/// Phiên đã chết thì không có gì "đang chạy" — kể cả nhật ký còn dở.
+///
+/// Hồi quy do chính bản vá agent-nền đẻ ra, bắt được bằng cách chạy trên máy
+/// thật chứ không phải bằng test: phiên "Tự chạy lại khi gặp lỗi" tắt từ 11
+/// tiếng trước mà khai 3 subagent đang chạy, vì tiến trình chết mang theo cả
+/// những thông báo kết thúc chưa kịp ghi.
+#[test]
+fn a_dead_session_has_no_running_subagents() {
+    assert_eq!(pending_for_display("dead", 3), 0);
+    // Không dò được tiến trình = KHÔNG BIẾT, và không biết thì không khai
+    // "đang chạy" — cùng lựa chọn "thà thiếu còn hơn nói dối".
+    assert_eq!(pending_for_display("unknown", 3), 0);
+    // Còn sống thì con số đếm được đi thẳng ra màn, không ai chỉnh sửa.
+    for host in ["terminal", "background", "detached", "editor"] {
+        assert_eq!(pending_for_display(host, 3), 3, "host={host}");
+        assert_eq!(pending_for_display(host, 0), 0, "host={host}");
+    }
+}
+
+/// Lời văn NHẮC TỚI thẻ thông báo không được đóng lệnh gọi nào.
+///
+/// Bẫy dogfood, và là bẫy hàng ngày trên chính dự án này: phiên đang sửa đúng
+/// tính năng đếm subagent sẽ có cả `<task-notification>` lẫn một `tool-use-id`
+/// thật nằm trong lời văn — chỗ dán nhật ký ra xem, chỗ bàn cách sửa. Bản đầu
+/// chỉ hỏi "đoạn này có chứa chữ ấy không" rồi hốt mọi id trong cả đoạn, nên
+/// một subagent ĐANG CHẠY bị đóng dấu "xong": con số vẫn nói dối, chỉ đổi
+/// chiều. Cắt theo cặp thẻ là hết.
+#[test]
+fn prose_that_merely_mentions_the_notice_closes_nothing() {
+    let bg: HashSet<String> = ["b1"].iter().map(|s| s.to_string()).collect();
+    let launched = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Agent","input":{}}]}}"#;
+    // Đúng hình dạng một lượt bàn việc: nhắc tên thẻ, rồi trích một id thật.
+    // Mẫu này phải là hình dạng THẬT của một câu bàn việc: nhắc tên khối, rồi
+    // trích một cặp thẻ NGUYÊN VẸN. Mẫu đầu tiên tôi viết có một thẻ mở lửng
+    // đứng trước cặp thật, nên mã cũ hớt phải một chuỗi rác thay vì `b1` và
+    // test xanh cả với mã hỏng — một phép đo mù, bắt được nhờ chạy RED trước.
+    let talking = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Khối <task-notification> đóng lệnh gọi bằng <tool-use-id>b1</tool-use-id>, tức khớp theo id chứ không theo tên."}]}}"#;
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{talking}"), &bg).pending_subagents,
+        1,
+        "lời văn nhắc tới thẻ không được tính là đã xong"
+    );
+
+    // Còn thông báo THẬT thì vẫn phải đóng được.
+    let real = r#"{"type":"user","message":{"content":[{"type":"text","text":"<task-notification>\n<tool-use-id>b1</tool-use-id>\n<status>completed</status>\n</task-notification>"}]}}"#;
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{talking}\n{real}"), &bg).pending_subagents,
+        0
+    );
+
+    // Khối THIẾU thẻ đóng không được tính là thông báo — vì nó không thể là
+    // một thông báo thật: mỗi bản ghi là một dòng JSON trọn vẹn, dòng bị cửa sổ
+    // 256KB cắt thì trượt `from_str` và bị bỏ cả dòng. Còn thứ mở mà không đóng
+    // thì đúng là lời văn, và lời văn không được đóng lệnh gọi nào.
+    let dangling = r#"{"type":"user","message":{"content":[{"type":"text","text":"nói về <task-notification> rồi trích <tool-use-id>b1</tool-use-id> mà không đóng khối"}]}}"#;
+    assert_eq!(parse_tail(&format!("{launched}\n{dangling}"), &bg).pending_subagents, 1);
 }

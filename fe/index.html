@@ -1757,7 +1757,15 @@
     // không cần dựng-theo-khoá như luồng; chỉ cần trả người đọc về đúng thẻ họ
     // đang nhìn, nhận diện bằng `session_id` chứ không bằng vị trí (thứ tự có
     // thể đổi khi một phiên vừa động).
-    const keepAnchor = (() => {
+    //
+    // Trừ khi người ta đang ở ĐỈNH: lúc ấy thứ họ đang nhìn là cái đỉnh, không
+    // phải một thẻ cụ thể. Neo theo thẻ ở đỉnh thì mỗi phiên mới chèn lên trên
+    // sẽ đẩy trang xuống đúng một thẻ — và đẩy đi mất chính cái vừa đến. Đo
+    // 2026-08-10: chạy `fe-board` ngay sau khi daemon khởi động lại (lúc danh
+    // sách mọc dần vì các tài khoản được dò lần lượt) thì trang tự đi **151px**
+    // trong 16 giây dù không ai chạm vào.
+    const atTop = scrollerFor(list).scrollTop <= 2;
+    const keepAnchor = atTop ? null : (() => {
       for (const n of list.querySelectorAll('.sess')) {
         const r = n.getBoundingClientRect();
         if (r.bottom > 0) return { id: n.dataset.session, top: r.top };
@@ -2477,16 +2485,37 @@
     // hub-act-demo…"*, tức lời đáp của một lệnh KHÁC (Hà gặp 2026-08-09).
     // Mỗi loại chờ nay chỉ nhận dấu của chính nó; `⚠` thì ai cũng nhận, vì một
     // lời từ chối là câu trả lời cho đúng cái vừa hỏi.
+    //
+    // Lệnh đi qua chốt Telegram (`/stop`, `/handover`) trả lời làm HAI nhịp
+    // (`pipeline.rs:1219` gửi trước rồi mới đứng chờ tới 90 giây):
+    //   1. `🔒 Đã gửi yêu cầu xác nhận…` — tin GIỮA CHỪNG, chưa phải kết cục;
+    //   2. `✋ đã huỷ` · `⌛ hết hạn` · `⏹ đã dừng` — kết cục thật.
+    // Thiếu cả hai nhóm này thì màn đứng nguyên ở "Đang dừng phiên…" **vĩnh
+    // viễn** khi không ai bấm Telegram — đo thật 2026-08-10: hub đã nói `⌛ Hết
+    // hạn chờ xác nhận — không dừng phiên nào` vào phòng lúc 07:54:00 mà màn
+    // phiên vẫn khai đang dừng. Một màn nói "đang làm" cho việc CHẮC CHẮN không
+    // xảy ra còn tệ hơn không nói gì: nó dạy người ta đừng bấm lại.
+    // Và nhận `🔒` mà cũng đóng luôn cửa sổ chờ thì lại nuốt mất kết cục ở nhịp
+    // 2 — nên tin giữa chừng chỉ ĐƯỢC HIỆN, không được kết thúc lượt chờ.
+    // `✋`/`⌛` CHỈ gắn vào hai lượt chờ có thật đi qua chốt: `/stop` (ô `tell`)
+    // và `/handover`. `/ask` và `/new` không gọi `ask_owner` (`pipeline.rs`)
+    // nên với chúng hai dấu ấy không bao giờ là câu trả lời — mà `waitingFor`
+    // là MỘT biến dùng chung, nút lại mở khoá sau 6 giây trong khi chốt chờ tới
+    // 90 giây, nên rắc rộng ra là mời đúng con bug "trả lời của lệnh khác đổ
+    // vào ô đang chờ" quay lại bằng cửa sau.
+    const INTERIM = /^🔒/;
+    const DONE = '✋|⌛';
     const MARKS = {
       ask: /^(💬|⚠)/,
-      tell: /^(➡️|⏹|⌨|📷|⚠)/,
+      tell: new RegExp(`^(➡️|⏹|⌨|📷|⚠|${DONE})`),
       new: /^(🚀|⚠)/,
-      handover: /^(📋|⚠)/,
+      handover: new RegExp(`^(📋|⚠|${DONE})`),
     };
     const want = MARKS[waitingFor] || MARKS.handover;
-    if (!want.test(text)) return;
+    const interim = INTERIM.test(text);
+    if (!interim && !want.test(text)) return;
     const box = $({ ask: 'sessAskBox', tell: 'sessTellBox', new: 'sessNewNote' }[waitingFor] || 'sessHandoverBox');
-    waitingFor = null;
+    if (!interim) waitingFor = null;
     box.classList.remove('hidden');
     box.textContent = '';
     const p = document.createElement('pre');

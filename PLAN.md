@@ -21,6 +21,7 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S09 | Ảnh chụp cũ thì nói là cũ | `fe-board-uc` |
 | S10 | Dừng / đóng sổ **ngay từ danh sách**, không phải mở phiên ra | `fe-sessions-uc` 25/25 |
 | S11 | Lệnh dừng phải **xác nhận qua Telegram** mới chạy | chạy thật 2026-08-10 (dưới) |
+| S02b | Phiên **đang chạy subagent** thì màn nói ra | `fe-subagent-uc` 6/6 trên subagent THẬT |
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
 
@@ -36,9 +37,24 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-1. **UC-S02b (phiên có subagent)** — đường hiển thị mới chỉ ghim bằng unit test
-   (13 test trong `tests/sessions.rs`); lúc nghiệm thu không phiên nào đang chạy
-   subagent nên chưa thấy nó vẽ ra trên màn thật.
+1. **Sáu chỗ "lỗi im lặng" đã được xác minh bằng file:line, chưa vá.** Nặng nhất:
+   `keys::screen_of` (`keys.rs:378-393`) trả `None` cho **ba** chuyện khác hẳn
+   nhau — không có cửa sổ, `osascript` hỏng (`.ok()?` hai lần), **và màn hình có
+   dấu hiệu lộ bí mật** (`keys.rs:381`) — còn `pipeline.rs:924` đọc cả ba thành
+   một: `None.is_some_and(..)` = `false` ⟹ chốt **hỏng về phía GỬI**, tức gửi
+   phím mũi tên đúng lúc đang có hộp thoại chọn, thứ mà chú thích ngay trên nó
+   gọi là "không lùi lại được". Đường thứ ba là tệ nhất: đúng lúc màn đang hiện
+   một mật khẩu thì chốt mở toang. Kế đó:
+**12 chỗ** đọc `db.get_cursor` làm "SQLite hỏng" và "chưa chọn phiên nào" nói
+   cùng một câu — tự đếm lại: **9** chỗ `.ok()` (`portal.rs:153,162` ·
+   `pipeline.rs:104,575,735,785,844,1014` · `bin/hubd.rs:457`) và **3** chỗ
+   `match … _ =>` (`portal.rs:90` · `pipeline.rs:1076` · `bin/hubd.rs:496`);
+   hai chỗ `match` còn lại (`pipeline.rs:285,373`) thì CÓ log, không tính.
+   Rồi: `bin/hubd.rs:233` chết bằng `eprintln!` nên lý do không vào sổ nào;
+   `sessions.rs:1758` bail! khẳng định "đã dừng lại" cả khi lệnh dừng chưa từng
+   chạy được; `config.rs:602` coi "không đọc được `hub.env`" y như "không có
+   file"; `adapters/tfl5.rs:405,527` bỏ rơi kết quả `set_read_timeout` (và chỉ
+   đặt cho nhánh **không TLS**).
 2. **UC-S09 nửa "ảnh chụp đã cũ"** — phải tắt `hubd` rồi chờ qua 5 phút mới thấy;
    chưa chạy.
 3. **Bảng cũ trong `data/hub.sqlite`** (`messages`, `decisions`, `outbox`,
@@ -50,21 +66,47 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
    hub có tự lên không** — vì việc đó phải reboot thật.
 5. ~~Hai hàng mới ở tab Sức khoẻ chưa nhìn thấy trên UI thật~~ → đã thấy:
    `fe-board` 27/27 trên daemon do launchd sở hữu.
-6. **`fe-newsession-uc` không còn tự chạy trọn vẹn được.** Bước `/stop` nay cần
-   một ngón tay thật bấm Telegram; không ai bấm thì kịch bản in "BỎ QUA 2 kiểm
-   tra" thay vì báo đỏ — sản phẩm lúc ấy đang cư xử đúng. Đây là **cái giá của
-   chốt chặn**, không phải hỏng, nhưng nghĩa là UC-S06 từ nay là bán tự động.
-7. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
+6. **`fe-sessions-uc` đỏ giả khi tập phiên vừa đổi.** Nó đọc sự thật từ
+   `hub sessions --json` một lần rồi so với màn, mà ảnh chụp trên trang trễ tới
+   ~25 giây ⟹ dừng/mở một phiên ngay trước lúc chạy là ra `màn 6 / máy 5`. Đo
+   2026-08-10: đỏ 3 dòng, chờ 45 giây chạy lại thì **xanh, exit 0**. Cách chữa đã
+   có sẵn khuôn trong `fe-subagent-uc.mjs`: đọc sự thật — đọc màn — đọc lại sự
+   thật, chỉ so khi hai đầu kẹp bằng nhau.
+7. **`fe-newsession-uc` là kịch bản bán tự động.** Bước `/stop` cần một ngón tay
+   thật bấm Telegram; không ai bấm thì kịch bản in **"BỎ QUA 2 + 3 kiểm tra"** kèm
+   tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm lúc ấy đang cư xử
+   đúng. (Câu này trước đây là **ý định chứ không phải hành vi**: đo 2026-08-10
+   chiều thì nó báo đỏ 3 dòng, vì hai lỗi đã vá cùng ngày — xem "Đã trả xong".)
+8. **Một quan sát trên màn, chưa quyết.** Hàng phụ của thẻ phiên cố ý **một dòng,
+   cắt đuôi** (`fe/index.html:425`). Khi có subagent, hàng thành `acc2 · tự duyệt ·
+   1 subagent đang chạy · ngữ cản…` — tức **mất con số ngữ cảnh**, thứ dùng để
+   quyết định "có nên đóng sổ chưa". Ba đường: cho hàng xuống hai dòng (tốn ~18px
+   mỗi thẻ), rút gọn chữ subagent, hoặc để nguyên vì màn chi tiết đã có đủ. Chưa
+   tự chọn — đây là đánh đổi bố cục, không phải lỗi.
+9. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
    `HUB_TFL5_PASSWORD`; repo chưa từng có remote nên nó chưa rời máy này. Đã
    `git rm --cached`, đã `chmod 600`, đã thêm vào `.gitignore`. **Còn nợ: đổi
    mật khẩu tfl5**, vì giá trị cũ vẫn nằm trong lịch sử `.git`.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
 
+- ~~UC-S02b chỉ có unit test~~ → `fe-subagent-uc` **6/6** trên subagent THẬT
+  (2026-08-10). Trên đường đi lòi ra **bộ đếm sai với agent chạy nền** (nhận
+  `tool_result` ngay lúc tung nên bị coi là đã xong) và **phiên chết khai 3
+  subagent ma**; cả hai đã vá, có test RED-trước-GREEN-sau.
+- ~~Màn phiên đứng nguyên "Đang dừng phiên…" mãi mãi khi không ai bấm Telegram~~
+  → `fe/index.html:2498` nay nhận `🔒` (giữa chừng, KHÔNG đóng lượt chờ) và
+  `✋`/`⌛` (kết cục). Đo thật: hub trả lời `⌛ Hết hạn…` lúc 07:54:00 mà màn cũ
+  không hề đổi; bundle **v130** thì màn tự nói ra.
+
 - ~~`/tell` + `/stop` chưa nghiệm thu qua UI~~ → `fe-newsession` **22/22**
   (2026-08-10): mở phiên `58f37f0c` → dừng → nói tiếp, nhật ký dài ra
   32509→38438 byte.
 - ~~`fe-phone-uc` còn đỏ~~ → **31/31**.
+- ~~Danh sách tự đi mất chỗ sau khi daemon khởi động lại~~ → neo giữ thẻ đang
+  nhìn nay **nhường khi người ta đang ở đỉnh** (`fe/index.html:1760`): phiên mới
+  chèn lên trên không đẩy trang nữa. Đo trong đúng điều kiện tái hiện:
+  **151px → 0px**, `fe-board` 31/31.
 
 ## Nguyên tắc còn giữ
 

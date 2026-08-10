@@ -214,13 +214,17 @@ try {
   await page.waitForFunction(
     () => {
       const t = document.getElementById("sessTellBox").textContent || "";
-      return t.length > 0 && !t.startsWith("Đang dừng");
+      // `🔒 Đã gửi yêu cầu xác nhận…` là tin GIỮA CHỪNG — dừng ở đó là đo cái
+      // bấm nút, không phải đo kết cục. Chờ tới nhịp thứ hai (⏹ / ✋ / ⌛).
+      return t.length > 0 && !t.startsWith("Đang dừng") && !t.startsWith("🔒");
     },
     null,
     { timeout: 180000, polling: 1000 }
   ).catch(() => {});
   const stopMsg = await page.textContent("#sessTellBox");
+  let stopped = false;
   if (/Đã dừng phiên/.test(stopMsg)) {
+    stopped = true;
     check("màn báo đã dừng phiên", true, stopMsg.trim().slice(0, 70));
     check("dừng rồi thì hội thoại vẫn còn", sizeOf(file) > 0, `${sizeOf(file)} byte`);
   } else if (/xác nhận|Telegram|Hết hạn|huỷ/i.test(stopMsg)) {
@@ -235,6 +239,20 @@ try {
   }
 
   // ——— UC-S05: nói tiếp vào CHÍNH phiên đó ———
+  //
+  // ĐIỀU KIỆN CẦN: phiên phải đã DỪNG. `claude` từ chối thẳng việc nối vào một
+  // phiên nền còn sống (CLAUDE.md §10) — nên khi không ai bấm Telegram, bước
+  // này KHÔNG THỂ chạy. Trước đây nó vẫn chạy rồi báo đỏ hai dòng, tức tố cáo
+  // sản phẩm hỏng đúng lúc sản phẩm đang cư xử ĐÚNG như thiết kế chốt chặn —
+  // và đỏ giả là thứ dạy người ta bỏ qua màu đỏ. Nay nói thẳng là chưa nghiệm
+  // thu, và nói vì sao.
+  if (!stopped) {
+    console.log(
+      `  · BỎ QUA 3 kiểm tra: chưa dừng được phiên nên không thể nói tiếp vào nó ` +
+      `(claude không nối vào phiên nền đang chạy). Chưa nghiệm thu: "màn báo đã nói tiếp", ` +
+      `"nhật ký phiên DÀI RA", "KHÔNG đẻ ra phiên mới ngoài ý muốn".`
+    );
+  } else {
   const sizeBefore = sizeOf(file);
   await page.fill("#sessSayInput", "Nội dung README bạn vừa đọc nói về cái gì? Trả lời một dòng.");
   await page.click("#sessSay");
@@ -264,6 +282,7 @@ try {
     !!stillThere || sizeAfter > sizeBefore,
     stillThere ? "phiên cũ vẫn là phiên cũ" : "(đã rời danh sách sống, nhật ký vẫn là của nó)"
   );
+  }
 
   const over = await page.evaluate(() => ({
     w: document.documentElement.scrollWidth,

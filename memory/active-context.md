@@ -1,5 +1,73 @@
 # active context — hub
 
+## 🧵 2026-08-10 (chiều muộn) — UC-S02b đóng được, và con bug nó lôi ra
+
+**Việc:** trả nốt món nợ 08-09 — *"phiên đang chạy subagent thì màn phải nói ra"*
+mới chỉ có 13 unit test, chưa ai THẤY nó vẽ. Dựng trạng thái thật rồi mở màn xem.
+
+🐛 **Và nó lôi ra đúng một con bug đang sống.** Subagent **chạy nền** nhận
+`tool_result` **ngay lập tức** — nội dung chỉ là "đã tung agent" — nên phép khớp
+`tool_use ↔ tool_result` báo nó xong đúng lúc nó vừa bắt đầu. Đo 14:22: hai agent
+đang chạy thật, `hub sessions` khai `pending 0`. Đau nhất là **chính chế độ nền
+mới là chế độ con số này sinh ra để bắt**: agent chặn thì phiên cha đang bận nhìn
+là biết; agent nền thì phiên cha rảnh tay, từ điện thoại nhìn y như treo.
+
+Đường sửa phải là **cấu trúc**, không phải dò chữ tiếng Anh trong câu trả lời
+(thứ vỡ lặng lẽ khi CLI đổi câu): CLI để lại
+`<slug>/<session_id>/subagents/agent-<id>.meta.json` mang `toolUseId`, và phiên
+cha nhận `<task-notification>` mang đúng `<tool-use-id>` ấy khi agent dừng.
+
+⚠ **Bản vá đầu đẻ ra ngay một con ma:** phiên `Tự chạy lại khi gặp lỗi` (chết từ
+12 tiếng trước) khai **3 subagent đang chạy** — tiến trình chết mang theo cả
+những thông báo kết thúc chưa kịp ghi. `pending_for_display` nay chặn ở nguồn cho
+cả `dead` lẫn `unknown` (không dò được `ps` = không biết, mà không biết thì không
+khai "đang chạy").
+
+🔁 **Rồi bản vá thứ hai của tôi mở lại đúng cái lỗ vừa vá.** Bộ quét chỉ hỏi "đoạn
+này có chứa chữ `<task-notification>` không" rồi hốt mọi `tool-use-id` trong cả
+đoạn — trên chính dự án này đó là chuyện HÀNG NGÀY (phiên nào đang sửa tính năng
+ấy đều có hai thứ chữ đó trong lời văn), và hậu quả là một subagent ĐANG CHẠY bị
+đóng dấu "xong". Nay cắt theo cặp thẻ, và **đòi thẻ đóng** — sự "khoan dung với
+khối bị cắt cụt" mà tôi thêm vào chính là chỗ mở lại cái lỗ, mà nó còn không cần:
+mỗi bản ghi là một dòng JSON trọn vẹn, dòng bị cắt thì trượt `from_str` cả dòng.
+
+📌 **Test đầu tiên của tôi cho con bug ấy MÙ** — mẫu thử có một thẻ mở lửng đứng
+trước cặp thật nên mã cũ hớt phải chuỗi rác thay vì id, và test xanh cả với mã
+hỏng. Chỉ lộ ra vì tôi chạy RED-trước. *Viết test xong phải xem nó có đỏ được
+không, đừng tin vào việc mình đã gõ.*
+
+**Con bug thứ hai, không liên quan mà lòi ra nhân tiện:** màn phiên **đứng nguyên
+"Đang dừng phiên…" vĩnh viễn** khi không ai bấm Telegram. hub trả lời đúng vào
+phòng (`⌛ Hết hạn chờ xác nhận — không dừng phiên nào`, 07:54:00) nhưng bộ lọc
+dấu hiệu ở màn phiên không có `🔒`/`✋`/`⌛`. Nay có — với `🔒` là tin **giữa
+chừng** (hiện ra nhưng KHÔNG đóng lượt chờ, không thì nuốt mất kết cục ở nhịp 2),
+và `✋`/`⌛` chỉ gắn vào hai lượt chờ thật đi qua chốt (`tell`, `handover`) — rắc
+rộng ra là mời lại con bug "trả lời của lệnh khác đổ vào ô đang chờ".
+
+**Con bug thứ ba, bắt được vì KHÔNG gọi một cú đỏ chập chờn là may:** `fe-board`
+đỏ trong bộ mà xanh khi chạy riêng. Dựng lại đúng điều kiện (chạy ngay sau khi
+daemon khởi động lại) thì tái hiện: trang tự đi **151px trong 16 giây**. Gốc:
+`renderSessions` neo theo thẻ đầu tiên còn nhìn thấy, mà lúc daemon vừa dậy danh
+sách **mọc thêm thẻ ở phía trên** (các tài khoản được dò lần lượt) ⟹ neo đẩy
+trang xuống đúng một chiều cao thẻ, đẩy đi mất chính cái vừa đến. Ở giữa danh
+sách thì neo là đúng; ở **đỉnh** thì thứ người ta đang nhìn là cái đỉnh. Đo lại
+trong đúng điều kiện ấy: **0px**.
+
+**Nghiệm thu:** `cargo test` **89** (+4) · clippy 0 · bundle **v132** · daemon do
+launchd sở hữu, `kind: cert`, đã `install.sh` · `fe-subagent` **6/6 trên subagent
+THẬT** · `fe-board` 31/31 · `fe-phone` · `fe-smoke` · `fe-url` · `fe-denied` ·
+`fe-config` · `fe-sessions` · `fe-newsession` 17/17 (5 kiểm tra khai rõ là chưa
+nghiệm thu vì không ai bấm Telegram) · 0 lỗi console.
+
+**Ba việc kiểm chứng chạy bằng đội subagent, kết quả đã tự kiểm lại bằng
+file:line, chưa vá — xem `PLAN.md` mục 1:** 12 chỗ `db.get_cursor` làm "SQLite
+hỏng" và "chưa chọn phiên nào" nói cùng một câu; `keys::screen_of` khiến chốt
+phím mũi tên **hỏng về phía GỬI** (và tôi tự tìm thêm đường thứ ba nặng hơn báo
+cáo: nó cũng trả `None` khi màn hình **có dấu hiệu lộ bí mật**, tức đúng lúc màn
+đang hiện mật khẩu thì chốt mở toang); và tài liệu lệch mã (số test 67→89, bản đồ
+file thiếu hẳn `fe-subagent-uc.mjs`) — đã sửa.
+
+
 ## 📊 2026-08-10 (chiều) — hạn mức lên màn, và hai lỗi phía sau nó
 
 **Hạn mức từng tài khoản** (Hà: *"thông tin tài khoản không có thông tin

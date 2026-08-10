@@ -150,6 +150,7 @@ node fe-sessions-uc.mjs  <app> <user> <pass>
 node fe-stream-uc.mjs    <app> <user> <pass>   # bước /handover: có cổng giá
 node fe-aside-uc.mjs     <app> <user> <pass>   # bước /ask: có cổng giá
 node fe-newsession-uc.mjs <app> <user> <pass>
+node fe-subagent-uc.mjs                # UC-S02b: phiên đang chạy subagent (cần có subagent THẬT)
 node fe-config-uc.mjs · fe-denied-uc.mjs · fe-smoke.mjs · fe-phone-uc.mjs
 ```
 
@@ -166,7 +167,7 @@ HUB_UC_PAY=1 node fe-stream-uc.mjs <app> <user> <pass>
 ## Test
 
 ```bash
-cd rust && cargo test --offline     # 67 test, 0 warning
+cd rust && cargo test --offline     # 89 test, 0 warning
 cargo clippy --offline --all-targets
 ```
 

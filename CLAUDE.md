@@ -45,7 +45,7 @@ or drive a session from a phone?** If not, it does not belong here.
 - Store: `data/hub.sqlite` (WAL). Three tables — `runs`, `cursors`, `spend`.
   An existing file still HAS the four inbox tables and their rows; nothing drops
   them, and no query can see them.
-- Tests: `cd rust && cargo test --offline` → 67 tests, 0 warnings.
+- Tests: `cd rust && cargo test --offline` → 89 tests, 0 warnings.
 - `./hub …` is a wrapper that builds on first use then execs `rust/target/release/hub`.
 
 ## Non-negotiables
@@ -119,6 +119,21 @@ or drive a session from a phone?** If not, it does not belong here.
     `state: "blocked"` on an interactive MCP-approval dialog it can never
     answer; `sessions::start_background` watches for that, stops it, and reports
     the one-time fix rather than claiming success.
+    **A BACKGROUND subagent's `tool_result` arrives immediately** — it says
+    "agent launched", not "agent finished" — so pairing `tool_use` with
+    `tool_result` reports a fan-out as over the instant it starts. Measured
+    2026-08-10: two agents running, `hub sessions` said `pending 0`, and the
+    background case is precisely the one the count exists for (a blocking
+    subagent leaves the parent visibly busy; a background one leaves it looking
+    idle). Three structural facts make the real answer reachable, none of them a
+    string match on CLI prose: a background agent writes
+    `<slug>/<session_id>/subagents/agent-<agentId>.jsonl` (`isSidechain: true`)
+    beside `agent-<agentId>.meta.json`, whose `toolUseId` names the call that
+    spawned it; the parent transcript later receives a `<task-notification>`
+    block whose `<tool-use-id>` is that same id; and a subagent is NOT a
+    process, so `ps` will never find one. A dead session's un-notified agents
+    are NOT running — the process took them with it — so liveness gates the
+    count (`sessions::pending_for_display`), or the screen grows ghosts.
 11. **The phone page is the only UI.** There is no local console any more. If you
     add a surface, it must go through the same room commands — one path, one set
     of books.
@@ -228,7 +243,10 @@ fe-deploy.mjs           zip → Releases → Activate through the console UI, th
 fe-*.mjs                Playwright over the DEPLOYED bundle at 390×844:
                         -smoke (chat), -board (tabs/health/config, absence of the inbox),
                         -sessions + -stream (UC-S01..S04, S07), -aside (UC-S05b),
-                        -newsession (UC-S06), -config (form → /set → disk), -denied, -phone
+                        -newsession (UC-S06), -subagent (UC-S02b — needs a REAL
+                        subagent running, else it exits 2 rather than passing),
+                        -config (form → /set → disk), -denied, -phone, -url, -type
+fe-shots.mjs            screenshots of all 5 screens; reads only, never calls claude
 console-acl.mjs         grant/revoke app access through the tfl5 console UI
 hub.env(.example)       secrets for launchd runs — chmod 600, gitignored
 deploy/*.plist          launchd unit (runs the INSTALLED hubd, not target/)

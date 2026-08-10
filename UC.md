@@ -131,26 +131,49 @@ kết quả có nội dung thật · không tràn ngang · quay lại thì hub *
    chậm hơn thế thì màn treo vĩnh viễn. Nay có vòng chờ 5 s, **hạn 2 phút**, hết
    hạn thì nói rõ lý do thay vì quay mãi.
 
-### UC-S02b · Phiên có subagent thì hiện thế nào  ⚠️ chưa có mẫu thật
+### UC-S02b · Phiên có subagent thì hiện thế nào  ✅ chạy thật 2026-08-10
 
-**Đã kiểm được:**
-- Mọi bản ghi đều mang cờ **`isSidechain`** (678/678 đang `false`) cùng `uuid`/`parentUuid` nối thành cây ⟹ định dạng **đã chừa chỗ** cho lượt của subagent, nhiều khả năng ghi vào **cùng tệp** của phiên cha.
-- **Chưa phiên nào trên máy này từng chạy subagent**: quét toàn bộ nhật ký → **0** tệp có `"isSidechain":true`, **0** tệp gọi `Task`/`Agent`. Nên đây là suy luận từ định dạng, **không phải quan sát**.
-- `claude agents --json` trả về `{pid, cwd, kind, sessionId, name}` — **không có trường cha/con** ⟹ subagent sẽ không hiện ra như một mục riêng để nhắm tới.
+**Thí nghiệm đã chạy** (nợ từ 08-09: *"lúc nghiệm thu không phiên nào đang chạy
+subagent"*). Tung subagent thật trong một phiên đang sống rồi mở màn hình xem.
 
-**Nói chuyện trực tiếp với subagent: chưa có đường.** Mọi lối vào một phiên
+**Nhật ký ghi thế nào — quan sát, không còn suy luận:**
+
+| Thứ | Sự thật đo được |
+|---|---|
+| Tệp của subagent | **tách riêng**: `<slug>/<session_id>/subagents/agent-<agentId>.jsonl`, mọi bản ghi `isSidechain: true` |
+| Móc ngược về lệnh gọi | `agent-<agentId>.meta.json` mang `{agentType, description, **toolUseId**, spawnDepth, model}` |
+| Trường `sessionId` trong tệp con | là id của **phiên CHA**, không phải id riêng |
+| `claude agents` | **không** liệt kê subagent như một mục riêng (đúng như dự đoán cũ) |
+| Tiến trình | subagent nền **không** là tiến trình riêng — `ps` không thấy con nào; chúng chạy trong chính tiến trình `claude` |
+
+**Cái bẫy đã sập, và là lý do UC này đáng nợ tới hôm nay:** subagent **chạy nền**
+nhận `tool_result` **ngay lập tức** (nội dung chỉ là "đã tung agent"), nên phép
+khớp `tool_use ↔ tool_result` báo nó xong đúng lúc nó vừa bắt đầu. Đo lúc 14:22:
+hai agent đang chạy thật mà `hub sessions` khai `pending 0`. Và chính chế độ nền
+mới là chế độ con số này sinh ra để bắt — agent chặn thì phiên cha đang bận nhìn
+là biết, agent nền thì phiên cha rảnh tay, từ điện thoại nhìn y như treo.
+
+Dấu kết thúc đúng của lệnh gọi nền là khối `<task-notification>` mà CLI chèn vào
+nhật ký phiên cha, mang `<tool-use-id>` **đúng bằng id của lệnh gọi ban đầu**
+(`toolu_01C7bc…` khớp cả hai đầu) — nên đường khớp vẫn theo ID, không theo tên.
+
+**Nghiệm thu trên màn thật** (`fe-subagent-uc.mjs`, 6/6, bundle v130): thẻ trong
+danh sách ghi `1 subagent đang chạy`; màn chi tiết có hàng `subagent · 1 đang
+chạy`; và **chiều âm**: 4 phiên không chạy subagent thì cả hai chỗ đều không nhắc
+tới nó. Nguồn sự thật là **bản đếm lại bằng JS đọc thẳng tệp**, không hỏi
+`hub sessions` — so màn với hub chỉ chứng minh trang vẽ trung thành, không chứng
+minh hub đếm đúng. Không phiên nào đang chạy subagent thì kịch bản **thoát mã 2**
+và nói "chưa dựng được trạng thái cần đo", không đếm là đạt.
+
+**Nói chuyện trực tiếp với subagent: vẫn chưa có đường.** Mọi lối vào một phiên
 (`-p --resume <sessionId>`, stdin) đều nói với **phiên cha**; không thấy primitive
 nào trong `claude --help` / `claude agents --help` gửi thẳng vào một sub đang
 chạy. Về thiết kế cũng nên vậy: sub là **công cụ của cha**, chen ngang sẽ phá
 chính vòng điều phối đó.
 
-**Quyết định tạm cho UI:** hiện **cây** — phiên cha, dưới là nhánh subagent, **đọc
-được hết** (ngồi máy thì cũng thấy sub chạy); **gõ thì gõ vào cha**, và màn phải
-nói rõ đang nói với cha, không giả vờ đang nói với sub.
-
-**Thí nghiệm để chốt:** chạy một phiên có subagent thật rồi xem tệp ghi gì — cờ
-`isSidechain` có bật không, có tách tệp riêng không, `claude agents` có thấy
-không. Chưa chạy.
+**Còn nợ trong UC này:** con số chỉ đúng khi lệnh gọi còn nằm trong cửa sổ 256KB;
+và một agent nền được **đánh thức lại** sau khi đã báo xong thì hub đọc là "không
+còn chạy" — cố ý thiếu còn hơn để một subagent ma chạy mãi trên màn.
 
 ---
 

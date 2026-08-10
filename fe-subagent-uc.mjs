@@ -132,7 +132,11 @@ function pendingSubagents(path) {
     let rec;
     try { rec = JSON.parse(line); } catch { continue; } // dòng đầu bị cắt giữa chừng là bình thường
     noticeText(rec).forEach(eat);
-    const blocks = rec?.message?.content;
+    const content = rec?.message?.content;
+    // `message.content` là CHUỖI THUẦN ở hầu hết lượt `user` (đếm trên 384 tệp:
+    // 355 chuỗi / 4 mảng) — bỏ dạng chuỗi là bỏ gần hết đường thứ ba.
+    if (typeof content === "string") eat(content);
+    const blocks = content;
     if (!Array.isArray(blocks)) continue;
     for (const b of blocks) {
       if (b?.type === "tool_use" && (b.name === "Agent" || b.name === "Task") && b.id) started.push(b.id);
@@ -257,7 +261,11 @@ try {
   const wanted = (sid) => truth.get(sid);
   const matches = () =>
     screen.every((c) => wanted(c.session) === null || Number(c.badge ?? 0) === wanted(c.session));
-  for (let wait = 0; wait < 6 && !matches(); wait++) {
+  // Trần chờ 72 giây, không phải 36: vòng đầu sau khi daemon khởi động lại chậm
+  // hơn hẳn (khối số liệu chậm chưa có cache — đo 14.4 giây/vòng), và một phép
+  // đo đỏ vì một độ trễ ĐÃ BIẾT là phép đo dạy người ta bỏ qua màu đỏ. Hết trần
+  // thì vẫn đỏ thật.
+  for (let wait = 0; wait < 12 && !matches(); wait++) {
     await page.waitForTimeout(6000);
     screen = await page.evaluate(() =>
       [...document.querySelectorAll("#sessList .sess")].map((c) => ({

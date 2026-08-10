@@ -474,6 +474,11 @@ fn a_stop_notice_arrives_by_three_different_roads() {
     let launched = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"q1","name":"Agent","input":{}},{"type":"tool_use","id":"a1","name":"Agent","input":{}}]}}"#;
     assert_eq!(parse_tail(launched, &bg).pending_subagents, 2);
 
+    // Đường 1 ở dạng THẬT của nó: `message.content` là chuỗi thuần, không phải
+    // mảng khối. Đếm trên 384 tệp nhật ký của máy này: 355 chuỗi / 4 mảng.
+    let plain = r#"{"type":"user","message":{"role":"user","content":"<task-notification>\n<tool-use-id>q1</tool-use-id>\n<status>completed</status>\n</task-notification>"}}"#;
+    assert_eq!(parse_tail(&format!("{launched}\n{plain}"), &bg).pending_subagents, 1);
+
     // Đường 2: xếp hàng, chữ nằm thẳng ở `content`.
     let queued = r#"{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<tool-use-id>q1</tool-use-id>\n<status>completed</status>\n</task-notification>"}"#;
     assert_eq!(parse_tail(&format!("{launched}\n{queued}"), &bg).pending_subagents, 1);
@@ -484,4 +489,17 @@ fn a_stop_notice_arrives_by_three_different_roads() {
         parse_tail(&format!("{launched}\n{queued}\n{attached}"), &bg).pending_subagents,
         0
     );
+}
+
+/// Thông báo KHÔNG mang `tool-use-id` thì không đóng được lệnh gọi nào.
+///
+/// Đếm thật trên 384 tệp nhật ký: 250/2535 khối là `Monitor event` — chúng có
+/// `<task-id>` nhưng không có `<tool-use-id>`, vì chúng thuộc một cơ chế khác.
+/// Đóng bừa theo `task-id` sẽ là khớp nhầm hai hệ id với nhau.
+#[test]
+fn a_notice_without_a_tool_use_id_closes_nothing() {
+    let bg: HashSet<String> = ["b1".to_string()].into_iter().collect();
+    let launched = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Agent","input":{}}]}}"#;
+    let monitor = r#"{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event</summary>\n</task-notification>"}"#;
+    assert_eq!(parse_tail(&format!("{launched}\n{monitor}"), &bg).pending_subagents, 1);
 }

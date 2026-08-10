@@ -62,7 +62,17 @@ rồi `attachment.prompt`). Bản vá chỉ đọc hình dạng thứ nhất ⟹
 lúc" thì ở lại trên màn mãi mãi. **Không kịch bản nào bắt được**, vì tất cả đều
 đo lúc agent đang chạy thật. *Bộ kịch bản xanh không phải là trạng thái sống.*
 
-**Nghiệm thu:** `cargo test` **90** (+5) · clippy 0 · bundle **v132** · daemon do
+📊 **Rồi hỏi dữ liệu thay vì đoán tiếp** — quét **384 tệp nhật ký**: thẻ
+`<task-notification>` xuất hiện trong 15 hình dạng bản ghi, nhưng chỉ **3** là
+đường giao thật (2520/2557 dòng, mỗi đường 100% khối đóng kín); 12 hình dạng còn
+lại là lời văn bàn về chính cơ chế ấy — luật "đòi thẻ đóng" loại đúng chúng. Khảo
+sát còn lòi ra **lỗ thứ hai của cùng bản vá**: `message.content` là **chuỗi thuần
+355 ca / mảng 4 ca**, mà tôi chỉ đọc dạng mảng — tức bỏ gần hết đường thứ nhất,
+đúng đường dùng khi phiên cha đang RẢNH nên không có `queue-operation` nào bù.
+Và 250 khối thiếu `tool-use-id` hoá ra là `Monitor event` — cơ chế khác, không
+được đóng theo `task-id` (có test riêng).
+
+**Nghiệm thu:** `cargo test` **91** (+6) · clippy 0 · bundle **v132** · daemon do
 launchd sở hữu, `kind: cert`, đã `install.sh` · `fe-subagent` **6/6 trên subagent
 THẬT** · `fe-board` 31/31 · `fe-phone` · `fe-smoke` · `fe-url` · `fe-denied` ·
 `fe-config` · `fe-sessions` · `fe-newsession` 17/17 (5 kiểm tra khai rõ là chưa

@@ -526,12 +526,21 @@ fn stopped_background_calls(tail: &str) -> HashSet<String> {
         // của người và của trợ lý nằm ở (1) — mà lời văn thì hay nhắc tới đúng
         // thứ thẻ này (chính commit này là ví dụ).
         let mut texts: Vec<&str> = Vec::new();
-        if let Some(blocks) = record
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_array())
-        {
-            texts.extend(blocks.iter().filter_map(|b| b.get("text").and_then(|t| t.as_str())));
+        if let Some(content) = record.get("message").and_then(|m| m.get("content")) {
+            // `message.content` là CHUỖI THUẦN ở hầu hết lượt `user`, hiếm khi
+            // là mảng khối. Đếm trên 384 tệp nhật ký của máy này: **355 chuỗi /
+            // 4 mảng**. Bản trước chỉ đọc mảng ⟹ bỏ lọt gần hết đường thứ ba —
+            // mà đó đúng là đường dùng khi phiên cha đang RẢNH, lúc không có
+            // `queue-operation` nào bù vào, nên con ma quay lại y như cũ.
+            match content {
+                Value::String(s) => texts.push(s),
+                Value::Array(blocks) => texts.extend(
+                    blocks
+                        .iter()
+                        .filter_map(|b| b.get("text").and_then(|t| t.as_str())),
+                ),
+                _ => {}
+            }
         }
         if record.get("type").and_then(|t| t.as_str()) == Some("queue-operation") {
             texts.extend(record.get("content").and_then(|c| c.as_str()));

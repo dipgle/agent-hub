@@ -49,23 +49,22 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
    hub có tự lên không** — vì việc đó phải reboot thật.
 5. ~~Hai hàng mới ở tab Sức khoẻ chưa nhìn thấy trên UI thật~~ → đã thấy:
    `fe-board` 27/27 trên daemon do launchd sở hữu.
-3. **`fe-sessions-uc` đỏ giả khi tập phiên vừa đổi.** Nó đọc sự thật từ
-   `hub sessions --json` một lần rồi so với màn, mà ảnh chụp trên trang trễ tới
-   ~25 giây ⟹ dừng/mở một phiên ngay trước lúc chạy là ra `màn 6 / máy 5`. Đo
-   2026-08-10: đỏ 3 dòng, chờ 45 giây chạy lại thì **xanh, exit 0**. Cách chữa đã
-   có sẵn khuôn trong `fe-subagent-uc.mjs`: đọc sự thật — đọc màn — đọc lại sự
-   thật, chỉ so khi hai đầu kẹp bằng nhau.
-4. **`fe-newsession-uc` là kịch bản bán tự động.** Bước `/stop` cần một ngón tay
+3. **`fe-newsession-uc` là kịch bản bán tự động.** Bước `/stop` cần một ngón tay
    thật bấm Telegram; không ai bấm thì kịch bản in **"BỎ QUA 2 + 3 kiểm tra"** kèm
    tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm lúc ấy đang cư xử
    đúng. (Câu này trước đây là **ý định chứ không phải hành vi**: đo 2026-08-10
    chiều thì nó báo đỏ 3 dòng, vì hai lỗi đã vá cùng ngày — xem "Đã trả xong".)
-5. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
+4. **Bí mật đã từng vào git.** `2b6ea80` commit `.env` kèm `HUB_TFL5_USER` +
    `HUB_TFL5_PASSWORD`; repo chưa từng có remote nên nó chưa rời máy này. Đã
    `git rm --cached`, đã `chmod 600`, đã thêm vào `.gitignore`. **Còn nợ: đổi
    mật khẩu tfl5**, vì giá trị cũ vẫn nằm trong lịch sử `.git`.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
+
+- ~~`fe-sessions-uc` đỏ giả khi tập phiên vừa đổi~~ → đã cắm kẹp cùng khuôn với
+  `fe-subagent-uc` (đọc sự thật — chờ màn bắt kịp — đọc lại; chỉ so khi hai đầu
+  kẹp bằng nhau), và dấu vân tay của tập phiên nay gồm cả `working` nên phép đo
+  chấm màu cũng được kẹp theo.
 
 - ~~UC-S09 nửa "ảnh chụp đã cũ" chưa chạy~~ → **8/8** trên ảnh chụp **6.3 phút
   tuổi**, dựng bằng cách `bootout` `hubd` thật (hub mù ~6 phút, hai lượt). Và

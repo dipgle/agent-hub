@@ -119,11 +119,17 @@ impl Change {
     pub fn say(&self, idle: &Idle, tail: Option<&str>) -> String {
         match self {
             Change::Finished { name, ran_sec, .. } => {
+                // Một câu phải trả lời được: CÓ CẦN MÌNH LÀM GÌ KHÔNG.
                 let what = match idle {
-                    Idle::Asking(n) => format!("⚠ {name} DỪNG LẠI HỎI ({n} lựa chọn trên màn)"),
-                    Idle::Prompt => format!("✅ {name} im sau {} phút chạy", ran_sec / 60),
+                    Idle::Asking(n) => {
+                        format!("⚠ {name} dừng lại HỎI ({n} lựa chọn) — cần bạn chọn")
+                    }
+                    Idle::Prompt => format!(
+                        "⏸ {name} dừng, đang chờ bạn — sau {} phút chạy",
+                        ran_sec / 60
+                    ),
                     Idle::Unknown => format!(
-                        "❓ {name} im sau {} phút chạy — tôi không đọc được màn của nó",
+                        "⏸ {name} dừng sau {} phút — không đọc được màn nên chưa rõ nó chờ gì",
                         ran_sec / 60
                     ),
                 };

@@ -62,7 +62,11 @@ fn finishing_is_announced_once_not_every_cycle() {
     let (events, next) = changes(&prev, &now, NOW);
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], Change::Finished { id, .. } if id == "a"));
-    assert!(events[0].say(&Idle::Prompt, None).contains("im sau"));
+    // Kiểm Ý NGHĨA, không kiểm mặt chữ: tin phải nói nó đang CHỜ NGƯỜI.
+    // (Câu chữ đổi theo Hà 2026-08-11: "chia làm 2 trường hợp thôi — dừng chờ
+    // giao tiếp và tắt hẳn"; ghim mặt chữ thì mỗi lần đổi lời là một test đỏ
+    // vô nghĩa.)
+    assert!(events[0].say(&Idle::Prompt, None).contains("chờ bạn"));
 
     // Vòng sau, cùng trạng thái: KHÔNG nói nữa. Đây là điều kiện sống còn —
     // vòng lặp chạy mỗi ~10 giây.
@@ -203,9 +207,10 @@ fn a_burst_of_short_turns_stays_quiet() {
 fn the_message_reports_what_was_seen_and_never_repeats_itself() {
     let e = Change::Finished { id: "a".into(), name: "dwork".into(), ran_sec: 300 };
 
-    // Màn có hộp chọn ⟹ KHÔNG được nói "xong", phải nói là đang kẹt hỏi.
+    // Màn có hộp chọn ⟹ KHÔNG được nói "xong", phải nói là đang kẹt hỏi và
+    // CẦN người trả lời — đó là khác biệt duy nhất người đọc quan tâm.
     let asking = e.say(&Idle::Asking(3), None);
-    assert!(asking.contains("DỪNG LẠI HỎI"), "{asking}");
+    assert!(asking.contains("HỎI") && asking.contains("cần bạn"), "{asking}");
     assert!(asking.contains('3'), "phải nói mấy lựa chọn: {asking}");
     assert!(!asking.contains("dấu nhắc"), "không được khẳng định đang rảnh: {asking}");
 

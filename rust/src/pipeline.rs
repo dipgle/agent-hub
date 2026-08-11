@@ -146,27 +146,17 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
         // câu hỏi rẻ, hỏi đúng lúc (chuyện này hiếm): cửa sổ Terminal mang tty
         // ấy còn không?
         let fate = if let crate::watch::Change::Ended { tty, kind, .. } = &c {
-            if kind == "background" {
-                // Phiên nền không có cửa sổ nào để đóng — nói "dừng", đừng nói
-                // "tắt terminal".
-                Some("phiên nền đã dừng — nó không gắn cửa sổ terminal nào".to_string())
-            } else if tty.is_empty() {
-                Some("đã kết thúc — phiên này vốn không gắn cửa sổ terminal".to_string())
+            // Phiên nền không có cửa sổ nào để đóng, nên dừng nó LÀ tắt hẳn.
+            if kind == "background" || tty.is_empty() {
+                Some("đã tắt hẳn".to_string())
             } else {
                 match crate::keys::window_of(tty) {
-                    Ok(Some(_)) => Some(format!(
-                        "đã THOÁT khỏi `claude`, nhưng cửa sổ terminal ({tty}) VẪN MỞ"
-                    )),
-                    Ok(None) => Some(format!("đã TẮT HẲN — cửa sổ terminal ({tty}) cũng không còn")),
-                    Err(e) => {
-                        logging::warn(
-                            "session_end_window_probe_failed",
-                            json!({ "tty": tty, "err": e.to_string() }),
-                        );
-                        Some(format!(
-                            "đã rời danh sách — không dò được cửa sổ terminal ({tty}) nên chưa rõ nó thoát hay bị đóng"
-                        ))
-                    }
+                    // Cửa sổ còn ⟹ CHƯA phải "tắt hẳn" theo đúng định nghĩa Hà
+                    // đặt ("thoát cli VÀ đóng terminal"). Nói "đã tắt", kèm ĐÚNG
+                    // một cụm trong ngoặc — vừa đủ để biết không phải làm gì.
+                    Ok(Some(_)) => Some("đã tắt (thoát CLI, cửa sổ terminal còn mở)".to_string()),
+                    Ok(None) => Some("đã tắt hẳn".to_string()),
+                    Err(_) => Some("đã tắt".to_string()),
                 }
             }
         } else {
@@ -195,8 +185,10 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
         let tail = row.and_then(|s| s.last_text.as_deref());
         let text = match (&c, &fate) {
             (crate::watch::Change::Ended { name, was_working, .. }, Some(f)) => {
+                // Tắt lúc đang chạy dở là chuyện ĐÁNG XEM LẠI — đó là lần duy
+                // nhất một tin "đã tắt" đòi người ta làm gì.
                 let warn = if *was_working {
-                    " — nó đang chạy dở, nếu không phải bạn dừng thì nên xem lại"
+                    " — nó đang chạy dở, nên xem lại"
                 } else {
                     ""
                 };

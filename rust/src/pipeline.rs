@@ -1217,12 +1217,21 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 "aside_done",
                                 json!({ "from": a.source_id, "to": a.new_session_id, "cost_usd": a.cost_usd }),
                             );
-                            // Say what it did NOT do as well as what it did:
-                            // the whole point of the feature is that the running
-                            // session was left alone, and the person cannot see
-                            // that from here.
+                            // Nói rõ ĐI ĐƯỜNG NÀO, vì hai đường khác nhau ở
+                            // đúng chỗ người hỏi cần biết: phiên gốc có bị thêm
+                            // một lượt hay không.
+                            //
+                            // `new_session_id == source_id` ⟹ hỏi thẳng phiên
+                            // sống bằng `/btw` (như ngồi trước terminal): rẻ,
+                            // sát việc, nhưng phiên gốc CÓ thêm lượt.
+                            // Khác nhau ⟹ fork: phiên gốc y nguyên byte.
+                            let how = if a.new_session_id == a.source_id {
+                                "hỏi thẳng bằng /btw — phiên gốc CÓ thêm một lượt, y như bạn tự gõ ở terminal"
+                            } else {
+                                "hỏi trên bản sao — phiên gốc không bị đụng"
+                            };
                             format!(
-                                "💬 Hỏi bên lề phiên {} (phiên gốc không bị đụng):\n\n{}",
+                                "💬 Hỏi bên lề phiên {} ({how}):\n\n{}",
                                 a.source_name, a.answer
                             )
                         }

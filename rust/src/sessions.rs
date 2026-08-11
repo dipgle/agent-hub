@@ -1711,10 +1711,78 @@ pub struct Aside {
 /// it is an order, not untrusted content — but the ANSWER can quote anything
 /// the session ever read, which is why it goes through the same preview gate as
 /// every other screen.
+/// Hỏi chen ngang bằng ĐÚNG cách chủ máy làm khi ngồi trước terminal: `/btw`.
+///
+/// Hà 2026-08-11: *"rõ ràng tôi đang ở session để làm việc, vậy 1 câu hỏi chen
+/// ngang nó phải tương đương như tôi đang làm trên cli terminal chứ?"*. Đúng —
+/// và `claude` có sẵn cách ấy, chính CLI gợi ý trên màn: *"Use /btw to ask a
+/// quick side question without interrupting Claude's current work"*.
+///
+/// Vì sao nó hơn hẳn đường fork cho phiên có cửa sổ:
+/// - **Giá.** Fork phải nạp lại toàn bộ nhật ký — đo thật 0.99 MB → **1.72**
+///   đơn vị hạn mức cho MỘT câu hỏi, và đó là lý do `fe-aside` phải có cổng
+///   chặn và mặc định không gọi. `/btw` hỏi phiên đang sống, nó trả lời bằng
+///   ngữ cảnh đã nằm sẵn trong đầu — gần như không tốn gì.
+/// - **Độ sát.** Fork dựng lại ngữ cảnh TỪ NHẬT KÝ; phiên sống thì biết cả việc
+///   đang dở giữa chừng, thứ chưa kịp vào nhật ký.
+///
+/// Cái giá phải nói thẳng: phiên gốc **có thêm một lượt** — mất lời hứa "y
+/// nguyên byte" của UC-S05b. Nên câu trả lời gửi về luôn nói rõ đã đi đường nào.
+///
+/// Phiên không gõ vào được (nền, trong editor, không cửa sổ) thì vẫn fork như cũ.
+fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
+    let window = match crate::keys::window_of(&session.tty) {
+        Ok(Some(w)) => w,
+        _ => return None,
+    };
+    // Ảnh màn TRƯỚC khi hỏi, để biết cái gì là mới.
+    let before = match crate::keys::look(&session.tty, 40) {
+        crate::keys::Look::Saw { body, .. } => body,
+        // Màn không đọc được thì cũng không đọc được câu trả lời ⟹ đừng gõ vào
+        // phiên của người ta rồi bỏ đấy.
+        _ => return None,
+    };
+    if let Err(e) = crate::keys::type_into(window, &format!("/btw {question}"), true) {
+        logging::warn("btw_type_failed", json!({ "session": session.session_id, "err": e.to_string() }));
+        return None;
+    }
+    // Chờ có cái mới VÀ phiên thôi bận. Có trần: `/btw` không chen ngang việc
+    // đang chạy, nên câu trả lời có thể tới muộn — muộn quá thì nói thẳng là
+    // chưa thấy, đừng bịa.
+    for _ in 0..30 {
+        std::thread::sleep(Duration::from_secs(2));
+        let crate::keys::Look::Saw { body, .. } = crate::keys::look(&session.tty, 40) else {
+            continue;
+        };
+        if body != before && !crate::keys::is_busy(&body) {
+            return Some(body);
+        }
+    }
+    logging::info("btw_no_answer_yet", json!({ "session": session.session_id }));
+    None
+}
+
 pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<Aside> {
     let question = question.trim();
     if question.is_empty() {
         anyhow::bail!("chưa có câu hỏi");
+    }
+
+    // Đường THẲNG trước: hỏi chính phiên đang sống, y như ngồi trước máy.
+    if let Some(screen) = ask_via_btw(session, question) {
+        return Ok(Aside {
+            source_id: session.session_id.clone(),
+            source_name: session.name.clone(),
+            // Không có fork nào cả — câu trả lời nằm trong CHÍNH phiên ấy.
+            new_session_id: session.session_id.clone(),
+            question: question.to_string(),
+            answer: gate_preview(
+                &screen,
+                "[hub ẩn câu trả lời: màn có thể chứa bí mật — mở phiên trên máy để xem]",
+            ),
+            cost_usd: 0.0,
+            ts: crate::logging::now_iso(),
+        });
     }
     // Say out loud that this is a side question. Without it the fork reads the
     // transcript as "we were in the middle of X" and carries on working —

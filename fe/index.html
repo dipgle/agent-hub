@@ -905,7 +905,9 @@
              làm gì — trong khi hai việc ấy loại trừ nhau, và với phần lớn
              phiên thì một trong hai còn KHÔNG dùng được.
              · nói tiếp = lượt ở lại trên chính phiên đó (phiên DÀI RA)
-             · hỏi bên lề = chạy trên bản sao (phiên gốc không thêm lượt nào)
+             · hỏi bên lề = phiên CÓ cửa sổ thì hỏi thẳng bằng `/btw` (bảng
+               bên trong TUI, nhật ký không dài thêm, ăn ngữ cảnh đang chạy);
+               phiên không gõ vào được thì chạy trên bản sao
              claude từ chối nối vào phiên nền đang chạy, nên "nói tiếp" chỉ mở
              cho phiên hub quản được; phiên khác thì ô tự khoá ở chế độ bên lề
              và nói rõ vì sao. -->
@@ -1829,8 +1831,15 @@
     const GROUPS = [
       { g: 'hub',        title: '📱 hub mở từ điện thoại', what: 'điều khiển được',
         pick: (x) => x.started_by_hub && x.host !== 'dead' },
-      { g: 'terminal',   title: '⌨ Bạn mở ở terminal',     what: 'hub không gõ vào được',
-        pick: (x) => x.host === 'terminal' },
+      // Hai nhóm, không phải một: "có tty" và "hub gõ vào được" là hai chuyện
+      // khác nhau, và ngày 2026-08-11 chúng khác nhau tốn thật — một phiên
+      // trong terminal tích hợp của VS Code khai `host: terminal`, trang mời
+      // gõ, còn Terminal.app thì không biết cái tty ấy. `can_type` là câu trả
+      // lời ĐO ĐƯỢC (hub hỏi Terminal.app giữ những tty nào), không phải suy.
+      { g: 'terminal',   title: '⌨ Bạn mở ở terminal',     what: 'gõ vào được',
+        pick: (x) => x.host === 'terminal' && x.can_type },
+      { g: 'terminal-x', title: '⌨ Terminal khác (VS Code · iTerm)', what: 'hub không gõ vào được',
+        pick: (x) => x.host === 'terminal' && !x.can_type },
       { g: 'background', title: '⚙ Chạy nền',              what: 'không có cửa sổ',
         pick: (x) => x.host === 'background' },
       { g: 'detached',   title: '❓ Không gắn cửa sổ',      what: 'không tty',
@@ -2246,7 +2255,18 @@
     //  · còn lại           → `/ask`   (hỏi trên bản sao)
     // Phiên có cửa sổ mới là phiên trả lời được hộp chọn đang chờ, nên hàng
     // phím điều khiển chỉ hiện ở đó.
-    const canType = !!s.tty && s.tty !== '??' && s.host === 'terminal';
+    // ĐO, không suy. Trước đây: `tty && host === 'terminal'` — thứ chỉ nói
+    // "phiên có một tty". Hub gõ được hay không lại phụ thuộc Terminal.app có
+    // giữ tty ấy không, và một phiên trong terminal tích hợp của VS Code trả
+    // lời KHÁC cho hai câu đó. `can_type` do hub đo mỗi vòng (một lời gọi
+    // AppleScript cho cả danh sách), nên trang thôi phải đoán hộ.
+    const canType = s.can_type === true;
+    // Kept outside the function on purpose: what the screen PROMISES about a
+    // side question depends on this exact condition. A session with a window
+    // gets asked straight (`/btw`) and therefore GAINS a turn; one without a
+    // window is forked and stays byte-identical. Same fact, two contracts.
+    sessCanType = canType;
+    sessHostTerminal = s.host === 'terminal';
     sayMode = mine ? 'tell' : (canType ? 'type' : 'ask');
     const cb = $('sessAside');
     cb.checked = sayMode === 'ask';
@@ -2320,6 +2340,11 @@
   /// một trong hai làm nhật ký phiên gốc dài ra.
   /// Chế độ hiện tại của ô nhập: 'tell' · 'type' · 'ask'.
   let sayMode = 'ask';
+  /// Phiên đang mở có cửa sổ gõ được không — quyết định đường của "hỏi bên lề".
+  let sessCanType = false;
+  /// Phiên có tty nhưng hub không gõ vào được (VS Code · iTerm · tmux) — nói
+  /// đúng LÝ DO thay vì gộp chung với phiên nền.
+  let sessHostTerminal = false;
 
   function applySayMode(canTell) {
     const aside = $('sessAside').checked;
@@ -2334,8 +2359,17 @@
       tell: 'Nói tiếp vào phiên này…',
     }[sayMode];
     btn.textContent = { ask: '💬 Hỏi', type: '⌨ Gõ', tell: 'Gửi' }[sayMode];
+    // Hỏi bên lề có HAI đường và chúng hứa ngược nhau ở đúng chỗ người ta cần
+    // biết. Nói một câu cho cả hai là nói sai một nửa số lần: từ 2026-08-11
+    // phiên CÓ cửa sổ được hỏi thẳng bằng `/btw` — rẻ, sát việc, nhưng nhật ký
+    // phiên gốc DÀI RA. Câu cũ ("phiên gốc không bị đụng") vẫn nằm nguyên trên
+    // màn cho tới hôm nay, tức trang hứa hộ một điều sản phẩm thôi làm.
     hint.textContent = {
-      ask: canTell === false
+      ask: sessCanType
+        ? 'Hub gõ /btw thẳng vào cửa sổ phiên — nhật ký phiên KHÔNG dài thêm, nhưng câu hỏi ăn vào ngữ cảnh đang chạy của nó.'
+        : sessHostTerminal
+        ? 'Phiên này ngồi trong cửa sổ hub không gõ vào được (VS Code · iTerm · tmux), nên câu hỏi chạy trên một bản sao — phiên gốc không bị đụng.'
+        : canTell === false
         ? 'Phiên này không gõ vào được, nên chỉ hỏi bên lề: câu hỏi chạy trên một bản sao, phiên gốc không bị đụng.'
         : 'Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.',
       type: 'Gõ THẲNG vào cửa sổ terminal của phiên (sẽ kéo cửa sổ đó lên trước trên máy).',
@@ -2377,7 +2411,11 @@
     $('sessTellBox').classList.remove('hidden');
     $('sessTellBox').textContent = 'Đang nói tiếp vào phiên — lượt này ở lại trên chính phiên đó…';
     waitingFor = 'tell';
-    sendCommand(`/tell ${text}`, e && e.target);
+    // Id ĐI CÙNG mệnh lệnh. Gửi `/session` rồi `/tell` là hai bản ghi rời
+    // nhau trong phòng chat, và thứ tự KHÔNG được bảo đảm — đo 2026-08-11:
+    // một `/ask` vượt lên trước `/session` của chính nó và hub gõ vào NHẦM
+    // phiên đang làm việc.
+    sendCommand(`/tell ${wantSession} ${text}`, e && e.target);
     input.value = '';
   }
 
@@ -2425,23 +2463,24 @@
     $('sessTellBox').textContent = 'Đang gõ vào cửa sổ phiên…';
     waitingFor = 'tell';
     // Cùng lý do với hàng phím: khẳng định lại phiên trước khi gõ.
-    sendCommand(`/session ${wantSession}`, null);
-    sendCommand(`/type ${text}`, e && e.target);
+    sendCommand(`/type ${wantSession} ${text}`, e && e.target);
     input.value = '';
   }
 
   // Phím điều khiển: một cú bấm = một phím, không có ô nhập nào ở giữa.
-  // UC-S05b mức 2. The question runs on a fork, so the session being watched
-  // keeps working and gains no turn — which is exactly the thing a person
-  // cannot see from a phone, so the screen has to keep saying it.
+  // UC-S05b. TWO paths, and the difference is the one thing a person holding a
+  // phone cannot see for themselves: a session with a terminal window is asked
+  // straight (`/btw`, level 1) and gains a turn; one without is forked (level 2)
+  // and gains nothing. So the screen states which one happened, every time.
   function askAside(e) {
     if (!wantSession) return;
     const input = $('sessSayInput');
     const q = input.value.trim();
     if (!q) { input.focus(); return; }
     $('sessAskBox').classList.remove('hidden');
-    $('sessAskBox').textContent =
-      'Đang hỏi bên lề — hub mở một bản sao của phiên, mất khoảng nửa phút. Phiên gốc vẫn chạy bình thường…';
+    $('sessAskBox').textContent = sessCanType
+      ? 'Đang hỏi bên lề — hub gõ /btw thẳng vào cửa sổ phiên và chờ nó trả lời trong bảng bên…'
+      : 'Đang hỏi bên lề — hub mở một bản sao của phiên, mất khoảng nửa phút. Phiên gốc vẫn chạy bình thường…';
     waitingFor = 'ask';
     // Remember which answer was already on screen. Snapshots keep arriving
     // while hub is still thinking, and each one carries the PREVIOUS answer —
@@ -2449,7 +2488,7 @@
     // new one. Ask the same question twice and the screen would answer
     // instantly with yesterday's text.
     askedAfterTs = lastAsideTs;
-    sendCommand(`/ask ${q}`, e && e.target);
+    sendCommand(`/ask ${wantSession} ${q}`, e && e.target);
     input.value = '';
   }
 
@@ -2581,16 +2620,14 @@
     const nav = NAV[ev.key];
     if (nav) {
       ev.preventDefault();
-      sendCommand(`/session ${wantSession}`, null);
-      sendCommand(`/key ${nav}`, null);
+      sendCommand(`/key ${wantSession} ${nav}`, null);
       return;
     }
     // Enter trên ô TRỐNG = phím Enter (chọn mục đang sáng), không phải gửi một
     // dòng rỗng đi đâu cả.
     if (ev.key === 'Enter' && !ev.target.value.trim()) {
       ev.preventDefault();
-      sendCommand(`/session ${wantSession}`, null);
-      sendCommand('/key enter', null);
+      sendCommand(`/key ${wantSession} enter`, null);
       return;
     }
     // Enter khi ĐÃ có chữ = gửi. Đường này cũng đứt trong cùng lần cắt ấy.
@@ -2628,12 +2665,18 @@
     ans.style.whiteSpace = 'pre-wrap';
     ans.textContent = a.answer;
 
-    // The claim that matters, stated every time: the running session was not
-    // touched, and this answer lives somewhere else.
+    // The claim that matters, stated every time — and it is not the same claim
+    // on both paths. `new_session_id === source_id` means hub typed `/btw` into
+    // the live window: the answer came from the session itself and that session
+    // now carries one more turn. Saying "trên bản sao … không thêm lượt nào"
+    // there is the page asserting something untrue about the owner's own
+    // transcript, which is worse than saying nothing.
+    const sameSession = String(a.new_session_id) === String(a.source_id);
     const foot = document.createElement('p');
     foot.className = 'muted boardnote';
-    foot.textContent =
-      `Trả lời trên bản sao ${String(a.new_session_id).slice(0, 8)} — phiên gốc không thêm lượt nào.`;
+    foot.textContent = sameSession
+      ? 'Hỏi thẳng bằng /btw vào chính phiên này — nhật ký không dài thêm; câu hỏi ăn vào ngữ cảnh đang chạy.'
+      : `Trả lời trên bản sao ${String(a.new_session_id).slice(0, 8)} — phiên gốc không thêm lượt nào.`;
 
     box.append(q, ans, foot);
   }

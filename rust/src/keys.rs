@@ -181,6 +181,41 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
     Ok(out.trim().parse::<i64>().ok())
 }
 
+/// MỌI tty mà Terminal.app đang giữ — một lời gọi cho cả danh sách.
+///
+/// Đây là câu trả lời cho "hub gõ vào phiên nào được": `type_into` đi qua
+/// `do script` của Terminal, nên phiên nào Terminal không giữ thì hub không có
+/// tay nào chạm tới — dù `ps` khai nó có tty đàng hoàng. Phiên trong terminal
+/// tích hợp của VS Code (hay iTerm, hay tmux tách rời) rơi đúng vào ca đó.
+///
+/// Vì sao hỏi CẢ danh sách thay vì hỏi từng phiên: một vòng có 5-15 phiên, mà
+/// mỗi `osascript` mất ~50-150ms. Hỏi từng phiên là con đường đã một lần kéo
+/// một vòng từ ~18 giây lên 90 giây (đọc màn cho mọi phiên, 2026-08-10); hỏi
+/// một lần rồi tra trong tập thì thêm đúng một lời gọi cho cả vòng.
+pub fn terminal_ttys() -> Result<std::collections::HashSet<String>> {
+    // Cùng lối phòng thủ với `window_script`: cửa sổ không có tab (bảng cài
+    // đặt, inspector) làm cả script chết giữa chừng nếu không bọc `try`.
+    let out = osascript(
+        r#"tell application "Terminal"
+  set acc to ""
+  repeat with w in every window
+    try
+      repeat with t in tabs of w
+        set acc to acc & (tty of t) & linefeed
+      end repeat
+    end try
+  end repeat
+  return acc
+end tell"#,
+    )?;
+    Ok(out
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .map(|l| l.trim_start_matches("/dev/").to_string())
+        .collect())
+}
+
 /// Tab của cửa sổ này còn chương trình nào đang chạy không.
 ///
 /// Đây là câu hỏi PHÂN BIỆT "thoát CLI xong" với "vẫn đang thoát": `ps` biến
@@ -387,8 +422,8 @@ end tell"#
 /// đoán nội dung: câu hỏi là chữ của người khác viết, hình dạng mới là thứ
 /// `claude` bảo đảm.
 pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
-    let mut out = Vec::new();
-    for line in screen.lines() {
+    let mut out: Vec<(usize, String, usize)> = Vec::new();
+    for (idx, line) in screen.lines().enumerate() {
         let t = line.trim();
         // Bỏ dấu con trỏ ❯ nếu có, rồi tìm "<số>." ở đầu.
         let t = t.strip_prefix('❯').map(str::trim_start).unwrap_or(t);
@@ -403,18 +438,39 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
         if label.is_empty() || label.len() > 120 {
             continue;
         }
-        out.push((n, label.to_string()));
+        out.push((n, label.to_string(), idx));
     }
     // Số phải liên tiếp từ 1: "3. xong" trong một đoạn văn không phải hộp chọn.
     if out.is_empty() || out[0].0 != 1 {
         return Vec::new();
     }
-    for (i, (n, _)) in out.iter().enumerate() {
+    for (i, (n, _, _)) in out.iter().enumerate() {
         if *n != i + 1 {
             return Vec::new();
         }
     }
-    out
+    // Một lựa chọn duy nhất thì không có gì để chọn.
+    if out.len() < 2 {
+        return Vec::new();
+    }
+    // LIỀN DÒNG NHAU. Đây là chỗ hình dạng thật khác hẳn một đoạn văn có đánh
+    // số, và bỏ nó ra thì cái chuông kêu nhầm — đo thật 2026-08-11: một câu
+    // TRẢ LỜI của phiên có ba gạch đầu dòng "1. / 2. / 3." bị đọc thành hộp
+    // chọn, hub bắn `⚠ dừng lại HỎI — cần bạn chọn` kèm nguyên văn ba dòng ấy
+    // cho một phiên chẳng hỏi gì ai. Chuông kêu nhầm dạy người ta thôi nghe
+    // chuông — đắt ngang một phép đo mù, chỉ hỏng theo chiều ngược lại.
+    //
+    // `claude` vẽ hộp chọn thành các dòng NGẮN nối tiếp nhau; văn xuôi có đánh
+    // số thì giữa hai mục luôn có dòng chữ tràn của mục trước. Cho phép dòng
+    // TRỐNG xen giữa (hộp có thể giãn dòng), không cho phép dòng có chữ.
+    let lines: Vec<&str> = screen.lines().collect();
+    for w in out.windows(2) {
+        let (from, to) = (w[0].2, w[1].2);
+        if lines[from + 1..to].iter().any(|l| !l.trim().is_empty()) {
+            return Vec::new();
+        }
+    }
+    out.into_iter().map(|(n, l, _)| (n, l)).collect()
 }
 
 /// Phiên có đang chạy dở không, đọc từ màn hình.
@@ -783,6 +839,28 @@ mod tests {
         assert!(parse_choices("Tôi đã sửa 2 tệp. Xong.").is_empty());
         // Màn trống thì không có gì.
         assert!(parse_choices("").is_empty());
+        // Một mục thì không có gì để chọn.
+        assert!(parse_choices("❯ 1. Chỉ có một").is_empty());
+
+        // ĐOẠN VĂN CÓ ĐÁNH SỐ — chuông từng kêu nhầm ở đây (2026-08-11).
+        // Một câu TRẢ LỜI của phiên, ba mục đánh số, mỗi mục tràn sang dòng
+        // sau: hub đọc thành hộp chọn rồi bắn `⚠ dừng lại HỎI — cần bạn chọn`
+        // kèm nguyên văn, cho một phiên chẳng hỏi gì ai. Cái khác nhau giữa
+        // hai hình dạng là DÒNG CHỮ TRÀN nằm giữa hai mục.
+        let prose = "Chờ anh\n\
+                     1. Mở lại quyền Documents — mọi việc còn lại đều cần đọc repo.\n\
+                     rồi mới chạy tiếp được kịch bản nghiệm thu.\n\
+                     2. Telegram hai chiều là việc chưa làm và tôi chưa tự quyết:\n\
+                     máy móc đã có sẵn, nhưng nó chỉ sống trong lúc chờ xác nhận.\n\
+                     3. Sau khi có quyền thì chạy /btw thật trên một phiên Terminal.";
+        assert!(
+            parse_choices(prose).is_empty(),
+            "đoạn văn có đánh số KHÔNG phải hộp chọn: {:?}",
+            parse_choices(prose)
+        );
+        // Nhưng hộp thật giãn một dòng trống thì vẫn phải nhận ra.
+        let spaced = "❯ 1. Yes\n\n  2. No, tell Claude what to do differently";
+        assert_eq!(parse_choices(spaced).len(), 2, "{spaced}");
     }
 
     #[test]

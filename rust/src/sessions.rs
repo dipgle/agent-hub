@@ -146,6 +146,23 @@ pub struct LiveSession {
     /// tty của tiến trình, hoặc rỗng. Chìa để tìm cửa sổ Terminal của phiên.
     #[serde(default)]
     pub tty: String,
+    /// Hub CÓ gõ vào được phiên này không — **đo, không suy**.
+    ///
+    /// `host == "terminal"` chỉ nói "có một tty". Trang lại đọc nó thành "gõ
+    /// thẳng vào cửa sổ được" và mời người ta bấm `/type`, `/btw`. Hai câu đó
+    /// khác nhau, và ngày 2026-08-11 khác nhau tốn thật: `projects-71` khai
+    /// `host: "terminal"`, tty `ttys008`, nhưng nó chạy trong **terminal tích
+    /// hợp của VS Code** — Terminal.app không biết cái tty ấy, `window_of` trả
+    /// rỗng, `/btw` lặng lẽ rơi về fork, fork hỏng và tiêu 0.53 đơn vị hạn mức.
+    /// Trang đã hứa một việc hub không làm được.
+    ///
+    /// Đo bằng ĐÚNG điều kiện `keys::type_into` cần: tty này có nằm trong danh
+    /// sách tab của Terminal.app không. Một lời gọi AppleScript cho CẢ danh
+    /// sách, mỗi vòng một lần — khác hẳn cái từng kéo một vòng lên 90 giây (đọc
+    /// màn cho từng phiên). Dò hỏng ⟹ `false` + một dòng log: thà mất tạm nút
+    /// gõ còn hơn mời người ta bấm một nút không chạy.
+    #[serde(default)]
+    pub can_type: bool,
     /// Cỡ ngữ cảnh lượt gần nhất, và model để biết cửa sổ rộng bao nhiêu.
     #[serde(default)]
     pub context_tokens: u64,
@@ -978,6 +995,32 @@ fn parent_map() -> std::collections::HashMap<i64, i64> {
     map
 }
 
+/// Đánh dấu những phiên hub THẬT SỰ gõ vào được — xem `LiveSession::can_type`.
+///
+/// Một lời gọi AppleScript cho cả vòng, và chỉ khi có ít nhất một phiên gắn
+/// tty; máy không mở Terminal.app nào thì không tốn gì cả.
+fn mark_can_type(rows: &mut [LiveSession]) {
+    if !rows.iter().any(|r| r.host == "terminal" && !r.tty.is_empty()) {
+        return;
+    }
+    let owned = match crate::keys::terminal_ttys() {
+        Ok(set) => set,
+        Err(e) => {
+            // Không đoán bù: dò hỏng thì mọi phiên ở lại `can_type = false`, và
+            // lý do phải nằm trong log — nếu không, nút gõ biến mất khỏi trang
+            // mà không ai biết vì sao.
+            logging::warn(
+                "terminal_tty_probe_failed",
+                json!({ "err": e.to_string(), "effect": "mọi phiên tạm coi là không gõ vào được" }),
+            );
+            return;
+        }
+    };
+    for r in rows.iter_mut() {
+        r.can_type = !r.tty.is_empty() && owned.contains(r.tty.trim_start_matches("/dev/"));
+    }
+}
+
 /// Which listed session spawned each windowless one.
 ///
 /// Only rows with no window need this — a terminal session's origin is the
@@ -1086,6 +1129,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 // không có sổ để tra, mà đoán thì thà để trống.
                 started_by_hub: false,
                 tty: String::new(),
+                // Đo một lần cho cả vòng ở `mark_can_type`, sau khi có đủ hàng.
+                can_type: false,
                 pending_subagents: 0,
                 context_tokens: 0,
                 model: None,
@@ -1213,6 +1258,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
         }
     }
 
+    mark_can_type(&mut out.sessions);
     link_parents(&mut out.sessions);
     out.hidden_editor = hidden_editor;
     if hidden_editor > 0 {
@@ -1557,6 +1603,50 @@ pub fn fork_cost_estimate(cfg: &Config, session: &LiveSession) -> f64 {
     (bytes as f64 / 1_000_000.0) * USD_PER_MB
 }
 
+/// `claude` thoát khác 0 — dựng lỗi cho NGƯỜI ĐỌC, ở đúng một chỗ.
+///
+/// Hai chỗ gọi `claude` (hỏi trên bản fork · nói tiếp vào phiên) từng có cùng
+/// một đoạn: cắt 200 ký tự đầu của stderr-hoặc-stdout rồi ném ra. Khi `claude`
+/// hỏng, thứ nó in là một envelope JSON và **200 ký tự đầu đúng là phần vô
+/// dụng** — `is_error/duration_api_ms/num_turns/session_id/total_cost_usd/
+/// usage…` — còn `result` (LÝ DO) nằm sau. Đo 2026-08-11: một lần hỏi bên lề
+/// hỏng, tiêu 0.53 đơn vị hạn mức, và câu duy nhất còn lại nói được đúng "có
+/// hỏng". Hai chỗ gọi thì chỗ thứ ba sẽ chép lại y thế — nên luật đứng ở nguồn.
+///
+/// Log giữ CẢ CÂU (tệp nằm trên chính máy này); ack đi ra phòng chat thì lấy
+/// đúng `result` và vẫn phải qua cổng quét rò rỉ như mọi thứ rời khỏi máy.
+fn claude_failed(session_id: &str, out: &crate::exec::RunOut) -> anyhow::Error {
+    let payload = if out.stderr.trim().is_empty() {
+        &out.stdout
+    } else {
+        &out.stderr
+    };
+    logging::error(
+        "claude_call_failed",
+        json!({
+            "session": session_id,
+            "code": out.code,
+            "stdout": truncate(&out.stdout, 4000),
+            "stderr": truncate(&out.stderr, 4000),
+        }),
+    );
+    let reason = serde_json::from_str::<Value>(payload.trim())
+        .ok()
+        .and_then(|v| {
+            v.get("result")
+                .or_else(|| v.get("error"))
+                .and_then(|r| r.as_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| payload.to_string());
+    let safe = if preview_risk(&reason).is_empty() {
+        truncate(&reason, 200)
+    } else {
+        "[hub ẩn lý do: có thể chứa bí mật — xem log trên máy]".to_string()
+    };
+    anyhow::anyhow!("claude exit {:?}: {}", out.code, safe)
+}
+
 fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkReply> {
     // Cap the CALL. `--resume` loads the whole conversation, so one handover on
     // a 986 KB session cost $1.72 on its first real run (2026-08-08) and a day
@@ -1610,18 +1700,7 @@ fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkRe
         anyhow::bail!("quá {}s", cfg.call.timeout_sec);
     }
     if out.code != Some(0) {
-        anyhow::bail!(
-            "claude exit {:?}: {}",
-            out.code,
-            truncate(
-                if out.stderr.trim().is_empty() {
-                    &out.stdout
-                } else {
-                    &out.stderr
-                },
-                200
-            )
-        );
+        return Err(claude_failed(&session.session_id, &out));
     }
     let v: Value = serde_json::from_str(&out.stdout)
         .map_err(|e| anyhow::anyhow!("kết quả không đọc được: {e}"))?;
@@ -1726,40 +1805,219 @@ pub struct Aside {
 /// - **Độ sát.** Fork dựng lại ngữ cảnh TỪ NHẬT KÝ; phiên sống thì biết cả việc
 ///   đang dở giữa chừng, thứ chưa kịp vào nhật ký.
 ///
-/// Cái giá phải nói thẳng: phiên gốc **có thêm một lượt** — mất lời hứa "y
-/// nguyên byte" của UC-S05b. Nên câu trả lời gửi về luôn nói rõ đã đi đường nào.
+/// 📌 **Cái giá — ĐO LẠI 2026-08-11, và nó KHÁC điều tệp này từng khẳng định.**
+/// Câu cũ ở đây (và trên trang, và trong `UC.md`) là *"phiên gốc CÓ thêm một
+/// lượt"*. Chạy thật trên phiên `3e9a7fd6` (Terminal.app, ttys001): `/btw` mở
+/// một **bảng bên** ngay trong TUI — câu trả lời hiện ra kèm chân bảng
+/// *"↑/↓ to scroll · c to copy · f to fork · Esc to close"* — và **KHÔNG một
+/// byte nào vào nhật ký**: phiên ấy vẫn chưa có tệp `.jsonl` sau khi trả lời
+/// xong. Nên lời hứa đúng là: *nhật ký phiên gốc không đổi, nhưng câu hỏi ăn
+/// vào NGỮ CẢNH đang chạy của phiên*.
+///
+/// ⚠ Điều CHƯA đo: phiên đã có nhật ký sẵn thì `/btw` có ghi thêm không. Phép
+/// đo trên chạy đúng một ca — phiên trắng. Đừng suy rộng lần nữa.
 ///
 /// Phiên không gõ vào được (nền, trong editor, không cửa sổ) thì vẫn fork như cũ.
 fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
+    // MỖI đường lui đều phải nói ra vì sao. Bản đầu trả `None` cho cả ba lý do
+    // — không có cửa sổ · không hỏi được Terminal · màn không đọc được — và
+    // đường lui ấy là một lời gọi `claude --fork-session` TỐN THẬT.
+    //
+    // Đo 2026-08-11: phiên `projects-71` (tty ttys008) hiện `host: "terminal"`
+    // trên màn nên trang hứa sẽ gõ thẳng, nhưng nó chạy trong **terminal tích
+    // hợp của VS Code**, không phải Terminal.app ⟹ `window_of` trả `None` ⟹ rơi
+    // về fork ⟹ fork hỏng và tiêu 0.53 đơn vị hạn mức. Trong log KHÔNG có một
+    // dòng nào nói vì sao `/btw` không chạy: đúng cái luật "không lỗi im lặng"
+    // mà tệp này viết ra, hỏng ngay trong tệp này.
     let window = match crate::keys::window_of(&session.tty) {
         Ok(Some(w)) => w,
-        _ => return None,
+        Ok(None) => {
+            logging::info(
+                "btw_no_window",
+                json!({
+                    "session": session.session_id,
+                    "tty": session.tty,
+                    "why": "không cửa sổ Terminal.app nào mang tty này (phiên trong VS Code / iTerm / tmux?)",
+                    "fallback": "fork",
+                }),
+            );
+            return None;
+        }
+        Err(e) => {
+            logging::warn(
+                "btw_window_probe_failed",
+                json!({ "session": session.session_id, "tty": session.tty, "err": e.to_string(), "fallback": "fork" }),
+            );
+            return None;
+        }
     };
+    // DỌN BẢNG CŨ trước đã.
+    //
+    // Đo 2026-08-11: một bảng `/btw` còn mở từ lượt trước NUỐT luôn câu hỏi của
+    // lượt này — gõ vào thì bảng đóng lại chứ không mở bảng mới, hub chờ hết 60
+    // giây rồi rơi về fork (và fork chết vì phiên ấy chưa có nhật ký). Một lượt
+    // hỏng vì rác của lượt trước là thứ chắc chắn tái diễn vào ngày có người hỏi
+    // hai câu liền nhau, nên dọn ngay ở đây — đừng trông vào việc lượt trước đã
+    // tự dọn.
+    if let crate::keys::Look::Saw { body, .. } = crate::keys::look(&session.tty, 40) {
+        if body.contains(BTW_PANEL_DONE) {
+            logging::info(
+                "btw_stale_panel_closed",
+                json!({ "session": session.session_id, "why": "bảng /btw của lượt trước còn mở" }),
+            );
+            let _ = crate::keys::press(window, "esc");
+            std::thread::sleep(Duration::from_millis(700));
+        }
+    }
     // Ảnh màn TRƯỚC khi hỏi, để biết cái gì là mới.
     let before = match crate::keys::look(&session.tty, 40) {
         crate::keys::Look::Saw { body, .. } => body,
         // Màn không đọc được thì cũng không đọc được câu trả lời ⟹ đừng gõ vào
         // phiên của người ta rồi bỏ đấy.
-        _ => return None,
+        other => {
+            logging::info(
+                "btw_screen_unreadable",
+                json!({
+                    "session": session.session_id,
+                    "why": match &other {
+                        crate::keys::Look::Blind { why } => why.clone(),
+                        crate::keys::Look::Withheld { risk, .. } =>
+                            format!("màn có dấu hiệu bí mật: {}", risk.join(",")),
+                        crate::keys::Look::Saw { .. } => unreachable!("nhánh Saw đã bắt ở trên"),
+                    },
+                    "fallback": "fork",
+                }),
+            );
+            return None;
+        }
     };
     if let Err(e) = crate::keys::type_into(window, &format!("/btw {question}"), true) {
         logging::warn("btw_type_failed", json!({ "session": session.session_id, "err": e.to_string() }));
         return None;
     }
-    // Chờ có cái mới VÀ phiên thôi bận. Có trần: `/btw` không chen ngang việc
-    // đang chạy, nên câu trả lời có thể tới muộn — muộn quá thì nói thẳng là
-    // chưa thấy, đừng bịa.
+    // Chờ BẢNG TRẢ LỜI ĐÓNG LẠI, không phải chờ "màn đổi và phiên thôi bận".
+    //
+    // Đo 2026-08-11, và đây là chỗ bản đầu trả về một câu trả lời GIẢ: `/btw`
+    // vẽ một bảng bên trong TUI, và trong lúc nó đang viết, màn ĐÃ đổi
+    // (`body != before`) còn `is_busy` thì KHÔNG bắt được — đồng hồ
+    // `(2m 5s · ↓ …)` là của một lượt chạy bình thường, bảng `/btw` không có nó.
+    // Kết quả: hub tóm cả màn hình lúc còn `· Answering…` rồi gửi về điện thoại
+    // như thể đó là câu trả lời — kèm nguyên cái logo `Claude Code v2.1.227`.
+    //
+    // Thứ `claude` bảo đảm là CHÂN BẢNG: `Esc to close` chỉ hiện khi bảng đã
+    // viết xong. Neo vào nó, y như `is_busy` neo vào cái đồng hồ chứ không vào
+    // động từ đang quay.
     for _ in 0..30 {
         std::thread::sleep(Duration::from_secs(2));
-        let crate::keys::Look::Saw { body, .. } = crate::keys::look(&session.tty, 40) else {
+        let crate::keys::Look::Saw { body, .. } = crate::keys::look(&session.tty, 60) else {
             continue;
         };
-        if body != before && !crate::keys::is_busy(&body) {
-            return Some(body);
+        if body == before || !btw_panel_finished(&body) {
+            continue;
         }
+        let answer = btw_answer(&body, question);
+        // Đóng bảng lại. Bỏ bước này là để lại một bảng chắn ngang phiên của
+        // người khác — hub mở ra thì hub phải dọn, y như `/stop` phải đóng được
+        // cái cửa sổ mà `/new` mở ra.
+        if let Err(e) = crate::keys::press(window, "esc") {
+            logging::warn(
+                "btw_panel_close_failed",
+                json!({ "session": session.session_id, "err": e.to_string() }),
+            );
+        }
+        return Some(answer);
     }
-    logging::info("btw_no_answer_yet", json!({ "session": session.session_id }));
+    // Hết trần chờ: nói ra ĐÃ NHÌN THẤY GÌ, không chỉ "chưa thấy". Dòng cuối của
+    // màn là thứ phân biệt "nó vẫn đang viết" với "câu hỏi rơi vào hư không" —
+    // và chính chỗ này từng để lọt cả một lượt hỏng mà log không kể được gì.
+    // Màn đã qua cổng quét rò rỉ (`look` trả `Saw`), nên một dòng là an toàn.
+    let seen = match crate::keys::look(&session.tty, 4) {
+        crate::keys::Look::Saw { body, .. } => body
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .map(|l| truncate(l.trim(), 120))
+            .unwrap_or_default(),
+        _ => "(không đọc lại được màn)".to_string(),
+    };
+    logging::info(
+        "btw_no_answer_yet",
+        json!({ "session": session.session_id, "last_line": seen, "fallback": "fork" }),
+    );
     None
+}
+
+/// Chân bảng `/btw`. Có nó nghĩa là BẢNG ĐANG MỞ — **không** nghĩa là đã viết xong.
+const BTW_PANEL_DONE: &str = "Esc to close";
+
+/// Chữ `claude` in trong lúc bảng còn đang viết câu trả lời.
+const BTW_ANSWERING: &str = "Answering";
+
+/// Dòng lệnh chính hub vừa gõ, `claude` vẽ lại ở đầu bảng.
+const BTW_ECHO: &str = "/btw";
+
+/// Bảng đã viết XONG chưa.
+///
+/// Đo 2026-08-11, lần vá thứ hai của cùng một lỗi: bản trước neo vào
+/// `Esc to close` và tưởng đó là dấu "xong". Ảnh chụp thật lúc đang viết:
+///
+/// ```text
+///     /btw Tóm tắt trong 1 câu: phiên này đang làm việc gì?
+///       ✳ Answering…
+///     Esc to close
+/// ```
+///
+/// Chân bảng có mặt NGAY TỪ ĐẦU — nó nói "bảng đang mở", không nói "đã xong".
+/// Nên phải đòi thêm vế phủ định: **không còn** `Answering`. Cùng một bài học
+/// với `is_busy` (neo vào đồng hồ, không vào động từ) và với `look` (ba kết cục
+/// khác nhau đừng gộp làm một).
+pub fn btw_panel_finished(screen: &str) -> bool {
+    screen.contains(BTW_PANEL_DONE) && !screen.contains(BTW_ANSWERING)
+}
+
+/// Bóc CÂU TRẢ LỜI ra khỏi màn hình.
+///
+/// Màn mang cả logo khởi động, cả dòng `/btw <câu hỏi>` vừa gõ, cả chân bảng
+/// hướng dẫn phím. Gửi nguyên màn về điện thoại thì người đọc phải tự lọc — mà
+/// hub đọc được thì hub lọc được. Cắt theo hai mốc `claude` tự vẽ: dòng chứa
+/// câu hỏi vừa gõ, và chân bảng.
+pub fn btw_answer(screen: &str, question: &str) -> String {
+    let lines: Vec<&str> = screen.lines().collect();
+    let key = question.trim();
+    // Mốc đầu: dòng `claude` vẽ lại chính lệnh vừa gõ. Neo vào `/btw` chứ không
+    // vào câu hỏi — TUI ngắt dòng theo bề ngang cửa sổ, nên một câu hỏi dài
+    // KHÔNG nằm trọn trên một dòng và phép so "dòng nào chứa câu hỏi" trượt
+    // sạch (đo 2026-08-11: câu trả lời trả về còn nguyên dòng `/btw …` ở đầu).
+    //
+    // Vế `char_indices` không phải cho đẹp: cắt chuỗi tiếng Việt theo BYTE giữa
+    // một ký tự nhiều byte là panic ngay tại chỗ, và chỗ này chạy trong daemon.
+    let prefix: String = key.chars().take(16).collect();
+    let start = lines
+        .iter()
+        .rposition(|l| l.contains(BTW_ECHO))
+        .or_else(|| {
+            lines
+                .iter()
+                .position(|l| l.contains(key) || (!prefix.is_empty() && l.contains(&prefix)))
+        })
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let end = lines
+        .iter()
+        .rposition(|l| l.contains(BTW_PANEL_DONE))
+        .unwrap_or(lines.len());
+    let body: Vec<&str> = lines[start.min(end)..end]
+        .iter()
+        .map(|l| l.trim_end())
+        .collect();
+    let text = body.join("\n").trim().to_string();
+    // Không cắt được thì thà trả cả màn còn hơn trả rỗng — nhưng nói ra là đã
+    // không cắt được, đừng im lặng đưa một đống chữ.
+    if text.is_empty() {
+        logging::info("btw_answer_uncut", json!({ "why": "không tìm thấy mốc cắt trên màn" }));
+        return screen.trim().to_string();
+    }
+    text
 }
 
 pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<Aside> {
@@ -1784,6 +2042,27 @@ pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<
             ts: crate::logging::now_iso(),
         });
     }
+    // Fork cần một CUỘC HỘI THOẠI để `--resume`. Phiên vừa mở, chưa nói lượt
+    // nào, thì không có gì để nạp — và `claude` trả đúng câu ấy: *"No
+    // conversation found with session ID: …"*, exit 1, sau khi đã tính tiền
+    // khởi động. Đo 2026-08-11. Nói thẳng trước khi gọi thì rẻ hơn, và câu trả
+    // lời nói được việc cần làm thay vì một mã lỗi.
+    let path = transcript_path(
+        &cfg.claude_transcript_root(),
+        &session.cwd,
+        &session.session_id,
+    );
+    if !path.exists() {
+        logging::info(
+            "aside_no_transcript",
+            json!({ "session": session.session_id, "path": path.display().to_string() }),
+        );
+        anyhow::bail!(
+            "phiên này chưa nói lượt nào nên không có bản sao để hỏi. Mở cửa sổ của nó rồi \
+             hỏi thẳng, hoặc giao cho nó một việc trước đã."
+        );
+    }
+
     // Say out loud that this is a side question. Without it the fork reads the
     // transcript as "we were in the middle of X" and carries on working —
     // which it cannot do here anyway (read-only tools), so it would just
@@ -2048,18 +2327,8 @@ pub fn start_background(
         },
     )?;
     if out.code != Some(0) {
-        anyhow::bail!(
-            "claude exit {:?}: {}",
-            out.code,
-            truncate(
-                if out.stderr.trim().is_empty() {
-                    &out.stdout
-                } else {
-                    &out.stderr
-                },
-                200
-            )
-        );
+        // Chưa có id nào để gọi tên: phiên đang được TẠO ra thì hỏng.
+        return Err(claude_failed("(phiên mới, chưa có id)", &out));
     }
     // Human-readable output, not JSON — the id is on the "backgrounded · <id>"
     // line. Parse defensively: a silent miss here would report success while
@@ -2262,18 +2531,7 @@ pub fn stop_background(cfg: &Config, session: &LiveSession) -> Result<()> {
         },
     )?;
     if out.code != Some(0) {
-        anyhow::bail!(
-            "claude exit {:?}: {}",
-            out.code,
-            truncate(
-                if out.stderr.trim().is_empty() {
-                    &out.stdout
-                } else {
-                    &out.stderr
-                },
-                200
-            )
-        );
+        return Err(claude_failed(&session.session_id, &out));
     }
     Ok(())
 }
@@ -2345,18 +2603,7 @@ pub fn tell(cfg: &Config, session: &LiveSession, text: &str) -> Result<Told> {
         anyhow::bail!("quá {}s", cfg.call.timeout_sec);
     }
     if out.code != Some(0) {
-        anyhow::bail!(
-            "claude exit {:?}: {}",
-            out.code,
-            truncate(
-                if out.stderr.trim().is_empty() {
-                    &out.stdout
-                } else {
-                    &out.stderr
-                },
-                200
-            )
-        );
+        return Err(claude_failed(&session.session_id, &out));
     }
     let v: Value = serde_json::from_str(&out.stdout)
         .map_err(|e| anyhow::anyhow!("kết quả không đọc được: {e}"))?;

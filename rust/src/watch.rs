@@ -69,6 +69,16 @@ pub struct Mark {
     /// `interactive` · `background`…
     #[serde(default)]
     pub k: String,
+    /// Phiên CHA, nếu phiên này do một phiên khác đẻ ra (rỗng = phiên gốc).
+    ///
+    /// Hà 2026-08-11: *"phiên con được gọi từ phiên cha mà tắt cũng đang gửi
+    /// qua tele, có cần không?"* — không. Phiên con kết thúc bình thường là
+    /// một CHI TIẾT trong lượt làm việc của phiên cha, và phiên cha sẽ tự báo
+    /// khi nó xong; hai tin cho một việc thì tin nào cũng mất giá.
+    /// Cùng lý do phải nhớ `tty`: lúc phiên biến mất thì hàng của nó đi theo,
+    /// nên quan hệ cha-con phải nằm trong sổ TỪ TRƯỚC.
+    #[serde(default)]
+    pub p: String,
 }
 
 /// Một chuyện vừa xảy ra, đáng để làm phiền chủ máy.
@@ -84,6 +94,8 @@ pub enum Change {
         was_working: bool,
         tty: String,
         kind: String,
+        /// Phiên cha, nếu có — xem `Mark::p`.
+        parent: String,
     },
 }
 
@@ -102,7 +114,17 @@ pub enum Change {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Idle {
     /// Màn đang có hộp chọn: phiên KHÔNG rảnh, nó đang chờ người trả lời.
-    Asking(usize),
+    ///
+    /// `options` mang NGUYÊN VĂN từng lựa chọn khi đọc được màn; rỗng khi màn bị
+    /// giữ lại vì có dấu hiệu bí mật (`keys::Look::Withheld`) — lúc ấy chỉ còn
+    /// con số, và câu nói phải khai luôn là vì sao.
+    ///
+    /// Hà 2026-08-11: *"cần thêm thông tin mô tả liên quan tới lựa chọn đó mới
+    /// hợp lý"*. Đúng: `keys::parse_choices` đã bóc được chữ của từng lựa chọn
+    /// từ 2026-08-10, mà tin báo lại chỉ mang con số — một cái chuông nói "có 3
+    /// lựa chọn" thì vẫn bắt người ta mở máy ra mới biết chọn gì, tức nó chưa
+    /// tiết kiệm cho ai một bước nào.
+    Asking { n: usize, options: Vec<String> },
     /// Đứng ở dấu nhắc thật.
     Prompt,
     /// Không đọc được màn — nói đúng chừng ấy, đừng đoán hộ.
@@ -121,9 +143,33 @@ impl Change {
             Change::Finished { name, ran_sec, .. } => {
                 // Một câu phải trả lời được: CÓ CẦN MÌNH LÀM GÌ KHÔNG.
                 let what = match idle {
-                    Idle::Asking(n) => {
-                        format!("⚠ {name} dừng lại HỎI ({n} lựa chọn) — cần bạn chọn")
+                    // Đọc được chữ ⟹ ĐƯA CHỮ RA. Nó đã qua cổng quét rò rỉ ở
+                    // `keys::look` (màn có dấu hiệu bí mật thì rơi sang nhánh
+                    // dưới), nên đây không phải chỗ để cẩn thận thêm lần nữa —
+                    // chỉ cắt cho vừa một cái chuông: 5 dòng, mỗi dòng 80 ký tự.
+                    Idle::Asking { n, options } if !options.is_empty() => {
+                        let lines: Vec<String> = options
+                            .iter()
+                            .take(5)
+                            .enumerate()
+                            .map(|(i, o)| format!("{}. {}", i + 1, crate::exec::truncate(o, 80)))
+                            .collect();
+                        let more = if *n > lines.len() {
+                            format!("\n… và {} lựa chọn nữa", n - lines.len())
+                        } else {
+                            String::new()
+                        };
+                        format!(
+                            "⚠ {name} dừng lại HỎI — cần bạn chọn:\n{}{more}",
+                            lines.join("\n")
+                        )
                     }
+                    // Không đọc được chữ thì nói RÕ vì sao chỉ có con số, đừng
+                    // để người ta tưởng hub keo kiệt thông tin.
+                    Idle::Asking { n, .. } => format!(
+                        "⚠ {name} dừng lại HỎI ({n} lựa chọn) — màn có dấu hiệu bí mật nên hub \
+                         không đưa nội dung ra; mở phiên trên máy để đọc"
+                    ),
                     Idle::Prompt => format!(
                         "⏸ {name} dừng, đang chờ bạn — sau {} phút chạy",
                         ran_sec / 60
@@ -198,6 +244,7 @@ pub fn changes(
                         },
                         y: s.tty.clone(),
                         k: s.kind.clone(),
+                        p: s.parent_session_id.clone().unwrap_or_default(),
                     },
                 );
             }
@@ -222,6 +269,7 @@ pub fn changes(
                 was_working,
                 tty: s.tty.clone(),
                 kind: s.kind.clone(),
+                parent: s.parent_session_id.clone().unwrap_or_default(),
             });
         }
     }
@@ -242,6 +290,7 @@ pub fn changes(
                 // nên không còn chỗ nào hỏi nó chạy ở cửa sổ nào.
                 tty: mark.y.clone(),
                 kind: mark.k.clone(),
+                parent: mark.p.clone(),
             });
         }
     }

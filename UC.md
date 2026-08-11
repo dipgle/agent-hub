@@ -338,23 +338,80 @@ phiên gốc · sinh **session id mới**. Đó chính là "chen ngang hỏi mà
 cảnh đang làm".
 
 **Trạng thái thật:**
+- Mức **1 (hỏi thẳng phiên đang sống)** — ✅ **có cửa, và cửa KHÔNG nằm ở CLI.**
+  Sổ này từng ghi *"đã đo, không có cửa… ngừng theo đuổi cho tới khi CLI có
+  đường"*, và câu ấy đúng về CLI: mặt lệnh chỉ có `agents · attach · logs ·
+  stop`, `--resume` bị từ chối thẳng khi phiên còn chạy, `attach` đòi TTY. Cái
+  sai là **kết luận rộng hơn phép đo**: cửa là **cửa sổ Terminal** — cùng đường
+  `keys::type_into` mà `/type` đã đi. Từ 2026-08-11 hub gõ **`/btw <câu>`** vào
+  phiên có cửa sổ (chính `claude` gợi ý đường này trên màn), chờ màn đổi + phiên
+  thôi bận (trần 60s), rồi đọc câu trả lời về.
+  Vì sao nó là đường ĐI TRƯỚC, không phải đường phụ: fork nạp lại TOÀN BỘ nhật
+  ký — đo thật 0.99 MB → **1.72 đơn vị hạn mức cho MỘT câu hỏi**, đắt tới mức
+  `fe-aside-uc` phải có cổng chặn và mặc định không gọi, mà *một tính năng không
+  ai dám bấm thì coi như không có*. `/btw` hỏi phiên đang sống bằng ngữ cảnh đã
+  nằm sẵn trong đầu nó, và còn biết cả việc đang dở giữa chừng — thứ chưa kịp
+  vào nhật ký.
+  📌 **Cái giá — ĐO LẠI cuối ngày 2026-08-11, và nó KHÁC điều mục này viết buổi
+  sáng.** Câu cũ: *"phiên gốc CÓ thêm một lượt"*. Chạy thật trên `projects-ff`
+  (Terminal.app, `ttys001`): `/btw` mở một **bảng bên** trong TUI, trả lời đầy
+  đủ, đóng bằng Esc — và **không một byte nào vào nhật ký**; phiên ấy tới cuối
+  ngày vẫn chưa có tệp `.jsonl`. Lời hứa đúng: **nhật ký không dài thêm, cái bị
+  ăn là NGỮ CẢNH đang chạy** — thứ không nhìn thấy trên đĩa. Màn nói đúng chừng
+  ấy, cả trước lẫn sau khi hỏi.
+  ⚠ **Chưa đo:** phiên ĐÃ có nhật ký sẵn thì `/btw` có ghi thêm không. Phép đo
+  chỉ chạy một ca — phiên trắng. Đừng suy rộng lần nữa.
+  Màn không đọc được thì **KHÔNG gõ gì cả**; hết trần chờ thì rơi về fork chứ
+  không bịa.
+  ⚠ Ba cái bẫy của đường này, cả ba đều đã cắn một lần rồi mới vá (mỗi cái một
+  test khoá bằng ảnh chụp màn hình THẬT):
+  1. **`Esc to close` KHÔNG phải dấu "xong"** — nó hiện ngay từ lúc bảng mới mở,
+     nên hub từng gửi về một bảng còn đang chạy chữ `✳ Answering…`. Dấu đúng là
+     chân bảng **và** không còn `Answering`.
+  2. **Câu hỏi dài bị TUI ngắt dòng**, nên "tìm dòng chứa câu hỏi" trượt sạch và
+     câu trả lời trả về còn nguyên dòng lệnh `/btw …` ở đầu. Neo vào chữ `/btw`
+     mà `claude` tự vẽ lại.
+  3. **Bảng của lượt trước còn mở thì nuốt câu hỏi lượt này** (gõ vào là bảng
+     đóng, không mở bảng mới) ⟹ chờ hết trần rồi rơi về fork. Nay dọn bảng cũ
+     trước khi hỏi.
 - Mức **2 (fork)** — ✅ **đã chạy thật**, kết quả ở trên. Chỉ là một lần gọi
   `claude -p --resume <id> --fork-session`, không cần chen vào tiến trình nào.
-  ⟹ **đây nên là nút mặc định**, vì nó an toàn tuyệt đối với việc đang chạy.
+  ⟹ đường cho phiên **không gõ vào được** (phiên nền, phiên trong editor, phiên
+  không tìm ra cửa sổ), vì nó an toàn tuyệt đối với việc đang chạy.
   ⚠ Ba điều kèm theo: bản fork là **ảnh chụp đông cứng** (phiên gốc chạy tiếp thì
-  nó lạc hậu) · điều fork biết thì **phiên gốc không biết** (muốn đưa về phải dùng
-  mức 1) · fork **đẻ ra session id mới** nên UI phải gắn nhãn "hỏi bên lề" và gom
-  dưới phiên cha, không thì danh sách rác dần.
-- Mức **1 (xếp hàng)** — ❌ **đã đo, không có cửa.** Hàng đợi là của tiến trình
-  đang chạy, và CLI **không có primitive nào gửi input vào phiên đang sống**:
-  toàn bộ mặt lệnh chỉ có `agents · attach · logs · stop`, còn `--resume` thì bị
-  từ chối thẳng khi phiên còn chạy. Kể cả với phiên **do hub nuôi** (`--bg`).
-  `attach` cần TTY trên máy. ⟹ ngừng theo đuổi mức 1 cho tới khi CLI có đường.
+  nó lạc hậu) · điều fork biết thì **phiên gốc không biết** · fork **đẻ ra
+  session id mới** nên UI phải gắn nhãn "hỏi bên lề" và gom dưới phiên cha,
+  không thì danh sách rác dần.
 - Mức **3** — không có primitive, và cũng không nên có.
 
+**Hai đường ⟹ HAI lời hứa ngược nhau, và phép đo phải chọn trước khi bấm.**
+Điều kiện quyết định đường đi là `tty` + `host == "terminal"` (hub: `window_of`;
+trang: `canType`). `fe-aside-uc.mjs` chốt `viaBtw` **trước** cú bấm rồi mới đo:
+
+| | `/btw` (có cửa sổ) | fork (không gõ vào được) |
+|---|---|---|
+| lời hứa | trả lời tới từ CHÍNH phiên ấy; nhật ký KHÔNG dài thêm, ăn ngữ cảnh đang chạy | phiên gốc y nguyên byte |
+| bằng chứng | byte · dòng · `last_activity` không đổi, VÀ câu trả lời sạch (không logo, không chân bảng, không `Answering`, không lặp lại dòng lệnh) | byte · dòng · mtime · `last_activity` không đổi |
+| ảnh chụp | `new_session_id == source_id` | `new_session_id != source_id` |
+| cổng hạn mức | **không áp** (một lượt, như tự gõ) | áp theo cỡ nhật ký |
+| đã chạy thật | **21/21**, `projects-ff` trên `ttys001` (2026-08-11) | **10/10**, `projects-71` trong VS Code — bước gọi `claude` BỎ QUA vì 0.26 > trần 0.25 |
+
+Điều kiện chọn đường nay là `can_type` — con số **hub tự đo** (hỏi Terminal.app
+đang giữ những tty nào), không phải `tty && host == "terminal"` như trước. Khác
+nhau ở đúng ca đã tốn tiền thật: phiên trong **terminal tích hợp của VS Code** có
+tty đàng hoàng mà Terminal.app không biết nó, nên `/btw` lặng lẽ rơi về fork.
+
+Chốt đường **sau** khi có câu trả lời thì phép đo chỉ là cái gương — hub trả về
+gì nó cũng gật.
+
 **Nghiệm thu:**
-- Bấm “hỏi bên lề” → trả lời đúng ngữ cảnh phiên gốc, và phiên gốc **không thêm
-  lượt nào** (`last_activity` không đổi, số bản ghi không tăng).
+- Bấm “hỏi bên lề” trên phiên **không gõ vào được** → trả lời đúng ngữ cảnh
+  phiên gốc, và phiên gốc **không thêm lượt nào** (`last_activity` không đổi, số
+  bản ghi không tăng).
+- Bấm “hỏi bên lề” trên phiên **có cửa sổ** → trả lời tới từ chính phiên ấy
+  (`new_session_id == source_id`), nhật ký **không dài thêm**, câu trả lời là câu
+  trả lời chứ không phải ảnh chụp màn hình, và **màn nói đúng cái nó ăn** (“ăn
+  vào ngữ cảnh đang chạy”) cả trước lẫn sau khi hỏi.
 - Bấm “gửi vào phiên” → màn hiện *đang xếp hàng* → *đã nhận*, và việc đang chạy
   **không đứt quãng** (không có lượt nào bị bỏ dở).
 

@@ -619,3 +619,71 @@ mod cua_so_moi {
         assert!(cmd.starts_with("cd '/Users/x/projects' &&"), "{cmd}");
     }
 }
+
+/// Câu trả lời `/btw` phải là CÂU TRẢ LỜI, không phải ảnh chụp màn hình.
+///
+/// Màn dưới đây là bản chụp THẬT (2026-08-11, phiên `projects-ff` trên
+/// `ttys001`) của lần `/btw` đầu tiên chạy được đầu-tới-cuối. Bản đầu gửi
+/// nguyên cả cái màn này về điện thoại — logo khởi động, dòng vừa gõ, chân bảng
+/// hướng dẫn phím — và người đọc phải tự lọc ra câu trả lời giữa đống ấy.
+#[test]
+fn a_btw_answer_is_cut_out_of_the_screen_not_shipped_whole() {
+    let screen = "\
+▗ ▗   ▖ ▖  Claude Code v2.1.227
+           Opus 5 (1M context) with xhigh effort · Claude Max
+  ▘▘ ▝▝    ~/Documents/projects
+
+
+▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
+
+    /btw Tóm tắt trong 1 câu: phiên này đang làm việc gì?
+
+      Phiên này thực tế chưa có trao đổi nào ngoài context khởi động
+      (CLAUDE.md workspace + memory index + hook SessionStart), nên chưa có
+      việc nào đang làm.
+
+    ↑/↓ to scroll · c to copy · f to fork · Esc to close";
+    let out = hub::sessions::btw_answer(screen, "Tóm tắt trong 1 câu: phiên này đang làm việc gì?");
+    assert!(out.contains("chưa có trao đổi nào"), "mất câu trả lời:\n{out}");
+    assert!(!out.contains("Claude Code v"), "còn logo khởi động:\n{out}");
+    assert!(!out.contains("Esc to close"), "còn chân bảng phím:\n{out}");
+    assert!(!out.contains("/btw"), "còn chính câu vừa gõ:\n{out}");
+}
+
+/// Không tìm thấy mốc cắt thì thà trả cả màn còn hơn trả rỗng — im lặng đưa một
+/// chuỗi rỗng là biến "đọc không được" thành "phiên không nói gì".
+#[test]
+fn an_uncuttable_screen_still_returns_something() {
+    let out = hub::sessions::btw_answer("một màn hình lạ hoắc", "câu hỏi không có trên màn");
+    assert_eq!(out, "một màn hình lạ hoắc");
+}
+
+/// Bảng đang VIẾT DỞ thì chưa phải câu trả lời — và chân bảng KHÔNG nói được
+/// điều đó.
+///
+/// Ảnh chụp thật 2026-08-11: `Esc to close` có mặt ngay từ lúc bảng mới mở,
+/// nên bản vá đầu (neo vào chân bảng) vẫn tóm về một bảng còn đang chạy chữ
+/// `✳ Answering…`. Đây là lần thứ hai của cùng một lỗi trong ngày: lấy một dấu
+/// hiệu "đang mở" làm dấu hiệu "đã xong".
+#[test]
+fn a_panel_still_writing_is_not_an_answer() {
+    let writing = "    /btw Tóm tắt trong 1 câu: phiên này đang làm việc gì?\n      ✳ Answering…\n    Esc to close";
+    assert!(!hub::sessions::btw_panel_finished(writing), "bảng đang viết mà đã coi là xong");
+
+    let done = "    /btw Tóm tắt?\n\n      Phiên này chưa làm gì cả.\n\n    ↑/↓ to scroll · c to copy · f to fork · Esc to close";
+    assert!(hub::sessions::btw_panel_finished(done), "bảng đã xong mà không nhận ra");
+    assert!(!hub::sessions::btw_panel_finished("❯ \n  ⏵⏵ auto mode on"), "màn thường không phải bảng");
+}
+
+/// Câu hỏi dài bị TUI ngắt dòng thì phép cắt vẫn phải đúng.
+///
+/// Bản trước tìm "dòng nào chứa cả câu hỏi" — với cửa sổ hẹp thì không dòng nào
+/// chứa cả câu, phép tìm trượt, và câu trả lời trả về còn nguyên dòng lệnh
+/// `/btw …` ở đầu. Nay neo vào chính chữ `/btw` mà `claude` vẽ lại.
+#[test]
+fn a_wrapped_question_still_gets_cut_off_the_answer() {
+    let screen = "    /btw Tóm tắt trong 1 câu: phiên này\n    đang làm việc gì?\n\n      Chưa có việc nào đang chạy.\n\n    ↑/↓ to scroll · Esc to close";
+    let out = hub::sessions::btw_answer(screen, "Tóm tắt trong 1 câu: phiên này đang làm việc gì?");
+    assert!(out.contains("Chưa có việc nào"), "mất câu trả lời:\n{out}");
+    assert!(!out.contains("/btw"), "còn dòng lệnh vừa gõ:\n{out}");
+}

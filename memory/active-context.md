@@ -1,5 +1,205 @@
 # active context — hub
 
+## 🎯 2026-08-11 (chiều) — hub gõ vào NHẦM PHIÊN, và ba lời hứa nói điều chưa đo
+
+Phiên này bắt đầu bằng việc đóng nốt ba món "CHƯA chạy thật" của buổi sáng. Đóng
+được hai, và trên đường đi lòi ra **một lỗi nặng hơn tất cả những gì đang chờ**.
+
+### 🔴 Lỗi nặng nhất: mệnh lệnh không tự nói nó nhắm vào phiên nào
+
+Trace, không cãi được:
+
+```text
+10:32:38.834  /session 3e9a7fd6…   ← trang gửi TRƯỚC (phiên đích)
+10:32:51.794  /ask Tóm tắt…        ← trang gửi SAU
+              ack: "Hỏi bên lề phiên projects-1f"   ← chạy trên phiên KHÁC
+10:33:42.128  ack: "Đang theo phiên projects-ff"    ← lệnh trước, chạy sau
+```
+
+`/ask` · `/tell` · `/type` · `/key` đều định vị bằng con trỏ **`focus:session`**
+— một biến toàn cục do một lệnh KHÁC đặt. Trang phải gửi hai bản ghi rời nhau
+vào phòng chat, mà **phòng chat không bảo đảm thứ tự**. Hậu quả thật: hub gõ
+`/btw` vào cửa sổ của một phiên đang làm việc khác; cùng đường ấy `/type` gửi
+chữ và `/key` gửi **phím** (mũi tên = vừa di vừa CHỐT) vào nhầm terminal.
+`/stop`/`/handover` miễn nhiễm vì chúng mang id ngay trong câu lệnh — và đó
+chính là bản vá: **`pipeline::split_target`**, id đi cùng mệnh lệnh, không có id
+thì rơi về focus **kèm log**. Trang gửi id ở cả 4 route.
+
+### `/btw` — cái giá tôi ghi vào sản phẩm buổi sáng là SAI
+
+Sáng viết vào trang + `UC.md` + ack: *"phiên gốc CÓ thêm một lượt"*. Chạy thật
+mới thấy: `/btw` mở **một bảng bên** trong TUI rồi đóng bằng Esc, và **không một
+byte nào vào nhật ký** — `projects-ff` tới cuối ngày vẫn chưa có tệp `.jsonl`.
+Sự thật: *nhật ký không dài thêm, cái bị ăn là **ngữ cảnh đang chạy***. Đã sửa
+cả bốn chỗ. ⚠ **Chưa đo:** phiên ĐÃ có nhật ký thì `/btw` có ghi thêm không.
+
+Ba cái bẫy của đường này, mỗi cái một test khoá bằng **ảnh chụp màn hình thật**:
+
+| Bẫy | Vì sao sập |
+|---|---|
+| `Esc to close` **không** phải dấu "xong" | nó hiện ngay lúc bảng mới mở ⟹ hub gửi về bảng còn chạy `✳ Answering…`. Dấu đúng: chân bảng **và** hết `Answering` |
+| câu hỏi dài **bị ngắt dòng** | "tìm dòng chứa câu hỏi" trượt sạch ⟹ câu trả lời còn nguyên dòng `/btw …`. Neo vào chữ `/btw` claude tự vẽ |
+| bảng lượt trước **còn mở** | nuốt câu hỏi lượt này (gõ vào là bảng đóng) ⟹ hết trần rồi rơi fork. Nay dọn trước khi hỏi |
+
+### `host: "terminal"` ≠ "hub gõ vào được"
+
+`projects-71` khai `host: terminal`, tty `ttys008` — nhưng nó chạy trong
+**terminal tích hợp của VS Code**, Terminal.app không biết cái tty ấy. `/btw`
+lặng lẽ rơi về fork, fork hỏng, tiêu **0.53 đơn vị hạn mức**, và log **không một
+dòng** nói vì sao. Nay: `can_type` do hub **ĐO** (một lời gọi AppleScript hỏi
+Terminal.app đang giữ tty nào, mỗi vòng một lần) thay cho phép suy
+`tty && host == "terminal"`; trang tách hẳn nhóm *"⌨ Terminal khác (VS Code ·
+iTerm)"* với chữ **hub không gõ vào được**; ba đường lui của `ask_via_btw` đều
+có log riêng.
+
+### Hai câu Hà hỏi giữa phiên → thành mã, đã chạy thật
+
+- *"cần thêm thông tin mô tả liên quan tới lựa chọn đó"* → tin báo hộp chọn nay
+  mang **nguyên văn** từng lựa chọn (`keys::parse_choices` đã bóc được chữ từ
+  08-10, mà tin chỉ mang con số). Màn có dấu hiệu bí mật thì giữ con số **và
+  nói rõ vì sao**. ⚠ Kèm theo phải siết bộ nhận diện: một **đoạn văn có đánh
+  số** trong câu trả lời của phiên từng bị đọc thành hộp chọn → hub bắn `⚠ dừng
+  lại HỎI` cho một phiên chẳng hỏi ai. Nay đòi các mục **liền dòng nhau**.
+- *"phiên con tắt cũng gửi tele, có cần không?"* → không. `Mark.p` +
+  `Ended.parent` ⟹ im, có log. Giữ đúng một ngoại lệ: con tắt **lúc đang chạy
+  dở** vẫn báo (cha có thể đang chờ một kết quả không bao giờ tới).
+
+### Nghiệm thu ĐÃ CHẠY THẬT
+
+- **UC-S06 26/26** (17:04–17:08, Hà bấm ✅ Telegram): mở cửa sổ `ttys005` → nói
+  tiếp (76797→78673 byte) → **tắt hẳn** (cửa sổ đóng, phiên rời danh sách).
+  Kèm tin tự phát `⏹ phiên 7c2ae1a7 đã tắt hẳn.` — nhánh terminal đã quan sát
+  được thật.
+- **UC-S05b `/btw` 21/21** trên `projects-ff`/`ttys001`, câu trả lời sạch.
+- **UC-S05b fork 10/10** trên `projects-71` — bước gọi `claude` **BỎ QUA** đúng
+  thiết kế (0.26 > trần 0.25), nói rõ chưa nghiệm thu cái gì.
+- `cargo test` **114** · clippy **0** · hubd `cert` · bundle **v147** (byte trang
+  phục vụ == byte cây làm việc).
+
+### ⚠ Còn treo
+
+1. **Telegram hai chiều** — Hà hỏi *"làm việc hoàn toàn qua kênh tele thì có gửi
+   được nội dung chát không"*: **không**. `confirm.rs:236` chỉ đọc
+   `callback_query` và chỉ sống trong lúc chờ xác nhận. Máy móc đã có sẵn (nút +
+   callback); làm cho trọn = vòng `getUpdates` thường trực → tin chữ từ đúng
+   chat id đi vào cùng `parse_command`, hộp chọn của phiên hiện thành N nút bấm
+   trả `/key <id> <n>`. **Chưa làm — chờ Hà chốt**, vì nó biến Telegram thành
+   kênh ra lệnh thật (cổng chặn duy nhất là chat id).
+2. **`/btw` trên phiên ĐÃ có nhật ký** — chưa đo.
+3. **Lỗi quyền `~/Documents` chập chờn** (mục dưới).
+
+### 🔍 Lỗi quyền: đã có chữ ký, CHƯA có thủ phạm
+
+Hà bắt đúng chỗ tôi đoán mò (*"chứng tỏ bạn đang chạy qua một cái khác"*). Đo
+lại tử tế:
+
+| Đo | Kết quả |
+|---|---|
+| `stat` một tệp dưới `~/Documents` | **OK** |
+| **đọc nội dung** / **liệt kê thư mục** | **EPERM** |
+| `tccd` nói gì | `service=kTCCServiceSystemPolicyDocumentsFolder` → *"Platform binary prompting is 'Deny' because: is Platform Binary"* |
+| cùng lúc, lời xin quy về Terminal (pid 28200) | `result was 1` — **được phép** |
+| `hubd` | không bao giờ dính (có danh tính chứng chỉ riêng) |
+
+⟹ Không phải TCC bị gỡ (quyền vẫn còn), mà là **lời xin không được quy về
+Terminal.app**; macOS **từ chối hỏi** cho binary hệ thống (`zsh`/`head`/`ls`/
+`git`), nên deny thẳng, không hộp thoại nào để bấm. Tự khỏi sau vài phút khi
+chuỗi quy trách nhiệm trở lại.
+
+**Đã loại bằng thí nghiệm** (đo → làm → đo lại): lệnh chạy nền · `osascript`/
+`do script` · một lượt Playwright · `install.sh` (codesign + launchctl). **Chưa
+tìm ra tác nhân** — nói đúng như vậy. Máy ghi chuyển trạng thái đang chạy:
+`tcc-timeline.log` (5s/mẫu, chỉ ghi lúc đổi).
+
+📌 Vá kèm: `fe-shots.mjs` (bước "mở ảnh ra nhìn" sau MỖI deploy) đang hỏng câm —
+sai chữ ký `waitForFunction` (trần 180s âm thầm rơi về 30s) **và** chờ một luồng
+rỗng vĩnh viễn khi thẻ đầu danh sách là phiên vừa mở.
+
+---
+
+## 🌉 2026-08-11 — hub là CẦU NỐI, và cây cầu ấy loại bỏ hạng phiên `--bg`
+
+Hà nhắc lại ý định gốc, và nó không phải một câu mô tả mà là một **tiêu chí**:
+*"cli claude cài trên máy tôi, hub là **cầu kết nối** ra ui để tôi làm việc,
+điều khiển, giao tiếp phiên"*. Nay nó nằm ở đầu `CLAUDE.md`, trước mọi luật
+khác, vì mọi việc hôm nay đều rơi ra từ nó.
+
+**Tiêu chí cắt hai chiều.** Thứ hub làm mà ở terminal không có tương đương ⟹ mùi
+lạ. Thứ Hà làm được ở terminal mà điện thoại không làm được ⟹ lỗ hổng (còn nợ:
+nhìn màn hai phiên cùng lúc, cuộn xa hơn 16 dòng, trả lời hộp thoại của macOS).
+Bằng chứng nó trả tiền ngay: `/new` đẻ ra phiên `--bg` — **không cửa sổ ⟹ không
+màn sống, không `/btw`, không dòng "đang làm gì", muốn nói chen vào phải dừng
+nó trước**. Ba tính năng dựng hôm 08-10 đều không chạy được trên hạng phiên ấy,
+và đó chính là dấu hiệu. Chủ máy ngồi trước máy sẽ không bao giờ tạo ra nó.
+
+**Bốn lần cùng một lỗi: nói điều hub không biết.** Cả ngày là một chuỗi vá cùng
+họ với "phiên đang đứng ở dấu nhắc" của đêm trước:
+
+| Câu sai | Vì sao sai | Vá |
+|---|---|---|
+| "đã tắt hẳn" | *biến khỏi `claude agents`* gộp **ba** chuyện: phiên nền bị dừng · CLI thoát nhưng cửa sổ còn · cửa sổ đóng luôn | `keys::window_of(tty)` hỏi thẳng Terminal, đúng một lần, đúng lúc phiên biến mất (hiếm ⟹ rẻ). Không dò được thì **nói thẳng là chưa rõ** |
+| tin báo dài dòng | Hà: *"chỉ cần thông tin có nghĩa để biết cần làm gì hay không"* | mỗi tin trả lời đúng một câu — CÓ CẦN MÌNH LÀM GÌ KHÔNG: `⏸ dừng, đang chờ bạn` · `⚠ dừng lại HỎI (N lựa chọn)` · `⏹ đã tắt hẳn` |
+| "lệnh/động từ" | nói bằng từ vựng nội bộ (`CommandKind`) với người chỉ nhìn thấy nút — đúng cách `/new` từng bị giải thích cho người chưa gõ nó bao giờ | Hà: *"tại sao không gọi nó là route?"* → gọi là **ROUTE** trong tài liệu và hội thoại. Kèm cảnh báo: route này **không mở ra ngoài**, chỉ tid chủ máy gọi được |
+| "phiên mới ⟹ bước này đẻ ra" | phép đo quá rộng: báo đỏ vì chủ máy TỰ mở một phiên gõ `/usage` đúng lúc kịch bản chạy | chỉ tính khi phiên mang **dấu của hub** HOẶC **chính câu vừa gõ** ở lượt đầu nhật ký. Phiên lạ khác vẫn được IN RA, chỉ không tính là hỏng |
+
+Ghi riêng một câu, vì **đỏ giả là thứ dạy người ta bỏ qua màu đỏ** — nó đắt
+ngang một phép đo mù, chỉ hỏng theo chiều ngược lại.
+
+**`/new` nay mở CỬA SỔ THẬT.** `do script` sinh cửa sổ, ghép với hàng
+`claude agents` bằng **tty** — cái handle duy nhất tồn tại lúc ấy (tên do
+`claude` tự đặt, id thì chưa có). `--bg` giữ làm đường lui sau cờ
+`new_in_terminal`. **`/stop` phải theo**, nếu không cây cầu một chiều: hub mở
+được cửa sổ rồi từ chối đóng. Thứ tự **`/exit` trước, đóng cửa sổ sau** không
+phải phép lịch sự — đóng khi còn tiến trình sẽ bật modal *"terminate running
+processes"*, mà **một modal thì khoá mọi lệnh automation sau nó**, tức hub bị
+bịt miệng. Tab còn bận sau 30 giây thì KHÔNG đóng liều.
+Nút trên trang nay đi theo **quyền sở hữu** (`started_by_hub`), không theo hạng
+phiên, chữ đổi thành "Tắt hẳn".
+Hai bẫy khoá bằng test RED-trước: đề bài phải đứng **trước** `--disallowedTools`
+variadic, và mọi mẫu `Bash(git push:*)` phải **bọc nháy** vì đường này đi qua
+shell — để trần là lỗi cú pháp, cửa sổ mở ra không có phiên **và không có rào**.
+(`--bg` chưa từng dính bẫy này vì nó truyền argv thẳng.)
+
+**`/ask` đi đường thẳng trước — `/btw`.** Chính `claude` gợi ý trên màn một
+phiên thật hôm nay. Đường fork cũ nạp lại TOÀN BỘ nhật ký: đo thật 0.99 MB →
+1.72 đơn vị hạn mức cho MỘT câu hỏi, và đó là lý do `fe-aside` phải có cổng chặn
+và mặc định không gọi — *một tính năng đắt tới mức không ai dám dùng thì coi như
+không có*. Nay gõ `/btw <câu>` vào chính phiên đang sống, chờ màn đổi + phiên
+thôi bận (trần 60s), đọc câu trả lời về. Cái giá nói thẳng trong ack: **phiên
+gốc CÓ thêm một lượt**, mất lời hứa "y nguyên byte" của UC-S05b — nên hai đường
+được phân biệt rõ trong câu trả lời. Màn không đọc được thì **KHÔNG gõ gì cả**;
+hết trần chờ thì rơi về fork chứ không bịa.
+
+📌 **Một niềm tin trong sổ đã HẾT ĐÚNG** (lộ ra khi Hà hỏi *"tại sao extension
+trên vscode quản lý được các trạng thái"*): chú thích ghi "`status`/`state` VẮNG
+với phiên interactive — đo 2026-08-08". Đo lại hôm nay: `claude agents --json`
+trả `status` cho **cả** phiên interactive. Vắng chỉ còn ở hàng do extension VS
+Code nuôi, mà hub vốn ẩn. May là `is_working` đã ưu tiên `status` trước mtime nên
+hành vi vẫn đúng — cái sai nằm ở **sổ**, và sổ sai thì lần sau có người tin theo.
+
+**Nghiệm thu đã CHẠY THẬT:** `cargo test` **109** · clippy 0 · đã cài, daemon
+`kind: cert` (bản cài 12:39:34 mới hơn `.rs` mới nhất 12:33:05) · bundle **v143**
+· `fe-newsession-uc` **22/22** trên trang thật 390×844 (`alice_local`), rồi một
+lượt có bấm Telegram đạt **25/26** — gồm trọn bước tắt hẳn: màn báo đã tắt, nhật
+ký còn 84.872 byte, cửa sổ `ttys006` đã đóng, phiên rời danh sách.
+
+⚠ **CHƯA chạy thật — ba món, ghi đúng như vậy:**
+1. **`fe-newsession-uc` 26/26.** Bản vá phép đo "phiên lạ" mới chỉ được kiểm trên
+   HAI NHẬT KÝ CŨ của lượt chạy trước, chưa chạy lại trọn lượt. Cần một cú bấm
+   xác nhận Telegram trong lúc kịch bản chạy. (Commit 12:51 sửa lại con số vì
+   commit trước đã ghi 26/26 cho một lượt chưa từng diễn ra.)
+2. **`/btw` chưa có lượt gõ thật** — cần một `/ask` thật lên phiên CÓ cửa sổ
+   terminal. Mới ghim bằng test.
+3. **Hai câu cho nhánh terminal** ("đã THOÁT khỏi claude, cửa sổ VẪN MỞ" vs "đã
+   TẮT HẲN") chưa quan sát được ở dạng tin báo tự phát — cần một phiên terminal
+   thật kết thúc theo từng đường.
+
+⚠ **Đừng soi trang bằng `fe-probe` trong lúc `fe-newsession-uc` đang chạy** — mỗi
+lượt soi gửi thêm một `/session` vào phòng, chen mất lượt trả lời của bước tắt.
+Đo 2026-08-11: lượt chạy sạch thì tin về đúng hạn; lượt bị soi song song nằm mãi
+ở tin giữa chừng `🔒`.
+
+
 ## 🔇 2026-08-10 (khuya) — cái loa nói dối, và Hà bắt được ngay tin thứ ba
 
 Hà đọc Telegram: *"rõ ràng là lỗi mà sao tele tôi nhận được lại là phiên đang

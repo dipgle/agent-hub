@@ -14,7 +14,7 @@ const NOW: i64 = 1_800_000_000;
 
 /// Sổ ghi "đang chạy từ lúc nào" — chạy đủ lâu để lượt xong ĐƯỢC tính là tin.
 fn mark(state: &str, tty: &str, kind: &str) -> Mark {
-    Mark { s: state.to_string(), y: tty.to_string(), k: kind.to_string() }
+    Mark { s: state.to_string(), y: tty.to_string(), k: kind.to_string(), p: String::new() }
 }
 fn working_long(id: &str) -> (String, Mark) {
     (id.to_string(), mark(&format!("working@{}", NOW - MIN_RUN_SEC - 5), "ttys009", "interactive"))
@@ -209,10 +209,32 @@ fn the_message_reports_what_was_seen_and_never_repeats_itself() {
 
     // Màn có hộp chọn ⟹ KHÔNG được nói "xong", phải nói là đang kẹt hỏi và
     // CẦN người trả lời — đó là khác biệt duy nhất người đọc quan tâm.
-    let asking = e.say(&Idle::Asking(3), None);
+    //
+    // Và phải mang NGUYÊN VĂN từng lựa chọn. Hà 2026-08-11: *"cần thêm thông
+    // tin mô tả liên quan tới lựa chọn đó mới hợp lý"* — một cái chuông chỉ nói
+    // "có 3 lựa chọn" vẫn bắt người ta mở máy ra mới biết chọn gì.
+    let asking = e.say(
+        &Idle::Asking {
+            n: 3,
+            options: vec![
+                "Yes, and don't ask again".into(),
+                "Yes".into(),
+                "No, tell Claude what to do differently".into(),
+            ],
+        },
+        None,
+    );
     assert!(asking.contains("HỎI") && asking.contains("cần bạn"), "{asking}");
-    assert!(asking.contains('3'), "phải nói mấy lựa chọn: {asking}");
+    assert!(asking.contains("don't ask again"), "phải có chữ của lựa chọn: {asking}");
+    assert!(asking.contains("No, tell Claude"), "phải có ĐỦ các lựa chọn: {asking}");
     assert!(!asking.contains("dấu nhắc"), "không được khẳng định đang rảnh: {asking}");
+
+    // Màn bị giữ lại vì có dấu hiệu bí mật ⟹ chỉ CON SỐ, và phải nói vì sao —
+    // im lặng đưa mỗi con số thì người đọc tưởng hub keo kiệt, rồi lần sau bỏ
+    // qua cả những tin có chữ.
+    let hidden = e.say(&Idle::Asking { n: 2, options: vec![] }, None);
+    assert!(hidden.contains('2'), "{hidden}");
+    assert!(hidden.contains("bí mật"), "phải khai vì sao không có chữ: {hidden}");
 
     // Không đọc được màn ⟹ nói thẳng là không đọc được, đừng đoán.
     let blind = e.say(&Idle::Unknown, None);

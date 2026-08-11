@@ -71,6 +71,68 @@ pub fn known_projects(cfg: &Config) -> Vec<String> {
 /// Cursor holding the Claude session the phone is currently reading.
 pub const FOCUS_SESSION_KEY: &str = "focus:session";
 
+/// Phiên mà MỆNH LỆNH NÀY nói tới — id nằm trong chính câu lệnh, không phải
+/// trong một con trỏ ai đó vừa đặt.
+///
+/// 🔴 Vì sao có hàm này (đo 2026-08-11, và đây là lỗi nặng nhất của cả ngày):
+/// `/ask`, `/tell`, `/type`, `/key` đều định vị bằng `FOCUS_SESSION_KEY` — một
+/// biến toàn cục đổi được bởi một lệnh KHÁC. Trang vì thế phải gửi hai câu
+/// (`/session <id>` rồi `/type <chữ>`), và hai câu ấy là hai bản ghi trong
+/// phòng chat: **thứ tự KHÔNG được bảo đảm**. Trace thật:
+///
+/// ```text
+/// 10:32:38.834  /session 3e9a7fd6…   ← hoãn
+/// 10:32:51.794  /ask Tóm tắt…        ← hoãn
+/// 10:32:5x      ack: "Hỏi bên lề phiên projects-1f"   ← SAI PHIÊN
+/// 10:33:42.128  ack: "Đang theo phiên projects-ff"    ← lệnh trước, chạy sau
+/// ```
+///
+/// Hậu quả không dừng ở một câu trả lời lạc: hub đã **gõ thật** vào cửa sổ của
+/// một phiên đang làm việc khác. Cùng cơ chế ấy, `/type` gửi chữ và `/key` gửi
+/// phím vào nhầm terminal. `/stop` và `/handover` không dính vì chúng mang id
+/// ngay trong câu lệnh — và đó chính là bản vá: mệnh lệnh nào ĐỤNG vào một
+/// phiên sống thì phải TỰ NÓI nó đụng vào phiên nào.
+///
+/// Trả về `(id, phần còn lại của câu lệnh)`. Không có id ở đầu thì rơi về con
+/// trỏ focus như cũ — nhưng có log, vì đó là đường đã biết là hỏng.
+fn target_and_rest(db: &Db, arg: &str) -> (String, String) {
+    if let Some((id, rest)) = split_target(arg) {
+        return (id, rest);
+    }
+    let focus = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+    logging::info(
+        "route_target_from_focus",
+        json!({
+            "focus": focus,
+            "why": "câu lệnh không mang id — dùng con trỏ đang theo, thứ tự lệnh KHÔNG bảo đảm",
+        }),
+    );
+    (focus, arg.trim().to_string())
+}
+
+/// Nửa THUẦN của `target_and_rest`: câu lệnh này có tự nói nó nhắm vào phiên nào
+/// không? `Some((id, phần còn lại))` nếu có, `None` nếu không.
+///
+/// Tách ra để kiểm được mà không cần một cái máy đang chạy `claude` — và vì đây
+/// là chỗ dễ sai theo cả hai chiều: bắt hụt id thì lệnh rơi về con trỏ focus
+/// (đúng con đường đã gõ nhầm phiên), còn bắt nhầm thì **chữ đầu của câu người
+/// ta gõ bị nuốt mất** và phiên nhận một câu cụt.
+///
+/// Nhận bằng HÌNH DẠNG uuid, không hỏi danh sách phiên: chỗ gọi vẫn phải tự
+/// kiểm phiên có sống không, còn một câu tiếng Việt hay một tên dự án thì không
+/// bao giờ mang hình dạng này.
+pub fn split_target(arg: &str) -> Option<(String, String)> {
+    let arg = arg.trim();
+    let (head, rest) = match arg.split_once(char::is_whitespace) {
+        Some((h, r)) => (h, r.trim()),
+        None => (arg, ""),
+    };
+    let looks_like_id = head.len() >= 32
+        && head.matches('-').count() == 4
+        && head.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+    looks_like_id.then(|| (head.to_string(), rest.to_string()))
+}
+
 /// Sổ ghi trạng thái từng phiên ở lượt trước, để thấy được CHUYỂN trạng thái.
 pub const WATCH_KEY: &str = "watch:sessions";
 
@@ -124,11 +186,18 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
             (crate::watch::Change::Finished { .. }, Some(s)) => {
                 match crate::keys::look(&s.tty, 8) {
                     crate::keys::Look::Saw { choices, .. } if !choices.is_empty() => {
-                        crate::watch::Idle::Asking(choices.len())
+                        crate::watch::Idle::Asking {
+                            n: choices.len(),
+                            // Chữ đi kèm con số: `look` đã trả `Saw` nghĩa là màn
+                            // qua được cổng quét rò rỉ, nên nội dung này đi ra
+                            // ngoài được.
+                            options: choices.iter().map(|(_, t)| t.clone()).collect(),
+                        }
                     }
                     crate::keys::Look::Saw { .. } => crate::watch::Idle::Prompt,
                     crate::keys::Look::Withheld { choices, .. } if choices > 0 => {
-                        crate::watch::Idle::Asking(choices)
+                        // Chỉ con số — con số không mang chữ nào ra khỏi máy.
+                        crate::watch::Idle::Asking { n: choices, options: vec![] }
                     }
                     crate::keys::Look::Withheld { .. } => crate::watch::Idle::Prompt,
                     crate::keys::Look::Blind { .. } => crate::watch::Idle::Unknown,
@@ -170,7 +239,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
         // phiên hub tự mở từ điện thoại — hoặc khi phiên KẸT, vì kẹt thì dù
         // đang ngồi trước máy cũng đáng được gọi. Còn "một lượt vừa xong" trên
         // phiên anh tự tay gõ thì anh thấy trước hub.
-        let stuck = matches!(idle, crate::watch::Idle::Asking(_));
+        let stuck = matches!(idle, crate::watch::Idle::Asking { .. });
         let hub_opened = row.is_some_and(|s| s.started_by_hub);
         if matches!(c, crate::watch::Change::Finished { .. }) && !stuck && !hub_opened {
             logging::info(
@@ -178,6 +247,27 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
                 json!({ "session": id, "why": "phiên terminal của chủ máy, không kẹt" }),
             );
             continue;
+        }
+
+        // IM khi một phiên CON kết thúc bình thường.
+        //
+        // Hà 2026-08-11: *"phiên con được gọi từ phiên cha mà tắt cũng đang gửi
+        // qua tele, có cần không?"* — không. Phiên con là một chi tiết bên
+        // trong lượt việc của phiên cha; phiên cha xong thì tự có tin của nó,
+        // nên tin của con chỉ làm loãng đúng cái tin đáng đọc. Cùng luật với
+        // "đừng kêu vào mặt người đang nhìn" (2026-08-10).
+        //
+        // MỘT ngoại lệ, và nó là lý do chỗ này không phải `continue` thẳng: con
+        // tắt lúc ĐANG CHẠY DỞ là chuyện đáng xem lại — phiên cha có thể đang
+        // đứng chờ một kết quả sẽ không bao giờ tới.
+        if let crate::watch::Change::Ended { parent, was_working, .. } = &c {
+            if !parent.is_empty() && !was_working {
+                logging::info(
+                    "session_change_muted",
+                    json!({ "session": id, "parent": parent, "why": "phiên con kết thúc bình thường" }),
+                );
+                continue;
+            }
         }
 
         // Câu cuối phiên nói ra — thứ làm mỗi tin KHÁC nhau. Nó đã qua cổng
@@ -943,7 +1033,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 Some(ack)
             }
             CommandKind::Tell => {
-                let want = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+                // Id đi CÙNG mệnh lệnh — xem `target_and_rest`.
+                let (want, said) = target_and_rest(db, &cmd.arg);
                 let live = crate::sessions::snapshot(cfg);
                 // Đã dừng KHÔNG phải là đã mất: `--resume` nối vào nhật ký, nó
                 // không cần tiến trình nào đang sống. Và dừng-rồi-nói-tiếp
@@ -963,7 +1054,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         "⚠ không thấy phiên '{}' đang chạy nữa",
                         crate::exec::truncate(&want, 40)
                     ),
-                    Some(s) => match crate::sessions::tell(cfg, s, &cmd.arg) {
+                    Some(s) => match crate::sessions::tell(cfg, s, &said) {
                         Ok(t) => {
                             if let Err(e) = db.record_spend(
                                 "tell",
@@ -998,7 +1089,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
                 // khác, và đó là hàng rào duy nhất còn lại ở đường này.
-                let want = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+                let (want, typed) = target_and_rest(db, &cmd.arg);
                 let live = crate::sessions::snapshot(cfg);
                 let ack = match live.sessions.iter().find(|s| s.session_id == want) {
                     None if want.is_empty() => {
@@ -1068,7 +1159,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             } else {
                             let is_key = matches!(cmd.kind, CommandKind::Key);
                             let arrow = matches!(
-                                cmd.arg.trim(),
+                                typed.trim(),
                                 "up" | "down" | "left" | "right"
                             );
                             // `do script` LUÔN kèm một dấu xuống dòng, không tắt
@@ -1090,7 +1181,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     crate::keys::Arrow::RefuseDialog => {
                                         logging::info(
                                             "keys_arrow_refused",
-                                            json!({ "session": s.session_id, "key": cmd.arg.trim(),
+                                            json!({ "session": s.session_id, "key": typed.trim(),
                                                     "why": "dialog" }),
                                         );
                                         Some(format!(
@@ -1103,7 +1194,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     crate::keys::Arrow::RefuseBlind(why) => {
                                         logging::warn(
                                             "keys_arrow_refused",
-                                            json!({ "session": s.session_id, "key": cmd.arg.trim(),
+                                            json!({ "session": s.session_id, "key": typed.trim(),
                                                     "why": "blind", "detail": why }),
                                         );
                                         Some(format!(
@@ -1123,9 +1214,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 msg
                             } else {
                             let res = if is_key {
-                                crate::keys::press(w, cmd.arg.trim())
+                                crate::keys::press(w, typed.trim())
                             } else {
-                                crate::keys::type_into(w, &cmd.arg, true)
+                                crate::keys::type_into(w, &typed, true)
                             };
                             match res {
                                 Ok(()) => {
@@ -1136,7 +1227,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         "keys_typed",
                                         json!({ "session": s.session_id, "window": w,
                                                 "kind": if is_key { "key" } else { "text" },
-                                                "len": cmd.arg.trim().len() }),
+                                                "len": typed.trim().len() }),
                                     );
                                     // Soi lại màn rồi mới nói. Mã trả về 0 chỉ
                                     // chứng minh byte đã vào tab, KHÔNG chứng minh
@@ -1156,9 +1247,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         _ => None,
                                     };
                                     let did = if is_key {
-                                        format!("đã bấm '{}'", cmd.arg.trim())
+                                        format!("đã bấm '{}'", typed.trim())
                                     } else {
-                                        format!("đã gõ {} ký tự", cmd.arg.trim().len())
+                                        format!("đã gõ {} ký tự", typed.trim().len())
                                     };
                                     match what {
                                         Some(crate::keys::Landed::Queued) => format!(
@@ -1213,7 +1304,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // No id in the verb: the target is the session being read.
                 // Asking with nothing open is a mistake worth naming, not a
                 // silent no-op.
-                let want = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+                let (want, asked) = target_and_rest(db, &cmd.arg);
                 let live = crate::sessions::snapshot(cfg);
                 let ack = match live.sessions.iter().find(|s| s.session_id == want) {
                     None if want.is_empty() => {
@@ -1224,7 +1315,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         "⚠ không thấy phiên '{}' đang chạy nữa",
                         crate::exec::truncate(&want, 40)
                     ),
-                    Some(s) => match crate::sessions::ask_aside(cfg, s, &cmd.arg) {
+                    Some(s) => match crate::sessions::ask_aside(cfg, s, &asked) {
                         Ok(a) => {
                             if let Err(e) = db.record_spend(
                                 "aside",
@@ -1256,8 +1347,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // sống bằng `/btw` (như ngồi trước terminal): rẻ,
                             // sát việc, nhưng phiên gốc CÓ thêm lượt.
                             // Khác nhau ⟹ fork: phiên gốc y nguyên byte.
+                            // 📌 Câu này từng nói "phiên gốc CÓ thêm một lượt"
+                            // — sai, đo 2026-08-11: `/btw` mở một bảng bên
+                            // trong TUI và KHÔNG ghi byte nào vào nhật ký.
+                            // Cái nó thật sự ăn là NGỮ CẢNH đang chạy của
+                            // phiên, thứ không nhìn thấy trên đĩa.
                             let how = if a.new_session_id == a.source_id {
-                                "hỏi thẳng bằng /btw — phiên gốc CÓ thêm một lượt, y như bạn tự gõ ở terminal"
+                                "hỏi thẳng vào phiên bằng /btw — nhật ký không dài thêm, nhưng câu hỏi ăn vào ngữ cảnh đang chạy"
                             } else {
                                 "hỏi trên bản sao — phiên gốc không bị đụng"
                             };

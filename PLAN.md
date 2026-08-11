@@ -14,8 +14,8 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S02 | Xem một phiên như đang ngồi máy (lệnh + kết quả) | `fe-stream-uc` 17/17 |
 | S03 | Trang tự làm mới khi đang theo một phiên | `fe-stream-uc` (≥3 lần/15s) |
 | S04 | Biết phiên chạy dưới chế độ quyền nào | `fe-sessions-uc` |
-| S05b | Hỏi bên lề trên **bản fork** — phiên gốc y nguyên byte | `fe-aside-uc` 17/17 |
-| S06 | Mở phiên cho một dự án — **cửa sổ Terminal thật**, tắt hẳn được từ điện thoại | `fe-newsession-uc` 25/26 trên màn thật, CÓ bấm xác nhận Telegram — đủ cả bước tắt hẳn (2026-08-11). Mục trượt là phép đo bắt nhầm phiên chủ máy tự mở, đã sửa nhưng CHƯA chạy lại |
+| S05b | Hỏi bên lề — **hai đường, hai lời hứa**: phiên có cửa sổ thì `/btw` hỏi thẳng (nhật ký không dài thêm, ăn ngữ cảnh đang chạy); phiên không gõ vào được thì **fork** (y nguyên byte) | `/btw` **21/21** trên `projects-ff`/`ttys001` · fork **10/10** trên `projects-71` (bước gọi `claude` bỏ qua: 0.26 > trần 0.25) — 2026-08-11 |
+| S06 | Mở phiên cho một dự án — **cửa sổ Terminal thật**, tắt hẳn được từ điện thoại | `fe-newsession-uc` **26/26** trên màn thật, CÓ bấm xác nhận Telegram (2026-08-11 17:04-17:08): mở cửa sổ `ttys005` → nói tiếp (nhật ký 76797→78673 byte) → tắt hẳn (cửa sổ đóng, phiên rời danh sách, nhật ký còn 82267 byte) |
 | S07 | Đóng sổ → bản bàn giao + phiên mới + lệnh `--resume` | `fe-stream-uc` |
 | S08 | Bí mật không rò ra trang (quét trước khi đẩy) | `redaction` tests |
 | S09 | Ảnh chụp cũ thì nói là cũ | `fe-board-uc` |

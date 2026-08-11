@@ -540,3 +540,39 @@ fn project_pin_reads_shows_and_clears() {
     assert!(tfl5::parse_command("/project sdvi", "u-stranger", &owners()).is_none());
 }
 
+
+/// 🔴 Mệnh lệnh đụng vào một phiên sống thì phải TỰ NÓI nó đụng vào phiên nào.
+///
+/// Đo 2026-08-11, lỗi nặng nhất trong ngày: `/ask`, `/tell`, `/type`, `/key`
+/// định vị bằng con trỏ `focus:session` — một biến toàn cục mà một lệnh KHÁC
+/// đặt. Trang vì thế gửi hai bản ghi (`/session <id>` rồi `/ask <câu>`), và
+/// phòng chat KHÔNG bảo đảm thứ tự:
+///
+/// ```text
+/// 10:32:38  /session 3e9a7fd6…      ← hoãn
+/// 10:32:51  /ask Tóm tắt…           ← hoãn
+///           ack: "Hỏi bên lề phiên projects-1f"   ← SAI PHIÊN, hub gõ thật vào đó
+/// 10:33:42  ack: "Đang theo phiên projects-ff"    ← lệnh trước, chạy sau
+/// ```
+#[test]
+fn an_order_that_touches_a_session_carries_that_sessions_id() {
+    use hub::pipeline::split_target;
+
+    let (id, rest) = split_target("3e9a7fd6-3050-4a54-ba52-0dfb24de033c Tóm tắt trong 1 câu?")
+        .expect("id đứng đầu phải nhận ra được");
+    assert_eq!(id, "3e9a7fd6-3050-4a54-ba52-0dfb24de033c");
+    assert_eq!(rest, "Tóm tắt trong 1 câu?");
+
+    // Phím cũng đi cùng id — `/key <id> down`.
+    let (id, rest) = split_target("3e9a7fd6-3050-4a54-ba52-0dfb24de033c down").unwrap();
+    assert_eq!(id, "3e9a7fd6-3050-4a54-ba52-0dfb24de033c");
+    assert_eq!(rest, "down");
+
+    // Không có id ⟹ None, để chỗ gọi rơi về con trỏ focus CÓ LOG. Quan trọng
+    // hơn: một câu tiếng Việt không được nuốt mất chữ đầu.
+    assert_eq!(split_target("Tóm tắt trong 1 câu: phiên này đang làm gì?"), None);
+    assert_eq!(split_target("down"), None);
+    assert_eq!(split_target(""), None);
+    // Chuỗi dài mà không phải uuid cũng không được nhận nhầm.
+    assert_eq!(split_target("khong-phai-uuid-nhung-rat-dai-va-co-gach-noi xin chao"), None);
+}

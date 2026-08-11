@@ -65,10 +65,24 @@ try {
     await page.locator(`.sess[data-session="${id}"]`).click();
     await page.waitForSelector("#sessDetail:not(.hidden)", { timeout: 10000 });
     // Luồng đọc từ nhật ký của phiên; phiên dài mất vài chục giây mới về.
-    await page.waitForFunction(
-      () => document.querySelectorAll("#sessStream .ev").length > 0,
-      { timeout: 180000, polling: 1000 }
-    );
+    //
+    // HAI lỗi cùng ở dòng này, cùng lộ ra 2026-08-11:
+    //  · chữ ký sai — Playwright nhận `(fn, arg, options)`, nên cái
+    //    `{ timeout: 180000 }` đặt ở vị trí thứ hai bị hiểu là ARG và trần thật
+    //    sự vẫn là 30 giây mặc định. Con số 180000 nằm đó chỉ để trấn an người
+    //    đọc.
+    //  · phiên VỪA MỞ chưa nói lượt nào thì luồng RỖNG MÃI MÃI — không có gì để
+    //    chờ. Thẻ đầu danh sách rất hay là một phiên như thế, và lúc ấy cả bước
+    //    chụp ảnh chết theo, tức deploy mất luôn khâu "mở ảnh ra nhìn".
+    await page
+      .waitForFunction(
+        () =>
+          document.querySelectorAll("#sessStream .ev").length > 0 ||
+          (document.getElementById("sessScreen")?.textContent || "").trim().length > 0,
+        null,
+        { timeout: 180000, polling: 1000 }
+      )
+      .catch(() => console.log("phiên này chưa có gì để hiện — vẫn chụp màn như nó đang là"));
     await page.waitForTimeout(1500);
     const n = await page.evaluate(() => document.querySelectorAll("#sessStream .ev").length);
     await page.screenshot({ path: `${OUT}${tag}-detail.png`, fullPage: true });

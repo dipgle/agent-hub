@@ -9,6 +9,31 @@ money unless the owner presses a button.
 Read `README.md` for the architecture and the CLI. Read `PLAN.md` for what is
 built vs. pending. This file is the rules for working ON hub.
 
+## The one test every design decision must pass
+
+Hà, 2026-08-11, restating the founding intent: *"cli claude cài trên máy tôi,
+hub là **cầu kết nối** ra ui để tôi làm việc, điều khiển, giao tiếp phiên"*.
+
+**hub is a BRIDGE, not an owner.** The sessions belong to the CLI on this Mac;
+hub carries them to a screen he can reach and carries his hands back. That gives
+one test, and it cuts both ways:
+
+- **Anything hub does that has no equivalent at the terminal is a smell.** It
+  means hub invented a way of working he cannot see, take over, or reason about.
+  Measured example: `/new` creates a `--bg` session — headless, no window, no
+  live screen, cannot be typed into without stopping it first. He would never
+  produce that by sitting down at the machine; he would open a window. That is
+  hub inventing a crippled class of session, and it is why three features built
+  on 2026-08-10 (the activity line, `/btw`, screen reading) simply do not work
+  there.
+- **Anything he can do at the terminal but not from the phone is a gap.** Today:
+  watch more than one session's screen at once (`portal.rs:96` — live screen
+  only for the focused session), scroll back further than the captured window
+  (`portal.rs:108` — 16 lines), open or close a window, answer an OS dialog.
+
+When a choice is unclear, ask what he would do sitting at the machine, and make
+the phone do that — not something cleverer.
+
 ## What hub is NOT (2026-08-08)
 
 hub was an inbox: GitHub notifications, project devlogs, email and Telegram fed

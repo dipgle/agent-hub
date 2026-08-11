@@ -75,13 +75,25 @@ pub struct LiveSession {
     /// Why this row is thinner than the others. Never silently empty.
     pub note: Option<String>,
     /// Whether the agent is working right now ("busy") or waiting ("idle"), and
-    /// whether it finished ("done"). Both come straight from `claude agents`,
-    /// and both are **absent for interactive sessions** — measured 2026-08-08,
-    /// only background rows carry them. An empty pair therefore means "hub
-    /// cannot tell", never "the session is idle".
+    /// whether it finished/blocked ("done"/"blocked"). Both come straight from
+    /// `claude agents` — **this is the CLI's own answer, not a guess**, and it
+    /// is the same signal the VS Code extension shows.
     ///
-    /// It is also the only honest answer hub has to "is it still working?":
-    /// the transcript records neither a cost nor a completion marker.
+    /// ⚠ This doc said the opposite until 2026-08-10: *"absent for interactive
+    /// sessions — only background rows carry them"*. Measured on 2026-08-08 and
+    /// true then; **false now**. Re-measured after Hà asked *"tại sao extension
+    /// trên vscode quản lý được các trạng thái đang làm việc"*:
+    ///
+    /// ```text
+    /// projects-7f  interactive  status: idle
+    /// projects-28  interactive  status: busy     ← đang chạy thật lúc đo
+    /// Tiếp mailler background   status: idle · state: blocked
+    /// ```
+    ///
+    /// Absent only for the **editor-hosted** rows (the VS Code extension's own
+    /// sessions), which hub hides from the phone anyway. So an empty pair still
+    /// means "hub cannot tell", never "idle" — but it is now the rare case, not
+    /// the normal one, and `is_working` prefers this field over any heuristic.
     pub status: Option<String>,
     pub state: Option<String>,
     /// Phiên có đang LÀM VIỆC ngay lúc này không — trả lời được cho MỌI phiên.
@@ -716,9 +728,15 @@ pub const IDLE_AFTER_SEC: i64 = 180;
 
 /// Phiên có đang làm việc không — ba nguồn, không nguồn nào cần đọc màn.
 ///
-/// Thứ tự có ý nghĩa: `pending_subagents > 0` là bằng chứng CHẮC CHẮN nhất và
-/// cũng là ca mà mọi cách khác đều đọc sai — phiên giao hết việc ra ngoài thì
-/// nhật ký của chính nó đứng im, nhìn từ xa y như đã xong.
+/// Thứ tự có ý nghĩa:
+/// 1. `pending_subagents > 0` — bằng chứng CHẮC CHẮN nhất, và là ca mà mọi cách
+///    khác đều đọc sai: phiên giao hết việc ra ngoài thì nhật ký của chính nó
+///    đứng im, nhìn từ xa y như đã xong.
+/// 2. `status` của `claude agents` — **câu trả lời của chính CLI**, đúng thứ
+///    extension VS Code hiển thị, và nó có cho cả phiên terminal (đo lại
+///    2026-08-10; xem `LiveSession::status`). Tin thẳng, đừng đoán đè lên.
+/// 3. mtime nhật ký — chỉ còn là lưới đỡ cho những hàng CLI không khai trạng
+///    thái. Nó trễ tới `IDLE_AFTER_SEC`, nên càng ít phải dùng càng tốt.
 pub fn is_working(status: Option<&str>, pending_subagents: usize, idle_sec: Option<i64>) -> bool {
     if pending_subagents > 0 {
         return true;

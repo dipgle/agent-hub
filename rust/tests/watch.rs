@@ -7,14 +7,17 @@
 use std::collections::BTreeMap;
 
 use hub::sessions::LiveSession;
-use hub::watch::{changes, Change, Idle, DEAD, IDLE, MIN_RUN_SEC, WORKING};
+use hub::watch::{changes, Change, Idle, Mark, DEAD, IDLE, MIN_RUN_SEC, WORKING};
 
 /// Mốc thời gian giả, để test không phụ thuộc đồng hồ thật.
 const NOW: i64 = 1_800_000_000;
 
 /// Sổ ghi "đang chạy từ lúc nào" — chạy đủ lâu để lượt xong ĐƯỢC tính là tin.
-fn working_long(id: &str) -> (String, String) {
-    (id.to_string(), format!("working@{}", NOW - MIN_RUN_SEC - 5))
+fn mark(state: &str, tty: &str, kind: &str) -> Mark {
+    Mark { s: state.to_string(), y: tty.to_string(), k: kind.to_string() }
+}
+fn working_long(id: &str) -> (String, Mark) {
+    (id.to_string(), mark(&format!("working@{}", NOW - MIN_RUN_SEC - 5), "ttys009", "interactive"))
 }
 
 fn sess(id: &str, name: &str, host: &str, working: bool) -> LiveSession {
@@ -27,10 +30,10 @@ fn sess(id: &str, name: &str, host: &str, working: bool) -> LiveSession {
     }
 }
 
-fn book(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+fn book(pairs: &[(&str, &str)]) -> BTreeMap<String, Mark> {
     pairs
         .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| (k.to_string(), mark(v, "ttys009", "interactive")))
         .collect()
 }
 
@@ -46,14 +49,14 @@ fn the_first_round_says_nothing_it_only_writes_the_book() {
     ];
     let (events, next) = changes(&BTreeMap::new(), &now, NOW);
     assert!(events.is_empty(), "lượt đầu phải im: {events:?}");
-    assert!(next.get("a").is_some_and(|v| v.starts_with(WORKING)), "{next:?}");
-    assert_eq!(next.get("b").map(String::as_str), Some(IDLE));
+    assert!(next.get("a").is_some_and(|m| m.s.starts_with(WORKING)), "{next:?}");
+    assert_eq!(next.get("b").map(|m| m.s.as_str()), Some(IDLE));
 }
 
 /// Đang chạy → đứng ở dấu nhắc = xong việc, nói ĐÚNG một lần.
 #[test]
 fn finishing_is_announced_once_not_every_cycle() {
-    let prev: BTreeMap<String, String> = [working_long("a")].into_iter().collect();
+    let prev: BTreeMap<String, Mark> = [working_long("a")].into_iter().collect();
     let now = vec![sess("a", "dwork", "terminal", false)];
 
     let (events, next) = changes(&prev, &now, NOW);
@@ -73,7 +76,10 @@ fn finishing_is_announced_once_not_every_cycle() {
 /// rình `host == "dead"` là bỏ lọt gần hết các lần tắt thật.
 #[test]
 fn a_session_that_leaves_the_list_counts_as_ended() {
-    let prev: BTreeMap<String, String> = [working_long("a"), ("b".to_string(), IDLE.to_string())].into_iter().collect();
+    let prev: BTreeMap<String, Mark> =
+        [working_long("a"), ("b".to_string(), mark(IDLE, "ttys002", "interactive"))]
+            .into_iter()
+            .collect();
     let now = vec![sess("b", "tfl5", "terminal", false)];
 
     let (events, next) = changes(&prev, &now, NOW);
@@ -87,7 +93,9 @@ fn a_session_that_leaves_the_list_counts_as_ended() {
         }
         other => panic!("phải là Ended: {other:?}"),
     }
-    assert!(events[0].say(&Idle::Unknown, None).contains("TẮT HẲN"));
+    // Câu kết cục nay do `pipeline` dựng sau khi DÒ cửa sổ terminal, nên ở
+    // đây chỉ kiểm sự kiện mang đủ dữ kiện để dò.
+    assert!(matches!(&events[0], Change::Ended { tty, kind, .. } if !tty.is_empty() && !kind.is_empty()));
     assert!(!next.contains_key("a"), "đã tắt thì rời sổ, không nói lại lần nữa");
 
     let (again, _) = changes(&next, &now, NOW);
@@ -122,13 +130,19 @@ fn starting_work_is_not_worth_a_notification() {
     let now = vec![sess("a", "dwork", "terminal", true)];
     let (events, next) = changes(&prev, &now, NOW);
     assert!(events.is_empty(), "{events:?}");
-    assert!(next.get("a").is_some_and(|v| v.starts_with(WORKING)), "{next:?}");
+    assert!(next.get("a").is_some_and(|m| m.s.starts_with(WORKING)), "{next:?}");
 }
 
 /// Nhiều phiên đổi cùng lúc thì nói đủ, không gộp mất cái nào.
 #[test]
 fn several_sessions_changing_at_once_are_all_reported() {
-    let prev: BTreeMap<String, String> = [working_long("a"), working_long("b"), ("c".to_string(), IDLE.to_string())].into_iter().collect();
+    let prev: BTreeMap<String, Mark> = [
+        working_long("a"),
+        working_long("b"),
+        ("c".to_string(), mark(IDLE, "ttys003", "interactive")),
+    ]
+    .into_iter()
+    .collect();
     let now = vec![
         sess("a", "dwork", "terminal", false), // xong
         sess("c", "hub", "terminal", true),    // bắt đầu — im
@@ -143,7 +157,10 @@ fn several_sessions_changing_at_once_are_all_reported() {
 /// Sổ cũ có, danh sách rỗng (mọi phiên đã tắt) — vẫn phải nói, và sổ về rỗng.
 #[test]
 fn everything_disappearing_still_reports_each_one() {
-    let prev: BTreeMap<String, String> = [working_long("a"), ("b".to_string(), IDLE.to_string())].into_iter().collect();
+    let prev: BTreeMap<String, Mark> =
+        [working_long("a"), ("b".to_string(), mark(IDLE, "ttys002", "interactive"))]
+            .into_iter()
+            .collect();
     let (events, next) = changes(&prev, &[], NOW);
     assert_eq!(events.len(), 2);
     assert!(next.is_empty());
@@ -161,13 +178,15 @@ fn a_burst_of_short_turns_stays_quiet() {
     let now = vec![sess("a", "hub-bd", "terminal", false)];
 
     // Vừa chạy 10 giây rồi dừng: im.
-    let brief: BTreeMap<String, String> =
-        [("a".to_string(), format!("working@{}", NOW - 10))].into_iter().collect();
+    let brief: BTreeMap<String, Mark> =
+        [("a".to_string(), mark(&format!("working@{}", NOW - 10), "ttys009", "interactive"))]
+            .into_iter()
+            .collect();
     let (events, _) = changes(&brief, &now, NOW);
     assert!(events.is_empty(), "lượt ngắn không được kêu: {events:?}");
 
     // Chạy quá ngưỡng rồi dừng: nói, và nói luôn nó chạy bao lâu.
-    let long: BTreeMap<String, String> = [working_long("a")].into_iter().collect();
+    let long: BTreeMap<String, Mark> = [working_long("a")].into_iter().collect();
     let (events, _) = changes(&long, &now, NOW);
     assert_eq!(events.len(), 1);
     assert!(events[0].say(&Idle::Prompt, None).contains("phút"), "{}", events[0].say(&Idle::Prompt, None));

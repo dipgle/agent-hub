@@ -88,7 +88,7 @@ pub const WATCH_KEY: &str = "watch:sessions";
 /// đường không được làm câm đường kia, và cả hai đều log khi hỏng — một cái loa
 /// im lặng thì tệ hơn không có loa.
 pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSession]) {
-    let prev: BTreeMap<String, String> = db
+    let prev: BTreeMap<String, crate::watch::Mark> = db
         .cursor_or_log(WATCH_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
@@ -137,6 +137,42 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
             _ => crate::watch::Idle::Unknown,
         };
 
+        // KẾT CỤC của một phiên biến mất: nói ĐÚNG thứ dò được, không gọi tất cả
+        // là "tắt hẳn".
+        //
+        // Hà 2026-08-10: *"tắt hẳn là sao? ý chung chung thế… tắt hẳn là phải
+        // thoát khỏi cli mới đúng, tắt hẳn terminal"*. Đúng, và "biến khỏi danh
+        // sách `claude agents`" gộp ba chuyện khác hẳn nhau. Phân biệt bằng một
+        // câu hỏi rẻ, hỏi đúng lúc (chuyện này hiếm): cửa sổ Terminal mang tty
+        // ấy còn không?
+        let fate = if let crate::watch::Change::Ended { tty, kind, .. } = &c {
+            if kind == "background" {
+                // Phiên nền không có cửa sổ nào để đóng — nói "dừng", đừng nói
+                // "tắt terminal".
+                Some("phiên nền đã dừng — nó không gắn cửa sổ terminal nào".to_string())
+            } else if tty.is_empty() {
+                Some("đã kết thúc — phiên này vốn không gắn cửa sổ terminal".to_string())
+            } else {
+                match crate::keys::window_of(tty) {
+                    Ok(Some(_)) => Some(format!(
+                        "đã THOÁT khỏi `claude`, nhưng cửa sổ terminal ({tty}) VẪN MỞ"
+                    )),
+                    Ok(None) => Some(format!("đã TẮT HẲN — cửa sổ terminal ({tty}) cũng không còn")),
+                    Err(e) => {
+                        logging::warn(
+                            "session_end_window_probe_failed",
+                            json!({ "tty": tty, "err": e.to_string() }),
+                        );
+                        Some(format!(
+                            "đã rời danh sách — không dò được cửa sổ terminal ({tty}) nên chưa rõ nó thoát hay bị đóng"
+                        ))
+                    }
+                }
+            }
+        } else {
+            None
+        };
+
         // IM cho phiên chủ máy đang ngồi gõ, TRỪ khi nó đang kẹt hỏi.
         //
         // Hà 2026-08-10: một phiên terminal anh đang nhìn thẳng vào bắn ba tin
@@ -157,7 +193,17 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
         // Câu cuối phiên nói ra — thứ làm mỗi tin KHÁC nhau. Nó đã qua cổng
         // quét rò rỉ ở `sessions::snapshot` trước khi vào ảnh chụp.
         let tail = row.and_then(|s| s.last_text.as_deref());
-        let text = c.say(&idle, tail);
+        let text = match (&c, &fate) {
+            (crate::watch::Change::Ended { name, was_working, .. }, Some(f)) => {
+                let warn = if *was_working {
+                    " — nó đang chạy dở, nếu không phải bạn dừng thì nên xem lại"
+                } else {
+                    ""
+                };
+                format!("⏹ {name} {f}{warn}.")
+            }
+            _ => c.say(&idle, tail),
+        };
         logging::info("session_change", json!({ "text": text }));
         if let Err(e) = tfl5::send(&cfg.adapters.tfl5, "", None, &text) {
             logging::error("session_change_room_failed", json!({ "err": logging::err_chain(&e) }));

@@ -48,13 +48,43 @@ fn working_since(mark: &str) -> Option<i64> {
     mark.strip_prefix("working@")?.parse().ok()
 }
 
+/// Những gì sổ phải nhớ về một phiên để nói ĐÚNG lúc nó biến mất.
+///
+/// Hà 2026-08-10: *"tắt hẳn là sao? ý chung chung thế… tắt hẳn là phải thoát
+/// khỏi cli mới đúng, tắt hẳn terminal"*. Đúng — và cùng một lỗi với câu "đang
+/// đứng ở dấu nhắc" đã vá trước đó: nói một điều hub không biết.
+///
+/// "Biến khỏi danh sách `claude agents`" xảy ra vì ít nhất ba lý do khác hẳn
+/// nhau: phiên NỀN bị dừng (chẳng liên quan terminal), `claude` thoát mà cửa sổ
+/// vẫn mở, hoặc cửa sổ terminal đóng luôn. Phân biệt được cả ba — nhưng phải
+/// giữ `tty` và `kind` TỪ TRƯỚC, vì lúc phiên biến mất thì hàng của nó cũng đi
+/// theo và không còn gì để hỏi.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Mark {
+    /// `working@<epoch>` · `idle`
+    pub s: String,
+    /// tty lúc còn thấy nó — rỗng nếu phiên không gắn cửa sổ nào.
+    #[serde(default)]
+    pub y: String,
+    /// `interactive` · `background`…
+    #[serde(default)]
+    pub k: String,
+}
+
 /// Một chuyện vừa xảy ra, đáng để làm phiền chủ máy.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
     /// Đang chạy → đứng lại ở dấu nhắc. Lượt việc đã xong.
     Finished { id: String, name: String, ran_sec: i64 },
-    /// Còn sống → tắt hẳn (hoặc rời khỏi danh sách).
-    Ended { id: String, name: String, was_working: bool },
+    /// Rời khỏi danh sách hoặc mất tiến trình. **Không tự nhận là "tắt hẳn"** —
+    /// chỗ gọi còn phải dò cửa sổ terminal mới biết nói câu nào (xem `Mark`).
+    Ended {
+        id: String,
+        name: String,
+        was_working: bool,
+        tty: String,
+        kind: String,
+    },
 }
 
 /// Phiên đang thật sự ở trạng thái nào lúc nó im — NHÌN, không đoán.
@@ -102,10 +132,10 @@ impl Change {
                     _ => what,
                 }
             }
-            Change::Ended { name, was_working: true, .. } => {
-                format!("⏹ {name} đã TẮT HẲN khi đang chạy dở — nếu không phải bạn dừng thì nên xem lại.")
-            }
-            Change::Ended { name, .. } => format!("⏹ {name} đã tắt hẳn."),
+            // `Ended` KHÔNG dựng câu ở đây: câu đúng phụ thuộc vào việc cửa
+            // sổ terminal còn hay mất, mà đó là một phép dò (I/O). Xem
+            // `pipeline::announce_changes`.
+            Change::Ended { name, .. } => format!("⏹ {name} — kết cục chưa xác định"),
         }
     }
 }
@@ -128,34 +158,42 @@ fn state_of(s: &LiveSession) -> &'static str {
 ///
 /// `first_run` (sổ cũ rỗng) trả về **không sự kiện nào** — xem luật 2 ở đầu tệp.
 pub fn changes(
-    prev: &BTreeMap<String, String>,
+    prev: &BTreeMap<String, Mark>,
     now: &[LiveSession],
     epoch_sec: i64,
-) -> (Vec<Change>, BTreeMap<String, String>) {
-    let mut next: BTreeMap<String, String> = BTreeMap::new();
+) -> (Vec<Change>, BTreeMap<String, Mark>) {
+    let mut next: BTreeMap<String, Mark> = BTreeMap::new();
     let mut out: Vec<Change> = Vec::new();
     let first_run = prev.is_empty();
 
     for s in now {
         let state = state_of(s);
-        let before = prev.get(&s.session_id).map(String::as_str);
-        let was_working = before.is_some_and(|b| b.starts_with(WORKING));
+        let before = prev.get(&s.session_id);
+        let was_working = before.is_some_and(|b| b.s.starts_with(WORKING));
         // Mốc bắt đầu chạy: giữ nguyên nếu đang chạy tiếp, đặt mới nếu vừa bắt
         // đầu. Không có mốc thì lấy lúc này — thiếu chính xác một lượt, và lượt
         // ấy sẽ bị coi là ngắn, tức im. Thà lỡ một tin còn hơn một tin sai.
         let since = if was_working {
-            before.and_then(working_since).unwrap_or(epoch_sec)
+            before.and_then(|b| working_since(&b.s)).unwrap_or(epoch_sec)
         } else {
             epoch_sec
         };
         // Phiên đã chết vẫn nằm trong danh sách vài giây; đừng ghi nó vào sổ
         // mới, nếu không lần sau nó lại "biến mất" và báo tắt lần thứ hai.
         match state {
-            WORKING => {
-                next.insert(s.session_id.clone(), format!("{WORKING}@{since}"));
-            }
-            IDLE => {
-                next.insert(s.session_id.clone(), IDLE.to_string());
+            WORKING | IDLE => {
+                next.insert(
+                    s.session_id.clone(),
+                    Mark {
+                        s: if state == WORKING {
+                            format!("{WORKING}@{since}")
+                        } else {
+                            IDLE.to_string()
+                        },
+                        y: s.tty.clone(),
+                        k: s.kind.clone(),
+                    },
+                );
             }
             _ => {}
         }
@@ -176,14 +214,16 @@ pub fn changes(
                 id: s.session_id.clone(),
                 name: s.name.clone(),
                 was_working,
+                tty: s.tty.clone(),
+                kind: s.kind.clone(),
             });
         }
     }
 
-    // Rời khỏi danh sách = đã tắt. Đây mới là đường CHÍNH, không phải `dead`.
+    // Rời khỏi danh sách = đã kết thúc. Đây mới là đường CHÍNH, không phải `dead`.
     if !first_run {
         let seen: Vec<&String> = now.iter().map(|s| &s.session_id).collect();
-        for (id, was) in prev {
+        for (id, mark) in prev {
             if seen.contains(&id) {
                 continue;
             }
@@ -191,9 +231,14 @@ pub fn changes(
                 id: id.clone(),
                 // Tên đã đi mất cùng danh sách; id ngắn còn hơn một chỗ trống.
                 name: format!("phiên {}", &id[..id.len().min(8)]),
-                was_working: was.starts_with(WORKING),
+                was_working: mark.s.starts_with(WORKING),
+                // ĐÂY là lý do sổ phải nhớ `tty`: hàng của phiên đã biến mất,
+                // nên không còn chỗ nào hỏi nó chạy ở cửa sổ nào.
+                tty: mark.y.clone(),
+                kind: mark.k.clone(),
             });
         }
     }
+
     (out, next)
 }

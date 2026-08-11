@@ -273,6 +273,14 @@ pub struct Config {
     /// together (true here since 2026-08-06).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub claude_transcript_root: String,
+    /// `/new` mở một CỬA SỔ Terminal thật (mặc định), thay vì phiên `--bg`.
+    ///
+    /// Mặc định BẬT vì phiên có cửa sổ mới là thứ chủ máy tự tạo khi ngồi trước
+    /// máy — và chỉ trên đó thì màn sống, `/btw`, dòng "đang làm gì" mới chạy.
+    /// Tắt cờ này ⟹ quay về `--bg`: không cửa sổ, nhưng sống sót khi đóng
+    /// Terminal, và không cần quyền Automation.
+    #[serde(default = "default_true")]
+    pub new_in_terminal: bool,
 
     #[serde(skip)]
     pub config_file: PathBuf,
@@ -298,6 +306,7 @@ impl Default for Config {
             claude_cli: default_claude_cli(),
             claude_accounts: vec![],
             claude_transcript_root: String::new(),
+            new_in_terminal: true,
             config_file: PathBuf::new(),
             hub_home: PathBuf::new(),
         }
@@ -477,6 +486,10 @@ pub fn save(cfg: &Config) -> Result<()> {
 /// would walk straight out of the workspace and point the act stage at a repo
 /// nobody chose. Names are single path segments; anything else is refused.
 /// Root first, then `AI/` — see `project_dir`.
+fn default_true() -> bool {
+    true
+}
+
 pub fn default_project_roots() -> Vec<String> {
     vec![String::new(), "AI".into()]
 }

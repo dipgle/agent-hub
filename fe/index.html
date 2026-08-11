@@ -2227,7 +2227,16 @@
     // button that cannot work is worse than no button, because it says hub is
     // in charge of something it is not.
     const mine = s.kind === 'background';
-    $('sessStop').classList.toggle('hidden', !mine);
+    // Từ 2026-08-11 `/new` mở CỬA SỔ THẬT, nên "hub mở nó" không còn đồng
+    // nghĩa với "phiên nền". Nút Dừng đi theo QUYỀN SỞ HỮU (`started_by_hub`),
+    // không theo hạng phiên — nếu không thì hub mở được cửa sổ mà không đóng
+    // được, một cây cầu một chiều. Cửa sổ chủ máy tự mở vẫn không có nút:
+    // đóng cửa sổ của người khác không phải việc của hub.
+    const canStop = mine || (s.started_by_hub && !!s.tty && s.host === 'terminal');
+    $('sessStop').classList.toggle('hidden', !canStop);
+    // Chữ trên nút phải là thứ SẮP xảy ra: phiên nền chỉ dừng lại (hội thoại
+    // còn, nói tiếp được), phiên cửa sổ thì thoát CLI và đóng luôn cửa sổ.
+    $('sessStop').textContent = mine ? '⏹ Dừng' : '⏹ Tắt hẳn';
     // Phiên hub quản được: mặc định NÓI TIẾP, muốn hỏi bên lề thì tự tích.
     // Phiên khác: hỏi bên lề là đường DUY NHẤT, nên tích sẵn và khoá lại — cho
     // chọn một thứ chắc chắn hỏng còn tệ hơn không cho chọn.
@@ -2399,7 +2408,9 @@
   $('sessStop').addEventListener('click', (e) => {
     if (!wantSession) return;
     $('sessTellBox').classList.remove('hidden');
-    $('sessTellBox').textContent = 'Đang dừng phiên…';
+    $('sessTellBox').textContent = $('sessStop').textContent.includes('Tắt hẳn')
+      ? 'Đang thoát CLI rồi đóng cửa sổ…'
+      : 'Đang dừng phiên…';
     waitingFor = 'tell';
     sendCommand(`/stop ${wantSession}`, e.target);
   });

@@ -62,10 +62,10 @@ chỉ là chữ.
 | Lệnh | Việc |
 |---|---|
 | `/session <id>` | theo một phiên — ảnh chụp kế tiếp mang cả luồng của nó (`/session -` để bỏ theo) |
-| `/new <dự án> <việc>` | mở phiên nền làm việc đó trong thư mục dự án |
+| `/new <dự án> <việc>` | mở một **cửa sổ Terminal thật** chạy `claude` với việc đó, ở gốc workspace |
 | `/ask <câu hỏi>` | hỏi bên lề phiên đang theo, **trên bản fork** — phiên gốc không thêm lượt nào |
-| `/tell <nội dung>` | nói tiếp vào phiên nền (phải `/stop` nó trước) |
-| `/stop [id]` | dừng phiên nền, hội thoại vẫn giữ |
+| `/tell <nội dung>` | nói tiếp vào phiên nền (phải `/stop` nó trước); phiên có cửa sổ thì dùng `/type`, gõ thẳng lúc nó đang chạy |
+| `/stop [id]` | phiên nền: dừng, hội thoại vẫn giữ · phiên cửa sổ hub mở: **tắt hẳn** — `/exit` rồi đóng cửa sổ |
 | `/handover [id]` | đóng sổ: bản bàn giao + phiên mới giữ nguyên ngữ cảnh + lệnh `--resume` |
 | `/project [tên]` | xem/ghim dự án cho phòng |
 | `/ingest` · `/run` · `/doctor` | đọc phòng ngay · chạy một vòng · kiểm tra thật |

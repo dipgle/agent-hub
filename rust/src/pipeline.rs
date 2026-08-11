@@ -836,10 +836,21 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     "session_started",
                                     json!({ "project": s.project, "session": s.session_id, "cwd": s.cwd }),
                                 );
+                                // Câu chào phải mô tả thứ VỪA xảy ra.
+                                //
+                                // Bản cũ nói "phiên nền … tại <thư mục dự án>"
+                                // và cả hai vế nay đều sai: từ 2026-08-11 hub
+                                // mở một CỬA SỔ thật, và mở ở GỐC WORKSPACE
+                                // (thư mục duy nhất cả ba tài khoản đã duyệt —
+                                // dự án được nói trong đề bài). Người đọc câu
+                                // ấy trên điện thoại sẽ đi tìm một cửa sổ ở chỗ
+                                // không có, hoặc tìm một phiên nền không tồn
+                                // tại. Nói sai chỗ còn tệ hơn không nói.
+                                let cua_so = if s.window { "cửa sổ terminal" } else { "phiên nền" };
                                 format!(
-                                    "🚀 Đã mở phiên nền cho {} tại {}.\nPhiên {}\n\n⚠ Nó chạy không hỏi ai. Dừng bằng nút Dừng hoặc /stop.",
+                                    "🚀 Đã mở {} cho {}.\nPhiên {} — đang chạy trên máy, xem màn sống ngay trên thẻ của nó.\n\n⚠ Nó chạy không hỏi ai. Tắt bằng nút Tắt hẳn hoặc /stop.",
+                                    cua_so,
                                     s.project,
-                                    s.cwd,
                                     &s.session_id[..8.min(s.session_id.len())]
                                 )
                             }
@@ -870,7 +881,17 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 } else {
                     want
                 };
-                let live = crate::sessions::snapshot(cfg);
+                // Đóng dấu `started_by_hub` TRƯỚC khi quyết định.
+                //
+                // `snapshot` chỉ đọc `claude agents`; dấu sở hữu nằm trong sổ
+                // riêng của hub và do `mark_started_by_hub` dán vào. Thiếu bước
+                // này thì mọi phiên đều "không phải của hub", và từ 2026-08-11
+                // — khi `/new` mở cửa sổ thật — nó biến thành lỗi nhìn thấy
+                // được: hub mở được cửa sổ rồi từ chối đóng chính nó, với câu
+                // *"chỉ dừng được phiên do hub mở"*. Nhánh phiên nền không lộ
+                // vì nó xét `kind`, không xét quyền sở hữu.
+                let mut live = crate::sessions::snapshot(cfg);
+                mark_started_by_hub(db, &mut live);
                 let ack = match live.sessions.iter().find(|s| s.session_id == want) {
                     None if want.is_empty() => "⚠ chưa mở phiên nào.".to_string(),
                     None => format!(
@@ -895,10 +916,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         "session_stopped",
                                         json!({ "session": s.session_id }),
                                     );
-                                    format!(
-                                        "⏹ Đã dừng phiên {}. Hội thoại vẫn còn — nói tiếp bằng /tell hoặc mở lại trên máy.",
-                                        s.name
-                                    )
+                                    // Hai đường dừng, hai kết cục khác nhau —
+                                    // nói đúng cái đã xảy ra, vì câu trả lời
+                                    // quyết định người ta làm gì tiếp.
+                                    if s.kind == "background" {
+                                        format!(
+                                            "⏹ Đã dừng phiên {}. Hội thoại vẫn còn — nói tiếp bằng /tell hoặc mở lại trên máy.",
+                                            s.name
+                                        )
+                                    } else {
+                                        format!(
+                                            "⏹ Đã tắt hẳn phiên {} — thoát CLI và đóng cửa sổ terminal. Nhật ký vẫn còn trên máy.",
+                                            s.name
+                                        )
+                                    }
                                 }
                                 Err(e) => format!(
                                     "⚠ không dừng được: {}",

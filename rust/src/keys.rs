@@ -122,6 +122,36 @@ pub fn landed(screen: &str) -> Landed {
     Landed::Idle
 }
 
+/// Mở một cửa sổ Terminal MỚI và chạy `cmd` trong đó; trả về `(id cửa sổ, tty)`.
+///
+/// Vì sao hub cần biết mở cửa sổ (Hà 2026-08-11: *"cli claude cài trên máy tôi,
+/// hub là cầu kết nối ra ui"*): một phiên `--bg` là hạng phiên **chủ máy không
+/// bao giờ tự tạo ra** khi ngồi trước máy — không cửa sổ, không màn sống, muốn
+/// nói chen vào phải dừng nó trước. Cầu nối thì phải bắc sang đúng thứ có thật
+/// ở đầu bên kia, nên `/new` mở đúng cái người ta sẽ mở: một cửa sổ.
+///
+/// `tty` lấy NGAY sau khi dựng, vì đó là thứ duy nhất ghép được cửa sổ này với
+/// hàng mà `claude agents` sắp khai ra — tên phiên thì `claude` tự đặt, và id
+/// thì chưa tồn tại lúc này.
+pub fn open_window(cmd: &str) -> Result<(i64, String)> {
+    let script = format!(
+        r#"tell application "Terminal"
+  set w to do script {}
+  delay 1
+  return ((id of window 1) as text) & "|" & (tty of w)
+end tell"#,
+        as_string(cmd)
+    );
+    let out = osascript(&script)?;
+    let (id, tty) = out
+        .trim()
+        .split_once('|')
+        .ok_or_else(|| anyhow!("Terminal trả về khác dạng: {}", crate::exec::truncate(&out, 120)))?;
+    // Id cửa sổ chỉ để ghi sổ, nên KHÔNG cho nó làm hỏng cả việc: cửa sổ đã
+    // dựng rồi, ném lỗi ở đây là bỏ lại một cửa sổ mồ côi trên màn hình.
+    Ok((id.trim().parse::<i64>().unwrap_or(0), tty.trim().to_string()))
+}
+
 /// Cửa sổ Terminal đang chạy `tty` này, nếu có.
 ///
 /// `Terminal` công bố `tty` của từng tab qua AppleScript (đo 2026-08-09:
@@ -149,6 +179,66 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
     // test của tệp này chỉ kiểm phần thoát chuỗi.
     let out = osascript(&script)?;
     Ok(out.trim().parse::<i64>().ok())
+}
+
+/// Tab của cửa sổ này còn chương trình nào đang chạy không.
+///
+/// Đây là câu hỏi PHÂN BIỆT "thoát CLI xong" với "vẫn đang thoát": `ps` biến
+/// mất trước khi shell kịp in dấu nhắc, còn `busy` là chính Terminal trả lời về
+/// tab của nó. Dùng nó để CHỜ, chứ đừng đoán bằng `sleep`.
+pub fn tab_busy(window: i64) -> Result<bool> {
+    let out = osascript(&format!(
+        r#"tell application "Terminal" to get busy of (selected tab of window id {window}) as text"#
+    ))?;
+    Ok(out.trim() == "true")
+}
+
+/// Thoát CLI rồi ĐÓNG cửa sổ — định nghĩa "tắt hẳn" của chủ máy.
+///
+/// Hà 2026-08-11: *"tắt hẳn là thoát cli và đóng terminal"*, và trước đó:
+/// *"phải thoát cli trước rồi đóng thì mới không bị hỏi chứ"*. Thứ tự ấy không
+/// phải phép lịch sự: đóng một cửa sổ còn chương trình chạy sẽ bật hộp thoại
+/// *"Do you want to terminate running processes?"* — một modal của Terminal,
+/// và modal thì **khoá luôn mọi lệnh automation sau đó**. Sai thứ tự là tự bịt
+/// mồm mình.
+///
+/// Hai sự thật đo được ngày 2026-08-11, mỗi cái bác một cách làm tắt:
+/// · gõ `/exit` là CLI thoát thật (pid biến mất, `busy` về `false`) — nên không
+///   cần `kill`, và `kill` thì mất phần ghi sổ cuối phiên;
+/// · cửa sổ **không tự đóng** khi shell thoát (hồ sơ Terminal giữ nó lại kèm
+///   dòng `[Process completed]`) — nên bước đóng là bắt buộc, không thừa.
+pub fn quit_and_close(window: i64) -> Result<()> {
+    osascript(&do_script(window, &as_string("/exit")))?;
+    // Chờ CLI nhả tab. 20 × 500ms: `/exit` thường xong trong ~3 giây, nhưng một
+    // phiên đang giữa lượt phải kết thúc lượt ấy trước.
+    // 60 × 500ms = 30 giây. Rộng hơn "vừa đủ cho một phiên rảnh" là có chủ ý:
+    // `claude` XẾP HÀNG chữ khi đang giữa lượt, nên `/exit` chỉ có hiệu lực sau
+    // khi lượt ấy chạy xong. Bấm "Tắt hẳn" đúng lúc phiên đang chạy là chuyện
+    // thường, và bỏ cuộc sau 10 giây thì biến một việc chỉ cần chờ thành một
+    // lời báo hỏng.
+    let mut still_busy = true;
+    for _ in 0..60 {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        match tab_busy(window) {
+            Ok(false) => {
+                still_busy = false;
+                break;
+            }
+            Ok(true) => {}
+            // Không hỏi được thì DỪNG, đừng đóng liều: đóng khi chưa chắc đã
+            // thoát là đúng cái bật hộp thoại.
+            Err(e) => return Err(e.context("không hỏi được tab còn bận không")),
+        }
+    }
+    if still_busy {
+        anyhow::bail!(
+            "đã gõ /exit nhưng phiên vẫn đang chạy dở sau 30 giây — `claude` xếp hàng lệnh thoát tới cuối lượt. Cửa sổ vẫn nguyên (đóng lúc này sẽ bật hộp thoại 'terminate running processes'); chờ nó xong rồi bấm lại"
+        );
+    }
+    osascript(&format!(
+        r#"tell application "Terminal" to close (first window whose id is {window})"#
+    ))?;
+    Ok(())
 }
 
 /// Gõ `text` vào cửa sổ của phiên, rồi Enter.

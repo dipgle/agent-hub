@@ -10,7 +10,7 @@
 
 import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, statSync, readdirSync } from "node:fs";
+import { mkdirSync, statSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -52,6 +52,47 @@ function transcriptOf(sessionId) {
   }
   return null;
 }
+/// Lượt NGƯỜI DÙNG đầu tiên trong nhật ký — tức đề bài đã tới phiên hay chưa.
+///
+/// Đọc thẳng tệp thay vì hỏi `hub sessions`: hub là thứ đang được nghiệm thu,
+/// nên nó không được vừa làm vừa chấm bài của chính mình.
+function firstUserTurn(path) {
+  if (!path) return "";
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    if (!line.trim()) continue;
+    let rec;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (rec.type !== "user") continue;
+    const c = rec.message?.content;
+    const text = typeof c === "string" ? c : (c || []).map((b) => b.text || "").join(" ");
+    if (text.trim()) return text;
+  }
+  return "";
+}
+
+/// Còn cửa sổ Terminal nào đang chạy cái tty này không — hỏi CHÍNH Terminal.
+///
+/// Không hỏi hub: hub là thứ đang bị chấm bài. Không hỏi `ps`: `ps` trả lời
+/// "còn tiến trình nào không", mà đó mới là NỬA định nghĩa "tắt hẳn" — nửa kia
+/// là cửa sổ, và ca hay gặp nhất chính là CLI thoát rồi mà cửa sổ vẫn mở.
+function ttyHasWindow(tty) {
+  if (!tty) return false;
+  const dev = tty.startsWith("/dev/") ? tty : `/dev/${tty}`;
+  const out = execFileSync("osascript", ["-e", `tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if (tty of t) is "${dev}" then return "yes"
+    end repeat
+  end repeat
+  return "no"
+end tell`], { encoding: "utf8" });
+  return out.trim() === "yes";
+}
+
 const sizeOf = (p) => {
   try {
     return statSync(p).size;
@@ -73,6 +114,9 @@ page.on("console", (m) => {
 page.on("pageerror", (e) => problems.push(`uncaught: ${e.message}`));
 
 let started = null;
+// Đã tắt trong lúc nghiệm thu chưa — khối `finally` cần biết, mà `stopped` thì
+// nằm trong `try` nên nó không với tới.
+let cleaned = false;
 try {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.fill("#u", username);
@@ -150,7 +194,16 @@ try {
   }
   check("phiên mới xuất hiện mà không cần chạm vào máy", true, fresh.session_id.slice(0, 8));
   started = fresh;
-  check("phiên mới là phiên NỀN", fresh.kind === "background", fresh.kind);
+  // Từ 2026-08-11 `/new` mở CỬA SỔ THẬT, không phải phiên nền — Hà: *"cli
+  // claude cài trên máy tôi, hub là cầu kết nối ra ui"*. Phép đo đổi theo, và
+  // đổi sang thứ ĐÁNG đo: có cửa sổ thì mới có màn sống, mới `/btw` được, mới
+  // hiện được "đang làm gì". `kind` một mình không đủ — một hàng `interactive`
+  // không tty là phiên hub không với tới.
+  check(
+    "phiên mới là phiên CÓ CỬA SỔ",
+    fresh.kind === "interactive" && !!fresh.tty && fresh.host === "terminal",
+    `${fresh.kind} · tty=${fresh.tty || "(không)"} · host=${fresh.host}`
+  );
   // Phiên mở ở GỐC WORKSPACE, không phải trong thư mục dự án — Hà 2026-08-10:
   // *"ngay từ đầu tôi bảo mọi phiên đều bắt đầu từ thư mục projects rồi mà"*.
   // Mở trong thư mục con là mở vào chỗ chưa tài khoản nào duyệt, nên phiên kẹt
@@ -161,10 +214,18 @@ try {
     (fresh.cwd || "").replace(/\/+$/, "").endsWith("/Documents/projects"),
     fresh.cwd
   );
+  // Đề bài có tới nơi không — đo ở NHẬT KÝ, không ở tên phiên.
+  //
+  // Phiên nền được `claude` đặt tên theo lời nhắc, nên tên từng là bằng chứng
+  // tốt. Phiên cửa sổ thì `claude` tự đặt tên (`projects-53`), nên đọc tên là
+  // đo nhầm chỗ. Nhật ký thì không nói dối: lượt đầu tiên CHÍNH LÀ đề bài, và
+  // đây đúng là chỗ bẫy `--disallowedTools` variadic sẽ lộ ra — đề bài bị nuốt
+  // thì lượt ấy trống, phiên dựng lên mà không có việc.
+  const firstTurn = firstUserTurn(transcriptOf(fresh.session_id));
   check(
-    "đề bài mang tên dự án",
-    (fresh.name || "").includes(`[${project}]`),
-    fresh.name
+    "đề bài tới được phiên, mang tên dự án",
+    firstTurn.includes(`[${project}]`),
+    firstTurn.slice(0, 60) || "(nhật ký chưa có lượt nào của người dùng)"
   );
 
   // Màn phải thấy nó, không chỉ máy thấy.
@@ -200,59 +261,41 @@ try {
       (await page.locator("#sessAside").isDisabled()) === false,
     await page.locator("#sessSayInput").getAttribute("placeholder"));
 
+  // MÀN SỐNG — thứ phân biệt "hub mở được cửa sổ" với "hub nhìn được vào cửa sổ".
+  //
+  // Đây là lý do `/new` bỏ `--bg`: phiên nền không có màn để nhìn. Nếu mở cửa
+  // sổ rồi mà màn vẫn trống thì việc đổi đường coi như chưa tới đích, nên nó
+  // phải là một mục nghiệm thu, không phải một lần soi tay.
+  //
+  // Chờ có mốc: màn chỉ tới trang sau lượt đẩy ảnh chụp KẾ TIẾP lượt `/session`
+  // (hub đọc màn hình rồi mới đẩy), nên đo ngay là đo độ trễ chứ không đo sản
+  // phẩm. Chờ tối đa 2 phút.
+  let liveScreen = false;
+  for (let i = 0; i < 60 && !liveScreen; i++) {
+    liveScreen = await page.evaluate(() => {
+      const st = document.getElementById("sessStream");
+      return !!st && st.children.length > 0;
+    });
+    if (!liveScreen) await page.waitForTimeout(2000);
+  }
+  check(
+    "màn chi tiết có nội dung sống, không phải hộp trắng",
+    liveScreen,
+    liveScreen ? "có" : "trống sau 2 phút — hub chưa đẩy được luồng/màn của phiên"
+  );
+
   const file = transcriptOf(fresh.session_id);
   check("phiên mới có nhật ký trên đĩa", !!file, file || "");
 
-  // ——— Dừng phiên: claude không cho nối vào phiên đang chạy ———
+  // ——— UC-S05: nói tiếp vào CHÍNH phiên đó, LÚC NÓ CÒN SỐNG ———
   //
-  // Từ 2026-08-10 bước này CẦN MỘT NGÓN TAY THẬT: `/stop` đi qua chốt xác nhận
-  // Telegram (`confirm.rs`), nên hub sẽ đứng chờ tới 90 giây một cú bấm. Đó là
-  // cái giá của chốt chặn, và nó phải hiện ra ở đây chứ không núp sau một dòng
-  // đỏ khó hiểu: không ai bấm thì kịch bản nói "BỎ QUA vì chưa ai xác nhận",
-  // KHÔNG tính là hỏng — vì sản phẩm lúc ấy đang cư xử đúng.
-  await page.click("#sessStop");
-  await page.waitForFunction(
-    () => {
-      const t = document.getElementById("sessTellBox").textContent || "";
-      // `🔒 Đã gửi yêu cầu xác nhận…` là tin GIỮA CHỪNG — dừng ở đó là đo cái
-      // bấm nút, không phải đo kết cục. Chờ tới nhịp thứ hai (⏹ / ✋ / ⌛).
-      return t.length > 0 && !t.startsWith("Đang dừng") && !t.startsWith("🔒");
-    },
-    null,
-    { timeout: 180000, polling: 1000 }
-  ).catch(() => {});
-  const stopMsg = await page.textContent("#sessTellBox");
+  // Thứ tự đổi từ 2026-08-11, và đổi vì sản phẩm đổi. Phiên nền phải DỪNG rồi
+  // mới nối vào được (`claude` từ chối nối vào job nền đang chạy), nên bản cũ
+  // buộc phải dừng trước — kéo theo cả khúc sau treo vào một cú bấm Telegram.
+  // Phiên CÓ CỬA SỔ thì ngược hẳn: gõ thẳng vào cửa sổ đang chạy (`/type`) mới
+  // là đường thật, và tắt là việc CUỐI CÙNG. Đúng thứ tự người ta làm khi ngồi
+  // trước máy.
   let stopped = false;
-  if (/Đã dừng phiên/.test(stopMsg)) {
-    stopped = true;
-    check("màn báo đã dừng phiên", true, stopMsg.trim().slice(0, 70));
-    check("dừng rồi thì hội thoại vẫn còn", sizeOf(file) > 0, `${sizeOf(file)} byte`);
-  } else if (/xác nhận|Telegram|Hết hạn|huỷ/i.test(stopMsg)) {
-    console.log(
-      `  · BỎ QUA 2 kiểm tra: /stop đang chờ xác nhận trên Telegram và không ai bấm ` +
-      `("${stopMsg.trim().slice(0, 60)}"). Chưa nghiệm thu: "màn báo đã dừng phiên", ` +
-      `"dừng rồi thì hội thoại vẫn còn".`
-    );
-  } else {
-    check("màn báo đã dừng phiên", false, stopMsg.trim().slice(0, 70));
-    check("dừng rồi thì hội thoại vẫn còn", sizeOf(file) > 0, `${sizeOf(file)} byte`);
-  }
-
-  // ——— UC-S05: nói tiếp vào CHÍNH phiên đó ———
-  //
-  // ĐIỀU KIỆN CẦN: phiên phải đã DỪNG. `claude` từ chối thẳng việc nối vào một
-  // phiên nền còn sống (CLAUDE.md §10) — nên khi không ai bấm Telegram, bước
-  // này KHÔNG THỂ chạy. Trước đây nó vẫn chạy rồi báo đỏ hai dòng, tức tố cáo
-  // sản phẩm hỏng đúng lúc sản phẩm đang cư xử ĐÚNG như thiết kế chốt chặn —
-  // và đỏ giả là thứ dạy người ta bỏ qua màu đỏ. Nay nói thẳng là chưa nghiệm
-  // thu, và nói vì sao.
-  if (!stopped) {
-    console.log(
-      `  · BỎ QUA 3 kiểm tra: chưa dừng được phiên nên không thể nói tiếp vào nó ` +
-      `(claude không nối vào phiên nền đang chạy). Chưa nghiệm thu: "màn báo đã nói tiếp", ` +
-      `"nhật ký phiên DÀI RA", "KHÔNG đẻ ra phiên mới ngoài ý muốn".`
-    );
-  } else {
   const sizeBefore = sizeOf(file);
   const idsBefore = new Set(
     hub(["sessions", "--json"]).sessions.map((s) => s.session_id)
@@ -262,16 +305,30 @@ try {
   await page.waitForFunction(
     () => {
       const t = document.getElementById("sessTellBox").textContent || "";
-      return t.length > 0 && !t.startsWith("Đang nói tiếp");
+      return t.length > 0 && !/^Đang (nói tiếp|gõ)/.test(t);
     },
     null,
     { timeout: 240000, polling: 1000 }
   ).catch(() => {});
   const tellMsg = await page.textContent("#sessTellBox");
-  const sizeAfter = sizeOf(file);
 
-  check("màn báo đã nói tiếp", /Đã nói tiếp vào phiên/.test(tellMsg), tellMsg.trim().slice(0, 70));
+  check(
+    "màn báo chữ đã tới cửa sổ phiên",
+    // Hai đường, hai câu: `/tell` báo "Đã nói tiếp vào phiên", `/type` báo
+    // "⌨ đã gõ N ký tự vào …". Đo Ý NGHĨA (chữ đã tới phiên), không đo hoa
+    // thường — bản trước bắt `Đã` viết hoa nên báo đỏ một lượt gõ THÀNH CÔNG,
+    // trong khi nhật ký ngay dưới đó dài ra 3650 byte.
+    /(đã nói tiếp vào phiên|đã gõ \d+ ký tự)/i.test(tellMsg),
+    tellMsg.trim().slice(0, 70)
+  );
   // ĐÂY là chỗ UC-S05 khác hẳn UC-S05b: lượt này ở LẠI trên phiên cũ.
+  // Nhật ký chỉ dài ra sau khi phiên xử lý xong lượt, nên CHỜ có mốc — đo ngay
+  // rồi kết luận "không dài ra" là đo cái độ trễ, không đo sản phẩm.
+  let sizeAfter = sizeBefore;
+  for (let i = 0; i < 60 && sizeAfter <= sizeBefore; i++) {
+    await page.waitForTimeout(2000);
+    sizeAfter = sizeOf(file);
+  }
   check(
     "nhật ký phiên DÀI RA (khác hẳn hỏi bên lề)",
     sizeAfter > sizeBefore,
@@ -281,9 +338,8 @@ try {
   //
   // Bản trước là `!!stillThere || sizeAfter > sizeBefore`, mà vế sau CHÍNH LÀ
   // điều kiện đã assert hai dòng trên ("nhật ký phiên DÀI RA"). Nên hễ phép đo
-  // kia xanh thì phép đo này xanh theo, bất kể có đẻ ra phiên lạ hay không —
-  // nó không bao giờ bắt được đúng thứ tên nó nói. Nay so tập id trước/sau:
-  // `/tell` phải ở LẠI trên phiên cũ, không được sinh phiên nào khác.
+  // kia xanh thì phép đo này xanh theo, bất kể có đẻ ra phiên lạ hay không.
+  // Nay so tập id trước/sau: chữ phải ở LẠI trên phiên cũ.
   const idsAfter = new Set(
     hub(["sessions", "--json"]).sessions.map((s) => s.session_id)
   );
@@ -293,6 +349,53 @@ try {
     strays.length === 0,
     strays.length ? `phiên lạ: ${strays.map((i) => i.slice(0, 8)).join(", ")}` : "không có phiên nào lạ"
   );
+
+  // ——— TẮT HẲN: thoát CLI và đóng cửa sổ ———
+  //
+  // Định nghĩa là của Hà (2026-08-11): *"tắt hẳn là thoát cli và đóng
+  // terminal"*. Nghiệm thu vì thế phải đo ĐÚNG HAI thứ ấy trên máy thật: phiên
+  // rời danh sách, VÀ không còn cửa sổ nào chạy cái tty đó. Đo một thứ thôi là
+  // bỏ lọt đúng ca hay gặp nhất — CLI thoát rồi mà cửa sổ vẫn nằm đấy.
+  //
+  // Bước này CẦN MỘT NGÓN TAY THẬT: `/stop` đi qua chốt xác nhận Telegram
+  // (`confirm.rs`), nên hub đứng chờ tới 90 giây một cú bấm. Không ai bấm thì
+  // kịch bản nói "BỎ QUA vì chưa ai xác nhận", KHÔNG tính là hỏng — sản phẩm
+  // lúc ấy đang cư xử đúng.
+  const nutTat = (await page.textContent("#sessStop")).trim();
+  check("nút tắt nói đúng việc nó làm", nutTat.includes("Tắt hẳn"), nutTat);
+  await page.click("#sessStop");
+  await page.waitForFunction(
+    () => {
+      const t = document.getElementById("sessTellBox").textContent || "";
+      // `🔒 Đã gửi yêu cầu xác nhận…` là tin GIỮA CHỪNG — dừng ở đó là đo cái
+      // bấm nút, không phải đo kết cục. Chờ tới nhịp thứ hai (⏹ / ✋ / ⌛).
+      return t.length > 0 && !/^Đang (dừng|thoát)/.test(t) && !t.startsWith("🔒");
+    },
+    null,
+    { timeout: 180000, polling: 1000 }
+  ).catch(() => {});
+  const stopMsg = await page.textContent("#sessTellBox");
+  if (/Đã tắt hẳn phiên/.test(stopMsg)) {
+    stopped = true;
+    cleaned = true;
+    check("màn báo đã tắt hẳn", true, stopMsg.trim().slice(0, 70));
+    check("nhật ký vẫn còn sau khi tắt", sizeOf(file) > 0, `${sizeOf(file)} byte`);
+    // Hai bằng chứng trên MÁY, không phải trên màn.
+    check("cửa sổ terminal đã đóng", !ttyHasWindow(fresh.tty), fresh.tty);
+    let left = false;
+    for (let i = 0; i < 15 && !left; i++) {
+      left = !hub(["sessions", "--json"]).sessions.some((x) => x.session_id === fresh.session_id);
+      if (!left) await page.waitForTimeout(2000);
+    }
+    check("phiên rời khỏi danh sách đang chạy", left, fresh.session_id.slice(0, 8));
+  } else if (/xác nhận|Telegram|Hết hạn|huỷ/i.test(stopMsg)) {
+    console.log(
+      `  · BỎ QUA 4 kiểm tra: /stop đang chờ xác nhận trên Telegram và không ai bấm ` +
+      `("${stopMsg.trim().slice(0, 60)}"). Chưa nghiệm thu: "màn báo đã tắt hẳn", ` +
+      `"nhật ký vẫn còn sau khi tắt", "cửa sổ terminal đã đóng", "phiên rời khỏi danh sách".`
+    );
+  } else {
+    check("màn báo đã tắt hẳn", false, stopMsg.trim().slice(0, 70));
   }
 
   const over = await page.evaluate(() => ({
@@ -307,12 +410,33 @@ try {
 } finally {
   await browser.close();
   // Đừng để lại một agent chạy hoang sau khi kiểm xong.
-  if (started) {
+  // Dọn: phiên CỬA SỔ không tắt được bằng `claude stop` (lệnh ấy chỉ biết job
+  // nền) — phải thoát CLI rồi đóng cửa sổ, đúng đường sản phẩm đi. Bản cũ gọi
+  // `claude stop` cho mọi thứ, nên mỗi lần chạy để lại một cửa sổ còn sống.
+  if (started && !cleaned) {
+    const short = started.session_id.slice(0, 8);
     try {
-      execFileSync("claude", ["stop", started.session_id.slice(0, 8)], { stdio: "ignore" });
-      console.log(`\n(dọn: đã dừng ${started.session_id.slice(0, 8)})`);
-    } catch {
-      console.log(`\n⚠ dọn không xong — tự dừng bằng: claude stop ${started.session_id.slice(0, 8)}`);
+      if (started.kind === "background") {
+        execFileSync("claude", ["stop", short], { stdio: "ignore" });
+      } else if (ttyHasWindow(started.tty)) {
+        const dev = started.tty.startsWith("/dev/") ? started.tty : `/dev/${started.tty}`;
+        execFileSync("osascript", ["-e", `tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if (tty of t) is "${dev}" then
+        do script "/exit" in t
+        delay 6
+        close w
+        return "closed"
+      end if
+    end repeat
+  end repeat
+  return "gone"
+end tell`], { stdio: "ignore" });
+      }
+      console.log(`\n(dọn: đã tắt ${short})`);
+    } catch (e) {
+      console.log(`\n⚠ dọn không xong (${e.message.slice(0, 60)}) — tự tắt cửa sổ ${started.tty}`);
     }
   }
 }

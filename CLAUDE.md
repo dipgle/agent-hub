@@ -20,16 +20,24 @@ one test, and it cuts both ways:
 
 - **Anything hub does that has no equivalent at the terminal is a smell.** It
   means hub invented a way of working he cannot see, take over, or reason about.
-  Measured example: `/new` creates a `--bg` session — headless, no window, no
-  live screen, cannot be typed into without stopping it first. He would never
-  produce that by sitting down at the machine; he would open a window. That is
-  hub inventing a crippled class of session, and it is why three features built
-  on 2026-08-10 (the activity line, `/btw`, screen reading) simply do not work
-  there.
+  The example that forced the rule, and the one that proves it pays: `/new` used
+  to create a `--bg` session — headless, no window, no live screen, impossible
+  to type into without stopping it first. He would never produce that by sitting
+  down at the machine; he would open a window. Three features built on
+  2026-08-10 (the activity line, `/btw`, screen reading) simply did not work
+  there, and that was the tell. **Fixed 2026-08-11**: `/new` now runs `do script`
+  and opens a real Terminal window, matched back to `claude agents` by **tty** —
+  the only handle that exists at that moment (the name is auto-assigned, the id
+  does not exist yet). `--bg` survives as the fallback when no window can be
+  opened, or when `new_in_terminal` is off.
+  Closing had to follow, or the bridge is one-way: hub could open a window and
+  then refuse to close it. `/stop` on a hub-opened window session types `/exit`,
+  waits for Terminal to report the tab idle, then closes the window — Hà's own
+  definition of *tắt hẳn*.
 - **Anything he can do at the terminal but not from the phone is a gap.** Today:
   watch more than one session's screen at once (`portal.rs:96` — live screen
   only for the focused session), scroll back further than the captured window
-  (`portal.rs:108` — 16 lines), open or close a window, answer an OS dialog.
+  (`portal.rs:108` — 16 lines), answer an OS dialog.
 
 When a choice is unclear, ask what he would do sitting at the machine, and make
 the phone do that — not something cleverer.
@@ -228,6 +236,23 @@ or drive a session from a phone?** If not, it does not belong here.
     rather than showing it — so a reply must read the screen back and say WHERE
     the text landed. `osascript` returning 0 proves only that bytes reached the
     tab.
+    **Opening and closing a window** (2026-08-11). `do script "<cmd>"` makes a
+    new window and returns its *tab*; `tty of` that tab is the handle that ties
+    it to the `claude agents` row that appears seconds later. Closing is
+    ordered, and the order is not politeness: `/exit` first, then close, because
+    closing a window with a live process raises Terminal's own *"Do you want to
+    terminate running processes?"* modal — and a modal **blocks every automation
+    command after it**, so getting this backwards gags hub. Two measurements
+    pin the steps: typing `/exit` really does end the CLI (pid gone, `busy` →
+    `false`), so no `kill` and no lost end-of-session bookkeeping; and the
+    window does **not** close itself when the shell exits (the profile keeps it,
+    showing `[Process completed]`), so the close step is required, not cosmetic.
+    If the tab is still busy after 10s, hub refuses to close — better a live
+    window than a modal that silences everything.
+    One trap unique to this path: the command goes through a **shell**, so every
+    `DENIED_TOOLS` pattern must be quoted. `Bash(git push:*)` bare is a shell
+    syntax error, and the window would open to a red line with no session and no
+    guard rail. The `--bg` path never had this because it passes argv directly.
     **Autostart survives rebuilds now — and here is the whole mechanism, because
     two of the three obvious ways to do it are wrong** (measured 2026-08-10).
     TCC pins a grant to a binary's *designated requirement*. `cargo` ad-hoc-signs

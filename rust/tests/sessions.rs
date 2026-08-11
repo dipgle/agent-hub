@@ -525,3 +525,97 @@ fn a_malformed_id_sequence_matches_the_javascript_twin() {
     let empty = r#"{"type":"queue-operation","content":"<task-notification><tool-use-id></tool-use-id></task-notification>"}"#;
     assert_eq!(parse_tail(&format!("{launched}\n{empty}"), &bg2).pending_subagents, 1);
 }
+
+/// Cửa sổ Terminal mà `/new` mở ra — dòng lệnh phải đúng ĐẾN TỪNG THỨ TỰ.
+///
+/// Hai thứ ở đây từng làm hỏng một phiên thật, nên chúng được khoá lại bằng
+/// test chứ không bằng lời dặn trong bình luận.
+mod cua_so_moi {
+    use hub::sessions::terminal_command;
+    use std::path::Path;
+
+    /// Đề bài phải đứng TRƯỚC `--disallowedTools`.
+    ///
+    /// Cờ ấy variadic: đặt đề bài sau nó thì đề bài bị nuốt thành một mẫu công
+    /// cụ nữa, phiên dựng lên mà không có việc gì để làm — đúng lỗi lần `/new`
+    /// đầu tiên (`CLAUDE.md` §10). Test đọc VỊ TRÍ, không đọc câu chữ.
+    #[test]
+    fn de_bai_dung_truoc_co_variadic() {
+        let cmd = terminal_command("claude", Path::new("/Users/x/projects"), "[hub] dọn nợ", None);
+        let de_bai = cmd.find("dọn nợ").expect("đề bài phải có trong lệnh");
+        let co = cmd.find("--disallowedTools").expect("phải có rào công cụ");
+        assert!(
+            de_bai < co,
+            "đề bài bị đẩy ra sau cờ variadic ⟹ phiên sẽ dựng lên rỗng: {cmd}"
+        );
+        // Và rào công cụ phải thật sự có hàng, không phải một cờ trống.
+        assert!(cmd.trim_end().len() > co + "--disallowedTools".len() + 3, "{cmd}");
+    }
+
+    /// Nháy đơn trong đề bài không được phép thoát ra ngoài chuỗi.
+    ///
+    /// Đề bài là chữ chủ máy gõ trên điện thoại; một dấu `'` mà lọt ra thì phần
+    /// còn lại của câu trở thành LỆNH SHELL. Đây là rào an toàn, không phải
+    /// chuyện thẩm mỹ.
+    #[test]
+    fn nhay_don_trong_de_bai_khong_thoat_ra_shell() {
+        let cmd = terminal_command(
+            "claude",
+            Path::new("/Users/x/projects"),
+            "đừng 'rm -rf /' nhé",
+            None,
+        );
+        // Sau khi bọc, mọi nháy đơn của người dùng phải nằm trong dạng '\''.
+        let tho = cmd.replace(r"'\''", "");
+        assert_eq!(
+            tho.matches('\'').count() % 2,
+            0,
+            "nháy đơn lẻ ⟹ chuỗi shell hở: {cmd}"
+        );
+        assert!(cmd.contains(r"'\''rm -rf /'\''"), "phải bọc lại nháy của người dùng: {cmd}");
+    }
+
+    /// Chạy đúng tài khoản: `CLAUDE_CONFIG_DIR` phải đứng trước lệnh `claude`.
+    #[test]
+    fn tai_khoan_duoc_cam_theo_vao_cua_so() {
+        let cmd = terminal_command(
+            "claude",
+            Path::new("/Users/x/projects"),
+            "việc",
+            Some("/Users/x/.claude-acc2"),
+        );
+        let env = cmd.find("CLAUDE_CONFIG_DIR").expect("phải cắm biến tài khoản");
+        let cli = cmd.find("'claude'").expect("phải gọi claude");
+        assert!(env < cli, "biến môi trường phải đứng trước lệnh: {cmd}");
+        assert!(cmd.contains("/Users/x/.claude-acc2"), "{cmd}");
+        // Không có tài khoản thì KHÔNG cắm biến rỗng.
+        let khong = terminal_command("claude", Path::new("/Users/x/projects"), "việc", None);
+        assert!(!khong.contains("CLAUDE_CONFIG_DIR"), "{khong}");
+    }
+
+    /// Rào công cụ phải SỐNG SÓT qua shell.
+    ///
+    /// `Bash(git push:*)` để trần là lỗi cú pháp của bash/zsh — cửa sổ sẽ mở ra
+    /// với một dòng đỏ, không có phiên nào, và rào an toàn coi như không tồn
+    /// tại. Nhánh `--bg` không dính bẫy này vì nó truyền argv thẳng.
+    #[test]
+    fn rao_cong_cu_song_sot_qua_shell() {
+        let cmd = terminal_command("claude", Path::new("/Users/x/projects"), "việc", None);
+        let (_, rao) = cmd.split_once("--disallowedTools").expect("phải có rào");
+        assert!(rao.contains("'Bash(git push:*)'"), "mẫu để trần: {rao}");
+        // Không một dấu ngoặc nào được đứng ngoài chuỗi.
+        for doan in rao.split('\'').step_by(2) {
+            assert!(
+                !doan.contains('(') && !doan.contains(')') && !doan.contains('*'),
+                "ký tự shell nuốt được nằm ngoài nháy: {doan:?} trong {rao}"
+            );
+        }
+    }
+
+    /// Cửa sổ mở ở GỐC WORKSPACE — thư mục duy nhất cả ba tài khoản đã duyệt.
+    #[test]
+    fn mo_o_goc_workspace() {
+        let cmd = terminal_command("claude", Path::new("/Users/x/projects"), "việc", None);
+        assert!(cmd.starts_with("cd '/Users/x/projects' &&"), "{cmd}");
+    }
+}

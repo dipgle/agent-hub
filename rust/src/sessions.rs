@@ -1829,6 +1829,14 @@ pub struct Started {
     pub cwd: String,
     pub task: String,
     pub ts: String,
+    /// Mở bằng CỬA SỔ terminal thật hay bằng phiên nền.
+    ///
+    /// Có trường này vì câu trả lời gửi ra điện thoại phải nói đúng thứ vừa
+    /// xảy ra, mà `/new` có hai đường (cửa sổ, và `--bg` khi đường kia hỏng).
+    /// Suy ngược từ `kind` ở chỗ gọi thì được một lời đoán; ghi lại ở đây thì
+    /// được một sự thật.
+    #[serde(default)]
+    pub window: bool,
 }
 
 /// The session id out of `claude --bg`'s human-readable output.
@@ -1872,6 +1880,99 @@ pub fn parse_backgrounded_id(stdout: &str) -> Option<&str> {
 /// trỏ nó vào `~/.claude` sẽ báo "not logged in", xem chú thích đầu tệp).
 /// Trước 2026-08-09 hàm này luôn xoá biến, tức máy có ba tài khoản mà từ điện
 /// thoại chỉ mở được phiên trên acc1 — Hà hỏi đúng chỗ đó.
+/// Mở phiên trong một CỬA SỔ TERMINAL THẬT, rồi ghép nó với hàng `claude agents`.
+///
+/// Ghép bằng **tty**, không bằng tên: tên phiên do `claude` tự đặt (`projects-31`)
+/// nên hub không đoán trước được, còn `sessionId` thì chưa tồn tại lúc vừa gõ
+/// lệnh. `tty` thì Terminal trả về ngay khi dựng cửa sổ, và `claude agents` khai
+/// đúng nó — hai đầu gặp nhau ở đó.
+///
+/// ⚠ Thứ tự tham số là bẫy đã trả giá một lần (`CLAUDE.md` §10):
+/// `--disallowedTools` là VARIADIC, nên đề bài phải đứng TRƯỚC nó; đặt sau thì
+/// đề bài bị nuốt thành một mẫu công cụ nữa và phiên dựng lên mà không có việc.
+fn start_in_terminal(
+    cfg: &Config,
+    root: &Path,
+    project: &str,
+    dir: &Path,
+    task: &str,
+    account: Option<&str>,
+) -> Result<Started> {
+    let cmd = terminal_command(
+        &cfg.claude_cli,
+        root,
+        task,
+        account.and_then(|a| account_dir(cfg, a)).as_deref(),
+    );
+    let (window, tty) = crate::keys::open_window(&cmd)?;
+    let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
+    logging::info(
+        "new_window_opened",
+        json!({ "window": window, "tty": tty_short, "task": truncate(task, 80) }),
+    );
+
+    // Chờ `claude agents` khai ra hàng mang đúng tty ấy.
+    //
+    // Đếm bằng ĐỒNG HỒ, không đếm bằng số vòng: mỗi vòng gọi `claude agents`
+    // cho từng tài khoản, nên "30 vòng × 2 giây" trên thực tế là 90 giây chứ
+    // không phải 60 — và câu báo lỗi nói "60 giây" sẽ là một con số bịa.
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_secs(2));
+        if let Some(row) = snapshot(cfg)
+            .sessions
+            .into_iter()
+            .find(|s| !s.tty.is_empty() && s.tty == tty_short)
+        {
+            return Ok(Started {
+                session_id: row.session_id,
+                project: project.to_string(),
+                cwd: dir.to_string_lossy().to_string(),
+                task: task.to_string(),
+                ts: crate::logging::now_iso(),
+                window: true,
+            });
+        }
+    }
+    anyhow::bail!("mở được cửa sổ ({tty_short}) nhưng `claude agents` chưa khai phiên nào trên đó sau 60 giây")
+}
+
+/// Dòng lệnh gõ vào cửa sổ Terminal mới.
+///
+/// Tách riêng để KIỂM ĐƯỢC cái bẫy đã trả giá một lần: `--disallowedTools` là
+/// variadic, nên đề bài phải đứng trước nó (`CLAUDE.md` §10). Một hàm thuần thì
+/// test đọc thẳng được thứ tự ấy; nếu để nội tuyến trong hàm mở cửa sổ thì chỉ
+/// một phiên thật mới phát hiện được sai, và lúc đó nó đã dựng một phiên rỗng.
+pub fn terminal_command(cli: &str, root: &Path, task: &str, config_dir: Option<&str>) -> String {
+    let env_prefix = match config_dir {
+        Some(dir) => format!("CLAUDE_CONFIG_DIR={} ", shell_quote(dir)),
+        None => String::new(),
+    };
+    // MỌI mẫu công cụ phải được bọc. Chúng chứa `(`, `)`, `*`, `:` —
+    // `Bash(git push:*)` để trần là LỖI CÚ PHÁP của shell, và cửa sổ sẽ mở ra
+    // với một dòng đỏ thay vì một phiên. Nhánh `--bg` không dính vì nó truyền
+    // argv thẳng, không đi qua shell; nhánh cửa sổ thì có, nên rào chỉ còn là
+    // rào khi nó sống sót qua shell.
+    let denied = DENIED_TOOLS
+        .iter()
+        .map(|t| shell_quote(t))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "cd {} && {}{} {} --disallowedTools {}",
+        shell_quote(&root.to_string_lossy()),
+        env_prefix,
+        shell_quote(cli),
+        shell_quote(task),
+        denied
+    )
+}
+
+/// Bọc một chuỗi cho shell — chỉ dùng cho lệnh hub tự dựng, không cho chữ ngoài.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
 pub fn start_background(
     cfg: &Config,
     project: &str,
@@ -1907,6 +2008,29 @@ pub fn start_background(
     // thư mục làm việc: `claude` đọc `CLAUDE.md` của cả cây từ gốc.
     let root = cfg.workspace_root.clone();
     let task_with_project = format!("[{project}] {task}");
+
+    // ĐƯỜNG CHÍNH: mở một cửa sổ Terminal thật, y như chủ máy tự mở.
+    //
+    // Hà 2026-08-11: *"cli claude cài trên máy tôi, hub là cầu kết nối ra ui"*.
+    // Một phiên `--bg` là hạng phiên ông ấy KHÔNG bao giờ tự tạo khi ngồi trước
+    // máy: không cửa sổ ⟹ không màn sống, không `/btw`, không dòng "đang làm
+    // gì", và muốn nói chen vào phải DỪNG nó trước. Ba tính năng dựng ngày
+    // 2026-08-10 đều không chạy được trên hạng phiên ấy — đó là bằng chứng rõ
+    // nhất rằng nó lệch khỏi thứ có thật ở đầu bên kia cây cầu.
+    //
+    // `--bg` vẫn giữ làm ĐƯỜNG LUI (không mở nổi cửa sổ, hoặc chủ máy tắt cờ),
+    // vì nó sống độc lập với Terminal — đóng cửa sổ là mất phiên cửa sổ, còn
+    // `--bg` thì không.
+    if cfg.new_in_terminal {
+        match start_in_terminal(cfg, &root, project, dir, &task_with_project, account) {
+            Ok(started) => return Ok(started),
+            Err(e) => logging::warn(
+                "new_in_terminal_failed",
+                json!({ "err": e.to_string(), "falling_back_to": "--bg" }),
+            ),
+        }
+    }
+
     let mut args: Vec<&str> = vec!["--bg", &task_with_project, "--disallowedTools"];
     args.extend_from_slice(&DENIED_TOOLS);
 
@@ -2076,6 +2200,7 @@ pub fn start_background(
         cwd: dir.to_string_lossy().to_string(),
         task: task.to_string(),
         ts: crate::logging::now_iso(),
+        window: false,
     })
 }
 
@@ -2094,12 +2219,34 @@ fn short_id(session_id: &str) -> &str {
 /// Stop a background session. Its conversation is kept, so it can be continued.
 pub fn stop_background(cfg: &Config, session: &LiveSession) -> Result<()> {
     if session.kind != "background" {
-        // An interactive session belongs to whoever opened the terminal. Hà
-        // decided on 2026-08-08 that hub only ever drives what hub started.
-        anyhow::bail!(
-            "chỉ dừng được phiên do hub mở (phiên này là {})",
-            session.kind
-        );
+        // Phiên CÓ CỬA SỔ do hub mở: dừng nó là thoát CLI rồi đóng cửa sổ —
+        // đúng chữ Hà dùng (2026-08-11): *"tắt hẳn là thoát cli và đóng
+        // terminal"*. `claude stop` không đụng tới hạng phiên này (nó chỉ biết
+        // job nền), nên nếu không có nhánh này thì hub MỞ được cửa sổ mà không
+        // ĐÓNG được — một cây cầu một chiều.
+        //
+        // Vẫn chỉ dừng thứ hub mở. Cửa sổ chủ máy tự mở là việc của chủ máy;
+        // `started_by_hub` do `pipeline::mark_started_by_hub` đóng dấu từ sổ
+        // riêng của hub, không phải đoán từ hình dạng phiên.
+        if !session.started_by_hub {
+            anyhow::bail!(
+                "chỉ dừng được phiên do hub mở (phiên này là {}, mở từ máy)",
+                session.kind
+            );
+        }
+        let window = crate::keys::window_of(&session.tty)
+            .map_err(|e| anyhow::anyhow!("không dò được cửa sổ terminal của phiên: {e}"))?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "không còn cửa sổ terminal nào chạy {} — phiên có lẽ đã tắt rồi",
+                    if session.tty.is_empty() {
+                        "(không rõ tty)"
+                    } else {
+                        &session.tty
+                    }
+                )
+            })?;
+        return crate::keys::quit_and_close(window);
     }
     let out = run(
         &cfg.claude_cli,

@@ -15,7 +15,7 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S03 | Trang tự làm mới khi đang theo một phiên | `fe-stream-uc` (≥3 lần/15s) |
 | S04 | Biết phiên chạy dưới chế độ quyền nào | `fe-sessions-uc` |
 | S05b | Hỏi bên lề trên **bản fork** — phiên gốc y nguyên byte | `fe-aside-uc` 17/17 |
-| S06 | Mở phiên nền cho một dự án | `fe-newsession-uc` 9/9 (đường KẸT) |
+| S06 | Mở phiên cho một dự án — **cửa sổ Terminal thật** | `fe-newsession-uc` 21/21 trên màn thật (2026-08-11) |
 | S07 | Đóng sổ → bản bàn giao + phiên mới + lệnh `--resume` | `fe-stream-uc` |
 | S08 | Bí mật không rò ra trang (quét trước khi đẩy) | `redaction` tests |
 | S09 | Ảnh chụp cũ thì nói là cũ | `fe-board-uc` |
@@ -47,11 +47,15 @@ là sổ việc, thành cái nền để biện minh.
 
 ## Theo thiết kế, KHÔNG phải nợ
 
-- **`fe-newsession-uc` bán tự động.** Bước `/stop` đi qua chốt xác nhận Telegram
-  nên cần một ngón tay thật. Không ai bấm thì kịch bản in **"BỎ QUA 2 + 3 kiểm
-  tra"** kèm tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm lúc ấy
-  đang cư xử ĐÚNG. Đây là cái giá của chốt chặn, không phải một thứ để sửa. Muốn
-  đóng trọn thì bấm nút Telegram trong lúc kịch bản chạy.
+- **`fe-newsession-uc` bán tự động.** Bước tắt phiên đi qua chốt xác nhận
+  Telegram nên cần một ngón tay thật. Không ai bấm thì kịch bản in **"BỎ QUA 4
+  kiểm tra"** kèm tên từng kiểm tra chưa nghiệm thu, và vẫn thoát 0 — sản phẩm
+  lúc ấy đang cư xử ĐÚNG. Đây là cái giá của chốt chặn, không phải một thứ để
+  sửa. Muốn đóng trọn thì bấm nút Telegram trong lúc kịch bản chạy.
+  **Đừng soi trang bằng `fe-probe` trong lúc kịch bản đang chạy**: mỗi lượt soi
+  gửi thêm một `/session` vào phòng, chen mất lượt trả lời của bước tắt — đo
+  2026-08-11, một lượt chạy sạch thì tin về đúng hạn, lượt bị soi song song thì
+  nằm mãi ở tin giữa chừng `🔒`.
 
 ## Đã trả xong (giữ lại vì sổ từng ghi là nợ)
 

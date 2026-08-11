@@ -616,6 +616,54 @@ chạy: phải tắt `hubd` rồi chờ qua 5 phút.
 
 ---
 
+## UC-S14 · Làm việc **hoàn toàn qua Telegram**  ✅ chạy thật 2026-08-11
+
+Hà hỏi trước, rồi chốt bằng cách gõ thử: *"nếu làm việc hoàn toàn qua kênh tele
+thì có gửi được nội dung chát không"*. Câu trả lời cũ là **không** — Telegram chỉ
+là cái loa có đúng hai cái nút (Xác nhận / Huỷ của `confirm.rs`), tin chữ bị bỏ
+qua hoàn toàn, và một phiên **dừng lại hỏi** thì tin báo nói "có N lựa chọn" mà từ
+đó không chọn được gì.
+
+**Nghiệm thu:** gõ một lệnh trong Telegram thì nó CHẠY và trả lời ngay tại đó;
+`/sessions` cho danh sách phiên **bấm được**; bấm một phiên là vào thẳng phiên ấy
+và **thấy màn hình** của nó.
+
+**Cách làm — một đường, một cuốn sổ.** Vòng `getUpdates` thường trực
+(`telegram.rs`) đẩy tin chữ vào hàng đợi, `execute_telegram_commands` cho chúng đi
+qua **đúng `parse_command` + `execute_commands` của phòng chat**. Cổng người là
+`chat_id` (cùng vai với `trust.tfl5_user_tids`): tin từ người khác được LOG rồi bỏ.
+Cái nút cũng không đẻ ra động từ mới — `callback_to_command` biến `sess:<id>` /
+`key:<id>:<n>` thành đúng dòng lệnh mà ngón tay sẽ gõ.
+
+**Bằng chứng chạy thật (2026-08-11, giờ máy):**
+
+| Lúc | Việc | Kết quả |
+|---|---|---|
+| 21:31:34 → 21:33:50 | `/help` | chạy, ack về Telegram — **nhưng chờ 2 phút 16 giây** |
+| 22:53:02 | `/sessions` | `telegram_buttons_sent count=5`, 5 phiên kèm hàng phụ + câu cuối |
+| 22:54:05 → 22:54:11 | **bấm nút** một phiên | `👁 Đang theo phiên projects-ff (acc3)` + `📷 Màn của projects-ff:` kèm 14 dòng màn thật |
+| 22:58:04 → 22:58:04 | bấm lần hai | **0 giây** — sau khi hòm thư cầm `waker` |
+
+📌 **Độ trễ 2 phút ấy là một lỗ hổng thật, không phải "chậm chút".**
+`execute_telegram_commands` đứng đầu `run_once` mà vòng ngủ 120 giây; phòng chat
+tfl5 thoát được vì socket `/ws/chat` gọi `wake()`, kênh này thì lúc đầu không có
+gì gọi. Một mệnh lệnh gõ tay đợi hai phút thì người ta **gõ lại lần nữa** — và
+lần thứ hai là một hành động THẬT chạy hai lần. Vá: hòm thư giữ chính cái `waker`
+ấy, `push_text` đánh thức ngay.
+
+⚠ **Một luật phải giữ:** chỉ **MỘT** nơi đọc `getUpdates`. Telegram giao mỗi
+update cho người hỏi trước và `offset` là con dấu dùng chung, nên hai vòng đọc
+song song sẽ ăn mất update của nhau — một cú bấm ✅ rơi vào vòng đọc lệnh thì
+`confirm::ask` ngồi tới hết giờ rồi kết luận "không ai bấm", một câu SAI gửi cho
+đúng người vừa bấm. `confirm` mượn đường bằng `hold()`, và nhặt hộ tin chữ vào
+hàng đợi thay vì bỏ rơi.
+
+**Cơ chế:** ✅ · **Sản phẩm:** ✅ · **Kịch bản:** ⏳ không có E2E — cổng là
+`chat_id` nên chỉ ngón tay của chủ máy bấm được; bù bằng test thuần cho phần
+quyết định (`callback_to_command`, `session_list_text`) + log đối chiếu từng mốc.
+
+---
+
 ## Đọc bảng này thế nào
 
 **Không UC nào có kịch bản tự động.** Xương sống là **UC-S02** — và đo theo chuẩn

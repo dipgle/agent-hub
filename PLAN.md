@@ -25,6 +25,7 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S12 | Danh sách biết **phiên nào đang chạy** — mọi phiên, không chỉ phiên nền | `fe-sessions-uc`, đối chiếu hai chiều với máy |
 | S13 | Phiên **vừa xong / kẹt hỏi / tắt hẳn** thì báo vào phòng chat + Telegram | chạy thật, 0 lỗi gửi; câu nói dựa trên **đọc màn**, không đoán |
 | S09b | **Ảnh chụp cũ thì nói là cũ** | `fe-stale-uc` 8/8 trên ảnh chụp 6.3 phút tuổi (tắt `hubd` thật) |
+| S14 | Làm việc **hoàn toàn qua Telegram** — gõ lệnh, `/sessions` ra danh sách **bấm được**, bấm một phiên là vào thẳng và **thấy màn** | chạy thật 2026-08-11 22:53–22:58: `telegram_buttons_sent count=5` → bấm nút → `👁 Đang theo phiên projects-ff` + `📷 Màn của…` 14 dòng thật; lần bấm thứ hai **0 giây** |
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
 

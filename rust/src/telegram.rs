@@ -1,0 +1,442 @@
+//! Telegram làm **KÊNH RA LỆNH**, không chỉ cái loa.
+//!
+//! # Vì sao có tệp này
+//!
+//! Hà 2026-08-11: *"nếu làm việc hoàn toàn qua kênh tele thì có gửi được nội
+//! dung chát không"* — và câu trả lời lúc ấy là **không**: `confirm.rs` chỉ đọc
+//! `callback_query` (hai cái nút Xác nhận/Huỷ), chỉ trong lúc đang chờ một câu
+//! xác nhận, còn tin nhắn chữ thì bị bỏ qua hoàn toàn. Tức Telegram là cái loa
+//! có đúng hai cái nút, mọi mệnh lệnh vẫn phải đi qua phòng chat tfl5.
+//!
+//! Kèm theo là lỗ hổng thứ hai, cùng gốc: phiên **dừng lại hỏi** thì hub bắn
+//! một tin `⚠ … cần bạn chọn` — mà từ Telegram **không chọn được**. Người ta
+//! phải mở trang ra bấm. Nay từng lựa chọn thành một cái nút.
+//!
+//! # Luật của kênh này
+//!
+//! 1. **ĐÚNG MỘT nơi đọc `getUpdates`.** Telegram giao mỗi update cho người hỏi
+//!    trước, và `offset` là con dấu "đã nhận tới đây" dùng chung cho cả bot.
+//!    Hai vòng đọc song song thì chúng **ăn mất update của nhau**: một cú bấm
+//!    Xác nhận rơi vào vòng đọc lệnh sẽ biến mất, và `confirm::ask` ngồi chờ tới
+//!    hết giờ rồi kết luận "không ai bấm" — một câu sai, gửi cho đúng người vừa
+//!    bấm. Nên `Inbox` giữ `offset` và cả cờ `busy`; lúc `confirm` đang hỏi thì
+//!    vòng đọc **đứng im**, và chính `confirm` nhặt hộ tin chữ vào hàng đợi (bỏ
+//!    rơi một mệnh lệnh vì "đang bận hỏi" là một lỗi im lặng).
+//! 2. **Chỉ chủ máy ra lệnh được.** Cổng là `chat_id` trong `hub.env` — cùng
+//!    luật với `trust.tfl5_user_tids` của phòng chat: được ở trong phòng là
+//!    chuyện của Telegram, còn lái cái máy này là chuyện của chủ máy. Tin từ
+//!    người khác được LOG rồi bỏ, không im lặng.
+//! 3. **Không có bí mật nào đi ra.** Mọi câu trả lời gửi qua đây đi cùng đường
+//!    với phòng chat, tức đã qua cổng quét rò rỉ ở nguồn (`sessions::snapshot`,
+//!    `gate_preview`). Tệp này không tự bịa thêm nội dung nào.
+
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+
+use serde_json::{json, Value};
+
+use crate::config::Config;
+use crate::logging;
+
+/// Tên kênh trong log và trong `reply_in_channel`.
+pub const NAME: &str = "telegram";
+
+/// Một mệnh lệnh vừa tới từ Telegram, chưa chạy.
+#[derive(Debug, Clone)]
+pub struct Incoming {
+    /// Nguyên văn dòng người ta gõ (hoặc dòng lệnh do một cái nút sinh ra).
+    pub text: String,
+}
+
+/// Hòm thư Telegram dùng chung cho cả tiến trình.
+#[derive(Clone)]
+pub struct Inbox {
+    queue: Arc<Mutex<VecDeque<Incoming>>>,
+    /// `update_id` kế tiếp cần đọc. **Một** con dấu cho cả bot — xem luật 1.
+    offset: Arc<Mutex<i64>>,
+    /// `confirm::ask` đang giữ đường đọc.
+    busy: Arc<AtomicBool>,
+    token: String,
+    chat_id: String,
+    /// Đánh thức vòng chạy khi có lệnh mới.
+    ///
+    /// 🔴 Đo 2026-08-11: gõ `/help` lúc 21:31:34, hub chạy nó lúc **21:33:50**
+    /// — **2 phút 16 giây**. `execute_telegram_commands` đứng đầu `run_once`,
+    /// mà vòng ngủ 120 giây, nên lệnh tới ngay sau lúc vòng vừa đọc hàng đợi
+    /// thì nằm chờ trọn một vòng. Phòng chat tfl5 không bị vì socket
+    /// `/ws/chat` gọi `wake()`; kênh này lúc đầu thì không có gì gọi.
+    /// Một lệnh gõ tay mà đợi hai phút thì người ta gõ lại lần nữa — và lần
+    /// thứ hai là một mệnh lệnh THẬT chạy hai lần.
+    waker: Option<Arc<crate::live::Waker>>,
+}
+
+/// Một cú bấm nút → **đúng dòng lệnh mà ngón tay sẽ gõ**, không phải một nhánh
+/// xử lý riêng.
+///
+/// Đây là chỗ giữ cho Telegram không mọc ra một bộ động từ thứ hai: nút chỉ là
+/// cái phím tắt của một ROUTE đã có, nên nó đi vào cùng hàng đợi, cùng
+/// `parse_command`, cùng handler, và để lại cùng một vết trong sổ. Hàm thuần —
+/// kiểm được mà không cần Telegram.
+///
+/// * `key:<session_id>:<n>` → `/key <id> <n>` — trả lời hộp chọn của một phiên.
+/// * `sess:<session_id>` → `/session <id>` — chọn phiên để theo từ danh sách.
+///
+/// `ok:`/`no:` (nút xác nhận) KHÔNG thuộc về đây: chúng chỉ có nghĩa trong lúc
+/// `confirm::ask` đang chờ, và trả `None` là cách nói "cái này không phải lệnh".
+pub fn callback_to_command(data: &str) -> Option<String> {
+    if let Some(rest) = data.strip_prefix("key:") {
+        let (sid, n) = rest.split_once(':')?;
+        if sid.is_empty() || n.is_empty() {
+            return None;
+        }
+        return Some(format!("/key {sid} {n}"));
+    }
+    if let Some(sid) = data.strip_prefix("sess:") {
+        if sid.is_empty() {
+            return None;
+        }
+        return Some(format!("/session {sid}"));
+    }
+    None
+}
+
+/// Hòm thư của tiến trình này.
+///
+/// Một biến toàn cục, và có lý do: `confirm::ask` bị gọi từ giữa lòng
+/// `execute_commands`, còn vòng đọc thì sinh ra ở `main` — luồn một tham số qua
+/// mười tầng gọi chỉ để hai chỗ ấy dùng chung một `offset` là làm cho mọi chữ ký
+/// hàm mang theo một chi tiết của kênh Telegram. Daemon chỉ có một tiến trình,
+/// nên đây là "một cái duy nhất" theo đúng nghĩa đen.
+static INBOX: OnceLock<Inbox> = OnceLock::new();
+
+pub fn inbox() -> Option<&'static Inbox> {
+    INBOX.get()
+}
+
+impl Inbox {
+    /// Dựng hòm thư và chạy vòng đọc nền. `None` khi thiếu bí mật — SKIP-CÓ-LOG,
+    /// không phải lỗi (luật 4 của dự án: thiếu khoá thì bỏ qua và nói ra).
+    pub fn start(cfg: &Config, waker: Option<Arc<crate::live::Waker>>) -> Option<Inbox> {
+        if !cfg.confirm.enabled {
+            logging::info(
+                "telegram_inbox_off",
+                json!({ "why": "confirm.enabled = false" }),
+            );
+            return None;
+        }
+        let (token, chat_id) = match (
+            crate::config::secret_from_env(&cfg.confirm.bot_token_env),
+            crate::config::secret_from_env(&cfg.confirm.chat_id_env),
+        ) {
+            (Some(t), Some(c)) => (t, c),
+            (t, c) => {
+                let missing: Vec<&str> = [
+                    (t.is_none()).then_some(cfg.confirm.bot_token_env.as_str()),
+                    (c.is_none()).then_some(cfg.confirm.chat_id_env.as_str()),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                logging::warn("telegram_inbox_no_secret", json!({ "keys": missing }));
+                return None;
+            }
+        };
+        let inbox = Inbox {
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+            offset: Arc::new(Mutex::new(0)),
+            busy: Arc::new(AtomicBool::new(false)),
+            token,
+            chat_id,
+            waker,
+        };
+        let _ = INBOX.set(inbox.clone());
+        let worker = inbox.clone();
+        std::thread::Builder::new()
+            .name("telegram-inbox".into())
+            .spawn(move || worker.read_forever())
+            .map_err(|e| {
+                logging::error("telegram_inbox_spawn_failed", json!({ "err": e.to_string() }));
+            })
+            .ok()?;
+        logging::info("telegram_inbox_started", json!({ "chat_id_env": cfg.confirm.chat_id_env }));
+        Some(inbox)
+    }
+
+    fn api(&self, method: &str) -> String {
+        format!("https://api.telegram.org/bot{}/{}", self.token, method)
+    }
+
+    /// `confirm::ask` mượn đường đọc: vòng nền đứng im cho tới khi trả.
+    pub fn hold(&self) -> Hold<'_> {
+        self.busy.store(true, Ordering::SeqCst);
+        Hold { inbox: self }
+    }
+
+    pub fn offset_now(&self) -> i64 {
+        *self.offset.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set_offset(&self, v: i64) {
+        let mut o = self.offset.lock().unwrap_or_else(|e| e.into_inner());
+        if v > *o {
+            *o = v;
+        }
+    }
+
+    pub fn chat_id(&self) -> &str {
+        &self.chat_id
+    }
+
+    /// Đưa một dòng lệnh vào hàng đợi — dùng cả từ `confirm` khi nó nhặt hộ.
+    pub fn push_text(&self, text: &str) {
+        let t = text.trim();
+        if t.is_empty() {
+            return;
+        }
+        self.queue
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push_back(Incoming { text: t.to_string() });
+        logging::info(
+            "telegram_command_queued",
+            json!({ "head": crate::exec::truncate(t, 40) }),
+        );
+        // Đánh thức NGAY, đừng để lệnh nằm hết giấc ngủ của vòng (xem `waker`).
+        if let Some(w) = &self.waker {
+            w.wake();
+        }
+    }
+
+    /// Lấy hết lệnh đang chờ. Vòng chạy gọi mỗi lượt.
+    pub fn drain(&self) -> Vec<Incoming> {
+        let mut q = self.queue.lock().unwrap_or_else(|e| e.into_inner());
+        q.drain(..).collect()
+    }
+
+    fn client(&self) -> Option<reqwest::blocking::Client> {
+        reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(40))
+            .build()
+            .map_err(|e| logging::error("telegram_client_failed", json!({ "err": e.to_string() })))
+            .ok()
+    }
+
+    fn read_forever(&self) {
+        let Some(client) = self.client() else { return };
+        // Bắt đầu từ mốc HIỆN TẠI, không đọc lại lịch sử: hub vừa khởi động lại
+        // mà chạy luôn mấy lệnh gõ từ hôm qua là một kiểu bất ngờ tệ.
+        if let Ok(v) = client
+            .get(format!("{}?offset=-1&timeout=0", self.api("getUpdates")))
+            .send()
+            .and_then(|r| r.json::<Value>())
+        {
+            if let Some(id) = v
+                .get("result")
+                .and_then(Value::as_array)
+                .and_then(|a| a.last())
+                .and_then(|u| u.get("update_id"))
+                .and_then(Value::as_i64)
+            {
+                self.set_offset(id + 1);
+            }
+        }
+        loop {
+            if self.busy.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(400));
+                continue;
+            }
+            let url = format!(
+                "{}?offset={}&timeout=20",
+                self.api("getUpdates"),
+                self.offset_now()
+            );
+            let resp = match client.get(&url).send().and_then(|r| r.json::<Value>()) {
+                Ok(v) => v,
+                Err(e) => {
+                    // Mạng chập là chuyện thường; im lặng thử lại thì không ai
+                    // biết kênh đang chết. Log rồi lùi một nhịp.
+                    logging::warn(
+                        "telegram_poll_failed",
+                        json!({ "err": logging::redact(&e.to_string()), "source": logging::redact(&format!("{:?}", std::error::Error::source(&e).map(|s| s.to_string()))) }),
+                    );
+                    std::thread::sleep(Duration::from_secs(3));
+                    continue;
+                }
+            };
+            let empty = vec![];
+            let updates = resp
+                .get("result")
+                .and_then(Value::as_array)
+                .unwrap_or(&empty);
+            for u in updates {
+                if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
+                    self.set_offset(id + 1);
+                }
+                self.handle_update(&client, u);
+            }
+        }
+    }
+
+    fn handle_update(&self, client: &reqwest::blocking::Client, u: &Value) {
+        // ── Nút bấm ──────────────────────────────────────────────────────────
+        if let Some(cb) = u.get("callback_query") {
+            let from = cb
+                .pointer("/from/id")
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            let data = cb.get("data").and_then(Value::as_str).unwrap_or("");
+            // Trả lời cái nút ngay, nếu không nó quay mãi trên máy người bấm.
+            if let Some(cbid) = cb.get("id").and_then(Value::as_str) {
+                let _ = client
+                    .post(self.api("answerCallbackQuery"))
+                    .json(&json!({ "callback_query_id": cbid }))
+                    .send();
+            }
+            if from != self.chat_id {
+                logging::warn("telegram_button_from_stranger", json!({ "data": data }));
+                return;
+            }
+            // Nút = phím tắt của một route đã có (xem `callback_to_command`):
+            // `key:` trả lời hộp chọn, `sess:` chọn phiên từ danh sách.
+            if let Some(cmd) = callback_to_command(data) {
+                self.push_text(&cmd);
+                return;
+            }
+            // Nút xác nhận (`ok:`/`no:`) chỉ có nghĩa khi `confirm::ask` đang
+            // chờ — mà lúc ấy vòng này đứng im. Tới được đây nghĩa là một cú bấm
+            // MUỘN, sau khi câu hỏi đã đóng sổ: nói thẳng, đừng im.
+            if data.starts_with("ok:") || data.starts_with("no:") {
+                logging::info(
+                    "telegram_confirm_button_late",
+                    json!({ "why": "câu hỏi đã đóng (hết hạn hoặc đã trả lời)" }),
+                );
+                let _ = self.send_text(
+                    "⌛ Nút này thuộc một câu hỏi đã đóng sổ — hub không làm gì. Gửi lại lệnh nếu vẫn cần.",
+                );
+                return;
+            }
+            logging::info("telegram_button_unknown", json!({ "data": data }));
+            return;
+        }
+
+        // ── Tin nhắn chữ ────────────────────────────────────────────────────
+        let Some(msg) = u.get("message").or_else(|| u.get("edited_message")) else {
+            return;
+        };
+        let from = msg
+            .pointer("/chat/id")
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        let Some(text) = msg.get("text").and_then(Value::as_str) else {
+            return;
+        };
+        if from != self.chat_id {
+            logging::warn(
+                "telegram_message_from_stranger",
+                json!({ "head": crate::exec::truncate(text, 40) }),
+            );
+            return;
+        }
+        self.push_text(text);
+    }
+
+    /// Gửi một câu ra Telegram. `Err` chứ không nuốt — chỗ gọi phải log.
+    pub fn send_text(&self, text: &str) -> Result<(), String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let r = client
+            .post(self.api("sendMessage"))
+            .json(&json!({ "chat_id": self.chat_id, "text": text }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            Ok(())
+        } else {
+            Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối sendMessage")
+                .to_string())
+        }
+    }
+
+    /// Gửi câu hỏi của một phiên kèm MỘT NÚT CHO MỖI LỰA CHỌN.
+    ///
+    /// Hà 2026-08-11: *"cần thêm thông tin mô tả liên quan tới lựa chọn đó mới
+    /// hợp lý"* — và bước sau của nó: chọn được ngay tại đây. Nút gửi về
+    /// `/key <session_id> <n>`, tức đi đúng con đường mà trang cũng đi.
+    pub fn ask_choices(&self, text: &str, session_id: &str, labels: &[String]) -> Result<(), String> {
+        let buttons: Vec<(String, String)> = labels
+            .iter()
+            .enumerate()
+            .take(9)
+            .map(|(i, l)| {
+                (
+                    format!("{}. {}", i + 1, crate::exec::truncate(l, 60)),
+                    format!("key:{}:{}", session_id, i + 1),
+                )
+            })
+            .collect();
+        self.send_buttons(text, &buttons)
+    }
+
+    /// Gửi một câu kèm bảng nút — **mỗi nút một hàng**.
+    ///
+    /// Nhãn của `claude` (và tên phiên kèm trạng thái) thường dài; xếp ngang là
+    /// cắt cụt trên màn điện thoại, mà một cái nút đọc không hết thì bấm bằng
+    /// đoán. `callback_data` của cả hai đường (`key:` 42 byte, `sess:` 41 byte)
+    /// nằm dưới trần 64 byte của Telegram.
+    ///
+    /// Không có nút nào thì gửi như một câu thường — một bảng phím rỗng là thứ
+    /// Telegram từ chối, và đó sẽ là một lỗi nói về API chứ không nói về việc.
+    pub fn send_buttons(&self, text: &str, buttons: &[(String, String)]) -> Result<(), String> {
+        if buttons.is_empty() {
+            return self.send_text(text);
+        }
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let keyboard: Vec<Vec<Value>> = buttons
+            .iter()
+            .map(|(label, data)| vec![json!({ "text": label, "callback_data": data })])
+            .collect();
+        let r = client
+            .post(self.api("sendMessage"))
+            .json(&json!({
+                "chat_id": self.chat_id,
+                "text": text,
+                "reply_markup": { "inline_keyboard": keyboard },
+            }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            // Ghi SỐ NÚT đã gửi. "Gửi được tin" và "tin ấy có nút bấm" là hai
+            // chuyện khác nhau, mà từ máy này không nhìn thấy màn hình điện
+            // thoại — không có dòng này thì câu "đã có nút" chỉ là suy luận từ
+            // việc không có lỗi.
+            logging::info(
+                "telegram_buttons_sent",
+                json!({ "count": buttons.len() }),
+            );
+            Ok(())
+        } else {
+            Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối sendMessage")
+                .to_string())
+        }
+    }
+}
+
+/// Quyền đọc đang được `confirm::ask` mượn; trả lại khi rời tầm.
+pub struct Hold<'a> {
+    inbox: &'a Inbox,
+}
+
+impl Drop for Hold<'_> {
+    fn drop(&mut self) {
+        self.inbox.busy.store(false, Ordering::SeqCst);
+    }
+}

@@ -433,6 +433,29 @@
      nhịp làm mới nên phải đứng yên một chỗ, không được đẩy bố cục. */
   .sess-act { margin: 4px 0 0; font-size: 12px; font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* ĐANG CHẠY thì phải NHÌN RA NGAY.
+     Hà 2026-08-11: *"thay đổi màu hoặc css làm sao dễ gây chú ý, hiện tại đang
+     hiện tĩnh"*. Chữ đứng im giữa một màn chữ đứng im thì mắt không bắt được —
+     nhất là khi thứ nó nói là "có cái gì đó ĐANG chạy ngay lúc này".
+     Ba lớp, rẻ và không đụng bố cục: chữ đổi màu, một chấm thở, và cả dòng
+     nhấp nháy rất nhẹ. KHÔNG dùng transform/left để tránh reflow mỗi nhịp. */
+  @keyframes hub-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
+  @keyframes hub-breathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+  .sess-act.live { color: var(--ok, #1a7f37); font-weight: 600; animation: hub-pulse 1.6s ease-in-out infinite; }
+  .sess-act.live .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor; margin-right: 6px; animation: hub-breathe 1.1s ease-in-out infinite; }
+  /* Dải trạng thái TRONG màn một phiên. Cùng chữ với thẻ ở danh sách, nhưng ở
+     đây nó là câu đầu tiên người ta nhìn thấy khi mở phiên ra. */
+  #sessLive { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px;
+    border: 1px solid var(--line, #d7dbe0); background: var(--soft, #f6f8fa);
+    font-variant-numeric: tabular-nums; }
+  #sessLive.live { border-color: #1a7f37; background: #eaf7ee; color: #14611f; font-weight: 600; }
+  #sessLive.live .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: currentColor; margin-right: 7px; animation: hub-breathe 1.1s ease-in-out infinite; }
+  #sessLive.idle { color: #57606a; }
+  @media (prefers-reduced-motion: reduce) {
+    .sess-act.live, .sess-act.live .dot, #sessLive.live .dot { animation: none; }
+  }
   /* Hàng thao tác ngay trên thẻ phiên. Vùng chạm 44px là chuẩn của trang này
      (`fe-phone-uc`), và ở đây nó đáng giá hơn mọi chỗ khác: hai nút đứng cạnh
      nhau mà một trong hai là "Dừng". */
@@ -890,6 +913,12 @@
              cập nhật theo ảnh chụp. Đứng TRÊN luồng sự kiện vì nó là hiện tại,
              còn luồng là quá khứ — và nó là thứ DUY NHẤT nói được rằng phiên
              đang dừng lại hỏi (nhật ký lúc ấy đứng yên). -->
+        <!-- DẢI TRẠNG THÁI SỐNG — câu đầu tiên khi mở một phiên ra.
+             Hà 2026-08-11: *"cũng chưa có bên trong 1 phiên đang mở"*. Trước đó
+             "đang làm gì" chỉ nằm trong hộp *Thông tin phiên* đang GẤP LẠI, tức
+             muốn biết phiên có chạy không thì phải bấm mở một hộp — trong khi
+             đó đúng là câu hỏi đầu tiên người ta mở màn này để hỏi. -->
+        <div id="sessLive" class="idle"></div>
         <div id="sessScreenBox" class="hidden">
           <div id="sessChoices" class="hidden"></div>
           <pre id="sessScreen"></pre>
@@ -1992,8 +2021,13 @@
       let actLine = null;
       if (s.activity) {
         actLine = document.createElement('div');
-        actLine.className = 'muted sess-act';
-        actLine.textContent = `⏳ ${s.activity}`;
+        // `live` chỉ bật khi CÓ dòng đang-làm-gì, tức có đồng hồ trên màn thật.
+        // Không bật theo cờ `working` cũ: cờ ấy tới từ vòng đầy đủ và có thể
+        // già hơn hai phút, mà một chấm nhấp nháy nói dối thì tệ hơn không có.
+        actLine.className = 'sess-act live';
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        actLine.append(dot, document.createTextNode(s.activity));
         card.dataset.activity2 = s.activity;
       }
       // Phiên không cửa sổ thì "ở đâu ra?" không có chỗ nào trả lời — trừ cây
@@ -2125,6 +2159,11 @@
 
     if (wantSession) {
       renderStream(sessions.focus || null);
+      // Lý lịch + dải trạng thái sống vẽ lại theo MỖI ảnh chụp, không chỉ lúc mở
+      // phiên: "đang làm gì" là một con số đang chạy, vẽ một lần rồi bỏ đấy thì
+      // nó đứng im đúng cái kiểu Hà nói *"hiện tại đang hiện tĩnh"*.
+      const row = (sessions.list || []).find((x) => x.session_id === wantSession);
+      if (row) renderSessInfo(row);
       renderHandover(sessions.handover || null);
       renderAside(sessions.aside || null);
     }
@@ -2340,6 +2379,8 @@
   /// một trong hai làm nhật ký phiên gốc dài ra.
   /// Chế độ hiện tại của ô nhập: 'tell' · 'type' · 'ask'.
   let sayMode = 'ask';
+  /// Lượt `focus` mới nhất từ ảnh chụp — mang màn hình sống và các lựa chọn.
+  let lastFocus = null;
   /// Phiên đang mở có cửa sổ gõ được không — quyết định đường của "hỏi bên lề".
   let sessCanType = false;
   /// Phiên có tty nhưng hub không gõ vào được (VS Code · iTerm · tmux) — nói
@@ -2514,7 +2555,48 @@
   /// Trước đó màn chi tiết chỉ có tên + luồng sự kiện: muốn biết phiên chạy tài
   /// khoản nào, ngữ cảnh đầy chưa, có subagent không thì phải quay ra danh sách
   /// đọc thẻ. Toàn bộ số liệu này đã đi kèm ảnh chụp rồi — chỉ là chưa ai bày ra.
+  /// Dải trạng thái sống của phiên đang mở — thứ đầu tiên phải đọc được.
+  ///
+  /// Ba câu, và chúng trả lời đúng một câu hỏi: CÓ CẦN MÌNH LÀM GÌ KHÔNG.
+  ///  · đang chạy   → động từ + đồng hồ, chấm thở, chữ xanh (nhìn là biết sống)
+  ///  · dừng lại hỏi → cảnh báo, vì đây là lúc phiên CẦN người
+  ///  · đứng chờ    → xám, tĩnh, không giả vờ có gì đang diễn ra
+  function renderSessLive(s) {
+    const box = $('sessLive');
+    if (!box) return;
+    box.textContent = '';
+    const asking = (lastFocus && (lastFocus.choices || []).length) || 0;
+    // Ưu tiên "đang hỏi": một phiên dừng lại chờ người thì cái đáng nói không
+    // phải là nó đang chạy hay không, mà là NÓ ĐANG CHỜ BẠN.
+    if (asking) {
+      box.className = 'live';
+      box.style.borderColor = '#b35c00';
+      box.style.background = '#fff4e5';
+      box.style.color = '#8a4b00';
+      box.textContent = `⚠ Phiên dừng lại HỎI — ${asking} lựa chọn, bấm số ở hàng phím bên dưới`;
+      return;
+    }
+    box.style.borderColor = '';
+    box.style.background = '';
+    box.style.color = '';
+    if (s.activity) {
+      box.className = 'live';
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      box.append(dot, document.createTextNode(`Đang chạy — ${s.activity}`));
+      if (s.pending_subagents) {
+        box.append(document.createTextNode(` · ${s.pending_subagents} subagent`));
+      }
+      return;
+    }
+    box.className = 'idle';
+    box.textContent = s.working
+      ? '⏳ Đang chạy — chưa đọc được nó đang làm gì trên màn'
+      : '⏸ Đang đứng ở dấu nhắc, chờ bạn';
+  }
+
   function renderSessInfo(s) {
+    renderSessLive(s);
     const box = $('sessInfo');
     if (!box) return;
     box.textContent = '';
@@ -2772,6 +2854,10 @@
   }
 
   function renderStream(focus) {
+    // Giữ lại lượt focus mới nhất: dải trạng thái sống cần biết phiên có đang
+    // dừng lại hỏi không, mà thông tin ấy chỉ đi kèm `focus`, không nằm trong
+    // hàng của phiên trên danh sách.
+    lastFocus = focus || null;
     // Màn hình sống vẽ trước luồng: nó là HIỆN TẠI, luồng là quá khứ.
     renderScreen(focus);
     const box = $('sessStream');

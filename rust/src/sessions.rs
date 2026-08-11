@@ -995,6 +995,51 @@ fn parent_map() -> std::collections::HashMap<i64, i64> {
     map
 }
 
+/// Làm mới RIÊNG "phiên đang làm gì", không dựng lại cả ảnh chụp.
+///
+/// Hà 2026-08-11: *"trạng thái phiên đang làm gì đồng bộ lên ui hơi chậm, bạn
+/// đang để bao lâu"*. Đo: ảnh chụp đầy đủ đẩy lên **mỗi ~133 giây** khi không ai
+/// mở phiên nào — đó là câu trả lời, và nó chậm thật.
+///
+/// Vì sao chậm, và vì sao KHÔNG phải cứ rút ngắn vòng là xong: một ảnh chụp đầy
+/// đủ tốn **3.05 giây** (chủ yếu là `claude agents` cho mỗi tài khoản), trong
+/// khi **đọc một màn chỉ 0.09 giây**. Hai thứ ấy đổi với tốc độ khác hẳn nhau —
+/// *phiên nào tồn tại* đổi vài phút một lần, còn *nó đang làm gì* đổi từng
+/// giây. Nên tách: vòng đầy đủ giữ nguyên nhịp, còn dòng "đang làm" được làm
+/// mới bằng đúng phép đo rẻ ấy.
+///
+/// Trả về `true` nếu có gì đó đổi so với lúc gọi (⟹ đáng đẩy một ảnh chụp).
+///
+/// Điều hàm này KHÔNG làm: nó không hỏi lại `claude agents`, nên không phát
+/// hiện phiên mới/phiên biến mất — việc ấy vẫn của vòng đầy đủ. Và nó **không**
+/// gọi `announce_changes`: một cái loa dựa trên nửa ảnh chụp là cái loa nói
+/// điều nó chưa nhìn đủ.
+pub fn refresh_activity(rows: &mut [LiveSession]) -> bool {
+    let mut changed = false;
+    for r in rows.iter_mut() {
+        if !r.can_type || r.tty.is_empty() {
+            continue;
+        }
+        // Màn có dấu hiệu bí mật (`Withheld`) hoặc không đọc được (`Blind`) thì
+        // GIỮ NGUYÊN thứ vòng đầy đủ đã ghi — không đọc được không phải là
+        // "không có gì".
+        let crate::keys::Look::Saw { body, .. } = crate::keys::look(&r.tty, 24) else {
+            continue;
+        };
+        let act = crate::keys::activity(&body).map(|a| a.label());
+        // Đồng hồ trên màn LÀ bằng chứng phiên đang chạy — đây là quan sát, không
+        // phải suy từ một cờ cũ. Hết đồng hồ trên một màn ĐỌC ĐƯỢC nghĩa là lượt
+        // đã xong.
+        let working = act.is_some();
+        if r.activity != act || r.working != working {
+            r.activity = act;
+            r.working = working;
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Đánh dấu những phiên hub THẬT SỰ gõ vào được — xem `LiveSession::can_type`.
 ///
 /// Một lời gọi AppleScript cho cả vòng, và chỉ khi có ít nhất một phiên gắn

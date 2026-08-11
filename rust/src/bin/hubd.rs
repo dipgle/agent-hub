@@ -329,6 +329,15 @@ fn real_main() -> Result<()> {
         hub::live::spawn(cfg.clone(), waker.clone());
     }
 
+    // Telegram làm KÊNH RA LỆNH, không chỉ cái loa (Hà 2026-08-11: *"làm việc
+    // hoàn toàn qua kênh tele"*). Vòng đọc chạy nền; thiếu khoá thì nó tự bỏ
+    // qua CÓ LOG, và mọi thứ khác vẫn chạy như cũ.
+    //
+    // Cùng cái `waker` của phòng chat: lệnh gõ trên Telegram phải chạy ngay như
+    // nút bấm trên trang, không nằm chờ hết giấc ngủ 120 giây của vòng (đo
+    // 2026-08-11: `/help` chờ 2 phút 16 giây trước khi có cái này).
+    hub::telegram::Inbox::start(&cfg, Some(waker.clone()));
+
     logging::info(
         "hubd_started",
         json!({
@@ -458,6 +467,72 @@ fn real_main() -> Result<()> {
 const FOLLOW_TICK: Duration = Duration::from_secs(2);
 const FOLLOW_MIN_GAP: Duration = Duration::from_secs(4);
 
+/// Nhịp làm mới dòng "đang làm gì" trên DANH SÁCH, khi không ai mở phiên nào.
+///
+/// Hà 2026-08-11: *"đồng bộ lên ui hơi chậm, bạn đang để bao lâu"*. Đo được:
+/// **~133 giây** — đúng nhịp vòng đầy đủ. Không rút ngắn vòng ấy, vì mỗi vòng
+/// tốn **3.05s** (`claude agents` cho từng tài khoản); rút xuống 15s là để máy
+/// chạy 20% thời gian chỉ để hỏi lại một danh sách gần như không đổi.
+///
+/// Thay vào đó tách theo TỐC ĐỘ ĐỔI: *phiên nào tồn tại* — chậm, giữ nguyên
+/// vòng; *phiên đang làm gì* — nhanh, và đọc một màn chỉ **0.09s**.
+const ACTIVITY_TICK: Duration = Duration::from_secs(12);
+
+/// Ngủ hết `delay`, nhưng cứ `ACTIVITY_TICK` một lần thì đọc lại MÀN của các
+/// phiên gõ vào được và đẩy ảnh chụp nếu dòng "đang làm gì" đổi.
+///
+/// Danh sách phiên lấy MỘT LẦN ở đầu giấc ngủ (3.05s), rồi mỗi nhịp chỉ đọc màn
+/// (0.09s × số phiên có cửa sổ, thường 2-4). Phiên mới xuất hiện / biến mất vẫn
+/// do vòng đầy đủ phát hiện — đường này không tự nhận biết điều đó, và nó cũng
+/// không cho cái loa "vừa xong / vừa tắt" ăn nửa ảnh chụp (`announce = false`).
+fn idle_activity_sleep(
+    cfg: &hub::config::Config,
+    db: &Db,
+    waker: &hub::live::Waker,
+    delay: Duration,
+) {
+    let mut live = hub::sessions::snapshot(cfg);
+    // Không có phiên nào gõ vào được thì không có gì để đọc — ngủ thẳng, đừng
+    // đốt một lời gọi AppleScript mỗi 12 giây cho hư không.
+    if !live.sessions.iter().any(|s| s.can_type) {
+        waker.sleep(delay);
+        return;
+    }
+    let started = Instant::now();
+    while started.elapsed() < delay {
+        let slice = ACTIVITY_TICK.min(delay.saturating_sub(started.elapsed()));
+        if slice.is_zero() {
+            break;
+        }
+        // Có lệnh tới: nhường cho vòng chính chạy ngay.
+        if waker.sleep(slice) {
+            return;
+        }
+        // Ai đó vừa mở một phiên trên điện thoại ⟹ đường bám sát hơn tiếp quản
+        // ở vòng sau; thôi phần việc của danh sách.
+        if db
+            .cursor_or_log(hub::pipeline::FOCUS_SESSION_KEY)
+            .is_some_and(|id| !id.is_empty())
+        {
+            return;
+        }
+        if !hub::sessions::refresh_activity(&mut live.sessions) {
+            continue;
+        }
+        match portal::push_snapshot(cfg, db, Some(live.clone())) {
+            Ok(p) => logging::info(
+                "portal_push_activity",
+                json!({ "bytes": p.bytes, "why": "dòng 'đang làm gì' vừa đổi" }),
+            ),
+            Err(e) if e.downcast_ref::<Skip>().is_some() => {}
+            Err(e) => logging::error(
+                "portal_push_failed",
+                json!({ "err": logging::err_chain(&e), "activity": true }),
+            ),
+        }
+    }
+}
+
 /// Sleep for `delay`, but while a session is focused, wake every couple of
 /// seconds and re-publish as soon as its transcript grows.
 ///
@@ -469,7 +544,9 @@ fn follow_sleep(cfg: &hub::config::Config, db: &Db, waker: &hub::live::Waker, de
         .cursor_or_log(hub::pipeline::FOCUS_SESSION_KEY)
         .filter(|id| !id.is_empty());
     let Some(session_id) = focus else {
-        waker.sleep(delay);
+        // KHÔNG mở phiên nào ⟹ người ta đang nhìn DANH SÁCH. Dòng "đang làm gì"
+        // trên đó vẫn phải sống, chứ không đứng im tới vòng sau.
+        idle_activity_sleep(cfg, db, waker, delay);
         return;
     };
     // A session hub just started has NO transcript for the first few seconds.

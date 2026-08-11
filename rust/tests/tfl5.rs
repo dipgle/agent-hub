@@ -330,6 +330,32 @@ fn an_empty_owner_list_grants_nobody_command_rights() {
     assert!(tfl5::parse_command("/approve 12", "", &[]).is_none());
 }
 
+/// `/sessions` (số nhiều) hỏi DANH SÁCH; `/session <id>` chọn một phiên.
+///
+/// Cùng một route, và cái tên số nhiều tồn tại vì người ta hỏi "có những phiên
+/// nào" bằng số nhiều — bắt nhớ "gõ /session không tham số" là bắt nhớ một luật
+/// của mã. Số nhiều **không nhận id**: `/sessions <id>` là gõ nhầm, mà im lặng
+/// theo một phiên vì gõ nhầm thì mọi lệnh sau đó (`/tell`, `/type`, `/key`) đi
+/// vào sai cửa sổ — đúng con bug 2026-08-11 sáng.
+#[test]
+fn the_plural_asks_for_the_list_and_never_picks_a_session() {
+    for line in ["/sessions", "/phiens", "/danhsach"] {
+        let (kind, id, arg) = tfl5::parse_command(line, OWNER, &owners()).expect("parsed");
+        assert_eq!(kind, hub::adapters::CommandKind::Session, "{line}");
+        assert_eq!(id, 0, "{line}");
+        assert_eq!(arg, "", "{line} phải là danh sách, không mang id");
+    }
+    let (_, _, arg) =
+        tfl5::parse_command("/sessions 3e9a7fd6-3050", OWNER, &owners()).expect("parsed");
+    assert_eq!(arg, "", "số nhiều mà nuốt id thì nó lặng lẽ đổi phiên đang theo");
+
+    // Số ít vẫn giữ nguyên hai nghĩa cũ.
+    let (_, _, arg) = tfl5::parse_command("/session abc-123", OWNER, &owners()).expect("parsed");
+    assert_eq!(arg, "abc-123");
+    let (_, _, arg) = tfl5::parse_command("/session", OWNER, &owners()).expect("parsed");
+    assert_eq!(arg, "");
+}
+
 #[test]
 fn a_side_question_keeps_every_word_including_the_slashes() {
     // The whole remainder is the question, not just the first token — a

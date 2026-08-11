@@ -78,3 +78,28 @@ fn config_patterns_compile_and_a_broken_one_is_reported_not_swallowed() {
     );
     assert!(!leak_scan("dự án tafalo-internal", &compiled).is_empty());
 }
+
+/// 🔴 Câu LỖI cũng phải qua cổng — đo 2026-08-11.
+///
+/// `reqwest` dựng câu lỗi bằng cách in nguyên URL, mà URL Telegram mang token
+/// trong đường dẫn. Vòng đọc mới hỏng mạng vài lần là **28 dòng log mang nguyên
+/// khoá bot**, trong một tệp nằm lâu trên đĩa. Luật 4 của dự án nói "log TÊN
+/// khoá, không bao giờ giá trị" — và chỗ dễ quên nhất chính là đường lỗi.
+/// ⚠ Mẫu thử dưới đây là token **BỊA**, cùng hình dạng chứ không cùng giá trị.
+/// Bản đầu của test này chép nguyên token THẬT của bot vào đây (bắt được
+/// 2026-08-11 trước khi commit, `git log -S` = 0 commit): một tệp test cũng là
+/// mã nguồn, và mã nguồn không phải chỗ của bí mật — đúng luật 4 mà chính test
+/// này sinh ra để bảo vệ.
+#[test]
+fn an_error_string_never_carries_the_bot_token() {
+    let raw = "error sending request for url (https://api.telegram.org/bot1234567890:AAFakeFakeFakeFakeFakeFakeFakeFake00/getUpdates?offset=1&timeout=20)";
+    let safe = hub::logging::redact(raw);
+    assert!(!safe.contains("AAFakeFake"), "token còn nguyên: {safe}");
+    assert!(!safe.contains("1234567890:"), "token còn nguyên: {safe}");
+    // Vẫn phải đọc được là hỏng ở đâu, nếu không thì che xong hoá mù.
+    assert!(safe.contains("getUpdates"), "mất mất chỗ hỏng: {safe}");
+    assert!(safe.contains("<token>"), "phải nói rõ đã che: {safe}");
+    // Chuỗi không có token thì giữ nguyên từng chữ.
+    let plain = "không đọc được nhật ký phiên";
+    assert_eq!(hub::logging::redact(plain), plain);
+}

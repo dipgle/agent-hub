@@ -79,15 +79,41 @@ fn window_script(dev: &str) -> String {
     // cả script chết giữa chừng — *"Can't get every tab of item 1 of every
     // window. (-1728)"*, đo 2026-08-10. Một cửa sổ lạ không được phép làm hỏng
     // việc tìm cửa sổ đúng.
+    // 🔴 Khớp tty KHÔNG đủ — đo 2026-08-11.
+    //
+    // Terminal giữ lại `tty` của một tab **đã chết** (shell thoát, tab hiện
+    // `[Process completed]`), còn macOS thì **dùng lại số tty**. Trên máy này,
+    // cùng lúc có BA cửa sổ khai `/dev/ttys005`:
+    //
+    // ```text
+    // win=54312 tty=/dev/ttys005 busy=false proc=          ← xác
+    // win=54299 tty=/dev/ttys005 busy=false proc=          ← xác
+    // win=54478 tty=/dev/ttys005 busy=false proc=login-zsh ← thật
+    // ```
+    //
+    // Bản trước trả về cửa sổ ĐẦU TIÊN khớp, tức rất dễ trúng một cái xác. Hậu
+    // quả không nhẹ: màn hình đẩy lên điện thoại là màn của phiên CŨ (Hà thấy
+    // `accept edits on` trong khi phiên thật đang `auto mode on`), `/type` gõ
+    // vào cửa sổ chết, `can_type` khai bừa là gõ được, và `tab_busy` — thứ
+    // quyết định có dám đóng cửa sổ không — đọc một tab không còn ai ở đó.
+    //
+    // Lọc bằng thứ Terminal trả lời được: tab CÒN TIẾN TRÌNH. Trong các tab còn
+    // sống, ưu tiên tab đang chạy chương trình (`busy`) — một phiên `claude`,
+    // kể cả lúc đứng ở dấu nhắc, luôn `busy = true`; một shell trống thì không.
     format!(
         r#"tell application "Terminal"
+  set alive to missing value
   repeat with w in every window
     try
       repeat with t in tabs of w
-        if tty of t is {} then return id of w
+        if tty of t is {} and (count of (processes of t)) > 0 then
+          if busy of t then return id of w
+          if alive is missing value then set alive to id of w
+        end if
       end repeat
     end try
   end repeat
+  if alive is not missing value then return alive
 end tell"#,
         as_string(dev)
     )
@@ -195,13 +221,16 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
 pub fn terminal_ttys() -> Result<std::collections::HashSet<String>> {
     // Cùng lối phòng thủ với `window_script`: cửa sổ không có tab (bảng cài
     // đặt, inspector) làm cả script chết giữa chừng nếu không bọc `try`.
+    // Chỉ đếm tab CÒN TIẾN TRÌNH — cùng lý do với `window_script`: một tab đã
+    // chết vẫn khai tty cũ, và tty thì bị dùng lại, nên đếm cả xác là khai bừa
+    // "hub gõ được vào phiên này".
     let out = osascript(
         r#"tell application "Terminal"
   set acc to ""
   repeat with w in every window
     try
       repeat with t in tabs of w
-        set acc to acc & (tty of t) & linefeed
+        if (count of (processes of t)) > 0 then set acc to acc & (tty of t) & linefeed
       end repeat
     end try
   end repeat
@@ -880,7 +909,13 @@ mod tests {
     #[test]
     fn window_script_is_well_formed() {
         let s = window_script("/dev/ttys005");
-        assert!(s.contains(r#"is "/dev/ttys005" then"#), "{s}");
+        assert!(s.contains(r#"is "/dev/ttys005" and"#), "{s}");
+        // Tab ĐÃ CHẾT vẫn khai tty cũ, và tty thì bị dùng lại — ba cửa sổ cùng
+        // khai `/dev/ttys005` (đo 2026-08-11, hai trong ba là xác). Khớp tty
+        // trần là trả về một cửa sổ ma: màn hình sai lên điện thoại, `/type` gõ
+        // vào chỗ không ai đọc.
+        assert!(s.contains("count of (processes of t)) > 0"), "phải lọc tab còn sống:\n{s}");
+        assert!(s.contains("busy of t"), "phải ưu tiên tab đang chạy chương trình:\n{s}");
         assert!(s.trim_end().ends_with("end tell"), "kết thúc sai:\n{s}");
         // Số dấu nháy phải CHẴN — lẻ nghĩa là có một chuỗi treo lửng.
         assert_eq!(s.matches('"').count() % 2, 0, "dấu nháy lẻ:\n{s}");

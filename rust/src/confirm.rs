@@ -157,12 +157,23 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
     };
     let api = |m: &str| format!("https://api.telegram.org/bot{token}/{m}");
 
-    // Mốc nước TRƯỚC khi hỏi: nếu không đặt, một cú bấm cũ còn nằm trong hàng
-    // đợi của Telegram sẽ được đọc lại và tính là câu trả lời cho câu hỏi lần
-    // này. Xác nhận đi lạc sang một lệnh khác là kiểu hỏng tệ nhất ở đây.
-    let mut offset = match watermark(&client, &api("getUpdates")) {
-        Ok(o) => o,
-        Err(e) => return Verdict::Unavailable(format!("không đọc được getUpdates: {e}")),
+    // MƯỢN đường đọc của hòm thư, không mở đường thứ hai.
+    //
+    // Từ 2026-08-11 Telegram còn là kênh RA LỆNH (`telegram.rs`), tức đã có một
+    // vòng đọc `getUpdates` chạy nền. Telegram giao mỗi update cho người hỏi
+    // trước và `offset` là con dấu dùng chung, nên hai vòng đọc song song sẽ ăn
+    // mất update của nhau: cú bấm ✅ rơi vào vòng kia thì hàm này ngồi tới hết
+    // giờ rồi kết luận "không ai bấm" — sai, và gửi cho đúng người vừa bấm.
+    // `hold()` bắt vòng nền đứng im, và `offset` lấy từ chính hòm thư ấy.
+    let hold = crate::telegram::inbox().map(|i| i.hold());
+    let shared = crate::telegram::inbox();
+    let mut offset = match shared.map(|i| i.offset_now()) {
+        Some(o) if o > 0 => o,
+        // Không có hòm thư (kênh tắt / thiếu khoá) thì tự lấy mốc như cũ.
+        _ => match watermark(&client, &api("getUpdates")) {
+            Ok(o) => o,
+            Err(e) => return Verdict::Unavailable(format!("không đọc được getUpdates: {e}")),
+        },
     };
 
     // Nonce chỉ để ghép câu trả lời với câu hỏi, không phải thứ để chống giả
@@ -219,7 +230,10 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
             Err(e) => {
                 // Một nhịp mạng hỏng KHÔNG phải là câu trả lời "không" — ghi lại
                 // rồi thử tiếp cho tới hạn.
-                logging::warn("confirm_poll_failed", json!({ "err": e.to_string() }));
+                logging::warn(
+                    "confirm_poll_failed",
+                    json!({ "err": crate::logging::redact(&e.to_string()) }),
+                );
                 std::thread::sleep(Duration::from_secs(2));
                 continue;
             }
@@ -232,8 +246,27 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
         for u in updates {
             if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
                 offset = offset.max(id + 1);
+                if let Some(i) = shared {
+                    i.set_offset(id + 1);
+                }
             }
             let Some(cb) = u.get("callback_query") else {
+                // Người ta gõ một mệnh lệnh trong lúc hub đang hỏi xác nhận.
+                // Vòng đọc lệnh đang đứng im vì mượn đường, nên bỏ qua ở đây là
+                // mệnh lệnh ấy BIẾN MẤT — đúng nghĩa lỗi im lặng. Nhặt hộ vào
+                // hàng đợi, vòng sau chạy.
+                if let (Some(i), Some(t)) = (
+                    shared,
+                    u.pointer("/message/text").and_then(Value::as_str),
+                ) {
+                    let from = u
+                        .pointer("/message/chat/id")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default();
+                    if from == i.chat_id() {
+                        i.push_text(t);
+                    }
+                }
                 continue;
             };
             let data = cb.get("data").and_then(Value::as_str).unwrap_or("");
@@ -299,6 +332,7 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
         "confirm_resolved",
         json!({ "what": what, "verdict": format!("{verdict:?}") }),
     );
+    drop(hold);
     verdict
 }
 

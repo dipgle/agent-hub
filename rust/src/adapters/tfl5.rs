@@ -660,6 +660,14 @@ pub fn parse_command(
         }
         // `/session <uuid>` — the id slot only parses integers, and a session
         // id is a uuid, so re-split like `/project`.
+        //
+        // **`/sessions` (số nhiều) = xem danh sách** (Hà 2026-08-11: *"mở kênh
+        // /sessions để xem danh sách phiên"*). Cùng một route, khác đúng cái tên
+        // gõ vào: người ta hỏi "có những phiên nào" bằng số nhiều, và bắt họ
+        // nhớ rằng "/session không tham số" mới là danh sách là bắt nhớ một luật
+        // của mã. Số nhiều thì KHÔNG nhận id — `/sessions <id>` là câu gõ nhầm,
+        // và im lặng theo một phiên vì gõ nhầm thì mọi lệnh sau đó đi sai chỗ.
+        "sessions" | "phiens" | "danhsach" => Some((CommandKind::Session, 0, String::new())),
         "session" | "phien" => {
             let want = t[1..]
                 .split_once(char::is_whitespace)

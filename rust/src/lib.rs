@@ -35,4 +35,6 @@ pub mod portal;
 pub mod redaction;
 pub mod runtime;
 pub mod sessions;
+/// Telegram làm kênh RA LỆNH hai chiều, không chỉ cái loa.
+pub mod telegram;
 pub mod watch;

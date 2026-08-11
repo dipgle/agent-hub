@@ -102,6 +102,33 @@ pub fn error(msg: &str, fields: Value) {
 }
 
 /// Flatten an error chain into one loggable string.
+/// Bỏ bí mật ra khỏi một câu lỗi TRƯỚC KHI nó vào log.
+///
+/// 🔴 Đo 2026-08-11: `reqwest` dựng câu lỗi bằng cách in NGUYÊN CẢ URL, và URL
+/// của Telegram mang token trong đường dẫn (`/bot<token>/getUpdates`). Vòng đọc
+/// mới hỏng mạng vài lần là **28 dòng log mang nguyên khoá bot**, trong một tệp
+/// nằm lâu trên đĩa — đúng thứ luật 4 của dự án cấm ("log TÊN khoá, không bao
+/// giờ giá trị"). Một câu lỗi không phải chỗ miễn trừ: nó là chỗ dễ quên nhất.
+///
+/// Cắt theo HÌNH DẠNG, không theo danh sách khoá đã biết: `/bot<gì đó>/` trong
+/// một URL telegram thì luôn là token, kể cả token sau này đổi.
+pub fn redact(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find("/bot") {
+        out.push_str(&rest[..i + 4]);
+        let after = &rest[i + 4..];
+        // Token chạy tới dấu `/` kế tiếp (hoặc hết chuỗi).
+        let end = after.find('/').unwrap_or(after.len());
+        if end > 0 {
+            out.push_str("<token>");
+        }
+        rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn err_chain(e: &anyhow::Error) -> String {
     let mut parts = vec![e.to_string()];
     let mut src = e.source();
@@ -109,5 +136,5 @@ pub fn err_chain(e: &anyhow::Error) -> String {
         parts.push(s.to_string());
         src = s.source();
     }
-    parts.join(" | ")
+    redact(&parts.join(" | "))
 }

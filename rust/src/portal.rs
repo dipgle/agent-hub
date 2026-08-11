@@ -71,6 +71,25 @@ pub struct Pushed {
 ///
 /// `cfg` rides along so the page can show the same Config and channel health
 /// the console does; pass `deep_health = false` to reuse a recent probe.
+/// Ảnh chụp dựng từ một danh sách phiên ĐÃ CÓ SẴN, không gọi lại `claude agents`.
+///
+/// Dùng cho nhịp làm mới nhẹ (xem `sessions::refresh_activity`): thứ đắt là
+/// "phiên nào tồn tại" (3.05s), thứ Hà cần tươi là "phiên đang làm gì" (0.09s).
+///
+/// `announce = false` ở đường nhẹ, và đó là điều kiện bắt buộc chứ không phải
+/// tuỳ chọn: `announce_changes` so hai lượt ảnh chụp để nói "vừa xong / vừa
+/// tắt", mà danh sách ở đây không hỏi lại tiến trình nào — một phiên vắng mặt
+/// trong nó có thể chỉ là chưa được hỏi tới. Cho cái loa ăn nửa ảnh chụp là cho
+/// nó nói điều nó chưa nhìn đủ.
+pub fn build_from(
+    db: &Db,
+    cfg: &Config,
+    live: crate::sessions::SessionsSnapshot,
+    announce: bool,
+) -> Result<Value> {
+    build_inner(db, cfg, live, announce)
+}
+
 pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
     // No spend-per-day series travels any more: the page that drew it (the
     // "Chi phí" tab) is gone, and a producer whose only consumer was deleted is
@@ -80,7 +99,16 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
     // The Claude CLI sessions running on this machine — the thing the owner
     // actually opens his phone for. Read-only, and already leak-gated at the
     // source (`sessions::snapshot`), so nothing here needs a second gate.
-    let mut live = crate::sessions::snapshot(cfg);
+    let live = crate::sessions::snapshot(cfg);
+    build_inner(db, cfg, live, true)
+}
+
+fn build_inner(
+    db: &Db,
+    cfg: &Config,
+    mut live: crate::sessions::SessionsSnapshot,
+    announce: bool,
+) -> Result<Value> {
     // Ai mở phiên là thứ chỉ cuốn sổ của hub biết — dán nhãn trước khi gói.
     crate::pipeline::mark_started_by_hub(db, &mut live);
 
@@ -88,7 +116,9 @@ pub fn build(db: &Db, cfg: &Config) -> Result<Value> {
     // nữa: mỗi ảnh chụp là một lần gọi `claude agents` cho MỖI tài khoản, và
     // vòng chạy này đã nặng sẵn. Việc so hai lượt thì rẻ — một dòng cursor và
     // một phép so — nên nó bám theo dữ liệu thay vì bắt dữ liệu chạy theo nó.
-    crate::pipeline::announce_changes(db, cfg, &live.sessions);
+    if announce {
+        crate::pipeline::announce_changes(db, cfg, &live.sessions);
+    }
 
     // Only the session being read carries its full stream. Pushing every
     // transcript every cycle would be megabytes for the one screen anybody is
@@ -293,6 +323,16 @@ fn probe_channels(cfg: &Config, now: i64) -> Value {
 /// Build and upload. Returns `Skip` (not an error) when the tfl5 channel is
 /// off or its credentials are absent — same contract as every adapter.
 pub fn push(cfg: &Config, db: &Db) -> Result<Pushed> {
+    push_snapshot(cfg, db, None)
+}
+
+/// Đẩy ảnh chụp; `live = Some(...)` thì dùng danh sách phiên đã có sẵn thay vì
+/// hỏi lại `claude agents` (nhịp làm mới nhẹ — xem `sessions::refresh_activity`).
+pub fn push_snapshot(
+    cfg: &Config,
+    db: &Db,
+    live: Option<crate::sessions::SessionsSnapshot>,
+) -> Result<Pushed> {
     let t = &cfg.adapters.tfl5;
     if !t.enabled {
         return Err(Skip("tfl5 channel disabled".into()).into());
@@ -303,7 +343,10 @@ pub fn push(cfg: &Config, db: &Db) -> Result<Pushed> {
         ));
     }
 
-    let snap = build(db, cfg)?;
+    let snap = match live {
+        Some(l) => build_from(db, cfg, l, false)?,
+        None => build(db, cfg)?,
+    };
     // What "items" means now: live Claude sessions. It used to be inbox rows,
     // and a log line that keeps counting a thing that no longer exists is a log
     // line that quietly reads zero forever.

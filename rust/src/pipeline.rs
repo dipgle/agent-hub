@@ -290,8 +290,31 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
         if let Err(e) = tfl5::send(&cfg.adapters.tfl5, "", None, &text) {
             logging::error("session_change_room_failed", json!({ "err": logging::err_chain(&e) }));
         }
-        if let Err(e) = crate::confirm::tell(cfg, &text) {
-            logging::error("session_change_telegram_failed", json!({ "err": e }));
+        // Phiên đang DỪNG LẠI HỎI thì tin nhắn phải BẤM ĐƯỢC.
+        //
+        // Hà 2026-08-11: *"lựa chọn vừa rồi không thể hiện được trên tele để
+        // chọn à"* + *"cần thêm thông tin mô tả liên quan tới lựa chọn đó mới
+        // hợp lý"*. Trước đó tin chỉ nói "có N lựa chọn": người đọc biết mình
+        // bị chặn, mà vẫn phải mở máy ra mới gỡ được — tức cái chuông báo đúng
+        // nhưng không tiết kiệm cho ai một bước nào.
+        //
+        // Nút gửi `/key <session_id> <n>` — đi đúng con đường của trang, không
+        // đẻ thêm một lối riêng cho Telegram.
+        let buttons = match &idle {
+            crate::watch::Idle::Asking { options, .. } if !options.is_empty() => Some(options),
+            _ => None,
+        };
+        match (buttons, crate::telegram::inbox()) {
+            (Some(opts), Some(tg)) => {
+                if let Err(e) = tg.ask_choices(&text, &id, opts) {
+                    logging::error("session_change_telegram_failed", json!({ "err": e }));
+                }
+            }
+            _ => {
+                if let Err(e) = crate::confirm::tell(cfg, &text) {
+                    logging::error("session_change_telegram_failed", json!({ "err": e }));
+                }
+            }
         }
     }
 }
@@ -741,6 +764,215 @@ pub fn ingest(db: &Db, cfg: &Config) -> Result<Value> {
     Ok(Value::Object(summary))
 }
 
+/// Nhiều nhất bấy nhiêu nút phiên trong một tin.
+///
+/// Không phải giới hạn của Telegram (nó chịu được nhiều hơn) mà của **ngón tay
+/// trên điện thoại**: quá số này thì bảng phím dài hơn màn hình và cái nút cuối
+/// nằm ngoài tầm nhìn. Cắt thì phải NÓI RA — xem `session_list_text`.
+pub const MAX_SESSION_BUTTONS: usize = 12;
+
+/// Danh sách phiên, viết cho một cái điện thoại.
+///
+/// Vì sao có hàm này (Hà 2026-08-11: *"chưa có lệnh để xem danh sách phiên?"*):
+/// bảng `/help` cho tới hôm nay đòi **id có sẵn** ở `/session <id>`, `/stop
+/// [id]`, `/handover [id]` — mà không route nào ĐƯA ra id. Từ Telegram nghĩa là
+/// muốn làm gì cũng phải mở trang điện thoại ra chép id, tức đúng cái lỗ hổng
+/// mà tiêu chí gốc của hub gọi tên: ngồi trước máy thì `claude agents` là thấy,
+/// qua điện thoại thì không.
+///
+/// Mỗi dòng trả lời đúng ba câu: **phiên nào** (tên · tài khoản), **đang chạy
+/// hay đứng chờ**, và **id ngắn** để gõ tiếp `/stop`, `/handover`. Phiên đang
+/// theo có dấu 👁 vì mọi lệnh không mang id sẽ rơi vào chính nó.
+pub fn session_list_text(
+    sessions: &[crate::sessions::LiveSession],
+    focus: &str,
+    now_ms: i64,
+) -> String {
+    if sessions.is_empty() {
+        return "Không có phiên nào đang sống.".to_string();
+    }
+    let mut out = format!("📋 {} phiên đang sống:\n", sessions.len());
+    for s in sessions.iter().take(MAX_SESSION_BUTTONS) {
+        let eye = if !focus.is_empty() && s.session_id == focus { "👁 " } else { "" };
+        let run = if s.working { "▶ đang chạy" } else { "⏸ đứng chờ" };
+        out.push_str(&format!(
+            "{}{} · {} · {} · {}\n",
+            eye,
+            s.name,
+            s.account,
+            run,
+            short_id(&s.session_id)
+        ));
+        // Hai dòng phụ, và chúng trả lời hai câu khác nhau: *tình trạng* (còn
+        // gõ tiếp được không, im bao lâu rồi) và *nội dung* (nó vừa nói gì).
+        // Thiếu vế sau thì danh sách chỉ nói phiên nào TỒN TẠI, không nói phiên
+        // nào ĐÁNG mở ra — mà đó mới là việc người ta cầm điện thoại lên để làm.
+        let meta = session_meta(s, now_ms);
+        if !meta.is_empty() {
+            out.push_str(&format!("    {meta}\n"));
+        }
+        if let Some(said) = &s.last_text {
+            let said = said.replace(['\n', '\r'], " ");
+            let said = said.trim();
+            if !said.is_empty() {
+                out.push_str(&format!("    💬 {}\n", crate::exec::truncate(said, 70)));
+            }
+        }
+    }
+    if sessions.len() > MAX_SESSION_BUTTONS {
+        // Cắt bớt mà im lặng thì danh sách này nói dối về số phiên đang chạy.
+        out.push_str(&format!(
+            "…còn {} phiên nữa không hiện nút — dùng /session <id>\n",
+            sessions.len() - MAX_SESSION_BUTTONS
+        ));
+    }
+    if focus.is_empty() {
+        out.push_str("Chưa theo phiên nào — bấm một nút để theo.");
+    } else if !sessions.iter().any(|s| s.session_id == focus) {
+        // Con trỏ trỏ vào một phiên KHÔNG còn trong danh sách: nói ra, vì mọi
+        // lệnh không mang id vẫn đang nhắm vào nó.
+        out.push_str(&format!("👁 Đang theo {} — phiên này không còn sống.", short_id(focus)));
+    }
+    out.trim_end().to_string()
+}
+
+/// Chữ ĐANG HIỆN trên màn một phiên — thứ `/shot` trả về, và thứ đi kèm khi
+/// bấm một phiên trên Telegram.
+///
+/// Trả CHỮ chứ không phải ảnh (Hà 2026-08-10): ảnh chỉ để nhìn, còn cái cần là
+/// biết nó đang hỏi gì rồi bấm số trả lời ngay.
+///
+/// Hai luật của dự án nằm gọn trong hàm này, và đó là lý do nó là MỘT hàm chứ
+/// không phải hai đoạn giống nhau ở hai chỗ gọi:
+/// * **Điều 5** — chữ trên màn rời khỏi máy này y như phần xem trước của phiên,
+///   nên phải qua `preview_risk` trước; có dấu hiệu bí mật thì nói là có, và
+///   KHÔNG đưa chữ ra.
+/// * Màn có **hộp chọn** thì nói thẳng từng lựa chọn: đó chính là thứ người ta
+///   mở lên để xem, và số của nó là thứ gõ tiếp được.
+pub fn screen_report(s: &crate::sessions::LiveSession, window: i64) -> String {
+    match crate::keys::screen_text(window) {
+        Ok(screen) => {
+            let risk = crate::sessions::preview_risk(&screen);
+            if !risk.is_empty() {
+                return format!(
+                    "📷 Màn của {} có thể chứa bí mật ({}) — không đưa ra ngoài.",
+                    s.name,
+                    risk.join(", ")
+                );
+            }
+            let choices = crate::keys::parse_choices(&screen);
+            let tail: Vec<&str> = screen
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .rev()
+                .take(14)
+                .collect();
+            let body: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+            if choices.is_empty() {
+                format!("📷 Màn của {}:\n\n{}", s.name, body)
+            } else {
+                let list: Vec<String> = choices
+                    .iter()
+                    .map(|(n, l)| format!("  {n}. {l}"))
+                    .collect();
+                format!(
+                    "📷 {} đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{}",
+                    s.name,
+                    list.join("\n"),
+                    body
+                )
+            }
+        }
+        Err(e) => format!(
+            "⚠ không đọc được màn: {}",
+            crate::exec::truncate(&e.to_string(), 300)
+        ),
+    }
+}
+
+/// Hàng phụ của một phiên — **cùng dữ kiện với thẻ trên trang điện thoại**.
+///
+/// Giữ đúng bộ ấy là có chủ ý: hai mặt đọc cùng một ảnh chụp, nên hai mặt phải
+/// nói cùng một câu. Một con số chỉ có ở một chỗ là một con số không ai đối
+/// chiếu được, và tới lúc lệch thì không biết bên nào sai (`fe/index.html:1996`
+/// là bản trên trang).
+///
+/// `im N phút` chỉ hiện với phiên KHÔNG chạy: với phiên đang chạy, "im" là câu
+/// sai — nhật ký của nó đứng yên suốt một lượt `cargo test` hai phút.
+fn session_meta(s: &crate::sessions::LiveSession, now_ms: i64) -> String {
+    let mode = match s.permission_mode.as_deref() {
+        Some("auto") => "tự duyệt",
+        Some("dontAsk") => "không hỏi",
+        Some("default") => "hỏi trước",
+        Some(other) => other,
+        None => "",
+    };
+    let kid = if s.pending_subagents > 0 {
+        format!("{} subagent", s.pending_subagents)
+    } else {
+        String::new()
+    };
+    // Cùng cửa sổ ngữ cảnh với trang: haiku 200k, còn lại 1M.
+    let win: u64 = if s.model.as_deref().is_some_and(|m| m.contains("haiku")) {
+        200_000
+    } else {
+        1_000_000
+    };
+    let pct = if s.context_tokens > 0 {
+        (s.context_tokens as f64 / win as f64 * 100.0).round() as u64
+    } else {
+        0
+    };
+    let ctx = if pct > 0 { format!("ngữ cảnh {pct}%") } else { String::new() };
+    let quiet = if s.working {
+        String::new()
+    } else {
+        quiet_for(s.last_activity.as_deref(), now_ms).unwrap_or_default()
+    };
+    [
+        s.activity.clone().unwrap_or_default(),
+        quiet,
+        kid,
+        ctx,
+        mode.to_string(),
+    ]
+    .into_iter()
+    .filter(|x| !x.is_empty())
+    .collect::<Vec<_>>()
+    .join(" · ")
+}
+
+/// "im bao lâu rồi", tính từ lượt cuối nhật ký lớn lên.
+///
+/// Dưới một phút thì KHÔNG nói: "im 0 phút" là một dòng chữ không mang tin, và
+/// mỗi dòng thừa đẩy phiên cuối danh sách ra khỏi màn.
+fn quiet_for(last_activity: Option<&str>, now_ms: i64) -> Option<String> {
+    let dt = chrono::DateTime::parse_from_rfc3339(last_activity?).ok()?;
+    let mins = (now_ms - dt.timestamp_millis()) / 60_000;
+    match mins {
+        m if m < 1 => None,
+        m if m < 60 => Some(format!("im {m} phút")),
+        m if m < 60 * 24 => Some(format!("im {} tiếng", m / 60)),
+        m => Some(format!("im {} ngày", m / (60 * 24))),
+    }
+}
+
+/// Nhãn của một cái nút phiên. Cùng ba dữ kiện với dòng chữ, gọn hơn để lọt bề
+/// ngang một cái nút.
+pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
+    format!(
+        "{} {} · {}",
+        if s.working { "▶" } else { "⏸" },
+        crate::exec::truncate(&s.name, 24),
+        s.account
+    )
+}
+
+/// Tám ký tự đầu của id — đúng thứ `claude stop` nhận, và đúng thứ trang hiện.
+fn short_id(session_id: &str) -> &str {
+    session_id.split('-').next().unwrap_or(session_id)
+}
+
 /// Execute button presses that arrived on a channel, then acknowledge them on
 /// that channel. Never propagates: one bad press must not fail the whole poll,
 /// but every outcome is logged.
@@ -755,6 +987,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             CommandKind::Help => {
                 let ack = "Lệnh dùng được trong phòng này:\n\
                      — Phiên Claude —\n\
+                     /sessions — danh sách phiên đang sống (trên Telegram: bấm nút để theo)\n\
                      /session <id> — theo một phiên (bỏ theo: /session -)\n\
                      /new <dự án> <việc> — mở phiên nền làm việc đó (chạy không hỏi ai)\n\
                      /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng\n\
@@ -1103,59 +1336,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         Ok(Some(w)) => {
                             // `/shot` đi đường riêng: nó không gõ gì, chỉ nhìn.
                             if matches!(cmd.kind, CommandKind::Shot) {
-                                // Trả về CHỮ đang hiện, không phải ảnh. Hà
-                                // 2026-08-10: ảnh chỉ nhìn được; cái cần là
-                                // biết nó đang hỏi gì rồi bấm số trả lời — và
-                                // hàng phím đã có sẵn.
-                                match crate::keys::screen_text(w) {
-                                    Ok(screen) => {
-                                        // Chữ trên màn CŨNG phải qua cổng quét
-                                        // rò rỉ: nó rời máy này y như phần xem
-                                        // trước của phiên (điều 5).
-                                        let risk = crate::sessions::preview_risk(&screen);
-                                        if !risk.is_empty() {
-                                            format!(
-                                                "📷 Màn của {} có thể chứa bí mật ({}) — không đưa ra ngoài.",
-                                                s.name,
-                                                risk.join(", ")
-                                            )
-                                        } else {
-                                            let choices = crate::keys::parse_choices(&screen);
-                                            let tail: Vec<&str> = screen
-                                                .lines()
-                                                .filter(|l| !l.trim().is_empty())
-                                                .rev()
-                                                .take(14)
-                                                .collect();
-                                            let body: String = tail
-                                                .into_iter()
-                                                .rev()
-                                                .collect::<Vec<_>>()
-                                                .join("\n");
-                                            if choices.is_empty() {
-                                                format!("📷 Màn của {}:\n\n{}", s.name, body)
-                                            } else {
-                                                // Có hộp chọn thì nói THẲNG các
-                                                // lựa chọn: đó là thứ người ta
-                                                // mở lên để xem.
-                                                let list: Vec<String> = choices
-                                                    .iter()
-                                                    .map(|(n, l)| format!("  {n}. {l}"))
-                                                    .collect();
-                                                format!(
-                                                    "📷 {} đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{}",
-                                                    s.name,
-                                                    list.join("\n"),
-                                                    body
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Err(e) => format!(
-                                        "⚠ không đọc được màn: {}",
-                                        crate::exec::truncate(&e.to_string(), 300)
-                                    ),
-                                }
+                                screen_report(s, w)
                             } else {
                             let is_key = matches!(cmd.kind, CommandKind::Key);
                             let arrow = matches!(
@@ -1376,12 +1557,54 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // survives a restart, and so the next snapshot — whoever
                 // builds it — carries that session's stream.
                 let want = cmd.arg.trim();
-                let ack = if want.is_empty() {
-                    match db.cursor_or_log(FOCUS_SESSION_KEY) {
-                        Some(id) if !id.is_empty() => format!("👁 Đang theo phiên {id}"),
-                        _ => "Chưa theo phiên nào. Chọn một phiên trên màn Phiên.".to_string(),
+                // `/session` KHÔNG kèm id = "cho tôi xem có những phiên nào".
+                // Câu trả lời cũ ("Chưa theo phiên nào. Chọn một phiên trên màn
+                // Phiên.") đẩy người hỏi sang một màn khác — dùng được khi lệnh
+                // này chỉ chạy từ chính màn ấy, vô dụng khi nó tới từ Telegram.
+                if want.is_empty() {
+                    let live = crate::sessions::snapshot(cfg);
+                    let focus = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+                    let ack = session_list_text(
+                        &live.sessions,
+                        &focus,
+                        chrono::Utc::now().timestamp_millis(),
+                    );
+                    // Trên Telegram mỗi phiên là một NÚT, và gửi ngay tại đây —
+                    // để `reply_in_channel` gửi thêm lần nữa là chủ máy nhận hai
+                    // tin cùng nội dung, một cái bấm được một cái không.
+                    let mut sent = false;
+                    if adapter == crate::telegram::NAME {
+                        if let Some(tg) = crate::telegram::inbox() {
+                            let buttons: Vec<(String, String)> = live
+                                .sessions
+                                .iter()
+                                .take(MAX_SESSION_BUTTONS)
+                                .map(|s| {
+                                    (
+                                        session_button_label(s),
+                                        format!("sess:{}", s.session_id),
+                                    )
+                                })
+                                .collect();
+                            match tg.send_buttons(&ack, &buttons) {
+                                Ok(()) => sent = true,
+                                // Hỏng thì rơi về đường chữ thường bên dưới,
+                                // đừng nuốt: thà một tin không nút còn hơn im.
+                                Err(e) => logging::error(
+                                    "telegram_ack_failed",
+                                    json!({ "err": e, "what": "session_buttons" }),
+                                ),
+                            }
+                        }
                     }
-                } else if want == "-" || want.eq_ignore_ascii_case("off") {
+                    if !sent {
+                        reply_in_channel(db, cfg, adapter, cmd, &ack);
+                    }
+                    // Giá trị của NHÁNH này, không phải `return`: `return` ở đây
+                    // sẽ bỏ luôn những lệnh còn lại trong cùng một lượt.
+                    Some(ack)
+                } else {
+                let ack = if want == "-" || want.eq_ignore_ascii_case("off") {
                     match db.set_cursor(FOCUS_SESSION_KEY, "") {
                         Ok(()) => "👁 Đã thôi theo phiên.".to_string(),
                         Err(e) => format!("⚠ không bỏ theo được: {e}"),
@@ -1405,7 +1628,42 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         Some(s) => match db.set_cursor(FOCUS_SESSION_KEY, want) {
                             Ok(()) => {
                                 let how = if s.pid == 0 { " — đã dừng, vẫn nói tiếp được" } else { "" };
-                                format!("👁 Đang theo phiên {} ({}){}", s.name, s.account, how)
+                                let head =
+                                    format!("👁 Đang theo phiên {} ({}){}", s.name, s.account, how);
+                                // "Vào phiên" phải THẤY được phiên (Hà
+                                // 2026-08-11, sau khi bấm thử nút: *"bấm xong
+                                // muốn thấy MÀN phiên"*). Trên trang thì màn
+                                // sống đã nằm ngay dưới tay, nên câu ack một
+                                // dòng là đủ; qua Telegram thì một dòng "đang
+                                // theo" mà không kèm màn bắt người ta gõ thêm
+                                // `/shot` — hai bước cho một ý định.
+                                //
+                                // Chỉ đọc màn khi CÓ cửa sổ Terminal ghép được:
+                                // phiên nền và phiên trong VS Code/iTerm thì
+                                // hub không đọc được, và nói thẳng ra như vậy
+                                // còn hơn im hoặc đoán.
+                                if adapter != crate::telegram::NAME {
+                                    head
+                                } else {
+                                    match crate::keys::window_of(&s.tty) {
+                                        Ok(Some(w)) => format!("{head}\n\n{}", screen_report(&s, w)),
+                                        Ok(None) => format!(
+                                            "{head}\n\n(hub không đọc được màn của phiên này — nó \
+                                             không chạy trong cửa sổ Terminal.app)"
+                                        ),
+                                        Err(e) => {
+                                            logging::warn(
+                                                "screen_window_lookup_failed",
+                                                json!({ "session": s.session_id,
+                                                        "err": e.to_string() }),
+                                            );
+                                            format!(
+                                                "{head}\n\n(⚠ không hỏi được Terminal về cửa sổ của \
+                                                 phiên này, nên chưa đọc được màn)"
+                                            )
+                                        }
+                                    }
+                                }
                             }
                             Err(e) => format!("⚠ không theo được: {e}"),
                         },
@@ -1418,6 +1676,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
+                }
             }
             CommandKind::Project => {
                 // The pin belongs to the conversation, so it is keyed on the
@@ -1502,6 +1761,59 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
     }
 }
 
+/// Chạy những mệnh lệnh vừa gõ trên TELEGRAM.
+///
+/// Cùng `parse_command`, cùng `execute_commands`, cùng bộ handler với phòng chat
+/// — đúng luật 12 của dự án ("một đường, một cuốn sổ"). Khác đúng hai chỗ, và cả
+/// hai đều là chuyện của KÊNH chứ không phải của lệnh:
+///
+/// * **Cổng người:** phòng chat gác bằng `trust.tfl5_user_tids`; Telegram gác
+///   bằng `chat_id` — `telegram.rs` đã bỏ mọi tin từ người khác trước khi tới
+///   đây, nên tới được đây tức là chủ máy gõ.
+/// * **Chỗ trả lời:** ack đi ngược về Telegram (`adapter = "telegram"`).
+fn execute_telegram_commands(db: &Db, cfg: &Config) {
+    let Some(inbox) = crate::telegram::inbox() else {
+        return;
+    };
+    let pending = inbox.drain();
+    if pending.is_empty() {
+        return;
+    }
+    let owner = cfg.trust.tfl5_user_tids.first().cloned().unwrap_or_default();
+    let mut cmds: Vec<ChannelCommand> = Vec::new();
+    for item in pending {
+        // `parse_command` gác theo tid của phòng chat. Ở đây cổng đã gác bằng
+        // chat_id rồi, nên truyền tid chủ máy vào cho nó đi đúng nhánh — KHÔNG
+        // phải nới cổng, mà là nói đúng "ai đang gõ" cho một hàm vốn hỏi câu ấy.
+        match tfl5::parse_command(&item.text, &owner, &cfg.trust.tfl5_user_tids) {
+            Some((kind, decision_id, arg)) => cmds.push(ChannelCommand {
+                kind,
+                decision_id,
+                arg,
+                chat_id: inbox.chat_id().to_string(),
+                callback_id: String::new(),
+                message_id: None,
+            }),
+            None => {
+                // Gõ một câu KHÔNG phải lệnh: nói ngay, đừng để người ta ngồi
+                // chờ một việc chẳng bao giờ chạy.
+                let head = crate::exec::truncate(item.text.trim(), 40);
+                logging::info("telegram_not_a_command", json!({ "head": head }));
+                if let Err(e) = inbox.send_text(
+                    "Chưa hiểu — kênh này nhận LỆNH, bắt đầu bằng dấu gạch chéo.\n\
+                     Gõ /help để xem danh sách.",
+                ) {
+                    logging::error("telegram_ack_failed", json!({ "err": e }));
+                }
+            }
+        }
+    }
+    if !cmds.is_empty() {
+        logging::info("telegram_commands_run", json!({ "count": cmds.len() }));
+        execute_commands(db, cfg, crate::telegram::NAME, &cmds);
+    }
+}
+
 /// Answer a command on the channel it came from. Failing to answer would leave
 /// the owner staring at a room that swallowed their command, so a send failure
 /// is logged rather than dropped.
@@ -1539,6 +1851,17 @@ fn ask_owner(
 
 fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, text: &str) {
     let _ = db;
+    // Lệnh gõ từ Telegram thì câu trả lời phải quay về Telegram. Bản trước rơi
+    // vào nhánh "adapter lạ" và chỉ ghi log — tức người gõ ngồi nhìn màn hình
+    // trống, còn câu trả lời nằm trong một tệp trên máy.
+    if adapter == crate::telegram::NAME {
+        if let Some(i) = crate::telegram::inbox() {
+            if let Err(e) = i.send_text(text) {
+                logging::error("telegram_ack_failed", json!({ "err": e }));
+            }
+        }
+        return;
+    }
     if adapter != tfl5::NAME {
         logging::info(
             "channel_command_ack",
@@ -1671,6 +1994,7 @@ pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String>
 
 pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     let started = std::time::Instant::now();
+    execute_telegram_commands(db, cfg);
     let ingested = ingest(db, cfg)?;
     auto_handover(db, cfg);
     // No triage, and nothing to flush. hub used to spend money on its own here:

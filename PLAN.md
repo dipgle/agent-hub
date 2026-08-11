@@ -15,7 +15,7 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S03 | Trang tự làm mới khi đang theo một phiên | `fe-stream-uc` (≥3 lần/15s) |
 | S04 | Biết phiên chạy dưới chế độ quyền nào | `fe-sessions-uc` |
 | S05b | Hỏi bên lề trên **bản fork** — phiên gốc y nguyên byte | `fe-aside-uc` 17/17 |
-| S06 | Mở phiên cho một dự án — **cửa sổ Terminal thật** | `fe-newsession-uc` 21/21 trên màn thật (2026-08-11) |
+| S06 | Mở phiên cho một dự án — **cửa sổ Terminal thật**, tắt hẳn được từ điện thoại | `fe-newsession-uc` 26/26 trên màn thật, có bấm xác nhận Telegram (2026-08-11) |
 | S07 | Đóng sổ → bản bàn giao + phiên mới + lệnh `--resume` | `fe-stream-uc` |
 | S08 | Bí mật không rò ra trang (quét trước khi đẩy) | `redaction` tests |
 | S09 | Ảnh chụp cũ thì nói là cũ | `fe-board-uc` |

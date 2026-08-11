@@ -343,11 +343,38 @@ try {
   const idsAfter = new Set(
     hub(["sessions", "--json"]).sessions.map((s) => s.session_id)
   );
-  const strays = [...idsAfter].filter((id) => !idsBefore.has(id) && id !== fresh.session_id);
+  const moi = hub(["sessions", "--json"]).sessions.filter(
+    (x) => !idsBefore.has(x.session_id) && x.session_id !== fresh.session_id
+  );
+  // Phiên lạ nào là DO BƯỚC NÀY đẻ ra?
+  //
+  // "Có phiên mới trên máy" là một phép đo quá rộng — 2026-08-11 nó báo đỏ vì
+  // chủ máy tự mở một `claude` khác để gõ `/usage` trong lúc kịch bản chạy.
+  // Cái cần khẳng định là "`/type` không đẻ phiên", nên bằng chứng phải buộc
+  // vào chính lượt gõ: một phiên do bước này sinh ra thì hoặc mang dấu của hub,
+  // hoặc mang CHÍNH câu vừa gõ ở lượt đầu nhật ký.
+  //
+  // Không thu hẹp về mỗi `started_by_hub`: một phiên hub đẻ ra NGOÀI Ý MUỐN sẽ
+  // không có trong sổ của hub, nên đóng khung theo dấu ấy là bịt mắt đúng chỗ
+  // phép đo sinh ra để nhìn.
+  const doBuocNay = moi.filter(
+    (x) =>
+      x.started_by_hub ||
+      firstUserTurn(transcriptOf(x.session_id)).includes("Nội dung README bạn vừa đọc")
+  );
+  if (moi.length && !doBuocNay.length) {
+    console.log(
+      `  · ghi nhận: có ${moi.length} phiên mới trên máy trong lúc chạy ` +
+      `(${moi.map((x) => `${x.session_id.slice(0, 8)} @ ${x.cwd}`).join(", ")}) — ` +
+      `không mang dấu hub và không mang câu vừa gõ, nên không phải do bước này.`
+    );
+  }
   check(
     "KHÔNG đẻ ra phiên mới ngoài ý muốn",
-    strays.length === 0,
-    strays.length ? `phiên lạ: ${strays.map((i) => i.slice(0, 8)).join(", ")}` : "không có phiên nào lạ"
+    doBuocNay.length === 0,
+    doBuocNay.length
+      ? `phiên do bước này đẻ: ${doBuocNay.map((x) => x.session_id.slice(0, 8)).join(", ")}`
+      : "không có"
   );
 
   // ——— TẮT HẲN: thoát CLI và đóng cửa sổ ———

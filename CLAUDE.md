@@ -94,10 +94,22 @@ or drive a session from a phone?** If not, it does not belong here.
 7. **The room takes ORDERS from the owner only.** `tfl5::parse_command` checks
    `trust.tfl5_user_tids` first; anyone else typing `/new` is just typing text.
    Being in the room is tfl5's decision; driving this Mac is the owner's.
-   Verbs: session · new · ask · tell · stop · handover · project · ingest · run ·
-   doctor · set · help. A verb that already answered must end its arm with
-   `Some(ack)` — the fall-through that used to exist logged "Không tìm thấy
-   decision #0" as the reply for every `/session` and `/ask` ever issued.
+
+   **Call them ROUTES** (Hà 2026-08-11: *"tại sao không gọi nó là route?"* — no
+   good reason, and it is the truer word). That is exactly the shape: a button
+   on the phone hits a named path, a handler runs, an ack comes back; the chat
+   room is only the transport. Say "route" in docs and in conversation — the
+   code's own `CommandKind` is internal vocabulary, and speaking it at the owner
+   is how `/new` ended up being explained to someone who only ever sees buttons.
+   One caveat the word must not hide: these routes are **not open**. Only the
+   owner's tid can invoke them, so they are authenticated at the human layer,
+   not public endpoints.
+
+   Routes: session · new · ask · tell · stop · handover · type · key · shot ·
+   project · ingest · run · doctor · set · help. A route that already answered
+   must end its arm with `Some(ack)` — the fall-through that used to exist
+   logged "Không tìm thấy decision #0" as the reply for every `/session` and
+   `/ask` ever issued.
 8. **hub consumes nothing on its own.** There is no triage, so a cycle costs
    nothing; the only calls are `/ask`, `/handover`, `/new`, `/tell` — a person
    pressing a button, at the same cost as typing it in the terminal. They are

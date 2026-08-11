@@ -209,7 +209,7 @@ trong hai cửa sổ 42 giây, tức không đẩy rác. Trang tự làm mới *
 
 ⚠ **Hai lần tôi đo sai trước khi đo đúng:** (1) ghi thẳng cursor `focus:session`
 bằng SQL **không đánh thức** daemon, nên nó ngủ nốt 120 giây của chu kỳ cũ — đường
-thật là verb `/session` qua phòng chat, và verb đó mới đánh thức. (2) Cửa sổ đo
+thật là route `/session` qua phòng chat, và route đó mới đánh thức. (2) Cửa sổ đo
 đầu tiên có 0 lần đẩy vì **phiên bị theo dõi chính là phiên đang đo**, mà lúc đó
 nó chỉ ngồi `sleep` nên chẳng ghi gì. Số 0 đó là **đúng**, không phải hỏng.
 
@@ -283,7 +283,7 @@ Thứ **có** chạy: **dừng phiên trước, rồi nối tiếp**. Đo: `clau
 **giữ nguyên system prompt lúc tạo**; phiên mất phải **thoái lui**, không được làm
 chết luồng.
 
-**Cách hub làm:** verb `/tell <nội dung>` + ô nhập trên màn phiên, **chỉ hiện với
+**Cách hub làm:** route `/tell <nội dung>` + ô nhập trên màn phiên, **chỉ hiện với
 phiên do hub mở**. Đang `busy` thì từ chối kèm lý do thật và chỉ sang hai lối
 khác (Dừng, hoặc hỏi bên lề). Denylist giữ nguyên như lúc mở phiên — nối tiếp một
 việc không được lén cấp thêm quyền mà lượt đầu không có.
@@ -360,7 +360,7 @@ cảnh đang làm".
 
 ### Đã dựng — mức 2 (bundle v43, 2026-08-08)
 
-Ô hỏi + nút **💬 Hỏi** nằm ngay trên màn luồng phiên; gõ → trang gửi verb
+Ô hỏi + nút **💬 Hỏi** nằm ngay trên màn luồng phiên; gõ → trang gửi route
 **`/ask <câu hỏi>`** vào phòng → hub fork phiên đang theo, trả lời về màn kèm
 nhãn *"phiên gốc không thêm lượt nào"*. (Bản đầu hiện thêm **giá của lần hỏi**;
 gỡ ngày 08-08 — xem 💰 bên dưới.)
@@ -485,7 +485,7 @@ ký trên đĩa, nên tắt terminal chẳng mất gì; cái cần là **bản b
 | 2 | **Nối tiếp** — id mới giữ nguyên ngữ cảnh | ✅ **XONG** |
 | 3 | Tắt terminal | tuỳ chọn — người dùng tự đóng |
 
-**Cách làm:** verb `/handover <id>` → hub chạy `claude -p --resume <id>
+**Cách làm:** route `/handover <id>` → hub chạy `claude -p --resume <id>
 --fork-session` với prompt bàn giao (đang làm gì · đã xong tới đâu kèm `file:dòng`
 · đang kẹt gì · việc kế). **Fork** nên phiên gốc **không bị sửa một byte nào** —
 đóng sổ không được phép làm hỏng chính cái thread nó đang mô tả.

@@ -415,6 +415,20 @@
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     margin-right: 7px; vertical-align: 1px; background: var(--muted); flex: none;
   }
+  /* DỰ ÁN — thứ mắt tìm trước cả tên phiên, vì tên do `claude` tự đặt.
+     Không cho nó to hơn tên: nó là NHÃN, tên mới là danh tính. Ở 390px một
+     dòng "AI/hub · projects-ff" vừa khít, và `overflow-wrap: anywhere` của
+     `.sess-head strong` lo phần dài hơn. */
+  .sess-folder { font-weight: 600; color: var(--accent, #2f5d8a); }
+  /* ĐANG HỎI — cái duy nhất trên màn này mà không ai làm gì thì việc đứng yên
+     mãi. Nền hổ phách để mắt bắt được trước cả khi đọc chữ; các lựa chọn có SỐ
+     vì số chính là thứ gõ tiếp được (`/key <id> <n>` hoặc bấm nút trên Telegram). */
+  .sess-asking { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px;
+    border: 1px solid #d8a640; background: #fff6e5; color: #6b4a06; font-size: 13px; }
+  .sess-asking strong { display: block; margin-bottom: 3px; }
+  .sess-asking p { margin: 0 0 6px; }
+  .sess-choice { font-variant-numeric: tabular-nums; padding: 1px 0; }
+  .sess[data-asking] .sess-dot { background: #d8a640; }
   .sess[data-work="đang chạy"] .sess-dot { background: var(--ok, #2f6f4e); }
   .sess[data-work="đang rảnh"] .sess-dot { background: #c98a1e; }
   .sess[data-host="dead"] .sess-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
@@ -1945,7 +1959,23 @@
       const name = document.createElement('strong');
       const dot = document.createElement('span');
       dot.className = 'sess-dot';
-      name.append(dot, document.createTextNode(s.name || '(không tên)'));
+      // DỰ ÁN đứng trước tên (Hà 2026-08-12: *"phải thêm thông tin để biết phiên
+      // đang làm dự án hay thư mục nào"*). Tên phiên do `claude` tự đặt —
+      // "projects-ff" không nói được gì — còn `cwd` thì giống hệt nhau ở mọi
+      // dòng trên máy này (mọi phiên mở từ thư mục cha), đó là lý do hàng phụ đã
+      // bỏ nó từ trước. `folder` là thứ khác: hub đếm đường dẫn tệp phiên thật
+      // sự đụng vào trong nhật ký (`sessions::folder_from_tail`), nên nó phân
+      // biệt được. Chưa đủ bằng chứng thì trường này rỗng và dòng này chỉ còn
+      // tên — không bịa một cái nhãn.
+      const folder = document.createElement('span');
+      folder.className = 'sess-folder';
+      folder.textContent = s.folder || '';
+      name.append(dot);
+      if (s.folder) {
+        name.append(folder, document.createTextNode(' · '));
+        card.dataset.folder = s.folder;
+      }
+      name.append(document.createTextNode(s.name || '(không tên)'));
       const when = document.createElement('span');
       when.className = 'muted';
       when.textContent = agoOf(s.last_activity);
@@ -2058,7 +2088,33 @@
       if (actLine) card.append(actLine);
       if (fromLine) card.append(fromLine);
 
-      if (s.last_text) {
+      // PHIÊN ĐANG HỎI — thứ duy nhất trên màn này mà không ai làm gì thì việc
+      // đứng yên mãi. Hà 2026-08-12: *"có 1 phiên đang đưa lựa chọn nhưng không
+      // nhận được trên tele"*. Câu hỏi đọc từ NHẬT KÝ (`sessions::asking`) chứ
+      // không từ màn, nên nó có cả với phiên trong VS Code/iTerm — thứ hub không
+      // đọc được màn. Đứng TRƯỚC dòng xem trước, và thay chỗ nó: câu cuối của
+      // một phiên đang hỏi chỉ là lời dẫn vào chính câu hỏi ấy.
+      if (s.asking) {
+        const ask = document.createElement('div');
+        ask.className = 'sess-asking';
+        const h = document.createElement('strong');
+        h.textContent = s.asking.header ? `⚠ ${s.asking.header}` : '⚠ Đang hỏi';
+        ask.append(h);
+        if (s.asking.question) {
+          const q = document.createElement('p');
+          q.textContent = s.asking.question;
+          ask.append(q);
+        }
+        (s.asking.options || []).slice(0, 9).forEach((o, i) => {
+          const row = document.createElement('div');
+          row.className = 'sess-choice';
+          row.textContent = `${i + 1}. ${o}`;
+          ask.append(row);
+        });
+        card.dataset.asking = String((s.asking.options || []).length);
+        card.append(ask);
+      }
+      if (s.last_text && !s.asking) {
         const body = document.createElement('p');
         body.className = 'sess-body';
         // Dòng xem trước là để biết phiên ĐANG NÓI GÌ. Bảng markdown lọt vào
@@ -2616,6 +2672,10 @@
       // chứ không chỉ nằm trên thẻ ở danh sách.
       ['ngữ cảnh', pct ? `${pct}% · ${s.context_tokens.toLocaleString('vi-VN')} token` : '(chưa đọc được)'],
       ['chế độ quyền', { auto: 'tự duyệt', dontAsk: 'không hỏi', default: 'hỏi trước' }[s.permission_mode] || s.permission_mode || '(chưa rõ)'],
+      // "Dự án" và "thư mục" là HAI câu trả lời khác nhau, nên đứng hai dòng:
+      // thư mục là nơi phiên được MỞ RA (giống nhau ở mọi phiên trên máy này),
+      // còn dự án là nơi nó đang LÀM VIỆC — đếm từ đường dẫn tệp nó đụng vào.
+      ['dự án', s.folder || '(chưa đủ bằng chứng)'],
       ['thư mục', s.cwd || '—'],
     ];
     if (s.pending_subagents) rows.splice(4, 0, ['subagent', `${s.pending_subagents} đang chạy`]);

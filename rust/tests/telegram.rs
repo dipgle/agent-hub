@@ -112,6 +112,32 @@ fn the_list_tells_running_waiting_and_stopped_apart() {
     assert!(text.contains("⏹ đã tắt"), "phiên đã tắt bị gộp vào 'đứng chờ': {text}");
 }
 
+/// Phiên đang HỎI phải đọc ra được cả câu hỏi lẫn từng lựa chọn.
+///
+/// Hà 2026-08-12: *"có 1 phiên đang đưa lựa chọn nhưng không nhận được trên
+/// tele"*. Trên danh sách, trạng thái này nhìn y hệt "đứng chờ" nếu không nói ra
+/// — mà nó là trạng thái DUY NHẤT cần người đọc làm gì đó thì việc mới đi tiếp.
+#[test]
+fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
+    let mut s = sess("aaaaaaaa-0000-0000-0000-000000000000", "projects-11", "acc1", false);
+    s.folder = "dwork".into();
+    s.last_text = Some("[dùng AskUserQuestion]".into());
+    s.asking = Some(hub::sessions::Asking {
+        header: "Nửa ngày".into(),
+        question: "Đơn vắng có khai được NỬA NGÀY không?".into(),
+        options: vec!["Thêm ô nửa ngày".into(), "Luôn trọn ngày".into()],
+    });
+    let text = session_list_text(&[s], "", NOW);
+    assert!(text.contains("⚠ dừng lại HỎI"), "tình trạng: {text}");
+    assert!(text.contains("Nửa ngày"), "nhãn câu hỏi: {text}");
+    assert!(text.contains("NỬA NGÀY không?"), "nguyên văn câu hỏi: {text}");
+    assert!(text.contains("1. Thêm ô nửa ngày"), "lựa chọn có SỐ để bấm: {text}");
+    assert!(text.contains("2. Luôn trọn ngày"), "{text}");
+    // Câu cuối ("[dùng AskUserQuestion]") không nói thêm được gì khi đã có câu
+    // hỏi thật — nó chỉ đẩy phiên sau ra khỏi màn.
+    assert!(!text.contains("💬"), "câu cuối chen vào chỗ của câu hỏi: {text}");
+}
+
 /// Phiên đang theo phải nhận ra được: mọi lệnh KHÔNG mang id sẽ rơi vào nó.
 #[test]
 fn the_followed_session_is_marked() {

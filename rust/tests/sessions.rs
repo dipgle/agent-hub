@@ -725,3 +725,45 @@ fn one_mention_is_not_evidence() {
     let tail = "chỉ nhắc một lần /Users/x/Documents/projects/dwork/a.ts";
     assert_eq!(hub::sessions::folder_from_tail(tail, root), None);
 }
+
+/// Phiên dừng lại HỎI thì đọc ra được câu hỏi + từng lựa chọn — từ NHẬT KÝ.
+///
+/// 🔴 Hà 2026-08-12: *"có 1 phiên đang đưa lựa chọn nhưng không nhận được trên
+/// tele"*. Trước đó hub hỏi sai nguồn: nó đọc MÀN rồi để `keys::parse_choices`
+/// nhận dạng, mà hàm ấy đòi các mục liền dòng nhau (luật 08-11, sinh ra để khỏi
+/// đọc nhầm một đoạn văn có đánh số) — còn bảng `AskUserQuestion` thì mỗi lựa
+/// chọn có một dòng MÔ TẢ bên dưới. Hai luật đúng gặp nhau thành một phiên kẹt
+/// mà điện thoại không hay biết. Nhật ký thì có cấu trúc, và có cả với phiên
+/// hub không đọc được màn.
+#[test]
+fn a_waiting_question_is_read_with_all_its_options() {
+    let tail = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Nửa ngày","question":"Đơn vắng có khai được NỬA NGÀY không?","options":[{"label":"Thêm ô nửa ngày","description":"…"},{"label":"Luôn trọn ngày","description":"…"}]}]}}]}}"#;
+    let a = hub::sessions::pending_question(tail).expect("phải thấy câu hỏi");
+    assert_eq!(a.header, "Nửa ngày");
+    assert!(a.question.contains("NỬA NGÀY"));
+    assert_eq!(a.options, vec!["Thêm ô nửa ngày", "Luôn trọn ngày"]);
+}
+
+/// Trả lời rồi thì thôi — không để cái chuông kêu về một câu đã xong.
+#[test]
+fn a_question_that_was_answered_is_no_longer_pending() {
+    let ask = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"h","question":"q","options":[{"label":"a"},{"label":"b"}]}]}}]}}"#;
+    let answer = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"The user answered"}]}}"#;
+    assert!(hub::sessions::pending_question(&format!("{ask}\n{answer}")).is_none());
+    // Hỏi tiếp sau khi đã trả lời câu trước ⟹ câu SAU mới là câu đang chờ.
+    let ask2 = ask.replace("toolu_1", "toolu_2").replace("\"question\":\"q\"", "\"question\":\"q2\"");
+    let a = hub::sessions::pending_question(&format!("{ask}\n{answer}\n{ask2}"))
+        .expect("câu thứ hai còn treo");
+    assert_eq!(a.question, "q2");
+}
+
+/// Điều 5: câu hỏi cũng là chữ rời khỏi máy — có dấu hiệu bí mật thì giữ chữ
+/// lại, nhưng KHÔNG giữ lại sự thật là phiên đang kẹt.
+#[test]
+fn a_question_that_smells_of_secrets_keeps_the_fact_but_not_the_words() {
+    let tail = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_9","name":"AskUserQuestion","input":{"questions":[{"header":"h","question":"mật khẩu tfl5 là Abcd1234! đúng không?","options":[{"label":"đúng"},{"label":"sai"}]}]}}]}}"#;
+    let a = hub::sessions::pending_question(tail).expect("vẫn phải báo là đang kẹt");
+    assert!(a.options.is_empty(), "không đưa lựa chọn ra: {a:?}");
+    assert!(!a.question.contains("Abcd1234"), "lộ bí mật: {a:?}");
+    assert!(a.question.contains("bí mật"), "phải nói vì sao trống: {a:?}");
+}

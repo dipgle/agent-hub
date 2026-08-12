@@ -308,3 +308,34 @@ fn the_message_reports_what_was_seen_and_never_repeats_itself() {
     assert!(a.contains("phiếu chuyển"), "{a}");
     assert_ne!(a, b, "hai phiên khác nhau mà tin giống hệt nhau");
 }
+
+/// Phiên BẮT ĐẦU HỎI là một sự kiện, và nó không bao giờ bị im.
+///
+/// Hà 2026-08-12: *"có 1 phiên đang đưa lựa chọn nhưng không nhận được trên
+/// tele"*. Trước đây hub chỉ nhận ra "đang hỏi" nếu nó tình cờ đọc màn đúng lúc
+/// phiên vừa im, và luật "đừng kêu vào mặt người đang nhìn" nuốt nốt phần còn
+/// lại. Nay "đang hỏi" là một TRẠNG THÁI đọc từ nhật ký.
+#[test]
+fn a_session_that_starts_asking_is_announced_once_with_its_options() {
+    let mut s = sess("a", "dwork", "terminal", false);
+    s.asking = Some(hub::sessions::Asking {
+        header: "Nửa ngày".into(),
+        question: "Đơn vắng có khai được NỬA NGÀY không?".into(),
+        options: vec!["Thêm ô".into(), "Trọn ngày".into()],
+    });
+    let prev: BTreeMap<String, Mark> = [("a".to_string(), mark(IDLE, "ttys009", "interactive"))]
+        .into_iter()
+        .collect();
+    let (events, next) = changes(&prev, &[s.clone()], NOW);
+    let said = match events.first() {
+        Some(c @ Change::Asking { .. }) => c.say(&Idle::Unknown, None),
+        other => panic!("phải là Asking: {other:?}"),
+    };
+    assert!(said.contains("dừng lại HỎI"), "{said}");
+    assert!(said.contains("Nửa ngày"), "{said}");
+    assert!(said.contains("1. Thêm ô") && said.contains("2. Trọn ngày"), "{said}");
+
+    // NÓI MỘT LẦN: vòng sau vẫn đang hỏi thì im.
+    let (again, _) = changes(&next, &[s], NOW + 60);
+    assert!(again.is_empty(), "kêu lại lần hai: {again:?}");
+}

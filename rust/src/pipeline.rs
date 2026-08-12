@@ -175,6 +175,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
         // Tra lại phiên để có `tty` (đọc màn), câu cuối nó nói, và ai mở nó.
         let id = match &c {
             crate::watch::Change::Finished { id, .. } => id.clone(),
+            crate::watch::Change::Asking { id, .. } => id.clone(),
             crate::watch::Change::Ended { id, .. } => id.clone(),
         };
         let row = live.iter().find(|s| s.session_id == id);
@@ -300,8 +301,13 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
         //
         // Nút gửi `/key <session_id> <n>` — đi đúng con đường của trang, không
         // đẻ thêm một lối riêng cho Telegram.
-        let buttons = match &idle {
-            crate::watch::Idle::Asking { options, .. } if !options.is_empty() => Some(options),
+        // Lựa chọn lấy từ NHẬT KÝ trước (đầy đủ, có cả với phiên hub không đọc
+        // được màn), rồi mới tới thứ đọc được trên màn.
+        let buttons = match (&c, &idle) {
+            (crate::watch::Change::Asking { options, .. }, _) if !options.is_empty() => {
+                Some(options)
+            }
+            (_, crate::watch::Idle::Asking { options, .. }) if !options.is_empty() => Some(options),
             _ => None,
         };
         match (buttons, crate::telegram::inbox()) {
@@ -798,9 +804,13 @@ pub fn session_list_text(
         // đang xử lý, đã dừng"*). Phiên đã tắt vẫn nằm trong danh sách vài giây
         // và vẫn `/handover` được, nên gộp nó vào "đứng chờ" là nói sai về thứ
         // người ta sắp làm với nó.
-        let run = match (s.host.as_str(), s.working) {
-            ("dead", _) => "⏹ đã tắt",
-            (_, true) => "▶ đang chạy",
+        // BỐN tình trạng. "Đang hỏi" đứng trên cả "đang chạy": nó là trạng thái
+        // duy nhất trong bốn cái mà người đọc PHẢI làm gì đó thì việc mới đi
+        // tiếp — mà nó lại nhìn y hệt "đứng chờ" nếu không nói ra.
+        let run = match (s.host.as_str(), s.asking.is_some(), s.working) {
+            ("dead", _, _) => "⏹ đã tắt",
+            (_, true, _) => "⚠ dừng lại HỎI",
+            (_, _, true) => "▶ đang chạy",
             _ => "⏸ đứng chờ",
         };
         // Dự án ĐANG LÀM đứng trước tên: tên phiên do `claude` tự đặt
@@ -826,6 +836,20 @@ pub fn session_list_text(
         let meta = session_meta(s, now_ms);
         if !meta.is_empty() {
             out.push_str(&format!("    {meta}\n"));
+        }
+        // Phiên đang hỏi thì CÂU HỎI thay chỗ câu cuối: câu cuối của nó chính là
+        // lời dẫn vào câu hỏi, còn thứ người đọc cần là hỏi gì và chọn được gì.
+        if let Some(a) = &s.asking {
+            let head = if a.header.is_empty() { "" } else { &a.header };
+            out.push_str(&format!(
+                "    ⚠ {}{}\n",
+                if head.is_empty() { String::new() } else { format!("{head}: ") },
+                crate::exec::truncate(&a.question, 120)
+            ));
+            for (i, o) in a.options.iter().take(9).enumerate() {
+                out.push_str(&format!("      {}. {}\n", i + 1, crate::exec::truncate(o, 60)));
+            }
+            continue;
         }
         if let Some(said) = &s.last_text {
             let said = said.replace(['\n', '\r'], " ");
@@ -992,9 +1016,10 @@ fn quiet_for(last_activity: Option<&str>, now_ms: i64) -> Option<String> {
 /// Nhãn của một cái nút phiên. Cùng ba dữ kiện với dòng chữ, gọn hơn để lọt bề
 /// ngang một cái nút.
 pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
-    let dot = match (s.host.as_str(), s.working) {
-        ("dead", _) => "⏹",
-        (_, true) => "▶",
+    let dot = match (s.host.as_str(), s.asking.is_some(), s.working) {
+        ("dead", _, _) => "⏹",
+        (_, true, _) => "⚠",
+        (_, _, true) => "▶",
         _ => "⏸",
     };
     // Dự án trước, vì đó là thứ ngón tay đang tìm; tên phiên tự sinh chỉ để phân

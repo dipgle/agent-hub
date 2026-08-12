@@ -34,6 +34,13 @@ use crate::sessions::LiveSession;
 pub const WORKING: &str = "working";
 pub const IDLE: &str = "idle";
 pub const DEAD: &str = "dead";
+/// Đang đứng chờ MỘT CÂU của chủ máy — trạng thái đáng gọi người ta nhất.
+///
+/// Tách khỏi `IDLE` vì hai chuyện khác hẳn nhau: "rảnh" là xong việc, còn đây
+/// là **việc đang dở và không tự đi tiếp được**. Trước 2026-08-12 hub chỉ nhận
+/// ra nó bằng cách đọc màn đúng lúc phiên vừa im; nay nó là một trạng thái đọc
+/// từ nhật ký, nên phiên bắt đầu hỏi lúc nào cũng bắt được.
+pub const ASKING: &str = "asking";
 
 /// Chạy ngắn hơn chừng này thì XONG không phải là tin.
 ///
@@ -136,6 +143,14 @@ pub enum Change {
     Finished { id: String, name: String, ran_sec: i64 },
     /// Rời khỏi danh sách hoặc mất tiến trình. **Không tự nhận là "tắt hẳn"** —
     /// chỗ gọi còn phải dò cửa sổ terminal mới biết nói câu nào (xem `Mark`).
+    /// Phiên vừa DỪNG LẠI HỎI — câu hỏi và các lựa chọn lấy từ nhật ký.
+    Asking {
+        id: String,
+        name: String,
+        header: String,
+        question: String,
+        options: Vec<String>,
+    },
     Ended {
         id: String,
         name: String,
@@ -235,6 +250,30 @@ impl Change {
             // `Ended` KHÔNG dựng câu ở đây: câu đúng phụ thuộc vào việc cửa
             // sổ terminal còn hay mất, mà đó là một phép dò (I/O). Xem
             // `pipeline::announce_changes`.
+            // Câu hỏi ĐI KÈM tin: người đọc phải quyết được ngay trên điện
+            // thoại, không phải mở máy ra mới biết nó hỏi gì. Nhãn ngắn
+            // (`header`) đứng trước vì nó đọc được trong một liếc.
+            Change::Asking { name, header, question, options, .. } => {
+                let head = if header.is_empty() {
+                    format!("⚠ {name} dừng lại HỎI")
+                } else {
+                    format!("⚠ {name} dừng lại HỎI — {header}")
+                };
+                let list: Vec<String> = options
+                    .iter()
+                    .take(9)
+                    .enumerate()
+                    .map(|(i, o)| format!("{}. {}", i + 1, crate::exec::truncate(o, 80)))
+                    .collect();
+                let mut out = head;
+                if !question.is_empty() {
+                    out.push_str(&format!("\n{}", crate::exec::truncate(question, 400)));
+                }
+                if !list.is_empty() {
+                    out.push_str(&format!("\n\n{}", list.join("\n")));
+                }
+                out
+            }
             Change::Ended { name, .. } => format!("⏹ {name} — kết cục chưa xác định"),
         }
     }
@@ -258,6 +297,10 @@ pub fn name_from_mark(id: &str, mark: &Mark) -> String {
 fn state_of(s: &LiveSession) -> &'static str {
     if s.host == "dead" {
         DEAD
+    } else if s.asking.is_some() {
+        // ĐỨNG TRƯỚC `working` có chủ ý: một phiên vừa hỏi vừa còn subagent chạy
+        // dở vẫn là phiên **đang chờ người**, và đó mới là điều cần nói ra.
+        ASKING
     } else if s.working {
         WORKING
     } else {
@@ -295,14 +338,14 @@ pub fn changes(
         // Phiên đã chết vẫn nằm trong danh sách vài giây; đừng ghi nó vào sổ
         // mới, nếu không lần sau nó lại "biến mất" và báo tắt lần thứ hai.
         match state {
-            WORKING | IDLE => {
+            WORKING | IDLE | ASKING => {
                 next.insert(
                     s.session_id.clone(),
                     Mark {
-                        s: if state == WORKING {
-                            format!("{WORKING}@{since}")
-                        } else {
-                            IDLE.to_string()
+                        s: match state {
+                            WORKING => format!("{WORKING}@{since}"),
+                            ASKING => ASKING.to_string(),
+                            _ => IDLE.to_string(),
                         },
                         y: s.tty.clone(),
                         k: s.kind.clone(),
@@ -322,7 +365,22 @@ pub fn changes(
         if first_run {
             continue;
         }
-        if was_working && state == IDLE {
+        // BẮT ĐẦU HỎI — nói một lần, ngay lúc câu hỏi xuất hiện.
+        //
+        // Không đi qua nhánh `Finished` bên dưới: một phiên dừng lại hỏi thì
+        // "vừa chạy xong" là câu sai (việc còn dở), và nó cũng không được im
+        // theo luật "đừng kêu vào mặt người đang nhìn" — kẹt thì dù đang ngồi
+        // trước máy cũng đáng được gọi, vì có thể người ta đang nhìn cửa sổ khác.
+        if state == ASKING && before.is_some_and(|b| b.s != ASKING) {
+            let a = s.asking.clone().unwrap_or_default();
+            out.push(Change::Asking {
+                id: s.session_id.clone(),
+                name: s.name.clone(),
+                header: a.header,
+                question: a.question,
+                options: a.options,
+            });
+        } else if was_working && state == IDLE {
             // Cửa thời lượng: chạy chớp nhoáng thì không phải tin.
             if epoch_sec - since >= MIN_RUN_SEC {
                 out.push(Change::Finished {

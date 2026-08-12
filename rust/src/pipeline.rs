@@ -97,11 +97,7 @@ pub fn known_projects(cfg: &Config) -> Vec<String> {
             // name in this list is a name `/project` will accept, so junk here
             // becomes a pin pointing at a folder that holds no work.
             let dir = e.path();
-            let is_project = ["CLAUDE.md", ".git", "Cargo.toml", "package.json"]
-                .iter()
-                .any(|marker| dir.join(marker).exists())
-                || dir.join("logs").join("devlog.sqlite").exists();
-            if is_project {
+            if crate::config::looks_like_project(&dir) {
                 out.push(name);
             }
         }
@@ -1897,11 +1893,47 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
                 // khác, và đó là hàng rào duy nhất còn lại ở đường này.
                 let (want, typed) = target_and_rest(db, &cmd.arg);
-                let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
-                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                // ĐƯỜNG NHANH: sổ nói cửa sổ nào, `ps` chứng thực — xem
+                // `sessions::window_target_from_book`. Đường cũ dựng lại ảnh
+                // chụp (ba lần spawn `claude` 279 MB) chỉ để tra `tty`, và trên
+                // máy đang swap nó mất **117–134 giây** rồi còn trả về "không
+                // thấy phiên" khi lượt hỏi hết giờ.
+                let booked = db
+                    .cursor_or_log(WATCH_KEY)
+                    .and_then(|v| crate::sessions::window_target_from_book(&v, &want))
+                    .map(|(name, tty, host)| crate::sessions::LiveSession {
+                        session_id: want.clone(),
+                        name,
+                        tty,
+                        host,
+                        ..Default::default()
+                    });
+                // Chỉ trả tiền ảnh chụp khi sổ KHÔNG trả lời được.
+                let live = match &booked {
+                    Some(_) => None,
+                    None => Some(crate::sessions::snapshot_cached(
+                        cfg,
+                        std::time::Duration::from_secs(20),
+                    )),
+                };
+                let target = booked.or_else(|| {
+                    live.as_ref()
+                        .and_then(|l| l.sessions.iter().find(|s| s.session_id == want).cloned())
+                });
+                let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
                     }
+                    // 🔴 "Không có trong danh sách" ≠ "không tồn tại". Nếu lượt
+                    // hỏi vừa rồi MÙ với tài khoản nào đó thì danh sách ấy
+                    // thiếu, và nói "không thấy phiên" là khẳng định một điều
+                    // hub không biết — đúng con bug đã vá ở cái loa, ở một chỗ
+                    // khác. Hà nhận đúng câu ấy về một phiên đang sống.
+                    None if live.as_ref().is_some_and(|l| !l.blind.is_empty()) => format!(
+                        "⚠ chưa hỏi được danh sách phiên của {} (máy đang chậm, `claude agents` hết giờ) \
+                         — nên tôi CHƯA gõ gì cả. Thử lại sau một nhịp.",
+                        live.as_ref().map(|l| l.blind.join(", ")).unwrap_or_default()
+                    ),
                     None => format!(
                         "⚠ không thấy phiên '{}' trong danh sách",
                         crate::exec::truncate(&want, 40)
@@ -1918,7 +1950,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     .trim()
                                     .parse::<usize>()
                                     .unwrap_or(SHOT_LINES);
-                                screen_report(s, w, n)
+                                screen_report(&s, w, n)
                             } else {
                             let is_key = matches!(cmd.kind, CommandKind::Key);
                             let arrow = matches!(
@@ -2091,12 +2123,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                 "và tôi không gửi Enter vì màn đang có hộp chọn"
                                             }
                                         ),
-                                        Some(crate::keys::Landed::Idle) => format!(
-                                            "⌨ {} vào {} — phiên đang đứng ở dấu nhắc{}.",
-                                            did,
-                                            s.name,
-                                            if sent_enter { " (phải gửi thêm một Enter rời)" } else { "" }
-                                        ),
+                                        // Hà 2026-08-12: *"chỉ cần báo đã gõ
+                                        // được thôi cần gì báo đã gửi enter rời
+                                        // làm gì"*. Đúng: cú Enter rời là RUỘT
+                                        // của hub, không phải việc của người
+                                        // đọc — họ hỏi "chữ tới chưa", và câu
+                                        // trả lời không đổi dù hub phải bắn
+                                        // thêm mấy phím. Vẫn còn nguyên ở
+                                        // `keys_enter_sent` trong log, đúng chỗ
+                                        // của nó; và nhánh KẸT bên trên vẫn nói
+                                        // ra, vì ở đó nó là LÝ DO chứ không
+                                        // phải khoe việc.
+                                        Some(crate::keys::Landed::Idle) => {
+                                            format!("⌨ {} vào {} — phiên đang đứng ở dấu nhắc.", did, s.name)
+                                        }
                                         // Byte đã vào tab (mã trả về 0), nhưng
                                         // đọc lại màn thì không được — nói đúng
                                         // chừng ấy, đừng đoán hộ.

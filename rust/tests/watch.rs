@@ -30,6 +30,8 @@ fn mark(state: &str, tty: &str, kind: &str) -> Mark {
         // chưa biết (`a` rỗng) là một ca riêng, có test riêng bên dưới.
         a: "acc1".to_string(),
         c: "/Users/hanguyen/projects".to_string(),
+        i: 4242,
+        o: "terminal".to_string(),
     }
 }
 fn working_long(id: &str) -> (String, Mark) {

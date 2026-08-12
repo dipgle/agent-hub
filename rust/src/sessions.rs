@@ -260,6 +260,50 @@ pub fn is_hub_runtime_cwd(cwd: &str) -> bool {
     !cwd.is_empty() && Path::new(cwd) == crate::config::expand_home(Path::new(HUBD_RUNTIME_DIR))
 }
 
+/// Cửa sổ của một phiên, lấy từ SỔ rồi bắt `ps` chứng thực — **không spawn
+/// `claude`**.
+///
+/// 🔴 Hà 2026-08-12: *"tất cả các lệnh từ tele sao không xử lý luôn lại phải
+/// chờ, rất lâu mới có phản hồi"* và *"chát từ tele toàn báo không thấy phiên"*.
+/// Đo: `/type` **134 giây** rồi trả *"⚠ không thấy phiên"* — về đúng cái phiên
+/// đang gõ dòng này. Cả hai là MỘT nguyên nhân: `/type`·`/key`·`/shot` đều gọi
+/// `snapshot_cached`, mà một lượt dựng ảnh chụp là ba lần spawn `claude` (279
+/// MB), và máy đang **swap 12,2/13,3 GB** ⟹ 15–92 giây một lượt, hết giờ thì
+/// danh sách về THIẾU và "không có trong danh sách" bị đọc thành "không tồn
+/// tại" (đúng lỗi `Look::Blind` ở một chỗ mới).
+///
+/// Vì sao sổ là đủ, mà trước đó tôi nói là KHÔNG đủ: một `tty` nhớ sẵn thì
+/// không đủ (tty được dùng lại — cửa sổ ấy có thể đã là của phiên khác), nhưng
+/// `tty` + `pid` thì đủ. `ps -o tty= -p <pid>` trả lời cả hai câu cùng lúc —
+/// *tiến trình ấy còn sống không* và *nó còn ngồi đúng cửa sổ ấy không* — trong
+/// vài mili giây. Phiên chết đi thì pid biến mất ⟹ hàm trả `None` ⟹ chỗ gọi rơi
+/// về đường ảnh chụp, đúng như khi sổ chưa biết gì.
+pub fn window_target_from_book(book_json: &str, id: &str) -> Option<(String, String, String)> {
+    let book: std::collections::BTreeMap<String, crate::watch::Mark> =
+        serde_json::from_str(book_json).ok()?;
+    let mark = book.get(id)?;
+    if mark.n.is_empty() || mark.i <= 0 || !is_real_tty(&mark.y) {
+        return None;
+    }
+    let out = crate::exec::run(
+        "ps",
+        &["-o", "tty=", "-p", &mark.i.to_string()],
+        crate::exec::RunOpts {
+            timeout: Some(std::time::Duration::from_secs(5)),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let now_tty = out.stdout.trim();
+    // `ps` in `ttys002`, sổ cũng giữ `ttys002` — nhưng đừng tin vào một chuỗi
+    // rỗng: pid chết thì `ps` in ra không có gì, và "" == "" là một cái bẫy.
+    if now_tty.is_empty() || now_tty.trim_start_matches("/dev/") != mark.y.trim_start_matches("/dev/")
+    {
+        return None;
+    }
+    Some((mark.n.clone(), mark.y.clone(), mark.o.clone()))
+}
+
 /// `tty` này có phải một cửa sổ THẬT không.
 ///
 /// 🔴 Đo 2026-08-12 22:59, trên đúng cái tin Hà đọc được: `⏹ hub-67 (033059d8)
@@ -538,6 +582,9 @@ pub fn folder_from_tail(tail: &str, workspace_root: &str) -> Option<String> {
         return None;
     }
     let mut count: HashMap<String, usize> = HashMap::new();
+    // Nhãn → thư mục con của nó → số lần nhắc. Dùng để MỞ NGĂN KÉO ở cuối hàm:
+    // `AI/tcc` không phải dự án, `AI/tcc/amm` mới là.
+    let mut children: HashMap<String, HashMap<String, usize>> = HashMap::new();
     for (i, _) in tail.match_indices(root) {
         let rest = &tail[i + root.len()..];
         // 🔴 `continue`, KHÔNG phải `?`. Bản đầu viết `strip_prefix('/')?` — và
@@ -567,13 +614,60 @@ pub fn folder_from_tail(tail: &str, workspace_root: &str) -> Option<String> {
         } else {
             first.to_string()
         };
+        // Mức sâu hơn một bậc: chưa dùng ngay, vì phải biết nhãn nào thắng đã.
+        if let Some(next) = segs.next() {
+            if !next.contains('.') {
+                *children
+                    .entry(label.clone())
+                    .or_default()
+                    .entry(next.to_string())
+                    .or_default() += 1;
+            }
+        }
         *count.entry(label).or_default() += 1;
     }
-    count
+    let best = count
         .into_iter()
         .filter(|(_, n)| *n >= 2)
         .max_by_key(|(label, n)| (*n, label.clone()))
-        .map(|(label, _)| label)
+        .map(|(label, _)| label)?;
+    Some(open_drawer(root, best, &children))
+}
+
+/// Nếu nhãn thắng chỉ là một NGĂN KÉO thì lấy tên bên trong nó.
+///
+/// 🔴 Hà 2026-08-12: *"sao phiên fb rõ ràng là ai/tcc/amm nhưng danh sách phiên
+/// chỉ hiện ai/tcc"*. Vì luật ngăn kéo được gõ cứng đúng một cái tên: `"AI"`.
+/// Đo trên máy: `AI/tcc` **không có marker nào** (không `CLAUDE.md`, không
+/// `.git`) — nó là ngăn kéo y hệt `AI`; còn `AI/tcc/amm` có `.git`, nó là dự án.
+/// Cùng một họ với `??` đọc thành cửa sổ: một luật ĐO ĐƯỢC bị thay bằng một cái
+/// tên viết sẵn, nên nó đúng cho tới đúng cái thư mục không ai nghĩ tới.
+///
+/// Hai cửa giữ cho nó không đi quá tay:
+/// - dừng ngay khi thư mục hiện tại **là dự án** (`AI/hub` có `CLAUDE.md` ⟹
+///   không bao giờ tụt xuống `AI/hub/rust`, dù `rust/` có `Cargo.toml`);
+/// - dừng khi **không kiểm được** (thư mục không tồn tại — sổ cũ, máy khác):
+///   không biết thì giữ nguyên nhãn, đừng đoán sâu thêm.
+fn open_drawer(
+    root: &str,
+    label: String,
+    children: &HashMap<String, HashMap<String, usize>>,
+) -> String {
+    let dir = Path::new(root).join(&label);
+    if !dir.is_dir() || crate::config::looks_like_project(&dir) {
+        return label;
+    }
+    let Some(kids) = children.get(&label) else {
+        return label;
+    };
+    match kids
+        .iter()
+        .filter(|(_, n)| **n >= 2)
+        .max_by_key(|(name, n)| (**n, (*name).clone()))
+    {
+        Some((name, _)) => format!("{label}/{name}"),
+        None => label,
+    }
 }
 
 /// Ngữ cảnh của lượt gần nhất + model của nó.

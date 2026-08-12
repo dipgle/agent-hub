@@ -1,5 +1,43 @@
 # active context — hub
 
+## 🗂 2026-08-12 (khuya) — ngăn kéo thứ hai không ai nghĩ tới, và một câu ack khoe việc
+
+Hai câu của Hà, hai lỗi nhỏ nhưng cùng một bài học đã học tối nay.
+
+### *"sao phiên fb rõ ràng là ai/tcc/amm nhưng danh sách phiên chỉ hiện ai/tcc"*
+
+`folder_from_tail` gõ cứng **đúng một cái tên ngăn kéo**: `if first == "AI"`. Đo
+trên máy: `AI/tcc` **không có marker nào** (không `CLAUDE.md`, không `.git`) —
+nó là ngăn kéo y hệt `AI`, chỉ khác là không ai nghĩ ra viết tên nó vào mã; còn
+`AI/tcc/amm` có `.git`, nó là dự án.
+
+📌 **Cùng một họ với `??` đọc thành cửa sổ**: một luật ĐO ĐƯỢC bị thay bằng một
+cái tên viết sẵn, nên nó đúng cho tới đúng cái thư mục không ai nghĩ tới. Và
+cùng cách chữa: `config::looks_like_project` — một chỗ trả lời "đây là dự án hay
+ngăn kéo", `known_projects` cũng dùng nó (trước đó nó đo bằng marker, `folder_
+from_tail` đo bằng tên: **hai câu trả lời khác nhau cho cùng một câu hỏi**).
+
+Hai cửa giữ cho nó không đào quá tay: dừng khi thư mục **là dự án** (`AI/hub` có
+`CLAUDE.md` ⟹ không bao giờ tụt xuống `AI/hub/rust`, dù `rust/` có `Cargo.toml`
+— đây là cái bẫy thật, đã ghim bằng test), và dừng khi **không kiểm được** (thư
+mục không có trên máy này ⟹ giữ nhãn nông, đừng đoán sâu thêm).
+
+Đo trên 4 phiên đang sống sau khi cài: `hanguyen-8e` → **`AI/tcc/amm`** (trước
+là `AI/tcc`) · phiên hub → `AI/hub` · `dwork` · `AI/tfl5` — ba nhãn kia không
+đổi. 2 test mới, đã kiểm là **đỏ được** (bỏ cửa "dừng ở dự án" ⟹ đỏ).
+
+### *"chỉ cần báo đã gõ được thôi cần gì báo đã gửi enter rời"*
+
+Đúng: cú Enter rời là **ruột của hub**, không phải việc của người đọc — họ hỏi
+*"chữ tới chưa"*, và câu trả lời không đổi dù hub phải bắn thêm mấy phím. Bỏ
+`(phải gửi thêm một Enter rời)` khỏi câu thành công. Giữ nguyên ở nhánh **KẸT**
+(*"chữ VẪN NẰM trong ô nhập — tôi đã gửi thêm một Enter rời mà nó chưa đi"*), vì
+ở đó nó là **lý do**, không phải khoe việc. Vẫn còn đủ trong log
+(`keys_enter_sent`) — đúng chỗ của nó.
+⏳ Chưa quan sát trên một tin THẬT (phải chờ lượt `/type` kế tiếp của Hà).
+
+---
+
 ## ⚡ 2026-08-12 (khuya) — 48 giây trả cho hai chuỗi ký tự
 
 Hà: *"bấm vào phiên vẫn phản hồi rất chậm, sao không chỉnh để nhận được luôn"*.

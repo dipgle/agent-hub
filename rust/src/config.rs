@@ -584,6 +584,22 @@ pub fn project_dir(cfg: &Config, project: &str) -> Option<PathBuf> {
     None
 }
 
+/// Thư mục này là một DỰ ÁN, hay chỉ là một ngăn kéo đựng dự án?
+///
+/// Một chỗ duy nhất trả lời, vì câu hỏi này đã được hỏi ở hai nơi với hai câu
+/// trả lời khác nhau, và cái khác nhau ấy hiện ra trên màn: `known_projects` đo
+/// bằng marker (đúng), còn `sessions::folder_from_tail` gõ cứng đúng một tên
+/// ngăn kéo — `"AI"`. Nên phiên làm việc trong `AI/tcc/amm` bị khai là `AI/tcc`
+/// (Hà 2026-08-12: *"sao phiên fb rõ ràng là ai/tcc/amm nhưng danh sách phiên
+/// chỉ hiện ai/tcc"*), trong khi `AI/tcc` **không có marker nào** — nó là ngăn
+/// kéo y hệt `AI`, chỉ khác là không ai nghĩ ra đặt tên nó vào mã.
+pub fn looks_like_project(dir: &Path) -> bool {
+    ["CLAUDE.md", ".git", "Cargo.toml", "package.json"]
+        .iter()
+        .any(|marker| dir.join(marker).exists())
+        || dir.join("logs").join("devlog.sqlite").exists()
+}
+
 /// The directories `project_dir` searches, already joined onto the workspace.
 pub fn project_bases(cfg: &Config) -> Vec<PathBuf> {
     cfg.project_roots

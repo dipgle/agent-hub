@@ -159,6 +159,26 @@ pub struct Mark {
     /// lúc phiên biến mất phải còn giữ đủ dữ kiện để gọi lại nó.
     #[serde(default)]
     pub c: String,
+    /// pid của tiến trình `claude` — thứ biến một `tty` nhớ sẵn thành một cái
+    /// handle DÙNG ĐƯỢC.
+    ///
+    /// tty là con số được DÙNG LẠI, nên "sổ nói phiên X ở ttys002" không đủ để
+    /// gõ vào ttys002 — cửa sổ ấy có thể đang là của phiên khác (đã trả giá cho
+    /// đúng luật này hôm nay). Nhưng `tty` + `pid` thì đủ: hỏi `ps` xem pid ấy
+    /// còn sống VÀ còn ngồi đúng tty ấy không — một lượt `ps`, vài mili giây,
+    /// KHÔNG spawn `claude`. Chết rồi thì `ps` im, và hub từ chối.
+    ///
+    /// 🔴 Vì sao cần (đo 2026-08-12): mọi lệnh gõ/nhìn đều đi qua
+    /// `snapshot_cached`, mà một lượt dựng ảnh chụp trên máy đang swap mất
+    /// 15–92 giây — `/type` **134 giây**, `/shot` **117 giây**, rồi trả về
+    /// *"không thấy phiên"* cho một phiên đang sống.
+    #[serde(default)]
+    pub i: i64,
+    /// `terminal` · `editor` · `background` — nhớ để câu TỪ CHỐI nói đúng lý do
+    /// khi hub không gõ vào được ("host: editor"), kể cả lúc đang trả lời bằng
+    /// sổ chứ không bằng ảnh chụp.
+    #[serde(default)]
+    pub o: String,
 }
 
 /// Một chuyện vừa xảy ra, đáng để làm phiền chủ máy.
@@ -633,6 +653,8 @@ pub fn changes(
                         d: s.folder.clone(),
                         a: s.account.clone(),
                         c: s.cwd.clone(),
+                        i: s.pid,
+                        o: s.host.clone(),
                     },
                 );
             }

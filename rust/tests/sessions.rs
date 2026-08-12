@@ -977,3 +977,113 @@ fn a_process_without_a_terminal_has_no_window_to_be_taken_over() {
         Some("heir")
     );
 }
+
+/// Ngăn kéo phải MỞ RA được, và luật ấy phải là phép ĐO chứ không phải một cái
+/// tên gõ sẵn.
+///
+/// 🔴 Hà 2026-08-12: *"sao phiên fb rõ ràng là ai/tcc/amm nhưng danh sách phiên
+/// chỉ hiện ai/tcc"*. Vì mã chỉ biết đúng một ngăn kéo — `"AI"`. Đo trên máy:
+/// `AI/tcc` **không có marker nào**, còn `AI/tcc/amm` có `.git`.
+///
+/// Test dựng một workspace THẬT trong thư mục tạm, vì luật này đọc đĩa: một
+/// bản giả bằng chuỗi sẽ không bao giờ phân biệt được ngăn kéo với dự án.
+#[test]
+fn a_drawer_is_opened_but_a_project_is_not_dug_into() {
+    let root = std::env::temp_dir().join(format!("hub-drawer-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    // `AI/tcc` = ngăn kéo (không marker) · `AI/tcc/amm` = dự án (.git)
+    std::fs::create_dir_all(root.join("AI/tcc/amm/.git")).unwrap();
+    // `AI/hub` = dự án (CLAUDE.md) và bên trong có `rust/` mang Cargo.toml —
+    // đúng cái bẫy: nếu luật chỉ hỏi "có marker không" mà không dừng đúng lúc
+    // thì phiên làm hub sẽ bị khai là `AI/hub/rust`.
+    std::fs::create_dir_all(root.join("AI/hub/rust")).unwrap();
+    std::fs::write(root.join("AI/hub/CLAUDE.md"), "x").unwrap();
+    std::fs::write(root.join("AI/hub/rust/Cargo.toml"), "[package]").unwrap();
+    let r = root.display().to_string();
+
+    let tail = format!("sửa {r}/AI/tcc/amm/src/a.rs rồi {r}/AI/tcc/amm/src/b.rs");
+    assert_eq!(
+        hub::sessions::folder_from_tail(&tail, &r).as_deref(),
+        Some("AI/tcc/amm"),
+        "ngăn kéo không mở ra"
+    );
+
+    let tail = format!("đọc {r}/AI/hub/rust/src/x.rs và {r}/AI/hub/rust/src/y.rs");
+    assert_eq!(
+        hub::sessions::folder_from_tail(&tail, &r).as_deref(),
+        Some("AI/hub"),
+        "đào sâu vào bên trong một dự án"
+    );
+
+    // Nhắc đúng MỘT lần thì không đủ để mở ngăn kéo — cùng ngưỡng ≥2 với nhãn.
+    let tail = format!("{r}/AI/tcc/amm/x.rs và {r}/AI/tcc/beta3/y.rs");
+    assert_eq!(
+        hub::sessions::folder_from_tail(&tail, &r).as_deref(),
+        Some("AI/tcc"),
+        "một lần nhắc mỗi bên mà vẫn chọn bừa một bên"
+    );
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Không kiểm được thì GIỮ NGUYÊN nhãn: thư mục không có trên máy này (sổ cũ,
+/// máy khác) thì "ngăn kéo hay dự án" là câu hub không trả lời được — và đoán
+/// sâu thêm một bậc là đoán.
+#[test]
+fn an_unknown_folder_keeps_the_shallow_label() {
+    let tail = "/khong/co/that/AI/tcc/amm/a.rs và /khong/co/that/AI/tcc/amm/b.rs";
+    assert_eq!(
+        hub::sessions::folder_from_tail(tail, "/khong/co/that").as_deref(),
+        Some("AI/tcc")
+    );
+}
+
+/// Sổ nhớ cửa sổ nào — nhưng phải bắt `ps` chứng thực trước khi gõ vào đó.
+///
+/// 🔴 Hà 2026-08-12: *"chát từ tele toàn báo không thấy phiên"* + *"tất cả các
+/// lệnh từ tele sao không xử lý luôn lại phải chờ"*. Cả hai là một: `/type`·
+/// `/key`·`/shot` dựng lại ảnh chụp (3 lần spawn `claude` 279 MB) chỉ để tra
+/// `tty`, mà máy đang swap ⟹ **117–134 giây**, rồi trả "không thấy phiên".
+///
+/// Sổ trả lời trong vài mili giây — nhưng `tty` một mình KHÔNG đủ, vì tty được
+/// dùng lại: cửa sổ ấy có thể đã thuộc phiên khác. `pid` + `tty` mới đủ, và
+/// `ps` trả lời cả hai câu cùng lúc.
+#[test]
+fn a_remembered_window_must_still_belong_to_that_process() {
+    let book = |pid: i64, tty: &str, name: &str| {
+        format!(
+            r#"{{"sess-1":{{"s":"idle","y":"{tty}","k":"interactive","p":"","f":1786500000,"h":false,"n":"{name}","d":"AI/hub","a":"acc1","c":"/x","i":{pid},"o":"terminal"}}}}"#
+        )
+    };
+    let f = hub::sessions::window_target_from_book;
+
+    // Sổ cũ chưa có pid ⟹ không đủ để gõ, rơi về đường ảnh chụp.
+    assert!(f(&book(0, "ttys002", "projects-fb"), "sess-1").is_none());
+    // Không có cửa sổ thật thì không có gì để gõ vào.
+    assert!(f(&book(4242, "??", "projects-fb"), "sess-1").is_none());
+    // Tên rỗng: sổ biết id mà không chào được ⟹ để đường kia lo.
+    assert!(f(&book(4242, "ttys002", ""), "sess-1").is_none());
+    // pid ĐÃ CHẾT: đây là ca nguy hiểm nhất — cửa sổ `ttys002` có thể đang là
+    // của phiên khác, và gõ vào đó là gõ vào việc của người khác.
+    assert!(f(&book(999_999, "ttys002", "projects-fb"), "sess-1").is_none());
+    // Sổ nói một tty KHÁC với chỗ pid đang ngồi ⟹ cũng từ chối.
+    let me = std::process::id() as i64;
+    assert!(f(&book(me, "ttys999", "projects-fb"), "sess-1").is_none());
+
+    // Ca thuận: chính tiến trình test, nếu lượt chạy này có tty thật.
+    let out = std::process::Command::new("ps")
+        .args(["-o", "tty=", "-p", &me.to_string()])
+        .output()
+        .expect("ps");
+    let tty = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if hub::sessions::is_real_tty(&tty) {
+        assert_eq!(
+            f(&book(me, &tty, "projects-fb"), "sess-1"),
+            Some((
+                "projects-fb".to_string(),
+                tty.clone(),
+                "terminal".to_string()
+            ))
+        );
+    }
+}

@@ -459,7 +459,16 @@ pub fn folder_from_tail(tail: &str, workspace_root: &str) -> Option<String> {
     let mut count: HashMap<String, usize> = HashMap::new();
     for (i, _) in tail.match_indices(root) {
         let rest = &tail[i + root.len()..];
-        let rest = rest.strip_prefix('/')?;
+        // 🔴 `continue`, KHÔNG phải `?`. Bản đầu viết `strip_prefix('/')?` — và
+        // vì hàm này trả `Option`, dấu `?` ấy **thoát khỏi cả vòng lặp** ngay
+        // lần gặp đầu tiên mà sau gốc không có gạch chéo. Mà lần ấy gần như luôn
+        // xảy ra: mỗi bản ghi nhật ký mang `"cwd":"~/Documents/projects"` trần.
+        // Kết quả: hai trong bốn phiên khai "(chưa rõ)" **trong khi nhật ký của
+        // chúng nhắc tên dự án 4 lần** — một lỗi im lặng đúng nghĩa, vì câu trả
+        // lời "chưa đủ bằng chứng" nghe hoàn toàn hợp lý.
+        let Some(rest) = rest.strip_prefix('/') else {
+            continue;
+        };
         let mut segs = rest
             .split(['/', '"', '\\', ' ', ',', ')', '\n', '\t'])
             .filter(|s| !s.is_empty());
@@ -964,6 +973,22 @@ fn read_tail(path: &Path) -> Result<String> {
     Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
+/// Đọc ĐẦU tệp nhật ký — nơi phiên nói nó sinh ra để làm gì.
+///
+/// Dùng khi phần đuôi không đủ bằng chứng về dự án (đo 2026-08-12: 2 trong 4
+/// phiên như vậy — chúng đang bàn chuyện không nêu đường dẫn tệp nào). Mấy lượt
+/// ĐẦU thì gần như luôn có: chủ máy mở phiên bằng một câu gọi tên dự án, rồi
+/// những việc đầu tiên là đọc `CLAUDE.md`, `PLAN.md` của chính dự án ấy.
+///
+/// 64 KB, một lần đọc nhỏ, và chỉ chạy cho phiên chưa đoán được.
+fn read_head(path: &Path) -> Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let n = file.read(&mut buf)?;
+    buf.truncate(n);
+    Ok(String::from_utf8_lossy(&buf).to_string())
+}
+
 fn mtime_rfc3339(path: &Path) -> Option<String> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     let ts: chrono::DateTime<chrono::Utc> = modified.into();
@@ -1292,7 +1317,16 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 Ok(tail) => {
                     // Dự án đang làm: đọc từ chính đoạn nhật ký vừa nạp, không
                     // tốn thêm một lần đọc đĩa nào.
-                    row.folder = folder_from_tail(&tail, &cfg.workspace_root.to_string_lossy())
+                    let ws = cfg.workspace_root.to_string_lossy().to_string();
+                    row.folder = folder_from_tail(&tail, &ws)
+                        // Đuôi im tiếng thì hỏi ĐẦU: phiên nào cũng mở đầu bằng
+                        // việc của một dự án cụ thể. Chỉ đọc thêm khi cần, nên
+                        // phiên đang làm việc bình thường không tốn gì.
+                        .or_else(|| {
+                            read_head(&path)
+                                .ok()
+                                .and_then(|head| folder_from_tail(&head, &ws))
+                        })
                         .unwrap_or_default();
                     let parsed = parse_tail(&tail, &background_agent_calls(&path));
                     if parsed.last_text.is_none() {

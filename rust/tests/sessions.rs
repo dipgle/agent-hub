@@ -687,3 +687,41 @@ fn a_wrapped_question_still_gets_cut_off_the_answer() {
     assert!(out.contains("Chưa có việc nào"), "mất câu trả lời:\n{out}");
     assert!(!out.contains("/btw"), "còn dòng lệnh vừa gõ:\n{out}");
 }
+
+/// Gốc workspace TRẦN không được làm câm cả phép đo.
+///
+/// 🔴 Đo 2026-08-12: hai trong bốn phiên khai "(chưa rõ)" trong khi nhật ký của
+/// chúng nhắc tên dự án 4 lần. Gốc: mỗi bản ghi mang `"cwd":"…/projects"` trần,
+/// và bản đầu dùng `strip_prefix('/')?` — dấu `?` trong hàm trả `Option` thoát
+/// khỏi CẢ vòng lặp ngay lần gặp đầu tiên. Một lỗi im lặng đúng nghĩa: câu trả
+/// lời "chưa đủ bằng chứng" nghe hoàn toàn hợp lý.
+#[test]
+fn a_bare_workspace_root_does_not_silence_the_whole_scan() {
+    let root = "/Users/x/Documents/projects";
+    let tail = r#"{"cwd":"/Users/x/Documents/projects","type":"user"}
+{"path":"/Users/x/Documents/projects/AI/hub/PLAN.md"}
+{"path":"/Users/x/Documents/projects/AI/hub/UC.md"}"#;
+    assert_eq!(
+        hub::sessions::folder_from_tail(tail, root).as_deref(),
+        Some("AI/hub")
+    );
+}
+
+/// `AI/` là ngăn kéo, không phải dự án — lấy tên bên trong nó.
+#[test]
+fn the_drawer_named_ai_is_never_the_project() {
+    let root = "/Users/x/Documents/projects";
+    let tail = "a /Users/x/Documents/projects/AI/sdvi/x.rs b /Users/x/Documents/projects/AI/sdvi/y.rs";
+    assert_eq!(
+        hub::sessions::folder_from_tail(tail, root).as_deref(),
+        Some("AI/sdvi")
+    );
+}
+
+/// Nhắc đúng một lần thì chưa đủ — một câu văn lỡ nêu tên không được lật kết quả.
+#[test]
+fn one_mention_is_not_evidence() {
+    let root = "/Users/x/Documents/projects";
+    let tail = "chỉ nhắc một lần /Users/x/Documents/projects/dwork/a.ts";
+    assert_eq!(hub::sessions::folder_from_tail(tail, root), None);
+}

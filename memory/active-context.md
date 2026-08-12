@@ -1,5 +1,62 @@
 # active context — hub
 
+## 🐌 2026-08-12 (khuya) — máy đang swap 12/13 GB, và mọi câu hỏi tối nay quy về đó
+
+Hà, bốn câu liên tiếp: *"chát từ tele toàn báo không thấy phiên"* · *"tất cả các
+lệnh từ tele sao không xử lý luôn lại phải chờ"* · *"vừa rồi lại không tự enter
+nên nó chỉ đứng trong ô chat"* · *"hình như lúc được lúc không"*.
+
+### Gốc: KHÔNG phải mã, mà là bộ nhớ
+
+Đo sau khi loại **ba** nghi can (stdin đã đóng · cùng một binary `claude` ·
+môi trường launchd dựng lại y hệt → 3,58s): máy **16 GB RAM**, **swap 12,2/13,3
+GB đã dùng**, pageins 489 triệu. Nạp một binary `claude` **279 MB** trong tình
+trạng ấy mất hàng chục giây — chạy tay thì 0,3s vì trang nhớ còn nóng, ba lượt
+song song cũng 0,4s (nên **không** phải tranh chấp). Góp phần lớn nhất: **9 tiến
+trình `claude` của extension VS Code**, tuổi **1–9,5 ngày**, 125–161 MB mỗi con.
+
+Từ đó chảy ra đúng bốn câu hỏi trên:
+
+| Đo được | Câu Hà thấy |
+|---|---|
+| `/type` **134s**, `/shot` **117s** rồi trả `⚠ không thấy phiên '76534706…'` — **chính phiên đang gõ** | "toàn báo không thấy phiên" |
+| mọi lệnh trừ `/session` đều dựng lại ảnh chụp = 3 lần spawn `claude` | "sao không xử lý luôn" |
+| gõ xong ngủ **900ms** rồi soi màn **đúng một lần** | "lúc được lúc không" |
+
+### Ba vá
+
+1. **`/type`·`/key`·`/shot` thôi hỏi ảnh chụp**: lấy cửa sổ từ SỔ rồi bắt `ps`
+   chứng thực (`window_target_from_book`). `tty` một mình KHÔNG đủ (tty được
+   dùng lại) — nhưng `tty` + `pid` thì đủ: `ps -o tty= -p <pid>` trả lời cùng
+   lúc *"còn sống không"* và *"còn ngồi đúng cửa sổ ấy không"*, vài mili giây,
+   **0 lần spawn `claude`**. Sổ nhớ thêm `i` (pid) và `o` (host).
+2. **"Không có trong danh sách" thôi bị đọc thành "không tồn tại"**: lượt hỏi mù
+   với tài khoản nào thì nói thẳng *chưa hỏi được* và **không gõ gì cả**. Đúng
+   con bug đã vá ở cái loa, mọc lại ở một chỗ mới.
+3. **Thôi đọc màn một lần rồi kết luận**: chờ tới khi màn nói được một trong hai
+   điều (phiên đã chạy/vào hàng chờ · chữ đã hiện trong ô), tối đa ~4,2s. Bản cũ
+   là một CUỘC ĐUA mà máy đang swap thì thua thường xuyên: TUI chưa vẽ kịp ⟹
+   `still_in_box` = false ⟹ không bắn Enter ⟹ chữ hiện ra sau và **nằm lại**.
+   Và nếu hết giờ mà màn vẫn không nói gì thì **thôi khai "đang đứng ở dấu
+   nhắc"** — nói thẳng là không thấy chữ đâu, mời `/shot`.
+
+### 📌 Một giả thuyết bị bác trước khi kịp sửa 15 chỗ
+
+Đọc mã thấy `do script … in **selected tab** of window id W` và `contents of
+**selected tab**` — tức nếu một cửa sổ có nhiều tab thì hub **gõ nhầm tab**, chứ
+không chỉ chụp nhầm. Đang định đổi `window_of` sang trả `(cửa sổ, tab)` thì đo
+trước: **cả 4 cửa sổ Terminal trên máy đều đúng 1 tab**, `selected` trỏ đúng
+chỗ. ⟹ Không phải nguyên nhân của `/shot` sai, và **không sửa**. Nhưng nó là
+một cái bẫy có thật đang nằm chờ: mở tab thứ hai trong một cửa sổ là hub gõ vào
+việc của người khác. Ghi vào sổ nợ.
+
+Cơ chế chụp thì ĐÚNG: đọc thẳng `contents` của win 56517 ra đúng một màn hình 27
+dòng, có cả `✢ Smooshing…` và ô nhập trống. Còn cú `/shot` cuối cùng trong log
+(17:09) chính là cú **hỏng vì "không thấy phiên"** — tức thứ Hà thấy sai rất có
+thể là lỗi ấy chứ không phải phép chụp. ⏳ Cần một lượt `/shot` mới để kết luận.
+
+---
+
 ## 🗂 2026-08-12 (khuya) — ngăn kéo thứ hai không ai nghĩ tới, và một câu ack khoe việc
 
 Hai câu của Hà, hai lỗi nhỏ nhưng cùng một bài học đã học tối nay.

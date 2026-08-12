@@ -60,7 +60,14 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-- 🐢 **`/shot` 22,2s · `/type` 10,9s · `/key` 7,5s** (đo 2026-08-12 16:49–17:00).
+- 💣 **Bẫy đang nằm chờ: hub gõ vào `selected tab`, không phải tab của phiên.**
+  `keys::do_script` và `keys::screen_text` đều nhắm `selected tab of window id
+  W`, trong khi `window_of` chỉ tìm ra CỬA SỔ chứa tty ấy. Đo 2026-08-12: cả 4
+  cửa sổ Terminal đều đúng 1 tab nên hiện chưa sai — nhưng mở tab thứ hai trong
+  một cửa sổ là hub **gõ vào việc của người khác**. Vá đúng: `window_of` trả
+  `(cửa sổ, tab)` rồi `do script … in tab i of window id W` (~15 chỗ gọi).
+- ~~🐢 **`/shot` 22,2s · `/type` 10,9s · `/key` 7,5s**~~ → **đã vá 2026-08-12**
+  (sổ + `ps` thay ảnh chụp). Mục dưới giữ lại vì nó ghi cái GỐC: (đo 2026-08-12 16:49–17:00).
   Cùng bệnh với `/session` vừa vá: hỏi `snapshot_cached` để tìm phiên. **Nhưng
   không được vá theo cùng một cách** — thứ chúng cần là `tty`, mà tty là con số
   ĐƯỢC DÙNG LẠI, nên một tty cũ trong sổ có thể đang là cửa sổ của phiên khác ⟹

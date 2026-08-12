@@ -2028,7 +2028,27 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // chứng minh byte đã vào tab, KHÔNG chứng minh
                                     // `claude` làm gì với nó — chính chỗ này từng
                                     // báo "đã bấm" trong khi Hà không thấy gì.
-                                    std::thread::sleep(std::time::Duration::from_millis(900));
+                                    // 🔴 KHÔNG đọc một lần rồi kết luận.
+                                    //
+                                    // Bản cũ ngủ 900ms rồi soi đúng một phát. Hà
+                                    // 2026-08-12: *"vừa rồi lại không tự enter
+                                    // nên nó chỉ đứng trong ô chat"* · *"hình
+                                    // như lúc được lúc không"*. Đó là một CUỘC
+                                    // ĐUA, và máy này đang swap 12/13 GB nên nó
+                                    // thua thường xuyên: TUI chưa kịp vẽ chữ ⟹
+                                    // `still_in_box` = false ⟹ không bắn Enter
+                                    // ⟹ chữ hiện ra ngay sau đó và nằm lại
+                                    // vĩnh viễn. Cả ba cửa của cú Enter đều đọc
+                                    // từ một tấm ảnh chụp quá sớm, nên cửa nào
+                                    // cũng "đúng" theo một sự thật chưa xảy ra.
+                                    //
+                                    // Nay CHỜ tới khi màn nói được một trong hai
+                                    // điều: phiên đã bắt đầu chạy/vào hàng chờ
+                                    // (xong, không cần Enter), hoặc chữ đã hiện
+                                    // trong ô (cần Enter). Hết 4,2 giây mà màn
+                                    // vẫn không nói gì thì đừng bịa ra một câu
+                                    // chắc chắn — xem chỗ trả lời bên dưới.
+                                    let waited = std::time::Instant::now();
                                     // Không đọc lại được màn thì nói là KHÔNG
                                     // BIẾT. Bản trước rơi về `Landed::Idle`, tức
                                     // trả lời "phiên đang đứng ở dấu nhắc" cho
@@ -2041,7 +2061,35 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         }
                                         _ => None,
                                     };
-                                    let mut view = seen(&s.tty);
+                                    let mut view = None;
+                                    for _ in 0..7 {
+                                        std::thread::sleep(std::time::Duration::from_millis(600));
+                                        view = seen(&s.tty);
+                                        match &view {
+                                            // Đã chạy hoặc đã vào hàng chờ ⟹ chữ
+                                            // ĐÃ được gửi, không cần Enter.
+                                            Some((body, _))
+                                                if crate::keys::landed(body)
+                                                    != crate::keys::Landed::Idle =>
+                                            {
+                                                break
+                                            }
+                                            // Chữ đã hiện trong ô ⟹ đủ căn cứ để
+                                            // bắn Enter; chờ thêm chỉ tổ chậm.
+                                            Some((body, _))
+                                                if crate::keys::still_in_box(body, &typed) =>
+                                            {
+                                                break
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                    logging::info(
+                                        "keys_screen_waited",
+                                        json!({ "session": s.session_id,
+                                                "ms": waited.elapsed().as_millis() as u64,
+                                                "saw": view.is_some() }),
+                                    );
                                     // ENTER RỜI — vì `do script` đẩy chữ và dấu
                                     // xuống dòng trong MỘT lượt ghi, và ô nhập
                                     // của `claude` đọc lượt ấy như một cú DÁN:
@@ -2134,6 +2182,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         // của nó; và nhánh KẸT bên trên vẫn nói
                                         // ra, vì ở đó nó là LÝ DO chứ không
                                         // phải khoe việc.
+                                        // Gõ CHỮ mà sau ngần ấy giây màn vẫn
+                                        // không thấy chữ đâu và phiên cũng
+                                        // không chạy: đó KHÔNG phải "đứng ở dấu
+                                        // nhắc" — đó là hub không biết chữ đi
+                                        // đâu. Câu cũ khai một điều chưa nhìn
+                                        // thấy, đúng thứ Hà bắt được: hub báo
+                                        // ngon mà chữ nằm im trong ô.
+                                        Some(crate::keys::Landed::Idle) if !is_key => format!(
+                                            "⚠ {} vào {}, nhưng sau {:.0}s màn KHÔNG thấy chữ ấy \
+                                             và phiên cũng không chạy — có thể nó chưa vào. /shot để nhìn.",
+                                            did,
+                                            s.name,
+                                            waited.elapsed().as_secs_f32()
+                                        ),
                                         Some(crate::keys::Landed::Idle) => {
                                             format!("⌨ {} vào {} — phiên đang đứng ở dấu nhắc.", did, s.name)
                                         }

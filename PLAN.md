@@ -41,6 +41,7 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S19 | **Xem ba tài khoản** từ phòng chat, và biết `/new` rơi vào tài khoản nào | `fe-accounts-uc` **12/12** trên bundle đã deploy (2026-08-12 17:28): `acc1 ⭐ mặc định · acc2 tuần 100% · acc3 tuần 5%`, 0 `$`, không tràn ngang ở 390px |
 | S20 | Lệnh đi bằng **cờ** (`/new -a acc3 -s hub`), đề bài để trống vẫn mở được, mở xong **theo luôn** phiên mới | `fe-newflags-uc` **8/8** chạy thật 17:33 + 17:35; đối chiếu ngoài màn: `new_window_opened tty=ttys003 task=""`, `focus:session` = đúng phiên vừa mở |
 | — | **Cái loa thôi đọc phép đo hỏng thành cái chết**: `claude agents` hỏng cho một tài khoản thì phiên của nó KHÔNG bị coi là đã tắt, và sổ giữ nguyên | 8 test mới, 3 test lõi đã kiểm là **đỏ được**; ⏳ chưa có lượt THẬT (xem "Còn nợ") |
+| S28 | **Bấm "vào phiên" trả lời NGAY** — tên + tài khoản đọc từ sổ, không dựng lại ảnh chụp | đo trên chính ngón tay Hà, cùng điều kiện (ảnh chụp quanh đó vẫn 15–28s): `command_done kind=Session` **48 407ms** (16:49) · **29 295ms** (16:53) → **1 106ms** (17:00, sau vá). 4 test mới |
 | — | **Cái loa thôi nói về phiên của CHÍNH hub, và cái nút thôi dẫn vào phiên đã chết** | Hà đọc tin thật: *"tại sao 1 phiên đã tắt mà vẫn gắn nút vào phiên"* · *"quá vô lý"*. Đo log: `⏹ hub-e6 … cửa sổ ấy nay đang chạy hub-36` (16:11:51) rồi `⏹ hub-36 … hub-f5` (16:16:05) — **5 phút một tin**, cả ba đều là phép dò `/usage` của hub, `tty="??"` (không phiên nào có cửa sổ). Ba vá: `is_real_tty` (một chỗ thay bốn bản chép), `is_hub_own_probe` (hai cửa: đang sống + trong sổ), `enter_button` (nút phải có phiên SỐNG để vào). 5 test mới, **cả 5 đỏ được** |
 | — | **hub theo gốc workspace mới `~/projects`** — không còn đường dẫn nào gõ cứng vào `~/Documents/projects` | đo thật 2026-08-12 22:5x sau khi cài lại: `hub doctor` `workspace /Users/hanguyen/projects`, snapshot liệt kê **32 dự án**, `folder` của 3 phiên sống ra đúng `dwork · AI/hub · AI/tcc`; phép đo "daemon cũ hơn mã" đã **sống lại và đo đúng**: `stale=false` → chạm một `.rs` → `true` → `install.sh` → `false`; 2 test mới, cả hai **đỏ được** khi trả đường cứng về chỗ cũ |
 | S18 | Tin báo mang **thông tin chốt** của lượt cuối, không mang câu dẫn nhập | chạy thật 2026-08-12 16:26 trên **4 phiên đang sống**: phiên trước đây mang `[dùng Read]`/`[dùng Bash]` nay mang một câu có nghĩa; `projects-71` (báo cáo 3151 byte) ra đủ *kết luận → bằng chứng → ⋯ → đề xuất → câu chốt* + `… (còn N dòng)`. ⚠ **chưa** có lượt gửi Telegram thật (từ lúc cài chưa phiên nào chuyển trạng thái) |
@@ -59,8 +60,16 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
+- 🐢 **`/shot` 22,2s · `/type` 10,9s · `/key` 7,5s** (đo 2026-08-12 16:49–17:00).
+  Cùng bệnh với `/session` vừa vá: hỏi `snapshot_cached` để tìm phiên. **Nhưng
+  không được vá theo cùng một cách** — thứ chúng cần là `tty`, mà tty là con số
+  ĐƯỢC DÙNG LẠI, nên một tty cũ trong sổ có thể đang là cửa sổ của phiên khác ⟹
+  gõ nhầm cửa sổ (chính cái bẫy đã trả giá hôm nay). Đường đúng: hỏi **một tài
+  khoản** mà sổ đã biết (`Mark::a`) thay vì cả ba, hoặc trị gốc cái chậm của
+  `claude agents` — xem mục dưới.
 - 🔴 **`claude -p "/usage"` TREO khi hubd gọi — chưa có thủ phạm** (mở
-  2026-08-12). Hình dạng đã đo chắc: `timed_out: true · ms: 60952 ·
+  2026-08-12). Cùng họ với việc `sessions_snapshot_ms` đo được **15–92 giây**
+  mỗi vòng trong khi `claude agents --json` chạy tay chỉ **0,3 giây**. Hình dạng đã đo chắc: `timed_out: true · ms: 60952 ·
   stdout_bytes: 0 · stderr rỗng` — treo tới trần 60s, không ra byte nào. Hậu quả
   nhìn thấy được: hàng tài khoản trên tab Sức khoẻ **trống số hạn mức**
   (`fe-board-uc` 29/31). Đã loại bằng đo: stdin (đã đóng, `exec.rs:132`), sai

@@ -1,5 +1,54 @@
 # active context — hub
 
+## ⚡ 2026-08-12 (khuya) — 48 giây trả cho hai chuỗi ký tự
+
+Hà: *"bấm vào phiên vẫn phản hồi rất chậm, sao không chỉnh để nhận được luôn"*.
+Đo đúng cú bấm ấy: `command_done kind=Session` **ms=48407**. Hàng chờ không liên
+quan (đã vá 18:29, đồng hồ đặt bên trong từng lệnh) — 48 giây nằm gọn trong
+lệnh, và đi vào **một dòng**: `snapshot_cached(20s)` gọi CHỈ để lấy `s.name` và
+`s.account` cho câu chào.
+
+📌 Đệm 20 giây của bản vá chiều nay đúng khi một lượt dựng ảnh chụp mất ~10
+giây. Tối nay `sessions_snapshot_ms` đo được **15–92 giây mỗi vòng**, nên gần
+như cú bấm nào cũng rơi trúng lượt dựng lại. *Một cái đệm hết tác dụng khi thứ
+nó đệm chậm hơn chính cái đệm — và nó hỏng CÂM, vì con số cũ vẫn đúng ở chỗ nó
+được đo.*
+
+Mà tên với tài khoản thì hub đã nhớ sẵn: `Mark::n`, `Mark::a`, ghi mỗi vòng
+chính vì lúc phiên biến mất không còn chỗ nào hỏi. Nay `/session <id>` đọc SỔ
+(một lượt SQLite), đặt con trỏ, chào ngay; sổ không biết id thì mới rơi về ảnh
+chụp — nơi câu từ chối còn nói được "đang có N phiên".
+
+### Nghiệm thu: chính ngón tay Hà, cùng điều kiện
+
+| Lúc | Bấm vào phiên | ms |
+|---|---|---|
+| 16:49:32 | `projects-fb` | **48 407** |
+| 16:53:27 | `hanguyen-41` | **29 295** |
+| **17:00:11** | `hanguyen-8e` — *sau bản vá* | **1 106** |
+
+Xung quanh cú 17:00 ảnh chụp vẫn đang mất 15–28 giây, tức bản vá nhanh **vì
+không còn phụ thuộc**, không phải vì máy vừa rảnh. `cargo test` **218** · clippy
+**0** · 4 test mới.
+
+⚠ Một lượt đo giữa chừng suýt bị tôi đọc nhầm: `command_done Session ms=19175`
+lúc 16:58:50 — nhưng đọc `ack` thì đó là `/session` **KHÔNG id** (bản danh
+sách), nhánh thật sự cần ảnh chụp. *Cùng một `kind`, hai đường đi khác hẳn nhau;
+đo `kind` mà không đọc câu trả lời là đo nhầm.*
+
+### Còn chậm — và KHÔNG được vá theo cùng một cách
+
+`/shot` **22,2s** · `/type` **10,9s** · `/key` **7,5s** (đo 16:49–17:00). Cùng
+một bệnh: chúng cũng hỏi `snapshot_cached` để tìm phiên. Nhưng thứ chúng cần là
+**tty**, mà tty là **con số ĐƯỢC DÙNG LẠI** (đã trả giá cho luật này hôm nay):
+một tty cũ trong sổ có thể đang là cửa sổ của phiên KHÁC ⟹ gõ nhầm cửa sổ. Với
+`/session` thì sổ cũ một vòng chỉ làm cái tên trễ một vòng; với `/type`/`/key`
+thì nó gõ chữ vào nhầm người. ⟹ Đường đúng cho ba route ấy là làm ảnh chụp
+NHANH lại (hoặc chỉ hỏi **một tài khoản** mà sổ đã biết, thay vì cả ba), không
+phải đọc sổ.
+
+---
+
 ## 🔕 2026-08-12 (khuya) — một câu hỏi của Hà lôi ra ba con bug, và cả ba cùng một họ
 
 Hà đọc Telegram giữa lúc tôi đang dọn dời nhà: *"tại sao 1 phiên đã tắt mà vẫn

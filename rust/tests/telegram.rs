@@ -423,6 +423,48 @@ fn a_live_session_still_gets_its_button() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Bấm "vào phiên" phải trả lời NGAY: tên và tài khoản lấy từ SỔ.
+//
+// Hà 2026-08-12: *"bấm vào phiên vẫn phản hồi rất chậm, sao không chỉnh để nhận
+// được luôn"*. Đo: `command_done kind=Session ms=48407` — 48 giây, nằm gọn
+// trong lệnh, và đi vào đúng một dòng `snapshot_cached(20s)` gọi CHỈ để lấy
+// hai chuỗi ký tự cho câu chào.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn book_json(id: &str, name: &str, account: &str) -> String {
+    format!(
+        r#"{{"{id}":{{"s":"idle","y":"ttys002","k":"interactive","p":"","f":1786500000,"h":false,"n":"{name}","d":"AI/hub","a":"{account}","c":"/Users/hanguyen/projects"}}}}"#
+    )
+}
+
+#[test]
+fn following_a_session_is_answered_from_the_book_not_from_a_new_snapshot() {
+    let b = book_json(SID, "projects-fb", "acc1");
+    assert_eq!(
+        hub::pipeline::session_name_from_book(&b, SID),
+        Some(("projects-fb".to_string(), "acc1".to_string()))
+    );
+}
+
+/// Sổ không biết id thì trả `None` — chỗ gọi rơi về đường ảnh chụp, nơi câu từ
+/// chối còn nói được "đang có N phiên". Đoán bừa một cái tên thì tệ hơn chậm.
+#[test]
+fn an_unknown_id_falls_through_instead_of_inventing_a_name() {
+    let b = book_json(SID, "projects-fb", "acc1");
+    assert_eq!(hub::pipeline::session_name_from_book(&b, "khong-co"), None);
+    assert_eq!(hub::pipeline::session_name_from_book("{}", SID), None);
+    assert_eq!(hub::pipeline::session_name_from_book("khong-phai-json", SID), None);
+}
+
+/// Sổ cũ (ghi từ trước khi nhớ tên) có id mà tên rỗng — cũng phải rơi xuống
+/// đường kia, không chào bằng một cái tên trống.
+#[test]
+fn a_book_entry_without_a_name_is_not_good_enough_to_greet_with() {
+    let b = book_json(SID, "", "acc1");
+    assert_eq!(hub::pipeline::session_name_from_book(&b, SID), None);
+}
+
 /// Nút trả lời hộp chọn vẫn giữ nguyên đường cũ, kể cả khi có thêm nút vào phiên.
 #[test]
 fn choice_buttons_still_answer_the_right_session() {

@@ -228,6 +228,34 @@ pub fn enter_button(
     ))
 }
 
+/// Tên + tài khoản của một phiên, lấy từ SỔ — **0 tiến trình, 0 chờ**.
+///
+/// 🔴 Hà 2026-08-12: *"bấm vào phiên vẫn phản hồi rất chậm, sao không chỉnh để
+/// nhận được luôn"*. Đo cú bấm ấy: `command_done kind=Session` **ms=48407**.
+/// Hàng chờ không liên quan (đã vá 18:29); 48 giây nằm gọn trong chính lệnh, và
+/// nó đi vào đúng một dòng: `snapshot_cached(20s)` — dựng lại ảnh chụp phiên
+/// **chỉ để lấy `s.name` và `s.account`** cho câu chào. Đệm 20 giây từng đủ khi
+/// một lượt dựng mất ~10 giây; tối nay `sessions_snapshot_ms` đo được **18–92
+/// giây** mỗi vòng, nên gần như cú bấm nào cũng rơi đúng vào lượt dựng lại.
+///
+/// Mà hai thứ ấy hub đã nhớ sẵn: `Mark::n` (tên) và `Mark::a` (tài khoản), ghi
+/// mỗi vòng chính vì lúc phiên biến mất thì không còn chỗ nào hỏi nữa. Đọc sổ
+/// là một lượt đọc SQLite.
+///
+/// Cái giá phải nói thẳng: sổ cũ hơn ảnh chụp đúng **một vòng**. Với câu "đang
+/// theo phiên nào" thì đó là cái giá đúng — một cái tên trễ một vòng vẫn là cái
+/// tên ấy, còn 48 giây im lặng thì người ta bấm lần hai.
+pub fn session_name_from_book(book_json: &str, id: &str) -> Option<(String, String)> {
+    let book: BTreeMap<String, crate::watch::Mark> = serde_json::from_str(book_json).ok()?;
+    let mark = book.get(id)?;
+    if mark.n.is_empty() {
+        // Sổ có id mà không có tên (bản ghi từ trước khi sổ nhớ tên) — trả None
+        // để rơi về đường ảnh chụp, đừng chào bằng một cái tên rỗng.
+        return None;
+    }
+    Some((mark.n.clone(), mark.a.clone()))
+}
+
 pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsSnapshot) {
     let live = &snap.sessions;
     let prev: BTreeMap<String, crate::watch::Mark> = db
@@ -2281,10 +2309,28 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         Ok(()) => "👁 Đã thôi theo phiên.".to_string(),
                         Err(e) => format!("⚠ không bỏ theo được: {e}"),
                     }
+                } else if let Some((name, account)) = db
+                    .cursor_or_log(WATCH_KEY)
+                    .and_then(|v| session_name_from_book(&v, want))
+                {
+                    // ĐƯỜNG NHANH: sổ đã biết phiên này. Đặt con trỏ rồi chào
+                    // ngay — xem `session_name_from_book` để biết vì sao đường
+                    // cũ mất 48 giây cho đúng hai chuỗi ký tự.
+                    match db.set_cursor(FOCUS_SESSION_KEY, want) {
+                        Ok(()) => {
+                            let head = format!("👁 Đang theo phiên {name} ({account})");
+                            if adapter == crate::telegram::NAME {
+                                format!("{head}\n(xem màn: /shot)")
+                            } else {
+                                head
+                            }
+                        }
+                        Err(e) => format!("⚠ không theo được: {e}"),
+                    }
                 } else {
-                    // Only a session this machine actually has: an id from a
-                    // stale page must not send the reader to an empty screen
-                    // with no explanation.
+                    // Sổ không biết id này: phiên vừa tắt, id gõ tay, hoặc trang
+                    // cũ. Lúc ấy mới đáng trả tiền một lượt ảnh chụp — vừa để
+                    // xác nhận, vừa để câu từ chối nói được "đang có N phiên".
                     let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                     // Phiên VỪA DỪNG vẫn phải theo được: màn chi tiết đang mở
                     // chính nó, và `/tell` sau đó cần đúng con trỏ này. Không có

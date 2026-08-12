@@ -1,5 +1,42 @@
 # active context — hub
 
+## 🌙 2026-08-12 (tối) — cổng lệnh thứ ba, nút gửi nhanh, và một tối ưu bị chính phép đo bác bỏ
+
+**`/cmd <dòng lệnh>`** — cổng ra lệnh thứ ba (Hà: *"thêm một cổng chạy lệnh
+nữa… chạy 1 command xong trả về kết quả rồi nó đóng luôn"*, gõ từ Telegram). Đi
+qua shell đăng nhập của chủ máy chứ không tự tách tham số; kết quả qua cổng quét
+rò (luật 5) và luôn mang mã thoát. KHÔNG phải quyền mới: `/type` đã bỏ qua
+`DENIED_TOOLS` từ 08-09, `/cmd` chỉ làm con đường ấy thẳng và có kết quả trả về.
+
+**Lệnh trên màn thành NÚT.** Hà: *"phiên hiện ra rõ ràng có lệnh để chạy trên
+terminal … nhưng ở tele lại không hề có, bạn chụp nội dung kiểu gì hay chỉ đang
+hiển thị log"*. Trả lời: `/shot` đọc **màn thật** (`contents of selected tab`),
+không phải nhật ký — nhưng nó chỉ giữ **14 dòng cuối**, mà lệnh ấy nằm cao hơn.
+Nay **40 dòng** (`/shot <n>` xin thêm). Lệnh nhận ra được kèm nút, bấm là gõ
+`!<lệnh>` **vào chính phiên** (ý Hà) — khác `/cmd`: phiên nhìn thấy kết quả và đi
+tiếp được. Nút mang một con số vì `callback_data` trần 64 byte.
+
+🔴 Bản THẬT lộ bug ngay lượt đầu: màn có dòng ``​`git push origin main` (a plain
+push to main) executed from…`` và bản đầu bóc dấu nháy mở rồi **nuốt cả câu phía
+sau** ⟹ một cái nút chạy nhầm thứ. Đọc mã thì hợp lý; chỉ chạy thật mới thấy.
+
+**"Bấm nút vẫn đợi lâu" — cắm đồng hồ vào từng route rồi đọc số:** hàng chờ đã
+hết từ bản chiều (queued và run cùng một giây), ack 1,5s — còn **10 giây là dựng
+lại ảnh chụp phiên**, thứ gần như route nào cũng làm trước khi trả lời (mỗi lần
+là ba lượt spawn `claude agents`, binary nay 279 MB). Đệm 20 giây cho lệnh chỉ
+cần tra cứu ⟹ `/session` **11,6s → 1,5s**. Vòng chạy vẫn dùng bản tươi.
+
+📌 **Và một tối ưu của chính tôi bị phép đo bác bỏ:** song song hoá ba lời gọi
+`claude agents` — tưởng chia 10 giây thành 3,5; đo lại **trung vị 10,1s → 13,0s**
+(53 mẫu trước, 8 mẫu sau), chậm hơn 30%. Ba tiến trình 279 MB dựng cùng lúc giẫm
+chân nhau ở CPU/đĩa. Đã trả lại bản nối đuôi và **giữ phép đo trong `sessions.rs`**
+để lần sau không ai thử lại bằng trực giác.
+
+`cargo test` **205** · clippy **0** · 5 commit: `97992d2` · `5a7dfc6` · `f891d1e`
+· `668e561` · `509d944`.
+
+---
+
 ## 🔔 2026-08-12 (chiều muộn) — cái loa nói dối hai kiểu, và lệnh mọc cờ
 
 Hà mở phiên bằng *"tiếp hub"*, rồi ba câu hỏi nối nhau — mỗi câu lôi ra một việc

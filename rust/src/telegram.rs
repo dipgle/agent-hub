@@ -60,6 +60,12 @@ pub struct Inbox {
     busy: Arc<AtomicBool>,
     token: String,
     chat_id: String,
+    /// Cấu hình, để `push_text` gọi được `pipeline::run_telegram_now`.
+    ///
+    /// `Arc` vì `Inbox` bị `clone()` cho luồng đọc và nằm trong một `OnceLock`
+    /// toàn cục — chép cả `Config` mỗi lượt bấm nút là chép một cây cấu hình
+    /// cho một việc chỉ cần đọc.
+    cfg: std::sync::Arc<Config>,
     /// Đánh thức vòng chạy khi có lệnh mới.
     ///
     /// 🔴 Đo 2026-08-11: gõ `/help` lúc 21:31:34, hub chạy nó lúc **21:33:50**
@@ -85,6 +91,155 @@ pub struct Inbox {
 ///
 /// `ok:`/`no:` (nút xác nhận) KHÔNG thuộc về đây: chúng chỉ có nghĩa trong lúc
 /// `confirm::ask` đang chờ, và trả `None` là cách nói "cái này không phải lệnh".
+/// Sổ những tin hub đã gửi sang Telegram, để sau này XOÁ được chúng.
+///
+/// Hà 2026-08-12: *"đã có cơ chế tự xóa tin nhắn cũ hơn 1.5 ngày chưa"* — chưa.
+/// Muốn xoá thì phải có `message_id`, mà `message_id` chỉ tồn tại đúng một lần:
+/// trong câu trả lời của `sendMessage`. Không nhặt ngay lúc ấy thì tin đã gửi
+/// nằm ngoài tầm với vĩnh viễn.
+///
+/// Ghi thẳng vào sổ (một cursor trong SQLite) chứ không giữ trong bộ nhớ: hub
+/// khởi động lại vài lần một ngày, và một bộ đệm trong RAM nghĩa là mỗi lần
+/// khởi động lại là một nhúm tin không bao giờ xoá được nữa — đúng loại lỗ hổng
+/// im lặng mà một tính năng dọn dẹp không được phép có.
+pub const SENT_KEY: &str = "telegram:sent";
+
+/// `message_id` + lúc gửi (epoch giây).
+pub type SentMsg = (i64, i64);
+
+/// Nhặt `message_id` từ câu trả lời của `sendMessage` và ghi vào sổ.
+///
+/// Không có `db` ở đây thì mở lấy một cái: hai đường gửi (`Inbox` và
+/// `confirm::tell`) đều không cầm sổ, mà bắt cả hai mang thêm một tham số chỉ
+/// để ghi một dòng là bắt mọi chỗ gọi mang theo chi tiết của kênh Telegram.
+pub fn remember_sent(cfg: &Config, resp: &Value) {
+    let Some(id) = resp
+        .get("result")
+        .and_then(|r| r.get("message_id"))
+        .and_then(Value::as_i64)
+    else {
+        // Gửi được mà không đọc ra id thì nói thẳng: tin ấy sẽ nằm lại mãi.
+        logging::warn("telegram_sent_no_id", json!({}));
+        return;
+    };
+    let now = chrono::Utc::now().timestamp();
+    let db = match crate::db::Db::open(&cfg.db) {
+        Ok(d) => d,
+        Err(e) => {
+            logging::error("telegram_sent_db_failed", json!({ "err": e.to_string() }));
+            return;
+        }
+    };
+    let mut list: Vec<SentMsg> = db
+        .cursor_or_log(SENT_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    list.push((id, now));
+    // Trần: sổ này chỉ để xoá, mà thứ quá 48 giờ thì không xoá được nữa — giữ
+    // vài nghìn dòng là giữ rác.
+    if list.len() > 2000 {
+        let cut = list.len() - 2000;
+        list.drain(..cut);
+    }
+    match serde_json::to_string(&list) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(SENT_KEY, &v) {
+                logging::error("telegram_sent_not_saved", json!({ "err": e.to_string() }));
+            }
+        }
+        Err(e) => logging::error("telegram_sent_not_encodable", json!({ "err": e.to_string() })),
+    }
+}
+
+/// Trần CỨNG của Telegram: quá 48 giờ thì bot không xoá được tin của chính nó.
+///
+/// Không phải một lựa chọn của hub — API trả `message can't be deleted`. Nên
+/// mọi tin quá hạn này bị **bỏ khỏi sổ** kèm một dòng log, chứ không nằm lại
+/// làm hub thử đi thử lại một việc không bao giờ xong.
+pub const TELEGRAM_DELETE_WINDOW_SEC: i64 = 48 * 3600;
+
+/// Chia sổ thành ba nhóm — hàm THUẦN, kiểm được mà không cần Telegram.
+///
+/// Trả về `(đến_hạn_xoá, quá_48h_không_xoá_được)`. Phần quyết định của tính năng
+/// này nằm gọn ở đây, nên nó phải kiểm được bằng một cái đồng hồ giả.
+pub fn due_for_delete(list: &[SentMsg], now: i64, after_hours: u64) -> (Vec<i64>, Vec<i64>) {
+    if after_hours == 0 {
+        return (Vec::new(), Vec::new());
+    }
+    let limit = (after_hours as i64) * 3600;
+    let mut due = Vec::new();
+    let mut gone = Vec::new();
+    for (id, ts) in list {
+        let age = now - ts;
+        if age >= TELEGRAM_DELETE_WINDOW_SEC {
+            gone.push(*id);
+        } else if age >= limit {
+            due.push(*id);
+        }
+    }
+    (due, gone)
+}
+
+/// Xoá những tin hub gửi đã quá hạn — chạy mỗi vòng, rẻ khi không có gì để xoá.
+///
+/// Hai điều phải nói thẳng vì chúng là giới hạn thật, không phải thiếu sót:
+/// * **Chỉ xoá được tin của CHÍNH BOT.** Trong buồng chat riêng, Telegram không
+///   cho bot xoá tin của người dùng — câu Hà gõ sẽ nằm lại.
+/// * **Chỉ trong 48 giờ.** Tin cũ hơn thì vĩnh viễn không xoá được bằng bot.
+pub fn prune_sent(cfg: &Config, db: &crate::db::Db) {
+    let hours = cfg.confirm.delete_after_hours;
+    if hours == 0 {
+        return;
+    }
+    let Some(inbox) = inbox() else {
+        return; // không có kênh Telegram thì không có gì để dọn
+    };
+    let mut list: Vec<SentMsg> = match db
+        .cursor_or_log(SENT_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+    {
+        Some(v) => v,
+        None => return,
+    };
+    let now = chrono::Utc::now().timestamp();
+    let (due, gone) = due_for_delete(&list, now, hours);
+    if due.is_empty() && gone.is_empty() {
+        return;
+    }
+    let (mut deleted, mut failed) = (0usize, 0usize);
+    let too_old = gone.len();
+    let mut drop_ids: Vec<i64> = gone;
+    for id in due {
+        match inbox.delete_message(id) {
+            Ok(()) => {
+                deleted += 1;
+                drop_ids.push(id);
+            }
+            // Telegram từ chối vĩnh viễn (đã xoá tay, hết cửa 48h…) thì bỏ khỏi
+            // sổ luôn; lỗi mạng thì GIỮ lại để vòng sau thử tiếp.
+            Err(e) if e.contains("can't be deleted") || e.contains("not found") => {
+                drop_ids.push(id);
+                failed += 1;
+            }
+            Err(_) => failed += 1,
+        }
+    }
+    list.retain(|(id, _)| !drop_ids.contains(id));
+    match serde_json::to_string(&list) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(SENT_KEY, &v) {
+                logging::error("telegram_prune_not_saved", json!({ "err": e.to_string() }));
+            }
+        }
+        Err(e) => logging::error("telegram_prune_not_encodable", json!({ "err": e.to_string() })),
+    }
+    logging::info(
+        "telegram_pruned",
+        json!({ "deleted": deleted, "too_old_to_delete": too_old, "failed": failed,
+                "left": list.len(), "after_hours": hours }),
+    );
+}
+
 /// Bảng nút cho một phiên đang dừng lại hỏi — hàm THUẦN, kiểm được không cần mạng.
 ///
 /// Tách khỏi `Inbox::ask_choices` vì phần đáng sai là ở đây: mã `callback_data`
@@ -176,6 +331,7 @@ impl Inbox {
             busy: Arc::new(AtomicBool::new(false)),
             token,
             chat_id,
+            cfg: std::sync::Arc::new(cfg.clone()),
             waker,
         };
         let _ = INBOX.set(inbox.clone());
@@ -234,6 +390,16 @@ impl Inbox {
         if let Some(w) = &self.waker {
             w.wake();
         }
+        // …và đánh thức thôi thì CHƯA đủ: `wake()` cắt được giấc ngủ, không cắt
+        // được một vòng đang chạy dở (đo 2026-08-12: một cú bấm nút chờ 26 giây
+        // đúng vì thế). Chạy thẳng ở đây, trong một luồng riêng, xếp hàng bằng
+        // `pipeline::CMD_LOCK`.
+        crate::pipeline::run_telegram_now(&self.cfg);
+    }
+
+    /// Còn lệnh nào đang chờ không — để luồng chạy-ngay vét nốt trước khi thoát.
+    pub fn has_pending(&self) -> bool {
+        !self.queue.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
     }
 
     /// Lấy hết lệnh đang chờ. Vòng chạy gọi mỗi lượt.
@@ -369,6 +535,28 @@ impl Inbox {
         self.push_text(text);
     }
 
+    /// Xoá MỘT tin của chính bot. `Err` mang nguyên câu Telegram trả lời, vì
+    /// chỗ gọi phải phân biệt "hỏng mạng, thử lại sau" với "không bao giờ xoá
+    /// được nữa".
+    pub fn delete_message(&self, message_id: i64) -> Result<(), String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let r = client
+            .post(self.api("deleteMessage"))
+            .json(&json!({ "chat_id": self.chat_id, "message_id": message_id }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            Ok(())
+        } else {
+            Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối deleteMessage")
+                .to_string())
+        }
+    }
+
     /// Gửi một câu ra Telegram. `Err` chứ không nuốt — chỗ gọi phải log.
     pub fn send_text(&self, text: &str) -> Result<(), String> {
         let client = self.client().ok_or("không dựng được HTTP client")?;
@@ -379,6 +567,7 @@ impl Inbox {
             .map_err(|e| e.to_string())?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            remember_sent(&self.cfg, &v);
             Ok(())
         } else {
             Err(v
@@ -437,6 +626,7 @@ impl Inbox {
             .map_err(|e| e.to_string())?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            remember_sent(&self.cfg, &v);
             // Ghi SỐ NÚT đã gửi. "Gửi được tin" và "tin ấy có nút bấm" là hai
             // chuyện khác nhau, mà từ máy này không nhìn thấy màn hình điện
             // thoại — không có dòng này thì câu "đã có nút" chỉ là suy luận từ

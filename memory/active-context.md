@@ -5,6 +5,34 @@
 Hà mở phiên bằng *"tiếp hub"*, rồi ba câu hỏi nối nhau — mỗi câu lôi ra một việc
 thật. Không câu nào trả lời được bằng trí nhớ; cả ba đều đo từ log của chính hub.
 
+### ⚡ Độ trễ lệnh Telegram, và cơ chế tự xoá tin
+
+Hà: *"tại sao kích vào nút 'vào phiên' đợi rất lâu"*. Đo đúng cú bấm ấy: 18:17:45
+bấm → 18:18:11 lệnh chạy → 18:18:27 trả lời = **42 giây**, tách ba khúc: **26s**
+chờ một vòng đang chạy dở (`waker` chỉ cắt được GIẤC NGỦ, không cắt được vòng
+đang chạy) + **16s** chính `/session` đi đọc màn bằng osascript rồi đẩy ảnh chụp.
+
+Hà chốt *"cả hai"* + *"thông báo đó của phiên đã đủ nội dung gần nhất rồi nên
+thông báo đã vào phiên không cần chụp lại nữa"* ⟹ (1) lệnh chạy NGAY ở luồng
+riêng, xếp hàng bằng `CMD_LOCK` đặt ở nguồn, lệnh tới giữa chừng thì vét nốt;
+(2) `/session` bỏ hẳn cú chụp màn, ack một dòng kèm `(xem màn: /shot)`. Đây là
+đảo một quyết định 08-11 (*"bấm xong muốn thấy MÀN phiên"*) — có giá đo được nên
+ghi thẳng lý do tại `pipeline.rs`.
+
+*"đã có cơ chế tự xóa tin cũ hơn 1.5 ngày chưa"* — **chưa, không chỗ nào**. Nay
+có, và nó phải nói thật về hai giới hạn KHÔNG phải của hub: bot chỉ xoá được tin
+**của chính nó**, và chỉ trong **48 giờ**. Ngưỡng mặc định 36h chừa 12 giờ dự
+phòng — đặt sát trần là tự dựng bẫy. `message_id` được nhặt NGAY lúc gửi và ghi
+thẳng vào SQLite (không đệm trong RAM: hub khởi động lại vài lần một ngày, mỗi
+lần là một nhúm tin mất đường xoá). Tin gửi TRƯỚC 19:35 hôm nay không có id
+trong sổ nên **vĩnh viễn không xoá được** — nói đúng vậy, đừng hứa dọn sạch.
+
+🔴 **Token Telegram mới chưa tới chỗ hub đọc.** Hà nói vừa thay token bot mới,
+nhưng đo: hai tệp bí mật hub nạp (`config.rs:594`) sửa lần cuối **06/08** và
+**10/08 11:43**, và **không tệp môi trường nào** dưới `~/Documents/projects` đổi
+sau 15:30 hôm nay ⟹ token mới đang nằm ở chỗ khác. Thêm nữa: bot mới phải được
+bấm `/start` một lần, và hubd phải khởi động lại thì mới nạp biến mới.
+
 ### 🔴 *"tại sao tele nhận được 'projects-d8 đã tắt cửa sổ còn mở' nhưng thực tế không còn mở"*
 
 **Hai lỗi khác nhau**, cùng một họ: *không nhìn được ≠ không có gì*.

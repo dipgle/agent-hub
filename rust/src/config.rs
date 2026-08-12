@@ -67,6 +67,22 @@ pub struct ConfirmCfg {
     pub chat_id_env: String,
     /// Chờ bấm nút bao lâu rồi coi như không đồng ý.
     pub timeout_sec: u64,
+    /// Tin hub gửi sang Telegram sống bao lâu rồi tự xoá. `0` = không xoá.
+    ///
+    /// Hà 2026-08-12: *"đã có cơ chế tự xóa tin nhắn cũ hơn 1.5 ngày chưa"* —
+    /// chưa, không chỗ nào. Mặc định **36 giờ** đúng bằng con số ấy.
+    ///
+    /// 🔴 Trần CỨNG của Telegram là **48 giờ**: quá đó bot không xoá được tin
+    /// của chính nó nữa, vĩnh viễn. Nên con số này phải nằm dưới 48 một khoảng
+    /// đủ cho một lần hub nằm im (mất mạng, máy ngủ) mà vẫn kịp quay lại xoá.
+    /// Đặt 47 là tự dựng một cái bẫy: hub tỉnh dậy sau một giấc là cả loạt tin
+    /// rơi ra ngoài cửa.
+    #[serde(default = "default_delete_after_hours")]
+    pub delete_after_hours: u64,
+}
+
+fn default_delete_after_hours() -> u64 {
+    36
 }
 
 impl Default for ConfirmCfg {
@@ -76,6 +92,7 @@ impl Default for ConfirmCfg {
             bot_token_env: "HUB_TELEGRAM_BOT_TOKEN".to_string(),
             chat_id_env: "HUB_TELEGRAM_CHAT_ID".to_string(),
             timeout_sec: 90,
+            delete_after_hours: default_delete_after_hours(),
         }
     }
 }

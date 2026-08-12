@@ -1921,39 +1921,29 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 let how = if s.pid == 0 { " — đã dừng, vẫn nói tiếp được" } else { "" };
                                 let head =
                                     format!("👁 Đang theo phiên {} ({}){}", s.name, s.account, how);
-                                // "Vào phiên" phải THẤY được phiên (Hà
-                                // 2026-08-11, sau khi bấm thử nút: *"bấm xong
-                                // muốn thấy MÀN phiên"*). Trên trang thì màn
-                                // sống đã nằm ngay dưới tay, nên câu ack một
-                                // dòng là đủ; qua Telegram thì một dòng "đang
-                                // theo" mà không kèm màn bắt người ta gõ thêm
-                                // `/shot` — hai bước cho một ý định.
+                                // KHÔNG chụp lại màn ở đây (Hà 2026-08-12).
                                 //
-                                // Chỉ đọc màn khi CÓ cửa sổ Terminal ghép được:
-                                // phiên nền và phiên trong VS Code/iTerm thì
-                                // hub không đọc được, và nói thẳng ra như vậy
-                                // còn hơn im hoặc đoán.
-                                if adapter != crate::telegram::NAME {
-                                    head
+                                // Từ 08-11 câu ack này kèm luôn màn, vì *"bấm
+                                // xong muốn thấy MÀN phiên"*. Đo lại hôm nay
+                                // thì cái giá của nó lộ ra: một cú bấm nút mất
+                                // **42 giây**, trong đó **16 giây** là chính
+                                // bước đọc màn bằng osascript rồi đẩy một ảnh
+                                // chụp mới.
+                                //
+                                // Mà từ hôm nay tin báo đã mang sẵn thông tin
+                                // chốt của lượt cuối (S18) — Hà: *"thông báo đó
+                                // của phiên đã đủ nội dung gần nhất rồi nên
+                                // thông báo đã vào phiên không cần chụp lại
+                                // nữa"*. Trả tiền 16 giây để in lại thứ vừa đọc
+                                // xong ở tin trên là trả cho một bản sao.
+                                //
+                                // Muốn nhìn màn thì `/shot` — một động từ, một
+                                // việc; ack nói ra đường ấy để không ai phải
+                                // đoán.
+                                if adapter == crate::telegram::NAME {
+                                    format!("{head}\n(xem màn: /shot)")
                                 } else {
-                                    match crate::keys::window_of(&s.tty) {
-                                        Ok(Some(w)) => format!("{head}\n\n{}", screen_report(&s, w)),
-                                        Ok(None) => format!(
-                                            "{head}\n\n(hub không đọc được màn của phiên này — nó \
-                                             không chạy trong cửa sổ Terminal.app)"
-                                        ),
-                                        Err(e) => {
-                                            logging::warn(
-                                                "screen_window_lookup_failed",
-                                                json!({ "session": s.session_id,
-                                                        "err": e.to_string() }),
-                                            );
-                                            format!(
-                                                "{head}\n\n(⚠ không hỏi được Terminal về cửa sổ của \
-                                                 phiên này, nên chưa đọc được màn)"
-                                            )
-                                        }
-                                    }
+                                    head
                                 }
                             }
                             Err(e) => format!("⚠ không theo được: {e}"),
@@ -2052,6 +2042,67 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
     }
 }
 
+/// Khoá cho MỘT lượt chạy lệnh tại một thời điểm.
+///
+/// Từ 2026-08-12 lệnh Telegram chạy ở hai chỗ: đầu mỗi vòng (như cũ) và **ngay
+/// lúc bấm** (`run_telegram_now`). Hai chỗ ấy đụng cùng một hàng đợi, cùng cuốn
+/// sổ, và cùng một Terminal để gõ phím vào — nên chúng phải xếp hàng. Khoá đặt
+/// ở NGUỒN, không ở từng chỗ gọi: chỗ gọi thứ ba sẽ quên.
+static CMD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Đang có một luồng chạy-ngay hay chưa — để một tràng nút bấm không đẻ ra
+/// mười luồng.
+static RUNNING_NOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Chạy lệnh Telegram **ngay**, không đợi vòng đang chạy dở kết thúc.
+///
+/// 🔴 Đo 2026-08-12, đúng một cú bấm nút "Vào phiên": bấm **18:17:45** → lệnh
+/// bắt đầu chạy **18:18:11** → trả lời **18:18:27**. Bốn mươi hai giây, và
+/// **26 giây** đầu chỉ là ngồi chờ một vòng đang chạy (vòng ấy 27,4s) rồi chờ
+/// đẩy xong ảnh chụp. `waker` đã có từ 08-11 nhưng nó chỉ cắt được GIẤC NGỦ —
+/// một vòng đang chạy dở thì không đánh thức được, nó phải chạy hết.
+///
+/// Vì sao là một luồng riêng chứ không chạy thẳng trong luồng đọc Telegram: chỗ
+/// ấy đang giữ đường long-poll `getUpdates`; một lệnh chạy 15 giây ở đó là 15
+/// giây không nghe được nút tiếp theo.
+pub fn run_telegram_now(cfg: &Config) {
+    use std::sync::atomic::Ordering;
+    if RUNNING_NOW.swap(true, Ordering::SeqCst) {
+        // Đã có luồng đang chạy — nó sẽ vét nốt hàng đợi trước khi thoát.
+        return;
+    }
+    let cfg = cfg.clone();
+    let spawned = std::thread::Builder::new()
+        .name("telegram-now".into())
+        .spawn(move || {
+            loop {
+                match Db::open(&cfg.db) {
+                    Ok(db) => execute_telegram_commands(&db, &cfg),
+                    Err(e) => {
+                        logging::error(
+                            "telegram_now_db_failed",
+                            json!({ "err": e.to_string() }),
+                        );
+                        break;
+                    }
+                }
+                // Lệnh mới tới TRONG LÚC đang chạy thì làm nốt ở đây, đừng để
+                // nó rơi lại vào chỗ phải đợi trọn một vòng.
+                if !crate::telegram::inbox().is_some_and(|i| i.has_pending()) {
+                    break;
+                }
+            }
+            RUNNING_NOW.store(false, Ordering::SeqCst);
+        });
+    if let Err(e) = spawned {
+        // Không nuốt: không dựng được luồng thì lệnh vẫn chạy ở đầu vòng sau,
+        // chậm chứ không mất — nhưng phải có dòng nói ra vì sao nó chậm.
+        RUNNING_NOW.store(false, Ordering::SeqCst);
+        logging::error("telegram_now_spawn_failed", json!({ "err": e.to_string() }));
+    }
+}
+
+
 /// Chạy những mệnh lệnh vừa gõ trên TELEGRAM.
 ///
 /// Cùng `parse_command`, cùng `execute_commands`, cùng bộ handler với phòng chat
@@ -2063,6 +2114,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
 ///   đây, nên tới được đây tức là chủ máy gõ.
 /// * **Chỗ trả lời:** ack đi ngược về Telegram (`adapter = "telegram"`).
 fn execute_telegram_commands(db: &Db, cfg: &Config) {
+    let _guard = CMD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(inbox) = crate::telegram::inbox() else {
         return;
     };
@@ -2336,6 +2388,9 @@ pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String>
 pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     let started = std::time::Instant::now();
     execute_telegram_commands(db, cfg);
+    // Dọn tin Telegram quá hạn (Hà 2026-08-12: *"tự xóa tin nhắn cũ hơn 1.5
+    // ngày"*). Rẻ khi không có gì tới hạn: một phép so trên một danh sách số.
+    crate::telegram::prune_sent(cfg, db);
     let ingested = ingest(db, cfg)?;
     auto_handover(db, cfg);
     // No triage, and nothing to flush. hub used to spend money on its own here:

@@ -31,6 +31,8 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S16 | **Cái loa thôi kêu oan**: phiên sống chớp nhoáng (phép dò hạn mức của chính hub) chết đi thì im | chạy thật: **26** dòng `session_end_muted` (15s · 27s · 114s) và **0** tin "đã tắt" kể từ 11:03, so với **20 tin trong 4 tiếng** trước đó |
 | S17 | Phiên **dừng lại HỎI** thì câu hỏi + từng lựa chọn lên điện thoại (đọc từ nhật ký, không rình trên màn) | ⚠ mới **chạy thử trên dữ liệu thật** của `projects-11` (dựng lại lúc câu hỏi còn treo → ra đúng tin + 3 lựa chọn); **chưa** có lượt gửi Telegram thật |
 | S21 | **Mọi phiên terminal dừng chờ đều báo**, và tin của phiên khác phiên đang theo mang **nút vào phiên** | luật im 08-10 gỡ theo chỉ đạo 2026-08-12 (*"mọi phiên terminal đều báo"*); 3 test nút, 2 test đã kiểm là **đỏ được**; cài lúc 18:14, daemon pid 23685 `cert` |
+| S22 | Lệnh Telegram **chạy ngay khi bấm** (không đợi vòng), `/session` thôi chụp lại màn | đo trước khi vá: bấm 18:17:45 → chạy 18:18:11 → trả lời 18:18:27 (**42s**: 26s chờ vòng + 16s chụp màn); nay chạy ở luồng riêng, xếp hàng bằng `CMD_LOCK`; cài 18:29 |
+| S23 | **Tự xoá tin Telegram cũ hơn 36 giờ** | cài 19:35 (pid 62301). 6 test, 2 đã kiểm là **đỏ được**. ⏳ chưa có lượt xoá THẬT: sổ `telegram:sent` mới bắt đầu ghi, tin đầu tiên tới hạn sau ~36h |
 | S19 | **Xem ba tài khoản** từ phòng chat, và biết `/new` rơi vào tài khoản nào | `fe-accounts-uc` **12/12** trên bundle đã deploy (2026-08-12 17:28): `acc1 ⭐ mặc định · acc2 tuần 100% · acc3 tuần 5%`, 0 `$`, không tràn ngang ở 390px |
 | S20 | Lệnh đi bằng **cờ** (`/new -a acc3 -s hub`), đề bài để trống vẫn mở được, mở xong **theo luôn** phiên mới | `fe-newflags-uc` **8/8** chạy thật 17:33 + 17:35; đối chiếu ngoài màn: `new_window_opened tty=ttys003 task=""`, `focus:session` = đúng phiên vừa mở |
 | — | **Cái loa thôi đọc phép đo hỏng thành cái chết**: `claude agents` hỏng cho một tài khoản thì phiên của nó KHÔNG bị coi là đã tắt, và sổ giữ nguyên | 8 test mới, 3 test lõi đã kiểm là **đỏ được**; ⏳ chưa có lượt THẬT (xem "Còn nợ") |
@@ -60,6 +62,15 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
   hợp VS Code, không phải cửa sổ Terminal.app ⟹ "tắt hẳn" là câu đúng).
   Nó là thủ phạm của **cả hai** chuyện: mất quyền `~/Documents` từng lượt ~2
   phút, và lỗi A của cái loa (danh sách phiên hỏng ⟹ báo tắt nhầm).
+- **Cơ chế xoá tin Telegram chưa xoá được tin nào** — sổ `telegram:sent` chỉ ghi
+  từ 19:35 trở đi, nên tin cũ hơn thời điểm ấy **vĩnh viễn không xoá được**
+  (không có `message_id` để gọi, và Telegram chỉ cho bot xoá trong 48 giờ). Lượt
+  xoá thật đầu tiên rơi vào khoảng 36 giờ sau tin đầu tiên được ghi.
+- **Token Telegram mới chưa tới chỗ hub đọc** (đo 2026-08-12 19:30): hub nạp bí
+  mật từ HAI tệp (`config.rs:594`), mà tệp đầu sửa lần cuối **06/08**, tệp thứ
+  hai **10/08 11:43**, và không tệp môi trường nào dưới `~/Documents/projects`
+  đổi sau 15:30 hôm nay. Bot mới còn phải được bấm `/start` một lần thì mới nhắn
+  cho chủ máy được.
 - **Hai bản vá của cái loa chưa có lượt chạy THẬT** (xem UC "Hai lỗi của cái
   loa"): lỗi A cần một lần `claude agents` hỏng nữa — mà thủ phạm vừa bị đóng,
   nên có thể không tái diễn; lỗi B cần một phiên tắt trong lúc phiên khác giữ

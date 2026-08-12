@@ -112,6 +112,9 @@ pub fn tell(cfg: &Config, text: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let v: Value = r.json().unwrap_or_else(|_| json!({}));
     if v.get("ok").and_then(Value::as_bool) == Some(true) {
+        // Nhặt `message_id` NGAY: đây là lần duy nhất nó tồn tại, và không có
+        // nó thì tin này không bao giờ xoá được (xem `telegram::remember_sent`).
+        crate::telegram::remember_sent(cfg, &v);
         Ok(())
     } else {
         Err(v

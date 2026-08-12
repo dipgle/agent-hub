@@ -359,3 +359,60 @@ fn choice_buttons_still_answer_the_right_session() {
         Some(format!("/key {SID} 3").as_str())
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TỰ XOÁ TIN CŨ — Hà 2026-08-12: *"đã có cơ chế tự xóa tin nhắn cũ hơn 1.5 ngày
+// chưa"*. Chưa có; đây là nó.
+//
+// Ràng buộc THẬT, không phải lựa chọn của hub: Telegram chỉ cho bot xoá tin của
+// chính nó trong **48 giờ**. Quá đó là vĩnh viễn không xoá được — nên tin quá
+// hạn phải bị bỏ khỏi sổ kèm log, chứ không nằm lại bắt hub thử mãi một việc
+// không bao giờ xong.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const H: i64 = 3600;
+/// Đồng hồ giả riêng cho nhóm test này.
+const T0: i64 = 1_800_000_000;
+
+#[test]
+fn a_message_younger_than_the_limit_is_left_alone() {
+    let (due, gone) = hub::telegram::due_for_delete(&[(1, T0 - 35 * H)], T0, 36);
+    assert!(due.is_empty(), "35 giờ mà đã đòi xoá: {due:?}");
+    assert!(gone.is_empty());
+}
+
+#[test]
+fn a_message_past_the_limit_is_deleted() {
+    let (due, gone) = hub::telegram::due_for_delete(&[(7, T0 - 37 * H)], T0, 36);
+    assert_eq!(due, vec![7]);
+    assert!(gone.is_empty());
+}
+
+/// Quá 48 giờ: KHÔNG gọi Telegram nữa, chỉ bỏ khỏi sổ.
+#[test]
+fn a_message_past_telegrams_own_window_is_dropped_not_retried() {
+    let (due, gone) = hub::telegram::due_for_delete(&[(9, T0 - 49 * H)], T0, 36);
+    assert!(due.is_empty(), "gọi xoá một tin Telegram không cho xoá: {due:?}");
+    assert_eq!(gone, vec![9], "phải bỏ khỏi sổ, đừng giữ lại thử mãi");
+}
+
+/// `0` = tắt hẳn, và tắt phải là tắt: không đụng tin nào.
+#[test]
+fn zero_hours_turns_the_whole_thing_off() {
+    let list = [(1, T0 - 100 * H), (2, T0 - 40 * H)];
+    let (due, gone) = hub::telegram::due_for_delete(&list, T0, 0);
+    assert!(due.is_empty() && gone.is_empty(), "{due:?} {gone:?}");
+}
+
+/// Ngưỡng mặc định phải nằm DƯỚI trần 48h một khoảng an toàn — đặt sát trần là
+/// tự dựng bẫy: hub ngủ một giấc là cả loạt tin rơi ra ngoài cửa.
+#[test]
+fn the_default_window_leaves_room_before_telegrams_hard_limit() {
+    let cfg = hub::config::Config::default();
+    let h = cfg.confirm.delete_after_hours as i64;
+    assert_eq!(h, 36, "mặc định phải đúng 1,5 ngày Hà đặt");
+    assert!(
+        h * H + 6 * H <= hub::telegram::TELEGRAM_DELETE_WINDOW_SEC,
+        "còn dưới 6 giờ dự phòng trước trần 48h"
+    );
+}

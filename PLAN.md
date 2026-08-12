@@ -30,6 +30,7 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S15 | Danh sách nói được **dự án** mỗi phiên đang làm (không lấy từ `cwd` — mọi phiên cùng `cwd`) | đo thật 2026-08-12: 4/4 phiên ra đúng `dwork · AI/hub · games · AI/tfl5`; bundle **v149**, ảnh 390px không cắt chữ |
 | S16 | **Cái loa thôi kêu oan**: phiên sống chớp nhoáng (phép dò hạn mức của chính hub) chết đi thì im | chạy thật: **26** dòng `session_end_muted` (15s · 27s · 114s) và **0** tin "đã tắt" kể từ 11:03, so với **20 tin trong 4 tiếng** trước đó |
 | S17 | Phiên **dừng lại HỎI** thì câu hỏi + từng lựa chọn lên điện thoại (đọc từ nhật ký, không rình trên màn) | ⚠ mới **chạy thử trên dữ liệu thật** của `projects-11` (dựng lại lúc câu hỏi còn treo → ra đúng tin + 3 lựa chọn); **chưa** có lượt gửi Telegram thật |
+| S18 | Tin báo mang **thông tin chốt** của lượt cuối, không mang câu dẫn nhập | chạy thật 2026-08-12 16:26 trên **4 phiên đang sống**: phiên trước đây mang `[dùng Read]`/`[dùng Bash]` nay mang một câu có nghĩa; `projects-71` (báo cáo 3151 byte) ra đủ *kết luận → bằng chứng → ⋯ → đề xuất → câu chốt* + `… (còn N dòng)`. ⚠ **chưa** có lượt gửi Telegram thật (từ lúc cài chưa phiên nào chuyển trạng thái) |
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
 
@@ -45,7 +46,15 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-**Rỗng** (2026-08-10). Mục cuối — bốn bảng hộp thư chết — đã dọn bằng bước nâng
+- **Chưa quan sát được một tin Telegram THẬT mang thông tin chốt** (S18) và một
+  tin THẬT của phiên dừng lại hỏi (S17). Cả hai đòi một phiên thật chuyển trạng
+  thái sau lúc cài 16:30 — không dựng giả được mà vẫn gọi là nghiệm thu.
+- **Phiên `projects-71` (pid 5001) tự cập nhật `claude` mỗi 30 phút** ⟹ ghi đè
+  binary mọi phiên đang chạy ⟹ mất quyền `~/Documents` từng lượt ~2 phút. Bắt
+  được cả cây tiến trình lúc 16:24:08. Cách chữa là **đóng phiên ấy** (nó mở từ
+  10/08 nên không đọc `DISABLE_AUTOUPDATER` thêm ngày 12/08) — chờ Hà chốt.
+
+Trước đó **rỗng** (2026-08-10). Mục cuối — bốn bảng hộp thư chết — đã dọn bằng bước nâng
 cấp lược đồ 4; xem "Đã trả xong". Món nào mới phát sinh thì ghi vào đây, đừng để
 danh sách này có sẵn vài dòng thường trực: một sổ nợ không bao giờ rỗng thì thôi
 là sổ việc, thành cái nền để biện minh.

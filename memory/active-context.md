@@ -1,5 +1,78 @@
 # active context — hub
 
+## 🔔 2026-08-12 (chiều) — cái chuông nói được CHUYỆN GÌ, và hai phiên tranh nhau một cây mã
+
+Hà: *"khi phiên dừng chờ thì cần hiện các thông tin chốt quan trọng để đọc trên
+tele"*. Chuông cũ báo đúng là **có** chuyện mà không nói được **chuyện gì** — nó
+mang 240 ký tự đầu của lượt cuối, và 240 ký tự đầu của một báo cáo là câu dẫn
+nhập, tức đúng phần không quyết được gì.
+
+### ⚠ Mở đầu bằng một chuyện về kỷ luật, không phải về mã
+
+Nhận việc thì trong cây có sẵn một bản `key_points` chưa test — **của phiên
+khác đang chạy song song** (`37e59209`, cùng cwd `AI/hub`). Đo được, không đoán:
+`sessions.rs` đổi nội dung **hai lần trong lúc tôi đang làm** (12:37:29 thêm
+`last_prose`, 12:43:04 mất lại). Tôi dừng tay, sao lưu patch ra ngoài cây, và
+hỏi Hà ai giữ cây mã — anh đóng phiên kia. 📌 *Hai phiên một cây mã thì lần ghi
+sau đè lần ghi trước, và cả hai bên đều tưởng mình đang tiến.*
+
+### Ba con bug, cả ba chỉ lộ ra khi ĐỌC BẢN THẬT
+
+Chạy `key_points` trên 3 báo cáo thật trong ngày (`dwork` · `hub` · `projects-71`)
+rồi **nhìn bằng mắt**. Đọc mã thì cả ba đều "hợp lý":
+
+| Bệnh | Vì sao chỉ bản thật mới lộ |
+|---|---|
+| Một đoạn văn **480 ký tự** lọt lưới (có chữ đậm) ăn sạch trần 700 | thứ bị đẩy ra là *"Hai đường đi tiếp, anh chọn: 1… 2…"* — phần DUY NHẤT đòi người đọc quyết. Nay mỗi dòng tối đa 180 |
+| Báo cáo mở bằng kết luận, **đóng bằng câu hỏi** | lấy tuần tự từ trên xuống thì phần đóng luôn là phần rơi. Nay 3 dòng cuối đặt chỗ TRƯỚC, và **dòng cuối bản gốc luôn vào** — cả ba báo cáo thật đều đóng bằng văn trơn không dấu nhấn |
+| `last_say` đọc **mọi** lượt hội thoại | nên lượt cuối thường là `[dùng Bash]` · `[Request interrupted…]` · `<command-name>/usage</command-name>`. Ca đắt nhất là ca chính nó sinh ra để phục vụ: phiên **đang HỎI** có lượt cuối là `AskUserQuestion` thuần (đo `a5f06b76…` bản ghi **328**) ⟹ tin rỗng nghĩa đúng lúc cần nhất |
+
+### 🔴 Và con bug thứ tư, chỉ CHẠY THẬT mới thấy: hai đầu đúng, nối lại thì sai
+
+Dựng đúng câu hub sẽ gửi cho 4 phiên đang sống. `key_points` giữ dòng cuối rất
+tử tế — nhưng `last_say` đã cắt bản dài ở **2000 ký tự trước đó**, nên "dòng
+cuối" nó giữ chỉ là **chỗ bị chặt giữa câu** (`projects-71`, báo cáo 3151 byte).
+📌 *Một cái trần đặt sai chỗ đọc lên y hệt một tính năng chạy đúng.* Nay
+`SAY_MAX = 12_000`, và chỗ quyết cái gì đáng giữ chỉ có MỘT: `key_points`.
+
+### Nghiệm thu ĐÃ CHẠY THẬT
+
+`cargo test` **159** · clippy **0** · `install.sh` exit 0, daemon pid 35654
+`kind: cert`, **0 dòng error** · 14 test mới, **mỗi test đã kiểm là ĐỎ ĐƯỢC**
+(dán lại bản cũ ⟹ 7/8 đỏ; hạ `SAY_MAX` về 2000 ⟹ test chuỗi đỏ). Trên 4 phiên
+đang sống: mọi phiên trước đây mang `[dùng Read]` nay mang một câu có nghĩa.
+
+⚠ **CHƯA có tin Telegram thật** mang thông tin chốt — từ lúc cài chưa phiên nào
+chuyển trạng thái. Ghi đúng như vậy, đừng đọc thành "đã gửi".
+
+### 🎯 Lỗi quyền `~/Documents`: có thủ phạm, gọi được tên
+
+Bẫy chạy nền chộp đúng lúc **16:24:08**, cả cây tiến trình:
+
+```
+npm install @anthropic-ai/claude-code@2.1.228   pid 29716
+  ← claude "terminal bị treo làm thế nào"       pid 5001   ← phiên 2 NGÀY trong VS Code
+    ← /bin/zsh -il ← VS Code Code Helper ← Visual Studio Code
+```
+
+Chính **phiên cũ tự cập nhật**: nó chạy bản 2.1.227 (inode `64955601`, 279 MB)
+nên 30 phút một lần tự đi cài 2.1.228, **ghi đè tệp mà mọi phiên khác đang thực
+thi**. Đo ba inode cùng lúc là ra hết: đĩa `67663719` · phiên tôi `67644650` ·
+phiên cũ `64955601`. macOS không khoá tệp đang chạy (npm đổi tên đè lên đường
+dẫn, tiến trình giữ inode cũ) ⟹ update thành công **trong lúc đang dùng**; còn
+TCC cấp quyền theo **danh tính mã tại đường dẫn**, nên tới lúc hết đệm thì không
+khớp ⟹ deny, mà platform binary thì macOS **từ chối cả việc hỏi**. Lượt 16:09
+mất **130 giây** rồi tự về.
+
+`DISABLE_AUTOUPDATER` Hà thêm vào `~/.claude/settings.json` lúc 12:24 **không
+cứu được**: phiên kia mở từ **10/08 08:32**, biến môi trường chỉ đọc lúc mở
+phiên. ⟹ Đóng pid 5001 là hết cả hai chuyện (và cũng hết câu *"máy 1 phiên mà
+tele báo 2"* — phiên thứ hai chính là nó, sống trong terminal tích hợp VS Code,
+tty `ttys008`, thứ Terminal.app không giữ nên hub **không gõ vào được**).
+⏳ **Chưa làm:** chưa kill — chờ Hà chốt.
+
+---
+
 ## 📱 2026-08-12 (sáng) — điện thoại thành chỗ LÀM VIỆC, và bốn con bug im lặng
 
 Buổi sáng đi theo đúng nhịp Hà gõ trên Telegram: mỗi câu của anh là một phép đo,

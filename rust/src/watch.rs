@@ -590,13 +590,14 @@ pub fn changes(
     // (plist `WorkingDirectory`), và tiến trình con thừa hưởng — không phiên
     // nào của người lại nằm ở đấy. Chỉ IM cái chuông; danh sách phiên vẫn liệt
     // kê đủ, vì giấu khỏi màn là một quyết định khác, chưa ai yêu cầu.
-    let now: Vec<&LiveSession> = now
-        .iter()
-        .filter(|s| !crate::sessions::is_hub_own_probe(s))
-        .collect();
-    let now = now.as_slice();
-
+    //
+    // 📌 Cửa đặt ở chỗ PHÁT NGÔN, không ở đầu vào. Lọc ngay từ `now` thì gọn
+    // hơn, nhưng nó làm hub im lặng bỏ qua cả một lớp phiên — không sổ, không
+    // log, không cách nào kiểm là luật có đang chạy hay không; đúng hình dạng
+    // mà tệp này gọi tên ở khắp nơi. Vào sổ như mọi phiên khác, và mỗi lần bỏ
+    // qua một cái chết thì NÓI RA (`session_end_muted`).
     for s in now {
+        let hub_own = crate::sessions::is_hub_own_probe(s);
         let state = state_of(s);
         let before = prev.get(&s.session_id);
         let was_working = before.is_some_and(|b| b.s.starts_with(WORKING));
@@ -638,6 +639,11 @@ pub fn changes(
             _ => {}
         }
         if first_run {
+            continue;
+        }
+        // Máy móc của chính hub: vào sổ như mọi phiên, nhưng không nói gì cả —
+        // không "vừa xong", không "đang hỏi", không "đã tắt".
+        if hub_own {
             continue;
         }
         // BẮT ĐẦU HỎI — nói một lần, ngay lúc câu hỏi xuất hiện.
@@ -689,6 +695,11 @@ pub fn changes(
             // được báo tử hàng loạt — một luật mới sinh ra để bớt tin lại đẻ ra
             // một tràng tin.
             if crate::sessions::is_hub_runtime_cwd(&mark.c) {
+                logging::info(
+                    "session_end_muted",
+                    json!({ "session": id, "lived_sec": epoch_sec - mark.f,
+                            "why": "phép dò hạn mức của chính hub — cái chết của nó không phải tin" }),
+                );
                 continue;
             }
             // Cửa MÙ — xem `Mark::a`. Tài khoản không liệt kê được phiên thì

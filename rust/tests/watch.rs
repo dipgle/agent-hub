@@ -95,10 +95,9 @@ fn a_running_hub_probe_never_reports_finishing_either() {
     s.cwd = hub_runtime_cwd();
     let (events, next) = changes(&prev, &[s], NOW, &[]);
     assert!(events.is_empty(), "chuông kêu cho phép dò của hub: {events:?}");
-    assert!(
-        !next.contains_key("probe"),
-        "phép dò của hub không được vào sổ"
-    );
+    // Vẫn VÀO SỔ: cửa đặt ở chỗ phát ngôn, không ở đầu vào — nhờ vậy lúc nó
+    // chết còn có một dòng `session_end_muted` để kiểm luật có đang chạy không.
+    assert!(next.contains_key("probe"), "sổ phải nhớ nó như mọi phiên khác");
 }
 
 /// …và một phiên THẬT sống lâu thì vẫn phải báo — luật trên không được siết lan.

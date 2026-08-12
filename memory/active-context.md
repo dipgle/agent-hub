@@ -69,8 +69,36 @@ chạy thật**, chỉ có điều nó chạy ĐÚNG mã và cho ra một câu S
 là `??`. *Một bản vá chạy đúng lần đầu tiên vẫn có thể nói sai — cái nó vá là
 lối đi, không phải câu nói.*
 
-⏳ Đang chờ đủ một chu kỳ dò (5 phút) sau lúc cài để xác nhận trên máy: từ 16:17
-không được có thêm tin `⏹ hub-xx đã tắt` nào.
+### 📌 Và một chỗ chính tôi làm chưa đúng chuẩn của dự án này
+
+Bản đầu lọc phép dò ngay ở **đầu vào** (`now`) — gọn hơn, nhưng nó làm hub **im
+lặng bỏ qua cả một lớp phiên**: không sổ, không log, không cách nào biết luật có
+đang chạy hay không. Đúng hình dạng mà tệp `watch.rs` gọi tên ở khắp nơi, và tôi
+chỉ nhận ra khi đi tìm bằng chứng trên máy: *im lặng vì luật chạy đúng* và *im
+lặng vì luật không chạy* đọc lên y hệt nhau.
+
+Nay cửa đặt ở **chỗ phát ngôn**: phép dò vào sổ như mọi phiên, nhưng không nói
+gì; và mỗi lần bỏ qua một cái chết thì ghi `session_end_muted why="phép dò hạn
+mức của chính hub"`. Có dòng log ấy mới **kiểm được**.
+
+### 🔴 Đo được trên đường đi: chính tôi làm hub mù
+
+`claude agents --json` timeout **31s · 62s · 77s · 96s** và một vòng ảnh chụp
+**150 giây** — trong khi máy rảnh thì lệnh ấy chạy **0,3 giây** (đo 2 lượt). Thủ
+phạm là tải của chính phiên này: `cargo test`/`clippy`/`install.sh` bản release +
+Playwright chạy song song với vòng poll. Hệ quả thật, không phải lý thuyết: hub
+báo `blind: [acc1]` rồi giữ sổ cho **hai phiên đang sống** (`session_end_unknown`
+16:20:28 và 16:21:54) — tức cửa mù dựng hôm nay đã đỡ đúng một cú.
+
+⟹ Hai điều rút ra: (1) **cửa mù đang làm đúng việc**, và nó đỡ cho một nguyên
+nhân không ai ngờ tới; (2) khi nghiệm thu bằng Playwright/build trên chính máy
+này thì đừng đọc số đo của hub trong cùng lúc ấy — nó đang đo một cái máy đang
+bị mình đè.
+
+⚠ Hai kiểm tra đỏ của `fe-board-uc` (29/31: hàng tài khoản không có số hạn mức)
+là **hệ quả của đúng chuyện trên** — `/usage` timeout tới trần 60 giây ⟹
+`usage_probe_unparsed` ⟹ không có số để hiện. Không phải bug của bảng; nói đúng
+như vậy, và cần một lượt chạy lại lúc máy rảnh mới kết luận được.
 
 ---
 

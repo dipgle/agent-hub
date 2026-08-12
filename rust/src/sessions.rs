@@ -1016,6 +1016,15 @@ pub fn idle_seconds(last_activity: Option<&str>) -> Option<i64> {
 /// ngưỡng này: `pending_subagents > 0` đã trả lời chắc chắn hơn (`is_working`).
 pub const IDLE_AFTER_SEC: i64 = 180;
 
+/// Nhật ký vừa lớn lên trong ngần này giây ⟹ phiên ĐANG viết, không cãi.
+///
+/// Khác hẳn `IDLE_AFTER_SEC` (180s, là ngưỡng để tuyên bố ĐÃ XONG — cố ý rộng
+/// để không nói sai). Cửa này hẹp và đi hướng ngược lại: nó chỉ khẳng định
+/// "đang chạy" khi có bằng chứng vừa mới xảy ra. 15 giây đủ để phủ một quãng
+/// nghỉ giữa hai lượt ghi của `claude` (nghĩ, gọi API) mà chưa đủ để giữ nhãn
+/// "đang chạy" trên một phiên đã đứng lại.
+pub const WRITING_NOW_SEC: i64 = 15;
+
 /// Phiên có đang làm việc không — ba nguồn, không nguồn nào cần đọc màn.
 ///
 /// Thứ tự có ý nghĩa:
@@ -1029,6 +1038,21 @@ pub const IDLE_AFTER_SEC: i64 = 180;
 ///    thái. Nó trễ tới `IDLE_AFTER_SEC`, nên càng ít phải dùng càng tốt.
 pub fn is_working(status: Option<&str>, pending_subagents: usize, idle_sec: Option<i64>) -> bool {
     if pending_subagents > 0 {
+        return true;
+    }
+    // 🔴 Nhật ký ĐANG được ghi thì phiên đang chạy — kể cả khi CLI khai `idle`.
+    //
+    // Hà 2026-08-12: *"trạng thái dừng, đang chạy ở danh sách phiên hình như
+    // không đúng"*. Đo đúng lúc ấy: `hanguyen-8e` — `status: "idle"` từ
+    // `claude agents`, mà **nhật ký của nó vừa được ghi 1 giây trước**. Hai
+    // nguồn nói ngược nhau, và nguồn nào đúng thì không phải chuyện ý kiến:
+    // một tệp vừa lớn lên là bằng chứng trực tiếp của việc đang diễn ra, còn
+    // `status` là một trường CLI báo cáo lại — nó trễ, và ở phiên terminal nó
+    // trễ hẳn một lượt.
+    //
+    // Đặt cửa này TRƯỚC `status` chứ không sau: sau thì `idle` đã `return false`
+    // và không bao giờ tới lượt nhật ký nói.
+    if idle_sec.is_some_and(|s| s < WRITING_NOW_SEC) {
         return true;
     }
     match status {

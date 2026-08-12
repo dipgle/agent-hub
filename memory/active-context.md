@@ -1,5 +1,71 @@
 # active context — hub
 
+## ⌨ 2026-08-12 (khuya) — bốn bản vá cú Enter, và cả bốn sai cùng một kiểu
+
+Hà làm việc thật qua Telegram cả tối, và cái Enter hỏng đi hỏng lại. Bốn lượt
+vá của tôi, mỗi lượt một cửa mới, **và cả bốn đều treo một QUYẾT ĐỊNH vào một
+tấm ảnh chụp màn hình** — trên một cái máy đang swap 12/13 GB, tấm ảnh ấy luôn
+tới muộn hơn sự thật.
+
+| Cửa tôi dựng | Đo ra nó sai ở đâu |
+|---|---|
+| "chỉ Enter khi **thấy chữ còn trong ô**" | 17:39 soi **18 giây** không thấy chữ ⟹ không Enter; `/shot` 20 giây sau: chữ nằm rõ trong ô |
+| "phiên **đang chạy** thì thôi, chữ đã vào hàng chờ" | 18:04 hub báo *"nằm ở HÀNG CHỜ"* mà chữ đứng im — dòng `queued message` trên màn là của **tin CŨ** |
+| "gõ xong Enter một phát sau 400ms" | *"gửi xong im lặng mãi, gửi lần nữa lại gộp thành 1 tin rồi enter"* — Enter bị **gộp ngược vào cú dán** |
+| "bấm lại tới khi ô trống" (có soi) | Hà: *"không hiểu soi kiểu gì… việc gì phải soi"* |
+
+**Hà chốt, và anh đúng:** *"nhận lệnh từ tele thì làm luôn 2 việc là nhập nội
+dung và bấm enter"*. Nay đúng thế: không soi trước, gõ, rồi bấm Enter **hai
+lần** (400ms + 1000ms). Hai lần vì `do script` đẩy chữ + xuống dòng trong CÙNG
+một lượt ghi nên TUI đọc như cú DÁN và nuốt dấu xuống dòng — Enter thứ hai vào ô
+TRỐNG thì `claude` không làm gì, nên lặp lại là an toàn theo nghĩa idempotent.
+
+📌 Bài học đắt hơn cả bản vá: **tôi cứ thêm một cửa nữa mỗi lần hỏng, thay vì
+hỏi tại sao cần cửa nào**. Cửa duy nhất đáng có là câu hỏi TRƯỚC KHI gõ (màn có
+hộp chọn không) — và chính Hà là người bảo bỏ nốt nó, chấp nhận đánh đổi. Ghi
+rõ: **không soi trước ⟹ nếu đúng lúc ấy màn đang có hộp chọn thì Enter là CHỐT**.
+Đường an toàn khi biết có hộp chọn vẫn là `/key <số>`.
+
+### Câu trả lời cũng phải gọn (Hà: *"chỉ cần xác nhận… nếu lỗi mới cần chi tiết"*)
+
+Ack cũ ba dòng, một nửa là ruột của hub (bao nhiêu ký tự, mấy cú Enter, màn nói
+gì) — và tệ nhất là nó **tự vu cho mình một lỗi không có**: `⚠ sau 3s màn KHÔNG
+thấy chữ ấy` bắn ra trong khi tin đã vào hàng chờ. *Một cảnh báo sai dạy người
+ta bỏ qua cảnh báo.* Nay: `✓ đã gửi · [amm] hanguyen-8e` hoặc `✓ vào hàng chờ ·
+…`, chi tiết chỉ khi lỗi; ruột về đúng chỗ của nó là log.
+
+### 🔴 Và một câu hỏi của Hà lôi ra bug thứ năm: trạng thái danh sách sai
+
+*"trạng thái dừng, đang chạy ở danh sách phiên hình như không đúng"*. Đo ngay:
+`hanguyen-8e` — `claude agents` khai **`status: idle`** trong khi **nhật ký của
+nó vừa được ghi 1 giây trước**. `is_working` tin thẳng `status` (`Some("idle")
+=> return false`) nên không bao giờ tới lượt nhật ký nói.
+
+Vá: **nhật ký vừa lớn lên trong 15 giây ⟹ đang chạy**, đặt TRƯỚC `status` (đặt
+sau thì `idle` đã `return false`). Một tệp vừa lớn lên là bằng chứng trực tiếp;
+`status` là một trường được báo cáo lại, và ở phiên terminal nó trễ một lượt.
+Đo lại sau khi cài: 26s/1s → `▶ đang chạy`; 768s/2496s → `⏸ đứng chờ`. Test mới
+**đỏ được** (bỏ cửa mới ⟹ đỏ).
+
+### Kèm trong cùng loạt
+
+- **`/new` mở phiên ở `--permission-mode auto`** (Hà: *"mở được phiên rồi nhưng
+  chưa chuyển tự động sang auto mode on"*). Giá trị lấy từ `claude --help` trên
+  chính máy này. Rào KHÔNG nới: `auto` bỏ bước HỎI, `--disallowedTools` bỏ bước
+  LÀM — test ghim `git push`/`sudo`/`rm` vẫn nằm trong lệnh.
+- **`/new` thôi chờ `claude agents`**: ghép id bằng TÊN TỆP nhật ký. Trước đó đo
+  được `command_done New ms=64725` mà cửa sổ mở ở giây thứ 7 — 57 giây còn lại
+  là chờ, và cái giá thật là Hà tưởng hỏng nên gõ lại ⟹ **hai phiên mailler**.
+- **Tên phiên mang dự án**: `[amm] hanguyen-8e` (Hà: *"projects-… nên thay thành
+  tên dự án"*). Đã chạy thật trên tin 18:03:33.
+- **Lỗi API thôi bị đọc thành "đang chờ bạn"** (`Idle::Failed`), mẫu lấy từ nhật
+  ký thật trên máy.
+
+⏳ **Chưa quan sát trên tin thật:** nhãn `[dự án]` trong tin tự phát, `/new` với
+auto mode, và tin lỗi API — cần đúng tình huống xảy ra.
+
+---
+
 ## 🐌 2026-08-12 (khuya) — máy đang swap 12/13 GB, và mọi câu hỏi tối nay quy về đó
 
 Hà, bốn câu liên tiếp: *"chát từ tele toàn báo không thấy phiên"* · *"tất cả các

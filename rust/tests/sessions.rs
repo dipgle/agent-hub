@@ -1102,3 +1102,28 @@ fn a_session_name_says_which_project_it_is_working_on() {
     // Tên đã tự mang tên dự án rồi thì đừng lặp lại: `[hub] hub-67` thừa.
     assert_eq!(d("hub-67", "AI/hub"), "hub-67");
 }
+
+/// Nhật ký đang được ghi thì phiên ĐANG CHẠY — kể cả khi CLI khai `idle`.
+///
+/// 🔴 Hà 2026-08-12: *"trạng thái dừng, đang chạy ở danh sách phiên hình như
+/// không đúng"*. Đo đúng lúc ấy: `hanguyen-8e` có `status: "idle"` từ
+/// `claude agents` trong khi **nhật ký vừa được ghi 1 giây trước**. Một tệp vừa
+/// lớn lên là bằng chứng trực tiếp; `status` là một trường được báo cáo lại, và
+/// ở phiên terminal nó trễ hẳn một lượt.
+#[test]
+fn a_transcript_being_written_beats_a_stale_idle_flag() {
+    let w = hub::sessions::is_working;
+    // Ca thật đo được: CLI nói idle, nhật ký vừa ghi 1 giây trước.
+    assert!(w(Some("idle"), 0, Some(1)), "tin `idle` trong khi nhật ký đang lớn lên");
+    assert!(w(Some("done"), 0, Some(3)));
+    // …nhưng im lâu rồi thì `idle` vẫn là `idle` — cửa mới không được siết lan.
+    assert!(!w(Some("idle"), 0, Some(60)));
+    assert!(!w(Some("idle"), 0, None));
+    // CLI nói busy thì vẫn tin thẳng.
+    assert!(w(Some("busy"), 0, Some(600)));
+    // Subagent nền vẫn là bằng chứng mạnh nhất.
+    assert!(w(Some("idle"), 2, Some(9_999)));
+    // Không có status (phiên terminal cũ): rơi về lưới đỡ mtime.
+    assert!(w(None, 0, Some(60)));
+    assert!(!w(None, 0, Some(9_999)));
+}

@@ -328,3 +328,58 @@ fn an_empty_task_opens_a_plain_session_with_no_positional_argument() {
     let d = with.find("--disallowedTools").expect("thiếu rào");
     assert!(p < d, "đề bài phải đứng trước --disallowedTools: {with}");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HỎI ĐƯỢC MỘT PHIÊN VỪA TẮT
+//
+// 🔴 Hà 2026-08-12 16:37 gõ `/ask` và nhận `⚠ không thấy phiên … đang chạy nữa`
+// — con trỏ đang theo trỏ vào một phiên vừa tắt lúc 16:08. Ngồi trước máy thì
+// câu ấy vẫn hỏi được (`claude --resume <id>` chạy trên NHẬT KÝ, không cần tiến
+// trình), nên phía điện thoại không làm được là một KHOẢNG TRỐNG — đúng phép
+// thử "hub là cầu nối" trong CLAUDE.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const T_NOW: i64 = 1_800_000_000;
+
+fn ended(id: &str, at: i64) -> (hub::sessions::LiveSession, i64) {
+    (
+        hub::sessions::LiveSession {
+            session_id: id.to_string(),
+            name: "projects-d8".into(),
+            account: "acc1".into(),
+            cwd: "/Users/hanguyen/Documents/projects".into(),
+            ..Default::default()
+        },
+        at,
+    )
+}
+
+#[test]
+fn a_session_that_just_ended_is_still_askable() {
+    let book = [ended("69a38c64", T_NOW - 600)];
+    let got = hub::pipeline::pick_ended(&book, "69a38c64", T_NOW).expect("mất phiên vừa tắt");
+    // Ba thứ `--resume` cần, và cả ba chỉ còn ở cuốn sổ: id, tài khoản, thư mục.
+    assert_eq!(got.account, "acc1");
+    assert!(!got.cwd.is_empty(), "thiếu cwd thì không tìm ra nhật ký");
+}
+
+/// …nhưng không phải phiên của tuần trước: con trỏ bị bỏ quên thì `/ask` sẽ âm
+/// thầm chạy trên một cuộc hội thoại chẳng liên quan, và vẫn tính hạn mức.
+#[test]
+fn an_old_ended_session_is_not_resurrected() {
+    let book = [ended("cu-lam-roi", T_NOW - hub::pipeline::ENDED_KEEP_SEC - 1)];
+    assert!(hub::pipeline::pick_ended(&book, "cu-lam-roi", T_NOW).is_none());
+}
+
+#[test]
+fn an_unknown_id_stays_unknown() {
+    let book = [ended("69a38c64", T_NOW - 60)];
+    assert!(hub::pipeline::pick_ended(&book, "khong-co", T_NOW).is_none());
+}
+
+/// Sổ giữ ĐÚNG 24 giờ — con số này là lời hứa in ra màn ("giữ 24 giờ"), nên nó
+/// không được trôi mà câu chữ đứng yên.
+#[test]
+fn the_promise_on_screen_matches_the_constant() {
+    assert_eq!(hub::pipeline::ENDED_KEEP_SEC, 24 * 3600);
+}

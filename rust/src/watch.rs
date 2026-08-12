@@ -149,6 +149,16 @@ pub struct Mark {
     /// theo — không còn chỗ nào hỏi "phiên này thuộc tài khoản nào" nữa.
     #[serde(default)]
     pub a: String,
+    /// Thư mục làm việc — nhớ TỪ TRƯỚC vì hỏi bên lề một phiên ĐÃ TẮT vẫn cần
+    /// nó: `--resume` tìm nhật ký theo `cwd` + id (`sessions::transcript_path`).
+    ///
+    /// Hà 2026-08-12 gõ `/ask` lúc 16:37 và nhận `⚠ không thấy phiên … đang
+    /// chạy nữa` — con trỏ đang trỏ vào một phiên vừa tắt. Ngồi trước máy thì
+    /// câu ấy vẫn hỏi được (`claude --resume <id>`), nên theo đúng phép thử
+    /// CẦU NỐI, phía điện thoại không làm được là một KHOẢNG TRỐNG. Muốn vá thì
+    /// lúc phiên biến mất phải còn giữ đủ dữ kiện để gọi lại nó.
+    #[serde(default)]
+    pub c: String,
 }
 
 /// Một chuyện vừa xảy ra, đáng để làm phiền chủ máy.
@@ -602,6 +612,7 @@ pub fn changes(
                         n: s.name.clone(),
                         d: s.folder.clone(),
                         a: s.account.clone(),
+                        c: s.cwd.clone(),
                     },
                 );
             }

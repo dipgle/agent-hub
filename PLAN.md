@@ -31,6 +31,8 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S16 | **Cái loa thôi kêu oan**: phiên sống chớp nhoáng (phép dò hạn mức của chính hub) chết đi thì im | chạy thật: **26** dòng `session_end_muted` (15s · 27s · 114s) và **0** tin "đã tắt" kể từ 11:03, so với **20 tin trong 4 tiếng** trước đó |
 | S17 | Phiên **dừng lại HỎI** thì câu hỏi + từng lựa chọn lên điện thoại (đọc từ nhật ký, không rình trên màn) | ⚠ mới **chạy thử trên dữ liệu thật** của `projects-11` (dựng lại lúc câu hỏi còn treo → ra đúng tin + 3 lựa chọn); **chưa** có lượt gửi Telegram thật |
 | S21 | **Mọi phiên terminal dừng chờ đều báo**, và tin của phiên khác phiên đang theo mang **nút vào phiên** | luật im 08-10 gỡ theo chỉ đạo 2026-08-12 (*"mọi phiên terminal đều báo"*); 3 test nút, 2 test đã kiểm là **đỏ được**; cài lúc 18:14, daemon pid 23685 `cert` |
+| S24 | **Hỏi được một phiên VỪA TẮT** — `/ask` · `/handover` rơi về sổ phiên tắt trong 24 giờ | chạy thật 20:43:41: mở phiên qua phòng → gõ `/exit` qua `/type` → hub ghi sổ đủ ba thứ `--resume` cần (`acc3` · `cwd` · id). Ngõ cụt cũ thay bằng câu kèm danh sách phiên đang sống (đo, không tốn hạn mức) |
+| — | **Token sai thôi chết câm**: mọi câu từ chối của `getUpdates` đều log rồi lùi 30s, và hub khai đang cầm bot nào lúc mở kênh | chạy thật 20:23:29: `telegram_bot_identity {"username":"ai_angles_bot"}` |
 | S22 | Lệnh Telegram **chạy ngay khi bấm** (không đợi vòng), `/session` thôi chụp lại màn | đo trước khi vá: bấm 18:17:45 → chạy 18:18:11 → trả lời 18:18:27 (**42s**: 26s chờ vòng + 16s chụp màn); nay chạy ở luồng riêng, xếp hàng bằng `CMD_LOCK`; cài 18:29 |
 | S23 | **Tự xoá tin Telegram cũ hơn 36 giờ** | cài 19:35 (pid 62301). 6 test, 2 đã kiểm là **đỏ được**. ⏳ chưa có lượt xoá THẬT: sổ `telegram:sent` mới bắt đầu ghi, tin đầu tiên tới hạn sau ~36h |
 | S19 | **Xem ba tài khoản** từ phòng chat, và biết `/new` rơi vào tài khoản nào | `fe-accounts-uc` **12/12** trên bundle đã deploy (2026-08-12 17:28): `acc1 ⭐ mặc định · acc2 tuần 100% · acc3 tuần 5%`, 0 `$`, không tràn ngang ở 390px |
@@ -52,9 +54,13 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-- **Chưa quan sát được một tin Telegram THẬT mang thông tin chốt** (S18) và một
-  tin THẬT của phiên dừng lại hỏi (S17). Cả hai đòi một phiên thật chuyển trạng
-  thái sau lúc cài 16:30 — không dựng giả được mà vẫn gọi là nghiệm thu.
+- ~~Chưa quan sát được một tin Telegram THẬT mang thông tin chốt (S18)~~ →
+  **đã có, 18:17:13**: `⏸ projects-7c dừng, đang chờ bạn — sau 16 phút chạy` kèm
+  nguyên khối thông tin chốt (mở bằng kết luận, có dấu đứt `⋯`, và **ba dòng
+  cuối** — đúng thứ `key_points` đặt chỗ trước). Hà nhận được và bấm nút trên
+  chính tin ấy (`telegram_command_queued /session e27806c2` lúc 18:17:45).
+- **Còn nợ của S17**: tin THẬT của một phiên *dừng lại HỎI* vẫn chưa quan sát
+  được — cần đúng lúc một phiên đang treo câu hỏi mà hub nhìn vào (khe mù ~139s).
 - ~~**Phiên `projects-71` (pid 5001) tự cập nhật `claude` mỗi 30 phút**~~ →
   **đã đóng 2026-08-12 16:59** (Hà chốt). `kill 5001` xong: pid biến mất, không
   còn `npm install @anthropic-ai/claude-code` nào chạy, và hub báo đúng
@@ -62,6 +68,8 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
   hợp VS Code, không phải cửa sổ Terminal.app ⟹ "tắt hẳn" là câu đúng).
   Nó là thủ phạm của **cả hai** chuyện: mất quyền `~/Documents` từng lượt ~2
   phút, và lỗi A của cái loa (danh sách phiên hỏng ⟹ báo tắt nhầm).
+- **`/ask` trên một phiên ĐÃ TẮT chưa chạy thật** — nửa ghi sổ đã đo (20:43:41),
+  nửa còn lại tiêu hạn mức của chủ máy nên để chính anh bấm. Cơ chế đã cài.
 - **Cơ chế xoá tin Telegram chưa xoá được tin nào** — sổ `telegram:sent` chỉ ghi
   từ 19:35 trở đi, nên tin cũ hơn thời điểm ấy **vĩnh viễn không xoá được**
   (không có `message_id` để gọi, và Telegram chỉ cho bot xoá trong 48 giờ). Lượt

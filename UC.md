@@ -882,6 +882,46 @@ phiên kế tiếp dừng chờ.
 
 ---
 
+## UC-S24 · Hỏi được một phiên **vừa tắt**  ✅ nửa đo được 2026-08-12
+
+Hà 16:37 gõ `/ask` và nhận `⚠ không thấy phiên … đang chạy nữa` — con trỏ đang
+theo trỏ vào một phiên tắt lúc 16:08. Ngồi trước máy thì câu ấy vẫn hỏi được
+(`claude --resume <id>` chạy trên **nhật ký**, không cần tiến trình), nên theo
+đúng phép thử CẦU NỐI của dự án, phía điện thoại không làm được là một **khoảng
+trống**, không phải giới hạn kỹ thuật.
+
+Cùng họ với bài học đã ghi ở `STOPPED_KEY`: `claude agents` bỏ phiên khỏi danh
+sách sau vài giây, nên **gác theo danh sách đang sống là gác nhầm cửa**. Khác một
+chỗ: `STOPPED_KEY` chỉ nhớ phiên do hub dừng, còn `ENDED_KEY` nhớ **mọi** phiên
+vừa rời danh sách — thứ Hà hỏi là phiên anh tự đóng.
+
+Lúc phiên biến mất thì hàng của nó đi theo, nên ba dữ kiện `--resume` cần phải
+nằm sẵn trong cuốn sổ theo dõi: id, **tài khoản** (`Mark::a`) và **thư mục**
+(`Mark::c`, thêm hôm nay). Sổ giữ **24 giờ** — đủ cho "phiên vừa tắt lúc nãy", đủ
+ngắn để một con trỏ bị bỏ quên không âm thầm hỏi một phiên của tuần trước.
+
+**Chạy thật 2026-08-12 20:41–20:43**, đi trọn đường người dùng: mở phiên bằng
+`/new -a acc3 -s hub` trong phòng → gõ `/exit` vào nó bằng `/type` → hub nhận ra
+phiên tắt và ghi sổ:
+
+```text
+5e2a889a · projects-02 · acc=acc3 · cwd=/Users/hanguyen/Documents/projects · tắt lúc 20:43:41
+```
+
+Và ngõ cụt cũ đã thay (đo, **không tốn hạn mức**):
+
+```text
+⚠ không thấy phiên '00000000-111…' — nó không còn chạy và cũng không nằm trong
+sổ phiên vừa tắt (giữ 24 giờ).
+Đang sống: projects-7c (e27806c2) · projects-de (8ead6de1) · projects-d2 (0a6b2a40)
+```
+
+**Cơ chế:** ✅ · **Kịch bản:** ✅ 4 test, test cửa 24 giờ đã kiểm là **đỏ được** ·
+⏳ **Chưa có lượt `/ask` THẬT trên một phiên đã tắt**: lượt ấy tiêu hạn mức của
+chủ máy, mà luật 8 nói hub chỉ tiêu khi có ngón tay bấm. Để chính Hà bấm.
+
+---
+
 ## Đọc bảng này thế nào
 
 **Không UC nào có kịch bản tự động.** Xương sống là **UC-S02** — và đo theo chuẩn

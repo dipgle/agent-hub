@@ -363,6 +363,14 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             }
             _ => c.say(&idle, tail),
         };
+        // Phiên vừa rời danh sách: giữ lại đủ dữ kiện để CÒN HỎI ĐƯỢC về nó
+        // (xem `ENDED_KEY`). Ghi trước khi nói, vì sau lượt này cuốn sổ theo dõi
+        // đã bỏ nó rồi — không còn chỗ nào lấy `cwd` với tài khoản nữa.
+        if matches!(c, crate::watch::Change::Ended { .. }) {
+            if let Some(m) = prev.get(&id) {
+                remember_ended(db, &id, m, chrono::Utc::now().timestamp());
+            }
+        }
         logging::info("session_change", json!({ "text": text }));
         if let Err(e) = tfl5::send(&cfg.adapters.tfl5, "", None, &text) {
             logging::error("session_change_room_failed", json!({ "err": logging::err_chain(&e) }));
@@ -420,6 +428,85 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             }
         }
     }
+}
+
+/// Những phiên VỪA TẮT, giữ đủ lâu để còn hỏi được về chúng.
+///
+/// 🔴 Hà 2026-08-12 16:37 gõ `/ask` và nhận `⚠ không thấy phiên … đang chạy
+/// nữa` — con trỏ đang theo trỏ vào một phiên vừa tắt lúc 16:08. Ngồi trước máy
+/// thì câu ấy vẫn hỏi được (`claude --resume <id>` chạy trên NHẬT KÝ, không cần
+/// tiến trình), nên theo đúng phép thử CẦU NỐI trong `CLAUDE.md`, phía điện
+/// thoại không làm được là một **khoảng trống**, không phải một giới hạn.
+///
+/// Cùng khuôn với `STOPPED_KEY` — và cùng bài học: `claude agents` bỏ phiên khỏi
+/// danh sách trong vài giây, nên "gác theo danh sách đang sống" là gác nhầm cửa.
+/// Khác một chỗ: `STOPPED_KEY` chỉ nhớ phiên do CHÍNH hub dừng, còn sổ này nhớ
+/// mọi phiên vừa rời danh sách, vì thứ Hà hỏi là phiên anh tự đóng.
+pub const ENDED_KEY: &str = "ended:recent";
+
+/// Giữ bao lâu. Đủ dài cho "phiên vừa tắt lúc nãy", đủ ngắn để `/ask` không âm
+/// thầm chạy trên một phiên của tuần trước khi con trỏ bị bỏ quên.
+pub const ENDED_KEEP_SEC: i64 = 24 * 3600;
+
+/// Bao nhiêu phiên. Con trỏ chỉ trỏ được một phiên, nên vài dòng là đủ.
+const ENDED_KEEP_N: usize = 10;
+
+/// Chọn trong sổ ra phiên còn hỏi được — hàm THUẦN, kiểm không cần sổ thật.
+pub fn pick_ended(
+    list: &[(crate::sessions::LiveSession, i64)],
+    id: &str,
+    now: i64,
+) -> Option<crate::sessions::LiveSession> {
+    list.iter()
+        .find(|(s, at)| s.session_id == id && now - at <= ENDED_KEEP_SEC)
+        .map(|(s, _)| s.clone())
+}
+
+/// Ghi một phiên vừa tắt vào sổ, dựng từ chính cuốn sổ theo dõi.
+///
+/// Lúc phiên biến mất thì hàng của nó đi theo, nên mọi dữ kiện phải lấy từ
+/// `watch::Mark` — đó là lý do `Mark` nhớ cả `a` (tài khoản) lẫn `c` (thư mục):
+/// `--resume` cần đúng hai thứ ấy để tìm nhật ký và chạy bằng đúng tài khoản.
+fn remember_ended(db: &Db, id: &str, mark: &crate::watch::Mark, now: i64) {
+    let mut list: Vec<(crate::sessions::LiveSession, i64)> = db
+        .cursor_or_log(ENDED_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    list.retain(|(s, at)| s.session_id != id && now - at <= ENDED_KEEP_SEC);
+    let row = crate::sessions::LiveSession {
+        session_id: id.to_string(),
+        name: mark.n.clone(),
+        account: mark.a.clone(),
+        cwd: mark.c.clone(),
+        folder: mark.d.clone(),
+        kind: mark.k.clone(),
+        // KHÔNG mang tty/pid theo: cửa sổ ấy có thể đã thuộc về phiên khác
+        // (xem `sessions::window_taken_over`), và một `pid` của xác chết đọc lên
+        // y hệt một phiên đang sống.
+        ..Default::default()
+    };
+    list.push((row, now));
+    if list.len() > ENDED_KEEP_N {
+        let cut = list.len() - ENDED_KEEP_N;
+        list.drain(..cut);
+    }
+    match serde_json::to_string(&list) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(ENDED_KEY, &v) {
+                logging::error("ended_list_not_saved", json!({ "err": e.to_string() }));
+            }
+        }
+        Err(e) => logging::error("ended_list_not_encodable", json!({ "err": e.to_string() })),
+    }
+}
+
+/// Phiên vừa tắt còn hỏi được không — `None` nếu quá hạn hoặc chưa từng ghi.
+fn ended_session(db: &Db, id: &str) -> Option<crate::sessions::LiveSession> {
+    let list: Vec<(crate::sessions::LiveSession, i64)> = db
+        .cursor_or_log(ENDED_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    pick_ended(&list, id, chrono::Utc::now().timestamp())
 }
 
 /// Cursor holding the most recent handover, so the page can show it.
@@ -1214,10 +1301,19 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     want
                 };
                 let live = crate::sessions::snapshot(cfg);
-                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                // Đóng sổ một phiên VỪA TẮT cũng chạy được — bản bàn giao dựng
+                // từ nhật ký, không cần tiến trình (cùng lối với `/ask`).
+                let target = live
+                    .sessions
+                    .iter()
+                    .find(|s| s.session_id == want)
+                    .cloned()
+                    .or_else(|| ended_session(db, &want));
+                let ack = match target.as_ref() {
                     None => format!(
-                        "⚠ không thấy phiên '{}' đang chạy",
-                        crate::exec::truncate(&want, 40)
+                        "⚠ không thấy phiên '{}' đang chạy, và nó cũng không nằm trong sổ phiên \
+                         vừa tắt (giữ 24 giờ)",
+                        crate::exec::truncate(&want, 12)
                     ),
                     // Hà hỏi 2026-08-10: *"nút đóng sổ chưa gửi xác nhận qua
                     // tele?"* — đúng, và nó nên có. Đóng sổ KHÔNG phá phiên gốc
@@ -1778,16 +1874,37 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // silent no-op.
                 let (want, asked) = target_and_rest(db, &cmd.arg);
                 let live = crate::sessions::snapshot(cfg);
-                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                // Phiên VỪA TẮT vẫn hỏi được: `--resume` chạy trên nhật ký, không
+                // cần tiến trình. Đây đúng là ca Hà gặp 16:37 — con trỏ trỏ vào
+                // phiên vừa tắt và hub trả lời bằng một ngõ cụt. Xem `ENDED_KEY`.
+                let target = live
+                    .sessions
+                    .iter()
+                    .find(|s| s.session_id == want)
+                    .cloned()
+                    .or_else(|| ended_session(db, &want));
+                let from_ended =
+                    target.is_some() && !live.sessions.iter().any(|s| s.session_id == want);
+                let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên trên màn Phiên rồi hỏi lại."
                             .to_string()
                     }
                     None => format!(
-                        "⚠ không thấy phiên '{}' đang chạy nữa",
-                        crate::exec::truncate(&want, 40)
+                        "⚠ không thấy phiên '{}' — nó không còn chạy và cũng không nằm trong \
+                         sổ phiên vừa tắt (giữ 24 giờ).\nĐang sống: {}",
+                        crate::exec::truncate(&want, 12),
+                        if live.sessions.is_empty() {
+                            "không có phiên nào".to_string()
+                        } else {
+                            live.sessions
+                                .iter()
+                                .map(|s| format!("{} ({})", s.name, &s.session_id[..8.min(s.session_id.len())]))
+                                .collect::<Vec<_>>()
+                                .join(" · ")
+                        }
                     ),
-                    Some(s) => match crate::sessions::ask_aside(cfg, s, &asked) {
+                    Some(ref s) => match crate::sessions::ask_aside(cfg, s, &asked) {
                         Ok(a) => {
                             if let Err(e) = db.record_spend(
                                 "aside",
@@ -1829,8 +1946,17 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             } else {
                                 "hỏi trên bản sao — phiên gốc không bị đụng"
                             };
+                            // Nói rõ phiên ấy ĐÃ TẮT: người đọc phải biết câu
+                            // trả lời dựng từ nhật ký chứ không phải từ một
+                            // phiên đang chạy — hai thứ đó khác nhau ở chỗ
+                            // "hỏi tiếp được không".
+                            let da_tat = if from_ended {
+                                "⏹ phiên này đã tắt — trả lời dựng từ nhật ký của nó.\n\n"
+                            } else {
+                                ""
+                            };
                             format!(
-                                "💬 Hỏi bên lề phiên {} ({how}):\n\n{}",
+                                "{da_tat}💬 Hỏi bên lề phiên {} ({how}):\n\n{}",
                                 a.source_name, a.answer
                             )
                         }

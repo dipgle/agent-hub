@@ -496,6 +496,86 @@ end tell"#
     osascript(&script)
 }
 
+/// Những DÒNG LỆNH đang hiện trên màn — thứ bấm một cái là chạy được.
+///
+/// Hà 2026-08-12: *"phiên hiện ra rõ ràng có lệnh để chạy trên terminal … nếu có
+/// lệnh như vậy thì hiển thị luôn lệnh gửi nhanh"*. Phiên `claude` thường kết
+/// một lượt bằng đúng một câu lệnh cho chủ máy gõ; đọc được nó trên điện thoại
+/// mà vẫn phải gõ tay lại từng ký tự thì cây cầu mới đi được một chiều.
+///
+/// Nhận diện theo HÌNH DẠNG, không theo ngữ nghĩa: bỏ dấu nhắc ở đầu (`$`, `❯`,
+/// `>`), rồi đòi từ đầu tiên là một lệnh quen hoặc một đường dẫn `./…`. Cố ý
+/// hẹp — đoán rộng ở đây nghĩa là đưa lên màn một cái nút chạy nhầm thứ.
+///
+/// Giữ tối đa `max` dòng CUỐI (mới nhất), bỏ trùng.
+pub fn commands_on_screen(screen: &str, max: usize) -> Vec<String> {
+    const KNOWN: &[&str] = &[
+        "git", "npm", "npx", "node", "cargo", "bash", "sh", "zsh", "python3", "pip3", "docker",
+        "make", "curl", "rsync", "scp", "ssh", "sqlite3", "pnpm", "yarn", "deno", "go", "rustup",
+        "brew", "launchctl", "osascript", "open", "code", "tail", "grep", "rg", "find", "ls",
+    ];
+    let mut out: Vec<String> = Vec::new();
+    for raw in screen.lines() {
+        let mut line = raw.trim();
+        // Dấu nhắc và dấu trang trí của TUI đứng trước lệnh.
+        for p in ["$ ", "❯ ", "> ", "⏵ ", "% ", "• ", "- "] {
+            if let Some(rest) = line.strip_prefix(p) {
+                line = rest.trim();
+            }
+        }
+        // 🔴 Lệnh NẰM TRONG câu văn: đo được ngay lượt `/shot` thật đầu tiên
+        // (2026-08-12 21:15) — màn có dòng
+        // "`git push origin main` (a plain push to main) executed from a
+        // nested-repo", và bản đầu bóc dấu nháy đầu rồi nuốt luôn cả câu phía
+        // sau, ra một cái nút chạy nhầm thứ. Trong dấu nháy ngược thì CHỈ lấy
+        // phần trong dấu nháy.
+        let owned;
+        let line = if let Some(after_tick) = line.strip_prefix('`') {
+            match after_tick.split_once('`') {
+                Some((inner, _)) => {
+                    owned = inner.trim().to_string();
+                    owned.as_str()
+                }
+                None => line.trim_start_matches('`').trim(),
+            }
+        } else {
+            line
+        };
+        let line = line.trim();
+        // Câu văn thường mang một mệnh đề trong ngoặc hoặc một dấu phẩy; một
+        // dòng lệnh thật thì hiếm khi có. Thà bỏ sót một nút còn hơn dựng một
+        // cái nút chạy nhầm.
+        if line.contains(" (") || line.contains(", ") {
+            continue;
+        }
+        if line.len() < 4 || line.len() > 300 {
+            continue;
+        }
+        // Câu văn có dấu chấm câu cuối thì không phải lệnh.
+        if line.ends_with('.') || line.ends_with(':') || line.ends_with('?') {
+            continue;
+        }
+        let Some(first) = line.split_whitespace().next() else {
+            continue;
+        };
+        let looks_like = KNOWN.contains(&first) || first.starts_with("./");
+        if !looks_like {
+            continue;
+        }
+        // Phải có ít nhất một tham số: `git` trần không phải một lệnh để chạy.
+        if line.split_whitespace().count() < 2 {
+            continue;
+        }
+        if !out.iter().any(|x| x == line) {
+            out.push(line.to_string());
+        }
+    }
+    if out.len() > max {
+        out.drain(..out.len() - max);
+    }
+    out
+}
+
 /// Hộp chọn đang chờ trên màn, nếu có.
 ///
 /// `claude` vẽ hộp chọn dạng:

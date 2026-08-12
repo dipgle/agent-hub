@@ -92,6 +92,19 @@ pub enum CommandKind {
     /// looking at one session's stream, and asking a person to retype a uuid
     /// there is asking them not to use the feature.
     Ask,
+    /// `/cmd <dòng lệnh>` — chạy ĐÚNG MỘT lệnh trên máy rồi trả kết quả về.
+    ///
+    /// Hà 2026-08-12: *"thêm một cổng chạy lệnh nữa… `/cmd lệnh`: ví dụ bash …
+    /// chạy 1 command xong trả về kết quả rồi nó đóng luôn"*, gõ **từ Telegram**.
+    ///
+    /// Đây KHÔNG phải một quyền mới: `/type` đã gõ thẳng phím vào cửa sổ terminal
+    /// từ 2026-08-09 và **bỏ qua `DENIED_TOOLS`** — nghĩa là từ điện thoại vẫn
+    /// chạy được bất cứ thứ gì, chỉ là phải có một phiên đang mở và phải gõ mò.
+    /// `/cmd` chỉ làm con đường ấy THẲNG và có kết quả trả về. Cổng gác vẫn là
+    /// một: chỉ tid/chat_id của chủ máy mới ra lệnh được.
+    ///
+    /// Một lệnh, một lượt, không phiên nào ở lại — đúng chữ *"đóng luôn"*.
+    Cmd,
     /// `/accounts` — ba tài khoản `claude` trên máy này: phiên nào đang chạy
     /// bằng tài khoản nào, còn bao nhiêu hạn mức, và **`/new` không nói `@acc`
     /// thì rơi vào tài khoản nào**.

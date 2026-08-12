@@ -559,6 +559,34 @@ impl Inbox {
                 );
                 return;
             }
+            // `run:<n>` — nút gửi nhanh một lệnh thấy trên màn. Chữ nằm trong
+            // sổ chứ không trong nút (trần 64 byte), nên phải tra lại; tra không
+            // ra thì NÓI, đừng im — nút cũ bấm lại là chuyện thường.
+            if let Some(n) = data.strip_prefix("run:").and_then(|n| n.parse::<usize>().ok()) {
+                match crate::db::Db::open(&self.cfg.db)
+                    .ok()
+                    .and_then(|db| crate::pipeline::quick_cmd(&db, n))
+                {
+                    Some(line) => {
+                        logging::info(
+                            "telegram_quick_cmd",
+                            json!({ "n": n, "cmd": crate::exec::truncate(&line, 120) }),
+                        );
+                        // `!` = chạy TRONG phiên: phiên nhìn thấy kết quả và đi
+                        // tiếp được. Đi qua `/type`, tức cùng một đường gõ phím
+                        // đã có, không đẻ lối riêng.
+                        self.push_text(&format!("/type !{line}"));
+                    }
+                    None => {
+                        if let Err(e) = self.send_text(
+                            "⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.",
+                        ) {
+                            logging::error("telegram_ack_failed", json!({ "err": e }));
+                        }
+                    }
+                }
+                return;
+            }
             logging::info("telegram_button_unknown", json!({ "data": data }));
             return;
         }

@@ -1427,11 +1427,53 @@ fn link_parents(rows: &mut [LiveSession]) {
 }
 
 /// Every live session across every configured account, newest activity first.
+/// Ảnh chụp gần nhất, cho những lệnh chỉ cần TRA CỨU chứ không cần tươi.
+///
+/// 🔴 Hà 2026-08-12: *"bấm vào phiên trên tele vẫn đang phải đợi rất lâu"*. Đo
+/// từng khúc: hàng chờ đã hết (queued và run cùng một giây), ack 1,5 giây — còn
+/// **10 giây** là dựng lại ảnh chụp, thứ gần như route nào cũng làm trước khi
+/// trả lời. Mà `/session`, `/shot`, `/type` chỉ cần biết *phiên này có thật
+/// không, cửa sổ nào* — một câu trả lời 20 giây tuổi vẫn đúng, trong khi 10
+/// giây chờ thì cảm nhận được ngay.
+///
+/// Vòng chạy KHÔNG dùng đệm: cái loa so hai lượt ảnh chụp, mà so một tấm cũ với
+/// chính nó thì không có sự kiện nào hiện ra.
+static SNAP_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<(std::time::Instant, SessionsSnapshot)>>> =
+    std::sync::OnceLock::new();
+
+/// Ảnh chụp còn dùng được nếu chưa quá `max_age`, không thì dựng mới.
+pub fn snapshot_cached(cfg: &Config, max_age: std::time::Duration) -> SessionsSnapshot {
+    let cell = SNAP_CACHE.get_or_init(|| std::sync::Mutex::new(None));
+    if let Some((at, snap)) = cell.lock().ok().and_then(|g| g.clone()) {
+        if at.elapsed() <= max_age {
+            logging::info(
+                "sessions_snapshot_reused",
+                json!({ "age_ms": at.elapsed().as_millis(), "sessions": snap.sessions.len() }),
+            );
+            return snap;
+        }
+    }
+    snapshot(cfg)
+}
+
 pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
+    let snap_started = std::time::Instant::now();
     let mut out = SessionsSnapshot::default();
     let root = cfg.claude_transcript_root();
     let mut hidden_editor = 0usize;
 
+    // Ba tài khoản, hỏi NỐI ĐUÔI — và đây là một kết quả ĐO ĐƯỢC, không phải
+    // lười tối ưu.
+    //
+    // 🔴 Đo 2026-08-12: một ảnh chụp tốn ~10 giây cho 4 phiên, gần hết là ba lần
+    // spawn `claude agents` (binary `claude` nay 279 MB — riêng việc dựng nó lên
+    // đã vài giây). Tôi đã thử `thread::scope` chạy cả ba cùng lúc, rồi đo lại:
+    // **trung vị 10,1s → 13,0s**, tức CHẬM HƠN 30%. Ba tiến trình khổng lồ dựng
+    // cùng lúc thì giẫm chân nhau ở CPU và đĩa; cái giá ấy không chia được.
+    //
+    // Thứ THẬT SỰ chữa được độ trễ bấm nút là `snapshot_cached` — đo cùng ngày:
+    // một lệnh `/session` 11,6s → **1,5s**. Đừng thử lại đường song song mà
+    // không đo trước.
     for account in &cfg.claude_accounts_or_ambient() {
         let raw = match list_account(account, &cfg.claude_cli) {
             Ok(v) => v,
@@ -1645,6 +1687,16 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
 
     mark_can_type(&mut out.sessions);
     link_parents(&mut out.sessions);
+    // Ảnh chụp tốn bao lâu — con số này quyết định mọi lệnh bấm từ điện thoại
+    // nhanh hay chậm, vì gần như route nào cũng dựng một cái trước khi trả lời.
+    if let Ok(mut g) = SNAP_CACHE.get_or_init(|| std::sync::Mutex::new(None)).lock() {
+        *g = Some((std::time::Instant::now(), out.clone()));
+    }
+    logging::info(
+        "sessions_snapshot_ms",
+        json!({ "ms": snap_started.elapsed().as_millis(), "sessions": out.sessions.len(),
+                "hidden_editor": out.hidden_editor, "blind": out.blind.len() }),
+    );
     out.hidden_editor = hidden_editor;
     if hidden_editor > 0 {
         logging::info(

@@ -448,3 +448,72 @@ fn a_normal_poll_is_not_mistaken_for_a_refusal() {
     let resp = serde_json::json!({ "ok": true, "result": [] });
     assert!(hub::telegram::poll_rejected(&resp).is_none());
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LỆNH THẤY TRÊN MÀN → NÚT GỬI NHANH
+//
+// Hà 2026-08-12: *"phiên hiện ra rõ ràng có lệnh để chạy trên terminal … nếu có
+// lệnh như vậy thì hiển thị luôn lệnh gửi nhanh"* → *"có thể chạy trực tiếp từ ô
+// chat trong cli bằng cách thêm ký tự `!` ở đầu"*.
+//
+// Nhận diện theo HÌNH DẠNG và cố ý HẸP: đoán rộng ở đây là đưa lên màn một cái
+// nút chạy nhầm thứ, mà nút thì bấm một cái là xong.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_command_on_screen_is_picked_up_with_its_arguments() {
+    let screen = "  Trạng thái để lại: cây sạch.\n\
+                  Chạy nốt lệnh này:\n\
+                    git -C ~/Documents/projects/AI/tcc/amm push origin main\n\
+                  Xong thì báo lại.";
+    let got = hub::keys::commands_on_screen(screen, 4);
+    assert_eq!(got, vec!["git -C ~/Documents/projects/AI/tcc/amm push origin main"]);
+}
+
+/// Câu văn không được thành nút.
+#[test]
+fn prose_is_not_mistaken_for_a_command() {
+    let screen = "Tôi sẽ chạy git để kiểm tra.\nls các thư mục xong rồi.\nfind ra nguyên nhân:";
+    assert!(hub::keys::commands_on_screen(screen, 4).is_empty(), "{:?}", hub::keys::commands_on_screen(screen, 4));
+}
+
+/// Dấu nhắc shell đứng trước lệnh phải bị bóc, và lệnh trần (không tham số) bỏ qua.
+#[test]
+fn prompts_are_stripped_and_bare_verbs_ignored() {
+    // `cargo` trần: đủ dài để qua cửa độ dài, nên nó ghim ĐÚNG luật "phải có
+    // tham số" chứ không ăn theo một luật khác.
+    let screen = "$ cargo test --offline\n❯ cargo\n  ./deploy/install.sh --no-build";
+    let got = hub::keys::commands_on_screen(screen, 4);
+    assert!(got.contains(&"cargo test --offline".to_string()), "{got:?}");
+    assert!(got.contains(&"./deploy/install.sh --no-build".to_string()), "{got:?}");
+    assert!(!got.iter().any(|c| c == "cargo"), "lệnh trần vẫn lọt: {got:?}");
+}
+
+/// Giữ các dòng CUỐI (mới nhất) và bỏ trùng.
+#[test]
+fn only_the_latest_few_survive_and_duplicates_collapse() {
+    let screen = "git status\ngit status\nnpm run build\ncargo test --offline\nnode fe-smoke.mjs a b c";
+    let got = hub::keys::commands_on_screen(screen, 2);
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert_eq!(got[1], "node fe-smoke.mjs a b c", "phải giữ dòng mới nhất: {got:?}");
+}
+
+/// 🔴 Đo trên bản THẬT, lượt `/shot` đầu tiên (2026-08-12 21:15): màn có dòng
+/// "`git push origin main` (a plain push to main) executed from a nested-repo".
+/// Bản đầu bóc dấu nháy mở rồi nuốt luôn cả câu phía sau ⟹ một cái nút chạy
+/// nhầm thứ. Chỉ ĐỌC MÃ thì thấy hợp lý; chỉ chạy thật mới thấy.
+#[test]
+fn a_command_quoted_inside_prose_keeps_only_the_command() {
+    let screen = "  `git push origin main` (a plain push to main) executed from a nested-repo";
+    assert_eq!(
+        hub::keys::commands_on_screen(screen, 4),
+        vec!["git push origin main"]
+    );
+}
+
+/// Và một câu văn có dấu phẩy thì không phải lệnh, dù mở đầu bằng tên lệnh.
+#[test]
+fn a_sentence_with_a_comma_is_not_a_command() {
+    let screen = "git status trước, rồi push sau";
+    assert!(hub::keys::commands_on_screen(screen, 4).is_empty());
+}

@@ -430,6 +430,51 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     }
 }
 
+/// Trần cho phần chữ một lệnh trả về. Telegram cắt tin ở 4096 ký tự, và một tin
+/// bị Telegram cắt là một tin mất đúng phần cuối — thường là phần kết luận.
+pub const CMD_OUT_MAX: usize = 3000;
+
+/// Dựng câu trả lời cho `/cmd` — hàm THUẦN, kiểm được không cần chạy lệnh nào.
+///
+/// Ba điều nó phải nói, và cả ba đều từng là chỗ người ta đoán mò:
+/// * **Mã thoát**, luôn luôn — `exit 1` mà im lặng thì một lệnh hỏng đọc lên y
+///   hệt một lệnh chạy xong.
+/// * **Không in ra gì** khác **chưa chạy được**: nói thẳng câu đầu.
+/// * **Bị cắt thì nói là bị cắt**, kèm số ký tự còn lại.
+pub fn cmd_report(code: Option<i32>, timed_out: bool, out: &str, err: &str, ms: u128) -> String {
+    if timed_out {
+        return format!("⏱ quá giờ sau {:.1}s — đã giết cả nhóm tiến trình.", ms as f64 / 1000.0);
+    }
+    let mut body = String::new();
+    if !out.trim().is_empty() {
+        body.push_str(out.trim_end());
+    }
+    if !err.trim().is_empty() {
+        if !body.is_empty() {
+            body.push('\n');
+        }
+        body.push_str("[stderr] ");
+        body.push_str(err.trim_end());
+    }
+    let shown = if body.chars().count() > CMD_OUT_MAX {
+        let cut: String = body.chars().take(CMD_OUT_MAX).collect();
+        let left = body.chars().count() - CMD_OUT_MAX;
+        format!("{cut}\n… (còn {left} ký tự — chạy lại kèm `| tail` để lấy khúc cuối)")
+    } else {
+        body
+    };
+    let head = match code {
+        Some(0) => format!("✅ xong ({:.1}s)", ms as f64 / 1000.0),
+        Some(c) => format!("❌ exit {c} ({:.1}s)", ms as f64 / 1000.0),
+        None => format!("❌ không rõ mã thoát ({:.1}s)", ms as f64 / 1000.0),
+    };
+    if shown.trim().is_empty() {
+        format!("{head}\n(không in ra gì)")
+    } else {
+        format!("{head}\n{shown}")
+    }
+}
+
 /// Những phiên VỪA TẮT, giữ đủ lâu để còn hỏi được về chúng.
 ///
 /// 🔴 Hà 2026-08-12 16:37 gõ `/ask` và nhận `⚠ không thấy phiên … đang chạy
@@ -536,7 +581,7 @@ fn auto_handover(db: &Db, cfg: &Config) {
     if !cfg.auto_handover.enabled {
         return;
     }
-    let mut live = crate::sessions::snapshot(cfg);
+    let mut live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
     mark_started_by_hub(db, &mut live);
     let done: Vec<String> = db
         .cursor_or_log(AUTO_DONE_KEY)
@@ -1076,6 +1121,69 @@ pub fn text_for_session(line: &str) -> Option<&str> {
     (!t.is_empty() && !t.starts_with('/')).then_some(t)
 }
 
+/// Bao nhiêu dòng màn hình đi ra ngoài trong một `/shot`.
+///
+/// 🔴 Hà 2026-08-12: *"phiên projects-d2 hiện ra rõ ràng có lệnh để chạy trên
+/// terminal `git -C … push origin main` nhưng ở tele lại không hề có"*. Không
+/// phải hub đọc nhầm nguồn — nó đọc ĐÚNG màn thật (`contents of selected tab`,
+/// không phải nhật ký) — mà nó chỉ giữ **14 dòng cuối**, và câu lệnh ấy nằm cao
+/// hơn cửa sổ 14 dòng. Một phép cắt im lặng đọc lên y hệt "trên màn không có".
+///
+/// 40 dòng: một màn terminal thường cao 40-50 dòng, nên đây là "gần cả màn", và
+/// vẫn dưới trần 4096 ký tự của Telegram cho phần lớn nội dung.
+pub const SHOT_LINES: usize = 40;
+
+/// Trần cứng cho số dòng `/shot <n>` xin thêm — trên nữa thì Telegram tự cắt,
+/// mà một tin bị Telegram cắt thì mất đúng phần cuối (phần mới nhất).
+pub const SHOT_LINES_MAX: usize = 120;
+
+
+/// Những lệnh vừa thấy trên màn, để cái nút "gửi nhanh" tra lại được.
+///
+/// Vì sao phải có sổ: `callback_data` của Telegram trần **64 byte**, mà một
+/// dòng `git -C ~/Documents/projects/AI/tcc/amm push origin main` đã 52 — thêm
+/// tiền tố là tràn, và một cái nút tràn thì Telegram từ chối cả tin. Nên nút
+/// mang một CON SỐ, còn chữ nằm ở đây.
+pub const QUICK_KEY: &str = "quick:cmds";
+
+/// Ghi danh sách lệnh gợi ý, trả về các cặp (nhãn, mã nút).
+///
+/// Nút gõ `!<lệnh>` VÀO PHIÊN chứ không chạy ngoài (Hà 2026-08-12: *"có thể sẽ
+/// chạy được trực tiếp từ ô chát trong cli bằng cách thêm ký tự `!` ở đầu"*).
+/// Khác biệt không nhỏ: chạy trong phiên thì **phiên nhìn thấy kết quả** và đi
+/// tiếp được, còn `/cmd` chạy ở một shell rời — kết quả về điện thoại, phiên
+/// không biết gì. Đúng thứ chủ máy làm khi ngồi trước máy.
+pub fn remember_quick(db: &Db, cmds: &[String]) -> Vec<(String, String)> {
+    if cmds.is_empty() {
+        return Vec::new();
+    }
+    if let Ok(v) = serde_json::to_string(cmds) {
+        if let Err(e) = db.set_cursor(QUICK_KEY, &v) {
+            logging::error("quick_cmds_not_saved", json!({ "err": e.to_string() }));
+            return Vec::new();
+        }
+    }
+    cmds.iter()
+        .enumerate()
+        .take(4)
+        .map(|(i, c)| {
+            (
+                format!("▶ {}", crate::exec::truncate(c, 48)),
+                format!("run:{i}"),
+            )
+        })
+        .collect()
+}
+
+/// Lệnh gợi ý thứ `n` — cái nút chỉ mang con số, chữ nằm trong sổ.
+pub fn quick_cmd(db: &Db, n: usize) -> Option<String> {
+    let list: Vec<String> = db
+        .cursor_or_log(QUICK_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    list.get(n).cloned()
+}
+
 /// Chữ ĐANG HIỆN trên màn một phiên — thứ `/shot` trả về, và thứ đi kèm khi
 /// bấm một phiên trên Telegram.
 ///
@@ -1089,7 +1197,7 @@ pub fn text_for_session(line: &str) -> Option<&str> {
 ///   KHÔNG đưa chữ ra.
 /// * Màn có **hộp chọn** thì nói thẳng từng lựa chọn: đó chính là thứ người ta
 ///   mở lên để xem, và số của nó là thứ gõ tiếp được.
-pub fn screen_report(s: &crate::sessions::LiveSession, window: i64) -> String {
+pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize) -> String {
     match crate::keys::screen_text(window) {
         Ok(screen) => {
             let risk = crate::sessions::preview_risk(&screen);
@@ -1105,21 +1213,35 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64) -> String {
                 .lines()
                 .filter(|l| !l.trim().is_empty())
                 .rev()
-                .take(14)
+                .take(lines.clamp(1, SHOT_LINES_MAX))
                 .collect();
             let body: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+            let quick = crate::keys::commands_on_screen(&screen, 4);
+            let quick_note = if quick.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "\n\n▶ Lệnh thấy trên màn (bấm nút dưới để gõ `!` vào chính phiên):\n{}",
+                    quick
+                        .iter()
+                        .map(|c| format!("  • {c}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            };
             if choices.is_empty() {
-                format!("📷 Màn của {}:\n\n{}", s.name, body)
+                format!("📷 Màn của {}:\n\n{}{}", s.name, body, quick_note)
             } else {
                 let list: Vec<String> = choices
                     .iter()
                     .map(|(n, l)| format!("  {n}. {l}"))
                     .collect();
                 format!(
-                    "📷 {} đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{}",
+                    "📷 {} đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{}{}",
                     s.name,
                     list.join("\n"),
-                    body
+                    body,
+                    quick_note
                 )
             }
         }
@@ -1226,6 +1348,11 @@ fn short_id(session_id: &str) -> &str {
 /// but every outcome is logged.
 fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCommand]) {
     for cmd in commands {
+        // ĐỒNG HỒ cho từng lệnh. Hà 2026-08-12: *"bấm vào phiên trên tele vẫn
+        // đang phải đợi rất lâu"* — và lúc ấy không ai trả lời được "lâu ở khúc
+        // nào", vì log chỉ có lúc nhận và lúc xong. Một con số cho mỗi route thì
+        // lần sau câu hỏi ấy tự có đáp án.
+        let cmd_started = std::time::Instant::now();
         // Every verb answers for itself. There used to be a second stage below
         // this match — "look the decision up, then approve or reject it" — and
         // a verb that forgot to end with `Some(ack)` fell into it and logged
@@ -1248,6 +1375,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /key <up|down|left|right|enter|esc|tab|space|1-9> — bấm một phím\n\
                      /shot — đọc chữ đang hiện trên màn của phiên\n\
                      — Vận hành —\n\
+                     /cmd <dòng lệnh> — chạy một lệnh trên máy rồi trả kết quả (chạy xong là hết)\n\
                      /accounts — ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, /new mặc định vào tài khoản nào\n\
                      /project [tên] — xem / ghim dự án cho phòng (bỏ ghim: /project -)\n\
                      /ingest · /run · /doctor — poll kênh · chạy một vòng · kiểm tra thật\n\
@@ -1276,12 +1404,70 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 reply_in_channel(db, cfg, adapter, cmd, &probe);
                 Some(probe)
             }
+            CommandKind::Cmd => {
+                // Chạy đúng MỘT lệnh rồi thôi (Hà 2026-08-12: *"chạy 1 command
+                // xong trả về kết quả rồi nó đóng luôn"*).
+                //
+                // Đi qua shell đăng nhập của chủ máy (`zsh -lc`) chứ không tự
+                // tách tham số: người gõ trên điện thoại gõ đúng cái họ gõ ở
+                // terminal — có `|`, có `&&`, có `~`. Tự tách là dựng một thứ
+                // ngôn ngữ thứ hai gần giống shell, và mọi khác biệt của nó sẽ
+                // là một lần "sao ở đây chạy mà ở kia không".
+                //
+                // Thư mục làm việc là GỐC WORKSPACE — cùng chỗ mọi phiên mở ra,
+                // nên đường dẫn tương đối trong đầu người gõ khớp với thực tế.
+                let line = cmd.arg.trim().to_string();
+                let ack = if line.is_empty() {
+                    "⚠ /cmd cần một dòng lệnh. Ví dụ: /cmd git -C ~/Documents/projects/AI/hub status --short".to_string()
+                } else {
+                    let out = crate::exec::run(
+                        "/bin/zsh",
+                        &["-lc", &line],
+                        crate::exec::RunOpts {
+                            cwd: Some(cfg.workspace_root.as_path()),
+                            timeout: Some(std::time::Duration::from_secs(cfg.call.timeout_sec.min(120))),
+                            ..Default::default()
+                        },
+                    );
+                    match out {
+                        Ok(r) => {
+                            logging::info(
+                                "cmd_run",
+                                json!({ "cmd": crate::exec::truncate(&line, 120),
+                                        "code": r.code, "timed_out": r.timed_out, "ms": r.ms }),
+                            );
+                            let report = cmd_report(r.code, r.timed_out, &r.stdout, &r.stderr, r.ms);
+                            // Kết quả RỜI KHỎI MÁY (đi vào một phòng chat trên
+                            // server, và sang Telegram) nên nó phải qua đúng cổng
+                            // quét rò như mọi thứ khác — luật 5.
+                            let risk = crate::sessions::preview_risk(&report);
+                            if risk.is_empty() {
+                                report
+                            } else {
+                                format!(
+                                    "🔒 lệnh chạy xong nhưng hub GIỮ LẠI kết quả: có dấu hiệu bí mật ({}). Xem trên máy.",
+                                    risk.join(", ")
+                                )
+                            }
+                        }
+                        Err(e) => {
+                            logging::error(
+                                "cmd_failed",
+                                json!({ "cmd": crate::exec::truncate(&line, 120), "err": e.to_string() }),
+                            );
+                            format!("⚠ không chạy được: {}", crate::exec::truncate(&e.to_string(), 200))
+                        }
+                    }
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+            }
             CommandKind::Accounts => {
                 // Một ảnh chụp thật, không phải con số nhớ từ lượt trước: câu
                 // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì
                 // hiện tại. Hạn mức thì lấy bản đã đo sẵn (5 phút một lượt),
                 // nên lệnh này không đẻ thêm tiến trình `claude` nào.
-                let live = crate::sessions::snapshot(cfg);
+                let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 let ack = crate::runtime::accounts_say(
                     cfg,
                     &live,
@@ -1300,7 +1486,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 } else {
                     want
                 };
-                let live = crate::sessions::snapshot(cfg);
+                let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 // Đóng sổ một phiên VỪA TẮT cũng chạy được — bản bàn giao dựng
                 // từ nhật ký, không cần tiến trình (cùng lối với `/ask`).
                 let target = live
@@ -1529,7 +1715,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // được: hub mở được cửa sổ rồi từ chối đóng chính nó, với câu
                 // *"chỉ dừng được phiên do hub mở"*. Nhánh phiên nền không lộ
                 // vì nó xét `kind`, không xét quyền sở hữu.
-                let mut live = crate::sessions::snapshot(cfg);
+                let mut live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 mark_started_by_hub(db, &mut live);
                 let ack = match live.sessions.iter().find(|s| s.session_id == want) {
                     None if want.is_empty() => "⚠ chưa mở phiên nào.".to_string(),
@@ -1584,7 +1770,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             CommandKind::Tell => {
                 // Id đi CÙNG mệnh lệnh — xem `target_and_rest`.
                 let (want, said) = target_and_rest(db, &cmd.arg);
-                let live = crate::sessions::snapshot(cfg);
+                let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 // Đã dừng KHÔNG phải là đã mất: `--resume` nối vào nhật ký, nó
                 // không cần tiến trình nào đang sống. Và dừng-rồi-nói-tiếp
                 // chính là đường DUY NHẤT — claude từ chối resume một phiên nền
@@ -1639,7 +1825,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
                 // khác, và đó là hàng rào duy nhất còn lại ở đường này.
                 let (want, typed) = target_and_rest(db, &cmd.arg);
-                let live = crate::sessions::snapshot(cfg);
+                let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 let ack = match live.sessions.iter().find(|s| s.session_id == want) {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
@@ -1652,7 +1838,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         Ok(Some(w)) => {
                             // `/shot` đi đường riêng: nó không gõ gì, chỉ nhìn.
                             if matches!(cmd.kind, CommandKind::Shot) {
-                                screen_report(s, w)
+                                // Nút "gửi nhanh" chỉ dựng được khi biết màn có
+                                // gì — nên đọc màn một lần, dùng cho cả hai.
+                                // `/shot 80` — xin nhiều dòng hơn khi thứ cần
+                                // nhìn nằm cao hơn cửa sổ mặc định.
+                                let n = typed
+                                    .trim()
+                                    .parse::<usize>()
+                                    .unwrap_or(SHOT_LINES);
+                                screen_report(s, w, n)
                             } else {
                             let is_key = matches!(cmd.kind, CommandKind::Key);
                             let arrow = matches!(
@@ -1861,7 +2055,24 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         ),
                     },
                 };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                // `/shot` trên Telegram đi kèm NÚT cho từng lệnh thấy trên màn.
+                // Đường đi vẫn là một: nút gõ `!<lệnh>` vào phiên qua `/type`,
+                // tức cùng route, cùng sổ (xem `remember_quick`).
+                let quick = if matches!(cmd.kind, CommandKind::Shot) {
+                    let cmds = crate::keys::commands_on_screen(&ack, 4);
+                    remember_quick(db, &cmds)
+                } else {
+                    Vec::new()
+                };
+                match (quick.is_empty(), crate::telegram::inbox()) {
+                    (false, Some(tg)) if adapter == crate::telegram::NAME => {
+                        if let Err(e) = tg.send_buttons(&ack, &quick) {
+                            logging::error("quick_buttons_failed", json!({ "err": e }));
+                            reply_in_channel(db, cfg, adapter, cmd, &ack);
+                        }
+                    }
+                    _ => reply_in_channel(db, cfg, adapter, cmd, &ack),
+                }
                 Some(ack)
             }
             CommandKind::Ask => {
@@ -1873,7 +2084,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Asking with nothing open is a mistake worth naming, not a
                 // silent no-op.
                 let (want, asked) = target_and_rest(db, &cmd.arg);
-                let live = crate::sessions::snapshot(cfg);
+                let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 // Phiên VỪA TẮT vẫn hỏi được: `--resume` chạy trên nhật ký, không
                 // cần tiến trình. Đây đúng là ca Hà gặp 16:37 — con trỏ trỏ vào
                 // phiên vừa tắt và hub trả lời bằng một ngõ cụt. Xem `ENDED_KEY`.
@@ -1979,7 +2190,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Phiên.") đẩy người hỏi sang một màn khác — dùng được khi lệnh
                 // này chỉ chạy từ chính màn ấy, vô dụng khi nó tới từ Telegram.
                 if want.is_empty() {
-                    let live = crate::sessions::snapshot(cfg);
+                    let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                     let focus = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
                     let ack = session_list_text(
                         &live.sessions,
@@ -2030,7 +2241,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // Only a session this machine actually has: an id from a
                     // stale page must not send the reader to an empty screen
                     // with no explanation.
-                    let live = crate::sessions::snapshot(cfg);
+                    let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                     // Phiên VỪA DỪNG vẫn phải theo được: màn chi tiết đang mở
                     // chính nó, và `/tell` sau đó cần đúng con trỏ này. Không có
                     // vế dưới thì bấm Dừng xong là màn tự đá mình ra — đo được
@@ -2158,6 +2369,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
         // nothing looked broken; only the log lied, which is the worst place
         // for it to lie because the log is where you go when something IS
         // broken.
+        logging::info(
+            "command_done",
+            json!({ "kind": format!("{:?}", cmd.kind), "adapter": adapter,
+                    "ms": cmd_started.elapsed().as_millis() }),
+        );
         if let Some(ack) = answered {
             logging::info(
                 "channel_command_handled",
@@ -2368,8 +2584,30 @@ fn ask_owner(
     }
 }
 
+/// Ghi thời gian trả lời lúc RỜI hàm, kể cả khi hàm thoát sớm.
+struct AckClock {
+    adapter: String,
+    at: std::time::Instant,
+}
+impl Drop for AckClock {
+    fn drop(&mut self) {
+        logging::info(
+            "ack_sent_ms",
+            json!({ "adapter": self.adapter, "ms": self.at.elapsed().as_millis() }),
+        );
+    }
+}
+fn scopeguard_log(adapter: &str, at: std::time::Instant) -> AckClock {
+    AckClock { adapter: adapter.to_string(), at }
+}
+
 fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, text: &str) {
     let _ = db;
+    // Đồng hồ cho ĐƯỜNG TRẢ LỜI. Với phòng chat tfl5, mỗi câu trả lời là một
+    // lần ĐĂNG NHẬP LẠI cộng một websocket mới (`tfl5::send` → `login`), nên nó
+    // không hề rẻ như "gửi một dòng chữ" nghe có vẻ.
+    let ack_started = std::time::Instant::now();
+    let _guard = scopeguard_log(adapter, ack_started);
     // Lệnh gõ từ Telegram thì câu trả lời phải quay về Telegram. Bản trước rơi
     // vào nhánh "adapter lạ" và chỉ ghi log — tức người gõ ngồi nhìn màn hình
     // trống, còn câu trả lời nằm trong một tệp trên máy.

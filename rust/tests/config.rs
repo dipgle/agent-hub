@@ -383,3 +383,38 @@ fn an_unknown_id_stays_unknown() {
 fn the_promise_on_screen_matches_the_constant() {
     assert_eq!(hub::pipeline::ENDED_KEEP_SEC, 24 * 3600);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `/cmd` — câu trả lời phải nói được ba điều, và cả ba từng là chỗ đoán mò.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_failing_command_never_reads_like_a_successful_one() {
+    let ok = hub::pipeline::cmd_report(Some(0), false, "hai dòng\nđây", "", 1200);
+    let bad = hub::pipeline::cmd_report(Some(1), false, "", "không thấy tệp", 300);
+    assert!(ok.starts_with("✅"), "{ok}");
+    assert!(bad.starts_with("❌") && bad.contains("exit 1"), "{bad}");
+    assert!(bad.contains("không thấy tệp"), "stderr phải tới nơi: {bad}");
+}
+
+/// "Không in ra gì" KHÁC "chưa chạy được" — nói thẳng, đừng trả một câu rỗng.
+#[test]
+fn a_silent_command_says_it_was_silent() {
+    let out = hub::pipeline::cmd_report(Some(0), false, "   ", "", 40);
+    assert!(out.contains("không in ra gì"), "{out}");
+}
+
+#[test]
+fn a_timeout_is_its_own_answer() {
+    let out = hub::pipeline::cmd_report(None, true, "", "", 120_000);
+    assert!(out.contains("quá giờ"), "{out}");
+}
+
+/// Bị cắt thì phải NÓI là bị cắt: một tin Telegram cụt đuôi trông y hệt một
+/// lệnh chạy xong sớm.
+#[test]
+fn a_truncated_output_says_how_much_is_missing() {
+    let big = "x".repeat(hub::pipeline::CMD_OUT_MAX + 250);
+    let out = hub::pipeline::cmd_report(Some(0), false, &big, "", 10);
+    assert!(out.contains("còn 250 ký tự"), "{}", &out[out.len().saturating_sub(120)..]);
+}

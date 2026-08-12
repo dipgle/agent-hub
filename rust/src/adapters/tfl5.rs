@@ -638,6 +638,15 @@ pub fn parse_command(
         // `/accounts` — cũng là một verb không mang id. `acc` để gõ nhanh trên
         // điện thoại, `taikhoan` cho lối gõ không dấu quen thuộc của phòng này.
         "accounts" | "acc" | "taikhoan" => Some((CommandKind::Accounts, 0, String::new())),
+        // `/cmd <dòng lệnh>` — phần sau động từ là NGUYÊN VĂN dòng lệnh, nên
+        // cắt lại từ chuỗi thô: `id` của bộ phân tích chung sẽ nuốt mất chữ đầu.
+        "cmd" | "sh" => {
+            let rest = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            Some((CommandKind::Cmd, 0, rest))
+        }
         // `/set <key> <value>` — the id slot holds the KEY here, so re-split
         // the raw text instead of using the parsed id.
         "set" | "cauhinh" => {

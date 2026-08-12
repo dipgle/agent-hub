@@ -616,3 +616,23 @@ fn the_accounts_verb_answers_to_three_spellings() {
         assert!(arg.is_empty(), "{text} không nhận tham số: {arg}");
     }
 }
+
+/// `/cmd <dòng lệnh>` — Hà 2026-08-12: *"thêm một cổng chạy lệnh nữa… chạy 1
+/// command xong trả về kết quả rồi nó đóng luôn"*, gõ từ Telegram.
+///
+/// Phần sau động từ phải giữ NGUYÊN VĂN: một dòng shell có `|`, `&&`, dấu nháy.
+#[test]
+fn the_cmd_verb_keeps_the_whole_line_verbatim() {
+    let (kind, id, arg) =
+        tfl5::parse_command("/cmd git -C ~/x status | head -3", OWNER, &owners()).expect("parse");
+    assert_eq!(kind, hub::adapters::CommandKind::Cmd);
+    assert_eq!(id, 0);
+    assert_eq!(arg, "git -C ~/x status | head -3", "dòng lệnh bị cắt xén");
+}
+
+#[test]
+fn the_cmd_verb_without_a_line_still_parses_so_the_reply_can_teach() {
+    let (kind, _, arg) = tfl5::parse_command("/cmd", OWNER, &owners()).expect("parse");
+    assert_eq!(kind, hub::adapters::CommandKind::Cmd);
+    assert!(arg.is_empty(), "không có lệnh thì arg phải rỗng: {arg}");
+}

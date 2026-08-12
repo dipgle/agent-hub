@@ -31,6 +31,9 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S16 | **Cái loa thôi kêu oan**: phiên sống chớp nhoáng (phép dò hạn mức của chính hub) chết đi thì im | chạy thật: **26** dòng `session_end_muted` (15s · 27s · 114s) và **0** tin "đã tắt" kể từ 11:03, so với **20 tin trong 4 tiếng** trước đó |
 | S17 | Phiên **dừng lại HỎI** thì câu hỏi + từng lựa chọn lên điện thoại (đọc từ nhật ký, không rình trên màn) | ⚠ mới **chạy thử trên dữ liệu thật** của `projects-11` (dựng lại lúc câu hỏi còn treo → ra đúng tin + 3 lựa chọn); **chưa** có lượt gửi Telegram thật |
 | S21 | **Mọi phiên terminal dừng chờ đều báo**, và tin của phiên khác phiên đang theo mang **nút vào phiên** | luật im 08-10 gỡ theo chỉ đạo 2026-08-12 (*"mọi phiên terminal đều báo"*); 3 test nút, 2 test đã kiểm là **đỏ được**; cài lúc 18:14, daemon pid 23685 `cert` |
+| S25 | **`/cmd <dòng lệnh>`** — cổng chạy lệnh thứ ba, chạy một lệnh rồi thôi | route mới, đi chung `parse_command`/sổ với hai cổng cũ; kết quả qua cổng quét rò trước khi rời máy; 4 test hình dạng câu trả lời |
+| S26 | **Lệnh thấy trên màn thành NÚT gửi nhanh** — bấm là gõ `!<lệnh>` vào chính phiên | `/shot` nay giữ **40 dòng** (trước 14 — đúng lý do lệnh của Hà không hiện); 6 test, trong đó 1 test ghim đúng dòng THẬT làm lộ bug (lệnh nằm trong câu văn) |
+| S27 | **Bấm nút trên Telegram thôi đợi** | đo từng khúc: ảnh chụp phiên ~10s là thủ phạm (không phải hàng chờ). Đệm 20 giây ⟹ `/session` **11,6s → 1,5s** (`command_done ms=1496`, `sessions_snapshot_reused age_ms=4470`) |
 | S24 | **Hỏi được một phiên VỪA TẮT** — `/ask` · `/handover` rơi về sổ phiên tắt trong 24 giờ | chạy thật 20:43:41: mở phiên qua phòng → gõ `/exit` qua `/type` → hub ghi sổ đủ ba thứ `--resume` cần (`acc3` · `cwd` · id). Ngõ cụt cũ thay bằng câu kèm danh sách phiên đang sống (đo, không tốn hạn mức) |
 | — | **Token sai thôi chết câm**: mọi câu từ chối của `getUpdates` đều log rồi lùi 30s, và hub khai đang cầm bot nào lúc mở kênh | chạy thật 20:23:29: `telegram_bot_identity {"username":"ai_angles_bot"}` |
 | S22 | Lệnh Telegram **chạy ngay khi bấm** (không đợi vòng), `/session` thôi chụp lại màn | đo trước khi vá: bấm 18:17:45 → chạy 18:18:11 → trả lời 18:18:27 (**42s**: 26s chờ vòng + 16s chụp màn); nay chạy ở luồng riêng, xếp hàng bằng `CMD_LOCK`; cài 18:29 |
@@ -89,6 +92,14 @@ Trước đó **rỗng** (2026-08-10). Mục cuối — bốn bảng hộp thư 
 cấp lược đồ 4; xem "Đã trả xong". Món nào mới phát sinh thì ghi vào đây, đừng để
 danh sách này có sẵn vài dòng thường trực: một sổ nợ không bao giờ rỗng thì thôi
 là sổ việc, thành cái nền để biện minh.
+
+## Đã thử và ĐO RA LÀ SAI (đừng thử lại mà không đo)
+
+- **Song song hoá ba lời gọi `claude agents`** (2026-08-12): tưởng chia được 10
+  giây thành 3,5 — đo lại thì **trung vị 10,1s → 13,0s**, chậm hơn 30%. Ba tiến
+  trình `claude` (279 MB) dựng cùng lúc giẫm chân nhau ở CPU và đĩa; cái giá ấy
+  không chia được. Đã trả lại bản nối đuôi, giữ nguyên phép đo trong
+  `sessions.rs` để lần sau không ai thử lại bằng trực giác.
 
 ## Theo thiết kế, KHÔNG phải nợ
 

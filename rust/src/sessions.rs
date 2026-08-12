@@ -870,6 +870,97 @@ pub fn pending_for_display(host: &str, counted: usize) -> usize {
 /// Hai chế độ, hai dấu kết thúc khác nhau — trộn chúng làm một là bug đã đo:
 /// agent **chặn** xong khi có `tool_result` cho id ấy; agent **nền** xong khi
 /// phiên cha ghi `<task-notification>` cho id ấy (xem hai hàm trên).
+/// Trần cho lượt cuối đọc lên, TRƯỚC khi rút thông tin chốt.
+///
+/// 🔴 Rộng là có lý do, đo được: bản đầu để 2000 và chạy thật trên `projects-71`
+/// lúc 16:26 thì báo cáo dài **2693** ký tự bị chặt ở giữa, nên câu chốt thật
+/// (*"Nói 'dọn đi' là mình chạy phần an toàn… mình để bạn quyết"*) **không bao
+/// giờ tới** tay `key_points` — luật "giữ dòng cuối" của nó chỉ còn giữ được
+/// chỗ bị chặt. Cắt ở đây là cắt **trước khi biết cái gì đáng giữ**; chỗ quyết
+/// phải là `watch::key_points`, còn con số này chỉ để một lượt khổng lồ không
+/// kéo dài một vòng.
+pub const SAY_MAX: usize = 12_000;
+
+/// Lượt cuối phiên nói ra, **dài hơn hẳn** phần xem trước 240 ký tự.
+///
+/// Chỉ đọc khi có chuyện đáng nói (một lượt chuyển trạng thái, vài lần một giờ)
+/// — cùng lối nghĩ với việc đọc màn: rẻ vì hiếm. Không nhét vào ảnh chụp mỗi
+/// vòng, vì ảnh chụp đi lên mạng 10 giây một lần còn thứ này chỉ cần đúng lúc
+/// hub sắp mở miệng.
+pub fn last_say(cfg: &Config, session: &LiveSession, max_chars: usize) -> Option<String> {
+    let path = transcript_path(&cfg.claude_transcript_root(), &session.cwd, &session.session_id);
+    let tail = read_tail(&path).ok()?;
+    last_prose(&tail, max_chars)
+}
+
+/// Lời cuối cùng **phiên nói ra**, bỏ qua những lượt chỉ gọi công cụ.
+///
+/// 🔴 Bỏ lượt-công-cụ không phải chuyện làm đẹp — không có nó thì tin báo mang
+/// đúng thứ vô nghĩa. Đo trên nhật ký thật lúc 16:10 ngày 2026-08-12:
+///
+/// | phiên | lượt cuối kiểu cũ (mọi lượt hội thoại) | lời cuối phiên NÓI |
+/// |---|---|---|
+/// | `69a38c64` | `[dùng Bash]` | *"Hà đã đóng phiên kia — cây mã đứng yên…"* |
+/// | `37e59209` | `[Request interrupted by user for tool use]` | *"[hub] Tôi phải báo một chuyện…"* |
+/// | 40 phiên dò `/usage` của chính hub | `<command-name>/usage</command-name>` | (không có) |
+///
+/// Và ca đắt nhất chính là ca tin này sinh ra để phục vụ: lượt cuối của một
+/// phiên **đang HỎI** chỉ có mỗi khối `tool_use`, nên `text_of` dựng nó thành
+/// `[dùng AskUserQuestion]` (đo: `a5f06b76…` bản ghi **328**,
+/// `blocks=['tool_use']`). Tức đúng cái tin cần nhất thì rỗng nghĩa, còn thứ
+/// quyết được câu trả lời nằm ở bản ghi liền trước.
+///
+/// Chỉ đọc lượt của **phiên** (`assistant`). Lượt `user` là câu chủ máy vừa gõ,
+/// hoặc một dòng máy tự chèn (`[Request interrupted…]`) — đọc ngược nó về điện
+/// thoại của chính anh ấy thì không nói thêm điều gì.
+///
+/// Điều 5 vẫn gác: chữ có dấu hiệu bí mật thì trả `None` — thà tin cụt còn hơn
+/// tin mang mật khẩu ra khỏi máy. **Không** đi lùi tìm một lượt sạch hơn: một
+/// lượt cũ hơn đọc lên như thể là lời mới nhất, mà đó là một câu SAI.
+pub fn last_prose(tail: &str, max_chars: usize) -> Option<String> {
+    for line in tail.lines().rev() {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if record.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(text) = text_of(&record) else { continue };
+        let prose = strip_tool_marks(&text);
+        if prose.is_empty() {
+            continue;
+        }
+        if !preview_risk(&prose).is_empty() {
+            return None;
+        }
+        return Some(truncate(&prose, max_chars));
+    }
+    None
+}
+
+/// Bỏ những dấu `[dùng X]` mà `text_of` chèn thay cho một lượt gọi công cụ.
+///
+/// Lượt vừa nói vừa gọi công cụ thì phần LỜI vẫn còn lại và vẫn được dùng; chỉ
+/// lượt sạch công cụ mới rỗng, và rỗng thì đi tiếp lên trên.
+fn strip_tool_marks(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("[dùng ") {
+        out.push_str(&rest[..start]);
+        match rest[start..].find(']') {
+            Some(end) => rest = &rest[start + end + 1..],
+            // Dấu mở không có dấu đóng: không phải thứ `text_of` sinh ra, nên
+            // giữ nguyên phần còn lại thay vì nuốt mất chữ của phiên.
+            None => {
+                rest = &rest[start..];
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out.trim().to_string()
+}
+
 /// Một câu hỏi đang chờ chủ máy trả lời.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Asking {

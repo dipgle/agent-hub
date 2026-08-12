@@ -271,9 +271,23 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
             }
         }
 
-        // Câu cuối phiên nói ra — thứ làm mỗi tin KHÁC nhau. Nó đã qua cổng
-        // quét rò rỉ ở `sessions::snapshot` trước khi vào ảnh chụp.
-        let tail = row.and_then(|s| s.last_text.as_deref());
+        // Câu cuối phiên nói ra — thứ làm mỗi tin KHÁC nhau.
+        //
+        // Đọc BẢN DÀI của lượt cuối rồi rút thông tin chốt (Hà 2026-08-12:
+        // *"khi phiên dừng chờ thì cần hiện các thông tin chốt quan trọng để đọc
+        // trên tele"*). `last_text` trong ảnh chụp chỉ có 240 ký tự — và 240 ký
+        // tự đầu của một báo cáo thường là câu dẫn nhập, tức đúng phần không
+        // quyết định được gì. Đọc thêm một lần ở đây thì rẻ: chuyện này hiếm.
+        // Không đọc được (hoặc chữ có dấu hiệu bí mật) thì rơi về bản ngắn đã
+        // qua cổng quét trong ảnh chụp.
+        let long = row.and_then(|s| crate::sessions::last_say(cfg, s, crate::sessions::SAY_MAX));
+        let points = long
+            .as_deref()
+            .map(|t| crate::watch::key_points(t, 700))
+            .filter(|p| !p.trim().is_empty());
+        let tail = points
+            .as_deref()
+            .or_else(|| row.and_then(|s| s.last_text.as_deref()));
         let text = match (&c, &fate) {
             (crate::watch::Change::Ended { name, was_working, .. }, Some(f)) => {
                 // Tắt lúc đang chạy dở là chuyện ĐÁNG XEM LẠI — đó là lần duy

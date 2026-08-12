@@ -767,3 +767,114 @@ fn a_question_that_smells_of_secrets_keeps_the_fact_but_not_the_words() {
     assert!(!a.question.contains("Abcd1234"), "lộ bí mật: {a:?}");
     assert!(a.question.contains("bí mật"), "phải nói vì sao trống: {a:?}");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// last_prose — LỜI cuối cùng phiên nói ra, thứ đi kèm tin báo lên điện thoại
+//
+// Ba mẫu dưới đây là hình dạng ĐO ĐƯỢC trên nhật ký thật ngày 2026-08-12, không
+// phải hình dạng tưởng tượng: lượt hỏi chỉ có một khối `tool_use`
+// (`a5f06b76…` bản ghi 328), dòng máy tự chèn `[Request interrupted…]`, và lượt
+// vừa nói vừa gọi công cụ.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Lượt cuối chỉ GỌI CÔNG CỤ thì chưa phải lời cuối.
+///
+/// Đây là ca đắt nhất và cũng là ca tin báo sinh ra để phục vụ: phiên **dừng
+/// lại HỎI** có lượt cuối là `AskUserQuestion` thuần, `text_of` dựng thành
+/// `[dùng AskUserQuestion]`. Lấy nguyên nó thì tin lên điện thoại rỗng nghĩa
+/// đúng lúc cần nhất, còn thứ quyết được câu trả lời nằm ở bản ghi liền trước.
+#[test]
+fn a_turn_that_only_calls_a_tool_is_not_the_last_word() {
+    let tail = concat!(
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Đo xong: node v24.4.0, cổng 8090 đang bận."}]}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"AskUserQuestion","input":{}}]}}"#,
+    );
+    assert_eq!(
+        hub::sessions::last_prose(tail, 2000).as_deref(),
+        Some("Đo xong: node v24.4.0, cổng 8090 đang bận."),
+    );
+}
+
+/// Câu của CHỦ MÁY không được đọc ngược về điện thoại của chính anh ấy.
+///
+/// `[Request interrupted by user for tool use]` là một bản ghi `user` do máy tự
+/// chèn — đo thật trên phiên `37e59209` lúc 16:10, và nó chính là thứ kiểu cũ
+/// mang đi làm "lời cuối".
+#[test]
+fn what_the_owner_typed_is_not_read_back_to_him() {
+    let tail = concat!(
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Đã cài xong, daemon chạy lại rồi."}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":"[Request interrupted by user for tool use]"}}"#,
+    );
+    assert_eq!(
+        hub::sessions::last_prose(tail, 2000).as_deref(),
+        Some("Đã cài xong, daemon chạy lại rồi."),
+    );
+}
+
+/// Vừa nói vừa gọi công cụ thì phần LỜI vẫn được giữ.
+#[test]
+fn a_turn_that_speaks_while_calling_a_tool_keeps_the_speech() {
+    let tail = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Chạy nốt bộ test đây."},{"type":"tool_use","id":"t2","name":"Bash","input":{}}]}}"#;
+    assert_eq!(
+        hub::sessions::last_prose(tail, 2000).as_deref(),
+        Some("Chạy nốt bộ test đây."),
+    );
+}
+
+/// Điều 5: chữ có dấu hiệu bí mật thì GIỮ LẠI, và **không** đi lùi tìm lượt sạch.
+///
+/// Một lượt cũ hơn đọc lên như thể là lời mới nhất — đó là một câu SAI, còn im
+/// lặng chỉ là một câu thiếu.
+#[test]
+fn a_secret_in_the_last_word_is_withheld_not_swapped_for_an_older_one() {
+    let tail = concat!(
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Câu này sạch, và nó CŨ."}]}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Mật khẩu là Abcd!2026 nhé"}]}}"#,
+    );
+    assert_eq!(hub::sessions::last_prose(tail, 2000), None);
+}
+
+/// Không có lượt nào của phiên thì trả None, để chỗ gọi rơi về bản xem trước.
+///
+/// Đúng hình dạng của 40 phiên dò `/usage` do chính hub đẻ ra: cả nhật ký chỉ
+/// có một bản ghi `user` mang `<command-name>/usage</command-name>`.
+#[test]
+fn a_transcript_with_no_assistant_turn_says_nothing() {
+    let tail = r#"{"type":"user","message":{"role":"user","content":"<command-name>/usage</command-name>"}}"#;
+    assert_eq!(hub::sessions::last_prose(tail, 2000), None);
+}
+
+/// Cả CHUỖI — nhật ký → lời cuối → thông tin chốt — phải giữ được câu chốt.
+///
+/// 🔴 Đây là con bug chạy thật mới thấy (16:26 ngày 2026-08-12, phiên
+/// `projects-71`): hai đầu đều đúng mà nối lại thì sai. `key_points` giữ dòng
+/// cuối rất tử tế, nhưng `last_prose` đã cắt bản dài ở 2000 ký tự TRƯỚC đó, nên
+/// "dòng cuối" nó giữ chỉ là chỗ bị chặt giữa câu. Một trần đặt sai chỗ đọc lên
+/// y hệt một tính năng chạy đúng.
+///
+/// Phép đo này đi đúng đường của `pipeline::announce_changes`, nên hạ `SAY_MAX`
+/// về 2000 là nó đỏ ngay.
+#[test]
+fn the_chain_from_transcript_to_message_keeps_the_closing_sentence() {
+    let filler = "Đoạn văn giữa bài, dài và không quyết được gì. ".repeat(60);
+    let report = format!(
+        "**Bắt được thủ phạm rồi** — đối chứng cùng một thời điểm.\n\n{filler}\n\nNói \"dọn đi\" là mình chạy phần an toàn."
+    );
+    assert!(report.chars().count() > 2600, "mẫu thử phải dài hơn trần cũ");
+    let tail = serde_json::json!({
+        "type": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": report}]}
+    })
+    .to_string();
+
+    let said = hub::sessions::last_prose(&tail, hub::sessions::SAY_MAX).expect("phải đọc được");
+    let points = hub::watch::key_points(&said, 700);
+    assert!(
+        points.contains("Nói \"dọn đi\" là mình chạy phần an toàn."),
+        "câu chốt chết ở giữa đường:\n{points}"
+    );
+}

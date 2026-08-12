@@ -339,3 +339,141 @@ fn a_session_that_starts_asking_is_announced_once_with_its_options() {
     let (again, _) = changes(&next, &[s], NOW + 60);
     assert!(again.is_empty(), "kêu lại lần hai: {again:?}");
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// key_points — rút thông tin chốt cho một cái chuông trên điện thoại
+//
+// Mẫu thử là một bản báo cáo THẬT, cắt ngắn: phiên `296972d4` ngày 2026-08-12
+// trả lời "sao máy treo". Nó có đủ bốn hình dạng làm hỏng bản đầu của hàm này —
+// đoạn văn dài có chữ đậm, một cái bảng, một danh sách đánh số, và câu chốt
+// cuối cùng là văn trơn không dấu nhấn nào.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Một báo cáo thật, rút gọn nhưng giữ nguyên hình dạng.
+const REPORT: &str = r#"Tìm ra rồi — **không phải một tiến trình nào treo. Cả máy đang thrash swap.**
+
+## Bằng chứng
+
+| Chỉ số | Giá trị |
+|---|---|
+| RAM vật lý | **16 GB** |
+| Swap đang dùng | **10.7 GB / 12 GB** (còn 1.5 GB) |
+
+10.7 GB swap trên máy 16 GB nghĩa là mỗi lần bạn gõ phím, terminal phải **đọc trang bộ nhớ từ SSD về** mới xử lý được → nhìn y hệt "treo cứng", nhưng thực ra nó đang bò. Bấm `Ctrl+C` cũng vô ích vì không phải lệnh nào treo, và cái làm nó chậm không nằm trong tiến trình nào cả mà nằm ở chỗ bộ nhớ vật lý đã hết từ lâu.
+
+```
+- **pageins** 386 triệu
+uptime 22 ngày
+```
+
+**Đề xuất dọn (chưa làm gì cả — chờ bạn duyệt):**
+
+1. **Đóng Activity Monitor** → lấy lại ~61% CPU của `sysmond`.
+2. **Kill 2 loop chết** (pid 20626, 38879) → chúng đang chờ file không bao giờ tới.
+
+Nói "dọn đi" là mình chạy phần an toàn. Riêng VM thì mình để bạn quyết — mình không biết cái nào đang dở việc."#;
+
+/// Câu CHỐT của một báo cáo nằm ở dòng cuối, và nó thường là văn trơn.
+///
+/// Bản đầu của `key_points` lấy tuần tự từ trên xuống nên dòng này luôn là dòng
+/// rơi — tức bản rút gọn bỏ đi đúng cái nó sinh ra để mang đi. Đo trên ba báo
+/// cáo thật ngày 2026-08-12, cả ba đều đóng bằng một câu văn trơn: *"Nói 'dọn
+/// đi' là mình chạy phần an toàn…"* · *"Tôi nghiêng về (1) rồi tôi chạy tiếp"* ·
+/// *"Hà mở lại phiên là tôi chạy nốt"*.
+#[test]
+fn the_closing_sentence_survives_the_cut() {
+    let out = hub::watch::key_points(REPORT, 700);
+    assert!(
+        out.contains("mình để bạn quyết"),
+        "câu chốt cuối bị cắt mất:\n{out}"
+    );
+}
+
+/// Một đoạn văn dài KHÔNG được ăn hết trần.
+///
+/// Đoạn "10.7 GB swap trên máy 16 GB…" dài hơn 400 ký tự và lọt lưới vì có chữ
+/// đậm. Bản đầu để nguyên nó ⟹ hết trần 700 ký tự ⟹ danh sách việc phải làm ở
+/// dưới không bao giờ tới điện thoại.
+#[test]
+fn one_fat_paragraph_cannot_eat_the_whole_budget() {
+    let out = hub::watch::key_points(REPORT, 700);
+    assert!(
+        out.contains("Đóng Activity Monitor"),
+        "mục việc phải làm bị đoạn văn dài đẩy ra ngoài:\n{out}"
+    );
+    let longest = out.lines().map(|l| l.chars().count()).max().unwrap_or(0);
+    assert!(longest <= 181, "còn một dòng {longest} ký tự:\n{out}");
+}
+
+/// Hàng bảng phải thành chữ đọc được, không phải một hàng rào `|`.
+#[test]
+fn a_table_row_reads_as_a_sentence() {
+    let out = hub::watch::key_points(REPORT, 700);
+    assert!(out.contains("RAM vật lý · 16 GB"), "bảng chưa dọn:\n{out}");
+    assert!(!out.contains('|'), "còn dấu bảng trong tin:\n{out}");
+}
+
+/// Cắt thì NÓI RA còn bao nhiêu dòng — và đếm từ bản GỐC.
+///
+/// Một bản rút gọn im lặng đọc như một bản đầy đủ, và người đọc sẽ quyết định
+/// trên thứ họ tưởng là toàn bộ.
+#[test]
+fn what_is_hidden_is_counted_from_the_original() {
+    let out = hub::watch::key_points(REPORT, 300);
+    let note = out
+        .lines()
+        .last()
+        .expect("tin rỗng")
+        .to_string();
+    assert!(note.starts_with("… (còn "), "không có câu nói phần bị giấu: {note}");
+    let n: usize = note
+        .trim_start_matches("… (còn ")
+        .trim_end_matches(" dòng)")
+        .parse()
+        .unwrap_or_else(|_| panic!("không đọc được con số: {note}"));
+    let total = REPORT.lines().filter(|l| !l.trim().is_empty()).count();
+    let shown = out.lines().count() - 1 - usize::from(out.contains("⋯\n"));
+    assert_eq!(n, total - shown, "con số nói dối:\n{out}");
+}
+
+/// Không giấu gì thì KHÔNG được dọa là có giấu.
+#[test]
+fn a_short_report_carries_no_warning_about_hidden_lines() {
+    let short = "✅ Xong cả ba việc.\n\nHỏi tiếp gì không?";
+    let out = hub::watch::key_points(short, 700);
+    assert!(!out.contains("còn"), "dọa người đọc là còn phần chưa xem:\n{out}");
+    assert!(out.contains("Xong cả ba việc"));
+}
+
+/// `10.7 GB…` mở đầu một câu KHÔNG phải mục đánh số.
+///
+/// Nhận nhầm "số rồi chấm" thành mục đánh số thì bản rút gọn đầy những mảnh câu
+/// giữa bài, đúng thứ không quyết được gì.
+#[test]
+fn a_number_starting_a_sentence_is_not_a_list_item() {
+    let text = "Mở đầu.\n\n10.7 GB swap là con số đáng ngại nhưng câu này chỉ là văn.\n\n1. Việc phải làm.\n\nCâu chốt.";
+    let out = hub::watch::key_points(text, 700);
+    assert!(out.contains("1. Việc phải làm"), "mất mục đánh số thật:\n{out}");
+    assert!(
+        !out.contains("10.7 GB swap"),
+        "câu văn mở đầu bằng số bị đọc thành mục đánh số:\n{out}"
+    );
+}
+
+/// Chữ trong rào mã không lên điện thoại — nhưng vẫn được ĐẾM.
+///
+/// Dòng trong rào cố tình mang **cả hai** dấu nhấn (`- ` và chữ đậm), nên nếu
+/// nó vắng mặt thì chỉ có một lời giải thích: luật rào mã đang chạy. Bản đầu
+/// của phép đo này dùng một dòng trần — thứ bị loại vì nhạt, không phải vì nằm
+/// trong rào — nên nó xanh cả với mã hỏng.
+#[test]
+fn fenced_code_is_dropped_but_still_counted() {
+    let out = hub::watch::key_points(REPORT, 700);
+    assert!(!out.contains("pageins"), "chữ trong rào mã lọt ra:\n{out}");
+}
+
+/// Bản rút gọn không được dán liền hai mẩu cách xa nhau mà không nói.
+#[test]
+fn a_gap_in_the_middle_is_marked() {
+    let out = hub::watch::key_points(REPORT, 300);
+    assert!(out.contains('⋯'), "cắt giữa mà không có dấu đứt:\n{out}");
+}

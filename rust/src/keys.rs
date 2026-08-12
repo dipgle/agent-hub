@@ -881,6 +881,25 @@ fn b64(data: &[u8]) -> String {
     out
 }
 
+/// Dòng LỖI API đang hiện trên màn, nếu có.
+///
+/// 🔴 Hà 2026-08-12: *"vừa rồi báo lỗi api mà chưa thấy bắt được"*. Một phiên
+/// gặp lỗi API thì nhật ký thôi lớn lên y hệt lúc nó xong việc, nên cái loa gọi
+/// đó là *"⏸ dừng, đang chờ bạn"* — đúng hình dạng, sai việc phải làm.
+///
+/// Mẫu lấy từ NHẬT KÝ THẬT trên máy này (đếm 2026-08-12): `API Error:` 30 lần
+/// (rate limit · 401 token bị thu hồi · đứt kết nối giữa chừng · máy ngủ),
+/// `Request timed out.` 18 lần. Cố ý hẹp: bắt bằng câu chữ `claude` in ra, chứ
+/// không đoán theo "màn có chữ error".
+pub fn api_error(screen: &str) -> Option<String> {
+    screen
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| l.contains("API Error") || l.contains("Request timed out"))
+        .map(str::to_string)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{activity, arrow_verdict, as_string, landed, window_script, Arrow, Landed, Look};
@@ -1078,3 +1097,4 @@ mod tests {
         assert_eq!(as_string(""), "\"\"");
     }
 }
+

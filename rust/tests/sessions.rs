@@ -1077,13 +1077,28 @@ fn a_remembered_window_must_still_belong_to_that_process() {
         .expect("ps");
     let tty = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if hub::sessions::is_real_tty(&tty) {
-        assert_eq!(
-            f(&book(me, &tty, "projects-fb"), "sess-1"),
-            Some((
-                "projects-fb".to_string(),
-                tty.clone(),
-                "terminal".to_string()
-            ))
-        );
+        let got = f(&book(me, &tty, "projects-fb"), "sess-1").expect("mất cửa sổ đang sống");
+        assert_eq!(got.name, "projects-fb");
+        assert_eq!(got.tty, tty);
+        assert_eq!(got.host, "terminal");
+        assert_eq!(got.pid, me);
     }
+}
+
+/// Tên phiên phải đọc ra được đang làm dự án nào.
+///
+/// 🔴 Hà 2026-08-12: *"tất cả các chỗ có gắn `projects-…` nên thay thành tên dự
+/// án-… sẽ hợp lý hơn cho việc đọc hiểu, hoặc bao nó trong dấu `[]`"*. `claude`
+/// đặt tên theo thư mục MỞ phiên, mà cả máy này mở ở gốc workspace, nên mọi
+/// phiên đều `projects-xx` — một cái tên không phân biệt được gì.
+#[test]
+fn a_session_name_says_which_project_it_is_working_on() {
+    let d = hub::sessions::display_name;
+    assert_eq!(d("projects-fb", "AI/tcc/amm"), "[amm] projects-fb");
+    assert_eq!(d("projects-be", "AI/tfl5"), "[tfl5] projects-be");
+    assert_eq!(d("hanguyen-41", "dwork"), "[dwork] hanguyen-41");
+    // Chưa đo được dự án thì GIỮ NGUYÊN — đừng bịa một cái nhãn rỗng.
+    assert_eq!(d("projects-fb", ""), "projects-fb");
+    // Tên đã tự mang tên dự án rồi thì đừng lặp lại: `[hub] hub-67` thừa.
+    assert_eq!(d("hub-67", "AI/hub"), "hub-67");
 }

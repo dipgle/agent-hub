@@ -608,3 +608,31 @@ fn with_every_account_answering_a_missing_session_still_ends() {
     assert_eq!(events.len(), 1, "phiên biến mất mà không báo: {events:?}");
     assert!(!next.contains_key("da-tat"), "phiên đã tắt vẫn nằm lại trong sổ");
 }
+
+/// Lỗi API KHÔNG được đọc thành "đang chờ bạn".
+///
+/// 🔴 Hà 2026-08-12: *"vừa rồi báo lỗi api mà chưa thấy bắt được"*. Hai trạng
+/// thái nhìn giống hệt nhau từ xa — nhật ký thôi lớn lên, màn đứng im — mà việc
+/// phải làm ngược nhau: một bên chờ anh trả lời, một bên chờ anh biết là nó
+/// hỏng.
+#[test]
+fn an_api_error_is_not_reported_as_waiting_for_you() {
+    let c = Change::Finished {
+        id: "s1".to_string(),
+        name: "[amm] projects-fb".to_string(),
+        ran_sec: 600,
+    };
+    let failed = c.say(
+        &Idle::Failed {
+            line: "API Error: Server is temporarily limiting requests (not your usage limit) · Rate limited".to_string(),
+        },
+        None,
+    );
+    assert!(failed.contains("LỖI API"), "{failed}");
+    assert!(failed.contains("Rate limited"), "phải mang nguyên câu lỗi: {failed}");
+    assert!(!failed.contains("đang chờ bạn"), "vẫn đọc thành chờ người: {failed}");
+
+    // Và dấu nhắc thật thì vẫn nói như cũ — luật mới không siết lan.
+    let ok = c.say(&Idle::Prompt, None);
+    assert!(ok.contains("đang chờ bạn"), "{ok}");
+}

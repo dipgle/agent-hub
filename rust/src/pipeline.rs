@@ -244,12 +244,14 @@ pub fn enter_button(
 pub fn session_name_from_book(book_json: &str, id: &str) -> Option<(String, String)> {
     let book: BTreeMap<String, crate::watch::Mark> = serde_json::from_str(book_json).ok()?;
     let mark = book.get(id)?;
+    // Tên để ĐỌC, không phải tên `claude` tự đặt — xem `sessions::display_name`.
+    let shown = crate::sessions::display_name(&mark.n, &mark.d);
     if mark.n.is_empty() {
         // Sổ có id mà không có tên (bản ghi từ trước khi sổ nhớ tên) — trả None
         // để rơi về đường ảnh chụp, đừng chào bằng một cái tên rỗng.
         return None;
     }
-    Some((mark.n.clone(), mark.a.clone()))
+    Some((shown, mark.a.clone()))
 }
 
 pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsSnapshot) {
@@ -305,6 +307,16 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                             // qua được cổng quét rò rỉ, nên nội dung này đi ra
                             // ngoài được.
                             options: choices.iter().map(|(_, t)| t.clone()).collect(),
+                        }
+                    }
+                    // LỖI API đứng TRƯỚC "đang ở dấu nhắc": hai thứ nhìn giống
+                    // nhau (nhật ký thôi lớn lên, màn đứng im) mà việc phải làm
+                    // ngược nhau — xem `keys::api_error`.
+                    crate::keys::Look::Saw { body, .. }
+                        if crate::keys::api_error(&body).is_some() =>
+                    {
+                        crate::watch::Idle::Failed {
+                            line: crate::keys::api_error(&body).unwrap_or_default(),
                         }
                     }
                     crate::keys::Look::Saw { .. } => crate::watch::Idle::Prompt,
@@ -1900,14 +1912,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // thấy phiên" khi lượt hỏi hết giờ.
                 let booked = db
                     .cursor_or_log(WATCH_KEY)
-                    .and_then(|v| crate::sessions::window_target_from_book(&v, &want))
-                    .map(|(name, tty, host)| crate::sessions::LiveSession {
-                        session_id: want.clone(),
-                        name,
-                        tty,
-                        host,
-                        ..Default::default()
-                    });
+                    .and_then(|v| crate::sessions::window_target_from_book(&v, &want));
                 // Chỉ trả tiền ảnh chụp khi sổ KHÔNG trả lời được.
                 let live = match &booked {
                     Some(_) => None,
@@ -1983,7 +1988,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             "⚠ {} đang có hộp chọn, nên tôi KHÔNG gửi mũi tên: đường gõ của \
                                              Terminal luôn kèm một dấu xuống dòng, tức mũi tên vừa di vừa CHỐT \
                                              — dễ chọn nhầm hộ Hà. Gõ thẳng SỐ của mục cần chọn thì an toàn.",
-                                            s.name
+                                            crate::sessions::display_name(&s.name, &s.folder)
                                         ))
                                     }
                                     crate::keys::Arrow::RefuseBlind(why) => {
@@ -1998,7 +2003,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                              đang có thì mũi tên vừa di vừa CHỐT, và chốt nhầm hộ Hà là thứ \
                                              không lùi lại được. Gõ thẳng SỐ của mục cần chọn thì an toàn dù \
                                              màn có đọc được hay không.",
-                                            s.name, why
+                                            crate::sessions::display_name(&s.name, &s.folder), why
                                         ))
                                     }
                                 }
@@ -2107,10 +2112,37 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     let mut sent_enter = false;
                                     if !is_key {
                                         if let Some((body, choices)) = &view {
+                                            // 🔴 Điều kiện ĐỔI (2026-08-12, sau
+                                            // khi Hà báo "nãy giờ gặp liên tục
+                                            // tình trạng không enter").
+                                            //
+                                            // Cũ: chỉ bắn Enter khi NHÌN THẤY
+                                            // chữ còn trong ô. Đo ra là một
+                                            // điều kiện không đáng tin dưới
+                                            // tải: 17:39:31 hub soi 18 giây
+                                            // không thấy chữ đâu, `/shot` 20
+                                            // giây sau thì chữ nằm rõ trong ô —
+                                            // TUI vẽ chậm hơn cả cửa sổ chờ, mà
+                                            // máy này đang swap 12/13 GB.
+                                            //
+                                            // Mới: bắn Enter khi CHỨNG MINH
+                                            // được **không có hộp chọn** và
+                                            // phiên chưa chạy. Đó mới là rủi ro
+                                            // thật — Enter trong hộp chọn là
+                                            // CHỐT một lựa chọn, không lùi được;
+                                            // còn Enter vào một ô nhập RỖNG thì
+                                            // `claude` không làm gì cả. Đổi từ
+                                            // "chỉ khi thấy chữ" sang "trừ khi
+                                            // thấy nguy hiểm" là đổi cho khớp
+                                            // với cái giá thật của mỗi bên.
+                                            //
+                                            // Màn không đọc được (`Blind` /
+                                            // `Withheld`) thì `view` = None và
+                                            // nhánh này không chạy — vẫn giữ
+                                            // nguyên: mù thì KHÔNG gõ.
                                             if choices.is_empty()
                                                 && crate::keys::landed(body)
                                                     == crate::keys::Landed::Idle
-                                                && crate::keys::still_in_box(body, &typed)
                                             {
                                                 match crate::keys::press(w, "enter") {
                                                     Ok(()) => {
@@ -2153,10 +2185,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         Some(crate::keys::Landed::Queued) => format!(
                                             "⌨ {} vào {} — phiên đang chạy dở nên chữ nằm ở HÀNG CHỜ, \
                                              `claude` sẽ xử lý ngay khi xong việc.",
-                                            did, s.name
+                                            did, crate::sessions::display_name(&s.name, &s.folder)
                                         ),
                                         Some(crate::keys::Landed::Running) => {
-                                            format!("⌨ {} vào {} — phiên đã nhận và bắt đầu chạy.", did, s.name)
+                                            format!("⌨ {} vào {} — phiên đã nhận và bắt đầu chạy.", did, crate::sessions::display_name(&s.name, &s.folder))
                                         }
                                         // "Đứng ở dấu nhắc" nghe như đã xong —
                                         // nên chỉ được nói khi ô nhập ĐÃ TRỐNG.
@@ -2164,7 +2196,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             "⚠ {} vào {}, nhưng chữ VẪN NẰM trong ô nhập — {}. \
                                              Bấm Enter trên máy, hoặc gửi lại.",
                                             did,
-                                            s.name,
+                                            crate::sessions::display_name(&s.name, &s.folder),
                                             if sent_enter {
                                                 "tôi đã gửi thêm một Enter rời mà nó chưa đi"
                                             } else {
@@ -2193,11 +2225,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             "⚠ {} vào {}, nhưng sau {:.0}s màn KHÔNG thấy chữ ấy \
                                              và phiên cũng không chạy — có thể nó chưa vào. /shot để nhìn.",
                                             did,
-                                            s.name,
+                                            crate::sessions::display_name(&s.name, &s.folder),
                                             waited.elapsed().as_secs_f32()
                                         ),
                                         Some(crate::keys::Landed::Idle) => {
-                                            format!("⌨ {} vào {} — phiên đang đứng ở dấu nhắc.", did, s.name)
+                                            format!("⌨ {} vào {} — phiên đang đứng ở dấu nhắc.", did, crate::sessions::display_name(&s.name, &s.folder))
                                         }
                                         // Byte đã vào tab (mã trả về 0), nhưng
                                         // đọc lại màn thì không được — nói đúng
@@ -2205,7 +2237,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         None => format!(
                                             "⌨ {} vào {} — nhưng tôi KHÔNG đọc lại được màn, nên chưa \
                                              biết chữ đã rơi vào dấu nhắc hay vào hàng chờ.",
-                                            did, s.name
+                                            did, crate::sessions::display_name(&s.name, &s.folder)
                                         ),
                                     }
                                 }

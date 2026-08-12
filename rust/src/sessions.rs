@@ -260,6 +260,30 @@ pub fn is_hub_runtime_cwd(cwd: &str) -> bool {
     !cwd.is_empty() && Path::new(cwd) == crate::config::expand_home(Path::new(HUBD_RUNTIME_DIR))
 }
 
+/// Tên phiên để ĐỌC, không phải tên `claude` tự đặt.
+///
+/// 🔴 Hà 2026-08-12: *"tất cả các chỗ có gắn `projects-…` nên thay thành tên dự
+/// án-… sẽ hợp lý hơn cho việc đọc hiểu… hoặc bao nó trong dấu `[]`"*.
+///
+/// Vì sao mọi phiên đều tên `projects-xx`: `claude` đặt tên theo **thư mục mở
+/// phiên**, mà cả máy này mở phiên ở GỐC workspace (`~/projects`) rồi mới nói
+/// tên dự án — nên cái tên ấy giống hệt nhau ở mọi dòng, tức nó **không phân
+/// biệt được gì**, đúng lý do `cwd` đã bị bỏ khỏi màn từ trước.
+///
+/// Thứ phân biệt được thì hub đã đo sẵn: `folder` (xem [`folder_from_tail`]).
+/// Nên `projects-fb` + `AI/tcc/amm` đọc thành **`[amm] projects-fb`**: mở đầu
+/// bằng thứ trả lời "phiên này đang làm gì", giữ nguyên phần đuôi để còn đối
+/// chiếu với `claude agents` và với những tin cũ.
+///
+/// Chưa biết dự án thì **giữ nguyên tên** — không bịa một cái nhãn rỗng.
+pub fn display_name(name: &str, folder: &str) -> String {
+    let leaf = folder.trim_matches('/').rsplit('/').next().unwrap_or("");
+    if leaf.is_empty() || name.starts_with(&format!("{leaf}-")) {
+        return name.to_string();
+    }
+    format!("[{leaf}] {name}")
+}
+
 /// Cửa sổ của một phiên, lấy từ SỔ rồi bắt `ps` chứng thực — **không spawn
 /// `claude`**.
 ///
@@ -278,7 +302,7 @@ pub fn is_hub_runtime_cwd(cwd: &str) -> bool {
 /// *tiến trình ấy còn sống không* và *nó còn ngồi đúng cửa sổ ấy không* — trong
 /// vài mili giây. Phiên chết đi thì pid biến mất ⟹ hàm trả `None` ⟹ chỗ gọi rơi
 /// về đường ảnh chụp, đúng như khi sổ chưa biết gì.
-pub fn window_target_from_book(book_json: &str, id: &str) -> Option<(String, String, String)> {
+pub fn window_target_from_book(book_json: &str, id: &str) -> Option<LiveSession> {
     let book: std::collections::BTreeMap<String, crate::watch::Mark> =
         serde_json::from_str(book_json).ok()?;
     let mark = book.get(id)?;
@@ -301,7 +325,16 @@ pub fn window_target_from_book(book_json: &str, id: &str) -> Option<(String, Str
     {
         return None;
     }
-    Some((mark.n.clone(), mark.y.clone(), mark.o.clone()))
+    Some(LiveSession {
+        session_id: id.to_string(),
+        name: mark.n.clone(),
+        tty: mark.y.clone(),
+        host: mark.o.clone(),
+        folder: mark.d.clone(),
+        account: mark.a.clone(),
+        pid: mark.i,
+        ..Default::default()
+    })
 }
 
 /// `tty` này có phải một cửa sổ THẬT không.
@@ -2759,12 +2792,45 @@ fn start_in_terminal(
         json!({ "window": window, "tty": tty_short, "task": truncate(task, 80) }),
     );
 
-    // Chờ `claude agents` khai ra hàng mang đúng tty ấy.
+    // ĐƯỜNG RẺ TRƯỚC: id phiên chính là TÊN TỆP nhật ký.
+    //
+    // 🔴 Hà 2026-08-12, sau khi gõ `/new mailler` ba lần: đo ra `command_done
+    // New` **64,7 giây**, trong đó `new_window_opened` xảy ra ở giây thứ 7 —
+    // tức **57 giây chỉ để chờ `claude agents` khai id**. Mà mỗi vòng chờ gọi
+    // `claude agents` cho cả ba tài khoản, và trên máy đang swap một lượt như
+    // thế mất 15–60 giây. Cái giá thật không phải là sự chậm: **anh tưởng hỏng
+    // nên gõ lại, và máy mở ra HAI phiên mailler**.
+    //
+    // `claude` tạo `~/.claude/projects/<slug>/<session_id>.jsonl` ngay khi phiên
+    // bắt đầu, nên id nằm sẵn trên đĩa — một lượt `read_dir`, vài mili giây.
+    // Chỉ nhận tệp sinh SAU lúc mở cửa sổ, và lấy cái mới nhất.
+    let opened_at = std::time::SystemTime::now();
+    let fast_deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::time::Instant::now() < fast_deadline {
+        std::thread::sleep(Duration::from_millis(500));
+        if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), root, opened_at) {
+            logging::info(
+                "new_session_matched_by_transcript",
+                json!({ "session": id, "tty": tty_short }),
+            );
+            return Ok(Started {
+                session_id: id,
+                project: project.to_string(),
+                cwd: dir.to_string_lossy().to_string(),
+                task: task.to_string(),
+                ts: crate::logging::now_iso(),
+                window: true,
+            });
+        }
+    }
+
+    // Đường cũ, giữ làm lưới đỡ: nhật ký chưa kịp sinh (phiên kẹt ở hộp thoại
+    // duyệt MCP chẳng hạn) thì vẫn còn `claude agents` để hỏi.
     //
     // Đếm bằng ĐỒNG HỒ, không đếm bằng số vòng: mỗi vòng gọi `claude agents`
     // cho từng tài khoản, nên "30 vòng × 2 giây" trên thực tế là 90 giây chứ
     // không phải 60 — và câu báo lỗi nói "60 giây" sẽ là một con số bịa.
-    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let deadline = std::time::Instant::now() + Duration::from_secs(40);
     while std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_secs(2));
         if let Some(row) = snapshot(cfg)
@@ -2783,6 +2849,41 @@ fn start_in_terminal(
         }
     }
     anyhow::bail!("mở được cửa sổ ({tty_short}) nhưng `claude agents` chưa khai phiên nào trên đó sau 60 giây")
+}
+
+/// Nhật ký phiên MỚI NHẤT sinh ra sau mốc `since`, trong thư mục khoá của `cwd`.
+///
+/// Tên tệp chính là `session_id` — đó là cả mẹo: hub biết id mà không phải hỏi
+/// `claude agents` (ba lần spawn một binary 279 MB). Chỉ nhận tệp sinh SAU lúc
+/// mở cửa sổ, nên phiên cũ trong cùng thư mục không lọt vào.
+fn newest_transcript_since(
+    root: &Path,
+    cwd: &Path,
+    since: std::time::SystemTime,
+) -> Option<String> {
+    let dir = root
+        .join("projects")
+        .join(transcript_slug(&cwd.to_string_lossy()));
+    let mut best: Option<(std::time::SystemTime, String)> = None;
+    for e in std::fs::read_dir(&dir).ok()?.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(m) = e.metadata().and_then(|m| m.modified()) else {
+            continue;
+        };
+        if m < since {
+            continue;
+        }
+        let Some(id) = p.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(t, _)| m > *t) {
+            best = Some((m, id.to_string()));
+        }
+    }
+    best.map(|(_, id)| id)
 }
 
 /// Dòng lệnh gõ vào cửa sổ Terminal mới.

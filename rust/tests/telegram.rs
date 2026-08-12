@@ -441,9 +441,11 @@ fn book_json(id: &str, name: &str, account: &str) -> String {
 #[test]
 fn following_a_session_is_answered_from_the_book_not_from_a_new_snapshot() {
     let b = book_json(SID, "projects-fb", "acc1");
+    // Tên mang theo dự án (`sessions::display_name`): `projects-fb` một mình
+    // không nói được gì — mọi phiên trên máy này đều tên như thế.
     assert_eq!(
         hub::pipeline::session_name_from_book(&b, SID),
-        Some(("projects-fb".to_string(), "acc1".to_string()))
+        Some(("[hub] projects-fb".to_string(), "acc1".to_string()))
     );
 }
 

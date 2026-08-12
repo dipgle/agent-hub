@@ -233,6 +233,14 @@ pub enum Idle {
     /// lựa chọn" thì vẫn bắt người ta mở máy ra mới biết chọn gì, tức nó chưa
     /// tiết kiệm cho ai một bước nào.
     Asking { n: usize, options: Vec<String> },
+    /// Màn đang mang một LỖI API — phiên không chờ bạn, nó **hỏng**.
+    ///
+    /// 🔴 Hà 2026-08-12: *"vừa rồi báo lỗi api mà chưa thấy bắt được"*. Trước
+    /// đó một phiên gặp lỗi API rơi vào đúng nhánh `Prompt`, và cái chuông nói
+    /// *"⏸ dừng, đang chờ bạn"* — một câu ĐÚNG về hình dạng (nó có dừng, nó có
+    /// chờ) mà SAI về việc phải làm: chờ ở đây không phải chờ một câu trả lời,
+    /// mà là chờ ai đó biết rằng nó đã hỏng.
+    Failed { line: String },
     /// Đứng ở dấu nhắc thật.
     Prompt,
     /// Không đọc được màn — nói đúng chừng ấy, đừng đoán hộ.
@@ -286,6 +294,11 @@ impl Change {
                     Idle::Asking { n, .. } => format!(
                         "⚠ {name} dừng lại HỎI ({n} lựa chọn) — màn có dấu hiệu bí mật nên hub \
                          không đưa nội dung ra; mở phiên trên máy để đọc"
+                    ),
+                    Idle::Failed { line } => format!(
+                        "🔴 {name} gặp LỖI API sau {} phút chạy:\n{}",
+                        ran_sec / 60,
+                        crate::exec::truncate(line, 160)
                     ),
                     Idle::Prompt => format!(
                         "⏸ {name} dừng, đang chờ bạn — sau {} phút chạy",

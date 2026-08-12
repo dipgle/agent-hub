@@ -704,6 +704,37 @@ danh sách thì hàng của nó đi theo — `⏹ projects-71 · AI/hub (8db9118
 quyết định (`callback_to_command`, `session_list_text`, `still_in_box`,
 `text_for_session`) + log đối chiếu từng mốc.
 
+### Tin báo mang **thông tin chốt**, không mang câu dẫn nhập  ✅ vá 2026-08-12 (chiều)
+
+Hà: *"khi phiên dừng chờ thì cần hiện các thông tin chốt quan trọng để đọc trên
+tele"*. Chuông cũ nói được **có** chuyện, không nói được **chuyện gì** — nó mang
+240 ký tự đầu của lượt cuối, mà 240 ký tự đầu của một báo cáo là câu dẫn nhập.
+
+`watch::key_points` lọc theo **hình dạng** (dấu kết luận · chữ đậm · gạch đầu
+dòng · mục đánh số · dòng đầu · **dòng cuối**), bảng thành chữ, rào mã bỏ đi —
+**không gọi model**, vì hub không tự tiêu hạn mức (điều 8) và một bản tóm tắt
+sinh ra sau lưng thì không đối chiếu được với thứ phiên thật sự nói.
+
+Ba luật chỉ đọc **bản thật** mới rút ra được (3 báo cáo trong ngày của `dwork` ·
+`hub` · `projects-71`):
+
+| Luật | Vì sao |
+|---|---|
+| mỗi dòng ≤ **180 ký tự** | một đoạn 480 ký tự lọt lưới (có chữ đậm) ăn sạch trần 700, đẩy *"Hai đường đi tiếp, anh chọn: 1… 2…"* ra ngoài |
+| **3 dòng cuối đặt chỗ trước**, và dòng cuối bản gốc luôn vào | báo cáo mở bằng kết luận, đóng bằng câu hỏi; cả ba bản thật đều đóng bằng văn trơn không dấu nhấn |
+| chỉ đọc **lời của phiên** (`sessions::last_prose`) | lượt cuối thường là `[dùng Bash]` · `[Request interrupted…]`; phiên **đang HỎI** thì là `AskUserQuestion` thuần (`a5f06b76…` bản ghi 328) ⟹ rỗng nghĩa đúng lúc cần nhất |
+
+🔴 Và con bug **chỉ chạy thật mới thấy**: hai đầu đúng mà nối lại thì sai —
+`last_say` cắt bản dài ở 2000 ký tự **trước khi** `key_points` kịp chọn, nên
+"dòng cuối" nó giữ chỉ là chỗ bị chặt giữa câu (`projects-71`, 3151 byte). Nay
+`sessions::SAY_MAX = 12_000`; chỗ quyết cái gì đáng giữ chỉ có MỘT.
+
+**Cơ chế:** ✅ · **Sản phẩm:** ✅ (chạy thật trên **4 phiên đang sống** 16:26 —
+phiên trước đây mang `[dùng Read]` nay mang một câu có nghĩa) · **Kịch bản:**
+✅ 14 test, mỗi test đã kiểm là **đỏ được** bằng đột biến · ⏳ **chưa** quan sát
+được một tin **Telegram thật** mang thông tin chốt: từ lúc cài chưa phiên nào
+chuyển trạng thái.
+
 ---
 
 ## Đọc bảng này thế nào

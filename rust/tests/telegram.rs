@@ -636,3 +636,36 @@ fn a_sentence_with_a_comma_is_not_a_command() {
     let screen = "git status trước, rồi push sau";
     assert!(hub::keys::commands_on_screen(screen, 4).is_empty());
 }
+
+/// Lệnh nằm trong DẤU NHÁY giữa câu văn cũng phải bấm chạy được.
+///
+/// 🔴 Hà 2026-08-12: *"nội dung của phiên có lệnh script cần chạy đã có tính
+/// năng bấm chạy luôn chưa"*. Có — nhưng luật cũ đòi lệnh **đứng đầu dòng**,
+/// đúng cho một màn terminal và sai cho một BÁO CÁO. Đo trên tin báo thật: 0
+/// nút, trong khi báo cáo viết rõ hai việc cần chạy.
+#[test]
+fn a_command_quoted_in_a_report_becomes_a_button_cut_at_the_backticks() {
+    let report = "Còn đúng hai việc của anh:\n\
+        1. `git -C ~/projects/AI/tcc/amm push origin main` (3 commit, hook chặn tôi push main)\n\
+        2. Chạy `bash ./deploy.sh perapp-storage` rồi kiểm lại.\n\
+        cargo test --all-targets chưa chạy lại sau bản vá SDK đó.";
+    let got = hub::keys::commands_on_screen(report, 4);
+    assert!(
+        got.contains(&"git -C ~/projects/AI/tcc/amm push origin main".to_string()),
+        "{got:?}"
+    );
+    assert!(got.contains(&"bash ./deploy.sh perapp-storage".to_string()), "{got:?}");
+    // Câu VĂN mở đầu bằng một lệnh thì KHÔNG thành nút — nút chạy nhầm thứ còn
+    // tệ hơn không có nút.
+    assert!(
+        !got.iter().any(|c| c.starts_with("cargo test")),
+        "biến một câu văn thành nút: {got:?}"
+    );
+    // Và cắt ĐÚNG trong cặp nháy: bẫy 08-12 tối là bóc nháy mở rồi nuốt cả câu
+    // phía sau, ra một cái nút chạy nhầm thứ.
+    let prose = "Nhắc tới `git push origin main` (a plain push to main) executed from…";
+    assert_eq!(
+        hub::keys::commands_on_screen(prose, 4),
+        vec!["git push origin main".to_string()]
+    );
+}

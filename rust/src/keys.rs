@@ -508,7 +508,8 @@ end tell"#
 /// hẹp — đoán rộng ở đây nghĩa là đưa lên màn một cái nút chạy nhầm thứ.
 ///
 /// Giữ tối đa `max` dòng CUỐI (mới nhất), bỏ trùng.
-pub fn commands_on_screen(screen: &str, max: usize) -> Vec<String> {
+pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
+    let screen = text;
     const KNOWN: &[&str] = &[
         "git", "npm", "npx", "node", "cargo", "bash", "sh", "zsh", "python3", "pip3", "docker",
         "make", "curl", "rsync", "scp", "ssh", "sqlite3", "pnpm", "yarn", "deno", "go", "rustup",
@@ -568,6 +569,36 @@ pub fn commands_on_screen(screen: &str, max: usize) -> Vec<String> {
         }
         if !out.iter().any(|x| x == line) {
             out.push(line.to_string());
+        }
+    }
+    // …và lệnh nằm TRONG DẤU NHÁY giữa câu văn.
+    //
+    // 🔴 Hà 2026-08-12: *"nội dung của phiên có lệnh script cần chạy đã có tính
+    // năng bấm chạy luôn chưa"*. Có, nhưng luật trên đòi lệnh **đứng đầu dòng**
+    // — đúng cho một màn terminal, sai cho một BÁO CÁO. Đo trên tin báo thật
+    // (`hanguyen-8e`, 33 phút chạy): nó nhắc `git fetch` và `cargo test
+    // --all-targets` mà cả hai nằm giữa câu, nên ra **0 nút**.
+    //
+    // Dấu nháy ngược là một ranh giới CHÍNH XÁC, và chính nó vá luôn cái bẫy đã
+    // trả giá hôm 08-12 tối: bản đầu bóc dấu nháy mở rồi nuốt cả câu phía sau
+    // (`git push origin main` (a plain push to main) executed from…) ⟹ một nút
+    // chạy nhầm thứ. Cắt đúng trong cặp nháy thì không còn chỗ cho câu văn lọt.
+    for span in text.split('`').skip(1).step_by(2) {
+        let cmd = span.trim();
+        if cmd.len() < 4 || cmd.len() > 300 || cmd.contains('\n') {
+            continue;
+        }
+        let Some(first) = cmd.split_whitespace().next() else {
+            continue;
+        };
+        if !(KNOWN.contains(&first) || first.starts_with("./")) {
+            continue;
+        }
+        if cmd.split_whitespace().count() < 2 {
+            continue;
+        }
+        if !out.iter().any(|x| x == cmd) {
+            out.push(cmd.to_string());
         }
     }
     if out.len() > max {

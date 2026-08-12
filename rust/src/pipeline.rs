@@ -489,14 +489,36 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             takeover.as_ref().map(|(i, n)| (i.as_str(), n.as_str())),
             &focused,
         );
+        // Lệnh nằm TRONG CHÍNH TIN BÁO cũng phải bấm chạy được.
+        //
+        // 🔴 Hà 2026-08-12: *"nội dung của phiên có lệnh script cần chạy đã có
+        // tính năng bấm chạy luôn chưa"*. Có — nhưng từ 08-12 tối tới giờ nó
+        // chỉ gắn vào câu trả lời của `/shot` (`cmd.kind == Shot`), tức chủ máy
+        // phải CHỦ ĐỘNG đi xin ảnh màn rồi mới thấy nút. Mà chỗ lệnh hay xuất
+        // hiện nhất lại là tin tự phát: phiên dừng lại và câu chốt của nó là
+        // một dòng lệnh để gõ. Cây cầu đi được một chiều thì vẫn là chưa nối.
+        //
+        // Cùng máy móc, không đẻ lối riêng: `commands_on_screen` (nhận theo
+        // HÌNH DẠNG, cố ý hẹp) → `remember_quick` → nút `run:<n>` → `/type
+        // !<lệnh>` vào chính phiên.
+        //
+        // ⛔ Trừ tin BÁO TỬ: gõ vào một phiên đã tắt là gõ vào chỗ trống — cùng
+        // lý do nút "vào phiên" đã bị gỡ khỏi nhánh ấy.
+        let quick = if matches!(c, crate::watch::Change::Ended { .. }) {
+            Vec::new()
+        } else {
+            remember_quick(db, &crate::keys::commands_on_screen(&text, 3))
+        };
         match (buttons, crate::telegram::inbox()) {
             (Some(opts), Some(tg)) => {
                 if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some()) {
                     logging::error("session_change_telegram_failed", json!({ "err": e }));
                 }
             }
-            (None, Some(tg)) if enter.is_some() => {
-                let b = [enter.unwrap()];
+            (None, Some(tg)) if enter.is_some() || !quick.is_empty() => {
+                let mut b: Vec<(String, String)> = Vec::new();
+                b.extend(enter);
+                b.extend(quick);
                 if let Err(e) = tg.send_buttons(&text, &b) {
                     logging::error("session_change_telegram_failed", json!({ "err": e }));
                 }

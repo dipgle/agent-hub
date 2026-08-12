@@ -139,7 +139,21 @@ or drive a session from a phone?** If not, it does not belong here.
    not public endpoints.
 
    Routes: session · new · ask · tell · stop · handover · type · key · shot ·
-   project · ingest · run · doctor · set · help. A route that already answered
+   project · ingest · run · doctor · set · help · **accounts**.
+
+   **Flags, not slots** (Hà 2026-08-12: *"kiến trúc lại lệnh cho hợp lý, ví dụ
+   `/new -a acc2 -s dwork`"*). `/new` reads `-a <acc>` and `-s <project>`
+   anywhere in the line (`pipeline::split_flags`), and the old positional form
+   (`/new <project> @acc <task>`) still parses — it is in the owner's muscle
+   memory and in Telegram buttons already sent. Two rules the parser must keep:
+   **only KNOWN flags are lifted** out of the text (an unknown `-x` stays in the
+   task, because silently eating part of a task produces a session that runs a
+   different job than the one typed), and a flag whose value slot holds another
+   known flag comes back EMPTY rather than swallowing it.
+   An **empty task is allowed on the window path** — that is what the owner does
+   at the machine: open a window, type `claude`, then talk. `claude ''` is "an
+   empty task", not "no task", so no positional argument is passed at all. The
+   `--bg` fallback still refuses it: that path has no window to type into. A route that already answered
    must end its arm with `Some(ack)` — the fall-through that used to exist
    logged "Không tìm thấy decision #0" as the reply for every `/session` and
    `/ask` ever issued.
@@ -212,6 +226,30 @@ or drive a session from a phone?** If not, it does not belong here.
     sentence, not a late one, and it goes to Telegram. Both mouths (the room and
     Telegram) say the SAME sentence (`Change::say`), or nobody can reconcile them
     later. Neither call spends quota.
+11b. **A failed measurement is not a fact about the world** (2026-08-12, two
+    bugs one family — the same family as `keys::look` returning `Blind`).
+    - `claude agents` failed for all three accounts at 14:44:07 (`spawn claude
+      failed: No such file or directory` — `npm` was overwriting the binary mid-
+      run, from a session that auto-updated itself every 30 minutes). The list
+      came back EMPTY and rule 11's *"leaving the list means it ended"* read that
+      empty list as three deaths: three `⏹ đã tắt` messages in 8 seconds, for
+      three sessions that were alive (one of them kept working for another two
+      hours). The snapshot now carries `blind` (accounts that could not be
+      listed, machine-readable — `notes` is the sentence for humans), the book
+      remembers each session's account (`watch::Mark::a`), and a session missing
+      from a blind account KEEPS ITS BOOK ENTRY and says nothing
+      (`session_end_unknown`). Keeping the entry is half the fix: dropping it
+      made the session come back as "new", so its REAL death got announced a
+      second time. One blind account must not gag the others — there is a test.
+    - **A tty is a number that gets REUSED**, so "is some tab still holding this
+      tty" answers "is there a window", never "is it still THAT session's
+      window". `projects-d8` lived in `ttys002` (open since 12:28); the owner
+      exited the CLI and typed `claude` again in that same window at 16:41:16;
+      at 16:42:33 hub noticed the old session gone, asked about the tty, and
+      said *"cửa sổ terminal còn mở"* — technically true, and a lie in effect,
+      because the window it describes is already running something else. Ask
+      your OWN snapshot first (`sessions::window_taken_over`) and name the
+      session that took the window over.
 12. **The phone page is the only UI.** There is no local console any more. If you
     add a surface, it must go through the same room commands — one path, one set
     of books.

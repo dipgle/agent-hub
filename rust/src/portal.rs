@@ -117,7 +117,7 @@ fn build_inner(
     // vòng chạy này đã nặng sẵn. Việc so hai lượt thì rẻ — một dòng cursor và
     // một phép so — nên nó bám theo dữ liệu thay vì bắt dữ liệu chạy theo nó.
     if announce {
-        crate::pipeline::announce_changes(db, cfg, &live.sessions);
+        crate::pipeline::announce_changes(db, cfg, &live);
     }
 
     // Only the session being read carries its full stream. Pushing every

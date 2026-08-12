@@ -26,6 +26,9 @@ fn mark(state: &str, tty: &str, kind: &str) -> Mark {
         h: false,
         n: String::new(),
         d: String::new(),
+        // Mặc định của test cũ: sổ ĐÃ biết phiên này thuộc tài khoản nào. Sổ
+        // chưa biết (`a` rỗng) là một ca riêng, có test riêng bên dưới.
+        a: "acc1".to_string(),
     }
 }
 fn working_long(id: &str) -> (String, Mark) {
@@ -60,7 +63,7 @@ fn a_session_that_lived_only_seconds_dies_quietly() {
     let mut m = mark(IDLE, "", "background");
     m.f = NOW - 20; // vừa sinh ra 20 giây trước
     let prev: BTreeMap<String, Mark> = [("probe".to_string(), m)].into_iter().collect();
-    let (events, _) = changes(&prev, &[], NOW);
+    let (events, _) = changes(&prev, &[], NOW, &[]);
     assert!(events.is_empty(), "phiên sống 20 giây mà vẫn kêu: {events:?}");
 }
 
@@ -74,7 +77,7 @@ fn a_hub_opened_session_dying_young_is_always_reported() {
     m.f = NOW - 20;
     m.h = true;
     let prev: BTreeMap<String, Mark> = [("just-opened".to_string(), m)].into_iter().collect();
-    let (events, _) = changes(&prev, &[], NOW);
+    let (events, _) = changes(&prev, &[], NOW, &[]);
     assert_eq!(events.len(), 1, "phiên hub vừa mở mà chết thì phải báo: {events:?}");
 }
 
@@ -89,7 +92,7 @@ fn the_farewell_says_which_session_it_was() {
     m.d = "AI/hub".into();
     let prev: BTreeMap<String, Mark> =
         [("8db91183-1111-2222-3333-444444444444".to_string(), m)].into_iter().collect();
-    let (events, _) = changes(&prev, &[], NOW);
+    let (events, _) = changes(&prev, &[], NOW, &[]);
     let said = match events.first() {
         Some(Change::Ended { name, .. }) => name.clone(),
         other => panic!("phải là Ended: {other:?}"),
@@ -109,7 +112,7 @@ fn the_first_round_says_nothing_it_only_writes_the_book() {
         sess("a", "dwork", "terminal", true),
         sess("b", "tfl5", "terminal", false),
     ];
-    let (events, next) = changes(&BTreeMap::new(), &now, NOW);
+    let (events, next) = changes(&BTreeMap::new(), &now, NOW, &[]);
     assert!(events.is_empty(), "lượt đầu phải im: {events:?}");
     assert!(next.get("a").is_some_and(|m| m.s.starts_with(WORKING)), "{next:?}");
     assert_eq!(next.get("b").map(|m| m.s.as_str()), Some(IDLE));
@@ -121,7 +124,7 @@ fn finishing_is_announced_once_not_every_cycle() {
     let prev: BTreeMap<String, Mark> = [working_long("a")].into_iter().collect();
     let now = vec![sess("a", "dwork", "terminal", false)];
 
-    let (events, next) = changes(&prev, &now, NOW);
+    let (events, next) = changes(&prev, &now, NOW, &[]);
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], Change::Finished { id, .. } if id == "a"));
     // Kiểm Ý NGHĨA, không kiểm mặt chữ: tin phải nói nó đang CHỜ NGƯỜI.
@@ -132,7 +135,7 @@ fn finishing_is_announced_once_not_every_cycle() {
 
     // Vòng sau, cùng trạng thái: KHÔNG nói nữa. Đây là điều kiện sống còn —
     // vòng lặp chạy mỗi ~10 giây.
-    let (again, _) = changes(&next, &now, NOW);
+    let (again, _) = changes(&next, &now, NOW, &[]);
     assert!(again.is_empty(), "không được nói lại: {again:?}");
 }
 
@@ -148,7 +151,7 @@ fn a_session_that_leaves_the_list_counts_as_ended() {
             .collect();
     let now = vec![sess("b", "tfl5", "terminal", false)];
 
-    let (events, next) = changes(&prev, &now, NOW);
+    let (events, next) = changes(&prev, &now, NOW, &[]);
     assert_eq!(events.len(), 1);
     match &events[0] {
         Change::Ended { id, was_working, .. } => {
@@ -164,7 +167,7 @@ fn a_session_that_leaves_the_list_counts_as_ended() {
     assert!(matches!(&events[0], Change::Ended { tty, kind, .. } if !tty.is_empty() && !kind.is_empty()));
     assert!(!next.contains_key("a"), "đã tắt thì rời sổ, không nói lại lần nữa");
 
-    let (again, _) = changes(&next, &now, NOW);
+    let (again, _) = changes(&next, &now, NOW, &[]);
     assert!(again.is_empty());
 }
 
@@ -174,7 +177,7 @@ fn a_row_that_turns_dead_is_announced_once_and_then_dropped() {
     let prev = book(&[("a", IDLE)]);
     let now = vec![sess("a", "dwork", "dead", false)];
 
-    let (events, next) = changes(&prev, &now, NOW);
+    let (events, next) = changes(&prev, &now, NOW, &[]);
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], Change::Ended { was_working: false, .. }));
     // KHÔNG ghi lại vào sổ: nếu ghi, lần sau nó biến khỏi danh sách và bị báo
@@ -182,7 +185,7 @@ fn a_row_that_turns_dead_is_announced_once_and_then_dropped() {
     assert!(!next.contains_key("a"));
     assert_eq!(next.len(), 0);
 
-    let (again, _) = changes(&next, &now, NOW);
+    let (again, _) = changes(&next, &now, NOW, &[]);
     assert!(again.is_empty(), "báo tắt hai lần: {again:?}");
 }
 
@@ -194,7 +197,7 @@ fn a_row_that_turns_dead_is_announced_once_and_then_dropped() {
 fn starting_work_is_not_worth_a_notification() {
     let prev = book(&[("a", IDLE)]);
     let now = vec![sess("a", "dwork", "terminal", true)];
-    let (events, next) = changes(&prev, &now, NOW);
+    let (events, next) = changes(&prev, &now, NOW, &[]);
     assert!(events.is_empty(), "{events:?}");
     assert!(next.get("a").is_some_and(|m| m.s.starts_with(WORKING)), "{next:?}");
 }
@@ -214,7 +217,7 @@ fn several_sessions_changing_at_once_are_all_reported() {
         sess("c", "hub", "terminal", true),    // bắt đầu — im
                                                // b biến mất — tắt
     ];
-    let (events, _) = changes(&prev, &now, NOW);
+    let (events, _) = changes(&prev, &now, NOW, &[]);
     assert_eq!(events.len(), 2, "{events:?}");
     assert!(events.iter().any(|e| matches!(e, Change::Finished { id, .. } if id == "a")));
     assert!(events.iter().any(|e| matches!(e, Change::Ended { id, .. } if id == "b")));
@@ -227,7 +230,7 @@ fn everything_disappearing_still_reports_each_one() {
         [working_long("a"), ("b".to_string(), mark(IDLE, "ttys002", "interactive"))]
             .into_iter()
             .collect();
-    let (events, next) = changes(&prev, &[], NOW);
+    let (events, next) = changes(&prev, &[], NOW, &[]);
     assert_eq!(events.len(), 2);
     assert!(next.is_empty());
     assert_eq!(DEAD, "dead"); // hằng số dùng chung với `state_of`
@@ -248,12 +251,12 @@ fn a_burst_of_short_turns_stays_quiet() {
         [("a".to_string(), mark(&format!("working@{}", NOW - 10), "ttys009", "interactive"))]
             .into_iter()
             .collect();
-    let (events, _) = changes(&brief, &now, NOW);
+    let (events, _) = changes(&brief, &now, NOW, &[]);
     assert!(events.is_empty(), "lượt ngắn không được kêu: {events:?}");
 
     // Chạy quá ngưỡng rồi dừng: nói, và nói luôn nó chạy bao lâu.
     let long: BTreeMap<String, Mark> = [working_long("a")].into_iter().collect();
-    let (events, _) = changes(&long, &now, NOW);
+    let (events, _) = changes(&long, &now, NOW, &[]);
     assert_eq!(events.len(), 1);
     assert!(events[0].say(&Idle::Prompt, None).contains("phút"), "{}", events[0].say(&Idle::Prompt, None));
 }
@@ -326,7 +329,7 @@ fn a_session_that_starts_asking_is_announced_once_with_its_options() {
     let prev: BTreeMap<String, Mark> = [("a".to_string(), mark(IDLE, "ttys009", "interactive"))]
         .into_iter()
         .collect();
-    let (events, next) = changes(&prev, &[s.clone()], NOW);
+    let (events, next) = changes(&prev, &[s.clone()], NOW, &[]);
     let said = match events.first() {
         Some(c @ Change::Asking { .. }) => c.say(&Idle::Unknown, None),
         other => panic!("phải là Asking: {other:?}"),
@@ -336,7 +339,7 @@ fn a_session_that_starts_asking_is_announced_once_with_its_options() {
     assert!(said.contains("1. Thêm ô") && said.contains("2. Trọn ngày"), "{said}");
 
     // NÓI MỘT LẦN: vòng sau vẫn đang hỏi thì im.
-    let (again, _) = changes(&next, &[s], NOW + 60);
+    let (again, _) = changes(&next, &[s], NOW + 60, &[]);
     assert!(again.is_empty(), "kêu lại lần hai: {again:?}");
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -476,4 +479,71 @@ fn fenced_code_is_dropped_but_still_counted() {
 fn a_gap_in_the_middle_is_marked() {
     let out = hub::watch::key_points(REPORT, 300);
     assert!(out.contains('⋯'), "cắt giữa mà không có dấu đứt:\n{out}");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KHÔNG NHÌN THẤY ≠ ĐÃ TẮT
+//
+// 🔴 Đo từ chính log của hub, 2026-08-12 14:44:07 — ba dòng liền nhau:
+//
+// ```text
+// claude_agents_list_failed acc1  "spawn claude failed: No such file or directory"
+// claude_agents_list_failed acc2  …
+// claude_agents_list_failed acc3  …
+// session_change  "⏹ projects-71 · games (296972d4) đã tắt hẳn."
+// session_change  "⏹ projects-b3 · AI/hub (37e59209) đã tắt (…)"
+// session_change  "⏹ projects-d8 · AI/hub (69a38c64) đã tắt (…)"
+// ```
+//
+// Ba tin trong 8 giây, cả ba phiên VẪN SỐNG: lúc 16:08 lệnh `/sessions` còn
+// liệt kê `projects-d8 · đang chạy`, và nó làm việc tới 16:41. Thứ hỏng là
+// `npm` đang ghi đè binary `claude` ngay lúc ấy — tức PHÉP ĐO, không phải máy.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Tài khoản không liệt kê được phiên thì phiên của nó KHÔNG được coi là đã tắt.
+#[test]
+fn a_failed_listing_is_not_a_dead_session() {
+    let prev = book(&[("69a38c64", IDLE)]);
+    let (events, next) = changes(&prev, &[], NOW, &["acc1".to_string()]);
+    assert!(events.is_empty(), "danh sách hỏng mà vẫn báo tắt: {events:?}");
+    // …và SỔ PHẢI CÒN. Xoá sổ là lượt sau phiên quay lại thành "phiên mới", rồi
+    // cái chết THẬT của nó bị báo thêm một lần nữa — đúng thứ đo được hôm nay
+    // (`37e59209` báo 14:44 + 16:08; `69a38c64` báo 14:44 + 16:42).
+    assert!(next.contains_key("69a38c64"), "sổ bị xoá trong lúc mù: {next:?}");
+}
+
+/// Sổ CŨ chưa ghi tài khoản thì cũng phải im khi có tài khoản mù.
+///
+/// Thà lỡ một tin còn hơn một tin sai: `a` được ghi lại ở mọi lượt nhìn thấy
+/// phiên, nên ca này tự hết sau đúng một vòng lành lặn.
+#[test]
+fn an_old_book_entry_without_an_account_is_kept_while_blind() {
+    let mut m = mark(IDLE, "ttys009", "interactive");
+    m.a = String::new(); // sổ ghi trước 2026-08-12
+    let prev: BTreeMap<String, Mark> = [("cu".to_string(), m)].into_iter().collect();
+    let (events, next) = changes(&prev, &[], NOW, &["acc3".to_string()]);
+    assert!(events.is_empty(), "sổ cũ mà vẫn báo tắt lúc mù: {events:?}");
+    assert!(next.contains_key("cu"), "sổ cũ bị xoá trong lúc mù");
+}
+
+/// Một tài khoản hỏng KHÔNG được làm câm những tài khoản còn nhìn được.
+///
+/// Cửa mù hẹp đúng bằng chỗ hub không nhìn thấy — rộng hơn thì nó thành cái cớ
+/// để im lặng, và một cái loa im lặng thì tệ hơn không có loa.
+#[test]
+fn a_blind_account_does_not_gag_the_others() {
+    let mut m = mark(IDLE, "ttys009", "interactive");
+    m.a = "acc1".into();
+    let prev: BTreeMap<String, Mark> = [("cua-acc1".to_string(), m)].into_iter().collect();
+    let (events, _) = changes(&prev, &[], NOW, &["acc2".to_string()]);
+    assert_eq!(events.len(), 1, "acc2 hỏng mà phiên acc1 tắt lại không báo: {events:?}");
+}
+
+/// Và khi mọi tài khoản đều trả lời được, luật cũ giữ nguyên: vắng mặt = đã tắt.
+#[test]
+fn with_every_account_answering_a_missing_session_still_ends() {
+    let prev = book(&[("da-tat", IDLE)]);
+    let (events, next) = changes(&prev, &[], NOW, &[]);
+    assert_eq!(events.len(), 1, "phiên biến mất mà không báo: {events:?}");
+    assert!(!next.contains_key("da-tat"), "phiên đã tắt vẫn nằm lại trong sổ");
 }

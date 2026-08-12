@@ -85,6 +85,33 @@ pub struct Inbox {
 ///
 /// `ok:`/`no:` (nút xác nhận) KHÔNG thuộc về đây: chúng chỉ có nghĩa trong lúc
 /// `confirm::ask` đang chờ, và trả `None` là cách nói "cái này không phải lệnh".
+/// Bảng nút cho một phiên đang dừng lại hỏi — hàm THUẦN, kiểm được không cần mạng.
+///
+/// Tách khỏi `Inbox::ask_choices` vì phần đáng sai là ở đây: mã `callback_data`
+/// phải khớp đúng thứ `callback_to_command` giải ra, và cả hai đều phải nằm
+/// dưới trần 64 byte của Telegram.
+pub fn choice_buttons(
+    session_id: &str,
+    labels: &[String],
+    offer_enter: bool,
+) -> Vec<(String, String)> {
+    let mut buttons: Vec<(String, String)> = labels
+        .iter()
+        .enumerate()
+        .take(9)
+        .map(|(i, l)| {
+            (
+                format!("{}. {}", i + 1, crate::exec::truncate(l, 60)),
+                format!("key:{}:{}", session_id, i + 1),
+            )
+        })
+        .collect();
+    if offer_enter {
+        buttons.push(("👁 Vào phiên này".to_string(), format!("sess:{session_id}")));
+    }
+    buttons
+}
+
 pub fn callback_to_command(data: &str) -> Option<String> {
     if let Some(rest) = data.strip_prefix("key:") {
         let (sid, n) = rest.split_once(':')?;
@@ -367,19 +394,18 @@ impl Inbox {
     /// Hà 2026-08-11: *"cần thêm thông tin mô tả liên quan tới lựa chọn đó mới
     /// hợp lý"* — và bước sau của nó: chọn được ngay tại đây. Nút gửi về
     /// `/key <session_id> <n>`, tức đi đúng con đường mà trang cũng đi.
-    pub fn ask_choices(&self, text: &str, session_id: &str, labels: &[String]) -> Result<(), String> {
-        let buttons: Vec<(String, String)> = labels
-            .iter()
-            .enumerate()
-            .take(9)
-            .map(|(i, l)| {
-                (
-                    format!("{}. {}", i + 1, crate::exec::truncate(l, 60)),
-                    format!("key:{}:{}", session_id, i + 1),
-                )
-            })
-            .collect();
-        self.send_buttons(text, &buttons)
+    /// `offer_enter`: thêm một hàng nút **vào phiên** ở cuối (Hà 2026-08-12 —
+    /// *"nếu báo phiên khác phiên đang theo thì thêm nút vào phiên"*). Trả lời
+    /// được hộp chọn từ xa là một chuyện; **nhìn phiên ấy đang làm gì** trước
+    /// khi trả lời là chuyện khác, và không có nút thì nó đòi gõ tay một uuid.
+    pub fn ask_choices(
+        &self,
+        text: &str,
+        session_id: &str,
+        labels: &[String],
+        offer_enter: bool,
+    ) -> Result<(), String> {
+        self.send_buttons(text, &choice_buttons(session_id, labels, offer_enter))
     }
 
     /// Gửi một câu kèm bảng nút — **mỗi nút một hàng**.

@@ -737,6 +737,151 @@ chuyển trạng thái.
 
 ---
 
+## UC-S19 · Xem **ba tài khoản**, và biết `/new` rơi vào tài khoản nào  ✅ chạy thật 2026-08-12
+
+Hà: *"chưa có lệnh xem danh sách acc"* → ngay sau đó *"vậy lệnh new chọn acc kiểu
+gì? hay đang để random?"*. Hai câu là một câu. Câu trả lời đo được, **không
+random**: `/new` không mang `-a` thì `account = None` ⟹ `sessions::terminal_command`
+**không đặt** `CLAUDE_CONFIG_DIR` ⟹ luôn rơi vào tài khoản không có `config_dir`
+trong `hub.config.json` (ở máy này là `acc1`). Chưa từng có chỗ nào nói ra điều
+đó, mà hậu quả thì chỉ lộ về sau — tuần cạn hạn mức thì phiên mới chết giữa việc.
+
+Số liệu đã có sẵn từ 08-10 (`runtime::usage_cached`, 5 phút một lượt, `claude -p
+"/usage"` **không tiêu hạn mức**) nhưng chỉ nằm ở tab Sức khoẻ — thứ không với
+tới được khi đang gõ trên Telegram. Route `/accounts` (`acc` · `taikhoan`) đem
+đúng số ấy ra phòng chat, kèm hai điều nó phải nói thẳng: tài khoản nào là **mặc
+định của `/new`**, và tài khoản nào **lượt này không liệt kê được phiên** (số "0
+phiên" của một phép đo hỏng — xem mục dưới).
+
+**Chạy thật 2026-08-12 17:28**, `fe-accounts-uc.mjs` **12/12**, 0 lỗi console,
+390×844, đăng nhập `alice_local`, gõ vào ô nhập rồi bấm Enter — không gọi API:
+
+```text
+👤 3 tài khoản claude
+acc1 ⭐ mặc định của /new · 2 phiên: projects-bb, projects-d2
+    đã dùng: tuần 15% · phiên 13% · Fable 0%
+acc2 · không có phiên nào
+    đã dùng: tuần 100% · phiên 0% · Fable 0%
+acc3 · 1 phiên: projects-7c
+    đã dùng: tuần 5% · phiên 2% · Fable 6%
+```
+
+📌 Và nó trả lời được ngay một câu đáng giá: **acc2 đã cạn hạn mức tuần (100%)**.
+Kiểm cả điều KHÔNG được có: `$` vắng mặt (điều 9), và câu trả lời không tràn
+ngang ở 390px (`scrollWidth 259 = clientWidth 259`).
+
+---
+
+## UC-S20 · Lệnh đi bằng **cờ**, và mở xong thì **theo luôn phiên mới**  ✅ chạy thật 2026-08-12
+
+Hà: *"kiến trúc lại lệnh cho hợp lý, ví dụ: `/new -a acc2 -s dwork` thì sẽ tạo
+một phiên mới chạy acc2 cho dự án dwork và mặc định sẽ focus luôn vào phiên mới
+→ đặt câu hỏi luôn vào luôn phiên mới này"*.
+
+Ba việc, và mỗi việc một lý do:
+
+| Việc | Vì sao |
+|---|---|
+| `-a <acc>` · `-s <dự án>` (kèm `-p` · `--project` · `--acc`…) | lối cũ là VỊ TRÍ (`/new <dự án> @acc <việc>`): thứ tự phải thuộc lòng, và `@acc` sai khe thì lặng lẽ thành một phần đề bài. Cờ gõ đâu cũng được và tự nói nó là gì. **Chỉ cờ đã biết mới bị bóc** — `-x` lạ ở nguyên trong đề bài, vì nuốt im một mẩu đề bài là lỗi không truy ra được |
+| Đề bài **để trống** vẫn mở được | đúng thứ chủ máy làm khi ngồi trước máy: mở cửa sổ, gõ `claude`, rồi mới nói. `claude ''` (đề bài rỗng) khác hẳn `claude` (chưa có đề bài) — nên không truyền tham số vị trí nào. Đường lui `--bg` vẫn **từ chối** đề bài rỗng: nó không có cửa sổ nào để gõ vào |
+| Câu chào nói ra **đang theo phiên này** | việc chuyển con trỏ đã có từ trước (`FOCUS_SESSION_KEY` ngay sau khi mở) — thứ thiếu là câu nói. Một tính năng không ai biết là một tính năng không tồn tại |
+
+**Chạy thật 2026-08-12 17:33 và 17:35**, `fe-newflags-uc.mjs` **8/8**, 0 lỗi
+console, gõ đúng câu Hà viết (không đề bài):
+
+```text
+/new -a acc3 -s hub
+→ 🚀 Đã mở cửa sổ terminal cho hub bằng acc3.
+  Phiên bc1a73db — đang chạy trên máy, xem màn sống ngay trên thẻ của nó.
+  🎯 Đang theo phiên này: gõ thẳng câu hỏi ở đây là vào nó (hoặc /ask…)
+```
+
+Đối chiếu ngoài màn: log `new_window_opened {"task":"","tty":"ttys003"}` — cửa sổ
+Terminal **thật**, đề bài rỗng; `ps` thấy `claude --disallowedTools …` không có
+tham số vị trí; cursor `focus:session` = đúng id phiên vừa mở.
+
+⚠ **Lượt chạy đầu của kịch bản này ĐỎ vì phép đo, không vì sản phẩm**: nó quét cả
+luồng tìm `⚠`/`🚀` và bắt trúng một tin `⚠` từ 12:45 còn trong lịch sử — trong khi
+lệnh vừa gõ chạy đúng. Nay chỉ đọc tin **mới hơn lượt gõ**. Cùng họ với bài học
+`sdvi` 07-29: một phép đo nhìn nhầm chỗ thì kết quả của nó không nói gì về sản phẩm.
+
+---
+
+## Hai lỗi của cái loa, cùng một họ: **không nhìn được ≠ không có gì**  ✅ vá 2026-08-12
+
+Hà: *"tại sao tele nhận được 'projects-d8 đã tắt cửa sổ còn mở' nhưng thực tế
+không còn mở nữa"*. Đào ra **hai** lỗi khác nhau, cả hai đọc được từ log.
+
+**Lỗi A — danh sách hỏng bị đọc thành ba cái chết.** 14:44:07, cả ba tài khoản:
+`claude_agents_list_failed … "spawn claude failed: No such file or directory"` —
+`npm` đang ghi đè binary `claude` (thủ phạm: phiên tự cập nhật pid 5001). Danh
+sách về rỗng, luật *"rời khỏi danh sách = đã kết thúc"* đọc cái rỗng ấy thành ba
+tin `⏹ đã tắt` trong 8 giây. Cả ba phiên vẫn sống — 16:08 lệnh `/sessions` còn
+liệt kê `projects-d8 · đang chạy`, và nó làm việc tới 16:41.
+Hệ quả kéo theo: báo nhầm xong hub **xoá phiên khỏi sổ**, nên lúc tắt thật thì
+báo **lần thứ hai** (`37e59209`: 14:44 + 16:08 · `69a38c64`: 14:44 + 16:42). Không
+phải loa lặp — sổ bị xoá.
+**Vá:** ảnh chụp mang thêm `blind` (tài khoản không liệt kê được, máy đọc được,
+chứ `notes` là câu cho người), sổ nhớ thêm `Mark::a` (tài khoản của phiên), và
+phiên vắng mặt thuộc tài khoản mù thì **giữ nguyên sổ, không báo gì**, có log
+`session_end_unknown`. Sổ cũ chưa có tên tài khoản cũng đi lối ấy khi có bất kỳ
+tài khoản nào mù — thà lỡ một tin còn hơn một tin sai. Một tài khoản mù **không**
+làm câm các tài khoản còn nhìn được (có test khoá).
+
+**Lỗi B — "cửa sổ còn mở" trỏ nhầm cửa sổ.** hub chỉ hỏi *"có tab nào mang tty ấy
+mà còn tiến trình không"*. `projects-d8` sống trong cửa sổ `ttys002` (mở từ
+12:28:08); 16:41:16 Hà thoát CLI rồi gõ `claude` **lại ngay trong cửa sổ đó**;
+16:42:33 hub mới nhận ra phiên cũ đi, hỏi tty → còn → nói *"cửa sổ terminal còn
+mở"*. Đúng chữ, sai nghĩa: cửa sổ ấy không nằm chờ ai, **nó đã là phiên khác**.
+Khớp trong sổ: phiên mới (`e27806c2`, `ttys002`) ghi "thấy lần đầu 16:42:33" —
+đúng vòng hub báo phiên cũ tắt.
+**Vá:** trước khi hỏi Terminal, hỏi ảnh chụp của chính mình
+(`sessions::window_taken_over`) — phiên nào đang ngồi ở tty ấy? Có thì nói thẳng
+*"đã tắt — cửa sổ ấy nay đang chạy phiên `<tên>`"*.
+
+**Cơ chế:** ✅ · **Kịch bản:** ✅ 8 test mới; ba test lõi đã kiểm là **đỏ được**
+bằng đột biến (tắt cửa mù ⟹ 2 đỏ; tắt phép hỏi tty ⟹ 1 đỏ) · ⏳ **Sản phẩm:**
+chưa quan sát được lượt THẬT nào — lỗi A cần một lần `claude agents` hỏng nữa
+(thủ phạm đã bị đóng lúc 16:59, nên có thể không tái diễn), lỗi B cần một phiên
+tắt trong lúc phiên khác giữ tty của nó. Ghi đúng như vậy, đừng đọc thành "đã
+chứng minh trên máy".
+
+---
+
+## UC-S21 · Phiên **dừng lại chờ** thì chuông kêu — và tin mang **đường vào phiên**  ✅ 2026-08-12
+
+Hà: *"phiên này vừa dừng lại hỏi lựa chọn mà tôi không nhận được trên tele là
+sao?"*. Đo ra **hai** nguyên nhân, cả hai đều là luật cũ chứ không phải hỏng:
+
+1. **Luật im 08-10**: phiên terminal của chủ máy vừa xong một lượt thì IM, chỉ
+   *kẹt hỏi* mới kêu — lý do hồi đó là *"anh đang nhìn thẳng vào nó"*. Log hôm
+   nay bắt đúng ba lần trên chính phiên ấy: `session_change_muted e27806c2` lúc
+   **16:57:47 · 17:53:35 · 17:58:16**.
+2. **Khe mù ~2,3 phút**: hub chỉ NHÌN mỗi vòng — đo 15 vòng: trung bình **139
+   giây**, thấp nhất 49s, cao nhất 161s. Một hộp chọn sống 40 giây rồi được trả
+   lời thì lọt trọn giữa hai lượt nhìn.
+
+📌 Một giả thuyết đã bị **bác bằng chính mã**: cửa sổ đọc màn 8 dòng
+(`pipeline.rs`) KHÔNG phải thủ phạm — `keys::look` chạy `parse_choices` trên
+**cả màn**, `lines` chỉ cắt phần chữ đem hiển thị. Kiểm trước khi khai.
+
+**Hà chốt:** *"mọi phiên terminal đều báo, rút nhịp nhìn xuống cần thảo luận
+lại, nếu báo phiên khác phiên đang theo thì thêm nút vào phiên"*.
+
+- Gỡ luật im cho `Change::Finished`. Cửa chống ồn còn lại là `MIN_RUN_SEC` 120s
+  (lượt chớp nhoáng không phải tin); nhánh **kẹt hỏi** không đi qua cửa ấy.
+- Tin của phiên **khác** phiên đang theo mang nút `👁 Vào phiên <tên>` → gửi
+  `sess:<id>` → đúng route `/session` sẵn có, không đẻ lối riêng cho Telegram.
+  Phiên đang theo thì không có nút — bấm vào chỉ để tới chỗ đang đứng.
+- **Nhịp nhìn giữ nguyên 139s** — Hà để bàn riêng, đừng tự hạ.
+
+**Cơ chế:** ✅ · **Kịch bản:** ✅ 3 test (round-trip nhãn→`callback_data`→lệnh,
+và trần 64 byte của Telegram); 2 test đã kiểm là **đỏ được** · **Sản phẩm:** cài
+18:14, daemon pid 23685 `kind: cert` — lượt Telegram thật đầu tiên sẽ tới ở lần
+phiên kế tiếp dừng chờ.
+
+---
+
 ## Đọc bảng này thế nào
 
 **Không UC nào có kịch bản tự động.** Xương sống là **UC-S02** — và đo theo chuẩn

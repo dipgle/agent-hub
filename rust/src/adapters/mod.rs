@@ -92,6 +92,16 @@ pub enum CommandKind {
     /// looking at one session's stream, and asking a person to retype a uuid
     /// there is asking them not to use the feature.
     Ask,
+    /// `/accounts` — ba tài khoản `claude` trên máy này: phiên nào đang chạy
+    /// bằng tài khoản nào, còn bao nhiêu hạn mức, và **`/new` không nói `@acc`
+    /// thì rơi vào tài khoản nào**.
+    ///
+    /// Hà 2026-08-12: *"chưa có lệnh xem danh sách acc"* → *"vậy lệnh new chọn
+    /// acc kiểu gì? hay đang để random?"*. Hai câu ấy là một câu: chọn tài
+    /// khoản là một quyết định có hậu quả (hạn mức tuần cạn thì phiên mới chết
+    /// giữa chừng), mà dữ liệu để quyết định chỉ nằm trên tab Sức khoẻ — thứ
+    /// không với tới được khi đang gõ trên Telegram.
+    Accounts,
 }
 
 #[derive(Debug, Clone)]

@@ -134,6 +134,21 @@ pub struct Mark {
     pub n: String,
     #[serde(default)]
     pub d: String,
+    /// Tài khoản `claude` phiên này thuộc về — nhớ TỪ TRƯỚC, vì nó là thứ quyết
+    /// định lượt sau có được QUYỀN kết luận "phiên đã tắt" hay không.
+    ///
+    /// 🔴 Đo 2026-08-12 14:44:07: `claude agents` hỏng cho **cả ba** tài khoản
+    /// (`spawn claude failed: No such file or directory` — `npm` đang ghi đè
+    /// binary `claude` ngay lúc đó). Danh sách về RỖNG, và luật "rời khỏi danh
+    /// sách = đã kết thúc" đọc cái rỗng ấy thành ba cái chết: ba tin `⏹ đã tắt`
+    /// trong 8 giây, trong khi cả ba phiên vẫn sống (16:08 lệnh `/sessions` còn
+    /// liệt kê `projects-d8 · đang chạy`, và nó còn làm việc tới 16:41).
+    ///
+    /// Cùng một họ với `Look::Blind` bên `keys.rs`: **không nhìn được ≠ không có
+    /// gì**. Sổ phải nhớ tài khoản vì lúc phiên biến mất thì hàng của nó đi
+    /// theo — không còn chỗ nào hỏi "phiên này thuộc tài khoản nào" nữa.
+    #[serde(default)]
+    pub a: String,
 }
 
 /// Một chuyện vừa xảy ra, đáng để làm phiền chủ máy.
@@ -195,6 +210,15 @@ pub enum Idle {
 }
 
 impl Change {
+    /// Tên phiên, dùng cho nhãn nút "vào phiên" — mỗi biến thể đều mang sẵn.
+    pub fn name(&self) -> &str {
+        match self {
+            Change::Finished { name, .. }
+            | Change::Asking { name, .. }
+            | Change::Ended { name, .. } => name,
+        }
+    }
+
     /// Câu nói cho phòng chat và cho Telegram — cùng một câu, vì hai nơi ấy
     /// phải kể cùng một chuyện. Khác câu là sau này không ai đối chiếu được.
     ///
@@ -528,10 +552,16 @@ fn state_of(s: &LiveSession) -> &'static str {
 /// một cái máy đang chạy `claude`.
 ///
 /// `first_run` (sổ cũ rỗng) trả về **không sự kiện nào** — xem luật 2 ở đầu tệp.
+/// `blind`: những tài khoản KHÔNG liệt kê được phiên ở lượt này — xem `Mark::a`.
+/// Phiên của một tài khoản mù không được coi là đã tắt, và **sổ của nó phải
+/// được giữ nguyên**: xoá khỏi sổ là lượt sau nó quay lại thành "phiên mới",
+/// rồi lúc tắt thật lại báo thêm một lần nữa (đo được: `37e59209` báo 14:44 +
+/// 16:08, `69a38c64` báo 14:44 + 16:42 — không phải loa lặp, mà là sổ bị xoá).
 pub fn changes(
     prev: &BTreeMap<String, Mark>,
     now: &[LiveSession],
     epoch_sec: i64,
+    blind: &[String],
 ) -> (Vec<Change>, BTreeMap<String, Mark>) {
     let mut next: BTreeMap<String, Mark> = BTreeMap::new();
     let mut out: Vec<Change> = Vec::new();
@@ -571,6 +601,7 @@ pub fn changes(
                         h: s.started_by_hub,
                         n: s.name.clone(),
                         d: s.folder.clone(),
+                        a: s.account.clone(),
                     },
                 );
             }
@@ -620,6 +651,25 @@ pub fn changes(
         let seen: Vec<&String> = now.iter().map(|s| &s.session_id).collect();
         for (id, mark) in prev {
             if seen.contains(&id) {
+                continue;
+            }
+            // Cửa MÙ — xem `Mark::a`. Tài khoản không liệt kê được phiên thì
+            // "không có trong danh sách" chỉ có nghĩa là **hub không nhìn
+            // thấy**, không có nghĩa là phiên đã tắt.
+            //
+            // Sổ cũ chưa có tên tài khoản (`a` rỗng) cũng đi lối này khi có bất
+            // kỳ tài khoản nào mù: thà lỡ một tin còn hơn một tin sai. Trường
+            // `a` được ghi lại ở mọi lượt nhìn thấy phiên, nên ca ấy tự hết sau
+            // đúng một vòng lành lặn.
+            if !blind.is_empty() && (mark.a.is_empty() || blind.contains(&mark.a)) {
+                // GIỮ sổ y nguyên: xoá đi là lượt sau phiên quay lại thành
+                // "phiên mới", và cái chết thật của nó sẽ được báo LẦN NỮA.
+                next.insert(id.clone(), mark.clone());
+                logging::info(
+                    "session_end_unknown",
+                    json!({ "session": id, "account": mark.a, "blind": blind,
+                            "why": "tài khoản không liệt kê được phiên — vắng mặt KHÔNG phải là đã tắt" }),
+                );
                 continue;
             }
             // Cửa TUỔI THỌ — xem `Mark::f`. Phiên sống chớp nhoáng (phép dò hạn

@@ -314,3 +314,48 @@ fn a_button_label_still_answers_which_and_whether() {
     let idle = session_button_label(&sess("b", "dwork", "acc1", false));
     assert!(idle.starts_with('⏸'), "{idle}");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NÚT "VÀO PHIÊN" — Hà 2026-08-12: *"nếu báo phiên khác phiên đang theo thì
+// thêm nút vào phiên"*.
+//
+// Không có nút thì tin báo bắt người đọc gõ tay `/session <uuid>` trên điện
+// thoại — đúng loại việc làm người ta bỏ tính năng.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SID: &str = "bc1a73db-1111-2222-3333-444444444444";
+
+#[test]
+fn the_enter_session_button_decodes_back_to_the_session_route() {
+    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], true);
+    let (label, data) = b.last().expect("thiếu nút vào phiên");
+    assert!(label.contains("Vào phiên"), "nhãn khó hiểu: {label}");
+    // Round-trip qua CHÍNH bộ giải mã đang chạy — nút gửi đi mà không giải ra
+    // được lệnh nào thì nó chỉ là một hình vẽ.
+    assert_eq!(
+        hub::telegram::callback_to_command(data).as_deref(),
+        Some(format!("/session {SID}").as_str())
+    );
+    // …và vẫn dưới trần 64 byte của Telegram.
+    assert!(data.len() <= 64, "callback_data {} byte: {data}", data.len());
+}
+
+/// Phiên ĐANG theo thì không có nút ấy — bấm vào chỉ để tới chỗ đang đứng.
+#[test]
+fn the_followed_session_gets_no_redundant_button() {
+    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], false);
+    assert_eq!(b.len(), 1, "thừa nút: {b:?}");
+    assert!(b[0].1.starts_with("key:"), "{:?}", b[0]);
+}
+
+/// Nút trả lời hộp chọn vẫn giữ nguyên đường cũ, kể cả khi có thêm nút vào phiên.
+#[test]
+fn choice_buttons_still_answer_the_right_session() {
+    let labels = vec!["Một".to_string(), "Hai".to_string(), "Ba".to_string()];
+    let b = hub::telegram::choice_buttons(SID, &labels, true);
+    assert_eq!(b.len(), 4, "3 lựa chọn + 1 nút vào phiên: {b:?}");
+    assert_eq!(
+        hub::telegram::callback_to_command(&b[2].1).as_deref(),
+        Some(format!("/key {SID} 3").as_str())
+    );
+}

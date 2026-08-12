@@ -30,6 +30,10 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S15 | Danh sách nói được **dự án** mỗi phiên đang làm (không lấy từ `cwd` — mọi phiên cùng `cwd`) | đo thật 2026-08-12: 4/4 phiên ra đúng `dwork · AI/hub · games · AI/tfl5`; bundle **v149**, ảnh 390px không cắt chữ |
 | S16 | **Cái loa thôi kêu oan**: phiên sống chớp nhoáng (phép dò hạn mức của chính hub) chết đi thì im | chạy thật: **26** dòng `session_end_muted` (15s · 27s · 114s) và **0** tin "đã tắt" kể từ 11:03, so với **20 tin trong 4 tiếng** trước đó |
 | S17 | Phiên **dừng lại HỎI** thì câu hỏi + từng lựa chọn lên điện thoại (đọc từ nhật ký, không rình trên màn) | ⚠ mới **chạy thử trên dữ liệu thật** của `projects-11` (dựng lại lúc câu hỏi còn treo → ra đúng tin + 3 lựa chọn); **chưa** có lượt gửi Telegram thật |
+| S21 | **Mọi phiên terminal dừng chờ đều báo**, và tin của phiên khác phiên đang theo mang **nút vào phiên** | luật im 08-10 gỡ theo chỉ đạo 2026-08-12 (*"mọi phiên terminal đều báo"*); 3 test nút, 2 test đã kiểm là **đỏ được**; cài lúc 18:14, daemon pid 23685 `cert` |
+| S19 | **Xem ba tài khoản** từ phòng chat, và biết `/new` rơi vào tài khoản nào | `fe-accounts-uc` **12/12** trên bundle đã deploy (2026-08-12 17:28): `acc1 ⭐ mặc định · acc2 tuần 100% · acc3 tuần 5%`, 0 `$`, không tràn ngang ở 390px |
+| S20 | Lệnh đi bằng **cờ** (`/new -a acc3 -s hub`), đề bài để trống vẫn mở được, mở xong **theo luôn** phiên mới | `fe-newflags-uc` **8/8** chạy thật 17:33 + 17:35; đối chiếu ngoài màn: `new_window_opened tty=ttys003 task=""`, `focus:session` = đúng phiên vừa mở |
+| — | **Cái loa thôi đọc phép đo hỏng thành cái chết**: `claude agents` hỏng cho một tài khoản thì phiên của nó KHÔNG bị coi là đã tắt, và sổ giữ nguyên | 8 test mới, 3 test lõi đã kiểm là **đỏ được**; ⏳ chưa có lượt THẬT (xem "Còn nợ") |
 | S18 | Tin báo mang **thông tin chốt** của lượt cuối, không mang câu dẫn nhập | chạy thật 2026-08-12 16:26 trên **4 phiên đang sống**: phiên trước đây mang `[dùng Read]`/`[dùng Bash]` nay mang một câu có nghĩa; `projects-71` (báo cáo 3151 byte) ra đủ *kết luận → bằng chứng → ⋯ → đề xuất → câu chốt* + `… (còn N dòng)`. ⚠ **chưa** có lượt gửi Telegram thật (từ lúc cài chưa phiên nào chuyển trạng thái) |
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
@@ -49,10 +53,18 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 - **Chưa quan sát được một tin Telegram THẬT mang thông tin chốt** (S18) và một
   tin THẬT của phiên dừng lại hỏi (S17). Cả hai đòi một phiên thật chuyển trạng
   thái sau lúc cài 16:30 — không dựng giả được mà vẫn gọi là nghiệm thu.
-- **Phiên `projects-71` (pid 5001) tự cập nhật `claude` mỗi 30 phút** ⟹ ghi đè
-  binary mọi phiên đang chạy ⟹ mất quyền `~/Documents` từng lượt ~2 phút. Bắt
-  được cả cây tiến trình lúc 16:24:08. Cách chữa là **đóng phiên ấy** (nó mở từ
-  10/08 nên không đọc `DISABLE_AUTOUPDATER` thêm ngày 12/08) — chờ Hà chốt.
+- ~~**Phiên `projects-71` (pid 5001) tự cập nhật `claude` mỗi 30 phút**~~ →
+  **đã đóng 2026-08-12 16:59** (Hà chốt). `kill 5001` xong: pid biến mất, không
+  còn `npm install @anthropic-ai/claude-code` nào chạy, và hub báo đúng
+  `⏹ projects-71 · games (296972d4) đã tắt hẳn` (phiên nằm trong terminal tích
+  hợp VS Code, không phải cửa sổ Terminal.app ⟹ "tắt hẳn" là câu đúng).
+  Nó là thủ phạm của **cả hai** chuyện: mất quyền `~/Documents` từng lượt ~2
+  phút, và lỗi A của cái loa (danh sách phiên hỏng ⟹ báo tắt nhầm).
+- **Hai bản vá của cái loa chưa có lượt chạy THẬT** (xem UC "Hai lỗi của cái
+  loa"): lỗi A cần một lần `claude agents` hỏng nữa — mà thủ phạm vừa bị đóng,
+  nên có thể không tái diễn; lỗi B cần một phiên tắt trong lúc phiên khác giữ
+  đúng tty của nó. Cả hai đã có test đỏ-được; đừng đọc thành "đã chứng minh trên
+  máy".
 
 Trước đó **rỗng** (2026-08-10). Mục cuối — bốn bảng hộp thư chết — đã dọn bằng bước nâng
 cấp lược đồ 4; xem "Đã trả xong". Món nào mới phát sinh thì ghi vào đây, đừng để

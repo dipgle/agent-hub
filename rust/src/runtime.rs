@@ -77,6 +77,106 @@ fn daemon_block(now: i64) -> Value {
     })
 }
 
+/// `/accounts` — ba tài khoản trên máy này, nói thành câu cho điện thoại.
+///
+/// Hà 2026-08-12: *"chưa có lệnh xem danh sách acc"*, rồi ngay sau đó *"vậy
+/// lệnh new chọn acc kiểu gì? hay đang để random?"*. Câu thứ hai là lý do câu
+/// thứ nhất đáng làm: **không random** — `/new` không mang `@acc` thì chạy bằng
+/// tài khoản KHÔNG đặt `CLAUDE_CONFIG_DIR` (`sessions::terminal_command`), tức
+/// luôn luôn một tài khoản duy nhất. Cái đó phải NÓI RA trên màn, vì hậu quả
+/// của nó (tuần cạn hạn mức thì phiên mới chết giữa chừng) chỉ lộ ra về sau.
+///
+/// Hạn mức lấy từ bản đã đo sẵn (`usage_cached`, 5 phút một lượt) — không đẻ
+/// thêm tiến trình `claude` nào cho một lệnh xem.
+pub fn accounts_say(cfg: &Config, live: &SessionsSnapshot, now: i64) -> String {
+    accounts_text(cfg, live, &usage_cached(cfg, now))
+}
+
+/// Phần dựng câu, tách khỏi phần đi đo — để test được mà không spawn `claude`.
+///
+/// Một hàm vừa gọi tiến trình vừa dựng chữ thì test của nó hoặc phải chạy thật
+/// (chậm, phụ thuộc máy) hoặc không có test. Ranh giới đặt ở đây vì `usage` là
+/// thứ DUY NHẤT phải đi hỏi ra ngoài.
+pub fn accounts_text(cfg: &Config, live: &SessionsSnapshot, usage: &Value) -> String {
+    let pending = usage.get("pending").and_then(Value::as_bool) == Some(true);
+    let per_acc = usage.get("accounts");
+    let accounts = cfg.claude_accounts_or_ambient();
+
+    let mut out = format!("👤 {} tài khoản claude\n", accounts.len());
+    for acc in &accounts {
+        let mine: Vec<_> = live
+            .sessions
+            .iter()
+            .filter(|s| s.account == acc.name && s.host != "dead")
+            .collect();
+        // Tài khoản mặc định = tài khoản KHÔNG có `config_dir`. Đó chính là
+        // định nghĩa `sessions::account_dir` dùng, nên đọc cùng một chỗ.
+        let is_default = acc.config_dir.as_deref().unwrap_or("").is_empty();
+        out.push_str(&format!(
+            "\n{}{} · {}\n",
+            acc.name,
+            if is_default { " ⭐ mặc định của /new" } else { "" },
+            match mine.len() {
+                0 => "không có phiên nào".to_string(),
+                n => format!(
+                    "{n} phiên: {}",
+                    mine.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")
+                ),
+            }
+        ));
+        // Tài khoản KHÔNG liệt kê được phiên ở lượt này: nói thẳng, vì con số
+        // "0 phiên" ở trên là con số của một phép đo hỏng — xem `watch::Mark::a`.
+        if live.blind.contains(&acc.name) {
+            let why = live
+                .notes
+                .iter()
+                .find(|n| n.starts_with(&format!("{}:", acc.name)))
+                .and_then(|n| n.split_once(':').map(|x| x.1.trim().to_string()))
+                .unwrap_or_default();
+            out.push_str(&format!(
+                "    ⚠ lượt này KHÔNG liệt kê được phiên — con số trên không đáng tin: {why}\n"
+            ));
+        }
+        let row = per_acc.and_then(|m| m.get(&acc.name));
+        match row {
+            Some(v) if v.get("err").is_some() => out.push_str(&format!(
+                "    hạn mức: chưa đo được ({})\n",
+                v.get("err").and_then(Value::as_str).unwrap_or("")
+            )),
+            Some(v) => {
+                let mut parts: Vec<String> = Vec::new();
+                if let Some(p) = v.get("week_pct").and_then(Value::as_u64) {
+                    parts.push(format!("tuần {p}%"));
+                }
+                if let Some(p) = v.get("session_pct").and_then(Value::as_u64) {
+                    parts.push(format!("phiên {p}%"));
+                }
+                if let (Some(n), Some(p)) = (
+                    v.get("week_model_name").and_then(Value::as_str),
+                    v.get("week_model_pct").and_then(Value::as_u64),
+                ) {
+                    parts.push(format!("{n} {p}%"));
+                }
+                if parts.is_empty() {
+                    // `parse_usage` giữ nguyên câu thô khi lời của CLI đổi —
+                    // thà một dòng thô còn hơn một con số bịa.
+                    if let Some(raw) = v.get("raw").and_then(Value::as_str) {
+                        parts.push(raw.to_string());
+                    }
+                }
+                if !parts.is_empty() {
+                    out.push_str(&format!("    đã dùng: {}\n", parts.join(" · ")));
+                }
+            }
+            // "Chưa đo xong" KHÁC "đã đo và bằng 0". Nói đúng cái đang có.
+            None if pending => out.push_str("    hạn mức: đang đo, hỏi lại sau một phút\n"),
+            None => {}
+        }
+    }
+    out.push_str("\nMở phiên bằng tài khoản khác: /new -a acc2 -s dwork [việc]");
+    out
+}
+
 /// Per-account state, joined onto the sessions already listed this cycle.
 ///
 /// The join matters: `sessions.notes` is where a failed `claude agents` lands,

@@ -878,3 +878,63 @@ fn the_chain_from_transcript_to_message_keeps_the_closing_sentence() {
         "câu chốt chết ở giữa đường:\n{points}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "CỬA SỔ CÒN MỞ" PHẢI LÀ CỬA SỔ CỦA PHIÊN ẤY
+//
+// 🔴 Hà 2026-08-12: *"tele nhận được 'projects-d8 đã tắt cửa sổ còn mở' nhưng
+// thực tế không còn mở nữa"*. Đo lại được cả chuỗi trên máy:
+//
+//   12:28:08  cửa sổ `ttys002` mở (login-zsh pid 39536)
+//   …         `projects-d8` (69a38c64) sống trong cửa sổ ấy
+//   16:41:16  Hà thoát CLI rồi gõ `claude` LẠI ngay trong cửa sổ đó (pid 43422)
+//   16:42:33  hub nhận ra phiên cũ đi → hỏi "tab nào mang ttys002 không?" → CÒN
+//             → nói "cửa sổ terminal còn mở"
+//   16:42:33  …đúng vòng ấy, sổ ghi phiên MỚI (e27806c2) cũng ở `ttys002`
+//
+// tty là một con số ĐƯỢC DÙNG LẠI. Hỏi Terminal "còn tab nào mang số này
+// không" trả lời được câu "có cửa sổ", không trả lời được câu "cửa sổ CỦA AI".
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn row_at(id: &str, name: &str, tty: &str) -> hub::sessions::LiveSession {
+    hub::sessions::LiveSession {
+        session_id: id.to_string(),
+        name: name.to_string(),
+        tty: tty.to_string(),
+        host: "terminal".to_string(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_window_reused_by_the_next_session_is_not_a_window_left_open() {
+    let live = vec![row_at("e27806c2", "projects-7c", "ttys002")];
+    let taken = hub::sessions::window_taken_over("69a38c64", "ttys002", &live);
+    assert_eq!(
+        taken.map(|s| s.name.as_str()),
+        Some("projects-7c"),
+        "cửa sổ đã bị phiên khác chiếm mà không nhận ra"
+    );
+}
+
+/// Không ai chiếm thì đừng bịa ra người chiếm — ca này vẫn đi hỏi Terminal.
+#[test]
+fn an_empty_window_is_not_reported_as_taken_over() {
+    let live = vec![row_at("khac", "projects-bb", "ttys001")];
+    assert!(hub::sessions::window_taken_over("69a38c64", "ttys002", &live).is_none());
+}
+
+/// Chính nó không tính là "phiên khác" — hàng của phiên vừa tắt có thể còn nằm
+/// trong ảnh chụp vài giây (`claude agents` bỏ chậm).
+#[test]
+fn a_session_does_not_take_over_its_own_window() {
+    let live = vec![row_at("69a38c64", "projects-d8", "ttys002")];
+    assert!(hub::sessions::window_taken_over("69a38c64", "ttys002", &live).is_none());
+}
+
+/// Phiên nền không gắn cửa sổ nào: tty rỗng không được khớp với tty rỗng khác.
+#[test]
+fn sessions_without_a_tty_never_match_each_other() {
+    let live = vec![row_at("nen-khac", "projects-zz", "")];
+    assert!(hub::sessions::window_taken_over("nen-nay", "", &live).is_none());
+}

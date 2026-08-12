@@ -211,6 +211,43 @@ pub struct SessionsSnapshot {
     /// without saying why is a list that gets argued with.
     #[serde(default)]
     pub hidden_editor: usize,
+    /// Tên những tài khoản KHÔNG liệt kê được phiên ở lượt này.
+    ///
+    /// `notes` đã mang cùng chuyện này nhưng dưới dạng **một câu cho người
+    /// đọc**; cái loa cần một danh sách **máy đọc được**, vì nó phải quyết định
+    /// một chuyện không có đường lùi: có được kết luận "phiên đã tắt" hay
+    /// không. Đo 2026-08-12 14:44:07 — ba tin "đã tắt" cho ba phiên còn sống,
+    /// vì `announce_changes` chỉ nhận `sessions` và `notes` không tới được tay
+    /// nó. Xem `watch::Mark::a`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blind: Vec<String>,
+}
+
+/// Phiên khác đang chiếm đúng cửa sổ (tty) của phiên vừa tắt — nếu có.
+///
+/// 🔴 Hà 2026-08-12: *"tele nhận được 'projects-d8 đã tắt, cửa sổ còn mở' nhưng
+/// thực tế không còn mở nữa"*. Đo lại được cả chuỗi: `projects-d8` sống trong
+/// cửa sổ `ttys002` (mở từ 12:28:08); 16:41:16 Hà thoát CLI rồi gõ `claude` lại
+/// **ngay trong cửa sổ ấy**; 16:42:33 hub mới nhận ra phiên cũ đi, hỏi "có tab
+/// nào mang tty ấy không" → còn → nói *"cửa sổ terminal còn mở"*.
+///
+/// Câu ấy đúng chữ mà sai nghĩa: cửa sổ ấy KHÔNG nằm chờ ai, nó đã là phiên
+/// khác. Người đọc đi tìm một cửa sổ bỏ không sẽ không thấy nó ở đâu — và đó là
+/// cách một câu đúng-về-kỹ-thuật trở thành một câu nói dối.
+///
+/// `tty` là một con số **được dùng lại**: cùng một `ttys002` có thể là cửa sổ
+/// cũ, cửa sổ mới, hay một cái xác (xem `keys::window_script`). Nên trước khi
+/// hỏi Terminal, hãy hỏi ảnh chụp của chính mình: phiên nào đang ngồi ở tty ấy?
+pub fn window_taken_over<'a>(
+    id: &str,
+    tty: &str,
+    live: &'a [LiveSession],
+) -> Option<&'a LiveSession> {
+    if tty.is_empty() {
+        return None;
+    }
+    live.iter()
+        .find(|s| s.session_id != id && s.tty == tty && s.host != "dead")
 }
 
 /// `~/Documents/projects` → `-Users-hanguyen-Documents-projects`.
@@ -1410,6 +1447,9 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     account.name,
                     truncate(&e.to_string(), 200)
                 ));
+                // …và một lần nữa dưới dạng máy đọc được, cho cái loa: xem
+                // `SessionsSnapshot::blind`.
+                out.blind.push(account.name.clone());
                 continue;
             }
         };
@@ -2582,12 +2622,20 @@ pub fn terminal_command(cli: &str, root: &Path, task: &str, config_dir: Option<&
         .map(|t| shell_quote(t))
         .collect::<Vec<_>>()
         .join(" ");
+    // Đề bài rỗng ⟹ KHÔNG có tham số vị trí nào: cửa sổ mở ra một phiên
+    // `claude` trống, đúng như chủ máy tự gõ. Đưa `''` vào đó thì `claude` nhận
+    // một đề bài rỗng — khác hẳn với không có đề bài.
+    let prompt = if task.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", shell_quote(task))
+    };
     format!(
-        "cd {} && {}{} {} --disallowedTools {}",
+        "cd {} && {}{} {}--disallowedTools {}",
         shell_quote(&root.to_string_lossy()),
         env_prefix,
         shell_quote(cli),
-        shell_quote(task),
+        prompt,
         denied
     )
 }
@@ -2605,9 +2653,14 @@ pub fn start_background(
     account: Option<&str>,
 ) -> Result<Started> {
     let task = task.trim();
-    if task.is_empty() {
-        anyhow::bail!("chưa nói việc cần làm");
-    }
+    // Đề bài RỖNG được phép — nhưng chỉ trên đường mở cửa sổ thật.
+    //
+    // Hà 2026-08-12: *"/new -a acc2 -s dwork"* — không có đề bài, và đó là
+    // đúng thứ ông ấy làm khi ngồi trước máy: mở một cửa sổ, gõ `claude`, rồi
+    // NÓI. Ép phải có đề bài ngay câu đầu là bắt điện thoại làm một việc mà cái
+    // bàn phím thật không phải làm. Đường `--bg` thì khác hẳn: nó không có cửa
+    // sổ nào để gõ vào, nên một phiên nền không đề bài là một phiên nằm chết
+    // (`idle — send a prompt to start`) — chỗ ấy vẫn phải từ chối, xem dưới.
     if !dir.is_dir() {
         anyhow::bail!("không thấy thư mục dự án: {}", dir.display());
     }
@@ -2631,7 +2684,11 @@ pub fn start_background(
     // chọn acc2. Việc thuộc dự án nào thì nói trong ĐỀ BÀI, chứ không cần đổi
     // thư mục làm việc: `claude` đọc `CLAUDE.md` của cả cây từ gốc.
     let root = cfg.workspace_root.clone();
-    let task_with_project = format!("[{project}] {task}");
+    let task_with_project = if task.is_empty() {
+        String::new()
+    } else {
+        format!("[{project}] {task}")
+    };
 
     // ĐƯỜNG CHÍNH: mở một cửa sổ Terminal thật, y như chủ máy tự mở.
     //
@@ -2655,6 +2712,14 @@ pub fn start_background(
         }
     }
 
+    // Đường lui `--bg` KHÔNG có cửa sổ nào để gõ vào, nên đề bài rỗng ở đây là
+    // một phiên nằm chết mà hub lại báo "đã mở".
+    if task_with_project.is_empty() {
+        anyhow::bail!(
+            "không mở được cửa sổ terminal, mà phiên nền thì phải có đề bài ngay từ đầu \
+             (không có cửa sổ nào để gõ vào) — gõ lại kèm việc cần làm"
+        );
+    }
     let mut args: Vec<&str> = vec!["--bg", &task_with_project, "--disallowedTools"];
     args.extend_from_slice(&DENIED_TOOLS);
 

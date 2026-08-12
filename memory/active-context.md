@@ -1,5 +1,100 @@
 # active context — hub
 
+## 🔔 2026-08-12 (chiều muộn) — cái loa nói dối hai kiểu, và lệnh mọc cờ
+
+Hà mở phiên bằng *"tiếp hub"*, rồi ba câu hỏi nối nhau — mỗi câu lôi ra một việc
+thật. Không câu nào trả lời được bằng trí nhớ; cả ba đều đo từ log của chính hub.
+
+### 🔴 *"tại sao tele nhận được 'projects-d8 đã tắt cửa sổ còn mở' nhưng thực tế không còn mở"*
+
+**Hai lỗi khác nhau**, cùng một họ: *không nhìn được ≠ không có gì*.
+
+| | Đo được | Vá |
+|---|---|---|
+| **A — danh sách hỏng đọc thành ba cái chết** | 14:44:07 cả 3 tài khoản `claude_agents_list_failed "spawn claude failed: No such file or directory"` (npm đang ghi đè binary) ⟹ danh sách RỖNG ⟹ 3 tin `⏹ đã tắt` trong 8 giây, cả ba phiên vẫn sống (16:08 `/sessions` còn liệt kê `projects-d8 · đang chạy`) | ảnh chụp mang `blind`, sổ nhớ `Mark::a`; phiên vắng mặt của tài khoản mù thì **giữ sổ, im lặng** |
+| **B — "cửa sổ còn mở" trỏ nhầm cửa sổ** | `projects-d8` ở `ttys002` (cửa sổ mở từ 12:28:08); 16:41:16 Hà thoát CLI rồi gõ `claude` lại **ngay trong cửa sổ đó**; 16:42:33 hub hỏi tty → còn → nói "còn mở". Sổ ghi phiên mới `e27806c2` cũng `ttys002`, "thấy lần đầu 16:42:33" — đúng vòng ấy | hỏi ảnh chụp của mình trước (`window_taken_over`), nói thẳng "cửa sổ ấy nay đang chạy phiên `<tên>`" |
+
+📌 Hệ quả kéo theo của A, mất một lúc mới nhìn ra: báo nhầm xong hub **xoá phiên
+khỏi sổ**, nên cái chết THẬT bị báo lần hai (`37e59209` 14:44 + 16:08 ·
+`69a38c64` 14:44 + 16:42). *Không phải loa lặp — sổ bị xoá.*
+
+### 🎯 *"tôi cảm thấy có những phiên ẩn mà tôi không hề biết"* — đúng, 9 phiên
+
+Đếm thật: **9 tiến trình `claude` của extension VS Code** (con của VS Code, cwd
+`~/Documents/projects`), tuổi từ **3/8** tới 11/8. hub cố ý ẩn từ 2026-08-09 theo
+chính lời Hà hồi đó (`sessions.rs:1491`), chỉ để lại một con số câm trên màn.
+Hà chốt lại định nghĩa: *"phiên ẩn là không hiện terminal trên màn hình, còn liên
+quan vs code thì bỏ qua luôn, ui chưa cần sửa gì vội"* ⟹ **không đụng UI**. Đo
+theo định nghĩa ấy: lúc 17:00 mọi phiên CLI đều có cửa sổ Terminal
+(`ttys000/001/002`), tức **0 phiên ẩn**. Thứ thật sự sinh ra phiên không cửa sổ
+là **phép dò hạn mức của chính hub**: 33 dòng `session_end_muted "phiên sống
+chớp nhoáng"` trong ngày.
+
+### ✅ pid 5001 đã đóng (Hà chốt) — và nó là thủ phạm của lỗi A
+
+`kill 5001` lúc 16:59: pid biến mất, 0 `npm install @anthropic-ai/claude-code`
+còn chạy, hub báo đúng `⏹ projects-71 · games (296972d4) đã tắt hẳn` (phiên nằm
+trong terminal tích hợp VS Code ⟹ không có cửa sổ Terminal.app ⟹ "tắt hẳn" đúng).
+
+### 🆕 *"chưa có lệnh xem danh sách acc"* → route `/accounts`
+
+Số liệu đã có từ 08-10 (`usage_cached`, 5 phút/lượt, `/usage` **không tiêu hạn
+mức**) nhưng chỉ nằm ở tab Sức khoẻ — không với tới được khi đang gõ Telegram.
+`fe-accounts-uc` **12/12** chạy thật 17:28 trên bundle đã deploy:
+`acc1 ⭐ mặc định · acc2 tuần 100% · acc3 tuần 5%`. 📌 Và nó trả lời ngay một câu
+đáng giá: **acc2 đã cạn hạn mức tuần**.
+
+### 🆕 *"vậy lệnh new chọn acc kiểu gì? hay đang để random?"* — không random
+
+`/new` không mang `-a` ⟹ `account = None` ⟹ `terminal_command` **không đặt**
+`CLAUDE_CONFIG_DIR` ⟹ luôn rơi vào tài khoản không có `config_dir` (`acc1`).
+
+### 🆕 *"kiến trúc lại lệnh cho hợp lý: `/new -a acc2 -s dwork`"*
+
+Cờ đọc ở đâu cũng được; **chỉ cờ đã biết mới bị bóc** (một `-x` lạ phải ở nguyên
+trong đề bài — nuốt im một mẩu đề bài là lỗi không truy ra được); đề bài **để
+trống** vẫn mở được trên đường cửa sổ (đúng thứ Hà làm khi ngồi máy), `--bg` vẫn
+từ chối vì nó không có cửa sổ nào để gõ vào; và câu chào nay **nói ra** rằng con
+trỏ đã chuyển sang phiên mới — việc chuyển thì đã có từ trước, thứ thiếu là câu
+nói. `fe-newflags-uc` **8/8** chạy thật 17:33 + 17:35, đối chiếu ngoài màn:
+`new_window_opened tty=ttys003 task=""`, `focus:session` = đúng phiên vừa mở.
+
+⚠ Lượt chạy ĐẦU của kịch bản ấy **đỏ vì phép đo**, không vì sản phẩm: nó quét cả
+luồng tìm `⚠`/`🚀` và bắt trúng một tin từ 12:45 còn trong lịch sử. Nay chỉ đọc
+tin **mới hơn lượt gõ**.
+
+### 🔔 *"phiên vừa dừng lại hỏi mà tôi không nhận được trên tele là sao?"*
+
+Hai nguyên nhân, cả hai là LUẬT CŨ chứ không phải hỏng:
+1. luật im 08-10 (phiên terminal chủ máy vừa xong một lượt thì im) — log bắt
+   đúng ba lần trên chính phiên ấy: `session_change_muted e27806c2` **16:57:47 ·
+   17:53:35 · 17:58:16**;
+2. khe mù: hub chỉ NHÌN mỗi **139 giây** trung bình (đo 15 vòng: 49s–161s), nên
+   một hộp chọn sống 40 giây lọt trọn giữa hai lượt.
+
+📌 Một giả thuyết của chính tôi bị **bác bằng mã** trước khi kịp khai ra: cửa sổ
+đọc màn 8 dòng KHÔNG phải thủ phạm — `keys::look` chạy `parse_choices` trên cả
+màn, `lines` chỉ cắt phần chữ đem hiển thị.
+
+Hà chốt: *"mọi phiên terminal đều báo, rút nhịp nhìn xuống cần thảo luận lại,
+nếu báo phiên khác phiên đang theo thì thêm nút vào phiên"* ⟹ gỡ luật im (cửa
+chống ồn còn lại: `MIN_RUN_SEC` 120s; nhánh kẹt hỏi không qua cửa ấy), thêm nút
+`👁 Vào phiên <tên>` gửi `sess:<id>` — đúng route `/session` sẵn có. **Nhịp nhìn
+giữ nguyên**, chờ bàn riêng.
+
+### Nghiệm thu đã chạy thật
+
+`cargo test` **181** (từ 159) · clippy **0** · `install.sh` exit 0, daemon pid
+92365 `kind: cert` · 8 test mới của cái loa + 6 test cờ + 4 test `/accounts`, và
+**các test lõi đều đã kiểm là ĐỎ ĐƯỢC** bằng đột biến (tắt cửa mù ⟹ 2 đỏ; tắt
+phép hỏi tty ⟹ 1 đỏ; bỏ nhãn mặc định / bỏ cảnh báo mù / bỏ "đang đo" ⟹ 3 đỏ).
+
+⏳ **Chưa có lượt THẬT cho hai bản vá cái loa** — lỗi A cần `claude agents` hỏng
+lần nữa (thủ phạm vừa bị đóng), lỗi B cần một phiên tắt trong lúc phiên khác giữ
+tty của nó. Ghi đúng vậy, đừng đọc thành "đã chứng minh trên máy".
+
+---
+
 ## 🔔 2026-08-12 (chiều) — cái chuông nói được CHUYỆN GÌ, và hai phiên tranh nhau một cây mã
 
 Hà: *"khi phiên dừng chờ thì cần hiện các thông tin chốt quan trọng để đọc trên

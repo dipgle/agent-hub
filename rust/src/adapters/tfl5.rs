@@ -635,6 +635,9 @@ pub fn parse_command(
         "ingest" | "poll" => Some((CommandKind::Ingest, 0, String::new())),
         "run" | "cycle" => Some((CommandKind::Run, 0, String::new())),
         "doctor" | "health" => Some((CommandKind::Doctor, 0, String::new())),
+        // `/accounts` — cũng là một verb không mang id. `acc` để gõ nhanh trên
+        // điện thoại, `taikhoan` cho lối gõ không dấu quen thuộc của phòng này.
+        "accounts" | "acc" | "taikhoan" => Some((CommandKind::Accounts, 0, String::new())),
         // `/set <key> <value>` — the id slot holds the KEY here, so re-split
         // the raw text instead of using the parsed id.
         "set" | "cauhinh" => {

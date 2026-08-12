@@ -28,6 +28,49 @@ pub struct CycleSummary {
     pub ingested: Value,
 }
 
+/// Tách cờ `-x <giá trị>` ra khỏi phần chữ còn lại của một lệnh.
+///
+/// Hà 2026-08-12: *"kiến trúc lại lệnh cho hợp lý, ví dụ: `/new -a acc2 -s
+/// dwork`"*. Lối gõ cũ là VỊ TRÍ (`/new <dự án> @acc <việc>`) — thứ tự phải
+/// thuộc lòng, và cái `@acc` phải nằm đúng khe thứ hai nếu không nó thành một
+/// phần của đề bài. Cờ thì gõ đâu cũng được và tự nói nó là gì.
+///
+/// **Chỉ cờ ĐÃ BIẾT mới bị bóc.** Một `-p` lạ trong đề bài (`sửa cờ -p của
+/// script`) phải ở nguyên trong chữ: nuốt im lặng một mẩu đề bài là đúng cái
+/// loại lỗi không ai truy ra được, vì phiên vẫn mở và vẫn chạy — chỉ là chạy
+/// một đề bài khác với đề bài đã gõ.
+///
+/// Cờ ở CUỐI mà không có giá trị cũng trả về (giá trị rỗng), để chỗ gọi nói
+/// được "thiếu giá trị cho -a" thay vì lặng lẽ bỏ qua.
+pub fn split_flags(
+    arg: &str,
+    known: &[&str],
+) -> (std::collections::BTreeMap<String, String>, String) {
+    let mut flags = std::collections::BTreeMap::new();
+    let mut rest: Vec<&str> = Vec::new();
+    let mut it = arg.split_whitespace().peekable();
+    while let Some(tok) = it.next() {
+        let name = tok.trim_start_matches('-');
+        let is_flag = tok.starts_with('-') && !name.is_empty() && known.contains(&name);
+        if !is_flag {
+            rest.push(tok);
+            continue;
+        }
+        // Giá trị là token kế tiếp — trừ khi token ấy lại là một cờ đã biết,
+        // nghĩa là cờ này bị bỏ trống (`/new -a -s dwork`).
+        let takes = it
+            .peek()
+            .map(|n| {
+                let nn = n.trim_start_matches('-');
+                !(n.starts_with('-') && known.contains(&nn))
+            })
+            .unwrap_or(false);
+        let val = if takes { it.next().unwrap_or("") } else { "" };
+        flags.insert(name.to_string(), val.to_string());
+    }
+    (flags, rest.join(" "))
+}
+
 /// Folder names under `project_roots` — the set `/project <name>` accepts.
 ///
 /// Was `devlog::discover_projects` (folders holding a devlog). With the devlog
@@ -149,12 +192,21 @@ pub const WATCH_KEY: &str = "watch:sessions";
 /// Không lời gọi `claude` nào ⟹ **không tốn hạn mức** (luật §8). Lỗi ở một
 /// đường không được làm câm đường kia, và cả hai đều log khi hỏng — một cái loa
 /// im lặng thì tệ hơn không có loa.
-pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSession]) {
+pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsSnapshot) {
+    let live = &snap.sessions;
     let prev: BTreeMap<String, crate::watch::Mark> = db
         .cursor_or_log(WATCH_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
-    let (changes, next) = crate::watch::changes(&prev, live, chrono::Utc::now().timestamp());
+    // Tài khoản nào KHÔNG liệt kê được phiên ở lượt này đi thẳng vào phép so:
+    // vắng mặt trong một danh sách hỏng không phải là một cái chết. Trước
+    // 2026-08-12 hàm này chỉ nhận `sessions`, nên `notes` — chỗ duy nhất ghi
+    // chuyện tài khoản hỏng — không tới được đây, và ba phiên còn sống bị báo
+    // tắt trong 8 giây.
+    let (changes, next) =
+        crate::watch::changes(&prev, live, chrono::Utc::now().timestamp(), &snap.blind);
+    // Phiên đang theo — để biết tin nào cần kèm nút "vào phiên".
+    let focused = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
 
     match serde_json::to_string(&next) {
         // Ghi sổ TRƯỚC khi nói: nói xong mới ghi mà sập giữa chừng thì lượt sau
@@ -219,6 +271,15 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
             // Phiên nền không có cửa sổ nào để đóng, nên dừng nó LÀ tắt hẳn.
             if kind == "background" || tty.is_empty() {
                 Some("đã tắt hẳn".to_string())
+            } else if let Some(other) = crate::sessions::window_taken_over(&id, tty, live) {
+                // Cửa sổ ấy CÒN, nhưng nó không còn là cửa sổ của phiên này —
+                // xem `sessions::window_taken_over`. Nói tên phiên đang ngồi ở
+                // đó: đấy là thứ người cầm điện thoại cần để khỏi đi tìm một
+                // cửa sổ bỏ không không tồn tại.
+                Some(format!(
+                    "đã tắt — cửa sổ ấy nay đang chạy phiên {}",
+                    other.name
+                ))
             } else {
                 match crate::keys::window_of(tty) {
                     // Cửa sổ còn ⟹ CHƯA phải "tắt hẳn" theo đúng định nghĩa Hà
@@ -233,22 +294,23 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
             None
         };
 
-        // IM cho phiên chủ máy đang ngồi gõ, TRỪ khi nó đang kẹt hỏi.
+        // MỌI phiên terminal dừng lại chờ đều được báo (Hà 2026-08-12).
         //
-        // Hà 2026-08-10: một phiên terminal anh đang nhìn thẳng vào bắn ba tin
-        // trong mười sáu phút. Cái loa này có giá trị ở phiên KHÔNG ai nhìn —
-        // phiên hub tự mở từ điện thoại — hoặc khi phiên KẸT, vì kẹt thì dù
-        // đang ngồi trước máy cũng đáng được gọi. Còn "một lượt vừa xong" trên
-        // phiên anh tự tay gõ thì anh thấy trước hub.
-        let stuck = matches!(idle, crate::watch::Idle::Asking { .. });
-        let hub_opened = row.is_some_and(|s| s.started_by_hub);
-        if matches!(c, crate::watch::Change::Finished { .. }) && !stuck && !hub_opened {
-            logging::info(
-                "session_change_muted",
-                json!({ "session": id, "why": "phiên terminal của chủ máy, không kẹt" }),
-            );
-            continue;
-        }
+        // Luật cũ (08-10) im cho phiên terminal của chủ máy trừ khi nó KẸT HỎI,
+        // với lý do *"anh đang nhìn thẳng vào nó"* — một phiên bắn ba tin trong
+        // mười sáu phút. Lý do ấy hết đúng từ lúc anh làm việc **qua điện
+        // thoại**: đang theo một phiên từ Telegram nghĩa là KHÔNG ngồi trước
+        // cửa sổ nào cả.
+        //
+        // 🔴 Đo được chính hôm nay, và đây là thứ làm Hà hỏi: phiên `e27806c2`
+        // bị im **ba lần** (16:57:47 · 17:53:35 · 17:58:16) đúng những lúc nó
+        // dừng lại chờ anh. Thêm một khe mù nữa: hub chỉ NHÌN mỗi ~139 giây
+        // (đo 15 vòng, thấp nhất 49s, cao nhất 161s), nên một hộp chọn sống 40
+        // giây thì lọt trọn giữa hai lượt nhìn — nhịp ấy Hà để bàn riêng.
+        //
+        // Cái chặn ồn còn lại là `watch::MIN_RUN_SEC` (120s): một lượt chạy
+        // chớp nhoáng vẫn không phải tin. Nhánh KẸT HỎI thì không đi qua cửa ấy
+        // — hỏi là hỏi, dài ngắn không đổi.
 
         // IM khi một phiên CON kết thúc bình thường.
         //
@@ -324,9 +386,30 @@ pub fn announce_changes(db: &Db, cfg: &Config, live: &[crate::sessions::LiveSess
             (_, crate::watch::Idle::Asking { options, .. }) if !options.is_empty() => Some(options),
             _ => None,
         };
+        // Tin của một phiên KHÁC phiên đang theo phải mang theo đường vào nó.
+        //
+        // Hà 2026-08-12: *"nếu báo phiên khác phiên đang theo thì thêm nút vào
+        // phiên"*. Không có nút thì tin báo bắt người đọc tự gõ `/session
+        // <uuid>` trên điện thoại — đúng loại việc làm người ta bỏ tính năng.
+        // Nút gửi `sess:<id>`, tức đi đúng route `/session` sẵn có
+        // (`telegram::callback_to_command`), không đẻ thêm lối riêng.
+        //
+        // Phiên ĐANG theo thì không cần nút: bấm vào chỉ để tới chỗ đang đứng.
+        let enter = (id != focused).then(|| {
+            (
+                format!("👁 Vào phiên {}", crate::exec::truncate(c.name(), 24)),
+                format!("sess:{id}"),
+            )
+        });
         match (buttons, crate::telegram::inbox()) {
             (Some(opts), Some(tg)) => {
-                if let Err(e) = tg.ask_choices(&text, &id, opts) {
+                if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some()) {
+                    logging::error("session_change_telegram_failed", json!({ "err": e }));
+                }
+            }
+            (None, Some(tg)) if enter.is_some() => {
+                let b = [enter.unwrap()];
+                if let Err(e) = tg.send_buttons(&text, &b) {
                     logging::error("session_change_telegram_failed", json!({ "err": e }));
                 }
             }
@@ -1068,7 +1151,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /sessions — danh sách phiên đang sống (trên Telegram: bấm nút để theo)\n\
                      /session <id> — theo một phiên (bỏ theo: /session -)\n\
                      (trên Telegram: chọn phiên xong thì CHỮ THƯỜNG gõ ở đây đi thẳng vào phiên ấy)\n\
-                     /new <dự án> <việc> — mở phiên nền làm việc đó (chạy không hỏi ai)\n\
+                     /new <dự án> [@acc] <việc> — mở phiên làm việc đó; không nói @acc thì chạy bằng tài khoản mặc định (xem /accounts)\n\
                      /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng\n\
                      /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước)\n\
                      /stop [id] — dừng phiên nền, hội thoại vẫn giữ\n\
@@ -1078,6 +1161,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /key <up|down|left|right|enter|esc|tab|space|1-9> — bấm một phím\n\
                      /shot — đọc chữ đang hiện trên màn của phiên\n\
                      — Vận hành —\n\
+                     /accounts — ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, /new mặc định vào tài khoản nào\n\
                      /project [tên] — xem / ghim dự án cho phòng (bỏ ghim: /project -)\n\
                      /ingest · /run · /doctor — poll kênh · chạy một vòng · kiểm tra thật\n\
                      /set <khoá> <giá trị> — sửa một trường cấu hình\n\
@@ -1104,6 +1188,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let probe = crate::portal::probe_now(cfg);
                 reply_in_channel(db, cfg, adapter, cmd, &probe);
                 Some(probe)
+            }
+            CommandKind::Accounts => {
+                // Một ảnh chụp thật, không phải con số nhớ từ lượt trước: câu
+                // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì
+                // hiện tại. Hạn mức thì lấy bản đã đo sẵn (5 phút một lượt),
+                // nên lệnh này không đẻ thêm tiến trình `claude` nào.
+                let live = crate::sessions::snapshot(cfg);
+                let ack = crate::runtime::accounts_say(
+                    cfg,
+                    &live,
+                    chrono::Utc::now().timestamp_millis(),
+                );
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
             }
             CommandKind::Handover => {
                 // Books, not brakes. This costs a `claude` call and every cent
@@ -1183,19 +1281,44 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // `<dự án> <việc>` — the project decides the folder, and only a
                 // folder hub already knows about is accepted: a typo must not
                 // start an agent loose in the wrong repo.
-                let (name, task) = cmd
-                    .arg
-                    .split_once(char::is_whitespace)
-                    .unwrap_or((&cmd.arg, ""));
-                let name = name.trim();
+                //
+                // HAI lối gõ, cùng một đường đi (Hà 2026-08-12: *"kiến trúc lại
+                // lệnh cho hợp lý, ví dụ: /new -a acc2 -s dwork"*):
+                //   `/new -a acc2 -s dwork sửa lịch`   ← cờ, gõ đâu cũng được
+                //   `/new dwork @acc2 sửa lịch`        ← vị trí, lối cũ
+                // Lối cũ giữ lại vì nó nằm trong tay quen của chủ máy và trong
+                // các nút Telegram đã gửi đi; bỏ nó là làm hỏng thứ đang chạy.
+                const NEW_FLAGS: &[&str] = &[
+                    "a", "acc", "account", "s", "p", "project", "duan", "du-an",
+                ];
+                let (flags, rest) = split_flags(&cmd.arg, NEW_FLAGS);
+                let flag_project = ["s", "p", "project", "duan", "du-an"]
+                    .iter()
+                    .find_map(|k| flags.get(*k))
+                    .map(|v| v.trim().to_string());
+                let flag_account = ["a", "acc", "account"]
+                    .iter()
+                    .find_map(|k| flags.get(*k))
+                    .map(|v| v.trim().to_string());
+
+                let (name, task) = match flag_project.as_deref() {
+                    // Có `-s` thì phần chữ còn lại LÀ đề bài, cả câu.
+                    Some(p) => (p.to_string(), rest.as_str()),
+                    None => {
+                        let (n, t) = rest.split_once(char::is_whitespace).unwrap_or((&rest, ""));
+                        (n.trim().to_string(), t)
+                    }
+                };
+                let name = name.as_str();
                 // `@tài-khoản` đứng ngay sau tên dự án: `/new hub @acc2 việc…`.
                 // Không có thì dùng tài khoản mặc định — giữ nguyên cách gõ cũ.
-                let (account, task) = match task.trim().strip_prefix('@') {
-                    Some(rest) => {
+                let (account, task) = match (flag_account, task.trim().strip_prefix('@')) {
+                    (Some(a), _) => (Some(a), task),
+                    (None, Some(rest)) => {
                         let (acc, rest) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
                         (Some(acc.trim().to_string()), rest)
                     }
-                    None => (None, task),
+                    (None, None) => (None, task),
                 };
                 // Tài khoản lạ thì TỪ CHỐI, đừng lặng lẽ rơi về mặc định: mở
                 // phiên nhầm tài khoản là mở nhầm cả kho phiên.
@@ -1249,10 +1372,28 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // không có, hoặc tìm một phiên nền không tồn
                                 // tại. Nói sai chỗ còn tệ hơn không nói.
                                 let cua_so = if s.window { "cửa sổ terminal" } else { "phiên nền" };
+                                // NÓI RA hai điều hub vừa quyết hộ, vì cả hai
+                                // đều đổi việc gõ câu tiếp theo (Hà 2026-08-12:
+                                // *"mặc định sẽ focus luôn vào phiên mới → đặt
+                                // câu hỏi luôn vào phiên mới này"*):
+                                //   • tài khoản nào — `/new` không mang `-a`
+                                //     thì LUÔN rơi vào tài khoản mặc định,
+                                //     không phải chọn ngẫu nhiên;
+                                //   • con trỏ đang theo đã chuyển sang phiên
+                                //     này, nên chữ thường gõ ở phòng chat đi
+                                //     thẳng vào nó.
+                                // Việc focus đã có từ trước; thứ thiếu là câu
+                                // nói ra — một tính năng không ai biết là một
+                                // tính năng không tồn tại.
+                                let acc_said = account
+                                    .as_deref()
+                                    .map(|a| format!(" bằng {a}"))
+                                    .unwrap_or_else(|| " bằng tài khoản mặc định".to_string());
                                 format!(
-                                    "🚀 Đã mở {} cho {}.\nPhiên {} — đang chạy trên máy, xem màn sống ngay trên thẻ của nó.\n\n⚠ Nó chạy không hỏi ai. Tắt bằng nút Tắt hẳn hoặc /stop.",
+                                    "🚀 Đã mở {} cho {}{}.\nPhiên {} — đang chạy trên máy, xem màn sống ngay trên thẻ của nó.\n\n🎯 Đang theo phiên này: gõ thẳng câu hỏi ở đây là vào nó (hoặc /ask để hỏi trên bản sao).\n⚠ Nó chạy không hỏi ai. Tắt bằng nút Tắt hẳn hoặc /stop.",
                                     cua_so,
                                     s.project,
+                                    acc_said,
                                     &s.session_id[..8.min(s.session_id.len())]
                                 )
                             }

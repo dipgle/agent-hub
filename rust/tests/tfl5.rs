@@ -602,3 +602,17 @@ fn an_order_that_touches_a_session_carries_that_sessions_id() {
     // Chuỗi dài mà không phải uuid cũng không được nhận nhầm.
     assert_eq!(split_target("khong-phai-uuid-nhung-rat-dai-va-co-gach-noi xin chao"), None);
 }
+
+/// `/accounts` — Hà 2026-08-12: *"chưa có lệnh xem danh sách acc"*.
+///
+/// Ba lối gõ vì đây là lệnh gõ trên điện thoại: tên đầy đủ, tên tắt, và lối
+/// không dấu quen thuộc của phòng này.
+#[test]
+fn the_accounts_verb_answers_to_three_spellings() {
+    for text in ["/accounts", "/acc", "/taikhoan"] {
+        let (kind, id, arg) = tfl5::parse_command(text, OWNER, &owners()).expect(text);
+        assert_eq!(kind, hub::adapters::CommandKind::Accounts, "sai verb cho {text}");
+        assert_eq!(id, 0, "{text} không nhận id");
+        assert!(arg.is_empty(), "{text} không nhận tham số: {arg}");
+    }
+}

@@ -221,8 +221,23 @@ or drive a session from a phone?** If not, it does not belong here.
     keystrokes (1002)"*) and no amount of granting Accessibility fixes it,
     because the process asking is `/usr/bin/osascript`, a system binary. `do
     script` needs only **Automation**, which hub already has. It **always
-    appends a newline** and that cannot be turned off: fine for `claude`'s
-    prompt box, but it means an arrow key both MOVES and CONFIRMS, so hub sends
+    appends a newline** and that cannot be turned off — but read the next
+    paragraph before concluding that a typed line therefore gets SENT.
+    🔴 **"Appends a newline" ≠ "the TUI submits it"** (Hà, 2026-08-12: *"nhận
+    được text nhưng không tự gửi… có vẻ như thiếu enter?"*). The text and the
+    newline arrive in ONE write, and `claude`'s input box reads that as a
+    **paste**: the line lands in the box and the newline goes into the content
+    instead of ending it. True for a shell, false for this TUI — and the two
+    behaved differently long enough for this file to state the wrong rule.
+    hub now looks before it speaks: after typing it re-reads the screen, and if
+    the text is still sitting in the box it sends a **separate** Enter
+    (`keys::still_in_box` + `press(w, "enter")`). Three measured conditions gate
+    that extra keystroke, because a stray Enter is not undoable — the text is
+    still visible, the session is not busy (busy means it already queued, i.e.
+    it WAS submitted), and no choice dialog is on screen (there Enter CONFIRMS).
+    A line under 6 characters never triggers it: "2" or "ok" appears on almost
+    any screen, and a false match would fire an Enter nobody asked for.
+    It also means an arrow key both MOVES and CONFIRMS, so hub sends
     an arrow only when it can **prove there is no choice dialog** — not merely
     when it fails to see one. That distinction is the whole gate: `screen_of`
     used to fold three outcomes into `None` (no window · osascript failed ·

@@ -25,6 +25,9 @@
 
 use std::collections::BTreeMap;
 
+use serde_json::json;
+
+use crate::logging;
 use crate::sessions::LiveSession;
 
 /// Trạng thái của một phiên, rút gọn còn đúng thứ cần để so hai lượt.
@@ -42,6 +45,19 @@ pub const DEAD: &str = "dead";
 ///
 /// 120 giây: dài hơn một lượt hỏi-đáp thường, ngắn hơn một việc đáng chờ.
 pub const MIN_RUN_SEC: i64 = 120;
+
+/// Sống ngắn hơn chừng này thì TẮT cũng không phải là tin.
+///
+/// 🔴 Đo 2026-08-12 từ chính log của hub: **20 tin "đã tắt hẳn" trong 4 tiếng,
+/// mỗi tin một id khác nhau**, đều đặn 7–12 phút một lần. Không phải một phiên
+/// báo lặp — là một dòng phiên sinh ra rồi chết, và thủ phạm là **phép dò hạn
+/// mức của chính hub**: `claude -p "/usage"` mỗi 5 phút đẻ ra một phiên thật,
+/// hiện vài giây trong `claude agents` rồi biến mất. Cái loa làm đúng luật đã
+/// viết; luật thiếu vế "sống bao lâu".
+///
+/// Dùng chung con số với `MIN_RUN_SEC` là có chủ ý: cùng một câu hỏi ("việc này
+/// có đủ dài để đáng gọi người ta không"), nên đừng để hai con số trôi khác nhau.
+pub const MIN_LIFE_SEC: i64 = MIN_RUN_SEC;
 
 /// Ghi trong sổ: `working@<epoch giây>` để biết nó chạy được bao lâu rồi.
 fn working_since(mark: &str) -> Option<i64> {
@@ -79,6 +95,38 @@ pub struct Mark {
     /// nên quan hệ cha-con phải nằm trong sổ TỪ TRƯỚC.
     #[serde(default)]
     pub p: String,
+    /// Lần ĐẦU hub thấy phiên này (epoch giây). 0 = sổ cũ, chưa có trường này.
+    ///
+    /// 🔴 Hà 2026-08-12: *"tại sao cứ báo phiên đã tắt liên tục"*. Đo log: 20
+    /// tin trong 4 tiếng, **mỗi tin một id khác nhau**, đều đặn 7–12 phút một
+    /// lần — tức không phải một phiên báo lặp, mà là một dòng phiên sinh ra rồi
+    /// chết. Đó chính là **phép dò hạn mức của hub**: `claude -p "/usage"` chạy
+    /// mỗi 5 phút, và mỗi lượt đẻ ra một phiên thật, mang một id thật, hiện ra
+    /// trong `claude agents` vài giây rồi biến mất. Cái loa làm đúng luật đã
+    /// viết ("rời khỏi danh sách = đã kết thúc") — luật ấy thiếu một vế.
+    ///
+    /// Vế thiếu: **một phiên sống vài giây thì cái chết của nó không phải tin**,
+    /// cùng lý do `MIN_RUN_SEC` tồn tại cho "vừa chạy xong".
+    #[serde(default)]
+    pub f: i64,
+    /// Phiên do CHÍNH hub mở (`/new`).
+    ///
+    /// Ngoại lệ của cửa thời lượng trên: phiên chủ máy vừa mở từ điện thoại mà
+    /// chết trong 30 giây là **đúng thứ phải báo** — nó chết chứ không phải nó
+    /// xong, và người mở đang chờ nó chạy.
+    #[serde(default)]
+    pub h: bool,
+    /// Tên phiên, và dự án nó đang làm — nhớ TỪ TRƯỚC vì lúc báo thì đã muộn.
+    ///
+    /// 🔴 Hà 2026-08-12: *"không biết nó là phiên nào rất mơ hồ"*. Tin cũ đọc là
+    /// `⏹ phiên 8db91183 đã tắt hẳn` — một id ngắn, thứ không nói được gì cho
+    /// người đang cầm điện thoại. Lý do nó chỉ có id: khi phiên **rời khỏi danh
+    /// sách** thì hàng của nó đi theo, không còn chỗ nào hỏi tên nữa. Cùng lý do
+    /// sổ phải nhớ `tty` và `p` — nhớ luôn tên và dự án.
+    #[serde(default)]
+    pub n: String,
+    #[serde(default)]
+    pub d: String,
 }
 
 /// Một chuyện vừa xảy ra, đáng để làm phiền chủ máy.
@@ -192,6 +240,20 @@ impl Change {
     }
 }
 
+/// Gọi tên một phiên ĐÃ BIẾN MẤT, bằng những gì sổ còn giữ.
+///
+/// Ba dữ kiện xếp theo thứ người ta nhận ra: **tên** phiên · **dự án** nó đang
+/// làm · id ngắn để gõ tiếp lệnh. Thiếu tên (sổ ghi từ bản cũ) thì nói thẳng
+/// "phiên <id>" — một id không có nhãn còn đỡ hơn một cái tên bịa.
+pub fn name_from_mark(id: &str, mark: &Mark) -> String {
+    let short = &id[..id.len().min(8)];
+    match (mark.n.trim(), mark.d.trim()) {
+        ("", _) => format!("phiên {short}"),
+        (name, "") => format!("{name} ({short})"),
+        (name, folder) => format!("{name} · {folder} ({short})"),
+    }
+}
+
 /// Trạng thái rút gọn của một phiên trong ảnh chụp lúc này.
 fn state_of(s: &LiveSession) -> &'static str {
     if s.host == "dead" {
@@ -245,6 +307,13 @@ pub fn changes(
                         y: s.tty.clone(),
                         k: s.kind.clone(),
                         p: s.parent_session_id.clone().unwrap_or_default(),
+                        // Giữ nguyên mốc lần đầu; sổ cũ (f = 0) coi như thấy từ
+                        // bây giờ, tức lượt sau nó mới đủ tuổi để báo — thà lỡ
+                        // một tin còn hơn một tin sai.
+                        f: before.map(|b| b.f).filter(|f| *f > 0).unwrap_or(epoch_sec),
+                        h: s.started_by_hub,
+                        n: s.name.clone(),
+                        d: s.folder.clone(),
                     },
                 );
             }
@@ -281,10 +350,24 @@ pub fn changes(
             if seen.contains(&id) {
                 continue;
             }
+            // Cửa TUỔI THỌ — xem `Mark::f`. Phiên sống chớp nhoáng (phép dò hạn
+            // mức của chính hub, một `claude -p` bất kỳ) chết đi không phải tin;
+            // phiên do hub mở thì luôn báo, vì ở đó chết ≠ xong.
+            let lived = epoch_sec - mark.f;
+            if mark.f > 0 && lived < MIN_LIFE_SEC && !mark.h {
+                logging::info(
+                    "session_end_muted",
+                    json!({ "session": id, "lived_sec": lived,
+                            "why": "phiên sống chớp nhoáng — cái chết của nó không phải tin" }),
+                );
+                continue;
+            }
             out.push(Change::Ended {
                 id: id.clone(),
-                // Tên đã đi mất cùng danh sách; id ngắn còn hơn một chỗ trống.
-                name: format!("phiên {}", &id[..id.len().min(8)]),
+                // Tên lấy TỪ SỔ (xem `Mark::n`): hàng của phiên đã đi mất cùng
+                // danh sách. Sổ cũ chưa có tên thì đành id ngắn — nhưng nói rõ
+                // đó là id, đừng để người đọc tưởng đấy là tên.
+                name: name_from_mark(id, mark),
                 was_working: mark.s.starts_with(WORKING),
                 // ĐÂY là lý do sổ phải nhớ `tty`: hàng của phiên đã biến mất,
                 // nên không còn chỗ nào hỏi nó chạy ở cửa sổ nào.

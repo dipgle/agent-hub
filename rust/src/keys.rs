@@ -135,6 +135,65 @@ pub enum Landed {
     Idle,
 }
 
+/// Phần màn hình thuộc **ô nhập** — khối đóng khung cuối cùng.
+///
+/// `claude` vẽ ô nhập bằng khung `╭─╮ │ ╰─╯` ở đáy màn. Lấy từ dấu `╭` cuối cùng
+/// trở đi là được đúng ô ấy (kèm dòng gợi ý dưới chân nó, vô hại). Không thấy
+/// khung nào — chủ đề khác, cửa sổ hẹp — thì lùi về **4 dòng không rỗng cuối**:
+/// vẫn là vùng đáy, chỉ kém sắc nét hơn, và thà kém sắc nét còn hơn soi cả màn
+/// rồi đọc phần hội thoại thành nội dung ô nhập.
+fn box_region(screen: &str) -> String {
+    if let Some(i) = screen.rfind('╭') {
+        return screen[i..].to_string();
+    }
+    let mut tail: Vec<&str> = screen
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .rev()
+        .take(4)
+        .collect();
+    tail.reverse();
+    tail.join("\n")
+}
+
+/// Chữ vừa gõ CÒN NẰM trong ô nhập, hay đã đi?
+///
+/// 🔴 Hà đo 2026-08-12: *"nhận được text nhưng không tự gửi"*. Chú thích của
+/// `do_script` (và cả CLAUDE.md) tin rằng `do script` luôn kèm một dấu xuống
+/// dòng nên "gõ xong là gửi" — điều đó đúng với một cái shell, mà **sai với ô
+/// nhập của `claude`**: chữ và dấu xuống dòng đi trong CÙNG MỘT lượt ghi, và
+/// TUI đọc lượt ấy như một cú DÁN, tức nuốt luôn dấu xuống dòng vào nội dung.
+/// Nên phải NHÌN xem chữ có còn nằm đó không rồi mới gửi Enter rời.
+///
+/// So sánh sau khi bóp bỏ khoảng trắng và khung viền: ô nhập ngắt dòng theo bề
+/// ngang cửa sổ, nên một câu dài nằm trong ô sẽ bị cắt làm nhiều đoạn có `│` xen
+/// vào — so nguyên văn thì trượt sạch. Cần **16 ký tự cuối** làm dấu vân tay:
+/// đủ đặc trưng để không trùng ngẫu nhiên với chữ khác trên màn, mà vẫn ngắn hơn
+/// một dòng của ô nhập.
+pub fn still_in_box(screen: &str, typed: &str) -> bool {
+    let squash = |s: &str| -> String {
+        s.chars()
+            .filter(|c| !c.is_whitespace() && !"│┃|>❯".contains(*c))
+            .collect()
+    };
+    // ⚠ CHỈ soi trong Ô NHẬP, không soi cả màn.
+    //
+    // Đây là chỗ phép đo suýt trỏ sai: gửi đi RỒI thì `claude` in lại chính câu
+    // ấy vào phần hội thoại phía trên — chữ vẫn còn trên màn, mà ý nghĩa ngược
+    // hẳn. Soi cả màn thì hub đọc "đã gửi" thành "còn nằm trong ô", rồi bắn một
+    // Enter thừa và báo sai cho chủ máy. Ô nhập là khối đóng khung cuối cùng.
+    let screen = box_region(screen);
+    let t = squash(typed);
+    let n = t.chars().count();
+    // Chữ quá ngắn ("2", "ok") không đủ đặc trưng: nó nằm sẵn trong mọi màn.
+    // Thà bỏ sót một lần gửi Enter còn hơn bắn Enter vì một chữ trùng.
+    if n < 6 {
+        return false;
+    }
+    let needle: String = t.chars().skip(n.saturating_sub(16)).collect();
+    squash(&screen).contains(&needle)
+}
+
 /// Phân loại thuần từ chữ trên màn, để test được không cần Terminal.
 pub fn landed(screen: &str) -> Landed {
     // Chính `claude` in dòng này khi có tin trong hàng chờ (đo trên máy:

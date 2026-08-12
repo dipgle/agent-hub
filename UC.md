@@ -658,9 +658,51 @@ song song sẽ ăn mất update của nhau — một cú bấm ✅ rơi vào vò
 đúng người vừa bấm. `confirm` mượn đường bằng `hold()`, và nhặt hộ tin chữ vào
 hàng đợi thay vì bỏ rơi.
 
+### Chọn phiên xong thì **chữ thường = gõ vào phiên**  ✅ chạy thật 2026-08-12
+
+Hà: *"bấm vào mỗi phiên focus vào phiên đó luôn"*. Chọn xong coi như đang ngồi
+trong phiên: gõ gì nó nhận nấy, không phải nhớ thêm động từ. Ranh giới là **dấu
+gạch chéo đầu dòng** — `/sesion` gõ nhầm KHÔNG được bơm vào cửa sổ đang chạy.
+
+🔴 **Và nó lôi ra một niềm tin sai nằm sẵn trong `CLAUDE.md`.** Sổ ghi *"`do
+script` luôn kèm xuống dòng ⟹ gõ xong là gửi"*. Đúng với shell, **sai với ô nhập
+của `claude`**: chữ và dấu xuống dòng đi trong CÙNG một lượt ghi nên TUI đọc cả
+cụm như một cú **DÁN** — chữ vào ô, dấu xuống dòng bị nuốt vào nội dung. Hà bắt
+được bằng mắt: *"nhận được text nhưng không tự gửi, có vẻ như thiếu enter?"*
+
+Bốn lượt gõ thật trong 12 phút giải thích trọn cơ chế:
+
+| Lúc | Dài | Phiên lúc ấy | Kết cục |
+|---|---|---|---|
+| 08:28:34 | 38 byte | **rảnh** | chữ nằm lại trong ô ⟹ `keys_enter_sent` 08:28:36 ⟹ **gửi được** |
+| 08:29:20 | 8 byte | **đang chạy** | `claude` xếp vào hàng chờ ⟹ tự gửi, không cần Enter |
+
+⟹ Nuốt-dấu-xuống-dòng chỉ xảy ra khi phiên **đang rảnh**; lúc bận thì đường hàng
+chờ nhận cả cụm và gửi đúng. Nay hub **nhìn rồi mới gửi**: đọc lại màn, chữ còn
+trong ô thì bắn một **Enter rời**. Ba cửa, đều là đo: chữ còn trong ô · phiên
+không bận · màn không có hộp chọn (ở đó Enter là CHỐT). Dòng dưới 6 ký tự không
+kích hoạt — "2"/"ok" có mặt trên gần như mọi màn.
+
+⚠ **Phép đo suýt trỏ sai chỗ:** gửi đi rồi thì câu ấy vẫn còn trên màn — ở phần
+hội thoại. Soi cả màn thì hub đọc "đã gửi" thành "còn trong ô", bắn Enter thừa và
+báo sai. `still_in_box` chỉ soi **khối đóng khung cuối cùng**, có test riêng.
+
+### Cái loa thôi kêu vì phiên của chính hub  ✅ vá 2026-08-12
+
+Hà: *"tại sao cứ báo phiên đã tắt liên tục, không biết nó là phiên nào rất mơ
+hồ"*. Log 4 tiếng: **20 tin, mỗi tin một id khác**, đều đặn 7–12 phút — không
+phải một phiên báo lặp, mà là **phép dò hạn mức của chính hub** (`claude -p
+"/usage"`, 5 phút/lượt) đẻ ra phiên thật rồi chết trong vài giây. Luật "rời khỏi
+danh sách = đã kết thúc" thiếu vế **sống bao lâu**: nay có `MIN_LIFE_SEC` (120s,
+dùng chung con số với `MIN_RUN_SEC`), sống chớp nhoáng thì chết lặng lẽ + ghi
+`session_end_muted`; phiên do **hub mở** thì luôn báo, vì ở đó chết ≠ xong.
+Và tin nay gọi được tên: sổ nhớ sẵn **tên + dự án** từ trước, vì lúc phiên rời
+danh sách thì hàng của nó đi theo — `⏹ projects-71 · AI/hub (8db91183)`.
+
 **Cơ chế:** ✅ · **Sản phẩm:** ✅ · **Kịch bản:** ⏳ không có E2E — cổng là
 `chat_id` nên chỉ ngón tay của chủ máy bấm được; bù bằng test thuần cho phần
-quyết định (`callback_to_command`, `session_list_text`) + log đối chiếu từng mốc.
+quyết định (`callback_to_command`, `session_list_text`, `still_in_box`,
+`text_for_session`) + log đối chiếu từng mốc.
 
 ---
 

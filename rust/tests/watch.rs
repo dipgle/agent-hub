@@ -14,7 +14,19 @@ const NOW: i64 = 1_800_000_000;
 
 /// Sổ ghi "đang chạy từ lúc nào" — chạy đủ lâu để lượt xong ĐƯỢC tính là tin.
 fn mark(state: &str, tty: &str, kind: &str) -> Mark {
-    Mark { s: state.to_string(), y: tty.to_string(), k: kind.to_string(), p: String::new() }
+    Mark {
+        s: state.to_string(),
+        y: tty.to_string(),
+        k: kind.to_string(),
+        p: String::new(),
+        // Đã thấy từ lâu: mặc định của các test cũ là phiên sống thật, không
+        // phải phiên chớp nhoáng — cửa tuổi thọ mới không được đổi ý nghĩa của
+        // chúng.
+        f: NOW - 3600,
+        h: false,
+        n: String::new(),
+        d: String::new(),
+    }
 }
 fn working_long(id: &str) -> (String, Mark) {
     (id.to_string(), mark(&format!("working@{}", NOW - MIN_RUN_SEC - 5), "ttys009", "interactive"))
@@ -35,6 +47,56 @@ fn book(pairs: &[(&str, &str)]) -> BTreeMap<String, Mark> {
         .iter()
         .map(|(k, v)| (k.to_string(), mark(v, "ttys009", "interactive")))
         .collect()
+}
+
+/// Phiên sống chớp nhoáng chết đi thì KHÔNG phải tin.
+///
+/// 🔴 Hà 2026-08-12: *"tại sao cứ báo phiên đã tắt liên tục"*. Log: 20 tin trong
+/// 4 tiếng, mỗi tin một id khác — không phải một phiên báo lặp, mà là **phép dò
+/// hạn mức của chính hub** (`claude -p "/usage"`, 5 phút một lượt) đẻ ra phiên
+/// thật rồi kết thúc trong vài giây.
+#[test]
+fn a_session_that_lived_only_seconds_dies_quietly() {
+    let mut m = mark(IDLE, "", "background");
+    m.f = NOW - 20; // vừa sinh ra 20 giây trước
+    let prev: BTreeMap<String, Mark> = [("probe".to_string(), m)].into_iter().collect();
+    let (events, _) = changes(&prev, &[], NOW);
+    assert!(events.is_empty(), "phiên sống 20 giây mà vẫn kêu: {events:?}");
+}
+
+/// …trừ phiên do CHÍNH hub mở: ở đó chết ≠ xong.
+///
+/// Chủ máy bấm mở một phiên từ điện thoại rồi nó chết trong 30 giây là đúng thứ
+/// phải báo — người mở đang chờ nó chạy, không ngồi nhìn màn hình máy.
+#[test]
+fn a_hub_opened_session_dying_young_is_always_reported() {
+    let mut m = mark(IDLE, "ttys009", "interactive");
+    m.f = NOW - 20;
+    m.h = true;
+    let prev: BTreeMap<String, Mark> = [("just-opened".to_string(), m)].into_iter().collect();
+    let (events, _) = changes(&prev, &[], NOW);
+    assert_eq!(events.len(), 1, "phiên hub vừa mở mà chết thì phải báo: {events:?}");
+}
+
+/// Tin báo phải gọi được TÊN phiên, không chỉ id.
+///
+/// Hà 2026-08-12: *"không biết nó là phiên nào rất mơ hồ"*. Lúc phiên rời khỏi
+/// danh sách thì hàng của nó đi theo, nên tên phải nằm sẵn trong sổ.
+#[test]
+fn the_farewell_says_which_session_it_was() {
+    let mut m = mark(IDLE, "ttys009", "interactive");
+    m.n = "projects-71".into();
+    m.d = "AI/hub".into();
+    let prev: BTreeMap<String, Mark> =
+        [("8db91183-1111-2222-3333-444444444444".to_string(), m)].into_iter().collect();
+    let (events, _) = changes(&prev, &[], NOW);
+    let said = match events.first() {
+        Some(Change::Ended { name, .. }) => name.clone(),
+        other => panic!("phải là Ended: {other:?}"),
+    };
+    assert!(said.contains("projects-71"), "thiếu tên: {said}");
+    assert!(said.contains("AI/hub"), "thiếu dự án: {said}");
+    assert!(said.contains("8db91183"), "thiếu id để gõ lệnh tiếp: {said}");
 }
 
 /// Lượt ĐẦU im hoàn toàn.

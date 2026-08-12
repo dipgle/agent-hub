@@ -5,7 +5,9 @@
 //! cú bấm rơi vào hư không, còn một dòng danh sách thiếu id thì người đọc không
 //! gõ tiếp được lệnh nào.
 
-use hub::pipeline::{session_button_label, session_list_text, MAX_SESSION_BUTTONS};
+use hub::pipeline::{
+    session_button_label, session_list_text, text_for_session, MAX_SESSION_BUTTONS,
+};
 use hub::sessions::LiveSession;
 use hub::telegram::callback_to_command;
 
@@ -88,6 +90,26 @@ fn every_row_carries_the_id_the_next_command_needs() {
     // Id ĐẦY ĐỦ không lên màn: nó dài gấp bốn lần chỗ nó chiếm mà không thêm
     // một thông tin nào — `claude stop` và `/session` đều nhận id ngắn.
     assert!(!text.contains("-3050-"), "id đầy đủ chiếm chỗ vô ích: {text}");
+}
+
+/// BA tình trạng, không phải hai — và dự án phải đọc được.
+///
+/// Hà 2026-08-12: *"phải thêm tình trạng đang xử lý, đã dừng"* + *"phải thêm
+/// thông tin để biết phiên đang làm dự án hay thư mục nào"*.
+#[test]
+fn the_list_tells_running_waiting_and_stopped_apart() {
+    let mut a = sess("aaaaaaaa-0000-0000-0000-000000000000", "projects-ff", "acc3", true);
+    a.folder = "AI/hub".into();
+    let mut b = sess("bbbbbbbb-0000-0000-0000-000000000000", "projects-11", "acc1", false);
+    b.folder = "dwork".into();
+    let mut c = sess("cccccccc-0000-0000-0000-000000000000", "Tự chạy lại", "acc3", false);
+    c.host = "dead".into();
+    let text = session_list_text(&[a, b, c], "", NOW);
+    assert!(text.contains("AI/hub · projects-ff"), "dự án đứng trước tên: {text}");
+    assert!(text.contains("dwork"), "{text}");
+    assert!(text.contains("▶ đang chạy"), "{text}");
+    assert!(text.contains("⏸ đứng chờ"), "{text}");
+    assert!(text.contains("⏹ đã tắt"), "phiên đã tắt bị gộp vào 'đứng chờ': {text}");
 }
 
 /// Phiên đang theo phải nhận ra được: mọi lệnh KHÔNG mang id sẽ rơi vào nó.
@@ -179,6 +201,81 @@ fn a_running_session_is_never_described_as_quiet() {
     let text = session_list_text(&[s], "", NOW);
     assert!(text.contains("Brewing…"), "đang làm gì: {text}");
     assert!(!text.contains("im 12 phút"), "phiên đang chạy mà bảo im: {text}");
+}
+
+/// Chọn phiên xong thì CHỮ THƯỜNG là chữ gõ vào phiên ấy.
+///
+/// Hà 2026-08-11: *"bấm vào mỗi phiên focus vào phiên đó luôn"* — chọn xong coi
+/// như đang ngồi trong phiên, không phải nhớ thêm một động từ trước mỗi câu.
+#[test]
+fn plain_text_is_something_to_type_into_the_session() {
+    assert_eq!(text_for_session("chạy test đi"), Some("chạy test đi"));
+    assert_eq!(text_for_session("  có lỗi gì không?  "), Some("có lỗi gì không?"));
+    assert_eq!(text_for_session("2"), Some("2"), "một con số cũng là câu trả lời");
+}
+
+/// Một LỆNH gõ nhầm KHÔNG được biến thành lượt gõ thật.
+///
+/// Đây là vế nguy hiểm của cùng một ranh giới: `/sesion` mà bị bơm vào cửa sổ
+/// đang chạy thì kèm luôn Enter, tức hub tự tay biến lỗi chính tả của chủ máy
+/// thành một hành động. Dòng rỗng cũng vậy — Enter trần vào một hộp chọn là một
+/// lựa chọn.
+#[test]
+fn a_mistyped_command_is_never_typed_into_a_live_window() {
+    assert_eq!(text_for_session("/sesion"), None);
+    assert_eq!(text_for_session("/help"), None);
+    assert_eq!(text_for_session("  /stop  "), None);
+    assert_eq!(text_for_session(""), None);
+    assert_eq!(text_for_session("   "), None);
+}
+
+/// Chữ còn nằm trong ô nhập thì phải nhận ra được — kể cả khi ô ngắt dòng.
+///
+/// 🔴 Hà đo 2026-08-12: *"nhận được text nhưng không tự gửi"*. `do script` đẩy
+/// chữ và dấu xuống dòng trong CÙNG một lượt ghi, và ô nhập của `claude` đọc
+/// lượt ấy như một cú DÁN — dấu xuống dòng bị nuốt vào nội dung. Muốn gửi Enter
+/// rời cho đúng lúc thì phải NHÌN thấy chữ còn nằm đó, chứ không đoán.
+#[test]
+fn text_still_sitting_in_the_input_box_is_recognised_even_when_wrapped() {
+    let typed = "Phải thêm thông tin để biết phiên đang làm dự án nào";
+    // Ô nhập vẽ khung và ngắt dòng theo bề ngang cửa sổ.
+    let screen = "╭──────────────╮\n\
+                  │ > Phải thêm thông tin để biết phiên │\n\
+                  │   đang làm dự án nào                │\n\
+                  ╰──────────────╯";
+    assert!(hub::keys::still_in_box(screen, typed), "so nguyên văn thì trượt");
+    // Đã gửi đi rồi thì ô trống — không được nhận nhầm là còn.
+    let after = "╭──────────────╮\n│ >                    │\n╰──────────────╯";
+    assert!(!hub::keys::still_in_box(after, typed));
+}
+
+/// ⚠ Gửi ĐI RỒI thì câu ấy vẫn còn trên màn — ở phần hội thoại, không phải ô nhập.
+///
+/// Đây là chỗ phép đo suýt trỏ sai chỗ: soi cả màn thì hub đọc "đã gửi" thành
+/// "còn nằm trong ô", rồi bắn một Enter thừa VÀ báo sai cho chủ máy. Ô nhập là
+/// khối đóng khung cuối cùng, và chỉ nó mới trả lời được câu hỏi này.
+#[test]
+fn a_line_echoed_in_the_transcript_is_not_a_line_still_in_the_box() {
+    let typed = "Phải thêm thông tin để biết phiên đang làm dự án nào";
+    let screen = "❯ Phải thêm thông tin để biết phiên đang làm dự án nào\n\
+                  ⏺ Đang xem lại danh sách phiên…\n\
+                  ╭──────────────╮\n\
+                  │ >                    │\n\
+                  ╰──────────────╯";
+    assert!(
+        !hub::keys::still_in_box(screen, typed),
+        "đọc phần hội thoại thành nội dung ô nhập"
+    );
+}
+
+/// Chữ QUÁ NGẮN không đủ đặc trưng — thà bỏ sót một Enter còn hơn bắn nhầm.
+///
+/// "2" hay "ok" nằm sẵn trong gần như mọi màn hình; nhận nhầm thành "còn trong
+/// ô" là gửi một Enter thừa, mà Enter thừa trên một hộp chọn là CHỐT hộ chủ máy.
+#[test]
+fn a_very_short_line_never_triggers_a_stray_enter() {
+    assert!(!hub::keys::still_in_box("… 2 …", "2"));
+    assert!(!hub::keys::still_in_box("nói ok đi", "ok"));
 }
 
 /// Nhãn nút gọn hơn dòng chữ nhưng vẫn phải nói phiên nào + có chạy không.

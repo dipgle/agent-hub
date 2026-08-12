@@ -794,11 +794,27 @@ pub fn session_list_text(
     let mut out = format!("📋 {} phiên đang sống:\n", sessions.len());
     for s in sessions.iter().take(MAX_SESSION_BUTTONS) {
         let eye = if !focus.is_empty() && s.session_id == focus { "👁 " } else { "" };
-        let run = if s.working { "▶ đang chạy" } else { "⏸ đứng chờ" };
+        // BA tình trạng, không phải hai (Hà 2026-08-12: *"phải thêm tình trạng
+        // đang xử lý, đã dừng"*). Phiên đã tắt vẫn nằm trong danh sách vài giây
+        // và vẫn `/handover` được, nên gộp nó vào "đứng chờ" là nói sai về thứ
+        // người ta sắp làm với nó.
+        let run = match (s.host.as_str(), s.working) {
+            ("dead", _) => "⏹ đã tắt",
+            (_, true) => "▶ đang chạy",
+            _ => "⏸ đứng chờ",
+        };
+        // Dự án ĐANG LÀM đứng trước tên: tên phiên do `claude` tự đặt
+        // ("projects-ff") không nói được gì, còn `cwd` thì giống hệt nhau ở mọi
+        // dòng trên máy này — xem `sessions::folder_from_tail`.
+        let what = if s.folder.is_empty() {
+            s.name.clone()
+        } else {
+            format!("{} · {}", s.folder, s.name)
+        };
         out.push_str(&format!(
             "{}{} · {} · {} · {}\n",
             eye,
-            s.name,
+            what,
             s.account,
             run,
             short_id(&s.session_id)
@@ -834,6 +850,22 @@ pub fn session_list_text(
         out.push_str(&format!("👁 Đang theo {} — phiên này không còn sống.", short_id(focus)));
     }
     out.trim_end().to_string()
+}
+
+/// Một dòng gõ trên Telegram mà `parse_command` không nhận: nó là **chữ để gõ
+/// vào phiên**, hay là một lệnh gõ nhầm?
+///
+/// Ranh giới là **dấu gạch chéo đầu dòng**, và nó phải rạch ròi vì hai bên hỏng
+/// theo hai kiểu ngược nhau. Đọc nhầm chữ thành lệnh thì câu của chủ máy rơi vào
+/// hư không (đường cũ: *"Chưa hiểu — kênh này nhận LỆNH"*). Đọc nhầm lệnh thành
+/// chữ thì một lỗi chính tả (`/sesion`) **được gõ thẳng vào cửa sổ đang chạy**,
+/// kèm Enter — hub biến cái gõ nhầm thành một lượt gõ thật.
+///
+/// `None` cho dòng rỗng và cho mọi dòng mở đầu bằng `/`. Muốn gửi một dòng có
+/// dấu gạch chéo VÀO phiên thì đi qua `/type`, tức nói rõ ý định.
+pub fn text_for_session(line: &str) -> Option<&str> {
+    let t = line.trim();
+    (!t.is_empty() && !t.starts_with('/')).then_some(t)
 }
 
 /// Chữ ĐANG HIỆN trên màn một phiên — thứ `/shot` trả về, và thứ đi kèm khi
@@ -960,12 +992,19 @@ fn quiet_for(last_activity: Option<&str>, now_ms: i64) -> Option<String> {
 /// Nhãn của một cái nút phiên. Cùng ba dữ kiện với dòng chữ, gọn hơn để lọt bề
 /// ngang một cái nút.
 pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
-    format!(
-        "{} {} · {}",
-        if s.working { "▶" } else { "⏸" },
-        crate::exec::truncate(&s.name, 24),
-        s.account
-    )
+    let dot = match (s.host.as_str(), s.working) {
+        ("dead", _) => "⏹",
+        (_, true) => "▶",
+        _ => "⏸",
+    };
+    // Dự án trước, vì đó là thứ ngón tay đang tìm; tên phiên tự sinh chỉ để phân
+    // biệt hai phiên cùng dự án.
+    let what = if s.folder.is_empty() {
+        s.name.clone()
+    } else {
+        format!("{} · {}", s.folder, s.name)
+    };
+    format!("{} {} · {}", dot, crate::exec::truncate(&what, 32), s.account)
 }
 
 /// Tám ký tự đầu của id — đúng thứ `claude stop` nhận, và đúng thứ trang hiện.
@@ -989,6 +1028,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      — Phiên Claude —\n\
                      /sessions — danh sách phiên đang sống (trên Telegram: bấm nút để theo)\n\
                      /session <id> — theo một phiên (bỏ theo: /session -)\n\
+                     (trên Telegram: chọn phiên xong thì CHỮ THƯỜNG gõ ở đây đi thẳng vào phiên ấy)\n\
                      /new <dự án> <việc> — mở phiên nền làm việc đó (chạy không hỏi ai)\n\
                      /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng\n\
                      /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước)\n\
@@ -1421,12 +1461,67 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // một chuyện chưa hề nhìn thấy — cùng họ với
                                     // con bug chốt mũi tên ngay phía trên: đọc
                                     // "mù" thành một khẳng định.
-                                    let what = match crate::keys::look(&s.tty, 24) {
-                                        crate::keys::Look::Saw { body, .. } => {
-                                            Some(crate::keys::landed(&body))
+                                    let seen = |tty: &str| match crate::keys::look(tty, 24) {
+                                        crate::keys::Look::Saw { body, choices } => {
+                                            Some((body, choices))
                                         }
                                         _ => None,
                                     };
+                                    let mut view = seen(&s.tty);
+                                    // ENTER RỜI — vì `do script` đẩy chữ và dấu
+                                    // xuống dòng trong MỘT lượt ghi, và ô nhập
+                                    // của `claude` đọc lượt ấy như một cú DÁN:
+                                    // chữ vào ô, dấu xuống dòng bị nuốt theo.
+                                    // Hà đo 2026-08-12: *"nhận được text nhưng
+                                    // không tự gửi"*.
+                                    //
+                                    // Ba điều kiện, và cả ba đều là ĐO chứ không
+                                    // phải đoán — một cú Enter thừa là thứ không
+                                    // lùi lại được: chữ CÒN nằm trong ô · phiên
+                                    // KHÔNG bận (bận thì nó đã vào hàng chờ, tức
+                                    // đã gửi) · màn KHÔNG có hộp chọn (ở đó Enter
+                                    // là CHỐT một lựa chọn, đúng cái chốt mũi tên
+                                    // sinh ra để chặn).
+                                    let mut sent_enter = false;
+                                    if !is_key {
+                                        if let Some((body, choices)) = &view {
+                                            if choices.is_empty()
+                                                && crate::keys::landed(body)
+                                                    == crate::keys::Landed::Idle
+                                                && crate::keys::still_in_box(body, &typed)
+                                            {
+                                                match crate::keys::press(w, "enter") {
+                                                    Ok(()) => {
+                                                        sent_enter = true;
+                                                        logging::info(
+                                                            "keys_enter_sent",
+                                                            json!({ "session": s.session_id,
+                                                                    "why": "chữ còn nằm trong ô nhập" }),
+                                                        );
+                                                        std::thread::sleep(
+                                                            std::time::Duration::from_millis(900),
+                                                        );
+                                                        view = seen(&s.tty);
+                                                    }
+                                                    Err(e) => logging::warn(
+                                                        "keys_enter_failed",
+                                                        json!({ "session": s.session_id,
+                                                                "err": e.to_string() }),
+                                                    ),
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Còn nằm trong ô SAU khi đã gửi Enter thì
+                                    // nói thẳng là chưa gửi được — đừng khai
+                                    // "đang đứng ở dấu nhắc", câu ấy nghe như
+                                    // mọi việc đã xong.
+                                    let stuck = view
+                                        .as_ref()
+                                        .is_some_and(|(b, _)| crate::keys::still_in_box(b, &typed));
+                                    let what = view
+                                        .as_ref()
+                                        .map(|(body, _)| crate::keys::landed(body));
                                     let did = if is_key {
                                         format!("đã bấm '{}'", typed.trim())
                                     } else {
@@ -1441,9 +1536,25 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         Some(crate::keys::Landed::Running) => {
                                             format!("⌨ {} vào {} — phiên đã nhận và bắt đầu chạy.", did, s.name)
                                         }
-                                        Some(crate::keys::Landed::Idle) => {
-                                            format!("⌨ {} vào {} — phiên đang đứng ở dấu nhắc.", did, s.name)
-                                        }
+                                        // "Đứng ở dấu nhắc" nghe như đã xong —
+                                        // nên chỉ được nói khi ô nhập ĐÃ TRỐNG.
+                                        Some(crate::keys::Landed::Idle) if stuck => format!(
+                                            "⚠ {} vào {}, nhưng chữ VẪN NẰM trong ô nhập — {}. \
+                                             Bấm Enter trên máy, hoặc gửi lại.",
+                                            did,
+                                            s.name,
+                                            if sent_enter {
+                                                "tôi đã gửi thêm một Enter rời mà nó chưa đi"
+                                            } else {
+                                                "và tôi không gửi Enter vì màn đang có hộp chọn"
+                                            }
+                                        ),
+                                        Some(crate::keys::Landed::Idle) => format!(
+                                            "⌨ {} vào {} — phiên đang đứng ở dấu nhắc{}.",
+                                            did,
+                                            s.name,
+                                            if sent_enter { " (phải gửi thêm một Enter rời)" } else { "" }
+                                        ),
                                         // Byte đã vào tab (mã trả về 0), nhưng
                                         // đọc lại màn thì không được — nói đúng
                                         // chừng ấy, đừng đoán hộ.
@@ -1794,18 +1905,68 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
                 callback_id: String::new(),
                 message_id: None,
             }),
-            None => {
-                // Gõ một câu KHÔNG phải lệnh: nói ngay, đừng để người ta ngồi
-                // chờ một việc chẳng bao giờ chạy.
-                let head = crate::exec::truncate(item.text.trim(), 40);
-                logging::info("telegram_not_a_command", json!({ "head": head }));
-                if let Err(e) = inbox.send_text(
-                    "Chưa hiểu — kênh này nhận LỆNH, bắt đầu bằng dấu gạch chéo.\n\
-                     Gõ /help để xem danh sách.",
-                ) {
-                    logging::error("telegram_ack_failed", json!({ "err": e }));
+            // Không phải lệnh — hai đường rất khác nhau, xem `text_for_session`.
+            None => match text_for_session(&item.text) {
+                // CHỮ THƯỜNG = gõ thẳng vào phiên đang theo.
+                //
+                // Hà 2026-08-11, sau khi bấm nút chọn phiên: *"bấm vào mỗi phiên
+                // focus vào phiên đó luôn"* — chọn xong thì coi như đang ngồi
+                // trong phiên ấy, gõ gì là nó nhận nấy, không phải nhớ thêm một
+                // động từ. Câu trả lời cũ ("Chưa hiểu — kênh này nhận LỆNH") bắt
+                // người ta gõ `/type` trước mỗi câu, tức bắt nhớ một luật của
+                // mã ngay giữa lúc đang làm việc.
+                //
+                // **Id đi CÙNG mệnh lệnh**, lấy ngay lúc nhận chứ không để
+                // handler tự tra con trỏ sau: đó đúng con đường đã gõ nhầm phiên
+                // sáng 2026-08-11 (`split_target`).
+                Some(text) => {
+                    let focus = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+                    if focus.is_empty() {
+                        // Không có phiên nào đang theo thì KHÔNG đoán một phiên
+                        // để gõ vào: gõ nhầm cửa sổ là thứ không lùi lại được.
+                        logging::info(
+                            "telegram_text_no_focus",
+                            json!({ "len": text.len() }),
+                        );
+                        if let Err(e) = inbox.send_text(
+                            "Chưa theo phiên nào nên tôi chưa biết gõ vào đâu.\n\
+                             Gõ /sessions rồi bấm một phiên — sau đó chữ gõ ở đây đi thẳng \
+                             vào phiên ấy.",
+                        ) {
+                            logging::error("telegram_ack_failed", json!({ "err": e }));
+                        }
+                    } else {
+                        // Nội dung KHÔNG vào log (chữ của chủ máy, log là tệp
+                        // nằm lâu) — ghi đủ để truy: phiên nào, dài bao nhiêu.
+                        logging::info(
+                            "telegram_text_as_typing",
+                            json!({ "session": focus, "len": text.len() }),
+                        );
+                        cmds.push(ChannelCommand {
+                            kind: CommandKind::Type,
+                            decision_id: 0,
+                            arg: format!("{focus} {text}"),
+                            chat_id: inbox.chat_id().to_string(),
+                            callback_id: String::new(),
+                            message_id: None,
+                        });
+                    }
                 }
-            }
+                // Tự xưng là lệnh mà không có handler: KHÔNG gõ nó vào phiên.
+                // Một động từ gõ nhầm (`/sesion`) mà bị bơm vào cửa sổ đang chạy
+                // thì hub biến lỗi chính tả thành một lượt gõ thật.
+                None => {
+                    let head = crate::exec::truncate(item.text.trim(), 40);
+                    logging::info("telegram_not_a_command", json!({ "head": head }));
+                    if let Err(e) = inbox.send_text(
+                        "Chưa hiểu lệnh này — gõ /help để xem danh sách.\n\
+                         (Muốn gõ một dòng bắt đầu bằng dấu gạch chéo VÀO phiên thì dùng \
+                         /type <dòng đó>.)",
+                    ) {
+                        logging::error("telegram_ack_failed", json!({ "err": e }));
+                    }
+                }
+            },
         }
     }
     if !cmds.is_empty() {

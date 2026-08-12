@@ -26,6 +26,10 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 | S13 | Phiên **vừa xong / kẹt hỏi / tắt hẳn** thì báo vào phòng chat + Telegram | chạy thật, 0 lỗi gửi; câu nói dựa trên **đọc màn**, không đoán |
 | S09b | **Ảnh chụp cũ thì nói là cũ** | `fe-stale-uc` 8/8 trên ảnh chụp 6.3 phút tuổi (tắt `hubd` thật) |
 | S14 | Làm việc **hoàn toàn qua Telegram** — gõ lệnh, `/sessions` ra danh sách **bấm được**, bấm một phiên là vào thẳng và **thấy màn** | chạy thật 2026-08-11 22:53–22:58: `telegram_buttons_sent count=5` → bấm nút → `👁 Đang theo phiên projects-ff` + `📷 Màn của…` 14 dòng thật; lần bấm thứ hai **0 giây** |
+| S14b | **Chữ thường gõ trên Telegram = gõ vào phiên đang theo**, kèm Enter rời khi TUI nuốt mất dấu xuống dòng | chạy thật 2026-08-12 08:28:34 → `keys_enter_sent` 08:28:36 → câu ấy tới đúng phiên; lượt 08:29 phiên đang bận thì đi đường hàng chờ, không cần Enter |
+| S15 | Danh sách nói được **dự án** mỗi phiên đang làm (không lấy từ `cwd` — mọi phiên cùng `cwd`) | đo thật 2026-08-12: 4/4 phiên ra đúng `dwork · AI/hub · games · AI/tfl5`; bundle **v149**, ảnh 390px không cắt chữ |
+| S16 | **Cái loa thôi kêu oan**: phiên sống chớp nhoáng (phép dò hạn mức của chính hub) chết đi thì im | chạy thật: **26** dòng `session_end_muted` (15s · 27s · 114s) và **0** tin "đã tắt" kể từ 11:03, so với **20 tin trong 4 tiếng** trước đó |
+| S17 | Phiên **dừng lại HỎI** thì câu hỏi + từng lựa chọn lên điện thoại (đọc từ nhật ký, không rình trên màn) | ⚠ mới **chạy thử trên dữ liệu thật** của `projects-11` (dựng lại lúc câu hỏi còn treo → ra đúng tin + 3 lựa chọn); **chưa** có lượt gửi Telegram thật |
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
 

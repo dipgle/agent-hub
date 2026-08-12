@@ -1,5 +1,54 @@
 # active context — hub
 
+## 📱 2026-08-12 (sáng) — điện thoại thành chỗ LÀM VIỆC, và bốn con bug im lặng
+
+Buổi sáng đi theo đúng nhịp Hà gõ trên Telegram: mỗi câu của anh là một phép đo,
+và bốn trong số đó lôi ra bug thật.
+
+### Đã chạy thật (log/đo, không phải test)
+
+| Việc | Bằng chứng |
+|---|---|
+| **Chữ thường = gõ vào phiên** | 08:28:34 gõ 38 byte → 08:28:36 `keys_enter_sent` → câu ấy tới phiên. Lượt 08:29 phiên đang bận ⟹ vào hàng chờ, không cần Enter |
+| **Danh sách nói được dự án** | 4/4 phiên ra đúng `dwork · AI/hub · games · AI/tfl5`; bundle **v149/v150**, ảnh 390px không cắt |
+| **Loa thôi kêu oan** | **26** dòng `session_end_muted` (15s · 27s · 114s) và **0** tin "đã tắt" từ 11:03 — trước đó 20 tin/4 tiếng |
+| **Phiên ma đã gỡ** | job nền `d92706eb` (kẹt từ 09-08, 1.02 triệu token) chuyển sang `jobs-off/`; `claude agents` + hub đều sạch |
+
+### Bốn con bug, và cả bốn đều IM LẶNG
+
+1. **Thiếu Enter.** `CLAUDE.md` tin *"`do script` luôn kèm xuống dòng ⟹ gõ xong là
+   gửi"* — đúng với shell, **sai với ô nhập `claude`**: chữ + dấu xuống dòng đi
+   trong MỘT lượt ghi nên TUI đọc như cú DÁN. Phiên **rảnh** thì bị nuốt, phiên
+   **đang chạy** thì đường hàng chờ nhận cả cụm. Nay đọc màn rồi mới bắn Enter
+   rời; ba cửa đều là đo (chữ còn trong ô · không bận · không có hộp chọn).
+2. **`?` trong vòng lặp làm câm cả phép đo dự án.** `strip_prefix('/')?` gặp
+   `"cwd":"…/projects"` trần là thoát khỏi CẢ hàm ⟹ 2/4 phiên khai "(chưa rõ)"
+   trong khi nhật ký nhắc tên dự án 4 lần.
+3. **Loa kêu vì phiên của chính hub.** 20 tin/4 tiếng, mỗi tin một id — `claude -p
+   "/usage"` 5 phút/lượt đẻ phiên thật rồi chết. Luật "rời danh sách = kết thúc"
+   thiếu vế **sống bao lâu** ⟹ `MIN_LIFE_SEC` 120s, ngoại lệ cho phiên hub mở.
+4. **Phiên dừng lại HỎI mà Telegram im.** Hai luật ĐÚNG va nhau: hub đọc màn, mà
+   `parse_choices` (08-11) đòi các mục **liền dòng nhau** để khỏi đọc nhầm văn có
+   đánh số — còn bảng `AskUserQuestion` thì mỗi lựa chọn có một dòng MÔ TẢ. Nay
+   đọc từ **nhật ký** (có cấu trúc, có cả với phiên hub không đọc được màn), và
+   "đang hỏi" thành một **trạng thái** (`watch::ASKING`) chứ không phải thứ nhìn
+   thấy tình cờ. Câu hỏi ấy treo **gần 2 tiếng** (08:53→10:52) mà hub im.
+
+📌 Cả bốn đều thuộc một họ: **câu trả lời sai nghe y hệt câu trả lời đúng**
+("(chưa rõ)", "không kẹt", "đang đứng ở dấu nhắc", "đã tắt hẳn").
+
+### ⚠ Còn treo
+
+1. **UC-S17 chưa gửi Telegram thật** — mới chạy thử trên dữ liệu thật của
+   `projects-11` (dựng lại lúc câu hỏi còn treo → ra đúng tin + 3 lựa chọn).
+   Lần sau có phiên dừng lại hỏi là biết; nếu vẫn im thì đọc `watch::ASKING`.
+2. **Tin "đã tắt" gọi tên phiên** — chưa quan sát được (chưa phiên nào tắt kể từ
+   khi vá).
+3. `/btw` trên phiên ĐÃ có nhật ký — vẫn chưa đo (treo từ 08-11).
+4. Lỗi quyền `~/Documents` chập chờn — nghi can npm đã bị loại, chưa có thủ phạm.
+
+---
+
 ## 📟 2026-08-11 (tối) — Telegram thành KÊNH RA LỆNH, chạy thật bằng ngón tay Hà
 
 Phiên này đóng nốt món "còn treo #1" của buổi chiều. Mã đã có sẵn từ lượt trước

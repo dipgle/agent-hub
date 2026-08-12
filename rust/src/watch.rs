@@ -577,6 +577,25 @@ pub fn changes(
     let mut out: Vec<Change> = Vec::new();
     let first_run = prev.is_empty();
 
+    // 🔴 Phép dò hạn mức của CHÍNH hub không được lên chuông (Hà 2026-08-12,
+    // đọc `⏹ hub-67 … đã tắt`: *"quá vô lý"*). Cửa TUỔI THỌ bên dưới bắt được
+    // phần lớn — `claude -p "/usage"` thường sống dưới 120 giây — nhưng nó bắt
+    // sai chỗ: thứ khiến cái chết này không phải tin **không phải là nó ngắn**,
+    // mà là **nó của hub**. Đo đúng ca lọt lưới: `hub-67` nằm trong danh sách
+    // 11 phút (lượt dò treo tới trần 60s rồi `usage_probe_unparsed`), qua cửa
+    // 120 giây, và bắn một tin về một phiên chủ máy không mở, không thấy, không
+    // làm gì được.
+    //
+    // Dấu nhận biết là `cwd`: hubd chạy với thư mục làm việc riêng của nó
+    // (plist `WorkingDirectory`), và tiến trình con thừa hưởng — không phiên
+    // nào của người lại nằm ở đấy. Chỉ IM cái chuông; danh sách phiên vẫn liệt
+    // kê đủ, vì giấu khỏi màn là một quyết định khác, chưa ai yêu cầu.
+    let now: Vec<&LiveSession> = now
+        .iter()
+        .filter(|s| !crate::sessions::is_hub_own_probe(s))
+        .collect();
+    let now = now.as_slice();
+
     for s in now {
         let state = state_of(s);
         let before = prev.get(&s.session_id);
@@ -662,6 +681,14 @@ pub fn changes(
         let seen: Vec<&String> = now.iter().map(|s| &s.session_id).collect();
         for (id, mark) in prev {
             if seen.contains(&id) {
+                continue;
+            }
+            // Phép dò của chính hub: im, và BỎ khỏi sổ. Không có cửa này thì
+            // đúng lượt nâng cấp đầu tiên, mọi phiên dò đang nằm trong sổ cũ sẽ
+            // "biến khỏi danh sách" (vì lượt lọc bên trên vừa gạt chúng ra) và
+            // được báo tử hàng loạt — một luật mới sinh ra để bớt tin lại đẻ ra
+            // một tràng tin.
+            if crate::sessions::is_hub_runtime_cwd(&mark.c) {
                 continue;
             }
             // Cửa MÙ — xem `Mark::a`. Tài khoản không liệt kê được phiên thì

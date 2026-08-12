@@ -348,6 +348,81 @@ fn the_followed_session_gets_no_redundant_button() {
     assert!(b[0].1.starts_with("key:"), "{:?}", b[0]);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Nút "vào phiên" phải có một phiên SỐNG để vào.
+//
+// Hà 2026-08-12, đọc đúng tin `⏹ hub-67 (033059d8) đã tắt — cửa sổ ấy nay đang
+// chạy phiên hub-ec.` kèm nút: *"tại sao 1 phiên đã tắt mà vẫn gắn nút vào
+// phiên để làm gì?"* · *"hình như phiên nào bạn cũng mặc định gắn nút vào
+// phiên, quá vô lý"*. Luật cũ chỉ hỏi "có phải phiên đang theo không", không
+// bao giờ hỏi "phiên còn sống không".
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn ended(id: &str, name: &str) -> hub::watch::Change {
+    hub::watch::Change::Ended {
+        id: id.to_string(),
+        name: name.to_string(),
+        was_working: false,
+        tty: "ttys002".to_string(),
+        kind: "interactive".to_string(),
+        parent: String::new(),
+    }
+}
+
+const DEAD: &str = "033059d8-1111-2222-3333-444444444444";
+const HEIR: &str = "cfd25b5f-5555-6666-7777-888888888888";
+
+/// Phiên đã tắt thì KHÔNG có nút — bấm vào là đi tới một phiên không tồn tại.
+#[test]
+fn a_dead_session_offers_nothing_to_walk_into() {
+    assert_eq!(
+        hub::pipeline::enter_button(&ended(DEAD, "hub-67"), DEAD, None, "khac"),
+        None
+    );
+}
+
+/// Trừ khi cửa sổ của nó đã bị phiên khác chiếm: lúc ấy nút trỏ vào **phiên
+/// đang ngồi ở đó**, và nhãn mang tên phiên MỚI. Một cái nút gọi tên người chết
+/// là một cái nút nói dối.
+#[test]
+fn a_taken_over_window_sends_you_to_the_session_that_holds_it() {
+    let (label, data) =
+        hub::pipeline::enter_button(&ended(DEAD, "hub-67"), DEAD, Some((HEIR, "hub-ec")), "khac")
+            .expect("mất đường vào phiên đang giữ cửa sổ");
+    assert!(label.contains("hub-ec"), "nhãn gọi nhầm tên: {label}");
+    assert!(!label.contains("hub-67"), "nhãn gọi tên phiên đã chết: {label}");
+    assert_eq!(
+        callback_to_command(&data).as_deref(),
+        Some(format!("/session {HEIR}").as_str())
+    );
+}
+
+/// …và nếu phiên chiếm cửa sổ CHÍNH LÀ phiên đang theo thì cũng không cần nút.
+#[test]
+fn no_button_when_the_heir_is_already_the_followed_session() {
+    assert_eq!(
+        hub::pipeline::enter_button(&ended(DEAD, "hub-67"), DEAD, Some((HEIR, "hub-ec")), HEIR),
+        None
+    );
+}
+
+/// Phiên còn SỐNG mà không phải phiên đang theo thì vẫn có nút — luật này không
+/// được siết nhầm sang phía kia.
+#[test]
+fn a_live_session_still_gets_its_button() {
+    let c = hub::watch::Change::Finished {
+        id: SID.to_string(),
+        name: "projects-fb".to_string(),
+        ran_sec: 90,
+    };
+    let (label, data) = hub::pipeline::enter_button(&c, SID, None, "khac").expect("mất nút");
+    assert!(label.contains("projects-fb"), "{label}");
+    assert_eq!(
+        callback_to_command(&data).as_deref(),
+        Some(format!("/session {SID}").as_str())
+    );
+}
+
 /// Nút trả lời hộp chọn vẫn giữ nguyên đường cũ, kể cả khi có thêm nút vào phiên.
 #[test]
 fn choice_buttons_still_answer_the_right_session() {

@@ -275,6 +275,26 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
       because the window it describes is already running something else. Ask
       your OWN snapshot first (`sessions::window_taken_over`) and name the
       session that took the window over.
+    - **`??` is not a window, and `??` == `??` is not a takeover** (2026-08-12,
+      the same fix biting back). `ps` prints `??` for a process with no
+      controlling terminal, and `??` is not empty — so the `tty.is_empty()` gate
+      let it through, `window_taken_over` matched `??` against `??`, and hub
+      announced `⏹ hub-67 đã tắt — cửa sổ ấy nay đang chạy phiên hub-ec.` about
+      **two of its own `/usage` probes, neither of which ever had a window**.
+      The rule was already written correctly in `keys::window_of` and in the
+      `terminal`/`detached` labeller — three hand copies, and the fourth site
+      forgot. One predicate now: **`sessions::is_real_tty`**.
+    - **hub's own machinery must never ring** (Hà, reading that message:
+      *"tại sao 1 phiên đã tắt mà vẫn gắn nút vào phiên"* · *"quá vô lý"*). The
+      lifetime gate (`MIN_LIFE_SEC`) catches most `/usage` probes, but it
+      measures the wrong thing: what makes that death not-news is not that it
+      was *short*, it is that it is *hub's*. Measured: one probe sat in
+      `claude agents` for **11 minutes** (the probe hung to its 60s ceiling),
+      walked past the 120s gate, and rang. The tell is `cwd` — hubd runs from
+      its own `WorkingDirectory` and children inherit it, and no human session
+      lives there (`sessions::is_hub_own_probe`). Two gates, because a session
+      can be filtered while alive *or* already sitting in the book from before
+      the upgrade — dropping one leaves a burst of false deaths on first run.
 12. **The phone page is the only UI.** There is no local console any more. If you
     add a surface, it must go through the same room commands — one path, one set
     of books.
@@ -370,6 +390,16 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     fixed that and nothing else was ever blocked. A binary running by hand from
     a terminal borrows that terminal's grants and honestly reports `adhoc`; only
     the launchd copy needs an identity of its own.
+14. **A button must have a live session to lead into** (2026-08-12). The
+    "👁 Vào phiên" button used to be attached on ONE condition — `id != focused`
+    — which asks *"is this the followed session"* and never *"is this session
+    still alive"*. So death notices grew a button into a session that no longer
+    exists, and Hà read one: *"tại sao 1 phiên đã tắt mà vẫn gắn nút vào phiên
+    để làm gì?"* · *"hình như phiên nào bạn cũng mặc định gắn nút vào phiên, quá
+    vô lý"*. `pipeline::enter_button` is the single decision now: alive → itself;
+    ended → **nothing**, unless another session took its window over, in which
+    case the button points at *that* session and the label carries *its* name.
+    A button that names the dead is a button that lies.
 
 ## When you change something
 

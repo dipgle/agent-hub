@@ -53,6 +53,65 @@ fn book(pairs: &[(&str, &str)]) -> BTreeMap<String, Mark> {
         .collect()
 }
 
+/// Thư mục làm việc của hubd — nơi mọi phép dò `/usage` của chính hub chạy.
+fn hub_runtime_cwd() -> String {
+    format!(
+        "{}/Library/Application Support/hub",
+        std::env::var("HOME").unwrap_or_default()
+    )
+}
+
+/// Phép dò hạn mức của CHÍNH hub sống LÂU vẫn không phải tin.
+///
+/// 🔴 Hà 2026-08-12, đọc `⏹ hub-67 (033059d8) đã tắt — cửa sổ ấy nay đang chạy
+/// phiên hub-ec.`: *"quá vô lý"*. Cửa tuổi thọ (120 giây) bắt được phần lớn phép
+/// dò, nhưng nó bắt sai chỗ: thứ khiến cái chết ấy không phải tin không phải là
+/// **nó ngắn** mà là **nó của hub**. Ca thật lọt lưới: phiên nằm trong danh sách
+/// 11 phút vì lượt dò treo tới trần 60 giây.
+#[test]
+fn hub_own_usage_probe_never_rings_even_when_it_lived_long() {
+    let mut m = mark(IDLE, "", "interactive");
+    m.f = NOW - 11 * 60; // sống 11 phút — qua thừa cửa tuổi thọ
+    m.c = hub_runtime_cwd();
+    let prev: BTreeMap<String, Mark> = [("probe".to_string(), m)].into_iter().collect();
+    let (events, next) = changes(&prev, &[], NOW, &[]);
+    assert!(events.is_empty(), "chuông kêu vì phiên của chính hub: {events:?}");
+    assert!(!next.contains_key("probe"), "giữ lại trong sổ thì lượt sau lại kêu");
+}
+
+/// …kể cả khi nó CÒN SỐNG: phép dò của hub cũng không được báo "vừa xong", và
+/// không được vào sổ. Hai cửa, hai đường khác nhau — cửa trên đọc sổ (phiên đã
+/// rời danh sách), cửa này đọc danh sách đang sống.
+#[test]
+fn a_running_hub_probe_never_reports_finishing_either() {
+    let mut m = mark(
+        &format!("working@{}", NOW - MIN_RUN_SEC - 5),
+        "",
+        "interactive",
+    );
+    m.c = hub_runtime_cwd();
+    let prev: BTreeMap<String, Mark> = [("probe".to_string(), m)].into_iter().collect();
+    let mut s = sess("probe", "hub-67", "detached", false);
+    s.cwd = hub_runtime_cwd();
+    let (events, next) = changes(&prev, &[s], NOW, &[]);
+    assert!(events.is_empty(), "chuông kêu cho phép dò của hub: {events:?}");
+    assert!(
+        !next.contains_key("probe"),
+        "phép dò của hub không được vào sổ"
+    );
+}
+
+/// …và một phiên THẬT sống lâu thì vẫn phải báo — luật trên không được siết lan.
+#[test]
+fn a_real_long_lived_session_still_rings_when_it_ends() {
+    let mut m = mark(IDLE, "", "interactive");
+    m.f = NOW - 11 * 60;
+    m.c = "/Users/hanguyen/projects".to_string();
+    let prev: BTreeMap<String, Mark> = [("real".to_string(), m)].into_iter().collect();
+    let (events, _) = changes(&prev, &[], NOW, &[]);
+    assert_eq!(events.len(), 1, "nuốt mất tin của phiên thật: {events:?}");
+}
+
 /// Phiên sống chớp nhoáng chết đi thì KHÔNG phải tin.
 ///
 /// 🔴 Hà 2026-08-12: *"tại sao cứ báo phiên đã tắt liên tục"*. Log: 20 tin trong

@@ -238,19 +238,57 @@ pub struct SessionsSnapshot {
 /// `tty` là một con số **được dùng lại**: cùng một `ttys002` có thể là cửa sổ
 /// cũ, cửa sổ mới, hay một cái xác (xem `keys::window_script`). Nên trước khi
 /// hỏi Terminal, hãy hỏi ảnh chụp của chính mình: phiên nào đang ngồi ở tty ấy?
+/// Thư mục làm việc của hubd — nơi launchd đặt nó (plist `WorkingDirectory`).
+const HUBD_RUNTIME_DIR: &str = "~/Library/Application Support/hub";
+
+/// Phiên này có phải máy móc của CHÍNH hub không (phép dò `/usage` 5 phút/lượt).
+///
+/// Đo 2026-08-12: `hub-67` · `cwd = /Users/hanguyen/Library/Application
+/// Support/hub` · `host = detached` — đúng thư mục launchd cho hubd chạy, và
+/// tiến trình con `claude -p "/usage"` thừa hưởng nó. Không phiên nào của người
+/// nằm ở đấy: chủ máy mở `claude` từ `~/projects`.
+///
+/// Dùng để IM cái chuông (`watch::changes`), **không** để giấu khỏi danh sách.
+pub fn is_hub_own_probe(s: &LiveSession) -> bool {
+    is_hub_runtime_cwd(&s.cwd)
+}
+
+/// Cùng phép thử, nhưng hỏi từ SỔ (`watch::Mark::c`) — cần cho phiên đã rời
+/// danh sách: lúc ấy không còn hàng `LiveSession` nào để hỏi, mà đó chính là
+/// lượt sinh ra tin "đã tắt".
+pub fn is_hub_runtime_cwd(cwd: &str) -> bool {
+    !cwd.is_empty() && Path::new(cwd) == crate::config::expand_home(Path::new(HUBD_RUNTIME_DIR))
+}
+
+/// `tty` này có phải một cửa sổ THẬT không.
+///
+/// 🔴 Đo 2026-08-12 22:59, trên đúng cái tin Hà đọc được: `⏹ hub-67 (033059d8)
+/// đã tắt — cửa sổ ấy nay đang chạy phiên hub-ec.` Cả hai đều là phiên `claude
+/// -p "/usage"` của CHÍNH hub, **không phiên nào có cửa sổ** — `ps` in `??` cho
+/// tiến trình không có tty điều khiển. Mà `??` **không rỗng**, nên cửa
+/// `tty.is_empty()` cho nó đi qua, rồi phép so "cùng tty" khớp `??` với `??` và
+/// hub tuyên bố một cửa sổ không tồn tại đã bị chiếm.
+///
+/// Luật này đã được viết đúng ở `keys::window_of` và ở chỗ đặt nhãn
+/// `terminal`/`detached` — ba chỗ, ba bản chép tay, và chỗ thứ tư quên. Nay một
+/// chỗ, vì cái giá của bản chép thứ tư là một câu nói dối gửi thẳng ra điện thoại.
+pub fn is_real_tty(tty: &str) -> bool {
+    !(tty.is_empty() || tty == "??" || tty == "-")
+}
+
 pub fn window_taken_over<'a>(
     id: &str,
     tty: &str,
     live: &'a [LiveSession],
 ) -> Option<&'a LiveSession> {
-    if tty.is_empty() {
+    if !is_real_tty(tty) {
         return None;
     }
     live.iter()
         .find(|s| s.session_id != id && s.tty == tty && s.host != "dead")
 }
 
-/// `~/projects` → `-Users-hanguyen-Documents-projects`.
+/// `~/projects` → `-Users-hanguyen-projects`.
 ///
 /// The rule the CLI uses for its transcript folders: every path separator
 /// becomes a dash, including the leading one.

@@ -945,3 +945,35 @@ fn sessions_without_a_tty_never_match_each_other() {
     let live = vec![row_at("nen-khac", "projects-zz", "")];
     assert!(hub::sessions::window_taken_over("nen-nay", "", &live).is_none());
 }
+
+/// `??` KHÔNG phải một cửa sổ.
+///
+/// 🔴 Đo 2026-08-12 22:59 trên đúng cái tin Hà đọc: `⏹ hub-67 đã tắt — cửa sổ
+/// ấy nay đang chạy phiên hub-ec.` Cả hai là phiên `claude -p "/usage"` của
+/// chính hub, **không phiên nào có cửa sổ** — `ps` in `??` khi không có tty điều
+/// khiển. `??` không rỗng nên cửa `tty.is_empty()` cho qua, rồi phép so "cùng
+/// tty" khớp `??` với `??`: hub tuyên bố một cửa sổ không tồn tại đã bị chiếm.
+#[test]
+fn a_process_without_a_terminal_has_no_window_to_be_taken_over() {
+    let ghost = |id: &str, tty: &str| hub::sessions::LiveSession {
+        session_id: id.to_string(),
+        name: id.to_string(),
+        tty: tty.to_string(),
+        host: "detached".to_string(),
+        ..Default::default()
+    };
+    let live = vec![ghost("heir", "??")];
+    for no_window in ["??", "-", ""] {
+        assert!(
+            hub::sessions::window_taken_over("dead", no_window, &live).is_none(),
+            "đọc {no_window:?} thành một cửa sổ có thật"
+        );
+    }
+    // Còn tty THẬT thì vẫn phải nhận ra — luật này không được siết lan.
+    let live = vec![ghost("heir", "ttys002")];
+    assert_eq!(
+        hub::sessions::window_taken_over("dead", "ttys002", &live)
+            .map(|s| s.session_id.as_str()),
+        Some("heir")
+    );
+}

@@ -1,5 +1,79 @@
 # active context — hub
 
+## 🔕 2026-08-12 (khuya) — một câu hỏi của Hà lôi ra ba con bug, và cả ba cùng một họ
+
+Hà đọc Telegram giữa lúc tôi đang dọn dời nhà: *"tại sao 1 phiên đã tắt mà vẫn
+gắn nút vào phiên để làm gì?"*, rồi *"hình như phiên nào bạn cũng mặc định gắn
+nút vào phiên, quá vô lý"*. Cả hai đúng, và câu thứ hai đúng theo nghĩa đen —
+mã chỉ có MỘT điều kiện.
+
+### Bug 1 — nút hỏi sai câu hỏi (`pipeline.rs:406`)
+
+```rust
+let enter = (id != focused).then(|| … format!("sess:{id}"));
+```
+
+Nó hỏi *"có phải phiên đang theo không"*, **không bao giờ hỏi *"phiên còn sống
+không"***. Nên tin BÁO TỬ cũng mọc nút, bấm vào là đi tới một phiên không còn
+tồn tại. Nay `pipeline::enter_button` quyết một chỗ: còn sống → chính nó; đã tắt
+→ **không nút**, trừ khi cửa sổ bị phiên khác chiếm thì nút trỏ vào **phiên đang
+ngồi ở đó** và nhãn mang tên phiên MỚI. *Một cái nút gọi tên người chết là một
+cái nút nói dối.*
+
+### Bug 2 — `??` bị đọc thành một cửa sổ có thật
+
+Đo cái tin Hà trích: `hub-67` và `hub-ec` đều là phiên `claude -p "/usage"` của
+**chính hub**, `tty = "??"`, `host = detached` — **không phiên nào có cửa sổ**.
+`ps` in `??` khi không có tty điều khiển, mà `??` **không rỗng**, nên cửa
+`tty.is_empty()` cho qua rồi phép so "cùng tty" khớp `??` với `??`.
+
+📌 Luật này ĐÃ được viết đúng ở `keys::window_of` và ở chỗ đặt nhãn
+`terminal`/`detached` — **ba bản chép tay, chỗ thứ tư quên**. Nay một chỗ:
+`sessions::is_real_tty`. Giá của bản chép thứ tư là một câu nói dối gửi thẳng ra
+điện thoại.
+
+### Bug 3 — cái loa nói về máy móc của chính hub (nặng nhất, vì nó lặp)
+
+| Lúc | Tin |
+|---|---|
+| 15:59:04 | `⏹ hub-67 (033059d8) đã tắt — cửa sổ ấy nay đang chạy phiên hub-ec.` |
+| 16:11:51 | `⏹ hub-e6 (839e9ab2) đã tắt — … hub-36.` |
+| 16:16:05 | `⏹ hub-36 (f85ab23f) đã tắt — … hub-f5.` |
+
+**Năm phút một tin**, về những phiên chủ máy không mở, không thấy, không làm gì
+được. Cửa tuổi thọ `MIN_LIFE_SEC` (120s, dựng 08-12 sáng đúng cho việc này) bắt
+được phần lớn — nhưng nó **đo sai thứ**: cái khiến những cái chết ấy không phải
+tin không phải là *nó ngắn*, mà là *nó của hub*. Ca lọt lưới đo được: một phép
+dò nằm trong `claude agents` **11 phút** (lượt dò treo tới trần 60s rồi
+`usage_probe_unparsed`), qua thừa cửa 120 giây.
+
+Dấu nhận biết là `cwd`: hubd chạy với `WorkingDirectory` riêng, tiến trình con
+thừa hưởng, và không phiên nào của người nằm ở đấy. **Hai cửa**, vì một phiên có
+thể bị lọc lúc còn sống *hoặc* đã nằm sẵn trong sổ từ trước lúc nâng cấp — bỏ
+cửa thứ hai thì đúng lượt nâng cấp đầu tiên sẽ nổ một tràng báo tử. Chỉ IM cái
+chuông; **danh sách vẫn liệt kê** (giấu khỏi màn là quyết định khác, chưa ai
+yêu cầu).
+
+### Nghiệm thu
+
+`cargo test` **215** (từ 207) exit 0 · clippy **0** · `install.sh` exit 0, hubd
+pid 50302 `cert`. **5 test mới, cả 5 đã kiểm là ĐỎ ĐƯỢC** bằng đột biến: trả
+`enter_button` về luật cũ ⟹ 3 đỏ; trả `??` về `tty.is_empty()` ⟹ 1 đỏ; tắt lượt
+lọc phép dò ⟹ 1 đỏ (và test "phiên THẬT sống lâu vẫn báo" vẫn xanh — luật mới
+không siết lan).
+
+📌 Hai món nợ trong sổ **tự xảy ra thật** trong lúc làm, không phải dựng ra:
+`session_end_unknown` 15:22:03 (`blind: acc1, acc2` ⟹ giữ sổ, im — **lỗi A của
+cái loa đã chạy thật**), và chính đường `window_taken_over` — **lỗi B cũng đã
+chạy thật**, chỉ có điều nó chạy ĐÚNG mã và cho ra một câu SAI, vì dữ liệu vào
+là `??`. *Một bản vá chạy đúng lần đầu tiên vẫn có thể nói sai — cái nó vá là
+lối đi, không phải câu nói.*
+
+⏳ Đang chờ đủ một chu kỳ dò (5 phút) sau lúc cài để xác nhận trên máy: từ 16:17
+không được có thêm tin `⏹ hub-xx đã tắt` nào.
+
+---
+
 ## 🧭 2026-08-12 (khuya) — dọn nốt cuộc dời nhà, và một phép đo đã tắt tiếng mà không ai biết
 
 Gốc workspace dời sang `~/projects` lúc ~22:20 (TCC gác `~/Documents`). Bản

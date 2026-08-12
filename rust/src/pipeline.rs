@@ -192,6 +192,42 @@ pub const WATCH_KEY: &str = "watch:sessions";
 /// Không lời gọi `claude` nào ⟹ **không tốn hạn mức** (luật §8). Lỗi ở một
 /// đường không được làm câm đường kia, và cả hai đều log khi hỏng — một cái loa
 /// im lặng thì tệ hơn không có loa.
+/// Nút "👁 Vào phiên" trỏ vào đâu — hoặc KHÔNG có nút nào.
+///
+/// 🔴 Hà 2026-08-12, đọc đúng tin `⏹ hub-67 (033059d8) đã tắt — cửa sổ ấy nay
+/// đang chạy phiên hub-ec.` kèm một cái nút: *"tại sao 1 phiên đã tắt mà vẫn
+/// gắn nút vào phiên để làm gì?"* và *"hình như phiên nào bạn cũng mặc định gắn
+/// nút vào phiên"*. Đúng cả hai. Luật cũ chỉ có MỘT điều kiện — `id != focused`
+/// — tức nó hỏi *"có phải phiên đang theo không"* mà không bao giờ hỏi
+/// *"phiên còn sống không"*. Nên tin BÁO TỬ cũng mọc nút, và bấm vào là đi tới
+/// một phiên không còn tồn tại: `/session` nhận id, đặt con trỏ, rồi mọi
+/// `/shot` · `/type` · `/key` sau đó đều nói vào chỗ trống.
+///
+/// Luật đúng: nút chỉ tồn tại khi có một phiên **SỐNG** để vào.
+/// - phiên vừa xong / đang hỏi ⟹ chính nó;
+/// - phiên đã tắt ⟹ **không có gì để vào**, TRỪ khi cửa sổ của nó đã bị một
+///   phiên khác chiếm — lúc ấy nút trỏ vào **phiên đang ngồi ở đó**, và nhãn
+///   phải mang tên phiên MỚI, vì một cái nút gọi tên người chết là một cái nút
+///   nói dối.
+pub fn enter_button(
+    c: &crate::watch::Change,
+    id: &str,
+    takeover: Option<(&str, &str)>,
+    focused: &str,
+) -> Option<(String, String)> {
+    let (target, name) = match c {
+        crate::watch::Change::Ended { .. } => takeover?,
+        _ => (id, c.name()),
+    };
+    if target == focused {
+        return None;
+    }
+    Some((
+        format!("👁 Vào phiên {}", crate::exec::truncate(name, 24)),
+        format!("sess:{target}"),
+    ))
+}
+
 pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsSnapshot) {
     let live = &snap.sessions;
     let prev: BTreeMap<String, crate::watch::Mark> = db
@@ -267,11 +303,19 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // sách `claude agents`" gộp ba chuyện khác hẳn nhau. Phân biệt bằng một
         // câu hỏi rẻ, hỏi đúng lúc (chuyện này hiếm): cửa sổ Terminal mang tty
         // ấy còn không?
+        // Phiên đang GIỮ cửa sổ của phiên vừa tắt, nếu có. Nó là thứ duy nhất
+        // còn "vào" được khi tin nói về một phiên đã chết — xem `enter_button`.
+        let mut takeover: Option<(String, String)> = None;
         let fate = if let crate::watch::Change::Ended { tty, kind, .. } = &c {
             // Phiên nền không có cửa sổ nào để đóng, nên dừng nó LÀ tắt hẳn.
-            if kind == "background" || tty.is_empty() {
+            // `??` (không có tty điều khiển) cũng là "không cửa sổ" — xem
+            // `sessions::is_real_tty`; đọc `??` như một cửa sổ có thật là cách
+            // hub từng nói "cửa sổ ấy nay đang chạy phiên khác" về hai phiên
+            // chưa bao giờ có cửa sổ nào.
+            if kind == "background" || !crate::sessions::is_real_tty(tty) {
                 Some("đã tắt hẳn".to_string())
             } else if let Some(other) = crate::sessions::window_taken_over(&id, tty, live) {
+                takeover = Some((other.session_id.clone(), other.name.clone()));
                 // Cửa sổ ấy CÒN, nhưng nó không còn là cửa sổ của phiên này —
                 // xem `sessions::window_taken_over`. Nói tên phiên đang ngồi ở
                 // đó: đấy là thứ người cầm điện thoại cần để khỏi đi tìm một
@@ -403,12 +447,12 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // (`telegram::callback_to_command`), không đẻ thêm lối riêng.
         //
         // Phiên ĐANG theo thì không cần nút: bấm vào chỉ để tới chỗ đang đứng.
-        let enter = (id != focused).then(|| {
-            (
-                format!("👁 Vào phiên {}", crate::exec::truncate(c.name(), 24)),
-                format!("sess:{id}"),
-            )
-        });
+        let enter = enter_button(
+            &c,
+            &id,
+            takeover.as_ref().map(|(i, n)| (i.as_str(), n.as_str())),
+            &focused,
+        );
         match (buttons, crate::telegram::inbox()) {
             (Some(opts), Some(tg)) => {
                 if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some()) {

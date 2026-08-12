@@ -96,9 +96,21 @@ này thì đừng đọc số đo của hub trong cùng lúc ấy — nó đang 
 bị mình đè.
 
 ⚠ Hai kiểm tra đỏ của `fe-board-uc` (29/31: hàng tài khoản không có số hạn mức)
-là **hệ quả của đúng chuyện trên** — `/usage` timeout tới trần 60 giây ⟹
-`usage_probe_unparsed` ⟹ không có số để hiện. Không phải bug của bảng; nói đúng
-như vậy, và cần một lượt chạy lại lúc máy rảnh mới kết luận được.
+đến từ `usage_probe_unparsed` — không có số để hiện. **Chưa biết vì sao**, và ở
+đây tôi đã đoán sai một lần rồi nên ghi lại cho rõ:
+
+📌 **Một kết luận của tôi bị chính phép đo tiếp theo bác bỏ.** Tôi viết "tải của
+tôi làm hub mù" — đúng cho `claude agents` (150s lúc đang build ⟶ 12s lúc rảnh),
+nhưng **sai cho `/usage`**: 16:34–16:36, máy đã rảnh, hubd vẫn hỏng **cả ba tài
+khoản**, trong khi chạy tay đúng lệnh ấy ra **6,08 giây** kèm đủ số
+(`Current session: 7% · Current week: 18%`). Vậy nguyên nhân **chưa tìm ra**.
+
+Thay vì đoán lần hai: bắt dòng log tự khai. `RunOut` đã mang sẵn `timed_out` và
+`ms` mà dòng cũ **vứt đi cả hai**, nên `code: null` đọc lên như "câu trả lời khó
+hiểu" trong khi nhiều khả năng là HẾT GIỜ — hai chuyện phải sửa theo hai hướng
+ngược nhau. Nay log mang `timed_out · ms · stdout_bytes · stderr`, và câu báo
+lỗi phân biệt "hết giờ sau Nms" với "không đọc được". Không log nội dung stdout:
+nó mang email tài khoản và số hạn mức.
 
 ---
 

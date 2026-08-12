@@ -360,11 +360,31 @@ fn usage_block(cfg: &Config) -> Value {
                 match text {
                     Some(t) => parse_usage(&t),
                     None => {
+                        // Một dòng "không đọc được" gộp hai chuyện khác hẳn
+                        // nhau, và tôi đã đoán nhầm vì đúng chỗ này (đo
+                        // 2026-08-12: hubd hỏng cả ba tài khoản trong khi chạy
+                        // tay thì 6 giây ra đủ số — `code: null` hoá ra là HẾT
+                        // GIỜ, không phải câu trả lời khó hiểu). `RunOut` đã
+                        // mang sẵn `timed_out` và `ms`; dòng log cũ vứt đi cả
+                        // hai. Không log nội dung stdout: nó mang email tài
+                        // khoản và số hạn mức.
                         crate::logging::warn(
                             "usage_probe_unparsed",
-                            json!({ "account": acc.name, "code": r.code }),
+                            json!({
+                                "account": acc.name,
+                                "code": r.code,
+                                "timed_out": r.timed_out,
+                                "ms": r.ms as u64,
+                                "stdout_bytes": r.stdout.len(),
+                                "stderr": crate::exec::truncate(r.stderr.trim(), 200),
+                            }),
                         );
-                        json!({ "err": "không đọc được câu trả lời của /usage" })
+                        let err = if r.timed_out {
+                            format!("/usage hết giờ sau {}ms", r.ms)
+                        } else {
+                            "không đọc được câu trả lời của /usage".to_string()
+                        };
+                        json!({ "err": err })
                     }
                 }
             }

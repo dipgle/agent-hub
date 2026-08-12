@@ -12,7 +12,7 @@
 //   2. Verifying by re-reading the same field we just typed into proves
 //      nothing. The check below reads the INDEPENDENT summary line
 //      ("N can view") that the app renders from the saved row.
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { readFileSync } from "node:fs";
 
 const TARGET = process.argv[2];

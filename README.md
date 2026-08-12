@@ -24,7 +24,7 @@ vào máy:
 ## Chạy trong 3 lệnh
 
 ```bash
-cd ~/Documents/projects/AI/hub
+cd ~/projects/AI/hub
 ./hub doctor          # kiểm tra thật: claude CLI, phòng chat, thư mục dự án
 ./hub sessions        # mọi phiên claude đang sống, mọi tài khoản
 ./hub once            # một vòng: đọc phòng → chạy lệnh trong đó → đẩy ảnh chụp

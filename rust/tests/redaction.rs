@@ -21,7 +21,7 @@ fn hosts_ips_paths_wikilinks_and_credentials_are_caught() {
         ("deploy chạy trên vps-a rồi reload", "internal_host"),
         ("node ở 46.250.231.130:41100", "ip_address"),
         (
-            "xem /Users/hanguyen/Documents/projects/tfl5",
+            "xem /Users/hanguyen/projects/tfl5",
             "local_filesystem_path",
         ),
         (

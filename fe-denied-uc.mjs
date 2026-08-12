@@ -9,7 +9,7 @@
 //   3. the owner puts it back (always, even if the assertions fail).
 //
 // Usage: node fe-denied-uc.mjs
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { readFileSync, mkdirSync } from "node:fs";
 
 const HERE = new URL("./", import.meta.url).pathname;

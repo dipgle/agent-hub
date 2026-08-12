@@ -491,7 +491,7 @@ không phải thông tin.
 
 ### 🔴 Rào chắn thật: phiên nền trong workspace này KẸT ngay khi mở
 
-Mọi dự án đều nằm dưới `~/Documents/projects/.mcp.json` (project-agent, vault),
+Mọi dự án đều nằm dưới `~/projects/.mcp.json` (project-agent, vault),
 nên phiên nền mở lên là dừng ở **hộp thoại duyệt MCP** — *"2 new MCP servers found
 in this project… Space to select · Enter to confirm · Esc to reject all"* — chờ
 một phím bấm mà điện thoại không gõ được. `state: blocked`, **không có nhật ký,

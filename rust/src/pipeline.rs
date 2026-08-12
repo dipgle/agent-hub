@@ -1141,7 +1141,7 @@ pub const SHOT_LINES_MAX: usize = 120;
 /// Những lệnh vừa thấy trên màn, để cái nút "gửi nhanh" tra lại được.
 ///
 /// Vì sao phải có sổ: `callback_data` của Telegram trần **64 byte**, mà một
-/// dòng `git -C ~/Documents/projects/AI/tcc/amm push origin main` đã 52 — thêm
+/// dòng `git -C ~/projects/AI/tcc/amm push origin main` đã 52 — thêm
 /// tiền tố là tràn, và một cái nút tràn thì Telegram từ chối cả tin. Nên nút
 /// mang một CON SỐ, còn chữ nằm ở đây.
 pub const QUICK_KEY: &str = "quick:cmds";
@@ -1418,7 +1418,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // nên đường dẫn tương đối trong đầu người gõ khớp với thực tế.
                 let line = cmd.arg.trim().to_string();
                 let ack = if line.is_empty() {
-                    "⚠ /cmd cần một dòng lệnh. Ví dụ: /cmd git -C ~/Documents/projects/AI/hub status --short".to_string()
+                    "⚠ /cmd cần một dòng lệnh. Ví dụ: /cmd git -C ~/projects/AI/hub status --short".to_string()
                 } else {
                     let out = crate::exec::run(
                         "/bin/zsh",

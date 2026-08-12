@@ -14,18 +14,22 @@ fn no_background() -> HashSet<String> {
 
 #[test]
 fn cwd_maps_to_the_folder_the_cli_writes_transcripts_into() {
+    // Gốc workspace đổi sang `~/projects` ngày 2026-08-12 ⟹ KHOÁ nhật ký đổi
+    // theo (`~/.claude/projects/-Users-hanguyen-projects`). Thư mục khoá mới là
+    // symlink trỏ về khoá cũ, nên hai đường cùng ra một kho — nhưng thứ hub tính
+    // ra từ `cwd` phải là khoá MỚI, vì đó là cwd thật của mọi phiên từ hôm ấy.
     assert_eq!(
-        transcript_slug("/Users/hanguyen/Documents/projects"),
-        "-Users-hanguyen-Documents-projects"
+        transcript_slug("/Users/hanguyen/projects"),
+        "-Users-hanguyen-projects"
     );
     // A trailing slash must not produce a different folder for the same cwd.
     assert_eq!(
-        transcript_slug("/Users/hanguyen/Documents/projects/"),
-        "-Users-hanguyen-Documents-projects"
+        transcript_slug("/Users/hanguyen/projects/"),
+        "-Users-hanguyen-projects"
     );
     assert_eq!(
-        transcript_slug("/Users/hanguyen/Documents/projects/AI/hub"),
-        "-Users-hanguyen-Documents-projects-AI-hub"
+        transcript_slug("/Users/hanguyen/projects/AI/hub"),
+        "-Users-hanguyen-projects-AI-hub"
     );
     assert_eq!(transcript_slug("/"), "-");
 
@@ -183,7 +187,7 @@ fn ordinary_development_chatter_stays_visible() {
     // is right for a reply to an outsider — but blanking them here would empty
     // the view the owner opens on his phone.
     for text in [
-        "Đã sửa /Users/hanguyen/Documents/projects/AI/hub/rust/src/db.rs:120",
+        "Đã sửa /Users/hanguyen/projects/AI/hub/rust/src/db.rs:120",
         "node RPC 46.250.231.130:41100 trả 403",
         "còn 1 blocker: CI đỏ vì billing",
         "[dùng Bash]",
@@ -255,7 +259,7 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
 
     // Dòng terminal thật, chép nguyên từ `ps` trên máy này (tty ttys005).
     assert_eq!(
-        classify_host("claude tiếp /Users/hanguyen/Documents/projects/AI/hub", "interactive", "ttys005"),
+        classify_host("claude tiếp /Users/hanguyen/projects/AI/hub", "interactive", "ttys005"),
         "terminal"
     );
     assert_eq!(classify_host("claude tiếp tfl5", "interactive", "ttys006"), "terminal");
@@ -275,7 +279,7 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
 
     // Tên dự án có chữ "vscode" KHÔNG phải phiên editor; dấu hiệu là thư mục ẩn.
     assert_eq!(
-        classify_host("claude tiếp /Users/hanguyen/Documents/projects/vscode-notes", "interactive", "ttys002"),
+        classify_host("claude tiếp /Users/hanguyen/projects/vscode-notes", "interactive", "ttys002"),
         "terminal"
     );
 }
@@ -623,7 +627,10 @@ mod cua_so_moi {
 /// Câu trả lời `/btw` phải là CÂU TRẢ LỜI, không phải ảnh chụp màn hình.
 ///
 /// Màn dưới đây là bản chụp THẬT (2026-08-11, phiên `projects-ff` trên
-/// `ttys001`) của lần `/btw` đầu tiên chạy được đầu-tới-cuối. Bản đầu gửi
+/// `ttys001`) của lần `/btw` đầu tiên chạy được đầu-tới-cuối. Nó mang
+/// `~/Documents/projects` vì hôm ấy gốc workspace nằm ở đó — **giữ nguyên
+/// từng byte**, đừng "sửa cho hợp thời": một bản chụp đã sửa thôi là bằng
+/// chứng, và cái đang đo ở đây là cách CẮT màn, không phải đường dẫn. Bản đầu gửi
 /// nguyên cả cái màn này về điện thoại — logo khởi động, dòng vừa gõ, chân bảng
 /// hướng dẫn phím — và người đọc phải tự lọc ra câu trả lời giữa đống ấy.
 #[test]
@@ -697,10 +704,10 @@ fn a_wrapped_question_still_gets_cut_off_the_answer() {
 /// lời "chưa đủ bằng chứng" nghe hoàn toàn hợp lý.
 #[test]
 fn a_bare_workspace_root_does_not_silence_the_whole_scan() {
-    let root = "/Users/x/Documents/projects";
-    let tail = r#"{"cwd":"/Users/x/Documents/projects","type":"user"}
-{"path":"/Users/x/Documents/projects/AI/hub/PLAN.md"}
-{"path":"/Users/x/Documents/projects/AI/hub/UC.md"}"#;
+    let root = "/Users/x/projects";
+    let tail = r#"{"cwd":"/Users/x/projects","type":"user"}
+{"path":"/Users/x/projects/AI/hub/PLAN.md"}
+{"path":"/Users/x/projects/AI/hub/UC.md"}"#;
     assert_eq!(
         hub::sessions::folder_from_tail(tail, root).as_deref(),
         Some("AI/hub")
@@ -710,8 +717,8 @@ fn a_bare_workspace_root_does_not_silence_the_whole_scan() {
 /// `AI/` là ngăn kéo, không phải dự án — lấy tên bên trong nó.
 #[test]
 fn the_drawer_named_ai_is_never_the_project() {
-    let root = "/Users/x/Documents/projects";
-    let tail = "a /Users/x/Documents/projects/AI/sdvi/x.rs b /Users/x/Documents/projects/AI/sdvi/y.rs";
+    let root = "/Users/x/projects";
+    let tail = "a /Users/x/projects/AI/sdvi/x.rs b /Users/x/projects/AI/sdvi/y.rs";
     assert_eq!(
         hub::sessions::folder_from_tail(tail, root).as_deref(),
         Some("AI/sdvi")
@@ -721,8 +728,8 @@ fn the_drawer_named_ai_is_never_the_project() {
 /// Nhắc đúng một lần thì chưa đủ — một câu văn lỡ nêu tên không được lật kết quả.
 #[test]
 fn one_mention_is_not_evidence() {
-    let root = "/Users/x/Documents/projects";
-    let tail = "chỉ nhắc một lần /Users/x/Documents/projects/dwork/a.ts";
+    let root = "/Users/x/projects";
+    let tail = "chỉ nhắc một lần /Users/x/projects/dwork/a.ts";
     assert_eq!(hub::sessions::folder_from_tail(tail, root), None);
 }
 

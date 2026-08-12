@@ -2003,7 +2003,7 @@
       // `kind` nói "interactive" cho cả cửa sổ terminal lẫn phiên do extension
       // của VS Code/Cursor chạy — nên hàng này hiện `host`, thứ phân biệt được.
       const where = { terminal: 'terminal', editor: 'trong editor', background: 'chạy nền', detached: 'không gắn cửa sổ', dead: 'đã dừng' }[s.host] || s.kind;
-      // `cwd` bỏ đi: mọi phiên trên máy này đều mở từ ~/Documents/projects nên
+      // `cwd` bỏ đi: mọi phiên trên máy này đều mở từ ~/projects nên
       // nó giống hệt nhau ở mọi dòng — chiếm chỗ mà không phân biệt được gì.
       // `work` cũng bỏ khỏi chữ: đã có chấm màu nói điều đó rồi.
       // `where` giờ nằm ở huy hiệu, nên hàng phụ thôi lặp lại nó — chỉ còn tài

@@ -14,7 +14,7 @@
 // Usage:
 //   node fe-newflags-uc.mjs <app_tid> <username> <password> [acc] [dự án]
 
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { mkdirSync } from "node:fs";
 
 const [appTid, username, password, acc = "acc3", project = "hub"] = process.argv.slice(2);

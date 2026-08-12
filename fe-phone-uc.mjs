@@ -17,7 +17,7 @@
 // Usage:
 //   node fe-phone-uc.mjs <app_tid> <username> <password>
 
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { mkdirSync } from "node:fs";
 
 const [appTid, username, password] = process.argv.slice(2);

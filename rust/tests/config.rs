@@ -347,7 +347,7 @@ fn ended(id: &str, at: i64) -> (hub::sessions::LiveSession, i64) {
             session_id: id.to_string(),
             name: "projects-d8".into(),
             account: "acc1".into(),
-            cwd: "/Users/hanguyen/Documents/projects".into(),
+            cwd: "/Users/hanguyen/projects".into(),
             ..Default::default()
         },
         at,

@@ -85,6 +85,31 @@ or drive a session from a phone?** If not, it does not belong here.
 - Tests: `cd rust && cargo test --offline` → 104 tests, 0 warnings.
 - `./hub …` is a wrapper that builds on first use then execs `rust/target/release/hub`.
 
+## Gốc workspace: `~/projects` — và đừng gõ nó vào mã (2026-08-12)
+
+Gốc dời từ `~/Documents/projects` sang **`~/projects`** ngày 2026-08-12 (macOS
+gác Documents bằng TCC; quyền đọc chớp tắt giữa phiên dù đã cấp đủ). Đường cũ
+còn sống như **symlink**, nên mọi thứ vẫn chạy — đó chính là chỗ nguy hiểm: một
+đường dẫn cũ gõ trong mã KHÔNG gãy, nó chỉ đi vòng qua đúng thư mục vừa bị bỏ.
+
+hub tự biết mình ở đâu, và mọi đường dẫn phải bắt nguồn từ đó:
+`HUB_CONFIG` (trong plist) → `cfg.hub_home` → `cfg.workspace_root` (`<hub_home>/../..`)
+→ danh sách dự án, `cwd` của mọi `/new`, và cây mã mà bảng sức khoẻ đem ra so.
+Kịch bản `.mjs` thì tự định vị bằng `HERE`/`import.meta.url`, không hỏi `$HOME`.
+
+📌 Cái giá đã trả, đúng hai hình dạng — cả hai đều **không kêu một tiếng nào**:
+- `runtime.rs` so bản cài với `~/Documents/projects/AI/hub/rust`. Mất cây mã ⟹
+  hàm trả `None` ⟹ bảng sức khoẻ **thôi cảnh báo "daemon đang chạy mã hôm qua"**,
+  tức mất đúng thứ duy nhất phát hiện ra việc quên `install.sh`. Nay bám
+  `hub_home` (`runtime::source_tree`), và không tìm thấy cây mã thì **ghi log**.
+- `deploy/com.dipgle.hubd.plist` vẫn trỏ `HUB_CONFIG` vào đường cũ trong khi bản
+  ĐANG CÀI đã sửa tay. Bản cài đúng, repo sai ⟹ **`install.sh` lượt sau cài đè
+  lại đường cũ**, lặng lẽ, và `workspace_root` của cả hub đi theo nó.
+
+Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong test
+(`rust/tests/sessions.rs`, `/btw` 2026-08-11) mang `~/Documents/projects` vì hôm
+ấy gốc nằm ở đó. Bằng chứng đã chụp thì không "sửa cho hợp thời".
+
 ## Non-negotiables
 
 1. **Nothing on this Mac runs unattended without a wall.** `/new` and `/tell`

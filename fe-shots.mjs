@@ -11,7 +11,7 @@
 // Chỉ ĐỌC: đăng nhập, bấm tab, mở phiên. Không gõ lệnh, không gọi `claude` —
 // nên chạy bao nhiêu lần cũng không tiêu hạn mức.
 
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { mkdirSync } from "node:fs";
 
 const [app, user, pass, tag = "shot"] = process.argv.slice(2);

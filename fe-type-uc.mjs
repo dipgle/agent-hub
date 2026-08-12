@@ -8,7 +8,7 @@
 //
 // ⚠ Kịch bản này gõ THẬT vào một phiên THẬT của chủ máy — không có đường giả.
 // Nội dung gửi đi tự giới thiệu nó là phép kiểm để phiên nhận không hiểu nhầm.
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 
 const [app, u, p, want] = process.argv.slice(2);
 const PROBE = "(hub tự kiểm đường gõ — bỏ qua tin này)";

@@ -8,11 +8,11 @@
 //
 // Usage: node fe-newsession-uc.mjs <app_tid> <username> <password> [project]
 
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, statSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const [appTid, username, password, project = "hub-act-demo"] = process.argv.slice(2);
 if (!appTid || !username || !password) {
@@ -21,6 +21,11 @@ if (!appTid || !username || !password) {
 }
 const BASE = `http://${appTid}.test.localhost:8090`;
 const HERE = new URL("./", import.meta.url).pathname;
+// Gốc workspace TỰ ĐỊNH VỊ: `<workspace>/AI/hub/` → `<workspace>`. Gõ cứng
+// `~/Documents/projects` ở đây thì phép đo "phiên mở ở gốc workspace" hoá đỏ
+// ngay hôm gốc dời sang `~/projects` (2026-08-12) — đỏ vì phép đo, không vì sản
+// phẩm, và đó là loại đỏ dạy người ta bỏ qua màu đỏ.
+const WORKSPACE = resolve(HERE, "../..");
 const SHOTS = HERE + "ui-shots/";
 mkdirSync(SHOTS, { recursive: true });
 
@@ -189,7 +194,7 @@ try {
     );
     console.log("\n  · máy này chưa duyệt MCP cho dự án đó ⇒ chỉ nghiệm thu được ĐƯỜNG KẸT");
     console.log("  · duyệt một lần rồi chạy lại để kiểm đường thành công:");
-    console.log(`      cd ~/Documents/projects/AI/${project} && claude   → Esc → thoát`);
+    console.log(`      cd ${WORKSPACE}/AI/${project} && claude   → Esc → thoát`);
     throw new Error("__blocked_path_done__");
   }
   check("phiên mới xuất hiện mà không cần chạm vào máy", true, fresh.session_id.slice(0, 8));
@@ -211,8 +216,8 @@ try {
   // thư mục, nên phép đo cũng chuyển sang đo đúng chỗ ấy.
   check(
     "phiên mới mở ở gốc workspace",
-    (fresh.cwd || "").replace(/\/+$/, "").endsWith("/Documents/projects"),
-    fresh.cwd
+    (fresh.cwd || "").replace(/\/+$/, "") === WORKSPACE,
+    `${fresh.cwd} (mong đợi ${WORKSPACE})`
   );
   // Đề bài có tới nơi không — đo ở NHẬT KÝ, không ở tên phiên.
   //

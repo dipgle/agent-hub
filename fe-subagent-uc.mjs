@@ -26,7 +26,7 @@
 // "chưa dựng được trạng thái cần đo" — không đếm là đạt.
 //
 // Usage: node fe-subagent-uc.mjs
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { readFileSync, mkdirSync, readdirSync, existsSync, openSync, fstatSync, readSync, closeSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";

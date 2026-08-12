@@ -7,7 +7,7 @@
 //
 // Verification is deliberately NOT "the form said ok": after activating, the
 // script fetches the public URL and checks the bytes a visitor now receives.
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { readFileSync, readdirSync, mkdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 

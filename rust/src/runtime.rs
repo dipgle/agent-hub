@@ -17,7 +17,7 @@
 //!   database. A status collector that makes the daemon slower would be a
 //!   status collector that changes what it measures.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -261,7 +261,7 @@ fn slow_block(cfg: &Config, now: i64) -> Value {
     }
     let v = json!({
         "checked_at": now,
-        "autostart": autostart_state(),
+        "autostart": autostart_state(cfg),
         "claude_cli": cfg.claude_cli.clone(),
         "auth": auth_block(cfg),
     });
@@ -512,7 +512,7 @@ fn auth_block(cfg: &Config) -> Value {
 /// in the repo, never installed, and the daemon was alive only because someone
 /// had started it by hand. That is exactly the kind of fact that is invisible
 /// until the day it matters, so it belongs on the screen.
-fn autostart_state() -> Value {
+fn autostart_state(cfg: &Config) -> Value {
     let plist = crate::config::expand_home(Path::new(
         "~/Library/LaunchAgents/com.dipgle.hubd.plist",
     ));
@@ -538,17 +538,22 @@ fn autostart_state() -> Value {
     } else {
         Some(false)
     };
-    let (signature, stale) = installed_binary_state();
+    let (signature, stale) = installed_binary_state(cfg);
     json!({
         "plist_installed": installed,
         "loaded": loaded,
         "plist_path": plist.display().to_string(),
         "signature": signature,
         "stale": stale,
-        "how_to_install":
+        // Câu hướng dẫn phải trỏ vào cây mã ĐANG chạy, không phải một đường dẫn
+        // gõ cứng: gốc workspace đã đổi một lần (2026-08-12), và một dòng hướng
+        // dẫn cũ thì bảo chủ máy cài đè plist của thư mục cũ.
+        "how_to_install": format!(
             "deploy/install.sh && \
-             cp ~/Documents/projects/AI/hub/deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/ && \
+             cp {}/deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/ && \
              launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist",
+            cfg.hub_home.display()
+        ),
     })
 }
 
@@ -567,7 +572,7 @@ const INSTALLED_HUBD: &str = "~/Library/Application Support/hub/bin/hubd";
 ///    dòng này thì không gì phát hiện ra.
 ///
 /// Trả `None` cho câu nào không hỏi được, không đoán bừa (`unknown` ≠ `sai`).
-fn installed_binary_state() -> (Value, Value) {
+fn installed_binary_state(cfg: &Config) -> (Value, Value) {
     let bin = crate::config::expand_home(Path::new(INSTALLED_HUBD));
     if !bin.exists() {
         return (Value::Null, Value::Null);
@@ -602,7 +607,7 @@ fn installed_binary_state() -> (Value, Value) {
         }
     };
 
-    (signature, stale_against_build())
+    (signature, stale_against_build(cfg))
 }
 
 /// Bản cài có còn là mã hiện tại không?
@@ -619,18 +624,42 @@ fn installed_binary_state() -> (Value, Value) {
 /// Một cảnh báo kêu oan sau mỗi lượt test là một cảnh báo bị phớt lờ, tức tệ
 /// hơn không có. Còn `.rs`/`Cargo.toml`/`Cargo.lock` thì chỉ đổi mtime khi có
 /// người thật sự sửa — đúng câu hỏi cần trả lời: *sửa mã xong đã cài lại chưa?*
-fn stale_against_build() -> Value {
+///
+/// 📌 Cây mã hỏi ở đâu: **`<hub_home>/rust`**, tức nơi hub ĐANG chạy, không phải
+/// một đường dẫn gõ cứng. Đường cứng `~/Documents/projects/AI/hub/rust` đứng ở
+/// đây tới 2026-08-12 — ngày gốc workspace dời sang `~/projects`. Nó không kêu
+/// một tiếng nào, vì mất cây mã thì hàm này trả `None` ⟹ `null` ⟹ tấm bảng sức
+/// khoẻ **thôi cảnh báo daemon cũ**, đúng cái nó sinh ra để nói. Một phép đo tắt
+/// tiếng đọc lên y hệt một phép đo nói "không sao".
+fn stale_against_build(cfg: &Config) -> Value {
     let bin = crate::config::expand_home(Path::new(INSTALLED_HUBD));
-    let src = crate::config::expand_home(Path::new("~/Documents/projects/AI/hub/rust"));
+    let src = source_tree(cfg);
     let Some(installed_at) = mtime(&bin) else {
         return Value::Null;
     };
     // Không có mã nguồn ở máy này (bản cài đem từ nơi khác) thì không có gì để
-    // so — im lặng, đừng doạ.
+    // so — nhưng nói ra là mình MÙ, đừng im: đây chính là hình dạng của lỗi ở
+    // trên, và cái phân biệt "không có gì để so" với "tôi đang nhìn nhầm chỗ"
+    // là đường dẫn đã nhìn.
     match newest_source_mtime(&src) {
         Some(changed_at) => Value::from(changed_at > installed_at),
-        None => Value::Null,
+        None => {
+            crate::logging::warn(
+                "hubd_stale_check_no_source",
+                json!({ "src": src.display().to_string() }),
+            );
+            Value::Null
+        }
     }
+}
+
+/// Cây mã của bản hub ĐANG chạy — bám `hub_home`, không bám `$HOME`.
+///
+/// Một dòng riêng vì đây đúng là chỗ đã sai: `hub_home` do `HUB_CONFIG` trong
+/// plist quyết, nên nó theo hub đi bất cứ đâu, còn một đường dẫn gõ cứng thì
+/// chỉ đúng cho tới lần dời thư mục kế tiếp.
+fn source_tree(cfg: &Config) -> PathBuf {
+    cfg.hub_home.join("rust")
 }
 
 fn mtime(p: &Path) -> Option<std::time::SystemTime> {
@@ -704,9 +733,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Không có cây nguồn trên máy (bản cài đem từ nơi khác) thì trả `None` để
-    /// màn nói "không rõ", KHÔNG phải `false` — đoán bừa là cách một phép đo
-    /// biến thành một lời nói dối yên tâm.
+    /// Cây mã phải đi THEO hub, không neo vào một đường dẫn gõ cứng.
+    ///
+    /// Đây là con bug đã xảy ra thật: `~/Documents/projects/AI/hub/rust` nằm
+    /// trong mã tới 2026-08-12, ngày gốc workspace dời sang `~/projects`. Nó
+    /// không làm gãy gì to tát — nó chỉ làm tấm bảng sức khoẻ **thôi trả lời**
+    /// câu "sửa mã xong đã cài lại chưa", tức mất đúng thứ duy nhất phát hiện
+    /// ra daemon đang chạy mã của hôm qua.
+    #[test]
+    fn the_source_tree_follows_hub_home_not_a_hardcoded_path() {
+        let cfg = Config {
+            hub_home: PathBuf::from("/tmp/somewhere-else/AI/hub"),
+            ..Default::default()
+        };
+        assert_eq!(
+            source_tree(&cfg),
+            PathBuf::from("/tmp/somewhere-else/AI/hub/rust")
+        );
+        assert!(
+            !source_tree(&cfg).starts_with(crate::config::expand_home(Path::new("~/Documents"))),
+            "cây mã lại bị neo vào đường cũ"
+        );
+    }
+
+    /// Không có cây nguồn ở chỗ đang nhìn thì trả `None` để màn nói "không rõ",
+    /// KHÔNG phải `false` — đoán bừa là cách một phép đo biến thành một lời nói
+    /// dối yên tâm. (Kèm một dòng log, vì "không rõ" mà im lặng thì đọc y hệt
+    /// "không sao".)
+    #[test]
+    fn a_missing_source_tree_answers_unknown_never_up_to_date() {
+        let cfg = Config {
+            hub_home: std::env::temp_dir().join(format!("hub-nosrc-{}", std::process::id())),
+            ..Default::default()
+        };
+        assert_eq!(stale_against_build(&cfg), Value::Null);
+    }
+
     /// Câu trả lời thật của `claude -p "/usage"`, chép nguyên văn 2026-08-10.
     const USAGE_SAMPLE: &str = "You are currently using your subscription to power your Claude Code usage\n\nCurrent session: 6% used · resets Aug 10 at 1:29pm (Asia/Saigon)\nCurrent week (all models): 98% used · resets Aug 11 at 12:59pm (Asia/Saigon)\nCurrent week (Fable): 50% used · resets Aug 11 at 1pm (Asia/Saigon)\n\nWhat's contributing to your limits usage?";
 
@@ -742,6 +804,8 @@ mod tests {
         assert!(v.get("raw").is_none());
     }
 
+    /// Không có cây nguồn ở đường được đưa (bản cài đem từ nơi khác) thì trả
+    /// `None` — tầng trên dịch thành "không rõ", không phải "đã mới".
     #[test]
     fn newest_source_mtime_is_unknown_when_there_is_no_tree() {
         let missing = std::env::temp_dir().join(format!("hub-rt-missing-{}", std::process::id()));

@@ -55,9 +55,15 @@
          `hub.config.json` bằng cách đi ngược lên từ cwd nữa. Chỉ thẳng đường:
          thiếu dòng này, hub rơi về cấu hình mặc định và ghi
          `adapter_skipped reason=disabled` — chạy, nhưng không nối với phòng
-         chat nào cả (đo 2026-08-10). -->
+         chat nào cả (đo 2026-08-10).
+         Gốc workspace đổi sang `~/projects` ngày 2026-08-12 (`~/Documents/...`
+         nay chỉ là symlink; TCC gác Documents nên đường cũ mất quyền đọc từng
+         lúc). Đường này còn quyết cả `hub_home` ⟹ `workspace_root`, tức danh
+         sách dự án và mọi phiên `/new`. Bản ĐANG CÀI đã sửa tay lúc 22:13; nếu
+         dòng dưới quay về `Documents` thì `install.sh` kế tiếp cài đè lại đường
+         cũ mà không ai thấy. -->
     <key>HUB_CONFIG</key>
-    <string>/Users/hanguyen/Documents/projects/AI/hub/hub.config.json</string>
+    <string>/Users/hanguyen/projects/AI/hub/hub.config.json</string>
 
     <key>HUB_LOG_LEVEL</key>
     <string>info</string>

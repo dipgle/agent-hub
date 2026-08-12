@@ -15,7 +15,7 @@
 //
 // Ảnh luôn ghi ra `ui-shots/probe.png`. Console error của trang luôn được in —
 // im lặng ở đây là bỏ sót đúng thứ hay hỏng nhất.
-import { chromium } from "/Users/hanguyen/Documents/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
+import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { readFileSync, mkdirSync } from "node:fs";
 
 const HERE = new URL("./", import.meta.url).pathname;

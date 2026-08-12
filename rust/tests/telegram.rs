@@ -464,10 +464,10 @@ fn a_normal_poll_is_not_mistaken_for_a_refusal() {
 fn a_command_on_screen_is_picked_up_with_its_arguments() {
     let screen = "  Trạng thái để lại: cây sạch.\n\
                   Chạy nốt lệnh này:\n\
-                    git -C ~/Documents/projects/AI/tcc/amm push origin main\n\
+                    git -C ~/projects/AI/tcc/amm push origin main\n\
                   Xong thì báo lại.";
     let got = hub::keys::commands_on_screen(screen, 4);
-    assert_eq!(got, vec!["git -C ~/Documents/projects/AI/tcc/amm push origin main"]);
+    assert_eq!(got, vec!["git -C ~/projects/AI/tcc/amm push origin main"]);
 }
 
 /// Câu văn không được thành nút.

@@ -1,5 +1,60 @@
 # active context — hub
 
+## 🧭 2026-08-12 (khuya) — dọn nốt cuộc dời nhà, và một phép đo đã tắt tiếng mà không ai biết
+
+Gốc workspace dời sang `~/projects` lúc ~22:20 (TCC gác `~/Documents`). Bản
+hubd ĐANG CÀI đã được sửa tay lúc 22:13 và chạy ngon — nên nhìn từ ngoài thì
+xong. Đo vào trong thì **hub còn 50 chỗ trỏ đường cũ**, và đường cũ vẫn sống
+dưới dạng symlink, tức **không chỗ nào gãy để mà biết**.
+
+### Hai chỗ có giá thật, cả hai đều im lặng
+
+| Chỗ | Nếu để nguyên |
+|---|---|
+| `deploy/com.dipgle.hubd.plist:60` còn `HUB_CONFIG=~/Documents/...` | bản cài đúng, repo sai ⟹ **`install.sh` lượt sau cài đè lại đường cũ**. Mà `HUB_CONFIG` quyết `hub_home` ⟹ `workspace_root` ⟹ danh sách dự án + `cwd` của mọi `/new` |
+| `runtime.rs:624` so bản cài với `~/Documents/projects/AI/hub/rust` gõ cứng | mất cây mã ⟹ hàm trả `None` ⟹ bảng sức khoẻ **thôi trả lời câu "sửa mã xong đã cài lại chưa"**. Không báo sai — nó ngừng báo. Đúng hình dạng lỗi mà dự án này viết đi viết lại: *một phép đo tắt tiếng đọc lên y hệt một phép đo nói "không sao"* |
+
+Vá theo gốc chứ không đổi chuỗi: `runtime::source_tree(cfg)` = `<hub_home>/rust`
+— hub_home do plist quyết nên nó **đi theo hub**; không tìm thấy cây mã thì
+`hubd_stale_check_no_source` ghi ra đường đã nhìn. Kịch bản `.mjs` tự định vị
+bằng `HERE`, `fe-newsession-uc` thôi so `cwd` với chuỗi cứng.
+
+### Nghiệm thu ĐÃ CHẠY THẬT trên máy, không phải test
+
+- `cargo test` **207** (từ 205) exit 0 · clippy **0 warning** · `install.sh`
+  exit 0, `hubd_boot` pid 20796 → `hubd_signature: cert` → `hub_env_loaded` 5 khoá.
+- **Phép đo sống lại và đo ĐÚNG** (đây mới là bằng chứng, không phải `stale` trả
+  về một giá trị): `false` → chạm một `.rs` → **`true`** → `install.sh` → `false`.
+- `how_to_install` nay in `/Users/hanguyen/projects/...`; `hub doctor` khai
+  `workspace /Users/hanguyen/projects`; snapshot có **32 dự án**; `folder` của 3
+  phiên sống ra đúng `dwork · AI/hub · AI/tcc` (phiên thứ 4 là phép dò của chính
+  hub, chưa có nhật ký ⟹ rỗng, đúng).
+- 2 test mới, **cả hai đỏ được**: trả `source_tree` về đường cứng ⟹ đúng 2 test đỏ.
+- Test khoá nhật ký nay ghim **khoá mới** (`-Users-hanguyen-projects`) — thư mục
+  khoá mới là symlink về khoá cũ nên hai đường cùng một kho, nhưng thứ hub TÍNH
+  RA từ `cwd` phải là khoá mới.
+
+📌 Giữ nguyên văn một chỗ: **bản chụp màn thật** của `/btw` (2026-08-11) trong
+`rust/tests/sessions.rs` vẫn mang `~/Documents/projects`, vì hôm ấy gốc ở đó.
+Bằng chứng đã chụp thì không sửa cho hợp thời — đã ghi lý do ngay tại chỗ.
+
+⚠ **Một phép đo của chính tôi sai trước khi mã sai**: tôi đọc `project` trong
+snapshot thấy `None` và suýt báo "dò dự án hỏng vì dời nhà" — trường thật tên là
+`folder`, và nó vẫn đúng cả ba phiên. *Đọc nhầm tên trường thì mọi phiên đều
+"chưa rõ", nghe y hệt một con bug.*
+
+### ⏳ Chưa làm — ghi đúng như vậy
+
+1. **Chưa chạy lại bộ `.mjs`** (21 kịch bản mới đổi đường `playwright-core`, và
+   `fe-newsession-uc` đổi hẳn phép đo "phiên mở ở gốc workspace"). Chúng cần
+   bundle đã deploy + ngón tay bấm Telegram + tiêu hạn mức của Hà. Sửa xong mới
+   là **viết**, chưa phải **chạy**.
+2. **Không deploy bundle mới**: `fe/index.html` chỉ đổi **một dòng chú thích**,
+   nên tên phiên bản (bất biến) không đáng tiêu cho một comment. Byte đang phục
+   vụ khác cây làm việc đúng chỗ ấy, không khác hành vi.
+
+---
+
 ## 🌙 2026-08-12 (tối) — cổng lệnh thứ ba, nút gửi nhanh, và một tối ưu bị chính phép đo bác bỏ
 
 **`/cmd <dòng lệnh>`** — cổng ra lệnh thứ ba (Hà: *"thêm một cổng chạy lệnh

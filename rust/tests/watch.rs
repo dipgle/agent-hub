@@ -29,7 +29,7 @@ fn mark(state: &str, tty: &str, kind: &str) -> Mark {
         // Mặc định của test cũ: sổ ĐÃ biết phiên này thuộc tài khoản nào. Sổ
         // chưa biết (`a` rỗng) là một ca riêng, có test riêng bên dưới.
         a: "acc1".to_string(),
-        c: "/Users/hanguyen/Documents/projects".to_string(),
+        c: "/Users/hanguyen/projects".to_string(),
     }
 }
 fn working_long(id: &str) -> (String, Mark) {

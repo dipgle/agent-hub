@@ -587,6 +587,50 @@ impl Inbox {
                 }
                 return;
             }
+            // `full:<n>` — bản ĐẦY ĐỦ của báo cáo đã bị rút gọn. Telegram chặn
+            // ở 4096 ký tự nên cắt thành nhiều tin, cắt theo DÒNG để không đứt
+            // giữa câu.
+            if let Some(n) = data.strip_prefix("full:").and_then(|n| n.parse::<usize>().ok()) {
+                let full = crate::db::Db::open(&self.cfg.db)
+                    .ok()
+                    .and_then(|db| crate::pipeline::full_report(&db, n));
+                match full {
+                    Some(text) => {
+                        let mut chunk = String::new();
+                        let mut parts: Vec<String> = Vec::new();
+                        for line in text.lines() {
+                            if chunk.len() + line.len() + 1 > 3500 {
+                                parts.push(std::mem::take(&mut chunk));
+                            }
+                            chunk.push_str(line);
+                            chunk.push('\n');
+                        }
+                        if !chunk.trim().is_empty() {
+                            parts.push(chunk);
+                        }
+                        let total = parts.len();
+                        for (i, p) in parts.into_iter().enumerate() {
+                            let head = if total > 1 {
+                                format!("📄 ({}/{})\n", i + 1, total)
+                            } else {
+                                String::new()
+                            };
+                            if let Err(e) = self.send_text(&format!("{head}{p}")) {
+                                logging::error("telegram_ack_failed", json!({ "err": e }));
+                                break;
+                            }
+                        }
+                    }
+                    None => {
+                        if let Err(e) = self
+                            .send_text("⚠ bản đầy đủ ấy cũ quá rồi (hub chỉ giữ 8 bản gần nhất).")
+                        {
+                            logging::error("telegram_ack_failed", json!({ "err": e }));
+                        }
+                    }
+                }
+                return;
+            }
             logging::info("telegram_button_unknown", json!({ "data": data }));
             return;
         }

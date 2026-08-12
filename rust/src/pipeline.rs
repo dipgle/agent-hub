@@ -504,11 +504,17 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         //
         // ⛔ Trừ tin BÁO TỬ: gõ vào một phiên đã tắt là gõ vào chỗ trống — cùng
         // lý do nút "vào phiên" đã bị gỡ khỏi nhánh ấy.
-        let quick = if matches!(c, crate::watch::Change::Ended { .. }) {
+        let mut quick = if matches!(c, crate::watch::Change::Ended { .. }) {
             Vec::new()
         } else {
             remember_quick(db, &crate::keys::commands_on_screen(&text, 3))
         };
+        // "… (còn N dòng)" phải có đường đi tiếp — xem `remember_full`.
+        if text.contains("… (còn ") {
+            if let Some(b) = long.as_deref().and_then(|full| remember_full(db, full)) {
+                quick.push(b);
+            }
+        }
         match (buttons, crate::telegram::inbox()) {
             (Some(opts), Some(tg)) => {
                 if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some()) {
@@ -759,13 +765,44 @@ fn auto_handover(db: &Db, cfg: &Config) {
                 if let Err(e) = db.record_spend("auto_handover", &h.new_session_id, h.cost_usd, &s.name) {
                     logging::error("spend_record_failed", json!({ "err": e.to_string() }));
                 }
+                // …rồi MỞ phiên mới và ĐÓNG phiên cũ (Hà chốt 2026-08-12, cách
+                // A): *"tự chủ động đóng phiên rồi mở phiên mới luôn"*. Trước
+                // đó hub dừng ở chỗ đưa một dòng `claude --resume …` cho chủ
+                // máy tự gõ — vô dụng đúng lúc anh đang ở trên điện thoại, tức
+                // đúng lúc tính năng này sinh ra để phục vụ.
+                let moved = if s.tty.is_empty() {
+                    Err(anyhow::anyhow!("phiên không có cửa sổ terminal"))
+                } else {
+                    crate::sessions::resume_in_new_window(cfg, s, &h.new_session_id)
+                };
+                let (where_now, leftover) = match &moved {
+                    Ok((tty, closed_err)) => (
+                        format!("Phiên mới đang chạy ở cửa sổ {tty}."),
+                        closed_err.clone().map(|e| format!("\n⚠ cửa sổ cũ chưa đóng được: {e}")),
+                    ),
+                    Err(e) => (
+                        format!(
+                            "⚠ chưa mở được cửa sổ mới ({}) — mở tay bằng:\n{}",
+                            crate::exec::truncate(&e.to_string(), 120),
+                            h.resume_command
+                        ),
+                        None,
+                    ),
+                };
+                if moved.is_ok() {
+                    if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, &h.new_session_id) {
+                        logging::error("focus_after_handover_failed", json!({ "err": e.to_string() }));
+                    }
+                }
                 let msg = format!(
-                    "📋 Tự đóng sổ {} (ngữ cảnh {}%, đã rảnh {} phút).\nPhiên mới: {}\n{}",
-                    s.name,
+                    "📋 Tự đóng sổ {} (ngữ cảnh {}%, đã rảnh {} phút) trước khi CLI phải nén ngữ cảnh.\n\
+                     Phiên mới: {}\n{}{}",
+                    crate::sessions::display_name(&s.name, &s.folder),
                     pct,
                     idle_sec / 60,
                     &h.new_session_id[..8.min(h.new_session_id.len())],
-                    h.resume_command
+                    where_now,
+                    leftover.unwrap_or_default()
                 );
                 // Báo vào phòng: mọi thứ hub tự làm đều phải có vết ở nơi đọc
                 // được, nhất là thứ chạy khi không ai bấm.
@@ -1255,6 +1292,60 @@ pub const QUICK_KEY: &str = "quick:cmds";
 /// Khác biệt không nhỏ: chạy trong phiên thì **phiên nhìn thấy kết quả** và đi
 /// tiếp được, còn `/cmd` chạy ở một shell rời — kết quả về điện thoại, phiên
 /// không biết gì. Đúng thứ chủ máy làm khi ngồi trước máy.
+/// Nhớ bản ĐẦY ĐỦ của một báo cáo, để dòng "… (còn N dòng)" có đường đi tiếp.
+///
+/// 🔴 Hà 2026-08-12: *"cuối tin nhắn sao lại báo còn số dòng vậy, muốn xem nốt
+/// thì làm thế nào"*. Đúng: bản rút gọn nói ra phần nó giấu (tử tế), rồi bỏ
+/// người đọc ở đó (không tử tế). Mà bản đầy đủ vốn đã nằm sẵn trong tay
+/// (`last_say`, tới 12 000 ký tự) — chỉ là chưa ai đưa nó ra.
+///
+/// Giữ 8 bản gần nhất kèm một `base` chạy tiến, nên số trên nút KHÔNG bị lệch
+/// khi bản cũ rơi ra: lấy theo số tuyệt đối, không theo vị trí trong mảng — nút
+/// cũ bấm lại thì trả về "bản ấy cũ quá rồi", chứ không trả về báo cáo của một
+/// phiên khác.
+pub const FULL_KEY: &str = "report:full";
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct FullStore {
+    base: usize,
+    items: Vec<String>,
+}
+
+pub fn remember_full(db: &Db, text: &str) -> Option<(String, String)> {
+    let mut st: FullStore = db
+        .cursor_or_log(FULL_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    st.items.push(text.to_string());
+    let n = st.base + st.items.len() - 1;
+    if st.items.len() > 8 {
+        let cut = st.items.len() - 8;
+        st.items.drain(..cut);
+        st.base += cut;
+    }
+    match serde_json::to_string(&st) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(FULL_KEY, &v) {
+                logging::error("full_report_not_saved", json!({ "err": e.to_string() }));
+                return None;
+            }
+        }
+        Err(e) => {
+            logging::error("full_report_not_saved", json!({ "err": e.to_string() }));
+            return None;
+        }
+    }
+    Some(("📄 Xem đầy đủ".to_string(), format!("full:{n}")))
+}
+
+/// Bản đầy đủ số `n`, nếu còn giữ.
+pub fn full_report(db: &Db, n: usize) -> Option<String> {
+    let st: FullStore = db
+        .cursor_or_log(FULL_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())?;
+    n.checked_sub(st.base).and_then(|i| st.items.get(i)).cloned()
+}
+
 pub fn remember_quick(db: &Db, cmds: &[String]) -> Vec<(String, String)> {
     if cmds.is_empty() {
         return Vec::new();

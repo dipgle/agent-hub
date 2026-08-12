@@ -669,3 +669,36 @@ fn a_command_quoted_in_a_report_becomes_a_button_cut_at_the_backticks() {
         vec!["git push origin main".to_string()]
     );
 }
+
+/// Số trên nút "xem đầy đủ" không được LỆCH khi bản cũ rơi ra khỏi kho.
+///
+/// 🔴 Hà 2026-08-12: *"cuối tin nhắn sao lại báo còn số dòng vậy, muốn xem nốt
+/// thì làm thế nào"*. Kho giữ 8 bản gần nhất; nếu đánh số theo VỊ TRÍ trong
+/// mảng thì mỗi lần đẩy một bản mới, nút cũ trong lịch sử chat sẽ trả về báo
+/// cáo của một phiên khác — sai còn tệ hơn không có nút.
+#[test]
+fn a_stale_full_report_button_says_so_instead_of_showing_someone_elses() {
+    let dir = std::env::temp_dir().join(format!("hub-full-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = hub::db::Db::open(&dir.join("t.sqlite")).unwrap();
+
+    let mut first = None;
+    for i in 0..12 {
+        let (_, data) = hub::pipeline::remember_full(&db, &format!("báo cáo số {i}")).unwrap();
+        if i == 0 {
+            first = Some(data);
+        }
+    }
+    // Bản mới nhất lấy được nguyên văn.
+    assert_eq!(
+        hub::pipeline::full_report(&db, 11).as_deref(),
+        Some("báo cáo số 11")
+    );
+    // Bản đầu đã rơi ra ⟹ trả None, KHÔNG trả nhầm bản khác.
+    let n: usize = first.unwrap().trim_start_matches("full:").parse().unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(hub::pipeline::full_report(&db, 0), None);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

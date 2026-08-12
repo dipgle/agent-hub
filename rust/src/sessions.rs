@@ -2916,6 +2916,76 @@ fn newest_transcript_since(
 /// variadic, nên đề bài phải đứng trước nó (`CLAUDE.md` §10). Một hàm thuần thì
 /// test đọc thẳng được thứ tự ấy; nếu để nội tuyến trong hàm mở cửa sổ thì chỉ
 /// một phiên thật mới phát hiện được sai, và lúc đó nó đã dựng một phiên rỗng.
+/// Lệnh mở một cửa sổ NỐI TIẾP một phiên đã có (`--resume`).
+///
+/// 🔴 Hà 2026-08-12: *"tránh trường hợp full context lại chạy nén ngữ cảnh,
+/// thay vào đó tự chủ động đóng phiên rồi mở phiên mới luôn"*. Trước đó hub
+/// đóng sổ xong chỉ **đưa một dòng lệnh** cho chủ máy tự gõ — tức đúng lúc anh
+/// đang ở trên điện thoại thì việc dừng lại ở đó.
+///
+/// Đo được vì sao ngưỡng phải nằm trước: CLI tự nén ở **945k–1 001k** tokens
+/// (ba phiên có bản ghi `compactMetadata.trigger = "auto"` trên máy này), tức
+/// ~95–100% cửa sổ 1M. Ngưỡng 80% chừa lại ~145k tokens để kịp làm.
+pub fn resume_command(cli: &str, cwd: &str, session_id: &str, config_dir: Option<&str>) -> String {
+    let env_prefix = match config_dir {
+        Some(dir) => format!("CLAUDE_CONFIG_DIR={} ", shell_quote(dir)),
+        None => String::new(),
+    };
+    let denied = DENIED_TOOLS
+        .iter()
+        .map(|t| shell_quote(t))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "cd {} && {}{} --permission-mode auto --resume {} --disallowedTools {}",
+        shell_quote(cwd),
+        env_prefix,
+        shell_quote(cli),
+        shell_quote(session_id),
+        denied
+    )
+}
+
+/// Mở cửa sổ nối tiếp một phiên, rồi ĐÓNG cửa sổ cũ — theo đúng thứ tự ấy.
+///
+/// Mở trước đóng sau là có chủ ý: mở hỏng thì chủ máy vẫn còn nguyên phiên cũ
+/// để làm tiếp; đóng trước mà mở hỏng thì anh mất cả hai.
+pub fn resume_in_new_window(
+    cfg: &Config,
+    session: &LiveSession,
+    new_session_id: &str,
+) -> Result<(String, Option<String>)> {
+    let cmd = resume_command(
+        &cfg.claude_cli,
+        &session.cwd,
+        new_session_id,
+        account_dir(cfg, &session.account).as_deref(),
+    );
+    let (_window, tty) = crate::keys::open_window(&cmd)?;
+    let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
+    logging::info(
+        "handover_window_opened",
+        json!({ "tty": tty_short, "session": new_session_id }),
+    );
+    // Đóng cửa sổ CŨ. Hỏng thì KHÔNG coi là hỏng cả việc: phiên mới đã chạy,
+    // và một cửa sổ thừa còn mở thì chủ máy đóng bằng tay được — nói ra là đủ.
+    let closed_err = match crate::keys::window_of(&session.tty) {
+        Ok(Some(w)) => match crate::keys::quit_and_close(w) {
+            Ok(()) => None,
+            Err(e) => Some(truncate(&e.to_string(), 200)),
+        },
+        Ok(None) => Some("không tìm thấy cửa sổ của phiên cũ".to_string()),
+        Err(e) => Some(truncate(&e.to_string(), 200)),
+    };
+    if let Some(why) = &closed_err {
+        logging::warn(
+            "handover_old_window_not_closed",
+            json!({ "session": session.session_id, "why": why }),
+        );
+    }
+    Ok((tty_short, closed_err))
+}
+
 pub fn terminal_command(cli: &str, root: &Path, task: &str, config_dir: Option<&str>) -> String {
     let env_prefix = match config_dir {
         Some(dir) => format!("CLAUDE_CONFIG_DIR={} ", shell_quote(dir)),

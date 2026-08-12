@@ -1975,45 +1975,22 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // mật**. Cả ba đọc thành "không có hộp chọn" ⟹ GỬI.
                             // Tức chốt hỏng về phía nguy hiểm, và hỏng nặng nhất
                             // đúng lúc màn đang hiện một mật khẩu.
-                            // Gõ CHỮ: hỏi cái đáng hỏi TRƯỚC KHI gõ.
+                            // Gõ CHỮ thì KHÔNG soi màn trước.
                             //
-                            // 🔴 Hà 2026-08-12: *"cú enter là có tin nhắn từ
-                            // tele thì bấm là được sau khi nhập input chứ sao
-                            // lại lằng nhằng thế"*. Đúng — và ba lượt vá trước
-                            // đều sai cùng một kiểu: gõ xong RỒI mới soi màn để
-                            // đoán *"chữ đã đi chưa"*, một câu hỏi mà ảnh chụp
-                            // trả lời sai thường xuyên trên máy đang swap (17:39
-                            // soi 18 giây không thấy chữ; 18:04 đọc dòng
-                            // "queued" của tin CŨ thành "tin này đã xếp hàng").
+                            // Hà 2026-08-12, ba lần một ý: *"nhận lệnh từ tele
+                            // thì làm luôn 2 việc là nhập nội dung và bấm enter,
+                            // việc gì phải soi"*. Bản trước hỏi màn một lượt để
+                            // biết có hộp chọn không — đúng về rủi ro, nhưng
+                            // trên máy đang swap thì mỗi lượt hỏi là vài giây,
+                            // và cái giá ấy trả cho MỌI câu chat trong khi hộp
+                            // chọn là chuyện hiếm. Chủ máy chốt: cứ gõ.
                             //
-                            // Câu đáng hỏi chỉ có MỘT, và phải hỏi trước: **màn
-                            // có hộp chọn không**. Có thì gõ chữ vào đó là chọn
-                            // nhầm, và Enter là CHỐT. Không có thì gõ rồi bấm
-                            // Enter liền tay — đúng thứ tự một người làm.
-                            let text_dialog = if !is_key {
-                                match crate::keys::look(&s.tty, 24) {
-                                    crate::keys::Look::Saw { choices, .. } if !choices.is_empty() => {
-                                        Some(choices.len())
-                                    }
-                                    crate::keys::Look::Withheld { choices, .. } if choices > 0 => {
-                                        Some(choices)
-                                    }
-                                    _ => None,
-                                }
-                            } else {
-                                None
-                            };
-                            let refusal = if let Some(n) = text_dialog {
-                                logging::info(
-                                    "keys_text_refused",
-                                    json!({ "session": s.session_id, "why": "dialog", "choices": n }),
-                                );
-                                Some(format!(
-                                    "⚠ {} đang có hộp chọn ({n} lựa chọn) nên tôi KHÔNG gõ chữ vào: \
-                                     ở đó Enter là CHỐT một lựa chọn. Trả lời bằng /key <số>, hoặc /shot để nhìn.",
-                                    crate::sessions::display_name(&s.name, &s.folder)
-                                ))
-                            } else if is_key && arrow {
+                            // ⚠ Cái còn lại phải nói thẳng chứ không giấu: nếu
+                            // đúng lúc ấy màn đang có hộp chọn thì Enter là
+                            // CHỐT một lựa chọn. Đường an toàn khi biết có hộp
+                            // chọn vẫn là `/key <số>`, và tin báo "dừng lại
+                            // HỎI" vẫn hiện đủ lựa chọn để bấm.
+                            let refusal = if is_key && arrow {
                                 match crate::keys::arrow_verdict(&crate::keys::look(&s.tty, 24)) {
                                     crate::keys::Arrow::Send => None,
                                     crate::keys::Arrow::RefuseDialog => {
@@ -2102,23 +2079,71 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // đúng thứ tự, và cú thứ hai tới như một
                                     // phím thật. Nghỉ 400ms để nó không bị gộp
                                     // ngược vào cú dán.
+                                    // …và bấm LẠI cho tới khi ô nhập trống.
+                                    //
+                                    // 🔴 Hà 2026-08-12, ngay sau bản một-phát:
+                                    // *"gửi xong im lặng mãi, gửi lần nữa lại
+                                    // gộp thành 1 tin rồi enter"*. Đó là chữ ký
+                                    // của việc cú Enter bị **gộp ngược vào cú
+                                    // dán**: lượt gửi sau tạo một lượt ghi mới,
+                                    // Enter tách ra được, và nó gửi luôn cả hai
+                                    // đoạn. Tức 400ms là đủ ở máy rảnh và
+                                    // KHÔNG đủ ở máy đang swap — một hằng số
+                                    // thời gian bao giờ cũng sai với một cái
+                                    // máy đang đổi tốc độ.
+                                    //
+                                    // Nên đừng đặt cược vào một con số: bấm,
+                                    // NHÌN, còn chữ thì bấm nữa (tối đa 3 lần,
+                                    // giãn dần). Một Enter thừa vào ô TRỐNG thì
+                                    // `claude` không làm gì — nên hỏng về phía
+                                    // an toàn. Thấy hộp chọn thì DỪNG ngay:
+                                    // ở đó Enter là chốt.
                                     let mut sent_enter = false;
                                     if !is_key {
-                                        std::thread::sleep(std::time::Duration::from_millis(400));
-                                        match crate::keys::press(w, "enter") {
-                                            Ok(()) => {
-                                                sent_enter = true;
-                                                logging::info(
-                                                    "keys_enter_sent",
-                                                    json!({ "session": s.session_id,
-                                                            "why": "gõ xong thì bấm Enter, như người ngồi máy" }),
-                                                );
+                                        // GÕ RỒI BẤM ENTER. Hết.
+                                        //
+                                        // 🔴 Hà 2026-08-12, sau khi tôi dựng
+                                        // tới bản thứ tư có soi màn: *"không
+                                        // hiểu soi kiểu gì, nhận lệnh từ tele
+                                        // thì làm luôn 2 việc là nhập nội dung
+                                        // và bấm enter, việc gì phải soi"*.
+                                        // Đúng — và mọi bản trước đều hỏng vì
+                                        // cùng một lý do: chúng treo một QUYẾT
+                                        // ĐỊNH vào một tấm ảnh chụp, trên một
+                                        // cái máy đang swap nên tấm ảnh ấy tới
+                                        // muộn hơn sự thật.
+                                        //
+                                        // Bấm HAI lần, giãn nhau, và không hỏi
+                                        // gì cả. Vì sao hai: `do script` đẩy
+                                        // chữ + xuống dòng trong CÙNG một lượt
+                                        // ghi nên TUI đọc như cú DÁN và nuốt
+                                        // dấu xuống dòng — chữ ký của nó là câu
+                                        // Hà tả: *"gửi lần nữa lại gộp thành 1
+                                        // tin rồi enter"*. Cú Enter thứ hai vào
+                                        // ô TRỐNG thì `claude` không làm gì,
+                                        // nên lặp lại là an toàn theo đúng
+                                        // nghĩa idempotent.
+                                        for wait_ms in [400u64, 1000] {
+                                            std::thread::sleep(std::time::Duration::from_millis(
+                                                wait_ms,
+                                            ));
+                                            match crate::keys::press(w, "enter") {
+                                                Ok(()) => sent_enter = true,
+                                                Err(e) => {
+                                                    logging::warn(
+                                                        "keys_enter_failed",
+                                                        json!({ "session": s.session_id,
+                                                                "err": e.to_string() }),
+                                                    );
+                                                    break;
+                                                }
                                             }
-                                            Err(e) => logging::warn(
-                                                "keys_enter_failed",
-                                                json!({ "session": s.session_id, "err": e.to_string() }),
-                                            ),
                                         }
+                                        logging::info(
+                                            "keys_enter_sent",
+                                            json!({ "session": s.session_id,
+                                                    "why": "gõ xong là bấm Enter — không soi, không đoán" }),
+                                        );
                                     }
                                     let waited = std::time::Instant::now();
                                     // Không đọc lại được màn thì nói là KHÔNG
@@ -2149,79 +2174,27 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                 "ms": waited.elapsed().as_millis() as u64,
                                                 "saw": view.is_some(), "enter": sent_enter }),
                                     );
-                                    // Còn nằm trong ô SAU khi đã gửi Enter thì
-                                    // nói thẳng là chưa gửi được — đừng khai
-                                    // "đang đứng ở dấu nhắc", câu ấy nghe như
-                                    // mọi việc đã xong.
-                                    let stuck = view
-                                        .as_ref()
-                                        .is_some_and(|(b, _)| crate::keys::still_in_box(b, &typed));
+                                    // MỘT DÒNG XÁC NHẬN. Hết.
+                                    //
+                                    // 🔴 Hà 2026-08-12: *"tôi chỉ cần thông tin
+                                    // xác nhận tin nhắn đã được vào hàng chờ
+                                    // thành công chưa thôi, cần gì các thông
+                                    // tin khác — nếu lỗi mới cần chi tiết"*.
+                                    // Câu trả lời cũ dài ba dòng và một nửa nội
+                                    // dung là RUỘT của hub (đã gõ bao nhiêu ký
+                                    // tự, có phải bấm Enter rời không, màn nói
+                                    // gì) — thứ chỉ có ích khi đi tìm lỗi, tức
+                                    // đúng chỗ của một dòng log.
                                     let what = view
                                         .as_ref()
                                         .map(|(body, _)| crate::keys::landed(body));
-                                    let did = if is_key {
-                                        format!("đã bấm '{}'", typed.trim())
+                                    let name = crate::sessions::display_name(&s.name, &s.folder);
+                                    if is_key {
+                                        format!("✓ đã bấm '{}' · {name}", typed.trim())
+                                    } else if what == Some(crate::keys::Landed::Queued) {
+                                        format!("✓ vào hàng chờ · {name}")
                                     } else {
-                                        format!("đã gõ {} ký tự", typed.trim().len())
-                                    };
-                                    match what {
-                                        Some(crate::keys::Landed::Queued) => format!(
-                                            "⌨ {} vào {} — phiên đang chạy dở nên chữ nằm ở HÀNG CHỜ, \
-                                             `claude` sẽ xử lý ngay khi xong việc.",
-                                            did, crate::sessions::display_name(&s.name, &s.folder)
-                                        ),
-                                        Some(crate::keys::Landed::Running) => {
-                                            format!("⌨ {} vào {} — phiên đã nhận và bắt đầu chạy.", did, crate::sessions::display_name(&s.name, &s.folder))
-                                        }
-                                        // "Đứng ở dấu nhắc" nghe như đã xong —
-                                        // nên chỉ được nói khi ô nhập ĐÃ TRỐNG.
-                                        Some(crate::keys::Landed::Idle) if stuck => format!(
-                                            "⚠ {} vào {}, nhưng chữ VẪN NẰM trong ô nhập — {}. \
-                                             Bấm Enter trên máy, hoặc gửi lại.",
-                                            did,
-                                            crate::sessions::display_name(&s.name, &s.folder),
-                                            if sent_enter {
-                                                "tôi đã gửi thêm một Enter rời mà nó chưa đi"
-                                            } else {
-                                                "và tôi không gửi Enter vì màn đang có hộp chọn"
-                                            }
-                                        ),
-                                        // Hà 2026-08-12: *"chỉ cần báo đã gõ
-                                        // được thôi cần gì báo đã gửi enter rời
-                                        // làm gì"*. Đúng: cú Enter rời là RUỘT
-                                        // của hub, không phải việc của người
-                                        // đọc — họ hỏi "chữ tới chưa", và câu
-                                        // trả lời không đổi dù hub phải bắn
-                                        // thêm mấy phím. Vẫn còn nguyên ở
-                                        // `keys_enter_sent` trong log, đúng chỗ
-                                        // của nó; và nhánh KẸT bên trên vẫn nói
-                                        // ra, vì ở đó nó là LÝ DO chứ không
-                                        // phải khoe việc.
-                                        // Gõ CHỮ mà sau ngần ấy giây màn vẫn
-                                        // không thấy chữ đâu và phiên cũng
-                                        // không chạy: đó KHÔNG phải "đứng ở dấu
-                                        // nhắc" — đó là hub không biết chữ đi
-                                        // đâu. Câu cũ khai một điều chưa nhìn
-                                        // thấy, đúng thứ Hà bắt được: hub báo
-                                        // ngon mà chữ nằm im trong ô.
-                                        Some(crate::keys::Landed::Idle) if !is_key => format!(
-                                            "⚠ {} vào {}, nhưng sau {:.0}s màn KHÔNG thấy chữ ấy \
-                                             và phiên cũng không chạy — có thể nó chưa vào. /shot để nhìn.",
-                                            did,
-                                            crate::sessions::display_name(&s.name, &s.folder),
-                                            waited.elapsed().as_secs_f32()
-                                        ),
-                                        Some(crate::keys::Landed::Idle) => {
-                                            format!("⌨ {} vào {} — phiên đang đứng ở dấu nhắc.", did, crate::sessions::display_name(&s.name, &s.folder))
-                                        }
-                                        // Byte đã vào tab (mã trả về 0), nhưng
-                                        // đọc lại màn thì không được — nói đúng
-                                        // chừng ấy, đừng đoán hộ.
-                                        None => format!(
-                                            "⌨ {} vào {} — nhưng tôi KHÔNG đọc lại được màn, nên chưa \
-                                             biết chữ đã rơi vào dấu nhắc hay vào hàng chờ.",
-                                            did, crate::sessions::display_name(&s.name, &s.folder)
-                                        ),
+                                        format!("✓ đã gửi · {name}")
                                     }
                                 }
                                 Err(e) => format!(

@@ -158,6 +158,26 @@ pub fn remember_sent(cfg: &Config, resp: &Value) {
 /// làm hub thử đi thử lại một việc không bao giờ xong.
 pub const TELEGRAM_DELETE_WINDOW_SEC: i64 = 48 * 3600;
 
+/// Telegram trả lời nhưng TỪ CHỐI — trả về lý do, `None` nếu bình thường.
+///
+/// 🔴 Lỗi im lặng bắt được 2026-08-12, đúng lúc Hà đổi bot: token sai thì
+/// `getUpdates` vẫn trả **JSON hợp lệ** (`{"ok":false,"description":"Unauthorized"}`),
+/// nên `r.json()` THÀNH CÔNG, `result` rỗng, vòng lặp coi như "không có tin
+/// nào" và quay lại hỏi ngay — không một dòng log, mà `timeout=20` cũng mất tác
+/// dụng vì server đáp tức thì. Kênh chết câm, và bên ngoài nhìn y hệt một buổi
+/// chiều không ai nhắn gì.
+pub fn poll_rejected(resp: &Value) -> Option<String> {
+    if resp.get("ok").and_then(Value::as_bool) == Some(true) {
+        return None;
+    }
+    Some(
+        resp.get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("Telegram từ chối getUpdates (không có mô tả)")
+            .to_string(),
+    )
+}
+
 /// Chia sổ thành ba nhóm — hàm THUẦN, kiểm được mà không cần Telegram.
 ///
 /// Trả về `(đến_hạn_xoá, quá_48h_không_xoá_được)`. Phần quyết định của tính năng
@@ -418,6 +438,27 @@ impl Inbox {
 
     fn read_forever(&self) {
         let Some(client) = self.client() else { return };
+        // NÓI RA đang cầm bot nào. Không có dòng này thì câu hỏi "hub đã nhận
+        // token mới chưa" không trả lời được từ bên ngoài — đúng chỗ Hà mắc
+        // 2026-08-12 khi đổi bot: gõ `/start` mà im, và mọi giả thuyết (token
+        // sai · chưa khởi động lại · chat_id lệch) đều nghe hợp lý như nhau.
+        // Chỉ tên công khai của bot, không bao giờ token (luật §4).
+        match client.get(self.api("getMe")).send().and_then(|r| r.json::<Value>()) {
+            Ok(v) => match poll_rejected(&v) {
+                None => logging::info(
+                    "telegram_bot_identity",
+                    json!({
+                        "username": v.get("result").and_then(|r| r.get("username")).and_then(Value::as_str),
+                        "id": v.get("result").and_then(|r| r.get("id")).and_then(Value::as_i64),
+                    }),
+                ),
+                Some(why) => logging::error("telegram_bot_unusable", json!({ "why": why })),
+            },
+            Err(e) => logging::warn(
+                "telegram_getme_failed",
+                json!({ "err": logging::redact(&e.to_string()) }),
+            ),
+        }
         // Bắt đầu từ mốc HIỆN TẠI, không đọc lại lịch sử: hub vừa khởi động lại
         // mà chạy luôn mấy lệnh gõ từ hôm qua là một kiểu bất ngờ tệ.
         if let Ok(v) = client
@@ -458,6 +499,14 @@ impl Inbox {
                     continue;
                 }
             };
+            // Trả lời được KHÔNG có nghĩa là trả lời thuận (xem `poll_rejected`).
+            if let Some(why) = poll_rejected(&resp) {
+                logging::error("telegram_poll_rejected", json!({ "why": why }));
+                // Lùi hẳn một nhịp: token sai thì hỏi lại sau 3 giây là gõ cửa
+                // Telegram 1200 lần một giờ để nghe cùng một câu từ chối.
+                std::thread::sleep(Duration::from_secs(30));
+                continue;
+            }
             let empty = vec![];
             let updates = resp
                 .get("result")

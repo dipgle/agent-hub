@@ -416,3 +416,35 @@ fn the_default_window_leaves_room_before_telegrams_hard_limit() {
         "còn dưới 6 giờ dự phòng trước trần 48h"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOKEN SAI PHẢI KÊU, KHÔNG ĐƯỢC IM
+//
+// 🔴 Bắt được 2026-08-12 lúc Hà đổi bot: `getUpdates` với token sai trả về JSON
+// HỢP LỆ (`{"ok":false,"description":"Unauthorized"}`), nên `r.json()` thành
+// công, `result` rỗng, và vòng lặp đọc nó y như "không ai nhắn gì" — không log,
+// không lỗi, kênh chết câm. Từ bên ngoài, một token sai trông hệt một buổi
+// chiều yên tĩnh.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn an_unauthorized_poll_is_reported_not_read_as_silence() {
+    let resp = serde_json::json!({ "ok": false, "description": "Unauthorized" });
+    assert_eq!(
+        hub::telegram::poll_rejected(&resp).as_deref(),
+        Some("Unauthorized")
+    );
+}
+
+#[test]
+fn a_refusal_without_a_reason_still_says_something() {
+    let resp = serde_json::json!({ "ok": false });
+    let why = hub::telegram::poll_rejected(&resp).expect("từ chối mà không kêu");
+    assert!(!why.trim().is_empty(), "câu báo rỗng thì cũng là im lặng");
+}
+
+#[test]
+fn a_normal_poll_is_not_mistaken_for_a_refusal() {
+    let resp = serde_json::json!({ "ok": true, "result": [] });
+    assert!(hub::telegram::poll_rejected(&resp).is_none());
+}

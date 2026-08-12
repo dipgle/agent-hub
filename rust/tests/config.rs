@@ -316,7 +316,16 @@ fn an_empty_task_opens_a_plain_session_with_no_positional_argument() {
         None,
     );
     assert!(!cmd.contains("'' --disallowedTools"), "đề bài rỗng vẫn được truyền vào: {cmd}");
-    assert!(cmd.contains("'claude' --disallowedTools"), "{cmd}");
+    assert!(cmd.contains("--permission-mode auto --disallowedTools"), "{cmd}");
+    // Phiên mở từ điện thoại phải ở CHẾ ĐỘ AUTO (Hà 2026-08-12: *"mở được phiên
+    // rồi nhưng chưa chuyển tự động sang auto mode on"*) — hộp thoại xin phép
+    // hiện trên một màn hình không ai đang nhìn thì phiên đứng im vô hạn.
+    // Nhưng rào thì KHÔNG được nới: `auto` bỏ bước HỎI, `--disallowedTools` bỏ
+    // bước LÀM, và vế sau mới là hàng rào (điều 1).
+    assert!(cmd.contains("--permission-mode auto"), "thiếu auto mode: {cmd}");
+    for guard in ["Bash(git push:*)", "Bash(sudo:*)", "Bash(rm:*)"] {
+        assert!(cmd.contains(guard), "rào '{guard}' biến mất khỏi lệnh: {cmd}");
+    }
     // …và có đề bài thì nó vẫn phải đứng TRƯỚC `--disallowedTools` (cờ variadic).
     let with = hub::sessions::terminal_command(
         "claude",

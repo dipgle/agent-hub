@@ -2915,8 +2915,24 @@ pub fn terminal_command(cli: &str, root: &Path, task: &str, config_dir: Option<&
     } else {
         format!("{} ", shell_quote(task))
     };
+    // `--permission-mode auto` — đúng chế độ chủ máy vẫn ngồi làm việc.
+    //
+    // 🔴 Hà 2026-08-12: *"khi dùng lệnh new mở được phiên rồi nhưng chưa chuyển
+    // tự động sang auto mode on"*. Phiên hub mở ra ở chế độ mặc định, tức mỗi
+    // lần chạm công cụ là một hộp thoại xin phép — mà **người mở đang ở trên
+    // điện thoại**: hộp thoại ấy hiện trên một cái màn hình không ai nhìn, và
+    // phiên đứng im cho tới lúc có người ngồi vào máy. Đúng phép thử CẦU NỐI:
+    // thứ chủ máy làm được ở terminal (bấm shift+tab) mà điện thoại không làm
+    // được là một khoảng trống.
+    //
+    // Giá trị lấy từ `claude --help` trên chính máy này, không lấy từ trí nhớ:
+    // `acceptEdits · auto · bypassPermissions · manual · dontAsk · plan`.
+    //
+    // ⚠ KHÔNG nới điều 1: `--disallowedTools` vẫn nguyên vẹn và vẫn đứng cuối.
+    // `auto` bỏ bước HỎI, `DENIED_TOOLS` bỏ bước LÀM — hai thứ khác nhau, và
+    // cái rào thật nằm ở vế sau (không push/merge/reset, không ssh/sudo/rm…).
     format!(
-        "cd {} && {}{} {}--disallowedTools {}",
+        "cd {} && {}{} --permission-mode auto {}--disallowedTools {}",
         shell_quote(&root.to_string_lossy()),
         env_prefix,
         shell_quote(cli),

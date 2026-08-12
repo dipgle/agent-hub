@@ -59,6 +59,17 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
+- 🔴 **`claude -p "/usage"` TREO khi hubd gọi — chưa có thủ phạm** (mở
+  2026-08-12). Hình dạng đã đo chắc: `timed_out: true · ms: 60952 ·
+  stdout_bytes: 0 · stderr rỗng` — treo tới trần 60s, không ra byte nào. Hậu quả
+  nhìn thấy được: hàng tài khoản trên tab Sức khoẻ **trống số hạn mức**
+  (`fe-board-uc` 29/31). Đã loại bằng đo: stdin (đã đóng, `exec.rs:132`), sai
+  binary (cùng `~/.npm-global/bin/claude`), môi trường launchd (chạy lại y hệt
+  bằng `env -i` + cwd của hubd → **3,58s ra đủ số**), và **không phải do dời gốc
+  workspace** — đếm log: 60 lần, lần đầu **10/08 05:51**, đi theo đợt. Nghi can
+  còn lại chưa kiểm: chồng lấn với `claude agents` trong cùng một vòng. Phép đo
+  kế tiếp: ghi kèm "lúc ấy còn lời gọi `claude` nào đang chạy không".
+
 - ~~Chưa quan sát được một tin Telegram THẬT mang thông tin chốt (S18)~~ →
   **đã có, 18:17:13**: `⏸ projects-7c dừng, đang chờ bạn — sau 16 phút chạy` kèm
   nguyên khối thông tin chốt (mở bằng kết luận, có dấu đứt `⋯`, và **ba dòng

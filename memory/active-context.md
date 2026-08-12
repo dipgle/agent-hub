@@ -105,6 +105,23 @@ nhưng **sai cho `/usage`**: 16:34–16:36, máy đã rảnh, hubd vẫn hỏng 
 khoản**, trong khi chạy tay đúng lệnh ấy ra **6,08 giây** kèm đủ số
 (`Current session: 7% · Current week: 18%`). Vậy nguyên nhân **chưa tìm ra**.
 
+**Dòng log mới trả lời ngay lượt đầu** (16:42:30): `timed_out: true · ms: 60952
+· stdout_bytes: 0 · stderr rỗng` ⟹ lời gọi **treo tới trần rồi không ra một byte
+nào**, không phải chuyện đọc hiểu. Ba giả thuyết bị loại bằng đo, không bằng suy:
+
+| Nghi can | Đo | Kết |
+|---|---|---|
+| stdin không đóng ⟹ `claude` chờ EOF | `exec.rs:132` `drop(child.stdin.take())` | ❌ đã đóng |
+| hub gọi một `claude` khác | `claude_cli = claude` → `~/.npm-global/bin/claude`, đúng binary shell dùng; PATH trong plist có đường ấy | ❌ cùng một binary |
+| môi trường launchd thiếu thứ gì | chạy lại y hệt: `env -i` chỉ HOME/USER/PATH-của-plist, cwd = thư mục hubd, stdin `/dev/null` → **3,58 giây, ra đủ số** | ❌ không phải môi trường |
+
+Và một câu hỏi khác hẳn hoá ra mới là câu đúng — **hỏng từ bao giờ?** Đếm cả
+log: **60 lần, lần đầu 2026-08-10T05:51**, đi theo từng ĐỢT (12 lần lúc
+08-11T20, 7 lần lúc 08-12T03, 11–12 lần trong hai giờ vừa rồi). ⟹ **Không phải
+do dời nhà** (10/08 sớm hơn nhiều), không phải hỏng đứt, mà là một cú **treo
+không thường xuyên** của `claude -p "/usage"` khi hubd gọi. Chưa có thủ phạm —
+ghi đúng như vậy.
+
 Thay vì đoán lần hai: bắt dòng log tự khai. `RunOut` đã mang sẵn `timed_out` và
 `ms` mà dòng cũ **vứt đi cả hai**, nên `code: null` đọc lên như "câu trả lời khó
 hiểu" trong khi nhiều khả năng là HẾT GIỜ — hai chuyện phải sửa theo hai hướng

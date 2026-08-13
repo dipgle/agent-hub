@@ -1655,13 +1655,20 @@ pub fn quick_cmd(db: &Db, n: usize) -> Option<String> {
 /// * Màn có **hộp chọn** thì nói thẳng từng lựa chọn: đó chính là thứ người ta
 ///   mở lên để xem, và số của nó là thứ gõ tiếp được.
 pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize) -> String {
+    // Tên để ĐỌC. 🔴 Hà 2026-08-13, ảnh chụp Telegram: nút và dòng "Đang theo
+    // phiên" đã là `[AI/hub]` trong khi ngay dưới nó `/shot` còn in `📷 Màn của
+    // projects-d2:` — cùng một phiên, hai cái tên, trong CÙNG một màn hình.
+    // `display_name` đã có từ 22c97e9 và chỗ này là chỗ sót: ba lần `s.name`
+    // thô, đúng cái tên `claude` tự đặt theo thư mục mở phiên (cả máy mở ở gốc
+    // workspace nên phiên nào cũng `projects-xx`, tức cái tên phân biệt được ít
+    // nhất trong mọi cái tên có ở đây).
+    let what = crate::sessions::display_name(&s.name, &s.folder);
     match crate::keys::screen_text(window) {
         Ok(screen) => {
             let risk = crate::sessions::preview_risk(&screen);
             if !risk.is_empty() {
                 return format!(
-                    "📷 Màn của {} có thể chứa bí mật ({}) — không đưa ra ngoài.",
-                    s.name,
+                    "📷 Màn của {what} có thể chứa bí mật ({}) — không đưa ra ngoài.",
                     risk.join(", ")
                 );
             }
@@ -1687,15 +1694,14 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
                 )
             };
             if choices.is_empty() {
-                format!("📷 Màn của {}:\n\n{}{}", s.name, body, quick_note)
+                format!("📷 Màn của {what}:\n\n{body}{quick_note}")
             } else {
                 let list: Vec<String> = choices
                     .iter()
                     .map(|(n, l)| format!("  {n}. {l}"))
                     .collect();
                 format!(
-                    "📷 {} đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{}{}",
-                    s.name,
+                    "📷 {what} đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{}{}",
                     list.join("\n"),
                     body,
                     quick_note

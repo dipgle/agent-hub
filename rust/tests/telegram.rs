@@ -677,6 +677,55 @@ fn a_command_quoted_in_a_report_becomes_a_button_cut_at_the_backticks() {
     );
 }
 
+/// Lệnh DÀI hơn bề ngang cửa sổ vẫn phải ra nút — TUI bẻ dòng, hub nối lại.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp Telegram: *"Không có lệnh merge mà bấm"*. Chữ dưới
+/// đây là bản CHÉP NGUYÊN từ nhật ký (`kind=Shot`, 04:15:24Z) — kể cả dấu cách
+/// cuối dòng và hai dấu cách thụt đầu dòng, vì chính chúng là bằng chứng chỗ bẻ
+/// rơi vào ranh giới từ. Cổng `contains('\n')` viết hôm 08-12 vứt thẳng span
+/// này, tức nó loại đúng những lệnh dài — thứ đáng có nút nhất.
+#[test]
+fn a_command_the_terminal_wrapped_is_joined_back_not_dropped() {
+    let screen = "※ recap: Goal was fixing what the tfl5 walk found; that's done, pushed, and PR \n  \
+                  #54 is open with all tests green. Next action is yours: merge PR #54, then \n  \
+                  deploy with `bash scripts/deploy.sh walk-fixes-0813 --expect-symbol \n  \
+                  renderChatPending`. (disable recaps in /config)";
+    assert_eq!(
+        hub::keys::commands_on_screen(screen, 4),
+        vec!["bash scripts/deploy.sh walk-fixes-0813 --expect-symbol renderChatPending".to_string()]
+    );
+
+    // …nhưng bẻ GIỮA MỘT TỪ thì KHÔNG nối: nối lại là bịa ra một lệnh khác, và
+    // một cái nút chạy nhầm thứ tệ hơn hẳn một cái nút thiếu.
+    let cut_mid_word = "chạy `bash scripts/deploy.sh walk-fix\nes-0813 --expect-symbol x`";
+    assert!(
+        hub::keys::commands_on_screen(cut_mid_word, 4).is_empty(),
+        "{:?}",
+        hub::keys::commands_on_screen(cut_mid_word, 4)
+    );
+
+    // Và một KHỐI chữ trong cặp nháy vẫn không phải một cái nút.
+    let block = "xem `line one here\n\nline two here\nline three\nline four\nline five`";
+    assert!(hub::keys::commands_on_screen(block, 4).is_empty());
+}
+
+/// `gh` là công cụ merge trên máy này — nó phải nằm trong danh sách lệnh quen.
+///
+/// Câu Hà hỏi 2026-08-13 là *"Không có lệnh merge mà bấm"*: màn viết *"Next
+/// action is yours: merge PR #54"*. Chữ ấy là CÂU VĂN nên không có nút nào dựng
+/// được từ nó — nhưng lúc phiên viết ra lệnh thật thì phải có.
+#[test]
+fn a_gh_command_is_known_so_a_merge_can_be_pressed() {
+    let screen = "Việc của anh:\n  gh pr merge 54 --squash --delete-branch";
+    assert_eq!(
+        hub::keys::commands_on_screen(screen, 4),
+        vec!["gh pr merge 54 --squash --delete-branch".to_string()]
+    );
+    // Câu VĂN nhắc chuyện merge thì vẫn không thành nút.
+    let prose = "Next action is yours: merge PR #54, then deploy";
+    assert!(hub::keys::commands_on_screen(prose, 4).is_empty());
+}
+
 /// Số trên nút "xem đầy đủ" không được LỆCH khi bản cũ rơi ra khỏi kho.
 ///
 /// 🔴 Hà 2026-08-12: *"cuối tin nhắn sao lại báo còn số dòng vậy, muốn xem nốt

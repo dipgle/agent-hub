@@ -581,10 +581,14 @@ end tell"#
 /// Giữ tối đa `max` dòng CUỐI (mới nhất), bỏ trùng.
 pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
     let screen = text;
+    // `gh` vào danh sách 2026-08-13, vì đó là cái tên trong câu Hà hỏi: màn nói
+    // *"Next action is yours: merge PR #54"* và không có nút nào. `gh` là công
+    // cụ merge trên máy này — cùng loại với `git`, đã nằm sẵn ở đây từ đầu.
     const KNOWN: &[&str] = &[
-        "git", "npm", "npx", "node", "cargo", "bash", "sh", "zsh", "python3", "pip3", "docker",
-        "make", "curl", "rsync", "scp", "ssh", "sqlite3", "pnpm", "yarn", "deno", "go", "rustup",
-        "brew", "launchctl", "osascript", "open", "code", "tail", "grep", "rg", "find", "ls",
+        "git", "gh", "npm", "npx", "node", "cargo", "bash", "sh", "zsh", "python3", "pip3",
+        "docker", "make", "curl", "rsync", "scp", "ssh", "sqlite3", "pnpm", "yarn", "deno", "go",
+        "rustup", "brew", "launchctl", "osascript", "open", "code", "tail", "grep", "rg", "find",
+        "ls",
     ];
     let mut out: Vec<String> = Vec::new();
     for raw in screen.lines() {
@@ -655,8 +659,11 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
     // (`git push origin main` (a plain push to main) executed from…) ⟹ một nút
     // chạy nhầm thứ. Cắt đúng trong cặp nháy thì không còn chỗ cho câu văn lọt.
     for span in text.split('`').skip(1).step_by(2) {
-        let cmd = span.trim();
-        if cmd.len() < 4 || cmd.len() > 300 || cmd.contains('\n') {
+        let Some(cmd) = unwrap_terminal_wrap(span) else {
+            continue;
+        };
+        let cmd = cmd.as_str();
+        if cmd.len() < 4 || cmd.len() > 300 {
             continue;
         }
         let Some(first) = cmd.split_whitespace().next() else {
@@ -676,6 +683,60 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
         out.drain(..out.len() - max);
     }
     out
+}
+
+/// Nối lại một lệnh bị MÀN HÌNH bẻ dòng — hoặc từ chối, nếu không chắc.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp Telegram: *"Không có lệnh merge mà bấm"*. Màn của
+/// phiên tfl5 lúc 11:15 kết bằng đúng một dòng lệnh để gõ, và hub không dựng nổi
+/// một cái nút nào cho nó. Lấy nguyên chữ hub đã gửi ra khỏi nhật ký thì thấy
+/// ngay vì sao — lệnh dài hơn bề ngang cửa sổ nên TUI bẻ nó làm hai:
+///
+/// ```text
+/// deploy with `bash scripts/deploy.sh walk-fixes-0813 --expect-symbol
+///   renderChatPending`. (disable recaps in /config)
+/// ```
+///
+/// …và cổng `contains('\n')` (viết 08-12) vứt thẳng. Cổng ấy đúng ý mà sai
+/// hình: nó định loại KHỐI CHỮ nhiều dòng, nhưng thứ nó loại được nhiều nhất
+/// lại là **lệnh dài** — đúng những lệnh đáng có nút nhất, vì không ai cần một
+/// cái nút để gõ `ls`.
+///
+/// Nối lại thì phải nối cho ĐÚNG, nên chỉ nối khi chỗ bẻ rơi vào **ranh giới
+/// từ**: đo trên chữ thật, TUI của `claude` bẻ sau dấu cách rồi thụt đầu dòng
+/// tiếp (`--expect-symbol ␣\n␣␣renderChatPending`, `git rev-parse ␣\n␣␣␣␣␣
+/// --show-toplevel`). Bẻ GIỮA một từ thì nối lại là bịa ra một lệnh khác — thà
+/// mất một cái nút, nên trường hợp ấy trả `None`.
+fn unwrap_terminal_wrap(span: &str) -> Option<String> {
+    if !span.contains('\n') {
+        return Some(span.trim().to_string());
+    }
+    let parts: Vec<&str> = span.split('\n').collect();
+    // Một lệnh bị bẻ vài lần thì còn là một lệnh; bẻ năm lần thì đây là một khối
+    // chữ, và khối chữ không phải thứ để bấm.
+    if parts.len() > 4 {
+        return None;
+    }
+    for w in parts.windows(2) {
+        // Dòng trống = ngắt đoạn văn, không phải bẻ dòng.
+        if w[0].trim().is_empty() || w[1].trim().is_empty() {
+            return None;
+        }
+        let word_boundary =
+            w[0].ends_with(char::is_whitespace) || w[1].starts_with(char::is_whitespace);
+        if !word_boundary {
+            return None;
+        }
+    }
+    Some(
+        parts
+            .iter()
+            .map(|p| p.trim())
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string(),
+    )
 }
 
 /// Hộp chọn đang chờ trên màn, nếu có.

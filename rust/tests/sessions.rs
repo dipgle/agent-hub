@@ -502,6 +502,53 @@ fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
     assert!(failed.contains("chưa mở được cửa sổ mới"), "{failed}");
 }
 
+/// hub chỉ được tự bấm ĐÚNG hộp tin-thư-mục, không phải hộp nào cũng bấm.
+///
+/// Hà uỷ quyền 2026-08-13 (*"bấm hộ đi, phải kiểm tra được và bấm luôn 1"*) sau
+/// khi xem một cửa sổ đứng im 22 phút. Uỷ quyền ấy hẹp: hộp này không hỏi về
+/// CÔNG VIỆC, nó hỏi *"thư mục này có phải của anh không"* về đúng thư mục hub
+/// vừa tự mở cửa sổ vào. Mọi hộp khác vẫn là câu hỏi dành cho chủ máy — bấm hộ
+/// ở đó là trả lời thay, và một cú bấm thì không có nút hoàn tác.
+#[test]
+fn only_the_trust_folder_dialog_may_be_answered_by_hub() {
+    use hub::sessions::trust_dialog_choice;
+
+    let trust = vec![
+        (1usize, "Yes, I trust this folder".to_string()),
+        (2usize, "No, exit".to_string()),
+    ];
+    assert_eq!(trust_dialog_choice(&trust), Some(1));
+
+    // Thứ tự khác thì bấm theo SỐ của lựa chọn, không bấm cứng số 1.
+    let flipped = vec![
+        (1usize, "No, exit".to_string()),
+        (2usize, "Yes, I trust this folder".to_string()),
+    ];
+    assert_eq!(trust_dialog_choice(&flipped), Some(2));
+
+    // Câu hỏi công việc: KHÔNG được đụng vào, dù nó cũng có "yes".
+    let work = vec![
+        (1usize, "Yes, run the deploy".to_string()),
+        (2usize, "No".to_string()),
+    ];
+    assert_eq!(trust_dialog_choice(&work), None);
+
+    // Hộp duyệt công cụ cũng không: nó hỏi về QUYỀN, không hỏi về thư mục.
+    let perms = vec![
+        (1usize, "Yes, allow Bash(rm -rf:*)".to_string()),
+        (2usize, "Yes, and don't ask again".to_string()),
+        (3usize, "No".to_string()),
+    ];
+    assert_eq!(trust_dialog_choice(&perms), None);
+
+    // Và nhánh CHỐI trong chính hộp ấy thì tuyệt đối không bấm.
+    let refuse = vec![(1usize, "No, I don't trust this folder".to_string())];
+    assert_eq!(trust_dialog_choice(&refuse), None);
+
+    // Màn không có hộp chọn nào ⟹ không có gì để bấm.
+    assert_eq!(trust_dialog_choice(&[]), None);
+}
+
 /// Phiên đã chết thì không có gì "đang chạy" — kể cả nhật ký còn dở.
 ///
 /// Hồi quy do chính bản vá agent-nền đẻ ra, bắt được bằng cách chạy trên máy

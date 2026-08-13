@@ -2917,6 +2917,31 @@ fn start_in_terminal(
         }
     }
 
+    // Hết 20 giây mà chưa có nhật ký ⟹ phiên chưa chào đời, và nguyên nhân đã
+    // đo được là hộp tin-thư-mục (mỗi cặp tài khoản × thư mục hỏi đúng một
+    // lần). Bấm hộ rồi chờ thêm một lượt — cùng cách với lượt tự đóng sổ.
+    if answer_trust_dialog(&tty_short).is_some() {
+        let after = std::time::Instant::now() + Duration::from_secs(20);
+        while std::time::Instant::now() < after {
+            std::thread::sleep(Duration::from_millis(500));
+            if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), root, opened_at)
+            {
+                logging::info(
+                    "new_session_matched_by_transcript",
+                    json!({ "session": id, "tty": tty_short, "after": "trust_dialog" }),
+                );
+                return Ok(Started {
+                    session_id: id,
+                    project: project.to_string(),
+                    cwd: dir.to_string_lossy().to_string(),
+                    task: task.to_string(),
+                    ts: crate::logging::now_iso(),
+                    window: true,
+                });
+            }
+        }
+    }
+
     // Đường cũ, giữ làm lưới đỡ: nhật ký chưa kịp sinh (phiên kẹt ở hộp thoại
     // duyệt MCP chẳng hạn) thì vẫn còn `claude agents` để hỏi.
     //
@@ -2942,6 +2967,71 @@ fn start_in_terminal(
         }
     }
     anyhow::bail!("mở được cửa sổ ({tty_short}) nhưng `claude agents` chưa khai phiên nào trên đó sau 60 giây")
+}
+
+/// Hộp *"tin thư mục này chứ?"* — và **chỉ** hộp ấy.
+///
+/// Thuần, để cái ranh giới hẹp này kiểm được mà không cần một cửa sổ Terminal.
+///
+/// Vì sao hẹp đến thế: bấm một con số vào hộp chọn là **trả lời thay chủ máy**,
+/// việc hub không được phép làm. Hộp này là ngoại lệ có căn cứ, và căn cứ nằm ở
+/// chỗ nó KHÔNG hỏi về công việc — nó hỏi *"thư mục này có phải của anh không"*
+/// về đúng thư mục **hub vừa tự mở cửa sổ vào**, dưới **tài khoản của chính chủ
+/// máy**, ở đúng chỗ phiên trước đang làm việc. Câu trả lời đã được chủ máy nói
+/// ra từ trước bằng hành động, chỉ là `claude` ghi "đã tin" theo từng cặp
+/// (`CLAUDE_CONFIG_DIR`, đường tuyệt đối) nên nó hỏi lại mỗi khi gặp cặp mới.
+///
+/// Nhận theo CHỮ của lựa chọn, và đòi cả ba: có `trust`, có `folder`, và KHÔNG
+/// mở đầu bằng `no` (hộp có sẵn một lựa chọn *"No, exit"*). Câu chữ đổi ⟹ không
+/// khớp ⟹ hub rơi về nhánh báo-và-giữ-nguyên, tức **hỏng thì hỏng về phía im
+/// lặng**, không phải về phía bấm bừa.
+pub fn trust_dialog_choice(choices: &[(usize, String)]) -> Option<usize> {
+    choices.iter().find_map(|(n, label)| {
+        let l = label.trim().to_lowercase();
+        (l.contains("trust") && l.contains("folder") && !l.starts_with("no")).then_some(*n)
+    })
+}
+
+/// Nhìn cửa sổ hub vừa mở; kẹt ở hộp tin-thư-mục thì bấm hộ. Trả về số đã bấm.
+///
+/// 🔴 Hà 2026-08-13, sau khi xem tận mắt một cửa sổ đứng im 22 phút: *"bấm hộ
+/// đi, phải kiểm tra được và bấm luôn 1"*.
+///
+/// Chỉ gọi cho cửa sổ **hub vừa tự mở** và chỉ khi phiên **chưa chào đời** —
+/// hai điều kiện ấy không nằm trong hàm này mà nằm ở chỗ gọi, vì chúng là lý do
+/// việc bấm hộ chấp nhận được.
+fn answer_trust_dialog(tty: &str) -> Option<usize> {
+    let (_, choices) = crate::keys::screen_of(tty, 24)?;
+    let n = trust_dialog_choice(&choices)?;
+    let w = match crate::keys::window_of(tty) {
+        Ok(Some(w)) => w,
+        // Không im lặng: mất cửa sổ ở đây nghĩa là phiên mới vẫn kẹt, và chỗ gọi
+        // phải biết để còn giữ cửa sổ cũ lại.
+        other => {
+            logging::warn(
+                "trust_dialog_window_gone",
+                json!({ "tty": tty, "detail": format!("{other:?}") }),
+            );
+            return None;
+        }
+    };
+    match crate::keys::press(w, &n.to_string()) {
+        Ok(()) => {
+            logging::info(
+                "trust_dialog_answered",
+                json!({ "tty": tty, "pressed": n,
+                        "why": "hộp tin-thư-mục trên cửa sổ CHÍNH HUB vừa mở — Hà uỷ quyền 2026-08-13" }),
+            );
+            Some(n)
+        }
+        Err(e) => {
+            logging::warn(
+                "trust_dialog_press_failed",
+                json!({ "tty": tty, "choice": n, "err": e.to_string() }),
+            );
+            None
+        }
+    }
 }
 
 /// Nhật ký phiên MỚI NHẤT sinh ra sau mốc `since`, trong thư mục khoá của `cwd`.
@@ -3044,6 +3134,19 @@ pub fn start_fresh_after_handover(
         if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), cwd, opened_at) {
             new_id = Some(id);
             break;
+        }
+    }
+    // Chưa có nhật ký sau 12 giây ⟹ phiên chưa chào đời. Nguyên nhân đã đo được
+    // và luôn là cùng một thứ: hộp tin-thư-mục. Bấm hộ rồi chờ thêm một lượt
+    // NỮA — xem `answer_trust_dialog`.
+    if new_id.is_none() && answer_trust_dialog(&tty_short).is_some() {
+        for _ in 0..24 {
+            std::thread::sleep(Duration::from_millis(500));
+            if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), cwd, opened_at)
+            {
+                new_id = Some(id);
+                break;
+            }
         }
     }
     logging::info(

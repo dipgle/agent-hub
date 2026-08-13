@@ -134,6 +134,7 @@ fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
         question: "Đơn vắng có khai được NỬA NGÀY không?".into(),
         options: vec!["Thêm ô nửa ngày".into(), "Luôn trọn ngày".into()],
         multi: false,
+        rest: Vec::new(),
     });
     let text = session_list_text(&[s], "", NOW);
     assert!(text.contains("⚠ dừng lại HỎI"), "tình trạng: {text}");
@@ -335,7 +336,7 @@ const SID: &str = "bc1a73db-1111-2222-3333-444444444444";
 
 #[test]
 fn the_enter_session_button_decodes_back_to_the_session_route() {
-    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], true, false);
+    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], true, false, &[]);
     let (label, data) = b.last().expect("thiếu nút vào phiên");
     assert!(label.contains("Vào phiên"), "nhãn khó hiểu: {label}");
     // Round-trip qua CHÍNH bộ giải mã đang chạy — nút gửi đi mà không giải ra
@@ -351,7 +352,7 @@ fn the_enter_session_button_decodes_back_to_the_session_route() {
 /// Phiên ĐANG theo thì không có nút ấy — bấm vào chỉ để tới chỗ đang đứng.
 #[test]
 fn the_followed_session_gets_no_redundant_button() {
-    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], false, false);
+    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], false, false, &[]);
     assert_eq!(b.len(), 1, "thừa nút: {b:?}");
     assert!(b[0].1.starts_with("key:"), "{:?}", b[0]);
 }
@@ -479,7 +480,7 @@ fn a_book_entry_without_a_name_is_not_good_enough_to_greet_with() {
 #[test]
 fn choice_buttons_still_answer_the_right_session() {
     let labels = vec!["Một".to_string(), "Hai".to_string(), "Ba".to_string()];
-    let b = hub::telegram::choice_buttons(SID, &labels, true, false);
+    let b = hub::telegram::choice_buttons(SID, &labels, true, false, &[]);
     assert_eq!(b.len(), 4, "3 lựa chọn + 1 nút vào phiên: {b:?}");
     assert_eq!(
         hub::telegram::callback_to_command(&b[2].1).as_deref(),
@@ -1272,4 +1273,65 @@ fn a_sentence_from_a_report_is_not_a_command() {
     ] {
         assert_eq!(commands_on_screen(cmd, 3).len(), 1, "mất nút thật: {cmd:?}");
     }
+}
+
+/// 🔴 Hà 2026-08-13, ảnh chụp bảng hỏi của `[AI/tfl5]`: *"chọn option xong thì
+/// vẫn còn bước nữa nên không pass qua được"* · *"có nhiều option thì phải có
+/// cơ chế chọn được nhiều"*.
+///
+/// Bảng nhiều câu chỉ gửi đi được khi KHÔNG còn ô trống. Bộ nút cũ chỉ mang số
+/// lựa chọn (`key:<id>:<n>`), tức nó mặc định "câu đang mở là câu người ta muốn
+/// trả lời" — đúng với bảng một câu, và dẫn vào ngõ cụt với bảng nhiều câu: bấm
+/// xong câu đầu là hết đường, các câu sau nằm sau một phím mũi tên mà hub (đúng
+/// luật) từ chối gửi khi màn đang có hộp chọn.
+#[test]
+fn a_table_with_several_questions_gets_a_button_for_every_question() {
+    let rest = vec![hub::sessions::Question {
+        header: "Đăng nhập".into(),
+        question: "Đăng nhập có phân biệt hoa thường không?".into(),
+        options: vec!["Không phân biệt".into(), "Chặn từ form".into()],
+        multi: false,
+    }];
+    let b = hub::telegram::choice_buttons(
+        SID,
+        &["Từ chối".to_string(), "Vẫn lưu".to_string()],
+        false,
+        false,
+        &rest,
+    );
+    let data: Vec<&str> = b.iter().map(|(_, d)| d.as_str()).collect();
+    // Câu 1 mang số câu như mọi câu khác: một khuôn duy nhất thì chỗ nhận lệnh
+    // không phải nhớ hai luật.
+    assert!(data.contains(&format!("pick:{SID}:1.1").as_str()), "{data:?}");
+    assert!(data.contains(&format!("pick:{SID}:1.2").as_str()), "{data:?}");
+    // Và câu 2 — thứ trước bản vá KHÔNG có nút nào dẫn tới.
+    assert!(data.contains(&format!("pick:{SID}:2.1").as_str()), "{data:?}");
+    assert!(data.contains(&format!("pick:{SID}:2.2").as_str()), "{data:?}");
+    // Trả lời đủ mọi ô rồi bảng VẪN đứng chờ một dấu Enter (`✔ Submit` là một
+    // tab riêng trên ảnh) — không có nút này thì mọi cú bấm trên kia vô nghĩa.
+    assert!(data.contains(&format!("key:{SID}:enter").as_str()), "{data:?}");
+    // Nhãn phải đọc được trong một liếc trên màn 390px: số câu ▸ số lựa chọn.
+    assert!(
+        b.iter().any(|(l, _)| l.starts_with("2▸1 Không phân biệt")),
+        "{:?}",
+        b.iter().map(|(l, _)| l).collect::<Vec<_>>()
+    );
+    // Cú bấm phải dịch được thành một lệnh THẬT, không thì nó rơi vào hư không.
+    assert_eq!(
+        callback_to_command(&format!("pick:{SID}:2.1")),
+        Some(format!("/pick {SID} 2.1"))
+    );
+}
+
+/// Bảng MỘT câu không đổi hình dạng: đường cũ đã chạy đúng, và đổi nó chỉ để
+/// cho "nhất quán" là bắt cả một đường đang tốt gánh rủi ro của đường mới.
+#[test]
+fn a_single_question_keeps_the_old_shape() {
+    let b = hub::telegram::choice_buttons(SID, &["Có".to_string(), "Không".to_string()], false, false, &[]);
+    let data: Vec<&str> = b.iter().map(|(_, d)| d.as_str()).collect();
+    assert!(data.contains(&format!("key:{SID}:1").as_str()), "{data:?}");
+    assert!(!data.iter().any(|d| d.starts_with("pick:")), "{data:?}");
+    // Không có bảng thì cũng không có nút Gửi: bấm số là xong, thêm một nút nữa
+    // chỉ mời người ta bấm một cái Enter thừa vào phiên.
+    assert!(!data.iter().any(|d| d.ends_with(":enter")), "{data:?}");
 }

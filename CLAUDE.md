@@ -174,8 +174,23 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    owner's tid can invoke them, so they are authenticated at the human layer,
    not public endpoints.
 
-   Routes: session · new · ask · tell · stop · handover · type · key · shot ·
-   project · ingest · run · doctor · set · help · **accounts**.
+   Routes: session · new · ask · tell · stop · handover · type · key · **pick** ·
+   shot · project · ingest · run · doctor · set · help · **accounts**.
+
+   **`/pick` vs `/key`, và vì sao phải là hai** (2026-08-13). `AskUserQuestion`
+   có thể mang **nhiều câu** trong một bảng, vẽ thành một thanh tab
+   (`←  ☒ Vá ACL  ☐ Đăng nhập  ✔ Submit  →`), và bảng ấy **chỉ gửi đi được khi
+   không còn ô trống**. `/key <số>` gửi số vào câu ĐANG MỞ — đủ cho bảng một
+   câu, và là ngõ cụt cho bảng nhiều câu: các câu sau nằm sau một phím mũi tên
+   mà `arrow_verdict` (đúng luật) từ chối gửi khi màn có hộp chọn. Hà bấm nút,
+   câu 1 xong, bảng vẫn đứng: *"chọn option xong thì vẫn còn bước nữa nên không
+   pass qua được"*. `/pick <câu>.<lựa chọn>` đi được vì nó **không gửi mũi tên
+   trần**: cả dãy (mũi tên + số) vào MỘT `do script`, nên chỉ có đúng một dấu
+   xuống dòng và nó nằm sau con số. Ba điều nó không làm: không đếm phím để đoán
+   vị trí (chủ máy có thể vừa tự bấm — vị trí đọc từ màn mỗi lần), không gõ khi
+   `Withheld`/`Blind`, không tin mã trả về (đọc lại bảng, so số ô trống
+   trước/sau). Nguồn nội dung vẫn là NHẬT KÝ (`pending_question` nay lấy cả
+   `questions[*]`, không chỉ `[0]`); màn chỉ trả lời "đang đứng ở câu nào".
 
    **Flags, not slots** (Hà 2026-08-12: *"kiến trúc lại lệnh cho hợp lý, ví dụ
    `/new -a acc2 -s dwork`"*). `/new` reads `-a <acc>` and `-s <project>`

@@ -278,7 +278,17 @@ pub fn choice_buttons(
     labels: &[String],
     offer_enter: bool,
     multi: bool,
+    rest: &[crate::sessions::Question],
 ) -> Vec<(String, String)> {
+    // 🔴 Hà 2026-08-13: *"có nhiều option thì phải có cơ chế chọn được nhiều"*.
+    // Bảng nhiều câu chỉ gửi đi được khi KHÔNG còn ô trống, nên một bộ nút chỉ
+    // phục vụ câu đầu là một bộ nút dẫn vào ngõ cụt: bấm xong, bảng vẫn đứng,
+    // và trên điện thoại nó trông y hệt lúc hỏng.
+    //
+    // Nút của bảng nhiều câu mang theo SỐ CÂU (`pick:<id>:<câu>.<lựa chọn>`),
+    // vì "câu đang mở" không phải thứ điện thoại biết — và cũng không nên là
+    // thứ nó phải biết.
+    let table = !rest.is_empty();
     let mut buttons: Vec<(String, String)> = labels
         .iter()
         .enumerate()
@@ -289,15 +299,29 @@ pub fn choice_buttons(
             // không đổi gì và người ta sẽ tưởng nút hỏng.
             let head = if multi {
                 format!("☐ {}", i + 1)
+            } else if table {
+                format!("1▸{}", i + 1)
             } else {
                 format!("{}.", i + 1)
             };
-            (
-                format!("{head} {}", crate::exec::truncate(l, 60)),
-                format!("key:{}:{}", session_id, i + 1),
-            )
+            let data = if table {
+                format!("pick:{}:1.{}", session_id, i + 1)
+            } else {
+                format!("key:{}:{}", session_id, i + 1)
+            };
+            (format!("{head} {}", crate::exec::truncate(l, 60)), data)
         })
         .collect();
+    // Các câu sau: cùng khuôn, chỉ đổi số câu. Nhãn mang số câu ở đầu (`2▸1`)
+    // để đọc được trong một liếc trên màn 390px — thứ tự đúng bằng thứ tự tab.
+    for (qi, q) in rest.iter().enumerate() {
+        for (oi, l) in q.options.iter().take(9).enumerate() {
+            buttons.push((
+                format!("{}▸{} {}", qi + 2, oi + 1, crate::exec::truncate(l, 60)),
+                format!("pick:{}:{}.{}", session_id, qi + 2, oi + 1),
+            ));
+        }
+    }
     // 🔴 Hà 2026-08-13, ảnh chụp hộp hỏi của `[codetrail]`: *"option này chọn
     // nhiều chứ không phải chọn 1"*. Với hộp chọn-nhiều, bấm một số chỉ BẬT/TẮT
     // một mục — phiên vẫn đứng đợi dấu Enter. Không có cái nút này thì bấm bao
@@ -305,7 +329,11 @@ pub fn choice_buttons(
     //
     // Đi bằng đúng route `/key` sẵn có (`key:<id>:enter` → `/key <id> enter`),
     // không đẻ lối riêng cho Telegram.
-    if multi {
+    // Bảng nhiều câu cũng cần cái nút này, và cần hơn: trả lời đủ mọi ô rồi
+    // bảng VẪN đứng đó chờ một dấu Enter (ảnh Hà gửi: `✔ Submit` là một tab
+    // riêng). Không có nút thì mọi cú bấm phía trên dẫn tới một bảng đầy đủ mà
+    // không ai gửi được — đúng cái ngõ cụt đang vá.
+    if multi || table {
         buttons.push((
             "✅ Gửi lựa chọn".to_string(),
             format!("key:{session_id}:enter"),
@@ -381,6 +409,17 @@ pub fn callback_to_command(data: &str) -> Option<String> {
             return None;
         }
         return Some(format!("/key {sid} {n}"));
+    }
+    // `pick:<id>:<câu>.<lựa chọn>` — một cái nút của bảng hỏi NHIỀU CÂU. Nút
+    // `key:` cũ chỉ mang được số lựa chọn, tức nó mặc định "câu đang mở là câu
+    // người ta muốn trả lời" — đúng với bảng một câu, và sai với bảng nhiều câu
+    // đúng vào lúc chuyện đó quan trọng nhất (xem `pipeline` route `Pick`).
+    if let Some(rest) = data.strip_prefix("pick:") {
+        let (sid, at) = rest.split_once(':')?;
+        if sid.is_empty() || at.is_empty() {
+            return None;
+        }
+        return Some(format!("/pick {sid} {at}"));
     }
     if let Some(sid) = data.strip_prefix("sess:") {
         if sid.is_empty() {
@@ -1400,8 +1439,12 @@ impl Inbox {
         labels: &[String],
         offer_enter: bool,
         multi: bool,
+        rest: &[crate::sessions::Question],
     ) -> Result<(), String> {
-        self.send_buttons(text, &choice_buttons(session_id, labels, offer_enter, multi))
+        self.send_buttons(
+            text,
+            &choice_buttons(session_id, labels, offer_enter, multi, rest),
+        )
     }
 
 /// Xếp nút thành hàng: mặc định mỗi nút một hàng, RIÊNG nút file thì gộp.

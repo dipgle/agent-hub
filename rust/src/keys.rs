@@ -611,10 +611,15 @@ end tell"#
 /// Hộp chọn của `claude` đi bằng mũi tên + Enter, và gửi chữ "xuống" vào đó thì
 /// nó gõ ra chữ chứ không di chuyển.
 pub fn press(window: i64, keyname: &str) -> Result<()> {
+    press_seq(window, std::slice::from_ref(&keyname))
+}
+
+/// Payload AppleScript cho một phím — dùng chung cho [`press`] và [`press_seq`].
+fn key_payload(keyname: &str) -> Result<String> {
     // Ký tự điều khiển gửi qua `do script` như mọi chuỗi khác. Mũi tên là dãy
     // thoát ANSI: ESC [ A/B/C/D — đúng thứ terminal nhận khi người ta bấm.
-    let payload = match keyname {
-        "enter" => "\"\"".to_string(),          // chuỗi rỗng: `do script` tự kèm xuống dòng
+    Ok(match keyname {
+        "enter" => "\"\"".to_string(), // chuỗi rỗng: `do script` tự kèm xuống dòng
         "esc" => "(ASCII character 27)".to_string(),
         "up" => "((ASCII character 27) & \"[A\")".to_string(),
         "down" => "((ASCII character 27) & \"[B\")".to_string(),
@@ -624,8 +629,27 @@ pub fn press(window: i64, keyname: &str) -> Result<()> {
         "space" => as_string(" "),
         d if d.len() == 1 && d.chars().all(|c| c.is_ascii_digit()) => as_string(d),
         other => return Err(anyhow!("không biết phím '{other}'")),
-    };
-    osascript(&do_script(window, &payload))?;
+    })
+}
+
+/// Nhiều phím trong MỘT lời gọi `do script` — cả dãy đi vào tab như một lần gõ.
+///
+/// Vì sao phải có, thay vì gọi [`press`] nhiều lần: mỗi `do script` **tự kèm
+/// một dấu xuống dòng** và không tắt được (xem `do_script`). Nên gọi ba lần là
+/// ba dấu Enter chen vào giữa dãy phím — trên một bảng hỏi, mỗi Enter thừa là
+/// một lần CHỐT hộ chủ máy. Gộp lại thì cả dãy chỉ còn đúng một dấu ở cuối, tức
+/// số Enter đếm được và nằm ở chỗ mình chọn.
+///
+/// Hàm này KHÔNG tự quyết được dãy phím ấy có an toàn hay không — chỗ gọi phải
+/// tự chịu trách nhiệm, cùng luật với `arrow_verdict`.
+pub fn press_seq(window: i64, keys: &[&str]) -> Result<()> {
+    if keys.is_empty() {
+        return Err(anyhow!("không có phím nào để gửi"));
+    }
+    let parts: Result<Vec<String>> = keys.iter().map(|k| key_payload(k)).collect();
+    // `enter` giữa dãy là chuỗi rỗng nên nối vào không sinh ký tự — đúng ý:
+    // dấu xuống dòng DUY NHẤT là cái `do script` kèm ở cuối.
+    osascript(&do_script(window, &parts?.join(" & ")))?;
     Ok(())
 }
 
@@ -1161,6 +1185,98 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
     out.into_iter().map(|(n, l, _)| (n, l)).collect()
 }
 
+/// Thanh tab của một bảng hỏi nhiều câu, đọc từ màn.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AskTable {
+    /// Mỗi câu một mục, ĐÚNG thứ tự trái→phải: đã trả lời hay chưa.
+    pub answered: Vec<bool>,
+    /// Nhãn ngắn từng câu, dùng để ghép với `sessions::Asking` đọc từ nhật ký.
+    pub headers: Vec<String>,
+}
+
+impl AskTable {
+    /// Còn mấy câu trống. `0` nghĩa là bảng đã sẵn sàng gửi.
+    pub fn left(&self) -> usize {
+        self.answered.iter().filter(|a| !**a).count()
+    }
+}
+
+/// Bảng hỏi NHIỀU CÂU đang mở trên màn, nếu có.
+///
+/// 🔴 Hà 2026-08-13: *"chọn option xong thì vẫn còn bước nữa nên không pass qua
+/// được"*. Bảng nhiều câu vẽ một thanh tab, và **chỉ thanh ấy** nói ra cái ràng
+/// buộc chết người: bảng không gửi đi được chừng nào còn một ô trống.
+///
+/// Đọc theo KÝ TỰ ĐÃ ĐO trên máy này, không theo ký tự đoán từ ảnh chụp —
+/// `rust/tests/ask_table_live.rs` in ra nguyên văn: `←  ☒ Vá ACL  ☐ Đăng nhập
+/// ✔ Submit  →`, tức `☒ U+2612` / `☐ U+2610` / `✔ U+2714`. Ảnh chụp điện thoại
+/// không phân biệt nổi `☒` với `⊠ U+22A0`, và viết theo cái đoán thì hàm này
+/// đếm ra 0 ở mọi màn mà vẫn "chạy đúng" — đúng cái phép đo mù mà
+/// `OPERATING-CHARTER.md` §2d dựng ra để tránh.
+///
+/// Nhận diện cả dòng chứ không bắt từng ký tự rời: phải có mũi tên chỉ dẫn hai
+/// đầu (`←` … `→`) VÀ ít nhất một ô. Một dòng văn xuôi lỡ mang chữ `☐` thì
+/// không đủ điều kiện, nên hàm không dựng ra một cái bảng không có thật.
+pub fn ask_table(screen: &str) -> Option<AskTable> {
+    for line in screen.lines() {
+        if !line.contains('←') || !line.contains('→') {
+            continue;
+        }
+        let mut answered = Vec::new();
+        let mut headers: Vec<String> = Vec::new();
+        for ch in line.chars() {
+            match ch {
+                '☒' | '☑' => {
+                    answered.push(true);
+                    headers.push(String::new());
+                }
+                '☐' | '□' => {
+                    answered.push(false);
+                    headers.push(String::new());
+                }
+                // `✔ Submit` là NÚT GỬI, không phải một câu hỏi — đếm nó vào
+                // thành một câu là khai bảng dài hơn thật, và mọi phép "còn mấy
+                // câu trống" lệch theo.
+                '✔' | '✓' => break,
+                _ => {
+                    if let Some(last) = headers.last_mut() {
+                        last.push(ch);
+                    }
+                }
+            }
+        }
+        if answered.is_empty() {
+            continue;
+        }
+        return Some(AskTable {
+            answered,
+            headers: headers.into_iter().map(|h| h.trim().to_string()).collect(),
+        });
+    }
+    None
+}
+
+/// Bảng đang đứng ở CÂU NÀO, ghép bằng chữ chứ không bằng màu.
+///
+/// Tab đang chọn được vẽ bằng nền tím, mà `contents of tab` trả chữ TRẦN — màu
+/// không đi qua đường ấy. Nên vị trí con trỏ phải suy từ thứ đọc được: dưới
+/// thanh tab, bảng in nguyên văn câu hỏi đang mở. Ghép câu ấy với danh sách câu
+/// đọc từ nhật ký là biết đang đứng ở đâu, không phải đếm phím đã bấm — mà đếm
+/// phím thì sai ngay lần đầu chủ máy tự bấm một cái trên bàn phím.
+///
+/// Bỏ hết khoảng trắng hai bên trước khi so: TUI ngắt dòng câu hỏi theo bề
+/// ngang cửa sổ, nên so nguyên văn là trượt đúng những câu dài.
+pub fn cursor_on(screen: &str, questions: &[String]) -> Option<usize> {
+    let squash = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+    let flat = squash(screen);
+    questions
+        .iter()
+        .enumerate()
+        .filter(|(_, q)| !q.trim().is_empty())
+        .find(|(_, q)| flat.contains(&squash(q)))
+        .map(|(i, _)| i)
+}
+
 /// Phiên có đang chạy dở không, đọc từ màn hình.
 ///
 /// `claude` chạy dở thì in một dòng đếm giờ — `✶ Unravelling… (2m 36s · ↓ 2.0k
@@ -1524,6 +1640,43 @@ mod tests {
         // Ngoặc có số nhưng KHÔNG phải đồng hồ thì không tính.
         assert!(!is_busy("Đã sửa 3 tệp (xem lại 2 chỗ)"));
         assert!(!is_busy("chạy trong (500ms)"));
+    }
+
+    /// Nguyên văn màn THẬT, chép từ `tests/ask_table_live.rs` chạy trên phiên
+    /// `projects-bd` đang kẹt (2026-08-13). Giữ nguyên ký tự đo được — sửa cho
+    /// "gọn" là vứt đúng cái bằng chứng khiến hàm đếm đúng.
+    const REAL_TAB_BAR: &str = "←  ☒ Vá ACL  ☐ Đăng nhập  ✔ Submit  →";
+
+    #[test]
+    fn the_tab_bar_says_which_questions_are_still_empty() {
+        let t = super::ask_table(&format!("chữ ở trên\n{REAL_TAB_BAR}\ncâu hỏi ở dưới"))
+            .expect("thanh tab thật phải đọc được");
+        assert_eq!(t.answered, vec![true, false], "☒ rồi ☐");
+        assert_eq!(t.headers, vec!["Vá ACL", "Đăng nhập"]);
+        // `✔ Submit` là nút gửi, KHÔNG phải câu thứ ba.
+        assert_eq!(t.left(), 1, "còn đúng một ô trống");
+    }
+
+    #[test]
+    fn a_line_that_merely_mentions_a_box_is_not_a_table() {
+        // Không có mũi tên hai đầu ⟹ không phải thanh tab. Dựng bảng từ một
+        // dòng văn xuôi là bịa ra một cái hộp không có thật, rồi gửi phím vào.
+        assert!(super::ask_table("tôi đã đánh dấu ☐ vào ô ấy").is_none());
+        assert!(super::ask_table("← quay lại · tiếp →").is_none(), "không có ô nào");
+    }
+
+    #[test]
+    fn the_cursor_is_found_by_text_even_when_the_question_wraps() {
+        // Đúng hình dạng thật: TUI bẻ câu hỏi theo bề ngang cửa sổ.
+        let screen = format!(
+            "{REAL_TAB_BAR}\nCòn chuyện đăng ký hạ chữ username mà đăng nhập lại so đúng\nnhư gõ?\n❯ 1. Có"
+        );
+        let qs = vec![
+            "Khi ô ACL nhận một chuỗi không trỏ tới ai, server nên xử sao?".to_string(),
+            "Còn chuyện đăng ký hạ chữ username mà đăng nhập lại so đúng như gõ?".to_string(),
+        ];
+        assert_eq!(super::cursor_on(&screen, &qs), Some(1), "đang đứng ở câu 2");
+        assert_eq!(super::cursor_on("màn chẳng có câu nào", &qs), None);
     }
 
     #[test]

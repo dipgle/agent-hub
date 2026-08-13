@@ -574,12 +574,19 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // được màn), rồi mới tới thứ đọc được trên màn.
         // Kèm luôn cờ CHỌN NHIỀU: nút và câu chữ phải khai đúng bản chất câu
         // hỏi, không thì bấm một cái rồi ngồi chờ một việc không xảy ra.
+        // `rest` đi kèm: bảng nhiều câu phải có nút cho TỪNG câu, không thì
+        // điện thoại trả lời được câu đầu rồi đứng — xem `sessions::Asking`.
+        const NO_REST: &[crate::sessions::Question] = &[];
         let buttons = match (&c, &idle) {
-            (crate::watch::Change::Asking { options, multi, .. }, _) if !options.is_empty() => {
-                Some((options, *multi))
+            (crate::watch::Change::Asking { options, multi, rest, .. }, _)
+                if !options.is_empty() =>
+            {
+                Some((options, *multi, rest.as_slice()))
             }
             (_, crate::watch::Idle::Asking { options, multi, .. }) if !options.is_empty() => {
-                Some((options, *multi))
+                // Nhánh này đọc từ MÀN (`keys::parse_choices`), mà màn chỉ vẽ
+                // câu đang mở — nên nó không biết bảng có mấy câu. Không bịa.
+                Some((options, *multi, NO_REST))
             }
             _ => None,
         };
@@ -652,8 +659,8 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             }
         }
         match (buttons, crate::telegram::inbox()) {
-            (Some((opts, multi)), Some(tg)) => {
-                if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some(), multi) {
+            (Some((opts, multi, rest)), Some(tg)) => {
+                if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some(), multi, rest) {
                     logging::error("session_change_telegram_failed", json!({ "err": e }));
                 }
             }
@@ -2123,6 +2130,174 @@ pub fn quick_cmd(db: &Db, n: usize) -> Option<(String, String)> {
 /// Trả CHỮ chứ không phải ảnh (Hà 2026-08-10): ảnh chỉ để nhìn, còn cái cần là
 /// biết nó đang hỏi gì rồi bấm số trả lời ngay.
 ///
+/// Dãy phím đưa con trỏ từ câu `from` sang câu `to` rồi bấm lựa chọn `opt`.
+///
+/// Tách ra khỏi phần I/O để **kiểm được bằng test**: cái sai đắt nhất ở đây là
+/// đi nhầm một tab — nó chốt một lựa chọn cho câu người ta chưa đọc, và không
+/// lùi lại được. Số phím mũi tên là số học thuần, nên nó phải đứng chỗ mà test
+/// nhìn thấy, không lẫn trong một hàm cần cửa sổ Terminal thật mới chạy.
+pub fn pick_keys(from: usize, to: usize, opt: usize) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    let dir = if to > from { "right" } else { "left" };
+    for _ in 0..to.abs_diff(from) {
+        keys.push(dir.to_string());
+    }
+    keys.push(opt.to_string());
+    keys
+}
+
+/// `/pick <câu>.<lựa chọn>` — trả lời MỘT câu bất kỳ của bảng hỏi nhiều câu.
+///
+/// 🔴 Hà 2026-08-13: *"chọn option xong thì vẫn còn bước nữa nên không pass qua
+/// được"*. Đường cũ (`/key <số>`) gửi số vào câu ĐANG MỞ; bảng nhiều câu thì
+/// các câu sau nằm sau một phím mũi tên, mà mũi tên trần bị `arrow_verdict` từ
+/// chối — đúng luật, vì `do script` kèm dấu xuống dòng nên mũi tên vừa di vừa
+/// CHỐT. Ở đây cả dãy đi trong MỘT `do script`, nên dấu xuống dòng chỉ có một,
+/// nằm sau con số — tức nó chốt đúng cái vừa chọn, không chốt hộ dọc đường.
+///
+/// Ba điều hàm này KHÔNG làm, và mỗi điều là một cái bẫy đã biết:
+/// * **Không đếm phím đã bấm để đoán vị trí** — chủ máy có thể vừa tự bấm một
+///   cái trên bàn phím. Vị trí đọc từ MÀN mỗi lần (`keys::cursor_on`).
+/// * **Không gõ khi mù** — `Withheld`/`Blind` thì dừng và nói vì sao. Gõ vào
+///   một màn không đọc được là chốt bừa vào việc của người khác.
+/// * **Không tin mã trả về** — `osascript` trả 0 chỉ chứng minh byte vào tới
+///   tab. Câu trả lời dựng từ việc ĐỌC LẠI bảng và so số ô trống trước/sau.
+fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
+    let name = crate::sessions::shown(s);
+    let (q_txt, opt_txt) = match arg.trim().split_once('.') {
+        Some(p) => p,
+        None => {
+            return format!(
+                "⚠ `/pick` cần dạng `<câu>.<lựa chọn>`, ví dụ `/pick 2.1` — nhận được '{}'",
+                crate::exec::truncate(arg.trim(), 40)
+            )
+        }
+    };
+    let (Ok(q), Ok(opt)) = (q_txt.trim().parse::<usize>(), opt_txt.trim().parse::<usize>()) else {
+        return format!("⚠ `/pick` cần hai con số, ví dụ `/pick 2.1` — nhận được '{arg}'");
+    };
+    if q == 0 || opt == 0 || opt > 9 {
+        return "⚠ số câu và số lựa chọn đếm từ 1, và lựa chọn tối đa là 9".to_string();
+    }
+
+    // Câu hỏi lấy từ NHẬT KÝ (đủ chữ, không phụ thuộc bề ngang cửa sổ); vị trí
+    // con trỏ lấy từ MÀN. Hai nguồn, mỗi nguồn trả lời đúng phần nó biết.
+    let asking = s.asking.clone().unwrap_or_default();
+    let questions: Vec<String> = std::iter::once(asking.question.clone())
+        .chain(asking.rest.iter().map(|r| r.question.clone()))
+        .collect();
+
+    let body = match crate::keys::look(&s.tty, PICK_LINES) {
+        crate::keys::Look::Saw { body, .. } => body,
+        crate::keys::Look::Withheld { risk, .. } => {
+            logging::info(
+                "pick_refused_withheld",
+                json!({ "session": s.session_id, "risk": risk }),
+            );
+            return format!(
+                "⚠ Màn của {name} có dấu hiệu bí mật nên hub không đọc được chữ — mà không đọc \
+                 được thì KHÔNG biết đang đứng ở câu nào, và bấm bừa là chốt hộ Hà một lựa chọn \
+                 không lùi lại được. Trả lời trên máy, hoặc `/shot` để tự nhìn."
+            );
+        }
+        crate::keys::Look::Blind { why } => {
+            logging::warn("pick_refused_blind", json!({ "session": s.session_id, "why": why }));
+            return format!("⚠ Không đọc được màn của {name} ({why}) — nên tôi KHÔNG bấm gì cả.");
+        }
+    };
+
+    let table = crate::keys::ask_table(&body);
+    let total = table.as_ref().map(|t| t.answered.len()).unwrap_or(1);
+    if q > total {
+        return format!(
+            "⚠ Bảng của {name} có {total} câu, không có câu {q}. (Bảng một câu thì dùng `/key`.)"
+        );
+    }
+    // Không có thanh tab ⟹ bảng MỘT câu ⟹ không có gì để đi tới; `/pick 1.x`
+    // vẫn chạy được và trùng đúng nghĩa với `/key x`.
+    let cursor = match crate::keys::cursor_on(&body, &questions) {
+        Some(c) => c,
+        None if total == 1 => 0,
+        None => {
+            logging::info(
+                "pick_cursor_unknown",
+                json!({ "session": s.session_id, "questions": questions.len(), "total": total }),
+            );
+            return format!(
+                "⚠ Đọc được bảng {total} câu của {name} nhưng KHÔNG khớp được câu nào đang mở, \
+                 nên tôi không biết phải đi mấy bước — và đi mò thì chốt nhầm câu. `/shot` để \
+                 nhìn, rồi `/key <số>` cho câu đang mở."
+            );
+        }
+    };
+
+    let before = table.as_ref().map(|t| t.left());
+    let keys = pick_keys(cursor, q - 1, opt);
+    let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+    if let Err(e) = crate::keys::press_seq(w, &refs) {
+        logging::warn(
+            "pick_send_failed",
+            json!({ "session": s.session_id, "keys": keys, "err": e.to_string() }),
+        );
+        return format!("⚠ Không gửi được phím tới {name}: {e}");
+    }
+    logging::info(
+        "pick_sent",
+        json!({ "session": s.session_id, "window": w, "from": cursor, "to": q - 1,
+                "opt": opt, "keys": keys }),
+    );
+
+    // ĐỌC LẠI, và chờ vì TUI vẽ sau. Ba nhịp ngắn thay vì một nhịp dài: nếu nó
+    // vẽ nhanh thì trả lời nhanh, còn máy đang swap thì vẫn kịp thấy.
+    let mut after = None;
+    for _ in 0..3 {
+        std::thread::sleep(std::time::Duration::from_millis(900));
+        if let crate::keys::Look::Saw { body, .. } = crate::keys::look(&s.tty, PICK_LINES) {
+            let t = crate::keys::ask_table(&body);
+            if t.as_ref().map(|t| t.left()) != before {
+                after = t;
+                break;
+            }
+            after = t;
+        }
+    }
+    let label = asking
+        .rest
+        .get(q.saturating_sub(2))
+        .map(|r| r.header.clone())
+        .filter(|_| q >= 2)
+        .unwrap_or_else(|| asking.header.clone());
+    match (before, after.as_ref().map(|t| t.left())) {
+        // Ô trống bớt đi: đúng thứ vừa làm, và nói luôn còn mấy câu nữa.
+        (Some(b), Some(a)) if a < b => {
+            if a == 0 {
+                format!(
+                    "✅ {name} · câu {q} ({label}) → chọn {opt}. Bảng ĐÃ ĐỦ — bấm `/key enter` để gửi."
+                )
+            } else {
+                format!("✅ {name} · câu {q} ({label}) → chọn {opt}. Còn {a} câu chưa trả lời.")
+            }
+        }
+        // Không đổi: nói thẳng là không đổi. Đây đúng chỗ hub từng báo "đã bấm"
+        // cho một cú bấm không tới đâu.
+        (Some(b), Some(a)) if a == b => format!(
+            "⚠ Đã gửi phím tới {name} nhưng bảng KHÔNG đổi (vẫn {b} câu trống). Có thể câu ấy \
+             cho chọn nhiều, hoặc phím chưa tới. `/shot` để nhìn trước khi bấm tiếp."
+        ),
+        _ => format!(
+            "⚠ Đã gửi phím tới {name} nhưng đọc lại KHÔNG thấy bảng đâu — có thể nó vừa được gửi \
+             đi, có thể màn đã đổi sang thứ khác. `/shot` để nhìn."
+        ),
+    }
+}
+
+/// Bao nhiêu dòng màn cần đọc để thấy CẢ thanh tab lẫn hộp chọn.
+///
+/// 8 dòng — con số của nhánh "phiên vừa im" — vừa đủ thấy `1. Submit answers /
+/// 2. Cancel` mà KHÔNG thấy dòng `You have not answered all questions` nằm cao
+/// hơn, tức vừa đủ để báo tin sai một cách tự tin.
+const PICK_LINES: usize = 40;
+
 /// Hai luật của dự án nằm gọn trong hàm này, và đó là lý do nó là MỘT hàm chứ
 /// không phải hai đoạn giống nhau ở hai chỗ gọi:
 /// * **Điều 5** — chữ trên màn rời khỏi máy này y như phần xem trước của phiên,
@@ -2339,6 +2514,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      — Gõ thẳng vào cửa sổ phiên —\n\
                      /type <chữ> — gõ chữ vào phiên đang theo (Terminal, kèm Enter)\n\
                      /key <up|down|left|right|enter|esc|tab|space|1-9> — bấm một phím\n\
+                     /pick <câu>.<lựa chọn> — trả lời MỘT câu của bảng hỏi nhiều câu, ví dụ /pick 2.1 (bảng chỉ gửi được khi hết ô trống → /key enter)\n\
                      /shot — đọc chữ đang hiện trên màn của phiên\n\
                      — Vận hành —\n\
                      /cmd <dòng lệnh> — chạy một lệnh trên máy rồi trả kết quả (chạy xong là hết)\n\
@@ -3098,7 +3274,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 }
                 Some(ack)
             }
-            CommandKind::Type | CommandKind::Key | CommandKind::Shot => {
+            CommandKind::Type | CommandKind::Key | CommandKind::Shot | CommandKind::Pick => {
                 // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
                 // khác, và đó là hàng rào duy nhất còn lại ở đường này.
@@ -3161,6 +3337,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     .parse::<usize>()
                                     .unwrap_or(SHOT_LINES);
                                 screen_report(&s, w, n)
+                            } else if matches!(cmd.kind, CommandKind::Pick) {
+                                // Bảng nhiều câu đi đường riêng: nó phải ĐỌC
+                                // trước khi gõ (đang đứng ở câu nào), và gõ cả
+                                // dãy trong một lượt — xem `pick_answer`.
+                                pick_answer(&s, w, &typed)
                             } else {
                             let is_key = matches!(cmd.kind, CommandKind::Key);
                             let arrow = matches!(

@@ -775,6 +775,14 @@ pub fn parse_command(
                 .unwrap_or_default();
             (!what.is_empty()).then_some((CommandKind::Key, 0, what))
         }
+        // `/pick [<phiên>] <câu>.<lựa chọn>` — trả lời một câu của bảng nhiều câu.
+        "pick" | "chon" => {
+            let what = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            (!what.is_empty()).then_some((CommandKind::Pick, 0, what))
+        }
         // `/ask <câu hỏi>` — everything after the verb is the question, so
         // re-split like `/project`. No id: the target is the focused session,
         // because this is typed while looking at that session's stream.

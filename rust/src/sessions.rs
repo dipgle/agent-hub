@@ -1476,6 +1476,31 @@ pub struct Asking {
     /// cạnh `options` trong chính lời gọi công cụ. Cùng bài học với bộ đếm
     /// subagent — hỏi cái nhật ký ghi có cấu trúc, đừng dò chữ trên màn.
     pub multi: bool,
+    /// Các câu CÒN LẠI của cùng một bảng, theo đúng thứ tự tab trên màn.
+    ///
+    /// 🔴 Hà 2026-08-13, ảnh chụp hộp hỏi của phiên `[AI/tfl5]`: *"chọn option
+    /// xong thì vẫn còn bước nữa nên không pass qua được"* · *"có nhiều option
+    /// thì phải có cơ chế chọn được nhiều"*. Chỗ này trước đây đọc đúng một câu
+    /// (`/input/questions/0`) và tự trấn an rằng *"các câu sau vẫn nằm nguyên
+    /// trên màn cho người mở phiên ra xem"* — nghe hợp lý, và **sai về hậu quả**:
+    /// một bảng nhiều câu chỉ gửi đi được khi trả lời HẾT, nên trả lời một câu
+    /// từ điện thoại rồi dừng ở đó là để nguyên phiên kẹt, lần này ⊠ một ô và
+    /// ☐ một ô, kèm dòng vàng *"You have not answered all questions"*.
+    ///
+    /// Đúng luật cây cầu: cái gì ngồi trước máy làm được thì điện thoại phải làm
+    /// được. Ngồi trước máy thì bấm `→` sang câu sau; nên bảng phải đi ra ngoài
+    /// NGUYÊN BẢNG, không phải một lát cắt của nó.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rest: Vec<Question>,
+}
+
+/// Một câu trong bảng hỏi — dùng cho các câu SAU câu đầu (xem [`Asking::rest`]).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Question {
+    pub header: String,
+    pub question: String,
+    pub options: Vec<String>,
+    pub multi: bool,
 }
 
 /// Câu hỏi phiên ĐANG CHỜ người trả lời — đọc từ NHẬT KÝ, không phải từ màn.
@@ -1513,40 +1538,24 @@ pub fn pending_question(tail: &str) -> Option<Asking> {
                     let Some(id) = b.get("id").and_then(Value::as_str) else {
                         continue;
                     };
-                    // Chỉ câu HỎI ĐẦU: bảng có thể mang nhiều câu, mà một cái
-                    // chuông trả lời được đúng một câu. Các câu sau vẫn nằm
-                    // nguyên trên màn cho người mở phiên ra xem.
-                    let Some(q) = b.pointer("/input/questions/0") else {
+                    // NGUYÊN BẢNG, không phải câu đầu. Bảng nhiều câu chỉ gửi đi
+                    // được khi trả lời hết, nên cắt lấy câu 0 là dựng sẵn một
+                    // phiên kẹt — xem `Asking::rest`.
+                    let Some(qs) = b.pointer("/input/questions").and_then(Value::as_array) else {
                         continue;
                     };
-                    let options: Vec<String> = q
-                        .get("options")
-                        .and_then(Value::as_array)
-                        .map(|a| {
-                            a.iter()
-                                .filter_map(|o| o.get("label").and_then(Value::as_str))
-                                .map(str::to_string)
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                    let mut all = qs.iter().map(question_of);
+                    let Some(first) = all.next() else {
+                        continue;
+                    };
                     asked.push((
                         id.to_string(),
                         Asking {
-                            header: q
-                                .get("header")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_string(),
-                            question: q
-                                .get("question")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_string(),
-                            options,
-                            multi: q
-                                .get("multiSelect")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false),
+                            header: first.header,
+                            question: first.question,
+                            options: first.options,
+                            multi: first.multi,
+                            rest: all.collect(),
                         },
                     ));
                 }
@@ -1569,7 +1578,36 @@ pub fn pending_question(tail: &str) -> Option<Asking> {
         asking.question = "(màn có dấu hiệu bí mật — mở phiên trên máy để đọc)".to_string();
         asking.options = Vec::new();
     }
+    // Cổng quét chạy trên TỪNG câu, không chỉ câu đầu: một bảng có thể hỏi
+    // chuyện vô hại ở tab 1 và dán nguyên một khoá ở tab 2, và chính tab 2 mới
+    // là thứ nút bấm sắp mang ra khỏi máy. Câu nào dính thì giữ chữ câu ấy —
+    // giấu cả bảng thì mất luôn sự thật là bảng có mấy câu.
+    for q in &mut asking.rest {
+        if risky(&q.question) || q.options.iter().any(|o| risky(o)) {
+            q.question = "(màn có dấu hiệu bí mật — mở phiên trên máy để đọc)".to_string();
+            q.options = Vec::new();
+        }
+    }
     Some(asking)
+}
+
+/// Một mục `questions[i]` trong lời gọi `AskUserQuestion` → [`Question`].
+fn question_of(q: &Value) -> Question {
+    Question {
+        header: q.get("header").and_then(Value::as_str).unwrap_or_default().to_string(),
+        question: q.get("question").and_then(Value::as_str).unwrap_or_default().to_string(),
+        options: q
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|o| o.get("label").and_then(Value::as_str))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        multi: q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false),
+    }
 }
 
 /// Tên công cụ `claude` dùng khi nó dừng lại hỏi chủ máy.

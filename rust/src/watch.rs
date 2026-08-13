@@ -210,6 +210,8 @@ pub enum Change {
         options: Vec<String>,
         /// Chọn NHIỀU: bấm một số là bật/tắt, chưa gửi — xem `sessions::Asking`.
         multi: bool,
+        /// Các câu còn lại của cùng bảng — xem `sessions::Asking::rest`.
+        rest: Vec<crate::sessions::Question>,
     },
     /// Phiên đứng lại vì một LỖI — xem `ERRORED`.
     Failed {
@@ -358,11 +360,20 @@ impl Change {
             // Câu hỏi ĐI KÈM tin: người đọc phải quyết được ngay trên điện
             // thoại, không phải mở máy ra mới biết nó hỏi gì. Nhãn ngắn
             // (`header`) đứng trước vì nó đọc được trong một liếc.
-            Change::Asking { name, header, question, options, .. } => {
-                let head = if header.is_empty() {
-                    format!("⚠ {name} dừng lại HỎI")
+            Change::Asking { name, header, question, options, rest, .. } => {
+                // Bảng mấy câu thì nói ngay ở dòng đầu. Con số này quyết định
+                // việc người đọc sắp làm: một câu thì bấm xong là xong, nhiều
+                // câu thì bấm xong VẪN CHƯA GỬI — và đó đúng là chỗ hub từng để
+                // Hà bấm rồi ngồi nhìn một cái hộp không nhúc nhích.
+                let of = if rest.is_empty() {
+                    String::new()
                 } else {
-                    format!("⚠ {name} dừng lại HỎI — {header}")
+                    format!(" (câu 1/{})", rest.len() + 1)
+                };
+                let head = if header.is_empty() {
+                    format!("⚠ {name} dừng lại HỎI{of}")
+                } else {
+                    format!("⚠ {name} dừng lại HỎI — {header}{of}")
                 };
                 let list: Vec<String> = options
                     .iter()
@@ -376,6 +387,30 @@ impl Change {
                 }
                 if !list.is_empty() {
                     out.push_str(&format!("\n\n{}", list.join("\n")));
+                }
+                // Các câu sau: đưa ra ĐỦ để quyết được, và nói thẳng cái ràng
+                // buộc — bảng chỉ đi khi không còn ô trống. Nhãn ngắn đứng
+                // trước, các lựa chọn nối bằng `·` cho vừa một cái chuông.
+                if !rest.is_empty() {
+                    out.push_str(&format!(
+                        "\n\n📋 Bảng {} câu — trả lời HẾT rồi mới gửi được:",
+                        rest.len() + 1
+                    ));
+                    for (i, q) in rest.iter().enumerate() {
+                        let label = if q.header.is_empty() { &q.question } else { &q.header };
+                        let opts = q
+                            .options
+                            .iter()
+                            .map(|o| crate::exec::truncate(o, 40))
+                            .collect::<Vec<_>>()
+                            .join(" · ");
+                        out.push_str(&format!(
+                            "\n{}. {}{}",
+                            i + 2,
+                            crate::exec::truncate(label, 60),
+                            if opts.is_empty() { String::new() } else { format!(": {opts}") }
+                        ));
+                    }
                 }
                 // Thông tin chốt phiên vừa nói ra TRƯỚC khi hỏi: nhiều câu hỏi
                 // chỉ quyết được khi biết nó vừa tìm ra gì. Đứng sau các lựa
@@ -757,6 +792,7 @@ pub fn changes(
                 question: a.question,
                 options: a.options,
                 multi: a.multi,
+                rest: a.rest,
             });
         } else if was_working && state == IDLE {
             // Cửa thời lượng: chạy chớp nhoáng thì không phải tin.

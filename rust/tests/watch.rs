@@ -391,6 +391,7 @@ fn a_session_that_starts_asking_is_announced_once_with_its_options() {
         question: "Đơn vắng có khai được NỬA NGÀY không?".into(),
         options: vec!["Thêm ô".into(), "Trọn ngày".into()],
         multi: false,
+        rest: Vec::new(),
     });
     let prev: BTreeMap<String, Mark> = [("a".to_string(), mark(IDLE, "ttys009", "interactive"))]
         .into_iter()

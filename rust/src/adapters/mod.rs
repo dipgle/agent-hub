@@ -92,6 +92,18 @@ pub enum CommandKind {
     /// space · 1-9. Hộp chọn của `claude` đi bằng mũi tên, gửi chữ "xuống" vào
     /// đó thì nó gõ ra chữ chứ không di chuyển.
     Key,
+    /// `/pick <câu>.<lựa chọn>` — trả lời MỘT CÂU BẤT KỲ của bảng hỏi nhiều câu.
+    ///
+    /// 🔴 Hà 2026-08-13: *"chọn option xong thì vẫn còn bước nữa nên không pass
+    /// qua được"* · *"có nhiều option thì phải có cơ chế chọn được nhiều"*.
+    /// `/key` gửi đúng một phím vào câu ĐANG MỞ, nên từ điện thoại chỉ trả lời
+    /// được câu đầu; các câu sau nằm sau một phím mũi tên mà `arrow_verdict` —
+    /// đúng luật của nó — từ chối gửi khi màn đang có hộp chọn. Kết quả: bảng
+    /// nhiều câu không bao giờ đủ ô để gửi, và điện thoại không có đường nào đi
+    /// tiếp. Route này đi được vì nó KHÔNG gửi mũi tên trần: nó ghép cả dãy
+    /// (mũi tên + số) vào MỘT `do script`, nên chỉ có đúng một dấu xuống dòng,
+    /// ở cuối, chỗ mình chọn.
+    Pick,
     /// Ask the focused session a question WITHOUT interrupting it. `arg` is the
     /// question; the target is whatever `/session` is following.
     ///

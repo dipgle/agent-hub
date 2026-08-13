@@ -13,3 +13,11 @@ hub.config.json.bak*
 *.sqlite-wal
 .DS_Store
 .tmp/
+
+# Không lên repo công khai — thêm 2026-08-13 khi mở repo public:
+# ảnh Hà gửi qua Telegram, log của daemon, và file quy định phạm vi daemon
+# ("this file is the security boundary" — chính nó tự khai).
+.inbox/
+scripts/.cmd-results/
+.runner-allowlist
+.runner-allowlist.bak*

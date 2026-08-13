@@ -592,6 +592,10 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
     ];
     let mut out: Vec<String> = Vec::new();
     for raw in screen.lines() {
+        // Câu đang CẤM một lệnh thì không phải câu mời chạy nó.
+        if forbids(raw) {
+            continue;
+        }
         let mut line = raw.trim();
         // Dấu nhắc và dấu trang trí của TUI đứng trước lệnh.
         for p in ["$ ", "❯ ", "> ", "⏵ ", "% ", "• ", "- "] {
@@ -658,7 +662,15 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
     // trả giá hôm 08-12 tối: bản đầu bóc dấu nháy mở rồi nuốt cả câu phía sau
     // (`git push origin main` (a plain push to main) executed from…) ⟹ một nút
     // chạy nhầm thứ. Cắt đúng trong cặp nháy thì không còn chỗ cho câu văn lọt.
-    for span in text.split('`').skip(1).step_by(2) {
+    let segs: Vec<&str> = text.split('`').collect();
+    for i in (1..segs.len()).step_by(2) {
+        let span = segs[i];
+        // Chữ đứng NGAY TRƯỚC dấu nháy, trong cùng dòng ấy — chỗ câu cấm nằm.
+        let before = segs[i - 1];
+        let prefix = before.rsplit('\n').next().unwrap_or(before);
+        if forbids(prefix) {
+            continue;
+        }
         let Some(cmd) = unwrap_terminal_wrap(span) else {
             continue;
         };
@@ -683,6 +695,27 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
         out.drain(..out.len() - max);
     }
     out
+}
+
+/// Câu này đang CẤM một lệnh, chứ không mời chạy nó?
+///
+/// 🔴 Trả giá ngay trong ngày đặt tính năng, 2026-08-13: một bộ gác lệnh từ
+/// chối `git filter-branch` và in ra câu giải thích **chứa chính lệnh ấy trong
+/// dấu nháy**. hub đọc màn, thấy hình dạng một lệnh, và gửi cho Hà ba cái nút —
+/// trong đó có `▶ git filter-branch --force`. Tức tính năng "bấm là chạy" vừa
+/// biến một lời cảnh báo thành **một cú bấm là làm đúng cái điều bị cấm**.
+///
+/// Bài học không phải "thêm một cửa nữa" mà là: nhận diện theo hình dạng thì
+/// không đọc được Ý — và ý duy nhất bắt buộc phải đọc là *"đừng chạy cái này"*.
+/// Dấu hiệu lấy hẹp và rõ, chấp nhận bỏ sót vài cái nút đúng, vì cán cân ở đây
+/// lệch hẳn: bỏ sót thì gõ tay, bấm nhầm thì không có nút hoàn tác.
+fn forbids(context: &str) -> bool {
+    const MARKS: &[&str] = &[
+        "block", "⚠", "❌", "🔴", "never", "do not", "don't", "denied", "refus", "dangerous",
+        "đừng", "cấm", "không được", "không nên", "từ chối", "nguy hiểm", "thay vì",
+    ];
+    let c = context.to_lowercase();
+    MARKS.iter().any(|m| c.contains(m))
 }
 
 /// Nối lại một lệnh bị MÀN HÌNH bẻ dòng — hoặc từ chối, nếu không chắc.

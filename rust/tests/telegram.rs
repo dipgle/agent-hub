@@ -709,6 +709,43 @@ fn a_command_the_terminal_wrapped_is_joined_back_not_dropped() {
     assert!(hub::keys::commands_on_screen(block, 4).is_empty());
 }
 
+/// Câu CẤM một lệnh không được biến thành cái nút chạy chính lệnh ấy.
+///
+/// 🔴 Trả giá đúng ngày đặt tính năng, 2026-08-13: bộ gác lệnh từ chối
+/// `git filter-branch` và in ra câu giải thích có chứa chính lệnh ấy trong dấu
+/// nháy. hub đọc màn, thấy hình dạng một lệnh, gửi cho Hà ba cái nút — trong đó
+/// có `▶ git filter-branch --force`. Một lời cảnh báo biến thành một cú bấm là
+/// làm đúng điều bị cấm.
+#[test]
+fn a_warning_about_a_command_never_becomes_a_button_for_it() {
+    // Chép nguyên hình dạng câu của bộ gác.
+    let block = "BLOCK: `git filter-branch --force` on `rewrite/main` rewrites commit history";
+    assert!(
+        hub::keys::commands_on_screen(block, 4).is_empty(),
+        "{:?}",
+        hub::keys::commands_on_screen(block, 4)
+    );
+
+    // Và câu cảnh báo của chính hub.
+    let mine = "⚠ Nút lệnh của hub vừa mời anh bấm `git filter-branch --force` — đừng bấm";
+    assert!(hub::keys::commands_on_screen(mine, 4).is_empty(), "{mine}");
+
+    // Lệnh đứng đầu dòng trong một dòng cảnh báo cũng không.
+    let bare = "❌ KHÔNG ĐƯỢC chạy dòng này:\n⚠ git push --force origin main";
+    assert!(
+        hub::keys::commands_on_screen(bare, 4).is_empty(),
+        "{:?}",
+        hub::keys::commands_on_screen(bare, 4)
+    );
+
+    // …nhưng câu MỜI chạy thì vẫn phải ra nút, không thì cửa này ăn hết.
+    let invite = "Chạy giúp tôi `cargo test --offline` rồi báo lại";
+    assert_eq!(
+        hub::keys::commands_on_screen(invite, 4),
+        vec!["cargo test --offline".to_string()]
+    );
+}
+
 /// Bấm "Xem đầy đủ" là đã chọn phiên ấy — nhưng chỉ được NÓI khi sổ đã ghi.
 ///
 /// 🔴 Hà 2026-08-13: *"khi bấm xem đầy đủ thì rõ ràng nó đang ở phiên đúng rồi

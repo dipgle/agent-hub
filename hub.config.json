@@ -12,7 +12,7 @@
   },
   "auto_handover": {
     "enabled": true,
-    "at_percent": 80,
+    "at_percent": 60,
     "idle_sec": 120
   },
   "confirm": {

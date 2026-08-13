@@ -105,8 +105,11 @@ fn the_list_tells_running_waiting_and_stopped_apart() {
     let mut c = sess("cccccccc-0000-0000-0000-000000000000", "Tự chạy lại", "acc3", false);
     c.host = "dead".into();
     let text = session_list_text(&[a, b, c], "", NOW);
-    assert!(text.contains("AI/hub · projects-ff"), "dự án đứng trước tên: {text}");
-    assert!(text.contains("dwork"), "{text}");
+    // Nhãn là ĐƯỜNG DỰ ÁN, không kèm tên tự sinh (Hà 2026-08-13: *"cần gì đoạn
+    // text project-xx làm gì"*).
+    assert!(text.contains("[AI/hub]"), "{text}");
+    assert!(text.contains("[dwork]"), "{text}");
+    assert!(!text.contains("projects-ff"), "tên tự sinh vẫn còn chiếm chỗ: {text}");
     // Chấm TRẠNG THÁI, không phải ký hiệu điều khiển của máy phát nhạc — Hà
     // 2026-08-13: *"icon biểu diễn chạy và dừng bị ngược"*. `▶` nay chỉ còn
     // nghĩa "bấm để chạy lệnh này" (`remember_quick`), một ký hiệu một nghĩa.
@@ -449,7 +452,7 @@ fn following_a_session_is_answered_from_the_book_not_from_a_new_snapshot() {
     // không nói được gì — mọi phiên trên máy này đều tên như thế.
     assert_eq!(
         hub::pipeline::session_name_from_book(&b, SID),
-        Some(("[hub] projects-fb".to_string(), "acc1".to_string()))
+        Some(("[AI/hub]".to_string(), "acc1".to_string()))
     );
 }
 

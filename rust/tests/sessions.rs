@@ -1085,22 +1085,25 @@ fn a_remembered_window_must_still_belong_to_that_process() {
     }
 }
 
-/// Tên phiên phải đọc ra được đang làm dự án nào.
+/// Tên phiên phải đọc ra được đang làm dự án nào — và CHỈ thế thôi.
 ///
-/// 🔴 Hà 2026-08-12: *"tất cả các chỗ có gắn `projects-…` nên thay thành tên dự
-/// án-… sẽ hợp lý hơn cho việc đọc hiểu, hoặc bao nó trong dấu `[]`"*. `claude`
-/// đặt tên theo thư mục MỞ phiên, mà cả máy này mở ở gốc workspace, nên mọi
-/// phiên đều `projects-xx` — một cái tên không phân biệt được gì.
+/// 🔴 Hà 2026-08-13: *"điều chỉnh lại các chỗ `[hub] project-06` = `[ai/hub]`
+/// là được, cho dễ nhận biết"* · *"cần gì đoạn text project-xx làm gì"*. Đúng:
+/// `claude` đặt tên theo thư mục MỞ phiên, mà cả máy này mở ở gốc workspace nên
+/// mọi phiên đều `projects-xx` — một cái tên không phân biệt được gì, chiếm chỗ
+/// của thứ phân biệt được.
 #[test]
 fn a_session_name_says_which_project_it_is_working_on() {
     let d = hub::sessions::display_name;
-    assert_eq!(d("projects-fb", "AI/tcc/amm"), "[amm] projects-fb");
-    assert_eq!(d("projects-be", "AI/tfl5"), "[tfl5] projects-be");
-    assert_eq!(d("hanguyen-41", "dwork"), "[dwork] hanguyen-41");
-    // Chưa đo được dự án thì GIỮ NGUYÊN — đừng bịa một cái nhãn rỗng.
+    assert_eq!(d("projects-fb", "AI/tcc/amm"), "[AI/tcc/amm]");
+    assert_eq!(d("projects-be", "AI/tfl5"), "[AI/tfl5]");
+    assert_eq!(d("hanguyen-41", "dwork"), "[dwork]");
+    // ĐƯỜNG ĐẦY ĐỦ, không phải mỗi lá cuối: `amm` một mình không nói được nó
+    // nằm trong `tcc`.
+    assert!(d("x", "AI/tcc/amm").contains("tcc"));
+    // Chưa đo được dự án thì GIỮ NGUYÊN tên — thà một cái tên vô nghĩa còn hơn
+    // một cặp ngoặc rỗng.
     assert_eq!(d("projects-fb", ""), "projects-fb");
-    // Tên đã tự mang tên dự án rồi thì đừng lặp lại: `[hub] hub-67` thừa.
-    assert_eq!(d("hub-67", "AI/hub"), "hub-67");
 }
 
 /// Nhật ký đang được ghi thì phiên ĐANG CHẠY — kể cả khi CLI khai `idle`.

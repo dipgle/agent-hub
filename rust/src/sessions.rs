@@ -271,18 +271,24 @@ pub fn is_hub_runtime_cwd(cwd: &str) -> bool {
 /// biệt được gì**, đúng lý do `cwd` đã bị bỏ khỏi màn từ trước.
 ///
 /// Thứ phân biệt được thì hub đã đo sẵn: `folder` (xem [`folder_from_tail`]).
-/// Nên `projects-fb` + `AI/tcc/amm` đọc thành **`[amm] projects-fb`**: mở đầu
-/// bằng thứ trả lời "phiên này đang làm gì", giữ nguyên phần đuôi để còn đối
-/// chiếu với `claude agents` và với những tin cũ.
+/// Hà 2026-08-13 chốt hình dạng: *"điều chỉnh lại các chỗ `[hub] project-06` =
+/// `[ai/hub]` là được, cho dễ nhận biết"* — tức **bỏ hẳn** cái tên tự sinh và
+/// hiện ĐƯỜNG DẪN dự án đầy đủ: `projects-fb` + `AI/tcc/amm` ⟹ **`[AI/tcc/amm]`**.
+/// Đường đầy đủ chứ không phải mỗi lá cuối, vì `amm` một mình không nói được nó
+/// nằm trong `tcc`.
+///
+/// ⚠ Hai phiên cùng một dự án thì nhãn giống nhau. Chấp nhận có ý thức: chỗ cần
+/// phân biệt là DANH SÁCH, mà ở đó mỗi dòng đã mang sẵn id ngắn (`76534706`).
 ///
 /// Chưa biết dự án thì **giữ nguyên tên** — không bịa một cái nhãn rỗng.
 pub fn display_name(name: &str, folder: &str) -> String {
-    let leaf = folder.trim_matches('/').rsplit('/').next().unwrap_or("");
-    if leaf.is_empty() || name.starts_with(&format!("{leaf}-")) {
+    let f = folder.trim_matches('/');
+    if f.is_empty() {
         return name.to_string();
     }
-    format!("[{leaf}] {name}")
+    format!("[{f}]")
 }
+
 
 /// Cửa sổ của một phiên, lấy từ SỔ rồi bắt `ps` chứng thực — **không spawn
 /// `claude`**.

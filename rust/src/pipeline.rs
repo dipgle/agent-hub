@@ -1246,11 +1246,8 @@ pub fn session_list_text(
         // Dự án ĐANG LÀM đứng trước tên: tên phiên do `claude` tự đặt
         // ("projects-ff") không nói được gì, còn `cwd` thì giống hệt nhau ở mọi
         // dòng trên máy này — xem `sessions::folder_from_tail`.
-        let what = if s.folder.is_empty() {
-            s.name.clone()
-        } else {
-            format!("{} · {}", s.folder, s.name)
-        };
+        // Nhãn dự án thay cho tên tự sinh — xem `sessions::display_name`.
+        let what = crate::sessions::display_name(&s.name, &s.folder);
         out.push_str(&format!(
             "{}{} · {} · {} · {}\n",
             eye,
@@ -1615,11 +1612,7 @@ pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
     };
     // Dự án trước, vì đó là thứ ngón tay đang tìm; tên phiên tự sinh chỉ để phân
     // biệt hai phiên cùng dự án.
-    let what = if s.folder.is_empty() {
-        s.name.clone()
-    } else {
-        format!("{} · {}", s.folder, s.name)
-    };
+    let what = crate::sessions::display_name(&s.name, &s.folder);
     format!("{} {} · {}", dot, crate::exec::truncate(&what, 32), s.account)
 }
 
@@ -1661,6 +1654,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /shot — đọc chữ đang hiện trên màn của phiên\n\
                      — Vận hành —\n\
                      /cmd <dòng lệnh> — chạy một lệnh trên máy rồi trả kết quả (chạy xong là hết)\n\
+                     /upgrade — hub tự dựng lại chính nó từ mã hiện tại rồi khởi động lại\n\
                      /accounts — ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, /new mặc định vào tài khoản nào\n\
                      /project [tên] — xem / ghim dự án cho phòng (bỏ ghim: /project -)\n\
                      /ingest · /run · /doctor — poll kênh · chạy một vòng · kiểm tra thật\n\
@@ -2103,6 +2097,25 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     },
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+            }
+            // Hub tự dựng lại chính nó. Trả lời TRƯỚC, khởi động lại SAU —
+            // bước cuối giết chính tiến trình đang gõ câu trả lời này.
+            CommandKind::Upgrade => {
+                let ack = match crate::runtime::self_install(cfg) {
+                    Ok(msg) => format!("🔧 {msg}\nĐang khởi động lại hubd…"),
+                    Err(e) => format!(
+                        "⚠ không dựng lại được (bản đang chạy GIỮ NGUYÊN): {}",
+                        crate::exec::truncate(&e.to_string(), 400)
+                    ),
+                };
+                let ok = ack.starts_with("🔧");
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                if ok {
+                    if let Err(e) = crate::runtime::restart_daemon() {
+                        logging::error("self_install_restart_failed", json!({ "err": e.to_string() }));
+                    }
+                }
                 Some(ack)
             }
             CommandKind::Type | CommandKind::Key | CommandKind::Shot => {

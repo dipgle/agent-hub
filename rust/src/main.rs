@@ -32,6 +32,18 @@ struct Cli {
 enum Command {
     /// Check the channel + secrets, honestly
     Doctor,
+    /// Dựng lại chính hub: build → ký → cài → khởi động lại launchd
+    ///
+    /// Hà 2026-08-13: *"tại sao không phải là luồng chạy độc lập trên rust, tức
+    /// là mọi lệnh và luồng xử lý phải nằm trong binary"*. Đây là bản Rust của
+    /// `deploy/install.sh`, giữ nguyên hai bước không được bỏ (ký bằng chứng
+    /// chỉ, cài ra đường riêng ngoài tầm với của cargo) — xem
+    /// `runtime::self_install`.
+    SelfInstall {
+        /// Cài xong thì KHÔNG khởi động lại (để tự bấm sau)
+        #[arg(long)]
+        no_restart: bool,
+    },
     /// Write hub.config.json + create the db
     Init {
         #[arg(long)]
@@ -97,6 +109,15 @@ fn real_main() -> Result<()> {
 
     match cli.command {
         Command::Doctor => cmd_doctor(&db, &cfg),
+        Command::SelfInstall { no_restart } => {
+            println!("{}", hub::runtime::self_install(&cfg)?);
+            if no_restart {
+                println!("chưa khởi động lại (--no-restart)");
+            } else {
+                println!("đã khởi động lại {}", hub::runtime::restart_daemon()?);
+            }
+            Ok(())
+        }
         Command::Init { force } => cmd_init(&cfg, force),
         Command::Once => {
             println!("{}", serde_json::to_string_pretty(&run_once(&db, &cfg)?)?);

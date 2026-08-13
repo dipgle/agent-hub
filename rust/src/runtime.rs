@@ -577,6 +577,154 @@ fn autostart_state(cfg: &Config) -> Value {
     })
 }
 
+/// Tự dựng lại chính mình: build → ký → cài → (khởi động lại ở bước riêng).
+///
+/// 🔴 Hà 2026-08-13: *"sao lại cần install.sh để chạy, tại sao không phải là
+/// luồng chạy độc lập trên rust, tức là mọi lệnh và luồng xử lý phải nằm trong
+/// binary"*. Phần "logic nằm ngoài" thì không đúng — `install.sh` không xử lý
+/// nghiệp vụ gì cả. Nhưng phần LÕI của câu hỏi thì đúng, và nó là một lỗ hổng
+/// của cây cầu: **hub không tự cài được chính nó**, nên mỗi bản vá đều phải có
+/// người ngồi ở máy gõ một dòng — đúng thứ mà cả dự án này sinh ra để bỏ đi.
+///
+/// Ba bước dưới đây chép nguyên `deploy/install.sh`, và giữ nguyên hai lý do
+/// tồn tại của nó (đo 2026-08-10, xem `deploy/sign.sh`):
+/// - **ký bằng chứng chỉ**, vì `cargo` ad-hoc-ký lại mỗi lần link và TCC gắn
+///   quyền theo *danh tính chữ ký* — mất chữ ký là mất quyền, im lặng, chỉ lộ
+///   ở lần khởi động máy sau;
+/// - **cài ra đường riêng**, ngoài tầm với của cargo, để `cargo test` không
+///   xoá mất chữ ký ấy.
+///
+/// KHÔNG đụng vào bản đang cài nếu bất kỳ bước nào hỏng: build hỏng, không tìm
+/// thấy danh tính ký, hay chữ ký ra không phải `certificate root` thì dừng tại
+/// chỗ, xoá bản tạm, và bản đang chạy còn nguyên.
+pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
+    let rust_dir = source_tree(cfg);
+    if !rust_dir.is_dir() {
+        anyhow::bail!("không thấy cây mã ở {}", rust_dir.display());
+    }
+    // 1. Build.
+    let out = run(
+        "cargo",
+        &["build", "--release", "--offline"],
+        RunOpts {
+            cwd: Some(&rust_dir),
+            timeout: Some(Duration::from_secs(900)),
+            ..Default::default()
+        },
+    )?;
+    if !out.ok() {
+        anyhow::bail!(
+            "cargo build hỏng (mã {:?}): {}",
+            out.code,
+            crate::exec::truncate(out.stderr.trim(), 300)
+        );
+    }
+    let src = rust_dir.join("target/release/hubd");
+    if !src.exists() {
+        anyhow::bail!("build xong mà không thấy {}", src.display());
+    }
+    // 2. Danh tính ký — TÌM, tuyệt đối không tự tạo cái mới: một chứng chỉ mới
+    //    là một `designated requirement` mới, tức mọi quyền TCC mất sạch.
+    let ids = run(
+        "security",
+        &["find-identity", "-p", "codesigning"],
+        RunOpts {
+            timeout: Some(Duration::from_secs(20)),
+            ..Default::default()
+        },
+    )?;
+    let sha = ids
+        .stdout
+        .lines()
+        .find(|l| l.contains("\"Hub Local Signing\""))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            anyhow::anyhow!("không thấy danh tính ký 'Hub Local Signing' trong keychain")
+        })?;
+    // 3. Chép ra bản TẠM rồi ký ở đó — bản đang chạy không được thấy một tệp
+    //    ghi dở, và macOS từ chối ghi đè một image đang chạy.
+    let dest = crate::config::expand_home(Path::new(INSTALLED_HUBD));
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = dest.with_extension("new");
+    std::fs::copy(&src, &tmp)?;
+    let fail = |e: anyhow::Error| -> anyhow::Error {
+        let _ = std::fs::remove_file(&tmp);
+        e
+    };
+    let signed = run(
+        "codesign",
+        &[
+            "--force",
+            "--sign",
+            &sha,
+            "--identifier",
+            "com.dipgle.hubd",
+            "--timestamp=none",
+            &tmp.display().to_string(),
+        ],
+        RunOpts {
+            timeout: Some(Duration::from_secs(60)),
+            ..Default::default()
+        },
+    )?;
+    if !signed.ok() {
+        return Err(fail(anyhow::anyhow!(
+            "codesign hỏng: {}",
+            crate::exec::truncate(signed.stderr.trim(), 200)
+        )));
+    }
+    // 4. Chứng minh chữ ký là loại BỀN, không phải `cdhash`. Đây là điều duy
+    //    nhất cả việc này tồn tại để bảo đảm, nên nó là lỗi chứ không phải
+    //    cảnh báo.
+    let dr = run(
+        "codesign",
+        &["-d", "-r-", &tmp.display().to_string()],
+        RunOpts {
+            timeout: Some(Duration::from_secs(20)),
+            ..Default::default()
+        },
+    )?;
+    let dr_text = format!("{}{}", dr.stdout, dr.stderr);
+    if !dr_text.contains("certificate root") {
+        return Err(fail(anyhow::anyhow!(
+            "ký xong mà designated requirement không phải certificate root — bản đang cài GIỮ NGUYÊN"
+        )));
+    }
+    std::fs::rename(&tmp, &dest)?;
+    Ok(format!("đã cài {}", dest.display()))
+}
+
+/// Bảo launchd nạp lại hubd. Gọi SAU khi đã trả lời, vì nó giết chính mình.
+pub fn restart_daemon() -> anyhow::Result<String> {
+    let uid = run(
+        "id",
+        &["-u"],
+        RunOpts {
+            timeout: Some(Duration::from_secs(10)),
+            ..Default::default()
+        },
+    )?;
+    let target = format!("gui/{}/com.dipgle.hubd", uid.stdout.trim());
+    let out = run(
+        "launchctl",
+        &["kickstart", "-k", &target],
+        RunOpts {
+            timeout: Some(Duration::from_secs(30)),
+            ..Default::default()
+        },
+    )?;
+    if !out.ok() {
+        anyhow::bail!(
+            "launchctl kickstart hỏng: {}",
+            crate::exec::truncate(out.stderr.trim(), 200)
+        );
+    }
+    Ok(target)
+}
+
 /// Đường dẫn bản hubd mà launchd chạy. KHÔNG phải bản `cargo` vừa build.
 const INSTALLED_HUBD: &str = "~/Library/Application Support/hub/bin/hubd";
 

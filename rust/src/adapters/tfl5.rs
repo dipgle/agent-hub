@@ -733,6 +733,8 @@ pub fn parse_command(
                 .unwrap_or_default();
             (!what.is_empty()).then_some((CommandKind::Type, 0, what))
         }
+        // `/upgrade` — hub tự dựng lại chính nó từ mã hiện tại.
+        "upgrade" | "capnhat" => Some((CommandKind::Upgrade, 0, String::new())),
         // `/shot` — chụp cửa sổ của phiên đang theo.
         "shot" | "chup" => Some((CommandKind::Shot, 0, String::new())),
         // `/key <tên phím>` — một phím điều khiển.

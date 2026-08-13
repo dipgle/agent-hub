@@ -709,6 +709,36 @@ fn a_command_the_terminal_wrapped_is_joined_back_not_dropped() {
     assert!(hub::keys::commands_on_screen(block, 4).is_empty());
 }
 
+/// Bấm "Xem đầy đủ" là đã chọn phiên ấy — nhưng chỉ được NÓI khi sổ đã ghi.
+///
+/// 🔴 Hà 2026-08-13: *"khi bấm xem đầy đủ thì rõ ràng nó đang ở phiên đúng rồi
+/// cần gì có nút vào phiên nữa"*. Sáng nay chính anh xin cái nút ấy; chiều dùng
+/// thật thì nó là một cú bấm thừa. Nay hub đi luôn — mà đổi con trỏ là đổi NƠI
+/// CHỮ ANH GÕ SẼ ĐI TỚI, nên nhánh ghi-hỏng phải nói thật, không được im cũng
+/// không được khoe.
+#[test]
+fn the_full_report_says_where_the_cursor_went_only_when_it_really_went() {
+    use hub::pipeline::full_report_follow_note;
+
+    // Đang theo sẵn phiên ấy ⟹ không thêm chữ nào.
+    assert_eq!(full_report_follow_note("[dwork]", None), "");
+
+    let ok = full_report_follow_note("[dwork]", Some(true));
+    assert!(ok.contains("Đang theo phiên [dwork]"), "{ok}");
+    assert!(ok.contains("gõ thẳng vào đây"), "{ok}");
+    assert!(!ok.contains("⚠"), "{ok}");
+
+    // Ghi sổ hỏng: TUYỆT ĐỐI không được in "Đang theo" — câu ấy làm chủ máy gõ
+    // việc vào nhầm phiên.
+    let bad = full_report_follow_note("[dwork]", Some(false));
+    assert!(bad.contains("chưa chuyển được"), "{bad}");
+    assert!(bad.contains("vẫn đang theo phiên cũ"), "{bad}");
+    assert!(
+        !bad.contains("Đang theo phiên [dwork]"),
+        "khoe đã chuyển trong khi sổ chưa ghi: {bad}"
+    );
+}
+
 /// `gh` là công cụ merge trên máy này — nó phải nằm trong danh sách lệnh quen.
 ///
 /// Câu Hà hỏi 2026-08-13 là *"Không có lệnh merge mà bấm"*: màn viết *"Next

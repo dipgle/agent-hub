@@ -795,19 +795,52 @@ impl Inbox {
                             parts.push(chunk);
                         }
                         // Đọc xong một báo cáo dài thì việc kế tiếp gần như luôn
-                        // là ĐI VÀO chính phiên ấy (Hà 2026-08-13). Nút đi kèm
-                        // TIN CUỐI, và chỉ khi đó không phải phiên đang theo —
-                        // đúng luật của `pipeline::enter_button`.
-                        let focus = crate::db::Db::open(&self.cfg.db)
-                            .ok()
+                        // là ĐI VÀO chính phiên ấy — nên hub ĐI LUÔN, không đưa
+                        // thêm một cái nút nữa.
+                        //
+                        // 🔴 Hà 2026-08-13: *"khi bấm xem đầy đủ thì rõ ràng nó
+                        // đang ở phiên đúng rồi cần gì có nút vào phiên nữa"*.
+                        // Sáng nay chính anh xin cái nút ấy; buổi chiều dùng thật
+                        // thì thấy nó là **một cú bấm thừa** — bấm "Xem đầy đủ"
+                        // đã là chọn phiên rồi, cái nút chỉ bắt nói lại điều vừa
+                        // nói. Cùng một bài học với `sess:` sáng nay (*"bấm vào
+                        // phiên sao không hiện shot luôn"*): việc kế tiếp đã
+                        // chắc chắn thì đừng bắt bấm thêm.
+                        //
+                        // Đổi con trỏ là đổi NƠI CHỮ ANH GÕ SẼ ĐI TỚI, nên nó
+                        // phải được NÓI RA trong chính tin ấy — và chỉ được nói
+                        // khi đã ghi xong sổ. Ghi hỏng mà vẫn in "đang theo" là
+                        // đúng loại nói dối làm người ta gõ việc vào nhầm phiên.
+                        let db = crate::db::Db::open(&self.cfg.db).ok();
+                        let focus = db
+                            .as_ref()
                             .and_then(|db| db.cursor_or_log(crate::pipeline::FOCUS_SESSION_KEY))
                             .unwrap_or_default();
-                        let enter = (!sid.is_empty() && sid != focus).then(|| {
-                            (
-                                format!("👁 Vào phiên {}", crate::exec::truncate(&sname, 24)),
-                                format!("sess:{sid}"),
-                            )
-                        });
+                        let moved = if sid.is_empty() || sid == focus {
+                            None
+                        } else {
+                            match db
+                                .as_ref()
+                                .map(|db| db.set_cursor(crate::pipeline::FOCUS_SESSION_KEY, &sid))
+                            {
+                                Some(Ok(())) => {
+                                    logging::info(
+                                        "focus_moved_by_full_report",
+                                        json!({ "session": sid, "from": focus,
+                                                "why": "bấm Xem đầy đủ = chọn phiên ấy (Hà 2026-08-13)" }),
+                                    );
+                                    Some(true)
+                                }
+                                other => {
+                                    logging::error(
+                                        "focus_move_failed",
+                                        json!({ "session": sid, "detail": format!("{other:?}") }),
+                                    );
+                                    Some(false)
+                                }
+                            }
+                        };
+                        let tail = crate::pipeline::full_report_follow_note(&sname, moved);
                         let total = parts.len();
                         for (i, p) in parts.into_iter().enumerate() {
                             let head = if total > 1 {
@@ -815,12 +848,13 @@ impl Inbox {
                             } else {
                                 String::new()
                             };
-                            let body = format!("{head}{p}");
                             let last = i + 1 == total;
-                            let sent = match (&enter, last) {
-                                (Some(b), true) => self.send_buttons(&body, std::slice::from_ref(b)),
-                                _ => self.send_text(&body),
+                            let body = if last {
+                                format!("{head}{p}{tail}")
+                            } else {
+                                format!("{head}{p}")
                             };
+                            let sent = self.send_text(&body);
                             if let Err(e) = sent {
                                 logging::error("telegram_ack_failed", json!({ "err": e }));
                                 break;

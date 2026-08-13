@@ -1619,6 +1619,29 @@ pub fn remember_full(db: &Db, session_id: &str, name: &str, text: &str) -> Optio
     Some(("📄 Xem đầy đủ".to_string(), format!("full:{n}")))
 }
 
+/// Dòng đuôi của bản đầy đủ: nói con trỏ đã đi đâu — hoặc nói là CHƯA đi.
+///
+/// Thuần, vì đây là chỗ một câu chữ có thể làm chủ máy gõ việc vào nhầm phiên.
+/// `moved`: `None` = không cần chuyển (đang theo sẵn phiên ấy) · `Some(true)` =
+/// đã ghi sổ xong · `Some(false)` = ghi hỏng.
+///
+/// Luật duy nhất nó giữ, và là lý do nó tồn tại: **chỉ được nói "đang theo" khi
+/// sổ ĐÃ ghi xong**. Ghi hỏng mà vẫn in câu ấy là đúng loại nói dối khiến câu
+/// tiếp theo của chủ máy rơi vào một phiên khác — im lặng còn đỡ hơn.
+pub fn full_report_follow_note(sname: &str, moved: Option<bool>) -> String {
+    match moved {
+        None => String::new(),
+        Some(true) => format!(
+            "\n\n👁 Đang theo phiên {} — gõ thẳng vào đây là nói với nó.",
+            crate::exec::truncate(sname, 40)
+        ),
+        Some(false) => format!(
+            "\n\n⚠ chưa chuyển được sang phiên {} — vẫn đang theo phiên cũ.",
+            crate::exec::truncate(sname, 40)
+        ),
+    }
+}
+
 /// Bản đầy đủ số `n` — trả `(id phiên, tên để đọc, nội dung)` nếu còn giữ.
 pub fn full_report(db: &Db, n: usize) -> Option<(String, String, String)> {
     let st: FullStore = db
@@ -1843,9 +1866,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             CommandKind::Help => {
                 let ack = "Lệnh dùng được trong phòng này:\n\
                      — Phiên Claude —\n\
-                     /sessions — danh sách phiên đang sống (trên Telegram: bấm nút để theo)\n\
-                     /session <id> — theo một phiên (bỏ theo: /session -)\n\
-                     (trên Telegram: chọn phiên xong thì CHỮ THƯỜNG gõ ở đây đi thẳng vào phiên ấy)\n\
+                     /sessions (hay /session trống) — danh sách phiên đang sống; bấm nút để theo một phiên (bấm 📄 Xem đầy đủ cũng vào phiên ấy luôn)\n\
+                     chọn phiên xong thì CHỮ THƯỜNG gõ ở đây đi thẳng vào phiên ấy · /session - để thôi theo\n\
                      /new [-a acc] <việc> — mở cửa sổ mới rồi gõ việc ấy vào; không nói -a thì dùng tài khoản mặc định (xem /accounts)\n\
                      /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng\n\
                      /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước)\n\

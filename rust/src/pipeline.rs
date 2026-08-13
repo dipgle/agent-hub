@@ -2035,7 +2035,9 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
                     // Nhãn nói ĐÚNG cơ chế: phiên nhận dòng lệnh rồi tự chạy
                     // (và thấy kết quả, đi tiếp được). Không phải shell trực
                     // tiếp — xem chú thích `!` ở `telegram.rs`.
-                    format!("▶ nhờ phiên chạy: {}", crate::exec::truncate(c, 38)),
+                    // Nhãn nói ĐÚNG cơ chế: hub chạy trên máy rồi dán kết quả
+                    // kèm ngữ cảnh vào phiên — xem `CommandKind::RunIn`.
+                    format!("▶ chạy & dán vào phiên: {}", crate::exec::truncate(c, 34)),
                     format!("run:{i}"),
                 ),
                 (
@@ -2303,7 +2305,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /shot — đọc chữ đang hiện trên màn của phiên\n\
                      — Vận hành —\n\
                      /cmd <dòng lệnh> — chạy một lệnh trên máy rồi trả kết quả (chạy xong là hết)\n\
-                     /win <dòng lệnh> — mở một CỬA SỔ Terminal thật rồi chạy ở đó; dùng khi lệnh cần gõ mật khẩu (sudo, ssh -t) — `!` trong CLI không có tty\n\
+                     /win <dòng lệnh> — mở một CỬA SỔ Terminal thật rồi chạy ở đó; dùng khi lệnh cần gõ mật khẩu (sudo, ssh -t)\n\
+                     /runin <id> <dòng lệnh> — hub chạy trên máy rồi DÁN kết quả (kèm lệnh + mã thoát) vào phiên ấy; không tốn hạn mức\n\
                      /upgrade — hub tự dựng lại chính nó từ mã hiện tại rồi khởi động lại\n\
                      /accounts — ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, /new mặc định vào tài khoản nào\n\
                      /project [tên] — xem / ghim dự án cho phòng (bỏ ghim: /project -)\n\
@@ -2332,6 +2335,116 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let probe = crate::portal::probe_now(cfg);
                 reply_in_channel(db, cfg, adapter, cmd, &probe);
                 Some(probe)
+            }
+            CommandKind::RunIn => {
+                // MÁY chạy, PHIÊN đọc — xem `CommandKind::RunIn`.
+                let (want, line) = target_and_rest(db, &cmd.arg);
+                let live =
+                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                    None => format!(
+                        "⚠ không thấy phiên '{}' đang chạy — lệnh KHÔNG chạy.",
+                        crate::exec::truncate(&want, 40)
+                    ),
+                    Some(s) => {
+                        let out = crate::exec::run(
+                            "/bin/zsh",
+                            &["-lc", &line],
+                            crate::exec::RunOpts {
+                                cwd: Some(cfg.workspace_root.as_path()),
+                                timeout: Some(std::time::Duration::from_secs(
+                                    cfg.call.timeout_sec.min(120),
+                                )),
+                                ..Default::default()
+                            },
+                        );
+                        match out {
+                            Ok(r) => {
+                                logging::info(
+                                    "runin_ran",
+                                    json!({ "session": s.session_id, "code": r.code,
+                                            "timed_out": r.timed_out, "ms": r.ms,
+                                            "cmd": crate::exec::truncate(&line, 120) }),
+                                );
+                                let report =
+                                    cmd_report(r.code, r.timed_out, &r.stdout, &r.stderr, r.ms);
+                                // 🔴 NGỮ CẢNH PHẢI ĐI CÙNG. Hà 2026-08-13:
+                                // *"nhưng ngữ cảnh lại bị mất dấu"*. Dán mỗi
+                                // đầu ra vào phiên là đưa một kết quả không có
+                                // nguyên nhân: phiên không biết lệnh nào đẻ ra
+                                // nó, chạy ở thư mục nào, có tty không — mà cả
+                                // ba đều đổi cách đọc kết quả ấy.
+                                //
+                                // Nên khối dán vào mang đủ dấu vết, và nói rõ
+                                // AI đã chạy: phiên không được tưởng chính nó
+                                // vừa chạy, không thì lượt sau nó kể lại một
+                                // việc nó chưa làm.
+                                let block = format!(
+                                    "[hub đã chạy hộ lệnh này trên máy — \
+                                     cwd {}, KHÔNG có tty]\n$ {}\n{}",
+                                    cfg.workspace_root.display(),
+                                    line,
+                                    report
+                                );
+                                // Đầu ra sẽ nằm lại trong NHẬT KÝ phiên, tức
+                                // trên đĩa, mãi mãi — gác giá trị bí mật trước
+                                // khi nó vào đó.
+                                let risk = crate::redaction::file_risk(&block);
+                                if !risk.is_empty() {
+                                    format!(
+                                        "🔒 Lệnh chạy xong nhưng hub GIỮ LẠI kết quả, không dán vào phiên: có dấu hiệu bí mật ({}). Xem trên máy.",
+                                        risk.join(", ")
+                                    )
+                                } else {
+                                    match crate::keys::window_of(&s.tty) {
+                                        Ok(Some(w)) => match crate::keys::type_into(w, &block, true)
+                                        {
+                                            Ok(()) => {
+                                                for wait_ms in [400u64, 1000] {
+                                                    std::thread::sleep(
+                                                        std::time::Duration::from_millis(wait_ms),
+                                                    );
+                                                    let _ = crate::keys::press(w, "enter");
+                                                }
+                                                format!(
+                                                    "✅ Đã chạy trên máy rồi dán kết quả vào {}:\n$ {}\n{}",
+                                                    crate::sessions::shown(s),
+                                                    line,
+                                                    crate::exec::truncate(&report, 400)
+                                                )
+                                            }
+                                            Err(e) => format!(
+                                                "⚠ chạy xong nhưng KHÔNG dán được vào phiên: {}\n\n$ {}\n{}",
+                                                crate::exec::truncate(&e.to_string(), 160),
+                                                line,
+                                                crate::exec::truncate(&report, 600)
+                                            ),
+                                        },
+                                        // Không có cửa sổ ⟹ không dán được.
+                                        // Vẫn TRẢ kết quả về điện thoại: lệnh
+                                        // đã chạy rồi, nuốt nó đi là mất công.
+                                        _ => format!(
+                                            "⚠ phiên {} không có cửa sổ terminal để dán vào. Kết quả:\n\n$ {}\n{}",
+                                            crate::sessions::shown(s),
+                                            line,
+                                            crate::exec::truncate(&report, 600)
+                                        ),
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                logging::error(
+                                    "runin_failed",
+                                    json!({ "err": e.to_string(),
+                                            "cmd": crate::exec::truncate(&line, 120) }),
+                                );
+                                format!("⚠ không chạy được: {}", crate::exec::truncate(&e.to_string(), 200))
+                            }
+                        }
+                    }
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
             }
             CommandKind::Win => {
                 // Cửa sổ THẬT, vì thứ thiếu là một cái tty — xem `CommandKind::Win`.

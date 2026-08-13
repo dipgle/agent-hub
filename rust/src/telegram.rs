@@ -1084,7 +1084,11 @@ impl Inbox {
                         // sinh ra và lúc nút được bấm. Đây đúng con đường đã gõ
                         // nhầm phiên sáng 08-11, và `remember_files` đã vá cho
                         // nút 📎 — một cuốn sổ được vá, cuốn bên cạnh thì không.
-                        self.push_text(&format!("/type {sid} {line}"));
+                        // MÁY chạy, PHIÊN đọc (Hà 2026-08-13: *"nên gọi lệnh
+                        // ở command khác rồi lấy kết quả dán gửi lại vào
+                        // phiên"*). Không tốn hạn mức cho một việc `zsh -lc`
+                        // làm được, và phiên vẫn thấy kết quả nên đi tiếp được.
+                        self.push_text(&format!("/runin {sid} {line}"));
                     }
                     None => {
                         if let Err(e) = self.send_text(

@@ -647,6 +647,18 @@ pub fn parse_command(
                 .unwrap_or_default();
             Some((CommandKind::Cmd, 0, rest))
         }
+        // `/runin <id> <lệnh>` — id đi TRƯỚC, phần còn lại là nguyên văn dòng
+        // lệnh. Không có id thì không nhận: cái nút luôn mang id, và một
+        // `/runin` gõ tay không id sẽ chạy vào phiên đang theo — đúng con
+        // đường đã gõ nhầm phiên tối nay.
+        "runin" => {
+            let rest = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            (!rest.is_empty() && rest.contains(char::is_whitespace))
+                .then_some((CommandKind::RunIn, 0, rest))
+        }
         // `/close [id]` — cùng cách nhận đích với `/stop`: trống thì phiên đang
         // theo, có id thì phiên ấy. Khác `/stop` ở KẾT CỤC, không ở cách nhắm.
         "close" | "dong" | "dongphien" => {

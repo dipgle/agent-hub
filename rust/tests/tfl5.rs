@@ -681,3 +681,28 @@ fn close_is_its_own_verb_and_takes_an_optional_id() {
     // Người khác gõ thì vẫn chỉ là chữ — cổng người không đổi.
     assert_eq!(parse_command("/close", "u-nguoi-la", &trusted), None);
 }
+
+/// `/runin <id> <lệnh>` — máy chạy, phiên đọc.
+///
+/// 🔴 Hà 2026-08-13, sau khi biết dấu `!` chưa bao giờ bật chế độ bash: *"có lẽ
+/// nên gọi lệnh ở command khác rồi lấy kết quả dán gửi lại vào phiên"* → *"nhưng
+/// ngữ cảnh lại bị mất dấu"*.
+#[test]
+fn runin_needs_both_a_session_and_a_command() {
+    use hub::adapters::{tfl5::parse_command, CommandKind};
+
+    let me = "u-owner";
+    let trusted = vec![me.to_string()];
+
+    assert_eq!(
+        parse_command("/runin 4963b95c cargo test --offline", me, &trusted),
+        Some((CommandKind::RunIn, 0, "4963b95c cargo test --offline".to_string()))
+    );
+    // Thiếu lệnh ⟹ không nhận.
+    assert_eq!(parse_command("/runin 4963b95c", me, &trusted), None);
+    // Thiếu id ⟹ không nhận: một `/runin` không id sẽ rơi vào phiên đang theo,
+    // đúng con đường đã gõ nhầm phiên tối 08-13.
+    assert_eq!(parse_command("/runin", me, &trusted), None);
+    // Người khác gõ thì vẫn chỉ là chữ.
+    assert_eq!(parse_command("/runin 4963b95c ls", "u-la", &trusted), None);
+}

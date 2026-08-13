@@ -112,6 +112,30 @@ pub enum CommandKind {
     ///
     /// Một lệnh, một lượt, không phiên nào ở lại — đúng chữ *"đóng luôn"*.
     Cmd,
+    /// `/runin <id> <lệnh>` — hub chạy lệnh, rồi DÁN KẾT QUẢ vào phiên.
+    ///
+    /// 🔴 Hà 2026-08-13, sau khi biết dấu `!` chưa bao giờ bật chế độ bash:
+    /// *"có lẽ nên gọi lệnh ở command khác rồi lấy kết quả dán gửi lại vào
+    /// phiên"*. Đây là đường thứ ba, và nó tốt hơn cả hai đường đang có:
+    ///
+    /// | | ai chạy | tốn hạn mức | có tty | phải ngồi ở máy |
+    /// |---|---|---|---|---|
+    /// | `▶` nhờ phiên chạy | phiên (`claude`) | CÓ | không | không |
+    /// | `🖥` cửa sổ mới | shell thật | không | CÓ | CÓ |
+    /// | `/runin` | **hub** | **không** | không | **không** |
+    ///
+    /// Vì sao nó đáng có: nhờ phiên chạy là trả tiền hạn mức cho một việc
+    /// `zsh -lc` làm được miễn phí, và bắt cả một lượt suy nghĩ chạy chỉ để gọi
+    /// một dòng lệnh. Còn cửa sổ mới thì kết quả nằm trên màn hình máy — phiên
+    /// KHÔNG thấy, nên nó không đi tiếp được.
+    ///
+    /// `/runin` tách đôi đúng chỗ: **máy chạy**, **phiên đọc**. Phiên nhận
+    /// nguyên dòng lệnh kèm mã thoát và đầu ra, tức đủ để làm bước sau.
+    ///
+    /// Cùng hàng rào với `/cmd` (cùng `zsh -lc`, cùng gốc workspace, cùng trần
+    /// thời gian) và thêm một cửa: đầu ra phải qua `redaction::file_risk` trước
+    /// khi vào phiên — nó sẽ nằm lại trong nhật ký phiên, tức trên đĩa, mãi mãi.
+    RunIn,
     /// `/close [id]` — ĐÓNG HẲN: thoát CLI rồi đóng luôn cửa sổ Terminal.
     ///
     /// 🔴 Hà 2026-08-13: *"chưa có lệnh đóng phiên đóng luôn cửa sổ?"* → *"đang

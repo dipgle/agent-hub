@@ -1186,3 +1186,48 @@ fn a_cd_then_command_line_is_still_a_command() {
     // Và câu văn có chữ "cd" ở đầu vẫn là câu văn.
     assert!(commands_on_screen("cd vào thư mục ấy rồi chạy thử; xong báo tôi", 3).is_empty());
 }
+
+/// Nút phải nhớ PHIÊN đã sinh ra nó, không phải phiên đang được chọn lúc bấm.
+///
+/// 🔴 Hà 2026-08-13: *"Sao bấm nút được tạo phiên này lại gửi vào phiên đang
+/// chọn thế"* · *"Nội dung có nút bấm nhưng bấm xong lại gửi vào phiên khác
+/// đang đc chọn"*. Bằng chứng rơi thẳng vào cuộc trò chuyện: tin của `[tfl5]`
+/// mang nút `▶ bash scripts/verify-acl-2026-08-13.sh`, bấm xong dòng
+/// `!bash scripts/verify-acl-…` chạy trong phiên `[hub]` — mà tệp ấy nằm ở
+/// `AI/tfl5/scripts/`, hub không có. Con trỏ focus ĐỔI ĐƯỢC giữa lúc nút sinh
+/// ra và lúc nút được bấm.
+#[test]
+fn a_button_remembers_which_session_made_it() {
+    use hub::db::Db;
+    use hub::pipeline::{quick_cmd, remember_quick};
+
+    let dir = std::env::temp_dir().join(format!(
+        "hub-quick-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = Db::open(&dir.join("t.sqlite")).unwrap();
+
+    let tfl5 = "4963b95c-0000-0000-0000-000000000000";
+    let cmds = vec!["bash scripts/verify-acl-2026-08-13.sh".to_string()];
+    // Hai nút một lệnh: ▶ (chạy trong phiên) và 🖥 (cửa sổ thật có tty).
+    let btns = remember_quick(&db, tfl5, &cmds);
+    assert_eq!(btns.len(), 2, "{btns:?}");
+    assert_eq!(btns[0].1, "run:0");
+    assert_eq!(btns[1].1, "win:0");
+
+    // Con trỏ đã sang phiên khác — nút vẫn phải trỏ về phiên đã sinh ra nó.
+    let (sid, line) = quick_cmd(&db, 0).expect("sổ phải nhớ");
+    assert_eq!(sid, tfl5, "nút quên mất phiên của mình");
+    assert_eq!(line, "bash scripts/verify-acl-2026-08-13.sh");
+
+    // Sổ CŨ (mảng trần, chưa có tên phiên) ⟹ None: thà bắt bấm lại /shot còn
+    // hơn gõ một dòng lệnh vào một phiên đoán bừa.
+    db.set_cursor("quick:cmds", r#"["git push"]"#).unwrap();
+    assert!(quick_cmd(&db, 0).is_none(), "sổ cũ mà vẫn đoán ra một phiên");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -629,7 +629,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         let mut quick = if matches!(c, crate::watch::Change::Ended { .. }) {
             Vec::new()
         } else {
-            remember_quick(db, &crate::keys::commands_on_screen(scan, 3))
+            remember_quick(db, &id, &crate::keys::commands_on_screen(scan, 3))
         };
         // …và file được NHẮC TỚI thì phải MỞ ĐƯỢC. Một báo cáo nói "xem
         // ARCHITECTURE.md" trên điện thoại là nói tới thứ không mở nổi, trừ khi
@@ -1979,11 +1979,29 @@ pub fn session_root(db: &Db, cfg: &Config, session_id: &str) -> Option<std::path
     Some(cfg.workspace_root.join(folder.trim_matches('/')))
 }
 
-pub fn remember_quick(db: &Db, cmds: &[String]) -> Vec<(String, String)> {
+pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String, String)> {
     if cmds.is_empty() {
         return Vec::new();
     }
-    if let Ok(v) = serde_json::to_string(cmds) {
+    // 🔴 Sổ phải nhớ PHIÊN NÀO đã sinh ra cái nút, không chỉ nhớ dòng lệnh.
+    //
+    // Hà 2026-08-13: *"Sao bấm nút được tạo phiên này lại gửi vào phiên đang
+    // chọn thế"* — và bằng chứng rơi thẳng vào cuộc trò chuyện: một tin của
+    // `[tfl5]` mang nút `▶ bash scripts/verify-acl-2026-08-13.sh`, anh bấm, và
+    // dòng `!bash scripts/verify-acl-2026-08-13.sh` hiện ra trong phiên `[hub]`
+    // — phiên đang được theo. Tệp ấy nằm ở `AI/tfl5/scripts/`, hub không có nó.
+    //
+    // Gốc: sổ này chỉ giữ MẢNG LỆNH, nên lúc bấm không còn gì để hỏi "của phiên
+    // nào", và `/type` rơi về con trỏ focus. `remember_files` đã vá đúng lỗi
+    // này cho nút 📎 sáng nay (*"giới hạn phiên nào chỉ nhận được file nằm
+    // trong đúng thư mục của phiên đó"*) — một cuốn sổ được vá, cuốn bên cạnh
+    // thì không, vì hai chỗ không ai bắt phải giống nhau.
+    //
+    // Con trỏ ĐỔI ĐƯỢC giữa lúc nút sinh ra và lúc nút được bấm: bấm "Xem đầy
+    // đủ" là đổi, bấm một phiên khác là đổi. Nên buộc theo phiên đã SINH ra
+    // nút, y như 📎.
+    let payload = json!({ "s": session_id, "c": cmds });
+    if let Ok(v) = serde_json::to_string(&payload) {
         if let Err(e) = db.set_cursor(QUICK_KEY, &v) {
             logging::error("quick_cmds_not_saved", json!({ "err": e.to_string() }));
             return Vec::new();
@@ -2023,13 +2041,21 @@ pub fn remember_quick(db: &Db, cmds: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Lệnh gợi ý thứ `n` — cái nút chỉ mang con số, chữ nằm trong sổ.
-pub fn quick_cmd(db: &Db, n: usize) -> Option<String> {
-    let list: Vec<String> = db
-        .cursor_or_log(QUICK_KEY)
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default();
-    list.get(n).cloned()
+/// Lệnh gợi ý thứ `n`, kèm PHIÊN đã sinh ra nó — cái nút chỉ mang con số.
+///
+/// Trả `None` khi sổ cũ (dạng mảng trần, chưa có tên phiên): thà bắt bấm lại
+/// `/shot` còn hơn gõ một dòng lệnh vào một phiên đoán bừa.
+pub fn quick_cmd(db: &Db, n: usize) -> Option<(String, String)> {
+    let v = db.cursor_or_log(QUICK_KEY)?;
+    let st: serde_json::Value = serde_json::from_str(&v).ok()?;
+    let sid = st.get("s")?.as_str()?.to_string();
+    let cmd = st
+        .get("c")?
+        .as_array()?
+        .get(n)?
+        .as_str()?
+        .to_string();
+    Some((sid, cmd))
 }
 
 /// Chữ ĐANG HIỆN trên màn một phiên — thứ `/shot` trả về, và thứ đi kèm khi
@@ -2900,6 +2926,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     live.as_ref()
                         .and_then(|l| l.sessions.iter().find(|s| s.session_id == want).cloned())
                 });
+                // Id của phiên ĐANG được thao tác — giữ TRƯỚC khi `match` nuốt mất
+                // `target`. Mọi cái nút dựng bên dưới phải buộc vào phiên này, không
+                // phải con trỏ focus lúc bấm (xem `remember_quick`).
+                let shot_sid = target
+                    .as_ref()
+                    .map(|s| s.session_id.clone())
+                    .unwrap_or_default();
                 let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
@@ -3206,7 +3239,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     if go {
                         cmds.push("làm đi".to_string());
                     }
-                    let stored = remember_quick(db, &cmds);
+                    let stored = remember_quick(db, &shot_sid, &cmds);
                     quick.extend(stored.into_iter().take(n_cmds));
                     if go {
                         quick.push(("✅ Làm đi".to_string(), format!("say:{n_cmds}")));
@@ -3231,7 +3264,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // Đi qua chính route `/type`, tức cùng đường chữ thường —
                     // nút chỉ là phím tắt của thứ Hà vẫn gõ tay ("Làm đi").
                     if crate::keys::asks_for_go_ahead(&ack) {
-                        if let Some(b) = remember_quick(db, &["làm đi".to_string()]).pop() {
+                        if let Some(b) = remember_quick(db, &shot_sid, &["làm đi".to_string()]).pop() {
                             quick.push(("✅ Làm đi".to_string(), b.1));
                         }
                     }
@@ -3259,7 +3292,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     let running = ack.contains("esc to interrupt");
                     if !running {
                         if let Some(t) = crate::keys::input_box_text(&ack) {
-                            if let Some(b) = remember_quick(db, std::slice::from_ref(&t)).pop() {
+                            if let Some(b) = remember_quick(db, &shot_sid, std::slice::from_ref(&t)).pop() {
                                 quick.push((
                                     format!("⏎ Gửi: {}", crate::exec::truncate(&t, 34)),
                                     format!("box:{}", b.1.trim_start_matches("run:")),

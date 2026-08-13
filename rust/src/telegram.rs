@@ -1004,10 +1004,13 @@ impl Inbox {
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
                 {
-                    Some(line) => {
+                    Some((_sid, line)) => {
+                        // `/win` mở một cửa sổ MỚI nên không nhắm vào phiên nào
+                        // cả — id ở đây chỉ để log truy được nút từ đâu ra.
                         logging::info(
                             "telegram_quick_cmd_window",
-                            json!({ "n": n, "cmd": crate::exec::truncate(&line, 120) }),
+                            json!({ "n": n, "from_session": _sid,
+                                    "cmd": crate::exec::truncate(&line, 120) }),
                         );
                         self.push_text(&format!("/win {line}"));
                     }
@@ -1026,10 +1029,11 @@ impl Inbox {
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
                 {
-                    Some(line) => {
+                    Some((sid, line)) => {
                         logging::info(
                             "telegram_quick_cmd",
-                            json!({ "n": n, "cmd": crate::exec::truncate(&line, 120) }),
+                            json!({ "n": n, "session": sid,
+                                    "cmd": crate::exec::truncate(&line, 120) }),
                         );
                         // `!` = chạy TRONG phiên: phiên nhìn thấy kết quả và đi
                         // tiếp được. Đi qua `/type`, tức cùng một đường gõ phím
@@ -1043,7 +1047,20 @@ impl Inbox {
                         // độ bash của chính TUI, tức đúng cái ngón tay chủ máy
                         // gõ. Hai thứ khác hẳn nhau, và tôi đã lẫn chúng làm
                         // một. Giữ nguyên một đường.
-                        self.push_text(&format!("/type !{line}"));
+                        // 🔴 MANG ID THEO. Hà 2026-08-13: *"Nội dung có nút bấm
+                        // nhưng bấm xong lại gửi vào phiên khác đang đc chọn"* —
+                        // và bằng chứng rơi thẳng vào cuộc trò chuyện: nút
+                        // `▶ bash scripts/verify-acl-2026-08-13.sh` của `[tfl5]`
+                        // bấm ra dòng `!bash scripts/verify-acl-…` chạy trong
+                        // phiên `[hub]`. Tệp ấy nằm ở `AI/tfl5/scripts/`, hub
+                        // không có nó.
+                        //
+                        // `/type` không mang id thì rơi về con trỏ focus
+                        // (`target_and_rest`), mà con trỏ ĐỔI ĐƯỢC giữa lúc nút
+                        // sinh ra và lúc nút được bấm. Đây đúng con đường đã gõ
+                        // nhầm phiên sáng 08-11, và `remember_files` đã vá cho
+                        // nút 📎 — một cuốn sổ được vá, cuốn bên cạnh thì không.
+                        self.push_text(&format!("/type {sid} !{line}"));
                     }
                     None => {
                         if let Err(e) = self.send_text(
@@ -1068,15 +1085,18 @@ impl Inbox {
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
                 {
-                    Some(line) => {
+                    Some((sid, line)) => {
                         logging::info(
                             "telegram_box_send",
-                            json!({ "n": n, "text": crate::exec::truncate(&line, 60) }),
+                            json!({ "n": n, "session": sid,
+                                    "text": crate::exec::truncate(&line, 60) }),
                         );
                         // Hai lệnh, đúng thứ tự — `CMD_LOCK` giữ chúng nối đuôi.
                         // Bước phụ ⟹ IM: một cú bấm chỉ nên ra một câu trả lời.
-                        self.push_text_quiet("/key esc");
-                        self.push_text(&line);
+                        // CẢ HAI mang id: nếu chỉ một cái mang thì Esc xoá ô của
+                        // phiên này còn chữ lại rơi vào phiên kia.
+                        self.push_text_quiet(&format!("/key {sid} esc"));
+                        self.push_text(&format!("/type {sid} {line}"));
                     }
                     None => {
                         if let Err(e) =
@@ -1099,12 +1119,14 @@ impl Inbox {
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
                 {
-                    Some(line) => {
+                    Some((sid, line)) => {
                         logging::info(
                             "telegram_quick_say",
-                            json!({ "n": n, "text": crate::exec::truncate(&line, 60) }),
+                            json!({ "n": n, "session": sid,
+                                    "text": crate::exec::truncate(&line, 60) }),
                         );
-                        self.push_text(&line);
+                        // Chữ thường cũng phải mang id: cùng lý do với `run:`.
+                        self.push_text(&format!("/type {sid} {line}"));
                     }
                     None => {
                         if let Err(e) =
@@ -1217,6 +1239,7 @@ impl Inbox {
                                     .map(|db| {
                                         let mut b = crate::pipeline::remember_quick(
                                             db,
+                                            &sid,
                                             &crate::keys::commands_on_screen(&text, 3),
                                         );
                                         b.extend(crate::pipeline::remember_files(

@@ -1361,3 +1361,53 @@ fn the_rebuild_command_gets_a_button_that_goes_through_upgrade() {
     }
     assert_eq!(callback_to_command("upgrade"), Some("/upgrade".to_string()));
 }
+
+/// 🔴 Hà 2026-08-14: *"nút chạy lệnh chỉ cần 1 icon là đủ chèn ngay sau câu
+/// lệnh"* · *"Chèn ngay sau câu lệnh chứ không phải 1 nút ở cuối"*.
+///
+/// Telegram không đặt nút giữa chữ (bàn phím luôn treo dưới đáy MỘT tin), nên
+/// thứ điều khiển được là chỗ tin KẾT THÚC. Cắt ngay sau dòng lệnh thì cái nút
+/// rơi đúng chỗ ấy.
+#[test]
+fn a_message_is_cut_right_after_each_command_line() {
+    let text = "Cài bản mới:\n\
+                cd ~/projects/hub && ./hub self-install\n\
+                Xong thì thử lại giúp tôi.\n\
+                bash ./deploy.sh\n\
+                Hết.";
+    let cmds = vec![
+        "cd ~/projects/hub && ./hub self-install".to_string(),
+        "bash ./deploy.sh".to_string(),
+    ];
+    let s = hub::pipeline::command_slices(text, &cmds);
+    assert_eq!(s.len(), 3, "{s:#?}");
+    // Mẩu 1 KẾT THÚC bằng dòng lệnh — nút của nó nằm ngay dưới, không phải
+    // dưới đáy cả tin dài.
+    assert!(s[0].0.ends_with("./hub self-install"), "{:?}", s[0].0);
+    assert_eq!(s[0].1, Some(0));
+    assert!(s[1].0.ends_with("bash ./deploy.sh"), "{:?}", s[1].0);
+    assert_eq!(s[1].1, Some(1));
+    // Mẩu đuôi không mang lệnh nào; nó là chỗ đứng của các nút còn lại.
+    assert_eq!(s[2].1, None);
+    assert!(s[2].0.contains("Hết."));
+}
+
+#[test]
+fn a_command_named_twice_gets_exactly_one_button() {
+    // Báo cáo hay nhắc lại lệnh ở phần tóm tắt. Hai nút giống hệt nhau cho
+    // cùng một việc là mời người ta bấm hai lần.
+    let text = "chạy ./hub doctor đi\nnhắc lại: ./hub doctor";
+    let s = hub::pipeline::command_slices(text, &["./hub doctor".to_string()]);
+    assert_eq!(s.iter().filter(|(_, i)| i.is_some()).count(), 1, "{s:#?}");
+}
+
+#[test]
+fn a_message_with_no_command_line_is_not_cut_at_all() {
+    // Tin gửi đi là bản RÚT GỌN, lệnh có khi chỉ nằm trong bản dài. Lúc ấy
+    // không có chữ nào quanh cái nút nói nó sắp chạy gì ⟹ không tách, và nhãn
+    // nút vẫn phải mang nguyên dòng lệnh.
+    let text = "Phiên đã dừng, còn 12 dòng nữa.";
+    let s = hub::pipeline::command_slices(text, &["bash ./deploy.sh".to_string()]);
+    assert_eq!(s.len(), 1);
+    assert_eq!(s[0].1, None, "không tách khi lệnh không nằm trong tin");
+}

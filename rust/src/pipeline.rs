@@ -633,11 +633,12 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // `long` đã qua cổng quét rò ở `last_say` (có dấu hiệu bí mật thì nó
         // trả `None`), nên đọc nó ở đây không nới rào nào.
         let scan = long.as_deref().unwrap_or(&text);
-        let mut quick = if matches!(c, crate::watch::Change::Ended { .. }) {
+        let cmds = if matches!(c, crate::watch::Change::Ended { .. }) {
             Vec::new()
         } else {
-            remember_quick(db, &id, &crate::keys::commands_on_screen(scan, 3))
+            crate::keys::commands_on_screen(scan, 3)
         };
+        let mut quick = remember_quick(db, &id, &cmds);
         // …và file được NHẮC TỚI thì phải MỞ ĐƯỢC. Một báo cáo nói "xem
         // ARCHITECTURE.md" trên điện thoại là nói tới thứ không mở nổi, trừ khi
         // có cái nút. Tin BÁO TỬ thì thôi, cùng lý do với nút lệnh: phiên đã
@@ -665,11 +666,54 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 }
             }
             (None, Some(tg)) if enter.is_some() || !quick.is_empty() => {
+                // 🔴 Hà 2026-08-14: *"nút chạy lệnh chỉ cần 1 icon là đủ chèn
+                // ngay sau câu lệnh"* · *"Chèn ngay sau câu lệnh chứ không phải
+                // 1 nút ở cuối"*. Cắt tin ngay sau dòng lệnh thì bàn phím rơi
+                // đúng chỗ ấy — xem `command_slices`.
+                //
+                // Nhãn rút còn ICON, và chỉ ở đường này: dòng lệnh đang nằm
+                // ngay trên đầu nút, NGUYÊN VĂN, nên nhắc lại nó trong nhãn
+                // vừa thừa vừa bị cắt còn 52 ký tự. Đường không tách được thì
+                // nhãn vẫn phải mang dòng lệnh, vì lúc ấy chẳng có chữ nào
+                // quanh cái nút nói nó sắp chạy gì.
+                let slices = command_slices(&text, &cmds);
+                let inline = slices.iter().any(|(_, i)| i.is_some());
                 let mut b: Vec<(String, String)> = Vec::new();
                 b.extend(enter);
-                b.extend(quick);
-                if let Err(e) = tg.send_buttons(&text, &b) {
-                    logging::error("session_change_telegram_failed", json!({ "err": e }));
+                b.extend(quick.clone());
+                if !inline {
+                    if let Err(e) = tg.send_buttons(&text, &b) {
+                        logging::error("session_change_telegram_failed", json!({ "err": e }));
+                    }
+                } else {
+                    // Nút LỆNH đi theo dòng của nó; mọi nút khác dồn xuống mẩu
+                    // cuối, nơi chúng vẫn đứng cạnh nhau như cũ.
+                    let is_cmd_btn =
+                        |d: &str| d.starts_with("run:") || d == "upgrade";
+                    let cmd_btns: Vec<(String, String)> =
+                        quick.iter().filter(|(_, d)| is_cmd_btn(d)).cloned().collect();
+                    let mut rest_btns: Vec<(String, String)> = Vec::new();
+                    rest_btns.extend(b.iter().filter(|(_, d)| !is_cmd_btn(d)).cloned());
+                    let last = slices.len().saturating_sub(1);
+                    for (n, (part, idx)) in slices.into_iter().enumerate() {
+                        let mut row: Vec<(String, String)> = Vec::new();
+                        if let Some((_, data)) = idx.and_then(|i| cmd_btns.get(i)) {
+                            let icon = if data == "upgrade" { "🔧" } else { "▶" };
+                            row.push((icon.to_string(), data.clone()));
+                        }
+                        if n == last {
+                            row.extend(rest_btns.clone());
+                        }
+                        if part.trim().is_empty() && row.is_empty() {
+                            continue;
+                        }
+                        if let Err(e) = tg.send_buttons(&part, &row) {
+                            logging::error(
+                                "session_change_telegram_failed",
+                                json!({ "err": e, "slice": n }),
+                            );
+                        }
+                    }
                 }
             }
             _ => {
@@ -2129,6 +2173,53 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
         .collect()
 }
 
+/// Cắt tin thành từng mẩu, mỗi mẩu kết thúc NGAY SAU dòng lệnh của nó.
+///
+/// 🔴 Hà 2026-08-14: *"nút chạy lệnh chỉ cần 1 icon là đủ chèn ngay sau câu
+/// lệnh"*. Telegram không đặt nút giữa chữ được — `inline_keyboard` luôn treo
+/// dưới đáy MỘT tin (xem `telegram::keyboard_rows`). Nhưng "dưới đáy một tin"
+/// là thứ điều khiển được: cắt tin ngay sau dòng lệnh thì cái nút rơi đúng chỗ
+/// Hà muốn, và lúc ấy nhãn không cần nhắc lại dòng lệnh nữa — dòng lệnh đang
+/// nằm ngay trên đầu nó, nguyên văn, không bị cắt còn 52 ký tự.
+///
+/// `Some(i)` = mẩu này kết bằng lệnh thứ `i`; `None` = mẩu đuôi, mang nốt các
+/// nút khác (vào phiên, mở tệp, xem đầy đủ).
+///
+/// Mỗi lệnh khớp ĐÚNG MỘT LẦN, ở dòng đầu tiên chứa nó: một báo cáo hay nhắc
+/// lại cùng một lệnh ở phần tóm tắt, và hai cái nút giống hệt nhau cho cùng
+/// một việc là mời người ta bấm hai lần.
+pub fn command_slices(text: &str, cmds: &[String]) -> Vec<(String, Option<usize>)> {
+    let mut out: Vec<(String, Option<usize>)> = Vec::new();
+    let mut buf: Vec<&str> = Vec::new();
+    let mut used = vec![false; cmds.len()];
+    for line in text.lines() {
+        buf.push(line);
+        let hit = cmds
+            .iter()
+            .enumerate()
+            .find(|(i, c)| !used[*i] && !c.trim().is_empty() && line.contains(c.trim()));
+        if let Some((i, _)) = hit {
+            used[i] = true;
+            out.push((buf.join("\n"), Some(i)));
+            buf.clear();
+        }
+    }
+    if !buf.is_empty() {
+        let tail = buf.join("\n");
+        // Đuôi chỉ toàn dòng trống thì không đáng một tin riêng — dán vào mẩu
+        // trước, không thì điện thoại kêu thêm một tiếng cho một tin rỗng.
+        if tail.trim().is_empty() {
+            if let Some(last) = out.last_mut() {
+                last.0.push('\n');
+                last.0.push_str(&tail);
+                return out;
+            }
+        }
+        out.push((tail, None));
+    }
+    out
+}
+
 /// Dòng lệnh này có phải là "hub dựng lại chính hub" không?
 ///
 /// Hàng rào HẸP có chủ ý — đây là danh sách hai đường duy nhất cài lại hubd
@@ -3369,6 +3460,14 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     .as_ref()
                     .map(|s| s.session_id.clone())
                     .unwrap_or_default();
+                // Bảng hỏi đọc từ NHẬT KÝ, giữ lại trước khi `match` nuốt mất
+                // `target`. 🔴 Hà 2026-08-14, ảnh chụp `/shot` một phiên đang
+                // mở bảng: *"Màn này chưa chọn được gì"* — đúng, vì bộ nút số
+                // của `/shot` dựng từ `keys::parse_choices`, mà hàm ấy MÙ với
+                // bảng `AskUserQuestion` (mỗi lựa chọn có một dòng mô tả bên
+                // dưới, đúng hình dạng luật "liền dòng" loại bỏ — đo được: 0
+                // mục trên chính màn ấy). Nhật ký thì đọc ra đủ.
+                let shot_asking = target.as_ref().and_then(|s| s.asking.clone());
                 let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
@@ -3701,13 +3800,27 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // route `/key <id> enter` đã có — nút chỉ là phím tắt của một
                 // đường đi sẵn, không phải một nhánh xử lý mới.
                 if matches!(cmd.kind, CommandKind::Shot) {
-                    // Phiên đang MỜI một tiếng "ừ" ⟹ nút gửi thẳng câu đồng ý.
-                    // Đi qua chính route `/type`, tức cùng đường chữ thường —
-                    // nút chỉ là phím tắt của thứ Hà vẫn gõ tay ("Làm đi").
-                    if crate::keys::asks_for_go_ahead(&ack) {
-                        if let Some(b) = remember_quick(db, &shot_sid, &["làm đi".to_string()]).pop() {
-                            quick.push(("✅ Làm đi".to_string(), b.1));
-                        }
+                    // 🔴 Hà 2026-08-14: *"Sao có 2 nút làm đi"*. Vì đúng hai
+                    // khối cùng dựng nó: khối trên (`say:<n>`, cùng kho với
+                    // lệnh) và khối này (`run:0`, một kho riêng). Cả hai đều
+                    // "đúng" một mình, cùng đọc một tín hiệu
+                    // (`asks_for_go_ahead`), cùng đổ vào một danh sách — và
+                    // chẳng chỗ nào hỏi "đã có ai dựng nút này chưa". Khối này
+                    // đi, khối trên ở lại: nó nằm cùng chỗ với các nút lệnh nên
+                    // thứ tự nút khớp thứ tự chữ trên màn.
+                    //
+                    // Bảng hỏi thì phải chọn được NGAY TẠI ĐÂY — cùng bộ nút
+                    // với tin tự phát (`telegram::choice_buttons`), không đẻ
+                    // lối riêng: `pick:<id>:<câu>.<lựa chọn>` cho mọi câu, kèm
+                    // `✅ Gửi lựa chọn`.
+                    if let Some(a) = shot_asking.as_ref() {
+                        quick.extend(crate::telegram::choice_buttons(
+                            &shot_sid,
+                            &a.options,
+                            false,
+                            a.multi,
+                            &a.rest,
+                        ));
                     }
                     // Ô nhập có chữ ⟹ một cái nút GỬI. Đúng một icon.
                     //
@@ -3735,8 +3848,22 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // interrupt`), và có hộp chọn thì thôi — ở đó Enter là CHỐT
                     // một lựa chọn, không phải gửi một câu; hộp chọn đã có bộ
                     // nút số riêng.
+                    // 🔴 Hà 2026-08-14, chỉ vào cái nút ấy trên ảnh `/shot` của
+                    // một phiên đang mở bảng hỏi: *"1 nút enter để làm gì"*.
+                    // Câu hỏi đúng, và câu trả lời là: ở màn ĐÓ nó không được
+                    // phép có mặt. Cửa chặn viết đúng ý ("có hộp chọn thì
+                    // thôi") nhưng hỏi bằng `parse_choices`, thứ MÙ với bảng
+                    // nhiều câu — nên cửa mở, nút hiện ra, và bấm vào là CHỐT
+                    // cái lựa chọn đang tô cho một câu chủ máy chưa chọn. Một
+                    // phép đo mù ở cổng an toàn thì hỏng về phía nguy hiểm.
+                    //
+                    // Hỏi cả ba nguồn: hộp chọn trên màn · thanh tab của bảng ·
+                    // bảng đọc từ nhật ký (đúng cho cả phiên hub không đọc được
+                    // màn).
                     let running = ack.contains("esc to interrupt");
-                    let has_choices = !crate::keys::parse_choices(&ack).is_empty();
+                    let has_choices = !crate::keys::parse_choices(&ack).is_empty()
+                        || crate::keys::ask_table(&ack).is_some()
+                        || shot_asking.is_some();
                     if !running && !has_choices && !shot_sid.is_empty() {
                         quick.push(("⏎".to_string(), format!("key:{shot_sid}:enter")));
                     }

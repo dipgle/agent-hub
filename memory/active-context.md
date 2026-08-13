@@ -1,5 +1,65 @@
 # active context — hub
 
+## 📋 2026-08-13 (sáng) — lượt tự đóng sổ THẬT đầu tiên, và ba lỗi nó lôi ra
+
+`auto_handover` bật lúc 04:13Z, nổ lần đầu **04:23:30Z** (`projects-06`, 80%,
+rảnh 126s) — và **phiên đang viết dòng này chính là phiên nó mở ra**
+(`86fe1666`, tty `ttys001`, `fresh:true`). Tức lần đầu tiên hub tự thay cửa sổ
+làm việc của Hà, và người kiểm chứng là cái phiên vừa được sinh ra.
+
+**Con số quyết định — vòng lặp 12-08 đã tắt hẳn:**
+
+| | bản lỗi 00:09 | bản vá 04:24 |
+|---|---|---|
+| phiên mới xuất phát | **59–61%** (`--resume` bê nguyên nhật ký cũ) | **4%** (47.652 tok) |
+| phiên cũ đóng ở | 61% | 80% |
+| kết cục | đủ điều kiện đóng sổ lần nữa ⟹ thay cửa sổ vô tận | dừng |
+
+Chuỗi chạy sạch: `fork_call_budget` → cửa sổ mới 04:24:30 → tin 04:24:36 →
+`session_end_muted` 04:24:51 (cửa sổ cũ đóng được, không có `closed_err`) →
+`portal_push_follow 86fe1666`. Hạn mức một lượt: **$7,49** (đọc như thước đo cỡ
+lượt gọi, luật 8).
+
+### Ba lỗi chỉ một lượt THẬT mới thấy
+
+1. **Tin không tới Telegram** (`570f026`). Log 04:24:36 chỉ có `tfl5_chat_sent`,
+   không một dòng telegram nào — hub tự đóng cửa sổ đang làm việc của Hà rồi báo
+   vào đúng cái phòng anh không mở. Mà đây là tin DUY NHẤT trong cả hub xảy ra
+   khi **không ai bấm gì**. `announce_changes` đi hai mồm từ đầu (luật 11); chỗ
+   này quên.
+2. **Tin gọi tên sai phiên** (`570f026`). In `h.new_session_id` — id BẢN FORK,
+   cắt còn 8 ký tự: `Phiên mới: f0883567`. Bản fork không có cửa sổ, không nằm
+   trong `claude agents`, và route `/session` khớp id CHÍNH XÁC ⟹ vô dụng cả hai
+   đường. Phiên thật là `86fe1666`, và `focus:session` đã trỏ đúng vào đó — tin
+   nhắn và cuốn sổ nói hai thứ khác nhau về cùng một việc.
+3. **Nhánh im lặng chưa ai nghĩ tới**: mở được cửa sổ nhưng chưa ghép được id ⟹
+   con trỏ VẪN nằm ở phiên vừa tắt, tin thì trông như thành công. Nay `HandoverMove`
+   ba kết cục, ba câu khác nhau.
+
+### Hai lỗi Hà chụp màn gửi thẳng (`2e1ca1e`)
+
+- *"Vẫn còn project-.."* — trong CÙNG một màn hình: nút `[AI/hub]`, dòng
+  `👁 Đang theo phiên [AI/hub]`, rồi `📷 Màn của projects-d2:`. `screen_report`
+  là chỗ sót của `display_name` (22c97e9): ba lần `s.name` thô.
+- *"Không có lệnh merge mà bấm"* — màn kết bằng đúng một lệnh để gõ, 0 nút. Gốc:
+  lệnh dài hơn bề ngang cửa sổ ⟹ TUI bẻ đôi ⟹ cổng `contains('\n')` (viết 08-12)
+  vứt thẳng. **Cổng ấy đúng ý mà sai hình**: nó định loại KHỐI CHỮ, nhưng thứ nó
+  loại được nhiều nhất là *lệnh dài* — đúng những lệnh đáng có nút nhất. Nay nối
+  lại, nhưng **chỉ khi chỗ bẻ rơi vào ranh giới từ** (đo trên chữ thật:
+  `--expect-symbol ␣\n␣␣renderChatPending`); bẻ giữa từ thì bỏ, vì nối bừa là
+  bịa ra một lệnh khác mà nút thì bấm một cái là chạy. `gh` vào danh sách lệnh
+  quen.
+
+⏳ **Chưa quan sát trên tin thật:** tin tự đóng sổ ĐI TELEGRAM (cần lượt nổ kế
+tiếp), và đầu đề `/shot` mang `[AI/hub]` (cần Hà bấm một nút phiên). Đã quan sát
+thật: `.inbox/<id ngắn>/` nhận ảnh Hà gửi đúng đường (`d407a8d`).
+
+📌 Bài học chung của cả năm lỗi: **cả năm đều nằm ở tin nhắn, không ở cơ chế.**
+Cơ chế đóng sổ chạy đúng ngay lượt đầu; thứ sai là hub kể lại việc mình vừa làm
+— sai phòng, sai tên phiên, sai tên màn, và im ở đúng nhánh cần nói nhất.
+
+---
+
 ## ⌨ 2026-08-12 (khuya) — bốn bản vá cú Enter, và cả bốn sai cùng một kiểu
 
 Hà làm việc thật qua Telegram cả tối, và cái Enter hỏng đi hỏng lại. Bốn lượt

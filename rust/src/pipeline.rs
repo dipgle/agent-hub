@@ -244,8 +244,15 @@ pub fn enter_button(
 pub fn session_name_from_book(book_json: &str, id: &str) -> Option<(String, String)> {
     let book: BTreeMap<String, crate::watch::Mark> = serde_json::from_str(book_json).ok()?;
     let mark = book.get(id)?;
-    // Tên để ĐỌC, không phải tên `claude` tự đặt — xem `sessions::display_name`.
-    let shown = crate::sessions::display_name(&mark.n, &mark.d);
+    // Tên để ĐỌC, không phải tên `claude` tự đặt. Sổ nhớ luôn cái nhãn ĐÃ
+    // TÍNH (`Mark::l`) chứ không tính lại từ `n`+`d`: nhãn duy nhất là tính
+    // chất của cả tập, mà ở đây chỉ còn một hàng trong sổ. Sổ cũ chưa có `l`
+    // thì rơi về cách tính cũ — đúng dự án, chỉ thiếu vế duy-nhất.
+    let shown = if mark.l.is_empty() {
+        crate::sessions::display_name(&mark.n, &mark.d)
+    } else {
+        mark.l.clone()
+    };
     if mark.n.is_empty() {
         // Sổ có id mà không có tên (bản ghi từ trước khi sổ nhớ tên) — trả None
         // để rơi về đường ảnh chụp, đừng chào bằng một cái tên rỗng.
@@ -618,7 +625,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // "… (còn N dòng)" phải có đường đi tiếp — xem `remember_full`.
         if text.contains("… (còn ") {
             let shown_name = row
-                .map(|r| crate::sessions::display_name(&r.name, &r.folder))
+                .map(crate::sessions::shown)
                 .unwrap_or_else(|| c.name().to_string());
             if let Some(b) = long
                 .as_deref()
@@ -939,7 +946,7 @@ fn auto_handover(db: &Db, cfg: &Config) {
                     }
                 };
                 let msg = auto_handover_notice(
-                    &crate::sessions::display_name(&s.name, &s.folder),
+                    &crate::sessions::shown(s),
                     pct,
                     idle_sec,
                     &outcome,
@@ -1496,7 +1503,7 @@ pub fn session_list_text(
         // ("projects-ff") không nói được gì, còn `cwd` thì giống hệt nhau ở mọi
         // dòng trên máy này — xem `sessions::folder_from_tail`.
         // Nhãn dự án thay cho tên tự sinh — xem `sessions::display_name`.
-        let what = crate::sessions::display_name(&s.name, &s.folder);
+        let what = crate::sessions::shown(s);
         out.push_str(&format!(
             "{}{} {} · {} · {} · {}\n",
             eye,
@@ -1837,13 +1844,30 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
     // thô, đúng cái tên `claude` tự đặt theo thư mục mở phiên (cả máy mở ở gốc
     // workspace nên phiên nào cũng `projects-xx`, tức cái tên phân biệt được ít
     // nhất trong mọi cái tên có ở đây).
-    let what = crate::sessions::display_name(&s.name, &s.folder);
+    let what = crate::sessions::shown(s);
     match crate::keys::screen_text(window) {
         Ok(screen) => {
-            let risk = crate::sessions::preview_risk(&screen);
+            // 🔴 Hà 2026-08-13 bấm 📷 và nhận *"Màn của [AI/mailler] có thể
+            // chứa bí mật (credential_word, credential_word_vi) — không đưa ra
+            // ngoài"*. Hai nhãn ấy là nhãn CHỮ: màn hình chỉ **nhắc tới** chữ
+            // "mật khẩu"/"token", không hề có giá trị nào. Mà phiên ấy đang bàn
+            // về DKIM và quyền ssh, tức nó sẽ nhắc tới mấy chữ đó cả buổi ⟹
+            // `/shot` tắt hẳn đúng lúc cần nhất.
+            //
+            // Cửa này phải cùng luật với `redaction::file_risk`, và lý do đã
+            // viết sẵn ở đó: chỗ khác nhau nằm ở NGƯỜI NHẬN và AI CHỌN. Phần
+            // xem trước là mảnh chữ **hub tự chọn** đẩy vào một tài liệu trên
+            // server — ngờ cả chữ là đúng. Còn `/shot` là **chủ máy gọi đích
+            // danh một phiên của chính anh**, trả về buồng chat gác bằng
+            // `chat_id`. Anh đang nhìn cái màn ấy nếu ngồi ở máy; chặn chữ ở
+            // đây là chặn đúng phép thử cầu nối.
+            //
+            // GIÁ TRỊ thì vẫn chặn — `credential_literal`, `private_key_block`,
+            // `secret_assignment` — vì đó mới là thứ mất đi khi lọt ra ngoài.
+            let risk = crate::redaction::file_risk(&screen);
             if !risk.is_empty() {
                 return format!(
-                    "📷 Màn của {what} có thể chứa bí mật ({}) — không đưa ra ngoài.",
+                    "📷 Màn của {what} có GIÁ TRỊ bí mật trên đó ({}) — không đưa ra ngoài.",
                     risk.join(", ")
                 );
             }
@@ -1977,7 +2001,7 @@ pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
     };
     // Dự án trước, vì đó là thứ ngón tay đang tìm; tên phiên tự sinh chỉ để phân
     // biệt hai phiên cùng dự án.
-    let what = crate::sessions::display_name(&s.name, &s.folder);
+    let what = crate::sessions::shown(s);
     // Nguồn đứng ngay trên NÚT nữa, không chỉ trên danh sách chữ: cái nút mới là
     // thứ ngón tay chạm vào, và nó phải nói trước rằng bấm vào một phiên VS Code
     // thì xem được chứ gõ thì không.
@@ -2623,7 +2647,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             "⚠ {} đang có hộp chọn, nên tôi KHÔNG gửi mũi tên: đường gõ của \
                                              Terminal luôn kèm một dấu xuống dòng, tức mũi tên vừa di vừa CHỐT \
                                              — dễ chọn nhầm hộ Hà. Gõ thẳng SỐ của mục cần chọn thì an toàn.",
-                                            crate::sessions::display_name(&s.name, &s.folder)
+                                            crate::sessions::shown(&s)
                                         ))
                                     }
                                     crate::keys::Arrow::RefuseBlind(why) => {
@@ -2638,7 +2662,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                              đang có thì mũi tên vừa di vừa CHỐT, và chốt nhầm hộ Hà là thứ \
                                              không lùi lại được. Gõ thẳng SỐ của mục cần chọn thì an toàn dù \
                                              màn có đọc được hay không.",
-                                            crate::sessions::display_name(&s.name, &s.folder), why
+                                            crate::sessions::shown(&s), why
                                         ))
                                     }
                                 }
@@ -2808,7 +2832,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     let what = view
                                         .as_ref()
                                         .map(|(body, _)| crate::keys::landed(body));
-                                    let name = crate::sessions::display_name(&s.name, &s.folder);
+                                    let name = crate::sessions::shown(&s);
                                     if is_key {
                                         format!("✓ đã bấm '{}' · {name}", typed.trim())
                                     } else if what == Some(crate::keys::Landed::Queued) {

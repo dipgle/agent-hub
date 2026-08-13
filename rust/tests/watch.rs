@@ -26,6 +26,7 @@ fn mark(state: &str, tty: &str, kind: &str) -> Mark {
         h: false,
         n: String::new(),
         d: String::new(),
+        l: String::new(),
         // Mặc định của test cũ: sổ ĐÃ biết phiên này thuộc tài khoản nào. Sổ
         // chưa biết (`a` rỗng) là một ca riêng, có test riêng bên dưới.
         a: "acc1".to_string(),
@@ -723,7 +724,10 @@ fn two_sessions_in_one_project_get_two_different_names() {
     ]
     .into_iter()
     .collect();
-    let (events, _) = changes(&prev, &[a.clone(), b.clone()], NOW, &[]);
+    // Nhãn tính ở NGUỒN, trên cả tập — đúng đường mà ảnh chụp thật đi qua.
+    let mut rows = vec![a.clone(), b.clone()];
+    hub::sessions::label_sessions(&mut rows, std::path::Path::new("/Users/hanguyen/projects"));
+    let (events, _) = changes(&prev, &rows, NOW, &[]);
     let names: Vec<String> = events
         .iter()
         .map(|c| match c {
@@ -739,7 +743,9 @@ fn two_sessions_in_one_project_get_two_different_names() {
     // Một mình thì KHÔNG gánh chuỗi hex: ca hiếm không được làm phiền ca thường.
     let solo_book: BTreeMap<String, Mark> =
         [working_long("0a109818-0000-0000-0000-000000000000")].into_iter().collect();
-    let (solo, _) = changes(&solo_book, &[a], NOW, &[]);
+    let mut solo_rows = vec![a];
+    hub::sessions::label_sessions(&mut solo_rows, std::path::Path::new("/Users/hanguyen/projects"));
+    let (solo, _) = changes(&solo_book, &solo_rows, NOW, &[]);
     match solo.first() {
         Some(Change::Finished { name, .. }) => assert_eq!(name, "[dwork]", "thừa id khi không trùng"),
         other => panic!("phải là Finished: {other:?}"),

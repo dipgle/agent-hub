@@ -141,6 +141,12 @@ pub struct Mark {
     pub n: String,
     #[serde(default)]
     pub d: String,
+    /// Nhãn ĐÃ TÍNH của phiên (`sessions::label_sessions`) — nhớ TỪ TRƯỚC,
+    /// cùng lý do với `n` và `d`, và thêm một lý do riêng: nhãn duy nhất là
+    /// tính chất của CẢ ảnh chụp, nên lúc phiên đã rời danh sách thì không còn
+    /// tính lại được nữa. Sổ cũ (rỗng) rơi về `display_name`.
+    #[serde(default)]
+    pub l: String,
     /// Tài khoản `claude` phiên này thuộc về — nhớ TỪ TRƯỚC, vì nó là thứ quyết
     /// định lượt sau có được QUYỀN kết luận "phiên đã tắt" hay không.
     ///
@@ -704,6 +710,7 @@ pub fn changes(
                         h: s.started_by_hub,
                         n: s.name.clone(),
                         d: s.folder.clone(),
+                        l: crate::sessions::shown(s),
                         a: s.account.clone(),
                         c: s.cwd.clone(),
                         i: s.pid,
@@ -731,14 +738,14 @@ pub fn changes(
         if state == ERRORED && before.is_some_and(|b| b.s != ERRORED) {
             out.push(Change::Failed {
                 id: s.session_id.clone(),
-                name: crate::sessions::unique_label(now, s),
+                name: crate::sessions::shown(s),
                 line: s.error.clone().unwrap_or_default(),
             });
         } else if state == ASKING && before.is_some_and(|b| b.s != ASKING) {
             let a = s.asking.clone().unwrap_or_default();
             out.push(Change::Asking {
                 id: s.session_id.clone(),
-                name: crate::sessions::unique_label(now, s),
+                name: crate::sessions::shown(s),
                 header: a.header,
                 question: a.question,
                 options: a.options,
@@ -749,14 +756,14 @@ pub fn changes(
             if epoch_sec - since >= MIN_RUN_SEC {
                 out.push(Change::Finished {
                     id: s.session_id.clone(),
-                    name: crate::sessions::unique_label(now, s),
+                    name: crate::sessions::shown(s),
                     ran_sec: epoch_sec - since,
                 });
             }
         } else if before.is_some() && state == DEAD {
             out.push(Change::Ended {
                 id: s.session_id.clone(),
-                name: crate::sessions::unique_label(now, s),
+                name: crate::sessions::shown(s),
                 was_working,
                 tty: s.tty.clone(),
                 kind: s.kind.clone(),
@@ -844,7 +851,7 @@ pub fn changes(
                 // Tên lấy TỪ SỔ (xem `Mark::n`): hàng của phiên đã đi mất cùng
                 // danh sách. Sổ cũ chưa có tên thì đành id ngắn — nhưng nói rõ
                 // đó là id, đừng để người đọc tưởng đấy là tên.
-                name: name_from_mark(id, mark),
+                name: if mark.l.is_empty() { name_from_mark(id, mark) } else { mark.l.clone() },
                 was_working: mark.s.starts_with(WORKING),
                 // ĐÂY là lý do sổ phải nhớ `tty`: hàng của phiên đã biến mất,
                 // nên không còn chỗ nào hỏi nó chạy ở cửa sổ nào.

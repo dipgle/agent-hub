@@ -1303,3 +1303,61 @@ fn talking_about_an_api_error_is_not_having_one() {
     assert_eq!(e(""), None);
     assert_eq!(e("không phải json"), None);
 }
+
+/// Nhãn không được mang tên NGĂN KÉO — `AI/hub` phải đọc là `[hub]`.
+///
+/// 🔴 Hà 2026-08-13, đọc hai tin liền nhau `[AI/mailler]` và `[AI/hub]`: *"sao
+/// lại bị như này, hub làm việc đâu liên quan tới ai"*. `AI/` đứng trước gần
+/// như mọi dự án trên máy, nên nó phân biệt được đúng số không.
+///
+/// Bỏ ĐÚNG MỘT bậc: Hà đã bác việc rút gọn quá tay ngày 08-12 (*"sao phiên fb
+/// rõ ràng là ai/tcc/amm nhưng danh sách phiên chỉ hiện ai/tcc"*), nên `tcc`
+/// phải ở lại — chỉ vài dự án nằm trong nó, tức nó CÓ phân biệt.
+#[test]
+fn a_filing_drawer_is_not_part_of_the_name() {
+    use hub::sessions::{label_sessions, LiveSession};
+
+    // Dựng đúng hình dạng đã đo trên máy: `AI` và `AI/tcc` trống trơn, còn
+    // `AI/hub` và `AI/tcc/amm` mang dấu hiệu dự án.
+    let root = std::env::temp_dir().join(format!(
+        "hub-drawer-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::create_dir_all(root.join("AI/hub")).unwrap();
+    std::fs::create_dir_all(root.join("AI/tcc/amm")).unwrap();
+    std::fs::create_dir_all(root.join("dwork")).unwrap();
+    std::fs::write(root.join("AI/hub/CLAUDE.md"), "x").unwrap();
+    std::fs::write(root.join("AI/tcc/amm/Cargo.toml"), "x").unwrap();
+    std::fs::write(root.join("dwork/CLAUDE.md"), "x").unwrap();
+
+    let row = |id: &str, folder: &str| LiveSession {
+        session_id: id.to_string(),
+        name: "projects-ff".to_string(),
+        folder: folder.to_string(),
+        ..Default::default()
+    };
+    let mut rows = vec![
+        row("11111111-0000-0000-0000-000000000000", "AI/hub"),
+        row("22222222-0000-0000-0000-000000000000", "AI/tcc/amm"),
+        row("33333333-0000-0000-0000-000000000000", "dwork"),
+        // Ngăn kéo không kiểm được (không có thư mục ấy) thì GIỮ NGUYÊN —
+        // không biết thì đừng đoán, cùng luật với `open_drawer`.
+        row("44444444-0000-0000-0000-000000000000", "khong/co/that"),
+    ];
+    label_sessions(&mut rows, &root);
+
+    assert_eq!(rows[0].label, "[hub]", "ngăn kéo AI/ vẫn bám vào nhãn");
+    assert_eq!(rows[1].label, "[tcc/amm]", "rút gọn quá tay, mất chỗ đứng của amm");
+    assert_eq!(rows[2].label, "[dwork]", "dự án ở gốc thì không có gì để bỏ");
+    assert_eq!(rows[3].label, "[khong/co/that]", "đoán bừa khi không kiểm được");
+
+    // Và `folder` KHÔNG bị đụng: nó là một mẩu đường dẫn thật, `clean_inbox`
+    // ghép nó vào gốc workspace để tìm hòm thư cũ (`AI/hub/.inbox` có thật
+    // trên máy lúc sửa).
+    assert_eq!(rows[0].folder, "AI/hub", "nhãn ăn vào đường dẫn");
+
+    std::fs::remove_dir_all(&root).ok();
+}

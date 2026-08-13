@@ -609,7 +609,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         //
         // Cùng máy móc, không đẻ lối riêng: `commands_on_screen` (nhận theo
         // HÌNH DẠNG, cố ý hẹp) → `remember_quick` → nút `run:<n>` → `/type
-        // !<lệnh>` vào chính phiên.
+        // <lệnh>` vào chính phiên (KHÔNG còn dấu `!` — xem `telegram.rs`).
         //
         // ⛔ Trừ tin BÁO TỬ: gõ vào một phiên đã tắt là gõ vào chỗ trống — cùng
         // lý do nút "vào phiên" đã bị gỡ khỏi nhánh ấy.
@@ -1763,7 +1763,7 @@ pub const QUICK_KEY: &str = "quick:cmds";
 
 /// Ghi danh sách lệnh gợi ý, trả về các cặp (nhãn, mã nút).
 ///
-/// Nút gõ `!<lệnh>` VÀO PHIÊN chứ không chạy ngoài (Hà 2026-08-12: *"có thể sẽ
+/// Nút gõ dòng lệnh VÀO PHIÊN chứ không chạy ngoài (Hà 2026-08-12: *"có thể sẽ
 /// chạy được trực tiếp từ ô chát trong cli bằng cách thêm ký tự `!` ở đầu"*).
 /// Khác biệt không nhỏ: chạy trong phiên thì **phiên nhìn thấy kết quả** và đi
 /// tiếp được, còn `/cmd` chạy ở một shell rời — kết quả về điện thoại, phiên
@@ -2014,10 +2014,10 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
     // khác: *"`!` trong Claude Code không cấp tty, nên `ssh -t` không xin được
     // — không phải lỗi sudo hay script"*.
     //
-    // `▶` gõ `!<lệnh>` vào chính phiên: phiên NHÌN THẤY kết quả rồi đi tiếp
-    // được — đó là giá trị của nó, và phần lớn lệnh hợp ở đây. Nhưng chế độ
-    // `!` của TUI không cấp tty, nên `sudo`, `ssh -t`, `passwd`, `read -s` chết
-    // ngay ở dòng hỏi mật khẩu. Không vá được trong `▶`: thứ thiếu là cái tty.
+    // `▶` gửi dòng lệnh vào chính phiên: phiên NHÌN THẤY kết quả rồi đi tiếp
+    // được — đó là giá trị của nó, và phần lớn lệnh hợp ở đây. Nhưng phiên chạy
+    // lệnh bằng công cụ của nó, KHÔNG có tty, nên `sudo`, `ssh -t`, `passwd`,
+    // `read -s` chết ngay ở dòng hỏi mật khẩu. Thứ thiếu là cái tty.
     //
     // `🖥` mở một cửa sổ Terminal thật (`/win`) — đúng thứ chủ máy sẽ tự làm
     // khi ngồi trước máy. Đổi lại: kết quả nằm trên cửa sổ ấy, không về điện
@@ -2032,7 +2032,10 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
         .flat_map(|(i, c)| {
             [
                 (
-                    format!("▶ chạy trong phiên: {}", crate::exec::truncate(c, 36)),
+                    // Nhãn nói ĐÚNG cơ chế: phiên nhận dòng lệnh rồi tự chạy
+                    // (và thấy kết quả, đi tiếp được). Không phải shell trực
+                    // tiếp — xem chú thích `!` ở `telegram.rs`.
+                    format!("▶ nhờ phiên chạy: {}", crate::exec::truncate(c, 38)),
                     format!("run:{i}"),
                 ),
                 (
@@ -3239,15 +3242,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     },
                 };
                 // `/shot` trên Telegram đi kèm NÚT cho từng lệnh thấy trên màn.
-                // Đường đi vẫn là một: nút gõ `!<lệnh>` vào phiên qua `/type`,
+                // Đường đi vẫn là một: nút gõ dòng lệnh vào phiên qua `/type`,
                 // tức cùng route, cùng sổ (xem `remember_quick`).
                 let mut quick = Vec::new();
                 if matches!(cmd.kind, CommandKind::Shot) {
                     let mut cmds = crate::keys::commands_on_screen(&ack, 4);
                     let n_cmds = cmds.len();
                     // Câu đồng ý nằm CÙNG kho với lệnh (một chỗ nhớ, một chỉ
-                    // số), nhưng đi bằng callback KHÁC: `run:` gõ `!<lệnh>` tức
-                    // chạy shell, còn đây là chữ thường gửi vào phiên.
+                    // số), nhưng đi bằng callback KHÁC: `run:` gõ một DÒNG
+                    // LỆNH, còn đây là một câu chữ thường.
                     let go = crate::keys::asks_for_go_ahead(&ack);
                     if go {
                         cmds.push("làm đi".to_string());

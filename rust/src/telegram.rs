@@ -1047,7 +1047,31 @@ impl Inbox {
                         // độ bash của chính TUI, tức đúng cái ngón tay chủ máy
                         // gõ. Hai thứ khác hẳn nhau, và tôi đã lẫn chúng làm
                         // một. Giữ nguyên một đường.
-                        // 🔴 MANG ID THEO. Hà 2026-08-13: *"Nội dung có nút bấm
+                        // 🔴 KHÔNG còn dấu `!`. Hà 2026-08-13, ảnh chụp màn
+                        // phiên tfl5: *"làm gì mà nó không nhận chạy lệnh mà
+                        // thành gửi text vào hỏi như bình thường"*. Trên ảnh,
+                        // dòng `!bash scripts/verify-acl-delta-0813.sh` vào
+                        // phiên như một CÂU HỎI THƯỜNG, và `claude` đọc nó rồi
+                        // tự gọi Bash tool để chạy.
+                        //
+                        // Vì sao: `do script` đẩy chữ + xuống dòng trong CÙNG
+                        // một lượt ghi, và TUI đọc lượt ấy như một cú DÁN —
+                        // điều tệp này đã ghi từ 08-12 cho chuyện dấu Enter.
+                        // Chế độ bash của TUI chỉ bật khi `!` tới như một PHÍM
+                        // GÕ đầu tiên vào ô trống; `!` trong một cú dán chỉ là
+                        // một ký tự. Tức quy ước `!<lệnh>` của hub **chưa bao
+                        // giờ chạy** theo cách nó tự mô tả.
+                        //
+                        // Và nó không vô hại: nếu có lượt nào `!` bật được chế
+                        // độ ấy thì chế độ DÍNH, nên tin nhắn thường tiếp theo
+                        // rơi vào ô bash và chạy như lệnh shell — đúng cái
+                        // `command not found: Tôi` Hà gặp tối nay.
+                        //
+                        // Bỏ hẳn `!`: gửi nguyên dòng lệnh cho phiên, đúng như
+                        // chủ máy tự gõ. Cần shell THẬT thì đã có `🖥` (cửa sổ
+                        // mới, có tty, không tốn hạn mức).
+                        //
+                        // MANG ID THEO. Hà: *"Nội dung có nút bấm
                         // nhưng bấm xong lại gửi vào phiên khác đang đc chọn"* —
                         // và bằng chứng rơi thẳng vào cuộc trò chuyện: nút
                         // `▶ bash scripts/verify-acl-2026-08-13.sh` của `[tfl5]`
@@ -1060,7 +1084,7 @@ impl Inbox {
                         // sinh ra và lúc nút được bấm. Đây đúng con đường đã gõ
                         // nhầm phiên sáng 08-11, và `remember_files` đã vá cho
                         // nút 📎 — một cuốn sổ được vá, cuốn bên cạnh thì không.
-                        self.push_text(&format!("/type {sid} !{line}"));
+                        self.push_text(&format!("/type {sid} {line}"));
                     }
                     None => {
                         if let Err(e) = self.send_text(
@@ -1110,8 +1134,8 @@ impl Inbox {
             }
             // `say:<n>` — gửi một câu CHỮ THƯỜNG vào phiên đang theo.
             //
-            // Khác `run:<n>` đúng một dấu `!`, mà dấu ấy đổi hẳn nghĩa: `run:`
-            // gõ `!<lệnh>` tức chạy shell trong phiên; `say:` gõ nguyên câu như
+            // Khác `run:<n>` ở NỘI DUNG chứ không ở đường đi: `run:` gõ một
+            // dòng lệnh cho phiên chạy; `say:` gõ nguyên câu như
             // chủ máy tự gõ. Dùng cho nút "✅ Làm đi" khi phiên đang mời một
             // tiếng "ừ" (Hà 2026-08-13).
             if let Some(n) = data.strip_prefix("say:").and_then(|n| n.parse::<usize>().ok()) {

@@ -325,6 +325,21 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         .cursor_or_log(AUTO_DONE_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
+    // …và phiên hub ĐANG ĐÓNG theo lệnh `/close` cũng vậy — cùng một lý do,
+    // một cuốn sổ khác.
+    //
+    // 🔴 Hà 2026-08-13, đếm tin sau đúng MỘT cú `/close`: *"Đóng 1 phiên mà lắm
+    // thông báo thế"*. Trên ảnh có `⏳ Đã gõ /exit … chờ CLI chạy nốt`, rồi
+    // `⚫ [mailler] đã tắt (thoát CLI, cửa sổ terminal còn mở)`, rồi `⏹ Đã đóng
+    // hẳn [mailler] … (chờ 24s)`. Tin giữa là cái loa nhìn thấy phiên biến mất
+    // và báo động — về đúng việc hub vừa cố ý làm, ba mươi giây trước. Nó còn
+    // mâu thuẫn với tin sau nó ("cửa sổ còn mở" rồi "cửa sổ đã đóng"), nên
+    // người đọc phải tự ghép hai câu mới ra một sự thật.
+    let closing: Vec<String> = db
+        .cursor_or_log(CLOSING_KEY)
+        .and_then(|v| serde_json::from_str::<BTreeMap<String, Closing>>(&v).ok())
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default();
 
     match serde_json::to_string(&next) {
         // Ghi sổ TRƯỚC khi nói: nói xong mới ghi mà sập giữa chừng thì lượt sau
@@ -366,7 +381,9 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         }
         // hub vừa tự đóng sổ phiên này ⟹ cái chết của nó là KẾ HOẠCH, không
         // phải tin. Xem `handed_over` ở đầu hàm.
-        if matches!(c, crate::watch::Change::Ended { .. }) && handed_over.iter().any(|d| d == &id) {
+        if matches!(c, crate::watch::Change::Ended { .. })
+            && (handed_over.iter().any(|d| d == &id) || closing.iter().any(|d| d == &id))
+        {
             logging::info(
                 "session_end_muted",
                 json!({ "session": id,
@@ -3802,7 +3819,17 @@ fn ask_owner(
     what: &str,
     nothing_done: &str,
 ) -> Option<String> {
-    if cfg.confirm.enabled {
+    // Câu "đã gửi yêu cầu sang Telegram" chỉ có nghĩa với người KHÔNG ở
+    // Telegram.
+    //
+    // 🔴 Cùng ảnh chụp ấy: bấm `/close` trên Telegram và nhận ngay `🔒 Đã gửi
+    // yêu cầu xác nhận sang Telegram: …` — hub nói với Telegram rằng nó vừa gửi
+    // một thứ sang Telegram, và cái thứ ấy hiện ngay dòng dưới. Một tin chỉ để
+    // giới thiệu tin kế tiếp.
+    //
+    // Với phòng chat tfl5 thì câu ấy vẫn cần: ở đó người đọc KHÔNG thấy hộp
+    // xác nhận, nên không nói ra là màn hình đứng im không lý do.
+    if cfg.confirm.enabled && adapter != crate::telegram::NAME {
         reply_in_channel(
             db,
             cfg,

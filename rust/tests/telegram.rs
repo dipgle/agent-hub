@@ -1214,10 +1214,16 @@ fn a_button_remembers_which_session_made_it() {
     let tfl5 = "4963b95c-0000-0000-0000-000000000000";
     let cmds = vec!["bash scripts/verify-acl-2026-08-13.sh".to_string()];
     // Hai nút một lệnh: ▶ (chạy trong phiên) và 🖥 (cửa sổ thật có tty).
+    // MỘT lệnh, MỘT nút, nhãn đúng là lệnh ấy — Hà 2026-08-13: *"sao vẫn ra
+    // một đống nút ở đây?"* · *"tôi chỉ cần biết nút đó chạy cái gì"*.
     let btns = remember_quick(&db, tfl5, &cmds);
-    assert_eq!(btns.len(), 2, "{btns:?}");
+    assert_eq!(btns.len(), 1, "{btns:?}");
     assert_eq!(btns[0].1, "run:0");
-    assert_eq!(btns[1].1, "win:0");
+    assert!(
+        btns[0].0.contains("verify-acl-2026-08-13.sh"),
+        "nhãn phải là chính lệnh: {}",
+        btns[0].0
+    );
 
     // Con trỏ đã sang phiên khác — nút vẫn phải trỏ về phiên đã sinh ra nó.
     let (sid, line) = quick_cmd(&db, 0).expect("sổ phải nhớ");

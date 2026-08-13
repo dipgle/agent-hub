@@ -2030,35 +2030,21 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
         .enumerate()
         .take(3)
         .flat_map(|(i, c)| {
-            [
-                (
-                    // Nhãn nói ĐÚNG cơ chế: phiên nhận dòng lệnh rồi tự chạy
-                    // (và thấy kết quả, đi tiếp được). Không phải shell trực
-                    // tiếp — xem chú thích `!` ở `telegram.rs`.
-                    // Nhãn nói ĐÚNG cơ chế: hub chạy trên máy rồi dán kết quả
-                    // kèm ngữ cảnh vào phiên — xem `CommandKind::RunIn`.
-                    format!("▶ chạy & dán vào phiên: {}", crate::exec::truncate(c, 34)),
-                    format!("run:{i}"),
-                ),
-                (
-                    // 🔴 Nhãn phải đọc ĐƯỢC MỘT MÌNH. Hà 2026-08-13: *"Thực sự
-                    // mấy cái nút đọc không dám bấm vì không thể hiểu nó làm
-                    // gì"*, kèm ảnh có nút `🖥 …trong cửa sổ thật (có tty)`.
-                    //
-                    // Nhãn ấy viết như vế sau của một câu, và vế trước nằm ở
-                    // NÚT KHÁC — đúng thứ chỉ hiểu được nếu đọc hai nút liền
-                    // nhau theo đúng thứ tự. Trên điện thoại người ta đọc từng
-                    // nút một, và một cái nút không tự nói được nó làm gì thì
-                    // nó là một cái nút không ai dám bấm.
-                    //
-                    // Mỗi nút nay tự đủ: LÀM GÌ + Ở ĐÂU + VỚI LỆNH NÀO.
-                    format!(
-                        "🖥 chạy trong cửa sổ mới: {}",
-                        crate::exec::truncate(c, 34)
-                    ),
-                    format!("win:{i}"),
-                ),
-            ]
+            // MỘT lệnh, MỘT nút, và nhãn đúng là lệnh ấy.
+            //
+            // 🔴 Hà 2026-08-13, ảnh chụp sáu nút dưới một tin: *"sao vẫn ra một
+            // đống nút ở đây?"*, rồi nói thẳng cái cần: *"tôi đâu cần thông tin
+            // chạy ở đâu làm gì, tôi chỉ cần biết nút đó chạy cái gì và hub phải
+            // quản lý được đúng phiên đúng luồng"*.
+            //
+            // Hai nút mỗi lệnh là bắt người bấm chọn hộ một quyết định KỸ THUẬT
+            // (chạy ở đâu) mà họ không có dữ kiện để chọn, và nó nhân đôi chiều
+            // dài bảng phím. hub biết đường nào chạy được từ điện thoại
+            // (`/runin`) nên hub chọn. Cần cửa sổ thật có tty thì gõ `/win`.
+            [(
+                format!("▶ {}", crate::exec::truncate(c, 52)),
+                format!("run:{i}"),
+            )]
         })
         .collect()
 }
@@ -2347,11 +2333,42 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         crate::exec::truncate(&want, 40)
                     ),
                     Some(s) => {
+                        // 🔴 THƯ MỤC PHẢI LÀ CỦA PHIÊN ẤY. Hà 2026-08-13, chỉ
+                        // vào nút `bash scripts/verify-acl-delta-0813.sh`:
+                        // *"ví dụ như cái này nó lấy ở đâu thì phải nằm đúng
+                        // chỗ đó chứ"*.
+                        //
+                        // Anh đúng, và đây là một lỗi im lặng đúng nghĩa: dòng
+                        // ấy lấy từ màn phiên `[tfl5]`, nơi `scripts/` nghĩa là
+                        // `AI/tfl5/scripts/`. Chạy nó ở GỐC workspace thì
+                        // `scripts/` là `~/projects/scripts/` — một thư mục có
+                        // thật, chứa những tệp khác hẳn. Lệnh sẽ chạy, trả một
+                        // mã thoát, và kết quả nói về một thứ không ai hỏi.
+                        //
+                        // `session_root` đọc dự án từ SỔ và trả `None` khi
+                        // không biết — chỗ này TỪ CHỐI thay vì rơi về gốc, vì
+                        // rơi về gốc chính là con bug trên.
+                        let root = match session_root(db, cfg, &s.session_id) {
+                            Some(r) => r,
+                            None => {
+                                logging::warn(
+                                    "runin_no_root",
+                                    json!({ "session": s.session_id,
+                                            "why": "sổ chưa biết dự án của phiên — không đoán gốc workspace" }),
+                                );
+                                let msg = format!(
+                                    "⚠ chưa biết {} làm ở thư mục nào nên KHÔNG chạy. Một lệnh tương đối chạy nhầm thư mục thì vẫn ra một mã thoát, mà kết quả nói về thứ khác. Dùng đường dẫn tuyệt đối, hoặc chờ hub nhận ra dự án của phiên.",
+                                    crate::sessions::shown(s)
+                                );
+                                reply_in_channel(db, cfg, adapter, cmd, &msg);
+                                continue;
+                            }
+                        };
                         let out = crate::exec::run(
                             "/bin/zsh",
                             &["-lc", &line],
                             crate::exec::RunOpts {
-                                cwd: Some(cfg.workspace_root.as_path()),
+                                cwd: Some(root.as_path()),
                                 timeout: Some(std::time::Duration::from_secs(
                                     cfg.call.timeout_sec.min(120),
                                 )),
@@ -2382,7 +2399,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 let block = format!(
                                     "[hub đã chạy hộ lệnh này trên máy — \
                                      cwd {}, KHÔNG có tty]\n$ {}\n{}",
-                                    cfg.workspace_root.display(),
+                                    root.display(),
                                     line,
                                     report
                                 );

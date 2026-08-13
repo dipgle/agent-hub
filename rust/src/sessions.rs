@@ -3378,9 +3378,46 @@ pub fn trust_dialog_choice(choices: &[(usize, String)]) -> Option<usize> {
 /// Chỉ gọi cho cửa sổ **hub vừa tự mở** và chỉ khi phiên **chưa chào đời** —
 /// hai điều kiện ấy không nằm trong hàm này mà nằm ở chỗ gọi, vì chúng là lý do
 /// việc bấm hộ chấp nhận được.
-fn answer_trust_dialog(tty: &str) -> Option<usize> {
-    let (_, choices) = crate::keys::screen_of(tty, 24)?;
-    let n = trust_dialog_choice(&choices)?;
+pub fn answer_trust_dialog(tty: &str) -> Option<usize> {
+    // 🔴 Ba lý do "không bấm" phải PHÂN BIỆT ĐƯỢC. Hà 2026-08-13: *"vẫn đang
+    // đứng im"* — cửa sổ kẹt nguyên trên hộp, hàm này trả `None`, và log không
+    // có một dòng nào. `screen_of` gộp `Withheld` (màn có vẻ chứa bí mật) và
+    // `Blind` (không đọc được) vào cùng một `None` với "đọc được nhưng không
+    // phải hộp ấy" — ba chuyện khác hẳn nhau, và chỉ một trong ba là bình
+    // thường. Cùng cái bẫy `keys::look` sinh ra để gỡ, lặp lại ở chỗ gọi.
+    let looked = crate::keys::look(tty, 24);
+    let choices = match looked {
+        crate::keys::Look::Saw { choices, .. } => choices,
+        // Màn bị giữ lại thì chỉ còn một CON SỐ lựa chọn, không có chữ — mà
+        // luật nhận hộp này đọc CHỮ ("trust" + "folder"). Không đọc được chữ
+        // thì KHÔNG bấm: bấm một con số vào một hộp chưa nhận diện được là trả
+        // lời thay chủ máy về một câu hub không biết nội dung.
+        crate::keys::Look::Withheld { choices, risk } => {
+            logging::info(
+                "trust_dialog_screen_withheld",
+                json!({ "tty": tty, "choices": choices, "risk": risk,
+                        "why": "màn có dấu hiệu bí mật nên chữ bị giữ — không nhận diện được hộp, KHÔNG bấm" }),
+            );
+            return None;
+        }
+        crate::keys::Look::Blind { why } => {
+            logging::warn(
+                "trust_dialog_screen_blind",
+                json!({ "tty": tty, "why": why }),
+            );
+            return None;
+        }
+    };
+    let Some(n) = trust_dialog_choice(&choices) else {
+        if !choices.is_empty() {
+            logging::info(
+                "trust_dialog_not_this_box",
+                json!({ "tty": tty, "choices": choices.len(),
+                        "why": "có hộp chọn nhưng không phải hộp tin-thư-mục — hub không trả lời thay chủ máy" }),
+            );
+        }
+        return None;
+    };
     let w = match crate::keys::window_of(tty) {
         Ok(Some(w)) => w,
         // Không im lặng: mất cửa sổ ở đây nghĩa là phiên mới vẫn kẹt, và chỗ gọi

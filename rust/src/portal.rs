@@ -121,7 +121,11 @@ fn build_inner(
         // Cửa sổ đang chờ đóng: ngó lại một lượt. Rẻ (một câu AppleScript cho
         // mỗi cửa sổ, và chỉ khi đã qua 30 giây), và nó phải bám vòng chạy —
         // chờ tại chỗ trong lượt lệnh là khoá `CMD_LOCK` (xem `CLOSING_KEY`).
-        crate::pipeline::close_pending_tick(db, cfg, chrono::Utc::now().timestamp());
+        let now_sec = chrono::Utc::now().timestamp();
+        crate::pipeline::close_pending_tick(db, cfg, now_sec);
+        // Cửa sổ kẹt ở hộp tin-thư-mục: chưa có id phiên nên không route nào
+        // với tới — phải có người ngó lại mỗi vòng (xem `trust_dialog_tick`).
+        crate::pipeline::trust_dialog_tick(now_sec);
     }
 
     // Only the session being read carries its full stream. Pushing every

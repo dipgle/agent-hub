@@ -1677,6 +1677,57 @@ fn save_closing(db: &Db, book: &BTreeMap<String, Closing>) {
     }
 }
 
+/// Mỗi vòng: cửa sổ nào đang kẹt ở hộp tin-thư-mục thì BẤM HỘ.
+///
+/// 🔴 Hà 2026-08-13, sau khi tôi vá đường tự đóng sổ: *"vẫn đang đứng im"*. Bản
+/// vá kia chỉ cứu lượt SAU — nó không gỡ được cửa sổ đang đứng, và cửa sổ ấy
+/// **chưa có id phiên** nên KHÔNG route nào của hub với tới được: `/key`,
+/// `/type`, `/shot`, `/close` đều nhắm bằng id. Một cửa sổ hub tự mở, rồi hub
+/// tự mất đường vào.
+///
+/// Nên phép bấm hộ phải sống trong VÒNG CHẠY, không sống trong một lời gọi hàm
+/// — cùng bài học với `CLOSING_KEY`: việc kéo dài thì phải có người ngó lại.
+/// Không cần sổ: dấu hiệu nằm ngay trên màn, và `trust_dialog_choice` chỉ khớp
+/// ĐÚNG hộp ấy (đúng hai lựa chọn, đúng chữ *"trust this folder"*). Màn nào
+/// không phải hộp ấy thì hàm không bấm gì cả.
+///
+/// Quét MỌI tab, không riêng tab hub mở: hộp này hỏi một lần cho mỗi cặp tài
+/// khoản × thư mục, và câu trả lời luôn là "có" — chủ máy uỷ quyền 2026-08-13.
+/// Ba mươi giây một lượt, cùng nhịp với `close_pending_tick`, vì nó cũng là
+/// một câu hỏi về màn hình chứ không phải một sự kiện.
+pub fn trust_dialog_tick(now: i64) {
+    static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+    if now - last < CLOSE_CHECK_SEC {
+        return;
+    }
+    LAST.store(now, std::sync::atomic::Ordering::Relaxed);
+    let tabs = match crate::keys::terminal_tabs() {
+        Ok(t) => t,
+        Err(e) => {
+            logging::warn(
+                "trust_tick_probe_failed",
+                json!({ "err": e.to_string() }),
+            );
+            return;
+        }
+    };
+    for tab in tabs {
+        // Chỉ tab đang chạy `claude`: hộp ấy là của `claude`, và đọc màn của
+        // một tab đang chạy thứ khác là đọc thứ không liên quan.
+        if tab.cli() != Some("claude") {
+            continue;
+        }
+        if let Some(n) = crate::sessions::answer_trust_dialog(&tab.tty) {
+            logging::info(
+                "trust_dialog_unstuck",
+                json!({ "tty": tab.tty, "pressed": n,
+                        "why": "cửa sổ kẹt ở hộp tin-thư-mục, chưa có id phiên nên không route nào với tới" }),
+            );
+        }
+    }
+}
+
 /// Mỗi vòng: cửa sổ nào hết bận thì đóng, còn bận thì CHỜ TIẾP.
 ///
 /// Ba kết cục, cả ba đều nói ra: đóng được · cửa sổ không còn (ai đó đã đóng

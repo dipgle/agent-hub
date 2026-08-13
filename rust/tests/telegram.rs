@@ -1099,3 +1099,61 @@ fn hub_never_reads_its_own_decoration_back_as_a_command() {
         hub::keys::commands_on_screen(in_ticks, 4)
     );
 }
+
+/// Nút file phải GỌN và phải PHÂN BIỆT được nhau.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp ba nút 📎 chồng nhau dưới một tin: *"sao không
+/// chèn thẳng nút xem file vào nội dung cho gọn thay vì nút độc lập"*. Trên ảnh
+/// có `📎 Cargo.toml`, `📎 cq.log`, `📎 Cargo.toml…` — ba hàng, và hai trong ba
+/// đọc y hệt nhau.
+#[test]
+fn file_buttons_share_a_row_and_say_which_file_is_which() {
+    use hub::telegram::Inbox;
+
+    // Ba nút file đứng liền nhau ⟹ MỘT hàng; nút khác vẫn hàng riêng.
+    let buttons = vec![
+        ("👁 Vào phiên".to_string(), "sess:abc".to_string()),
+        ("📎 Cargo.toml".to_string(), "file:0".to_string()),
+        ("📎 cq.log".to_string(), "file:1".to_string()),
+        ("📎 mod.rs".to_string(), "file:2".to_string()),
+        ("📄 Xem đầy đủ".to_string(), "full:abc".to_string()),
+    ];
+    let rows = Inbox::keyboard_rows(&buttons);
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert_eq!(rows[0].len(), 1, "nút phiên phải đứng riêng: {rows:?}");
+    assert_eq!(rows[1].len(), 3, "ba nút file phải chung một hàng: {rows:?}");
+    assert_eq!(rows[2].len(), 1, "{rows:?}");
+
+    // Quá 3 thì xuống hàng — 4 nút trên 390px là bắt đầu cắt nhãn.
+    let many: Vec<(String, String)> = (0..4)
+        .map(|i| (format!("📎 f{i}"), format!("file:{i}")))
+        .collect();
+    let rows = Inbox::keyboard_rows(&many);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert_eq!(rows[0].len(), 3);
+    assert_eq!(rows[1].len(), 1);
+}
+
+/// Đường dẫn bị TUI cắt cụt không được thành một cái nút.
+///
+/// Trên ảnh, `Cargo.toml…` sinh ra từ chính màn hình: `claude` cắt dòng lệnh
+/// dài rồi dán `…` vào cuối. Một cái nút trỏ vào đó không bao giờ mở được.
+#[test]
+fn a_truncated_path_is_not_a_file_button() {
+    use hub::keys::paths_on_screen;
+
+    let screen = "cargo test --manifest-path /Users/hanguyen/projects/AI/hub/rust/Cargo.toml… (46s)\n\
+                  clippy > /tmp/cq.log 2>&1\n\
+                  đọc /Users/hanguyen/projects/AI/hub/rust/Cargo.toml xem";
+    let got = paths_on_screen(screen, 4);
+    assert!(
+        got.iter().all(|p| !p.contains('…')),
+        "nút ma từ đường dẫn cắt cụt: {got:?}"
+    );
+    assert!(got.contains(&"/tmp/cq.log".to_string()), "{got:?}");
+    assert!(
+        got.contains(&"/Users/hanguyen/projects/AI/hub/rust/Cargo.toml".to_string()),
+        "{got:?}"
+    );
+    assert_eq!(got.len(), 2, "một file một nút: {got:?}");
+}

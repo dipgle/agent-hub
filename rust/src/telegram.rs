@@ -1315,6 +1315,46 @@ impl Inbox {
         self.send_buttons(text, &choice_buttons(session_id, labels, offer_enter, multi))
     }
 
+/// Xếp nút thành hàng: mặc định mỗi nút một hàng, RIÊNG nút file thì gộp.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp ba nút 📎 chồng nhau dưới một tin: *"sao không
+/// chèn thẳng nút xem file vào nội dung cho gọn thay vì nút độc lập"*.
+///
+/// Nói thẳng chỗ KHÔNG làm được: Telegram không có nút nằm giữa chữ. Bàn phím
+/// `inline_keyboard` luôn là một khối dưới tin, và thứ duy nhất chèn được vào
+/// nội dung là một đường dẫn siêu liên kết — mà một đường dẫn thì không gọi
+/// được bot để lấy file về. Nên "chèn vào nội dung" không có đường thi hành;
+/// phần *"cho gọn"* thì có, và đó là phần thật của yêu cầu.
+///
+/// Luật cũ — mỗi nút một hàng — viết cho nhãn DÀI (tên phiên kèm trạng thái):
+/// xếp ngang là cắt cụt, mà nút đọc không hết thì bấm bằng đoán. Nút file
+/// không thuộc ca ấy: nhãn là một tên file, ngắn. Ba nút file ngốn ba hàng
+/// trong khi chúng vừa gọn một hàng.
+///
+/// Gộp theo `callback_data` bắt đầu bằng `file:` chứ không theo vị trí: đó là
+/// dấu hiệu của thứ đang xếp, không phải một quy ước đếm-thứ-tự mà chỗ gọi
+/// phải nhớ giữ đúng. Ba nút một hàng — bốn thì nhãn bắt đầu bị cắt trên 390px.
+pub fn keyboard_rows(buttons: &[(String, String)]) -> Vec<Vec<Value>> {
+    let mut rows: Vec<Vec<Value>> = Vec::new();
+    for (label, data) in buttons {
+        let cell = json!({ "text": label, "callback_data": data });
+        let joinable = data.starts_with("file:");
+        match rows.last_mut() {
+            Some(last)
+                if joinable
+                    && last.len() < 3
+                    && last.first().and_then(|c| c.get("callback_data"))
+                        .and_then(Value::as_str)
+                        .is_some_and(|d| d.starts_with("file:")) =>
+            {
+                last.push(cell);
+            }
+            _ => rows.push(vec![cell]),
+        }
+    }
+    rows
+}
+
     /// Gửi một câu kèm bảng nút — **mỗi nút một hàng**.
     ///
     /// Nhãn của `claude` (và tên phiên kèm trạng thái) thường dài; xếp ngang là
@@ -1329,10 +1369,7 @@ impl Inbox {
             return self.send_text(text);
         }
         let client = self.client().ok_or("không dựng được HTTP client")?;
-        let keyboard: Vec<Vec<Value>> = buttons
-            .iter()
-            .map(|(label, data)| vec![json!({ "text": label, "callback_data": data })])
-            .collect();
+        let keyboard = Self::keyboard_rows(buttons);
         let r = client
             .post(self.api("sendMessage"))
             .json(&json!({

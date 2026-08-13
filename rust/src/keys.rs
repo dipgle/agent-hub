@@ -801,6 +801,21 @@ pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
         }
         // Cắt theo khoảng trắng và các dấu bao quanh hay gặp trong câu văn.
         for tok in raw.split(|c: char| c.is_whitespace() || "`\"'()[]{}<>,;".contains(c)) {
+            // 🔴 Đường dẫn BỊ CẮT CỤT không phải một đường dẫn.
+            //
+            // Hà 2026-08-13, ảnh chụp Telegram: ba nút 📎 dưới một tin, trong đó
+            // `Cargo.toml` và `Cargo.toml…` — hai nút, một file. Cái thứ hai
+            // sinh ra từ chính màn hình: TUI cắt dòng lệnh dài rồi dán `…` vào
+            // cuối (`--manifest-path …/rust/Cargo.toml… (46s · 2 lines)`), và
+            // vòng quét này đọc `Cargo.toml…` thành một đường dẫn khác.
+            //
+            // Bỏ hẳn, đừng gọt `…` rồi dùng: gọt xong thì đúng ở ca này mà SAI
+            // ở ca `…/rust/Car…` — cắt cụt giữa tên file thì phần còn lại là
+            // một đường dẫn hợp lệ về hình dạng và trỏ vào hư không. Một cái
+            // nút không bao giờ mở được là một lời hứa suông trên màn hình.
+            if tok.contains('…') || tok.contains("...") {
+                continue;
+            }
             let t = tok.trim_end_matches(['.', ':', '?', '!']);
             if !(t.starts_with('/') || t.starts_with("~/")) || t.len() < 4 {
                 continue;

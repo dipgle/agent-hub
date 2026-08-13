@@ -1891,14 +1891,41 @@ pub fn remember_files(db: &Db, session_id: &str, paths: &[String]) -> Vec<(Strin
             return Vec::new();
         }
     }
-    paths
+    // Nhãn phải PHÂN BIỆT được, không chỉ đọc được.
+    //
+    // 🔴 Cùng ảnh chụp ấy: hai nút cùng đọc là `Cargo.toml`. Lấy mỗi tên file
+    // là bỏ đúng phần khác nhau — trong một cây mã thì `Cargo.toml`,
+    // `index.html`, `mod.rs` trùng tên là chuyện thường, không phải ngoại lệ.
+    // Trùng tên thì thêm thư mục cha, đủ để tách chứ không dán cả đường dẫn.
+    let shown: Vec<String> = paths
         .iter()
-        .enumerate()
         .take(4)
-        .map(|(i, p)| {
+        .map(|p| {
             let name = p.rsplit('/').next().unwrap_or(p);
+            let dup = paths
+                .iter()
+                .take(4)
+                .filter(|q| q.rsplit('/').next().unwrap_or(q) == name)
+                .count()
+                > 1;
+            if dup {
+                let mut seg = p.rsplit('/');
+                let last = seg.next().unwrap_or(p);
+                match seg.next() {
+                    Some(parent) => format!("{parent}/{last}"),
+                    None => last.to_string(),
+                }
+            } else {
+                name.to_string()
+            }
+        })
+        .collect();
+    shown
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| {
             (
-                format!("📎 {}", crate::exec::truncate(name, 40)),
+                format!("📎 {}", crate::exec::truncate(&name, 40)),
                 format!("file:{i}"),
             )
         })

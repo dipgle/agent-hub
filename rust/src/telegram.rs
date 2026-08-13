@@ -295,6 +295,18 @@ pub fn choice_buttons(
     buttons
 }
 
+/// `~/x` → `/Users/…/x`. Chữ trên màn hay viết gọn bằng dấu ngã, mà
+/// `Path::canonicalize` không hiểu dấu ấy — nó sẽ đi tìm một thư mục tên `~`.
+fn shellexpand_home(p: &str) -> String {
+    match p.strip_prefix("~/") {
+        Some(rest) => match std::env::var("HOME") {
+            Ok(h) => format!("{h}/{rest}"),
+            Err(_) => p.to_string(),
+        },
+        None => p.to_string(),
+    }
+}
+
 pub fn callback_to_command(data: &str) -> Option<String> {
     if let Some(rest) = data.strip_prefix("key:") {
         let (sid, n) = rest.split_once(':')?;
@@ -485,6 +497,104 @@ impl Inbox {
 
     fn api(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.token, method)
+    }
+
+    /// Gửi MỘT file ra Telegram để đọc thẳng trên điện thoại.
+    ///
+    /// 🔴 Hà 2026-08-13: *"các nội dung có path file thì nên cho click vào nhận
+    /// được file để mở trực tiếp trên tele"*. Trước đó cây cầu tệp đi một
+    /// chiều: hub nhận được tệp từ Telegram nhưng không gửi ra được cái nào,
+    /// nên mọi báo cáo nhắc tới một file đều nhắc tới thứ không mở nổi.
+    ///
+    /// Ba cửa, và cả ba đều là luật đã có chứ không phải luật mới:
+    /// * **Phải nằm trong cây làm việc** — đường dẫn tới từ chữ trên màn, mà
+    ///   chữ trên màn thì ai viết cũng được. `/etc/passwd` là một đường dẫn hợp
+    ///   lệ về mặt hình dạng.
+    /// * **Phải qua `preview_risk`** (luật 5): thứ gì rời khỏi máy này đều bị
+    ///   soi, y như phần xem trước của phiên. Đây cũng là lý do chỉ gửi file
+    ///   CHỮ — cổng soi không đọc được file nhị phân, mà gửi cái không soi được
+    ///   thì cái cổng chỉ còn là hình thức.
+    /// * **Trần dung lượng**: Telegram chặn ở 50 MB, nhưng hub chặn sớm hơn
+    ///   nhiều — một file 5 MB đọc trên điện thoại là chuyện không xảy ra.
+    pub fn send_document(&self, path: &std::path::Path, root: &std::path::Path) -> Result<(), String> {
+        const MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+        let real = path.canonicalize().map_err(|e| format!("không mở được: {e}"))?;
+        let root_real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        if !real.starts_with(&root_real) {
+            return Err(format!(
+                "nằm ngoài cây làm việc ({}) — hub không gửi",
+                root_real.display()
+            ));
+        }
+        let meta = std::fs::metadata(&real).map_err(|e| e.to_string())?;
+        if !meta.is_file() {
+            return Err("không phải một tệp".into());
+        }
+        if meta.len() > MAX_BYTES {
+            return Err(format!(
+                "{:.1} MB — quá trần {} MB",
+                meta.len() as f64 / 1_048_576.0,
+                MAX_BYTES / 1_048_576
+            ));
+        }
+        let ext = real
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_lowercase();
+        if !crate::keys::SENDABLE_EXT.contains(&ext.as_str()) {
+            return Err(format!("đuôi .{ext} không soi được nội dung nên hub không gửi"));
+        }
+        let body = std::fs::read_to_string(&real).map_err(|e| format!("không đọc được chữ: {e}"))?;
+        let risk = crate::sessions::preview_risk(&body);
+        if !risk.is_empty() {
+            logging::warn(
+                "telegram_document_withheld",
+                json!({ "path": real.display().to_string(), "risk": risk }),
+            );
+            return Err(format!("giữ lại: có dấu hiệu bí mật ({})", risk.join(", ")));
+        }
+
+        let name = real
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let part = reqwest::blocking::multipart::Part::bytes(body.into_bytes())
+            .file_name(name.clone())
+            .mime_str("text/plain; charset=utf-8")
+            .map_err(|e| e.to_string())?;
+        let form = reqwest::blocking::multipart::Form::new()
+            .text("chat_id", self.chat_id.clone())
+            .text(
+                "caption",
+                real.strip_prefix(&root_real)
+                    .unwrap_or(&real)
+                    .display()
+                    .to_string(),
+            )
+            .part("document", part);
+        let r = client
+            .post(self.api("sendDocument"))
+            .multipart(form)
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            remember_sent(&self.cfg, &v);
+            logging::info(
+                "telegram_document_sent",
+                json!({ "name": name, "bytes": meta.len() }),
+            );
+            Ok(())
+        } else {
+            Err(format!(
+                "telegram từ chối: {}",
+                v.get("description").and_then(Value::as_str).unwrap_or("không rõ")
+            ))
+        }
     }
 
     /// `confirm::ask` mượn đường đọc: vòng nền đứng im cho tới khi trả.
@@ -687,6 +797,34 @@ impl Inbox {
             // `run:<n>` — nút gửi nhanh một lệnh thấy trên màn. Chữ nằm trong
             // sổ chứ không trong nút (trần 64 byte), nên phải tra lại; tra không
             // ra thì NÓI, đừng im — nút cũ bấm lại là chuyện thường.
+            // `file:<n>` — gửi thẳng file ấy vào phòng chat để đọc trên điện
+            // thoại. Mọi cửa (trong cây làm việc · quét rò · trần dung lượng)
+            // nằm trong `send_document`, không nằm ở đây: một cửa đặt ở chỗ gọi
+            // là một cửa chỗ gọi thứ hai sẽ quên.
+            if let Some(n) = data.strip_prefix("file:").and_then(|n| n.parse::<usize>().ok()) {
+                let path = crate::db::Db::open(&self.cfg.db)
+                    .ok()
+                    .and_then(|db| crate::pipeline::quick_file(&db, n));
+                let msg = match path {
+                    Some(p) => {
+                        let expanded = shellexpand_home(&p);
+                        match self.send_document(
+                            std::path::Path::new(&expanded),
+                            &self.cfg.workspace_root,
+                        ) {
+                            Ok(()) => None,
+                            Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
+                        }
+                    }
+                    None => Some("⚠ đường dẫn ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.".into()),
+                };
+                if let Some(m) = msg {
+                    if let Err(e) = self.send_text(&m) {
+                        logging::error("telegram_ack_failed", json!({ "err": e }));
+                    }
+                }
+                return;
+            }
             if let Some(n) = data.strip_prefix("run:").and_then(|n| n.parse::<usize>().ok()) {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()

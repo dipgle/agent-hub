@@ -709,6 +709,39 @@ fn a_command_the_terminal_wrapped_is_joined_back_not_dropped() {
     assert!(hub::keys::commands_on_screen(block, 4).is_empty());
 }
 
+/// File được NHẮC TỚI phải mở được — nhưng chỉ file chữ, chỉ đường tuyệt đối.
+///
+/// 🔴 Hà 2026-08-13: *"các nội dung có path file thì nên cho click vào nhận
+/// được file để mở trực tiếp trên tele"*. Trước đó cây cầu tệp đi MỘT CHIỀU:
+/// hub nhận được tệp từ Telegram nhưng không gửi ra được cái nào.
+#[test]
+fn a_file_path_on_screen_becomes_something_you_can_open() {
+    let text = "Đã viết xong /Users/hanguyen/projects/AI/hub/ARCHITECTURE.md và \
+                `~/projects/AI/hub/README.md` — đọc thử đi.";
+    let got = hub::keys::paths_on_screen(text, 4);
+    assert!(
+        got.contains(&"/Users/hanguyen/projects/AI/hub/ARCHITECTURE.md".to_string()),
+        "{got:?}"
+    );
+    assert!(got.contains(&"~/projects/AI/hub/README.md".to_string()), "{got:?}");
+
+    // Dấu chấm cuối câu không được dính vào tên file.
+    let dot = hub::keys::paths_on_screen("xem /tmp/bao-cao.md.", 4);
+    assert_eq!(dot, vec!["/tmp/bao-cao.md".to_string()]);
+
+    // Đường TƯƠNG ĐỐI bỏ qua: `src/main.rs` không nói được nó thuộc dự án nào,
+    // mà đoán sai ở đây là gửi nhầm file của dự án khác.
+    assert!(hub::keys::paths_on_screen("sửa ở src/main.rs rồi", 4).is_empty());
+
+    // File NHỊ PHÂN không gửi: cổng quét rò chỉ đọc được chữ, mà một ảnh chụp
+    // màn hình có thể mang nguyên một mật khẩu.
+    assert!(hub::keys::paths_on_screen("ảnh ở /tmp/man-hinh.png nhé", 4).is_empty());
+    assert!(hub::keys::paths_on_screen("/tmp/data.sqlite", 4).is_empty());
+
+    // Và câu CẤM thì vẫn không thành nút, y như với lệnh.
+    assert!(hub::keys::paths_on_screen("⚠ đừng mở /tmp/bi-mat.md", 4).is_empty());
+}
+
 /// Câu CẤM một lệnh không được biến thành cái nút chạy chính lệnh ấy.
 ///
 /// 🔴 Trả giá đúng ngày đặt tính năng, 2026-08-13: bộ gác lệnh từ chối

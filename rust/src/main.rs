@@ -44,6 +44,11 @@ enum Command {
         #[arg(long)]
         no_restart: bool,
     },
+    /// Mở trang cấu hình ngay trên máy này rồi ghi hub.env (chmod 600)
+    ///
+    /// Hà 2026-08-13: *"đóng gói hub thành app và cài trên máy có ui để cấu
+    /// hình biến môi trường"*. Trang chạy ở 127.0.0.1, đóng ngay sau khi lưu.
+    Setup,
     /// Write hub.config.json + create the db
     Init {
         #[arg(long)]
@@ -118,6 +123,7 @@ fn real_main() -> Result<()> {
             }
             Ok(())
         }
+        Command::Setup => hub::setup::serve(&cfg.hub_home),
         Command::Init { force } => cmd_init(&cfg, force),
         Command::Once => {
             println!("{}", serde_json::to_string_pretty(&run_once(&db, &cfg)?)?);

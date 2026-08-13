@@ -34,6 +34,7 @@ pub mod portal;
 /// password from leaving this Mac is not optional.
 pub mod redaction;
 pub mod runtime;
+pub mod setup;
 pub mod sessions;
 /// Telegram làm kênh RA LỆNH hai chiều, không chỉ cái loa.
 pub mod telegram;

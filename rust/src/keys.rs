@@ -697,6 +697,59 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
     out
 }
 
+/// Đuôi file hub chịu gửi ra Telegram — **chỉ file CHỮ**.
+///
+/// Không phải vì file nhị phân khó gửi, mà vì luật 5: thứ gì rời khỏi máy này
+/// phải qua được cổng quét rò, và **cổng ấy chỉ đọc được chữ**. Một ảnh chụp
+/// màn hình có thể mang nguyên một mật khẩu mà mọi phép quét chuỗi đều nói
+/// "sạch". Gửi cái không soi được là bịt mắt rồi ném ra ngoài.
+pub const SENDABLE_EXT: &[&str] = &[
+    "md", "html", "htm", "txt", "json", "jsonl", "csv", "log", "toml", "yaml", "yml", "rs", "js",
+    "mjs", "ts", "tsx", "jsx", "css", "sh", "py", "sql", "xml", "svg", "diff", "patch", "lock",
+    "cfg", "conf", "ini", "env",
+];
+
+/// Những ĐƯỜNG DẪN FILE hiện trên màn — thứ bấm một cái là nhận được file.
+///
+/// 🔴 Hà 2026-08-13: *"các nội dung có path file thì nên cho click vào nhận
+/// được file để mở trực tiếp trên tele"*. Trước đó cây cầu này một chiều: hub
+/// **nhận** được tệp từ Telegram (`getFile`, từ 79ee269) nhưng không gửi ra
+/// được cái nào — nên một báo cáo nhắc tới `ARCHITECTURE.md` là nhắc tới thứ
+/// người đọc trên điện thoại không mở nổi.
+///
+/// Nhận theo HÌNH DẠNG như `commands_on_screen`, và hẹp y như thế: phải là
+/// đường TUYỆT ĐỐI (`/…` hoặc `~/…`), phải có đuôi nằm trong `SENDABLE_EXT`.
+/// Đường tương đối thì cố ý bỏ qua — `src/main.rs` trên màn không nói được nó
+/// nằm trong dự án nào, mà đoán sai ở đây là gửi nhầm file của dự án khác.
+pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in text.lines() {
+        if forbids(raw) {
+            continue;
+        }
+        // Cắt theo khoảng trắng và các dấu bao quanh hay gặp trong câu văn.
+        for tok in raw.split(|c: char| c.is_whitespace() || "`\"'()[]{}<>,;".contains(c)) {
+            let t = tok.trim_end_matches(['.', ':', '?', '!']);
+            if !(t.starts_with('/') || t.starts_with("~/")) || t.len() < 4 {
+                continue;
+            }
+            let Some(ext) = t.rsplit('.').next() else {
+                continue;
+            };
+            if ext == t || !SENDABLE_EXT.contains(&ext.to_lowercase().as_str()) {
+                continue;
+            }
+            if !out.iter().any(|x| x == t) {
+                out.push(t.to_string());
+            }
+        }
+    }
+    if out.len() > max {
+        out.drain(..out.len() - max);
+    }
+    out
+}
+
 /// Câu này đang CẤM một lệnh, chứ không mời chạy nó?
 ///
 /// 🔴 Trả giá ngay trong ngày đặt tính năng, 2026-08-13: một bộ gác lệnh từ

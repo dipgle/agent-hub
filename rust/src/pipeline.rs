@@ -585,6 +585,14 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         } else {
             remember_quick(db, &crate::keys::commands_on_screen(&text, 3))
         };
+        // …và file được NHẮC TỚI thì phải MỞ ĐƯỢC. Một báo cáo nói "xem
+        // ARCHITECTURE.md" trên điện thoại là nói tới thứ không mở nổi, trừ khi
+        // có cái nút. Tin BÁO TỬ thì thôi, cùng lý do với nút lệnh: phiên đã
+        // tắt, nhưng ở đây lý do khác — file thì vẫn còn, chỉ là một tin báo tử
+        // không phải chỗ để đọc tài liệu.
+        if !matches!(c, crate::watch::Change::Ended { .. }) {
+            quick.extend(remember_files(db, &crate::keys::paths_on_screen(&text, 2)));
+        }
         // "… (còn N dòng)" phải có đường đi tiếp — xem `remember_full`.
         if text.contains("… (còn ") {
             let shown_name = row
@@ -1650,6 +1658,52 @@ pub fn full_report(db: &Db, n: usize) -> Option<(String, String, String)> {
     n.checked_sub(st.base)
         .and_then(|i| st.items.get(i))
         .map(|it| (it.s.clone(), it.n.clone(), it.t.clone()))
+}
+
+/// Đường dẫn file hub vừa nhắc tới trên màn — để nút `file:<n>` tìm lại được.
+pub const FILES_KEY: &str = "quick:files";
+
+/// Nhớ các đường dẫn rồi dựng nút `📎 <tên file>`.
+///
+/// Cùng khuôn với [`remember_quick`] và cố ý thế: một cuốn sổ, một dạng
+/// `callback_data`, một chỗ hết hạn. Nút mang CHỈ SỐ chứ không mang đường dẫn,
+/// vì `callback_data` của Telegram chỉ có 64 byte — một đường dẫn tuyệt đối
+/// vượt trần ấy là chuyện thường, và khi vượt thì nút im lặng không hiện.
+pub fn remember_files(db: &Db, paths: &[String]) -> Vec<(String, String)> {
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    match serde_json::to_string(paths) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(FILES_KEY, &v) {
+                logging::error("quick_files_not_saved", json!({ "err": e.to_string() }));
+                return Vec::new();
+            }
+        }
+        Err(e) => {
+            logging::error("quick_files_not_saved", json!({ "err": e.to_string() }));
+            return Vec::new();
+        }
+    }
+    paths
+        .iter()
+        .enumerate()
+        .take(3)
+        .map(|(i, p)| {
+            let name = p.rsplit('/').next().unwrap_or(p);
+            (
+                format!("📎 {}", crate::exec::truncate(name, 40)),
+                format!("file:{i}"),
+            )
+        })
+        .collect()
+}
+
+/// Đường dẫn số `n` trong sổ, nếu còn giữ.
+pub fn quick_file(db: &Db, n: usize) -> Option<String> {
+    let v = db.cursor_or_log(FILES_KEY)?;
+    let paths: Vec<String> = serde_json::from_str(&v).ok()?;
+    paths.get(n).cloned()
 }
 
 pub fn remember_quick(db: &Db, cmds: &[String]) -> Vec<(String, String)> {

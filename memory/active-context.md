@@ -50,9 +50,32 @@ lượt gọi, luật 8).
   bịa ra một lệnh khác mà nút thì bấm một cái là chạy. `gh` vào danh sách lệnh
   quen.
 
-⏳ **Chưa quan sát trên tin thật:** tin tự đóng sổ ĐI TELEGRAM (cần lượt nổ kế
-tiếp), và đầu đề `/shot` mang `[AI/hub]` (cần Hà bấm một nút phiên). Đã quan sát
-thật: `.inbox/<id ngắn>/` nhận ảnh Hà gửi đúng đường (`d407a8d`).
+### 🔴 Lượt thứ HAI (04:30) — hub phá cái chắc chắn để đổi lấy cái chưa chứng minh
+
+`hanguyen-41` (acc3, 64%) → cửa sổ mới `ttys000` mở 04:31:37 với
+`handover_window_opened session:""` (**id RỖNG**), rồi 04:31:59 hub đóng cửa sổ
+cũ **như thường lệ**. Cửa sổ mới đứng im **22 phút**; người phát hiện là Hà:
+*"mở phiên mới bị dừng giữa chừng"* + ảnh hộp *"Quick safety check … 1. Yes, I
+trust this folder"*.
+
+**Gốc nằm ngoài hub** — và nó là hoá đơn của lần dời gốc 08-12: `claude` ghi "đã
+tin thư mục này" theo **từng `CLAUDE_CONFIG_DIR`**. Đo trong `.claude.json` ba
+tài khoản: acc1 có bản ghi cho `/Users/hanguyen/projects`; **acc2 + acc3 KHÔNG**
+(chỉ còn đường cũ). ⟹ cửa sổ đầu tiên dưới acc2/acc3 ở gốc mới luôn dừng ở hộp
+hỏi ⟹ không sinh nhật ký ⟹ không có id để ghép. Dọn một lần mỗi tài khoản:
+`cd ~/projects && CLAUDE_CONFIG_DIR=~/.claude-acc2 claude` → bấm `1` → `/exit`.
+(acc3 Hà đã bấm, acc2 còn chờ.)
+
+**Cái sai của hub là cái nó làm TIẾP THEO** (`65c5946`): `new_id = None` nghĩa là
+*chưa thấy phiên nào cả*, mà hub vẫn đóng cửa sổ đang làm việc của chủ máy — mù
+nhất thì lại mạnh tay nhất. Nay id rỗng ⟹ **giữ nguyên cửa sổ cũ** + đọc màn cửa
+sổ mới xem vướng gì + tin nói đủ ba điều (vướng cái gì · cửa sổ cũ còn nguyên ·
+KHÔNG khoe "đang chạy"). `start_fresh_after_handover` trả `FreshWindow`, vì
+`old_kept` là thứ bộ ba ẩn danh cũ không có chỗ nào chứa.
+
+⏳ **Chưa quan sát trên tin thật:** tin tự đóng sổ ĐI TELEGRAM, nhánh `Stalled`,
+và đầu đề `/shot` mang `[AI/hub]` — cả ba cần lượt kế tiếp. Đã quan sát thật:
+`.inbox/<id ngắn>/` nhận ba ảnh Hà gửi đúng đường (`d407a8d`).
 
 📌 Bài học chung của cả năm lỗi: **cả năm đều nằm ở tin nhắn, không ở cơ chế.**
 Cơ chế đóng sổ chạy đúng ngay lượt đầu; thứ sai là hub kể lại việc mình vừa làm

@@ -93,9 +93,20 @@ còn sống như **symlink**, nên mọi thứ vẫn chạy — đó chính là 
 đường dẫn cũ gõ trong mã KHÔNG gãy, nó chỉ đi vòng qua đúng thư mục vừa bị bỏ.
 
 hub tự biết mình ở đâu, và mọi đường dẫn phải bắt nguồn từ đó:
-`HUB_CONFIG` (trong plist) → `cfg.hub_home` → `cfg.workspace_root` (`<hub_home>/../..`)
+`HUB_CONFIG` (trong plist) → `cfg.hub_home` → `cfg.workspace_root`
 → danh sách dự án, `cwd` của mọi `/new`, và cây mã mà bảng sức khoẻ đem ra so.
 Kịch bản `.mjs` thì tự định vị bằng `HERE`/`import.meta.url`, không hỏi `$HOME`.
+
+**hub nay nằm ở `~/projects/hub`, không còn trong `AI/` (2026-08-13.)** Hà:
+*"chuyển ra ngoài thư mục gốc đi"*, sau khi đọc nhãn `[AI/hub]` và hỏi *"hub làm
+việc đâu liên quan tới ai"*. `AI/` là một ngăn kéo xếp hồ sơ, không phải chủ đề.
+
+Và đừng đếm số bậc để tìm gốc. Dòng cũ là `hub_home/../..` — gõ cứng đúng hình
+dạng `<workspace>/AI/hub`, nên lượt chuyển này làm nó tính ra `~/`, im lặng:
+danh sách dự án rỗng, `/new` mở nhầm thư mục, bảng sức khoẻ thôi so được cây mã.
+Nay `config::find_workspace_root` **đi ngược lên tìm** thư mục có chứa ngăn kéo
+đã khai trong `project_roots` — đo được, và đúng ở cả hai chỗ hub từng nằm, nên
+lần chuyển sau nữa không phải đụng dòng nào.
 
 📌 Cái giá đã trả, đúng hai hình dạng — cả hai đều **không kêu một tiếng nào**:
 - `runtime.rs` so bản cài với `~/Documents/projects/AI/hub/rust`. Mất cây mã ⟹

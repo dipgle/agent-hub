@@ -21,11 +21,11 @@ if (!appTid || !username || !password) {
 }
 const BASE = `http://${appTid}.test.localhost:8090`;
 const HERE = new URL("./", import.meta.url).pathname;
-// Gốc workspace TỰ ĐỊNH VỊ: `<workspace>/AI/hub/` → `<workspace>`. Gõ cứng
+// Gốc workspace TỰ ĐỊNH VỊ: `<workspace>/hub/` → `<workspace>`. Gõ cứng
 // `~/Documents/projects` ở đây thì phép đo "phiên mở ở gốc workspace" hoá đỏ
 // ngay hôm gốc dời sang `~/projects` (2026-08-12) — đỏ vì phép đo, không vì sản
 // phẩm, và đó là loại đỏ dạy người ta bỏ qua màu đỏ.
-const WORKSPACE = resolve(HERE, "../..");
+const WORKSPACE = resolve(HERE, "..");
 const SHOTS = HERE + "ui-shots/";
 mkdirSync(SHOTS, { recursive: true });
 

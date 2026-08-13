@@ -54,7 +54,7 @@ hội thoại của phiên, bảng sức khoẻ, form cấu hình; Telegram là 
 ## Chạy trong 4 lệnh
 
 ```bash
-cd ~/projects/AI/hub
+cd ~/projects/hub
 ./hub setup           # trang cấu hình ở 127.0.0.1 → ghi hub.env (chmod 600)
 ./hub doctor          # kiểm tra thật: claude CLI, Telegram, phòng chat, thư mục dự án
 ./hub sessions        # mọi phiên claude đang sống, mọi tài khoản

@@ -33,7 +33,7 @@ Mỗi app tự mang sổ sách của nó — hub chỉ ĐỌC, không bao giờ 
 
 **Vì sao mỗi app một thư mục, không phải một repo lớn:** một phiên `claude` mở ở
 đúng thư mục của app thì mọi đường dẫn tương đối nó gõ ra đều đúng, và cái tên
-thư mục trở thành nhãn phân biệt phiên trên điện thoại (`[AI/hub]`,
+thư mục trở thành nhãn phân biệt phiên trên điện thoại (`[hub]`,
 `[dwork]`). Mở tất cả ở gốc thì mọi phiên mang cùng một cái tên tự sinh
 `projects-xx` — đúng cái tên **không phân biệt được gì**.
 

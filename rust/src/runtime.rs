@@ -717,9 +717,29 @@ pub fn restart_daemon() -> anyhow::Result<String> {
         },
     )?;
     if !out.ok() {
+        // 🔴 "Chưa nạp" KHÔNG phải "cài hỏng" — đo 2026-08-13, ngay lượt chuyển
+        // hub từ `AI/hub` sang `~/projects/hub`. Kịch bản chuyển `bootout` agent
+        // TRƯỚC (bắt buộc: `KeepAlive` làm `kill` vô nghĩa), rồi gọi
+        // `self-install`. Build xong, ký xong, **binary đã nằm đúng chỗ** — rồi
+        // hàm này `bail!` vì `kickstart` không tìm thấy service, và `set -e`
+        // giết luôn kịch bản ở bước áp chót. Kết cục: đã cài mà mã trả về nói
+        // là hỏng, còn agent thì không ai nạp.
+        //
+        // Phân biệt bằng chính câu launchctl trả: *"Could not find service … in
+        // domain"* nghĩa là chưa nạp, và với một lượt cài thì đó là chuyện bình
+        // thường (máy mới, hoặc vừa bootout). Mọi lỗi khác vẫn là lỗi.
+        let why = out.stderr.trim();
+        if why.contains("Could not find service") || why.contains("No such process") {
+            crate::logging::info(
+                "self_install_not_loaded",
+                json!({ "target": target, "why": why,
+                        "next": "launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist" }),
+            );
+            return Ok(format!("{target} (chưa nạp — cần bootstrap một lần)"));
+        }
         anyhow::bail!(
             "launchctl kickstart hỏng: {}",
-            crate::exec::truncate(out.stderr.trim(), 200)
+            crate::exec::truncate(why, 200)
         );
     }
     Ok(target)

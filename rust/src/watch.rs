@@ -324,11 +324,11 @@ impl Change {
                         crate::exec::truncate(line, 160)
                     ),
                     Idle::Prompt => format!(
-                        "⏸ {name} dừng, đang chờ bạn — sau {} phút chạy",
+                        "🟡 {name} dừng, đang chờ bạn — sau {} phút chạy",
                         ran_sec / 60
                     ),
                     Idle::Unknown => format!(
-                        "⏸ {name} dừng sau {} phút — không đọc được màn nên chưa rõ nó chờ gì",
+                        "🟡 {name} dừng sau {} phút — không đọc được màn nên chưa rõ nó chờ gì",
                         ran_sec / 60
                     ),
                 };
@@ -373,7 +373,7 @@ impl Change {
                 }
                 out
             }
-            Change::Ended { name, .. } => format!("⏹ {name} — kết cục chưa xác định"),
+            Change::Ended { name, .. } => format!("⚫ {name} — kết cục chưa xác định"),
         }
     }
 }

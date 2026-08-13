@@ -509,7 +509,9 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 } else {
                     ""
                 };
-                format!("⏹ {name} {f}{warn}.")
+                // Chấm TRẠNG THÁI, cùng bộ với danh sách — `⏹` là nút "dừng"
+                // của máy phát nhạc, và Hà đã bắt đúng chỗ lẫn ấy 2026-08-13.
+                format!("⚫ {name} {f}{warn}.")
             }
             _ => c.say(&idle, tail),
         };

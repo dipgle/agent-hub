@@ -430,17 +430,53 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
     cfg.log_file = absolutize(&cfg.log_file.clone(), &home);
     cfg.notify.file = absolutize(&cfg.notify.file.clone(), &home);
     cfg.workspace_root = if cfg.workspace_root.as_os_str().is_empty() {
-        // <workspace>/AI/hub → <workspace>
-        home.parent()
-            .and_then(|p| p.parent())
-            .unwrap_or(&home)
-            .to_path_buf()
+        find_workspace_root(&home, &cfg.project_roots)
     } else {
         absolutize(&cfg.workspace_root.clone(), &home)
     };
 
     validate(&cfg)?;
     Ok(cfg)
+}
+
+/// Gốc workspace: **đi ngược lên tìm**, đừng đếm số bậc.
+///
+/// 🔴 Dòng cũ là `home.parent().parent()` — hai bậc, gõ cứng đúng hình dạng
+/// `<workspace>/AI/hub`. Nó đúng cho tới đúng ngày hub không nằm ở đó nữa, và
+/// nó sai **không kêu một tiếng**: `workspace_root` trỏ nhầm ⟹ danh sách dự án
+/// rỗng, `/new` mở phiên ở nhầm thư mục, bảng sức khoẻ thôi so được cây mã.
+/// Cùng một họ với `runtime.rs` từng so bản cài với `~/Documents/projects` sau
+/// khi gốc dời đi (2026-08-12): một con số viết sẵn thay cho một phép đo.
+///
+/// Hà 2026-08-13: *"chuyển ra ngoài thư mục gốc đi"* — hub rời `AI/hub` sang
+/// `<workspace>/hub`. Thay vì sửa `2` thành `1` (đổi một hằng số sai lấy một
+/// hằng số sai khác), hỏi thẳng câu cần hỏi: **thư mục nào là gốc?** Gốc là
+/// thư mục có chứa các NGĂN KÉO dự án mà cấu hình đã khai (`project_roots`,
+/// ở máy này là `["", "AI"]`). Đo được, và đúng cho cả hai chỗ hub từng nằm —
+/// tức lần chuyển sau nữa cũng không phải đụng vào dòng nào.
+///
+/// Không có ngăn kéo nào tên tuổi (`project_roots` chỉ có `""`, ca của người
+/// mới kéo repo về) thì lấy thư mục cha — hub nằm thẳng trong chỗ làm việc.
+/// Trèo tối đa 4 bậc: không tìm thấy thì dừng, đừng leo tới `/`.
+fn find_workspace_root(home: &Path, project_roots: &[String]) -> PathBuf {
+    let drawers: Vec<&str> = project_roots
+        .iter()
+        .map(|r| r.trim().trim_matches('/'))
+        .filter(|r| !r.is_empty())
+        .collect();
+    let fallback = home.parent().unwrap_or(home).to_path_buf();
+    if drawers.is_empty() {
+        return fallback;
+    }
+    let mut dir = home;
+    for _ in 0..4 {
+        let Some(parent) = dir.parent() else { break };
+        if drawers.iter().any(|d| parent.join(d).is_dir()) {
+            return parent.to_path_buf();
+        }
+        dir = parent;
+    }
+    fallback
 }
 
 // `&Path` would be the better Rust, but serde's `skip_serializing_if` calls

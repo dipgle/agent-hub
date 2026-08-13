@@ -2294,17 +2294,21 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             CommandKind::Win => {
                 // Cửa sổ THẬT, vì thứ thiếu là một cái tty — xem `CommandKind::Win`.
                 //
-                // `cd <gốc workspace> && <lệnh>`: cùng thư mục làm việc với
-                // `/cmd`, nên hai đường không đọc ra hai nghĩa khác nhau cho
-                // cùng một đường dẫn tương đối. Ghép bằng `;` chứ không `&&`
-                // — `cd` hỏng thì vẫn phải MỞ cửa sổ ra cho người ta thấy lỗi,
-                // im lặng không mở là kiểu hỏng tệ nhất ở đây.
+                // 🔴 CHẠY ĐÚNG DÒNG ANH GÕ, không bọc thêm gì. Hà 2026-08-13:
+                // *"tại sao lệnh chỉ có 1 dòng mà chèn thêm text vào làm gì?"*.
+                // Bản đầu ghép `cd <gốc workspace>; <lệnh>` để cwd khớp `/cmd`
+                // — lý do nghe hợp lý, và cái giá là mọi cửa sổ mở ra đều bắt
+                // đầu bằng một dòng anh không gõ, dài hơn cả lệnh thật.
+                //
+                // Phép thử cầu nối trả lời gọn: ngồi trước máy anh mở cửa sổ
+                // rồi dán ĐÚNG dòng ấy, không ai tự thêm một `cd` vào trước.
+                // Cần thư mục thì gõ `cd` — như ở terminal. Đổi lại, câu trả
+                // lời phải NÓI RA cửa sổ mở ở đâu, vì đó là thứ vừa đổi.
                 let line = cmd.arg.trim().to_string();
                 let ack = if line.is_empty() {
                     "⚠ /win cần một dòng lệnh. Ví dụ: /win sudo -v".to_string()
                 } else {
-                    let full = format!("cd {}; {line}", cfg.workspace_root.display());
-                    match crate::keys::open_window(&full) {
+                    match crate::keys::open_window(&line) {
                         Ok((win, tty)) => {
                             logging::info(
                                 "win_opened",
@@ -2312,8 +2316,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         "window": win, "tty": tty }),
                             );
                             format!(
-                                "🖥 Đã mở cửa sổ Terminal ({tty}) và chạy:\n{line}\n\n\
-                                 Kết quả nằm TRÊN cửa sổ ấy, không về đây — đó là chỗ gõ mật khẩu."
+                                "🖥 Đã mở cửa sổ Terminal ({tty}) và chạy đúng dòng này:\n{line}\n\n\
+                                 Cửa sổ mở ở thư mục mặc định của shell, không phải gốc workspace — \
+                                 cần chỗ khác thì gõ cd. Kết quả nằm TRÊN cửa sổ ấy, không về đây: \
+                                 đó là chỗ gõ mật khẩu."
                             )
                         }
                         // Không nuốt: mở cửa sổ hỏng thì người bấm phải biết,

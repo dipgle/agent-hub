@@ -3506,24 +3506,56 @@ pub fn start_fresh_after_handover(
     let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
     // Ghép id qua TÊN TỆP nhật ký — cùng mẹo với `/new`, vài mili giây, không
     // phải ba lần spawn `claude agents`.
+    // 🔴 BẤM HỘ TRƯỚC, đừng chờ tới khi kết luận "chưa chào đời".
+    //
+    // Hà 2026-08-13 21:5x: *"phiên dwork tự chuyển do ngữ cảnh đầy lại đang bị
+    // kẹt"* · *"lại kẹt khi chuyển phiên kìa"*. Đọc màn `ttys004` ra đúng thủ
+    // phạm — cửa sổ kế nhiệm ngồi nguyên trên hộp:
+    //
+    //     ❯ 1. Yes, I trust this folder
+    //       2. No, exit
+    //
+    // Mã ĐÃ có bước bấm hộ, và nó vẫn không chạy: cửa của nó là
+    // `new_id.is_none()`, mà `new_id` vừa được điền — bằng nhật ký của CHÍNH
+    // PHIÊN CŨ. Log làm chứng: `handover_window_opened session:0a109818…`, đúng
+    // id phiên đang được đóng sổ. `newest_transcript_since` chỉ hỏi "tệp nào
+    // mới đổi sau lúc mở cửa sổ", mà phiên cũ vẫn đang ghi tiếp vào nhật ký của
+    // nó. Tức một phép đo trả lời ĐÚNG câu nó được hỏi và SAI câu người ta cần.
+    //
+    // Hai vá, và cả hai đều thu hẹp chỗ đoán:
+    // * bấm hộ VÔ ĐIỀU KIỆN trước khi chờ — `trust_dialog_choice` chỉ khớp
+    //   đúng hộp ấy, không có hộp thì nó không bấm gì cả, nên gọi sớm không mất
+    //   gì mà cứu được đúng ca này;
+    // * và loại id phiên CŨ ra khỏi phép ghép, vì "nhật ký vừa đổi" bao gồm cả
+    //   nó — xem `newest_transcript_since`.
+    if let Some(n) = answer_trust_dialog(&tty_short) {
+        logging::info(
+            "handover_trust_dialog_answered",
+            json!({ "tty": tty_short, "choice": n,
+                    "why": "cửa sổ kế nhiệm kẹt ở hộp tin-thư-mục — bấm trước khi chờ" }),
+        );
+    }
     let mut new_id = None;
     for _ in 0..24 {
         std::thread::sleep(Duration::from_millis(500));
         if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), cwd, opened_at) {
-            new_id = Some(id);
-            break;
+            if id != session.session_id {
+                new_id = Some(id);
+                break;
+            }
         }
     }
-    // Chưa có nhật ký sau 12 giây ⟹ phiên chưa chào đời. Nguyên nhân đã đo được
-    // và luôn là cùng một thứ: hộp tin-thư-mục. Bấm hộ rồi chờ thêm một lượt
-    // NỮA — xem `answer_trust_dialog`.
+    // Vẫn chưa có nhật ký ⟹ thử bấm hộ lần nữa: hộp có thể hiện MUỘN hơn lượt
+    // gọi ở trên (máy đang swap thì `claude` mất vài giây mới vẽ xong).
     if new_id.is_none() && answer_trust_dialog(&tty_short).is_some() {
         for _ in 0..24 {
             std::thread::sleep(Duration::from_millis(500));
             if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), cwd, opened_at)
             {
-                new_id = Some(id);
-                break;
+                if id != session.session_id {
+                    new_id = Some(id);
+                    break;
+                }
             }
         }
     }

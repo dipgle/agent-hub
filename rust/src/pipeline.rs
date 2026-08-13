@@ -2114,25 +2114,21 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
                 .take(lines.clamp(1, SHOT_LINES_MAX))
                 .collect();
             let body: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
-            let quick = crate::keys::commands_on_screen(&screen, 4);
-            let quick_note = if quick.is_empty() {
-                String::new()
-            } else {
-                // Chữ hub tự chèn để dạng COMMENT (Hà 2026-08-13: *"muốn tự chèn
-                // text thì nên để dạng comment"*), sau khi chính dòng này lọt ra
-                // shell và zsh vấp dấu ngoặc — xem `keys::looks_like_prose`.
-                // Cửa lọc đã vá, nhưng một dòng bắt đầu bằng `#` thì dù có lọt
-                // lần nữa cũng chỉ nằm im. Hai lớp, vì lớp thứ nhất đã thủng
-                // một lần.
-                format!(
-                    "\n\n# Lệnh thấy trên màn — bấm nút dưới để gõ vào chính phiên:\n{}",
-                    quick
-                        .iter()
-                        .map(|c| format!("#   {c}"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                )
-            };
+            // ⛔ KHÔNG in lại lệnh thành chữ: CÁI NÚT ĐÃ LÀ CÂU ẤY RỒI.
+            //
+            // 🔴 Hà 2026-08-13: *"các nút phải thay vào đúng vị trí nó làm,
+            // thay văn bản hiển thị"*. Trước đó `/shot` vừa đính một khối
+            // comment liệt kê từng lệnh, VỪA gắn nút cho từng lệnh — cùng một
+            // nội dung nói hai lần, mà bản chữ thì dài hơn và không bấm được.
+            //
+            // Và chính khối chữ ấy đẻ ra con bug anh chụp được: nó nằm lại
+            // trong ô nhập, `input_box_text` đọc nó lên, rồi hub dựng nút
+            // `⏎ Gửi: # Lệnh thấy trên màn…` — mời gửi lại lời của chính mình.
+            // Bỏ nguồn thì cả họ bug ấy hết đường sinh ra.
+            //
+            // Nút thì vẫn dựng — ở chỗ gọi, từ chính `ack` này
+            // (`commands_on_screen`), nên không mất đường bấm nào.
+            let quick_note = String::new();
             if choices.is_empty() {
                 format!("📷 Màn của {what}:\n\n{body}{quick_note}")
             } else {
@@ -3268,38 +3264,50 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             quick.push(("✅ Làm đi".to_string(), b.1));
                         }
                     }
-                    // Ô nhập có chữ ⟹ MỘT nút, và nó gửi thẳng chính chữ ấy.
+                    // Ô nhập có chữ ⟹ một cái nút GỬI. Đúng một icon.
                     //
-                    // 🔴 Hà 2026-08-13: *"phiên tfl5 đang dừng có gợi ý ở nhắc,
-                    // nếu không bấm tab hoặc mũi tên right thì nó sẽ không nhập
-                    // tự động"* → *"nên chỗ gợi ý đó cần thao tác bấm là gửi
-                    // luôn text đó tới phiên"*.
+                    // 🔴 Hà 2026-08-13, ảnh chụp nút `⏎ Gửi: # Lệnh thấy trên
+                    // màn — bấm nút dướ…`: *"sao gợi ý mờ tạo nút lại vô duyên
+                    // thế"* → *"không phải bạn tự chèn à"* → *"chỉ cần icon
+                    // send là đủ"* → *"focus đúng mục tiêu"*.
                     //
-                    // Đo màn ấy ở dạng thô: `"❯\u{a0}push"` — **chữ trơn**.
-                    // `contents of tab` bỏ sạch màu, mà cái phân biệt "chữ đã
-                    // gõ" với "gợi ý mờ" CHÍNH LÀ màu. Nên đừng đoán, và đừng
-                    // bắt người ta đoán hộ bằng hai cái nút: hub đã ĐỌC ĐƯỢC
-                    // chữ rồi, cứ gửi thẳng chữ ấy đi.
+                    // Anh chỉ đúng hai chỗ. Một: dòng trên nhãn là chữ CỦA
+                    // CHÍNH HUB (`pipeline.rs` chèn `# Lệnh thấy trên màn…` vào
+                    // bản trả lời `/shot`), nên cái nút đang mời gửi lại lời
+                    // của chính nó. Hai: bản cũ ĐỌC chữ trong ô rồi GÕ LẠI chữ
+                    // ấy — mà cái phân biệt "chữ đã gõ" với "gợi ý mờ" chính là
+                    // MÀU, thứ `contents of tab` bỏ sạch. Đọc-rồi-gõ-lại là
+                    // dựng một hành động lên trên một phép đo không làm được.
                     //
-                    // Một bẫy phải chặn: nếu chữ ấy nằm THẬT trong ô (không
-                    // phải gợi ý), gõ thêm lần nữa thành `pushpush`. Nên xoá ô
-                    // trước bằng Esc — và chỉ mời nút này khi phiên ĐANG RẢNH,
-                    // vì Esc trên một phiên đang chạy là cắt ngang việc.
-                    // "Đang chạy" đọc từ CHÍNH màn vừa chụp, không từ một cờ
-                    // có thể đã cũ: chân màn của phiên đang chạy mang `esc to
-                    // interrupt`, phiên rảnh thì không (đo trên hai màn thật
-                    // 2026-08-13: `dwork` đang chạy CÓ, `tfl5` đứng chờ KHÔNG).
+                    // Nút nay là một CỬ CHỈ, không phải một nội dung: bấm Enter
+                    // vào đúng cửa sổ ấy, y như ngón tay chủ máy. hub không cần
+                    // biết trong ô có gì — gõ dở, gợi ý đã nhận, hay rỗng — vì
+                    // Enter làm đúng một việc ở cả ba ca. Không đọc thì không
+                    // đoán sai được.
+                    //
+                    // Hai cửa giữ nó khỏi bấm nhầm chỗ, cả hai đọc từ CHÍNH màn
+                    // vừa chụp: phiên đang chạy thì thôi (chân màn mang `esc to
+                    // interrupt`), và có hộp chọn thì thôi — ở đó Enter là CHỐT
+                    // một lựa chọn, không phải gửi một câu; hộp chọn đã có bộ
+                    // nút số riêng.
                     let running = ack.contains("esc to interrupt");
-                    if !running {
-                        if let Some(t) = crate::keys::input_box_text(&ack) {
-                            if let Some(b) = remember_quick(db, &shot_sid, std::slice::from_ref(&t)).pop() {
-                                quick.push((
-                                    format!("⏎ Gửi: {}", crate::exec::truncate(&t, 34)),
-                                    format!("box:{}", b.1.trim_start_matches("run:")),
-                                ));
-                            }
-                        }
+                    let has_choices = !crate::keys::parse_choices(&ack).is_empty();
+                    if !running && !has_choices && !shot_sid.is_empty() {
+                        quick.push(("⏎".to_string(), format!("key:{shot_sid}:enter")));
                     }
+                    // text đó tới phiên"*) — nhưng nó đứng trên một phép đo hub
+                    // KHÔNG làm được.
+                    // phân biệt 'chữ đã gõ' với 'gợi ý mờ' CHÍNH LÀ màu"*, mà
+                    // `contents of tab` bỏ sạch màu. Rồi kết luận ngược lại —
+                    // *"đừng đoán… cứ gửi thẳng chữ ấy đi"* — tức đúng là ĐOÁN,
+                    // và đoán về phía nguy: gợi ý mờ là thứ TUI tự bày ra từ
+                    // lịch sử, không phải câu chủ máy định gửi. Một cái nút mời
+                    // gửi nó đi là mời gửi một câu không ai viết.
+                    //
+                    // Cùng luật với `keys::look` trả `Blind` thay vì `None`:
+                    // không đo được thì NÓI KHÔNG BIẾT, đừng dựng một hành động
+                    // lên trên chỗ trống. Muốn gửi chữ ấy thì gõ thẳng nó ở
+                    // Telegram — đường ấy có sẵn và không phải đoán gì cả.
                 }
                 match (quick.is_empty(), crate::telegram::inbox()) {
                     (false, Some(tg)) if adapter == crate::telegram::NAME => {

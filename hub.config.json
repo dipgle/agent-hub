@@ -11,7 +11,7 @@
     "timeout_sec": 240
   },
   "auto_handover": {
-    "enabled": false,
+    "enabled": true,
     "at_percent": 60,
     "idle_sec": 120
   },

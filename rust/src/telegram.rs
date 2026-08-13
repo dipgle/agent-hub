@@ -697,6 +697,38 @@ impl Inbox {
                 }
                 return;
             }
+            // `box:<n>` — gửi chính chữ đang nằm trong ô nhập của phiên.
+            //
+            // 🔴 Hà 2026-08-13: *"nên chỗ gợi ý đó cần thao tác bấm là gửi luôn
+            // text đó tới phiên"*. Hai bước, một cú bấm: **Esc** xoá ô trước,
+            // rồi gõ lại nguyên chữ ấy. Xoá trước là bắt buộc vì hub KHÔNG phân
+            // biệt được "gợi ý mờ" (ô rỗng thật) với "chữ đã gõ" (ô có chữ) —
+            // màn đọc về không mang màu. Không xoá thì ca thứ hai thành
+            // `pushpush`.
+            if let Some(n) = data.strip_prefix("box:").and_then(|n| n.parse::<usize>().ok()) {
+                match crate::db::Db::open(&self.cfg.db)
+                    .ok()
+                    .and_then(|db| crate::pipeline::quick_cmd(&db, n))
+                {
+                    Some(line) => {
+                        logging::info(
+                            "telegram_box_send",
+                            json!({ "n": n, "text": crate::exec::truncate(&line, 60) }),
+                        );
+                        // Hai lệnh, đúng thứ tự — `CMD_LOCK` giữ chúng nối đuôi.
+                        self.push_text("/key esc");
+                        self.push_text(&line);
+                    }
+                    None => {
+                        if let Err(e) =
+                            self.send_text("⚠ chữ ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.")
+                        {
+                            logging::error("telegram_ack_failed", json!({ "err": e }));
+                        }
+                    }
+                }
+                return;
+            }
             // `say:<n>` — gửi một câu CHỮ THƯỜNG vào phiên đang theo.
             //
             // Khác `run:<n>` đúng một dấu `!`, mà dấu ấy đổi hẳn nghĩa: `run:`

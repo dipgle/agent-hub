@@ -1692,7 +1692,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /sessions — danh sách phiên đang sống (trên Telegram: bấm nút để theo)\n\
                      /session <id> — theo một phiên (bỏ theo: /session -)\n\
                      (trên Telegram: chọn phiên xong thì CHỮ THƯỜNG gõ ở đây đi thẳng vào phiên ấy)\n\
-                     /new <dự án> [@acc] <việc> — mở phiên làm việc đó; không nói @acc thì chạy bằng tài khoản mặc định (xem /accounts)\n\
+                     /new [-a acc] <việc> — mở cửa sổ mới rồi gõ việc ấy vào; không nói -a thì dùng tài khoản mặc định (xem /accounts)\n\
                      /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng\n\
                      /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước)\n\
                      /stop [id] — dừng phiên nền, hội thoại vẫn giữ\n\
@@ -1911,13 +1911,23 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     .find_map(|k| flags.get(*k))
                     .map(|v| v.trim().to_string());
 
+                // 🔴 `/new` chỉ cần HAI thứ: tài khoản nào, và gõ gì.
+                //
+                // Hà 2026-08-13: *"luồng xử lý 1 phiên mới là gõ lệnh vào cli
+                // (mở phiên) → gõ text để làm việc vào cli → vì vậy lệnh `new`
+                // chỉ cần tham số sử dụng acc nào và text gửi đi là gì"*. Đúng
+                // theo đúng phép thử CẦU NỐI: ngồi ở máy thì chủ máy mở một cửa
+                // sổ rồi gõ việc — không ai khai báo "dự án" với cái terminal.
+                //
+                // Bản cũ bóc TỪ ĐẦU TIÊN làm tên dự án và bắt nó phải là một
+                // dự án đã biết. Cái giá đo được (09:35 ngày 12-08): Hà gõ
+                // `/new Tại sao lại có phiên này chạy…` và nhận về
+                // `⚠ không biết dự án 'Tại'` — một câu hỏi bị đọc thành một tên
+                // thư mục. Nay cả câu là ĐỀ BÀI; `-s` vẫn còn cho ai muốn chỉ
+                // đúng thư mục, nhưng không bắt buộc và không đoán.
                 let (name, task) = match flag_project.as_deref() {
-                    // Có `-s` thì phần chữ còn lại LÀ đề bài, cả câu.
                     Some(p) => (p.to_string(), rest.as_str()),
-                    None => {
-                        let (n, t) = rest.split_once(char::is_whitespace).unwrap_or((&rest, ""));
-                        (n.trim().to_string(), t)
-                    }
+                    None => (String::new(), rest.as_str()),
                 };
                 let name = name.as_str();
                 // `@tài-khoản` đứng ngay sau tên dự án: `/new hub @acc2 việc…`.
@@ -1950,9 +1960,19 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         known_accounts.join(", ")
                     )
                 } else {
+                    // Không nêu `-s` ⟹ mở ở GỐC workspace, đúng chỗ mọi phiên
+                    // trên máy này vẫn mở (và là thư mục duy nhất cả ba tài
+                    // khoản đã duyệt MCP).
+                    let dir = if name.is_empty() {
+                        Some(cfg.workspace_root.clone())
+                    } else {
+                        dir
+                    };
                     match dir {
                     Some(d)
-                        if known.contains(&name.to_string()) || cfg.projects.contains_key(name) =>
+                        if name.is_empty()
+                            || known.contains(&name.to_string())
+                            || cfg.projects.contains_key(name) =>
                     {
                         match crate::sessions::start_background(cfg, name, &d, task, account.as_deref()) {
                             Ok(s) => {
@@ -2517,11 +2537,37 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             quick.push(("✅ Làm đi".to_string(), b.1));
                         }
                     }
-                    if let Some(t) = crate::keys::input_box_text(&ack) {
-                        quick.push((
-                            format!("⏎ Gửi: {}", crate::exec::truncate(&t, 40)),
-                            format!("key:{want}:enter"),
-                        ));
+                    // Ô nhập có chữ ⟹ MỘT nút, và nó gửi thẳng chính chữ ấy.
+                    //
+                    // 🔴 Hà 2026-08-13: *"phiên tfl5 đang dừng có gợi ý ở nhắc,
+                    // nếu không bấm tab hoặc mũi tên right thì nó sẽ không nhập
+                    // tự động"* → *"nên chỗ gợi ý đó cần thao tác bấm là gửi
+                    // luôn text đó tới phiên"*.
+                    //
+                    // Đo màn ấy ở dạng thô: `"❯\u{a0}push"` — **chữ trơn**.
+                    // `contents of tab` bỏ sạch màu, mà cái phân biệt "chữ đã
+                    // gõ" với "gợi ý mờ" CHÍNH LÀ màu. Nên đừng đoán, và đừng
+                    // bắt người ta đoán hộ bằng hai cái nút: hub đã ĐỌC ĐƯỢC
+                    // chữ rồi, cứ gửi thẳng chữ ấy đi.
+                    //
+                    // Một bẫy phải chặn: nếu chữ ấy nằm THẬT trong ô (không
+                    // phải gợi ý), gõ thêm lần nữa thành `pushpush`. Nên xoá ô
+                    // trước bằng Esc — và chỉ mời nút này khi phiên ĐANG RẢNH,
+                    // vì Esc trên một phiên đang chạy là cắt ngang việc.
+                    // "Đang chạy" đọc từ CHÍNH màn vừa chụp, không từ một cờ
+                    // có thể đã cũ: chân màn của phiên đang chạy mang `esc to
+                    // interrupt`, phiên rảnh thì không (đo trên hai màn thật
+                    // 2026-08-13: `dwork` đang chạy CÓ, `tfl5` đứng chờ KHÔNG).
+                    let running = ack.contains("esc to interrupt");
+                    if !running {
+                        if let Some(t) = crate::keys::input_box_text(&ack) {
+                            if let Some(b) = remember_quick(db, std::slice::from_ref(&t)).pop() {
+                                quick.push((
+                                    format!("⏎ Gửi: {}", crate::exec::truncate(&t, 34)),
+                                    format!("box:{}", b.1.trim_start_matches("run:")),
+                                ));
+                            }
+                        }
                     }
                 }
                 match (quick.is_empty(), crate::telegram::inbox()) {

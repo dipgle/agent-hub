@@ -2099,12 +2099,46 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
             // (chạy ở đâu) mà họ không có dữ kiện để chọn, và nó nhân đôi chiều
             // dài bảng phím. hub biết đường nào chạy được từ điện thoại
             // (`/runin`) nên hub chọn. Cần cửa sổ thật có tty thì gõ `/win`.
+            // 🔴 Hà 2026-08-13: *"Nút chưa chèn vào đúng chỗ của nó"* · *"Bấm
+            // vẫn chưa chạy được"*. Đo trong log: ba cú bấm
+            // (16:29:39 · 16:30:55 · 16:31:26Z) đều xếp `/runin … ./hub
+            // self-install`, và **không cú nào có dòng `runin_ran`** — trong
+            // khi bản cài đổi lúc 16:31:37Z, tức lệnh CHẠY XONG. Nó chạy được;
+            // thứ không về là lời báo.
+            //
+            // Gốc: lệnh ấy khởi động lại chính hubd, nên tiến trình đang xử lý
+            // lệnh bị thay thế TRƯỚC khi kịp ghi log và gửi tin. Từ điện thoại
+            // nhìn y hệt một cái nút hỏng — nên Hà bấm lại, và cài thêm hai
+            // lần nữa. Đây là "lỗi im lặng" đúng nghĩa, chỉ khác chỗ: không
+            // phải một `Err` bị nuốt, mà là **cái mồm bị giết giữa câu**.
+            //
+            // Đường đúng đã có sẵn: route `/upgrade` báo TRƯỚC rồi mới restart
+            // (`CommandKind::Upgrade`). Nên nút phải trỏ vào đó — đúng nghĩa
+            // "chèn vào đúng chỗ của nó".
+            if is_self_rebuild(c) {
+                return [(
+                    format!("🔧 {}", crate::exec::truncate(c, 52)),
+                    "upgrade".to_string(),
+                )];
+            }
             [(
                 format!("▶ {}", crate::exec::truncate(c, 52)),
                 format!("run:{i}"),
             )]
         })
         .collect()
+}
+
+/// Dòng lệnh này có phải là "hub dựng lại chính hub" không?
+///
+/// Hàng rào HẸP có chủ ý — đây là danh sách hai đường duy nhất cài lại hubd
+/// trên máy này (`./hub self-install` là bản Rust, `deploy/install.sh` là bản
+/// shell nó thay thế). Nới rộng bằng cách bắt mọi thứ có chữ "install" thì
+/// `npm install` cũng thành "dựng lại hub", và người bấm nhận một câu trả lời
+/// nói về chuyện khác hẳn.
+pub fn is_self_rebuild(cmd: &str) -> bool {
+    let c = cmd.trim();
+    c.contains("hub self-install") || c.contains("deploy/install.sh")
 }
 
 /// Lệnh gợi ý thứ `n`, kèm PHIÊN đã sinh ra nó — cái nút chỉ mang con số.
@@ -2552,6 +2586,35 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             CommandKind::RunIn => {
                 // MÁY chạy, PHIÊN đọc — xem `CommandKind::RunIn`.
                 let (want, line) = target_and_rest(db, &cmd.arg);
+                // Lệnh dựng lại chính hub đi đường `/upgrade`, kể cả khi được
+                // gõ tay vào đây: chạy nó qua `/runin` thì hubd bị thay thế
+                // giữa lúc đang xử lý, và câu trả lời chết theo — đo được ba
+                // lần liền 2026-08-13, xem `remember_quick`.
+                if is_self_rebuild(&line) {
+                    let ack = match crate::runtime::self_install(cfg) {
+                        Ok(msg) => format!(
+                            "🔧 {msg}\nĐang khởi động lại hubd… (lệnh này dựng lại chính hub nên nó \
+                             đi đường /upgrade — chạy qua /runin thì hub bị thay giữa chừng và câu \
+                             trả lời chết theo)"
+                        ),
+                        Err(e) => format!(
+                            "⚠ không dựng lại được (bản đang chạy GIỮ NGUYÊN): {}",
+                            crate::exec::truncate(&e.to_string(), 400)
+                        ),
+                    };
+                    let ok = ack.starts_with("🔧");
+                    // NÓI TRƯỚC, chết sau. Thứ tự này là cả bản vá.
+                    reply_in_channel(db, cfg, adapter, cmd, &ack);
+                    if ok {
+                        if let Err(e) = crate::runtime::restart_daemon() {
+                            logging::error(
+                                "self_install_restart_failed",
+                                json!({ "err": e.to_string() }),
+                            );
+                        }
+                    }
+                    continue;
+                }
                 let live =
                     crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 let ack = match live.sessions.iter().find(|s| s.session_id == want) {

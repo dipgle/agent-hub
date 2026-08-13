@@ -421,6 +421,12 @@ pub fn callback_to_command(data: &str) -> Option<String> {
         }
         return Some(format!("/pick {sid} {at}"));
     }
+    // Nút "dựng lại hub". Không mang tham số nào: route `/upgrade` dựng từ MÃ
+    // HIỆN TẠI trong cây nguồn, nên một dòng lệnh đi kèm chỉ tạo ảo giác là
+    // bấm cái này chạy đúng chữ đang hiện trên màn.
+    if data == "upgrade" {
+        return Some("/upgrade".to_string());
+    }
     if let Some(sid) = data.strip_prefix("sess:") {
         if sid.is_empty() {
             return None;

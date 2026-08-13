@@ -1335,3 +1335,29 @@ fn a_single_question_keeps_the_old_shape() {
     // chỉ mời người ta bấm một cái Enter thừa vào phiên.
     assert!(!data.iter().any(|d| d.ends_with(":enter")), "{data:?}");
 }
+
+/// 🔴 Hà 2026-08-13: *"Nút chưa chèn vào đúng chỗ của nó"* · *"Bấm vẫn chưa
+/// chạy được"*.
+///
+/// Đo trong log hubd: ba cú bấm (16:29:39 · 16:30:55 · 16:31:26Z) đều xếp
+/// `/runin … ./hub self-install`, không cú nào có dòng `runin_ran` — mà bản cài
+/// đổi lúc 16:31:37Z, tức lệnh CHẠY XONG. Nó chạy được; thứ không về là lời
+/// báo, vì lệnh ấy khởi động lại chính hubd và giết mất cái mồm đang định trả
+/// lời. Nút phải đi route `/upgrade`, nơi câu trả lời được gửi TRƯỚC khi
+/// restart.
+#[test]
+fn the_rebuild_command_gets_a_button_that_goes_through_upgrade() {
+    for cmd in [
+        "cd ~/projects/hub && ./hub self-install",
+        "./hub self-install",
+        "bash deploy/install.sh",
+    ] {
+        assert!(hub::pipeline::is_self_rebuild(cmd), "phải nhận ra: {cmd}");
+    }
+    // Hàng rào HẸP: nới ra thì `npm install` cũng thành "dựng lại hub", và
+    // người bấm nhận một câu trả lời nói về chuyện khác hẳn.
+    for cmd in ["npm install", "cargo install cargo-nextest", "git pull"] {
+        assert!(!hub::pipeline::is_self_rebuild(cmd), "không được nhận: {cmd}");
+    }
+    assert_eq!(callback_to_command("upgrade"), Some("/upgrade".to_string()));
+}

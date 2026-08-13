@@ -102,10 +102,34 @@ Cửa sổ hiện `⏵⏵ auto mode on` — đúng rào của hub.
 Trạng thái tin-thư-mục sau buổi thử: acc1 ✓ `~/projects` · acc2 ✓ `~/projects`
 (bấm hộ 11:5x) · acc3 mới có `~/projects/AI/hub`, các đường khác sẽ do hub tự bấm.
 
-⏳ **Chưa quan sát trên tin thật:** tin tự đóng sổ ĐI TELEGRAM, nhánh `Stalled`,
-và đầu đề `/shot` mang `[AI/hub]` — cả ba cần lượt kế tiếp. Đã quan sát thật:
-`.inbox/<id ngắn>/` nhận ba ảnh Hà gửi đúng đường (`d407a8d`), và hub tự bấm
-qua hộp tin-thư-mục.
+### 📄 Chiều 13-08 — "Xem đầy đủ" tự vào phiên, và vòng khép kín đo được
+
+Hà: *"bấm xem đầy đủ thì rõ ràng nó đang ở phiên đúng rồi cần gì có nút vào phiên
+nữa"* — **sáng nay chính anh xin cái nút ấy**, chiều dùng thật thì thấy thừa. Đo
+trước khi sửa (cổng lọc CHẠY ĐÚNG: `full:21` là báo cáo `[dwork]` trong khi con
+trỏ ở `[AI/hub]`) ⟹ **thiết kế sai chứ không phải mã sai**. Nay bấm là vào luôn,
+bỏ nút; `full_report_follow_note` thuần + test ghim nhánh ghi-hỏng (`4f1474e`).
+
+Chạy thật, trọn một vòng — và nó **đóng nợ quan sát của bản vá `2e1ca1e`**:
+
+| mốc | đo được |
+|---|---|
+| 07:40:40 `/session` TRỐNG | 3 nút, **1,0s** (đúng: trống = `/sessions`) |
+| 07:40:57.614 → .615 | ghi sổ **rồi mới** log `focus_moved_by_full_report` |
+| | `86fe1666 [AI/hub]` → `d7173681 [AI/tfl5]`, **0 nút** kèm theo |
+| 07:42:29 bấm nút phiên | ack `👁 Đang theo phiên [AI/hub]` **870ms** (sáng nay: 48s) |
+| 07:42:32 `/shot` tự kèm | **1,9s**, đầu đề `📷 Màn của **[AI/hub]**` ✅ |
+| 07:42:56 gõ chữ trên Telegram | `telegram_text_as_typing` → `✓ đã gửi · [AI/hub]` |
+
+📌 Cạnh sắc của chính tính năng này, đã nói rõ với Hà: đọc báo cáo phiên nào là
+**con trỏ đi theo phiên ấy**, nên chữ gõ tiếp trên Telegram đổi đích. Một cú bấm
+ít đi, đổi lấy việc phải biết mình đang đứng ở đâu — tin luôn in dòng
+`👁 Đang theo phiên …` chính vì thế.
+
+⏳ **Chưa quan sát trên tin thật:** tin tự đóng sổ ĐI TELEGRAM và nhánh `Stalled`
+— cả hai cần một lượt đóng sổ nữa. Đã quan sát thật: `.inbox/<id ngắn>/` nhận ba
+ảnh (`d407a8d`), hub tự bấm qua hộp tin-thư-mục (`3805ab1`), đầu đề `/shot` mang
+nhãn dự án (`2e1ca1e`), và "Xem đầy đủ" tự chuyển phiên (`4f1474e`).
 
 📌 Bài học chung của cả năm lỗi: **cả năm đều nằm ở tin nhắn, không ở cơ chế.**
 Cơ chế đóng sổ chạy đúng ngay lượt đầu; thứ sai là hub kể lại việc mình vừa làm

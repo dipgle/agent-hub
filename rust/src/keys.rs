@@ -370,6 +370,95 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
 /// mỗi `osascript` mất ~50-150ms. Hỏi từng phiên là con đường đã một lần kéo
 /// một vòng từ ~18 giây lên 90 giây (đọc màn cho mọi phiên, 2026-08-10); hỏi
 /// một lần rồi tra trong tập thì thêm đúng một lời gọi cho cả vòng.
+/// Một tab Terminal, như chính Terminal khai ra.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tab {
+    /// `ttys004`, đã bỏ `/dev/`.
+    pub tty: String,
+    /// Terminal tự trả lời "tab này còn chương trình nào đang chạy không".
+    pub busy: bool,
+    /// Tên các tiến trình trong tab, thường là `login`, `-zsh`, rồi CLI.
+    pub procs: Vec<String>,
+}
+
+impl Tab {
+    /// Tab này có đang chạy một CLI trợ lý không — hay chỉ là một dấu nhắc?
+    ///
+    /// Đo bằng DANH SÁCH TIẾN TRÌNH chứ không bằng `busy`: `busy` là true cho
+    /// cả một `git log` đang mở pager, và false cho một `claude` vừa trả lời
+    /// xong. Hai câu hỏi khác nhau, và chỉ câu này quyết định tab ấy có phải
+    /// một phiên trợ lý hay không.
+    ///
+    /// Shell thì bỏ qua: `login`, `-zsh`, `zsh`, `bash`, `-bash`, `sh`. Còn lại
+    /// gì thì đó là thứ đang chạy.
+    pub fn cli(&self) -> Option<&str> {
+        self.procs
+            .iter()
+            .map(|p| p.trim_start_matches('-'))
+            .find(|p| !matches!(*p, "login" | "zsh" | "bash" | "sh" | "tcsh" | "fish" | ""))
+            .map(|p| p.trim())
+    }
+}
+
+/// Mọi tab Terminal đang mở, kèm thứ đang chạy trong đó.
+///
+/// 🔴 Hà 2026-08-13: *"mỗi cửa sổ terminal là một phiên thì sẽ quản lý được
+/// phiên nào đang chạy cli phiên nào không"* · *"vào phiên (terminal) chưa chạy
+/// gì → gõ lệnh bình thường như đang gõ ở terminal là được rồi"*.
+///
+/// Đây là phép đo mà mô hình ấy đứng lên: cho tới nay hub đi từ `claude agents`
+/// rồi mới tìm cửa sổ (`window_of` theo tty), nên một cửa sổ **không chạy CLI**
+/// là thứ hub không có cách nào biết là có tồn tại. Ngồi trước máy thì nó nằm
+/// ngay đó, mở sẵn, gõ được — tức đúng định nghĩa một LỖ HỔNG của cây cầu.
+///
+/// Trả cả tab lẫn tiến trình trong MỘT lượt `osascript`: hỏi hai lần là hai ảnh
+/// chụp lệch nhau, và giữa hai lần ấy một cửa sổ đóng được.
+pub fn terminal_tabs() -> Result<Vec<Tab>> {
+    // Ngăn cách bằng ký tự hiếm, KHÔNG phải khoảng trắng: `processes of t as
+    // string` dán liền các tên (`login-zshclaude`), đọc ra là một tên tiến
+    // trình không có thật.
+    let out = osascript(
+        r#"tell application "Terminal"
+  set acc to ""
+  repeat with w in every window
+    try
+      repeat with t in tabs of w
+        set ps to ""
+        repeat with p in (processes of t)
+          set ps to ps & (p as string) & "|"
+        end repeat
+        set acc to acc & (tty of t) & tab & (busy of t) & tab & ps & linefeed
+      end repeat
+    end try
+  end repeat
+  return acc
+end tell"#,
+    )?;
+    Ok(out
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let tty = f.next()?.trim();
+            if tty.is_empty() {
+                return None;
+            }
+            let busy = f.next().unwrap_or("false").trim() == "true";
+            let procs = f
+                .next()
+                .unwrap_or_default()
+                .split('|')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect();
+            Some(Tab {
+                tty: tty.trim_start_matches("/dev/").to_string(),
+                busy,
+                procs,
+            })
+        })
+        .collect())
+}
+
 pub fn terminal_ttys() -> Result<std::collections::HashSet<String>> {
     // Cùng lối phòng thủ với `window_script`: cửa sổ không có tab (bảng cài
     // đặt, inspector) làm cả script chết giữa chừng nếu không bọc `try`.

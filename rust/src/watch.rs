@@ -676,6 +676,13 @@ pub fn changes(
     // mà tệp này gọi tên ở khắp nơi. Vào sổ như mọi phiên khác, và mỗi lần bỏ
     // qua một cái chết thì NÓI RA (`session_end_muted`).
     for s in now {
+        // Cửa sổ RẢNH không phải một phiên trợ lý, nên nó không có "vừa xong"
+        // và cái chết của nó không phải tin: đóng một cửa sổ trống là chuyện
+        // thường ngày, báo lên điện thoại là cái loa kêu vào mặt người đang
+        // ngồi ngay đó. Không vào sổ, không nói gì (xem `add_shell_windows`).
+        if s.host == "shell" {
+            continue;
+        }
         let hub_own = crate::sessions::is_hub_own_probe(s);
         let state = state_of(s);
         let before = prev.get(&s.session_id);

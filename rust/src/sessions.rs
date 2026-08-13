@@ -1820,6 +1820,85 @@ pub fn refresh_activity(rows: &mut [LiveSession]) -> bool {
 ///
 /// Một lời gọi AppleScript cho cả vòng, và chỉ khi có ít nhất một phiên gắn
 /// tty; máy không mở Terminal.app nào thì không tốn gì cả.
+/// Cửa sổ Terminal ĐANG MỞ mà không chạy CLI nào — cũng là một phiên.
+///
+/// 🔴 Hà 2026-08-13: *"có lẽ cần thay đổi lại cách định nghĩa phiên cho tường
+/// minh: mỗi cửa sổ terminal là một phiên thì sẽ quản lý được phiên nào đang
+/// chạy cli phiên nào không, như vậy lệnh new cũng sẽ dễ hiểu hơn"* rồi nói
+/// đúng hành vi cần có: *"vào phiên (terminal) chưa chạy gì → gõ lệnh bình
+/// thường như đang gõ ở terminal là được rồi"*, và *"còn phiên đang chạy cli
+/// rồi thì vẫn như cũ (gửi text; file)"*.
+///
+/// Cho tới nay hub đi MỘT chiều: `claude agents` liệt kê phiên, rồi tìm cửa sổ
+/// theo tty. Một cửa sổ không chạy CLI vì thế là thứ hub không có cách nào biết
+/// là tồn tại — trong khi ngồi trước máy thì nó nằm ngay đó, mở sẵn, gõ được.
+/// Đúng định nghĩa lỗ hổng của cây cầu.
+///
+/// Đo lúc dựng (5 cửa sổ, mỗi cửa sổ 1 tab, cả 5 đang chạy `claude`): ghép 1-1
+/// sạch với 5 phiên hub thấy — tức mô hình cửa-sổ-là-phiên khớp máy này, và
+/// hàng thêm ra ở đây chỉ xuất hiện khi có cửa sổ THẬT SỰ rảnh.
+///
+/// Ba chỗ cố tình làm khác hàng phiên `claude`:
+/// * **id tự đặt** `win-<tty>`: cửa sổ rảnh không có id nào cả. tty bị dùng
+///   lại, nên id này chỉ có nghĩa trong đúng ảnh chụp hiện tại — mọi thứ dùng
+///   nó (gõ chữ, đóng) đều tra lại trong ảnh chụp, không nhớ qua lượt.
+/// * **`host = "shell"`**: một hạng riêng, để `watch` không đọc việc đóng cửa
+///   sổ thành "phiên đã tắt", và để màn hình nói đúng nó là cái gì.
+/// * **không tài khoản, không nhật ký**: không có `claude` thì không có hai thứ
+///   ấy. Khai bừa một tài khoản là bịa.
+fn add_shell_windows(rows: &mut Vec<LiveSession>) {
+    let tabs = match crate::keys::terminal_tabs() {
+        Ok(t) => t,
+        Err(e) => {
+            // Không đoán bù: dò hỏng thì danh sách thiếu đúng phần này, và lý
+            // do phải nằm trong log — không thì cửa sổ rảnh biến mất khỏi màn
+            // mà không ai biết vì sao.
+            logging::warn(
+                "terminal_tabs_probe_failed",
+                json!({ "err": e.to_string(), "effect": "cửa sổ rảnh không lên danh sách lượt này" }),
+            );
+            return;
+        }
+    };
+    let taken: std::collections::HashSet<String> = rows
+        .iter()
+        .map(|r| r.tty.trim_start_matches("/dev/").to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    let mut added = 0usize;
+    for tab in tabs {
+        if taken.contains(&tab.tty) {
+            continue;
+        }
+        // Có CLI chạy mà không khớp phiên nào: **không** phải cửa sổ rảnh. Có
+        // thể là một `claude` của tài khoản đang mù, hoặc một CLI khác hẳn.
+        // Khai nó là "dấu nhắc trống" rồi gõ lệnh shell vào đó là gõ vào giữa
+        // một chương trình đang chạy — thứ không lùi lại được.
+        if let Some(cli) = tab.cli() {
+            logging::info(
+                "terminal_tab_busy_unmatched",
+                json!({ "tty": tab.tty, "cli": cli,
+                        "why": "cửa sổ chạy một CLI không khớp phiên nào — không nhận là cửa sổ rảnh" }),
+            );
+            continue;
+        }
+        rows.push(LiveSession {
+            session_id: format!("win-{}", tab.tty),
+            name: format!("cửa sổ {}", tab.tty),
+            label: String::new(),
+            host: "shell".to_string(),
+            kind: "shell".to_string(),
+            tty: tab.tty.clone(),
+            working: tab.busy,
+            ..Default::default()
+        });
+        added += 1;
+    }
+    if added > 0 {
+        logging::info("shell_windows_listed", json!({ "count": added }));
+    }
+}
+
 fn mark_can_type(rows: &mut [LiveSession]) {
     if !rows.iter().any(|r| r.host == "terminal" && !r.tty.is_empty()) {
         return;
@@ -2167,6 +2246,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
         }
     }
 
+    add_shell_windows(&mut out.sessions);
     mark_can_type(&mut out.sessions);
     link_parents(&mut out.sessions);
     // Nhãn tính SAU khi đã có đủ mọi hàng: "có trùng ai không" là một câu hỏi
@@ -3805,9 +3885,18 @@ pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Option<i64>>
                 }
             )
         })?;
-    // Chỉ GÕ `/exit`. Việc canh "CLI chạy nốt chưa" là của vòng chạy — Hà
+    // Chỉ GÕ lệnh thoát. Việc canh "chạy nốt chưa" là của vòng chạy — Hà
     // 2026-08-13: *"30 giây kiểm tra 1 lần nếu chưa xong thì chờ tiếp"*.
-    crate::keys::send_exit(window)?;
+    //
+    // Cửa sổ RẢNH thoát bằng `exit` của shell, không phải `/exit` của TUI: gõ
+    // `/exit` vào một dấu nhắc zsh ra `zsh: no such file or directory: /exit`
+    // rồi cửa sổ nằm nguyên đó — hub báo "đang đóng" cho một việc không bao
+    // giờ xảy ra.
+    if session.host == "shell" {
+        crate::keys::type_into(window, "exit", true)?;
+    } else {
+        crate::keys::send_exit(window)?;
+    }
     Ok(Some(window))
 }
 

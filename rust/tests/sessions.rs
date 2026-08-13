@@ -1361,3 +1361,32 @@ fn a_filing_drawer_is_not_part_of_the_name() {
 
     std::fs::remove_dir_all(&root).ok();
 }
+
+/// Tab Terminal: cái gì đang chạy trong đó — và cái gì chỉ là shell.
+///
+/// 🔴 Hà 2026-08-13: *"mỗi cửa sổ terminal là một phiên thì sẽ quản lý được
+/// phiên nào đang chạy cli phiên nào không"*. Câu hỏi ấy quy về đúng một phép
+/// đo: trong danh sách tiến trình của tab, bỏ shell đi thì còn lại gì.
+#[test]
+fn a_tab_knows_whether_a_cli_is_running_in_it() {
+    use hub::keys::Tab;
+
+    let tab = |procs: &[&str]| Tab {
+        tty: "ttys004".to_string(),
+        busy: true,
+        procs: procs.iter().map(|p| p.to_string()).collect(),
+    };
+
+    // Đo thật trên máy lúc dựng: `login`, `-zsh`, rồi CLI.
+    assert_eq!(tab(&["login", "-zsh", "claude"]).cli(), Some("claude"));
+    // Dấu nhắc trống — đây là hàng mà `/type` gõ lệnh shell vào được.
+    assert_eq!(tab(&["login", "-zsh"]).cli(), None);
+    assert_eq!(tab(&["login", "-bash"]).cli(), None);
+    assert_eq!(tab(&[]).cli(), None);
+    // CLI khác `claude` vẫn phải nhận ra là CÓ thứ đang chạy: gõ lệnh shell vào
+    // giữa một chương trình đang chạy là thứ không lùi lại được.
+    assert_eq!(tab(&["login", "-zsh", "vim"]).cli(), Some("vim"));
+    assert_eq!(tab(&["login", "-zsh", "codex"]).cli(), Some("codex"));
+    // Tiến trình phụ của shell không được đọc thành CLI.
+    assert_eq!(tab(&["login", "zsh"]).cli(), None);
+}

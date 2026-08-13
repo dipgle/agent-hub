@@ -1130,3 +1130,33 @@ fn a_transcript_being_written_beats_a_stale_idle_flag() {
     assert!(w(None, 0, Some(60)));
     assert!(!w(None, 0, Some(9_999)));
 }
+
+/// "Gặp lỗi API" khác hẳn "nhắc tới lỗi API".
+///
+/// 🔴 Đo 2026-08-13, lượt thật đầu tiên của cảnh báo lỗi: hub bắn `🔴 [AI/hub]
+/// đang dừng vì LỖI:` kèm **4 KB JSON** — bản ghi khớp chính là báo cáo của tôi,
+/// một tin NÓI VỀ lỗi API. Bản đầu quét chữ trên từng dòng thô của một tệp JSON.
+///
+/// Đếm lại trên toàn bộ nhật ký của máy: 43 lỗi thật đều mang
+/// `isApiErrorMessage: true`; ba ca dương tính giả đều là tin thường.
+#[test]
+fn talking_about_an_api_error_is_not_having_one() {
+    let e = hub::sessions::transcript_error;
+    let real = r#"{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":"Credit balance is too low"}}"#;
+    assert_eq!(e(real).as_deref(), Some("Credit balance is too low"));
+
+    // Tin thường có nhắc chữ "API Error" ⟹ KHÔNG phải lỗi.
+    let talk = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Nay lỗi là một trạng thái: API Error: 500 …"}]}}"#;
+    assert_eq!(e(talk), None);
+
+    // Lỗi CŨ mà sau đó phiên đã nói tiếp ⟹ nó không còn đứng vì lỗi.
+    let recovered = format!("{real}\n{talk}");
+    assert_eq!(e(&recovered), None);
+
+    // …còn lỗi là bản ghi assistant CUỐI thì vẫn bắt được, dù trước đó có gì.
+    let stuck = format!("{talk}\n{real}");
+    assert!(e(&stuck).is_some());
+
+    assert_eq!(e(""), None);
+    assert_eq!(e("không phải json"), None);
+}

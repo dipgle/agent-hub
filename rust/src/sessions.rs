@@ -272,6 +272,54 @@ pub fn is_hub_runtime_cwd(cwd: &str) -> bool {
     !cwd.is_empty() && Path::new(cwd) == crate::config::expand_home(Path::new(HUBD_RUNTIME_DIR))
 }
 
+/// Phiên có đang ĐỨNG vì một lỗi API không — đọc từ CẤU TRÚC nhật ký.
+///
+/// 🔴 Bản đầu (2026-08-13, vài phút trước) quét chữ `"API Error"` trên từng
+/// DÒNG THÔ của nhật ký, và nó kêu oan ngay lượt thật đầu tiên: bản ghi khớp
+/// chính là **báo cáo của tôi** — một tin nhắn NÓI VỀ lỗi API. Tin gửi đi mang
+/// nguyên 4 KB JSON làm "dòng lỗi". Hai cái sai chồng nhau: quét chữ trên một
+/// tệp JSON, và không phân biệt *gặp lỗi* với *nhắc tới lỗi*.
+///
+/// Đo lại cho tử tế trên toàn bộ nhật ký của máy: **43 lỗi API thật đều mang
+/// `isApiErrorMessage: true`** trên bản ghi `assistant` — một lá cờ máy đọc
+/// được, không phải một chuỗi chữ. Ba ca dương tính giả đều là tin thường có
+/// nhắc chữ ấy.
+///
+/// Và chỉ tính khi bản ghi assistant CUỐI CÙNG là lỗi: lỗi hai tiếng trước mà
+/// phiên đã chạy tiếp thì nó không còn đứng vì lỗi nữa.
+pub fn transcript_error(tail: &str) -> Option<String> {
+    for line in tail.lines().rev() {
+        let Ok(r) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(msg) = r.get("message") else { continue };
+        if msg.get("role").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        // Bản ghi assistant cuối cùng quyết định — gặp cái không phải lỗi thì
+        // phiên đã đi tiếp được rồi.
+        if r.get("isApiErrorMessage").and_then(Value::as_bool) != Some(true) {
+            return None;
+        }
+        let text = match msg.get("content") {
+            Some(Value::String(t)) => t.clone(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .filter_map(|c| c.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join(" "),
+            _ => String::new(),
+        };
+        let text = text.trim();
+        return Some(if text.is_empty() {
+            "lỗi API (nhật ký không kèm chữ)".to_string()
+        } else {
+            truncate(text, 200)
+        });
+    }
+    None
+}
+
 /// Tên phiên để ĐỌC, không phải tên `claude` tự đặt.
 ///
 /// 🔴 Hà 2026-08-12: *"tất cả các chỗ có gắn `projects-…` nên thay thành tên dự
@@ -1824,7 +1872,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // đoạn nhật ký vừa nạp, không tốn thêm lần đọc nào.
                     row.asking = pending_question(&tail);
                     // Lỗi đọc từ NHẬT KÝ, không đợi đọc màn — xem `LiveSession::error`.
-                    row.error = crate::keys::api_error(&tail);
+                    row.error = transcript_error(&tail);
                     let parsed = parse_tail(&tail, &background_agent_calls(&path));
                     if parsed.last_text.is_none() {
                         row.note = Some("chưa có lượt hội thoại nào đọc được".into());

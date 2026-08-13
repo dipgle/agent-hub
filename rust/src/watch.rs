@@ -41,6 +41,13 @@ pub const DEAD: &str = "dead";
 /// ra nó bằng cách đọc màn đúng lúc phiên vừa im; nay nó là một trạng thái đọc
 /// từ nhật ký, nên phiên bắt đầu hỏi lúc nào cũng bắt được.
 pub const ASKING: &str = "asking";
+/// Đang đứng vì một LỖI — không phải "xong", cũng không phải "đang hỏi".
+///
+/// 🔴 Hà 2026-08-13: *"vì lỗi chưa thấy cảnh báo gì"*. Trước đó lỗi chỉ được
+/// nhận ra nếu hub tình cờ ĐỌC MÀN đúng lúc phiên vừa im (`Idle::Failed`); lỡ
+/// nhịp thì phiên nằm im và nhìn y hệt một phiên đã xong việc. Nay nó là một
+/// TRẠNG THÁI đọc từ nhật ký, nên vào đúng cỗ máy "so hai lượt, nói một lần".
+pub const ERRORED: &str = "errored";
 
 /// Chạy ngắn hơn chừng này thì XONG không phải là tin.
 ///
@@ -196,6 +203,12 @@ pub enum Change {
         question: String,
         options: Vec<String>,
     },
+    /// Phiên đứng lại vì một LỖI — xem `ERRORED`.
+    Failed {
+        id: String,
+        name: String,
+        line: String,
+    },
     Ended {
         id: String,
         name: String,
@@ -251,6 +264,7 @@ impl Change {
     /// Tên phiên, dùng cho nhãn nút "vào phiên" — mỗi biến thể đều mang sẵn.
     pub fn name(&self) -> &str {
         match self {
+            Change::Failed { name, .. } => name,
             Change::Finished { name, .. }
             | Change::Asking { name, .. }
             | Change::Ended { name, .. } => name,
@@ -265,6 +279,15 @@ impl Change {
     /// — đó là lời phàn nàn thứ hai của Hà, và nó đúng.
     pub fn say(&self, idle: &Idle, tail: Option<&str>) -> String {
         match self {
+            // Lỗi: nói THẲNG ra dòng lỗi. Người đọc không cần biết nó im bao
+            // lâu — họ cần biết nó hỏng vì cái gì.
+            Change::Failed { name, line, .. } => {
+                let head = format!("🔴 {name} đang dừng vì LỖI:\n{}", crate::exec::truncate(line, 200));
+                match tail {
+                    Some(t) if !t.trim().is_empty() => format!("{head}\n\n«{}»", t.trim()),
+                    _ => head,
+                }
+            }
             Change::Finished { name, ran_sec, .. } => {
                 // Một câu phải trả lời được: CÓ CẦN MÌNH LÀM GÌ KHÔNG.
                 let what = match idle {
@@ -567,10 +590,14 @@ fn plain(s: &str) -> String {
 /// "phiên <id>" — một id không có nhãn còn đỡ hơn một cái tên bịa.
 pub fn name_from_mark(id: &str, mark: &Mark) -> String {
     let short = &id[..id.len().min(8)];
+    // Nhãn DỰ ÁN, không phải tên `claude` tự đặt — Hà 2026-08-13, hai lần:
+    // *"cần gì đoạn text project-xx làm gì"* rồi *"vẫn còn project-.."* khi tin
+    // báo vẫn hiện `⏸ projects-06`. Lượt trước tôi mới đổi ở danh sách và ở câu
+    // ack, quên hẳn đường của CÁI LOA — mà đó lại là đường Hà đọc nhiều nhất.
     match (mark.n.trim(), mark.d.trim()) {
         ("", _) => format!("phiên {short}"),
         (name, "") => format!("{name} ({short})"),
-        (name, folder) => format!("{name} · {folder} ({short})"),
+        (_, folder) => format!("[{folder}] ({short})"),
     }
 }
 
@@ -578,6 +605,10 @@ pub fn name_from_mark(id: &str, mark: &Mark) -> String {
 fn state_of(s: &LiveSession) -> &'static str {
     if s.host == "dead" {
         DEAD
+    } else if s.error.is_some() && !s.working {
+        // Lỗi đứng TRƯỚC `idle`: cùng một phiên im lìm, nhưng "im vì xong" và
+        // "im vì hỏng" đòi hai việc khác hẳn nhau của người đọc.
+        ERRORED
     } else if s.asking.is_some() {
         // ĐỨNG TRƯỚC `working` có chủ ý: một phiên vừa hỏi vừa còn subagent chạy
         // dở vẫn là phiên **đang chờ người**, và đó mới là điều cần nói ra.
@@ -687,11 +718,18 @@ pub fn changes(
         // "vừa chạy xong" là câu sai (việc còn dở), và nó cũng không được im
         // theo luật "đừng kêu vào mặt người đang nhìn" — kẹt thì dù đang ngồi
         // trước máy cũng đáng được gọi, vì có thể người ta đang nhìn cửa sổ khác.
-        if state == ASKING && before.is_some_and(|b| b.s != ASKING) {
+        // LỖI — nói một lần, ngay lúc dòng lỗi xuất hiện trong nhật ký.
+        if state == ERRORED && before.is_some_and(|b| b.s != ERRORED) {
+            out.push(Change::Failed {
+                id: s.session_id.clone(),
+                name: crate::sessions::display_name(&s.name, &s.folder),
+                line: s.error.clone().unwrap_or_default(),
+            });
+        } else if state == ASKING && before.is_some_and(|b| b.s != ASKING) {
             let a = s.asking.clone().unwrap_or_default();
             out.push(Change::Asking {
                 id: s.session_id.clone(),
-                name: s.name.clone(),
+                name: crate::sessions::display_name(&s.name, &s.folder),
                 header: a.header,
                 question: a.question,
                 options: a.options,
@@ -701,14 +739,14 @@ pub fn changes(
             if epoch_sec - since >= MIN_RUN_SEC {
                 out.push(Change::Finished {
                     id: s.session_id.clone(),
-                    name: s.name.clone(),
+                    name: crate::sessions::display_name(&s.name, &s.folder),
                     ran_sec: epoch_sec - since,
                 });
             }
         } else if before.is_some() && state == DEAD {
             out.push(Change::Ended {
                 id: s.session_id.clone(),
-                name: s.name.clone(),
+                name: crate::sessions::display_name(&s.name, &s.folder),
                 was_working,
                 tty: s.tty.clone(),
                 kind: s.kind.clone(),

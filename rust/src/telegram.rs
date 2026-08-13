@@ -431,7 +431,18 @@ impl Inbox {
         if !folder.is_empty() {
             dir = dir.join(&folder);
         }
+        // Xếp theo MÃ PHIÊN (Hà 2026-08-13: *"`.inbox` nên đưa vào theo mã phiên
+        // cho dễ dọn rác"*). Tệp gửi cho một phiên chỉ có nghĩa trong đời phiên
+        // ấy; đổ chung một chỗ thì sau một tuần không ai biết cái nào còn dùng.
+        // Id NGẮN (8 ký tự) — đúng thứ danh sách phiên và `claude stop` đang
+        // dùng, nên nhìn thư mục là ghép được với dòng trên màn.
+        let short = focus.split('-').next().unwrap_or("").to_string();
         let dir = dir.join(".inbox");
+        let dir = if short.is_empty() {
+            dir
+        } else {
+            dir.join(&short)
+        };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             logging::error("telegram_inbox_mkdir_failed", json!({ "err": e.to_string() }));
             let _ = self.send_text(&format!("\u{26a0} không tạo được thư mục nhận tệp: {e}"));

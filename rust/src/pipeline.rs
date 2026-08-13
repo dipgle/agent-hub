@@ -254,6 +254,34 @@ pub fn session_name_from_book(book_json: &str, id: &str) -> Option<(String, Stri
     Some((shown, mark.a.clone()))
 }
 
+/// Xoá hòm thư của một phiên đã kết thúc — xem chỗ gọi trong `announce_changes`.
+fn clean_inbox(cfg: &Config, session_id: &str, folder: &str) {
+    let short = session_id.split('-').next().unwrap_or("");
+    // Chỉ nhận id ngắn dạng hex: đường dẫn xoá KHÔNG được nhận một chuỗi tuỳ ý.
+    if short.len() < 6 || !short.chars().all(|c| c.is_ascii_hexdigit()) {
+        return;
+    }
+    let mut dir = cfg.workspace_root.clone();
+    if !folder.is_empty() {
+        dir = dir.join(folder);
+    }
+    let dir = dir.join(".inbox").join(short);
+    if !dir.is_dir() {
+        return;
+    }
+    let n = std::fs::read_dir(&dir).map(|d| d.flatten().count()).unwrap_or(0);
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => logging::info(
+            "inbox_cleaned",
+            json!({ "session": session_id, "files": n, "dir": dir.display().to_string() }),
+        ),
+        Err(e) => logging::warn(
+            "inbox_clean_failed",
+            json!({ "dir": dir.display().to_string(), "err": e.to_string() }),
+        ),
+    }
+}
+
 pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsSnapshot) {
     let live = &snap.sessions;
     let prev: BTreeMap<String, crate::watch::Mark> = db
@@ -305,12 +333,26 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     for c in changes {
         // Tra lại phiên để có `tty` (đọc màn), câu cuối nó nói, và ai mở nó.
         let id = match &c {
+            crate::watch::Change::Failed { id, .. } => id.clone(),
             crate::watch::Change::Finished { id, .. } => id.clone(),
             crate::watch::Change::Asking { id, .. } => id.clone(),
             crate::watch::Change::Ended { id, .. } => id.clone(),
         };
         let row = live.iter().find(|s| s.session_id == id);
 
+        // Phiên kết thúc ⟹ dọn hòm thư của nó.
+        //
+        // Hà 2026-08-13: *"`.inbox` nên đưa vào theo mã phiên cho dễ dọn rác"* ·
+        // *"vì hết phiên nó ko cần nữa"*. Tệp gửi vào một phiên chỉ có nghĩa
+        // trong đời phiên ấy; để lại thì sau một tuần không ai biết cái nào còn
+        // dùng, mà đó đúng là cách một thư mục rác hình thành.
+        //
+        // Xoá HẸP và NÓI RA: chỉ đúng thư mục `<dự án>/.inbox/<id ngắn>` do
+        // chính hub tạo, và log kèm số tệp — xoá tệp của người khác mà im lặng
+        // là thứ không ai tha thứ lần thứ hai.
+        if matches!(c, crate::watch::Change::Ended { .. }) {
+            clean_inbox(cfg, &id, row.map(|r| r.folder.as_str()).unwrap_or(""));
+        }
         // hub vừa tự đóng sổ phiên này ⟹ cái chết của nó là KẾ HOẠCH, không
         // phải tin. Xem `handed_over` ở đầu hàm.
         if matches!(c, crate::watch::Change::Ended { .. }) && handed_over.iter().any(|d| d == &id) {
@@ -1240,6 +1282,10 @@ pub fn session_list_text(
             // cùng một tin nhắn.
             ("dead", _, _) => "⚫ đã tắt",
             (_, true, _) => "⚠ dừng lại HỎI",
+            // LỖI đứng trên "đang chạy": một phiên dừng vì lỗi nhìn từ xa y hệt
+            // một phiên đã xong — Hà 2026-08-13: *"vì lỗi chưa thấy cảnh báo
+            // gì"*. Đọc từ nhật ký nên không phụ thuộc việc bắt đúng nhịp.
+            _ if s.error.is_some() => "🔴 dừng vì LỖI",
             (_, _, true) => "🟢 đang chạy",
             _ => "🟡 đứng chờ",
         };
@@ -1607,6 +1653,7 @@ pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
     let dot = match (s.host.as_str(), s.asking.is_some(), s.working) {
         ("dead", _, _) => "⚫",
         (_, true, _) => "⚠",
+        _ if s.error.is_some() => "🔴",
         (_, _, true) => "🟢",
         _ => "🟡",
     };

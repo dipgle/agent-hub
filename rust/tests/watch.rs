@@ -158,8 +158,10 @@ fn the_farewell_says_which_session_it_was() {
         Some(Change::Ended { name, .. }) => name.clone(),
         other => panic!("phải là Ended: {other:?}"),
     };
-    assert!(said.contains("projects-71"), "thiếu tên: {said}");
-    assert!(said.contains("AI/hub"), "thiếu dự án: {said}");
+    // Nhãn là DỰ ÁN, không phải tên `claude` tự đặt — Hà 2026-08-13 phải nhắc
+    // hai lần vì lượt trước tôi đổi ở danh sách mà quên đường của cái loa.
+    assert!(said.contains("[AI/hub]"), "thiếu dự án: {said}");
+    assert!(!said.contains("projects-71"), "tên tự sinh vẫn chiếm chỗ: {said}");
     assert!(said.contains("8db91183"), "thiếu id để gõ lệnh tiếp: {said}");
 }
 
@@ -635,4 +637,34 @@ fn an_api_error_is_not_reported_as_waiting_for_you() {
     // Và dấu nhắc thật thì vẫn nói như cũ — luật mới không siết lan.
     let ok = c.say(&Idle::Prompt, None);
     assert!(ok.contains("đang chờ bạn"), "{ok}");
+}
+
+/// Phiên dừng vì LỖI phải kêu — và kêu khác hẳn "vừa xong".
+///
+/// 🔴 Hà 2026-08-13: *"cần lệnh kiểm các phiên đã xử lý xong và đang dừng, hoặc
+/// tìm phiên đang dừng do lỗi"* · *"vì lỗi chưa thấy cảnh báo gì"*. Trước đó lỗi
+/// chỉ được nhận ra nếu hub tình cờ ĐỌC MÀN đúng lúc phiên vừa im; lỡ nhịp thì
+/// phiên nằm im và nhìn y hệt một phiên đã xong việc.
+#[test]
+fn a_session_stopped_by_an_error_rings_and_says_the_error() {
+    let mut s = sess("s1", "projects-06", "terminal", false);
+    s.folder = "AI/hub".into();
+    s.error = Some("API Error: 500 internal".into());
+    let prev = book(&[("s1", WORKING)]);
+    let (events, next) = changes(&prev, &[s], NOW, &[]);
+    let said = match events.first() {
+        Some(c @ Change::Failed { .. }) => c.say(&Idle::Unknown, None),
+        other => panic!("phải là Failed: {other:?}"),
+    };
+    assert!(said.contains("LỖI"), "{said}");
+    assert!(said.contains("API Error: 500"), "phải mang nguyên dòng lỗi: {said}");
+    assert!(!said.contains("vừa chạy xong"), "{said}");
+    // …và NÓI MỘT LẦN: lượt sau cùng trạng thái thì im.
+    let (again, _) = changes(&next, &[{
+        let mut s = sess("s1", "projects-06", "terminal", false);
+        s.folder = "AI/hub".into();
+        s.error = Some("API Error: 500 internal".into());
+        s
+    }], NOW + 30, &[]);
+    assert!(again.is_empty(), "kêu lại lần hai: {again:?}");
 }

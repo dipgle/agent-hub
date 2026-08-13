@@ -56,6 +56,18 @@ pub struct LiveSession {
     /// nó đang đứng chờ MỘT CÂU của chủ máy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asking: Option<Asking>,
+    /// Phiên đang đứng vì một LỖI, kèm nguyên văn dòng lỗi.
+    ///
+    /// 🔴 Hà 2026-08-13: *"cần lệnh kiểm các phiên đã xử lý xong và đang dừng,
+    /// hoặc tìm phiên đang dừng do lỗi"* · *"vì lỗi chưa thấy cảnh báo gì"*.
+    ///
+    /// Trước đó hub chỉ nhận ra lỗi bằng cách ĐỌC MÀN đúng lúc phiên chuyển
+    /// trạng thái (`Idle::Failed`) — tức bắt được thì bắt, lỡ nhịp thì phiên
+    /// nằm đó im lìm và nhìn y hệt "đã xong". Nhật ký thì luôn còn: dòng lỗi
+    /// nằm nguyên trong lượt cuối, đọc lại không tốn thêm một lần đọc đĩa nào
+    /// (cùng `tail` đã nạp cho `last_text`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     /// Dự án phiên ĐANG LÀM, đoán từ đường dẫn nó đụng vào — xem
     /// [`folder_from_tail`]. Rỗng = chưa đủ bằng chứng.
     ///
@@ -1715,6 +1727,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     .unwrap_or("unknown")
                     .to_string(),
                 asking: None,          // đọc từ nhật ký bên dưới
+                error: None,           // cũng đọc từ nhật ký bên dưới
                 folder: String::new(), // đọc từ nhật ký bên dưới
                 host: String::new(),   // set below, once `kind` and `pid` are read
                 pid: s.get("pid").and_then(|v| v.as_i64()).unwrap_or(0),
@@ -1810,6 +1823,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // Phiên có đang chờ một câu trả lời không — đọc từ chính
                     // đoạn nhật ký vừa nạp, không tốn thêm lần đọc nào.
                     row.asking = pending_question(&tail);
+                    // Lỗi đọc từ NHẬT KÝ, không đợi đọc màn — xem `LiveSession::error`.
+                    row.error = crate::keys::api_error(&tail);
                     let parsed = parse_tail(&tail, &background_agent_calls(&path));
                     if parsed.last_text.is_none() {
                         row.note = Some("chưa có lượt hội thoại nào đọc được".into());

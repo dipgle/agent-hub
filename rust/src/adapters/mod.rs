@@ -112,6 +112,47 @@ pub enum CommandKind {
     ///
     /// Một lệnh, một lượt, không phiên nào ở lại — đúng chữ *"đóng luôn"*.
     Cmd,
+    /// `/close [id]` — ĐÓNG HẲN: thoát CLI rồi đóng luôn cửa sổ Terminal.
+    ///
+    /// 🔴 Hà 2026-08-13: *"chưa có lệnh đóng phiên đóng luôn cửa sổ?"* → *"đang
+    /// đứng ở phiên nào thì cần lệnh đóng hẳn"* → *"ah stop là dừng rồi vậy
+    /// dùng close"* → *"nếu trống thì đóng phiên đang đứng còn có id thì đóng
+    /// phiên theo id"*.
+    ///
+    /// Tách khỏi `Stop` vì một động từ đang gánh hai kết cục khác hẳn nhau về
+    /// mức mất mát: `/stop` dừng một phiên NỀN và giữ nguyên hội thoại (`/tell`
+    /// nói tiếp được), còn với phiên có cửa sổ thì nó lại thoát CLI và đóng cửa
+    /// sổ. Người bấm không có cách nào biết mình sắp nhận cái nào.
+    ///
+    /// Quy trình đóng **giữ nguyên như cũ** (Hà: *"trước khi đóng phải chờ cli
+    /// chạy nốt mới đóng hẳn"*): gõ `/exit`, chờ tới 30 giây cho `claude` chạy
+    /// hết lượt đang xếp hàng, còn bận thì TỪ CHỐI đóng — đóng lúc ấy bật hộp
+    /// thoại "terminate running processes", thứ khoá mồm mọi lệnh sau nó.
+    Close,
+    /// `/win <lệnh>` — chạy trong một **cửa sổ Terminal thật**, không phải nền.
+    ///
+    /// 🔴 Hà 2026-08-13, gửi ảnh chụp lời một phiên khác: *"`!` trong Claude
+    /// Code không cấp tty, nên `ssh -t` không xin được — không phải lỗi sudo
+    /// hay script. Cần một cửa sổ terminal thật, dán đúng dòng này rồi gõ mật
+    /// khẩu"*, rồi chốt: *"với lệnh này chỉ chạy được trong terminal không chạy
+    /// được trong cli nên cần thêm cách tạo nút"*.
+    ///
+    /// `/cmd` sinh tiến trình con KHÔNG có tty, nên mọi thứ đòi bàn phím —
+    /// `sudo`, `ssh -t`, `passwd`, một `read -s` — chết ngay ở dòng hỏi, và
+    /// chết theo kiểu khó đọc (*"a terminal is required"*), chứ không phải kiểu
+    /// "lệnh sai". Đây không phải lỗi vá được trong `/cmd`: **cái thiếu là một
+    /// cái tty**, mà tty thì chỉ cửa sổ mới có.
+    ///
+    /// Nên đúng như luật cầu nối: ngồi ở máy anh sẽ mở một cửa sổ rồi dán vào
+    /// đó. `/win` làm đúng thế — `keys::open_window`, cùng đường `/new` đã đi.
+    /// Cửa sổ **ở lại** sau khi lệnh chạy xong: đó là chỗ gõ mật khẩu, và cũng
+    /// là chỗ đọc kết quả.
+    ///
+    /// Hai đường này KHÔNG thay nhau: `/cmd` trả kết quả về điện thoại (đọc
+    /// được từ xa, không cần đứng dậy), `/win` cần người ngồi trước máy. Nút
+    /// `🖥` chỉ mọc kèm KẾT QUẢ của `/cmd`, tức đúng lúc đã biết đường kia
+    /// không đi được.
+    Win,
     /// `/accounts` — ba tài khoản `claude` trên máy này: phiên nào đang chạy
     /// bằng tài khoản nào, còn bao nhiêu hạn mức, và **`/new` không nói `@acc`
     /// thì rơi vào tài khoản nào**.

@@ -423,6 +423,32 @@ pub fn tab_busy(window: i64) -> Result<bool> {
 ///   cần `kill`, và `kill` thì mất phần ghi sổ cuối phiên;
 /// · cửa sổ **không tự đóng** khi shell thoát (hồ sơ Terminal giữ nó lại kèm
 ///   dòng `[Process completed]`) — nên bước đóng là bắt buộc, không thừa.
+/// Gõ `/exit` vào cửa sổ, và CHỈ thế — không chờ, không đóng.
+///
+/// 🔴 Hà 2026-08-13: *"30 giây kiểm tra 1 lần nếu chưa xong thì chờ tiếp"*.
+/// `quit_and_close` bên dưới chờ tại chỗ rồi **bỏ cuộc sau 30 giây**, và bỏ
+/// cuộc là câu trả lời sai cho câu hỏi thật: một lượt `claude` chạy hai mươi
+/// phút thì cửa sổ ấy vẫn phải đóng, chỉ là muộn hơn. Nhưng chờ tại chỗ lâu
+/// hơn thì hỏng kiểu khác — `execute_commands` giữ `CMD_LOCK`, nên một lượt
+/// chờ dài **khoá cả vòng chạy**: không tin báo, không lệnh nào khác đi được.
+///
+/// Nên tách đôi: gõ `/exit` xong thì ghi sổ và trả lời ngay; việc canh chừng
+/// giao cho vòng chạy (`pipeline::close_pending_tick`), đúng cùng cỗ máy "so
+/// hai lượt" mà `watch.rs` đã dùng. Chờ bao lâu cũng được vì không ai phải ngồi
+/// giữ chỗ.
+pub fn send_exit(window: i64) -> Result<()> {
+    osascript(&do_script(window, &as_string("/exit")))?;
+    Ok(())
+}
+
+/// Đóng cửa sổ. Gọi khi ĐÃ biết tab không còn bận — xem `tab_busy`.
+pub fn close_window(window: i64) -> Result<()> {
+    osascript(&format!(
+        r#"tell application "Terminal" to close (first window whose id is {window})"#
+    ))?;
+    Ok(())
+}
+
 pub fn quit_and_close(window: i64) -> Result<()> {
     osascript(&do_script(window, &as_string("/exit")))?;
     // Chờ CLI nhả tab. 20 × 500ms: `/exit` thường xong trong ~3 giây, nhưng một

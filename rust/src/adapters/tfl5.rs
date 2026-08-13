@@ -647,6 +647,24 @@ pub fn parse_command(
                 .unwrap_or_default();
             Some((CommandKind::Cmd, 0, rest))
         }
+        // `/close [id]` — cùng cách nhận đích với `/stop`: trống thì phiên đang
+        // theo, có id thì phiên ấy. Khác `/stop` ở KẾT CỤC, không ở cách nhắm.
+        "close" | "dong" | "dongphien" => {
+            let want = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            Some((CommandKind::Close, 0, want))
+        }
+        // `/win <dòng lệnh>` — cùng cách cắt với `/cmd`, khác chỗ CHẠY: một cửa
+        // sổ Terminal thật, vì thứ nó thiếu là một cái tty (xem `CommandKind::Win`).
+        "win" | "cuaso" => {
+            let rest = t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default();
+            (!rest.is_empty()).then_some((CommandKind::Win, 0, rest))
+        }
         // `/set <key> <value>` — the id slot holds the KEY here, so re-split
         // the raw text instead of using the parsed id.
         "set" | "cauhinh" => {

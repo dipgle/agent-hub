@@ -1599,6 +1599,149 @@ pub const SHOT_LINES_MAX: usize = 120;
 /// dòng `git -C ~/projects/AI/tcc/amm push origin main` đã 52 — thêm
 /// tiền tố là tràn, và một cái nút tràn thì Telegram từ chối cả tin. Nên nút
 /// mang một CON SỐ, còn chữ nằm ở đây.
+/// Cửa sổ ĐANG CHỜ được đóng: `/exit` đã gõ, giờ canh cho CLI chạy nốt.
+///
+/// 🔴 Hà 2026-08-13: *"trước khi đóng phải chờ cli chạy nốt mới đóng hẳn"* rồi
+/// *"30 giây kiểm tra 1 lần nếu chưa xong thì chờ tiếp"*. Vế sau mới là chỗ
+/// bắt phải có cuốn sổ này: **chờ không có hạn**. Bản cũ chờ tại chỗ 30 giây
+/// rồi bỏ cuộc, và bỏ cuộc là câu trả lời sai — một lượt `claude` chạy hai
+/// mươi phút thì cửa sổ ấy vẫn phải đóng, chỉ là muộn hơn.
+///
+/// Không chờ tại chỗ được: `execute_commands` giữ `CMD_LOCK`, nên chờ dài là
+/// **khoá cả vòng chạy** — không tin báo, không lệnh nào khác đi được. Nên ghi
+/// sổ rồi trả lời ngay, và mỗi vòng ngó lại một lượt. Cùng cỗ máy "so hai lượt,
+/// nói một lần" của `watch.rs`, và cùng lý do: một việc kéo dài thì phải sống
+/// trong sổ, không sống trong một lời gọi hàm.
+pub const CLOSING_KEY: &str = "closing:windows";
+
+/// Một cửa sổ đang chờ đóng.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Closing {
+    /// id cửa sổ Terminal.
+    pub w: i64,
+    /// Nhãn để nói tên phiên lúc báo xong — hàng của nó sẽ biến mất trước đó.
+    pub n: String,
+    /// Lúc gõ `/exit` (epoch giây), để nói "chờ bao lâu rồi".
+    pub t: i64,
+    /// Lần kiểm gần nhất (epoch giây) — cách nhau 30 giây, không kiểm mỗi vòng.
+    #[serde(default)]
+    pub c: i64,
+}
+
+/// Bao lâu ngó lại một lần. Hà nói thẳng con số này.
+const CLOSE_CHECK_SEC: i64 = 30;
+
+/// Ghi một cửa sổ vào sổ chờ đóng.
+pub fn remember_closing(db: &Db, session_id: &str, window: i64, shown_name: &str, now: i64) {
+    let mut book = closing_book(db);
+    book.insert(
+        session_id.to_string(),
+        Closing { w: window, n: shown_name.to_string(), t: now, c: 0 },
+    );
+    save_closing(db, &book);
+}
+
+fn closing_book(db: &Db) -> BTreeMap<String, Closing> {
+    db.cursor_or_log(CLOSING_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default()
+}
+
+fn save_closing(db: &Db, book: &BTreeMap<String, Closing>) {
+    match serde_json::to_string(book) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(CLOSING_KEY, &v) {
+                // Không nuốt: mất sổ này là mất luôn cái cửa sổ đang chờ, và nó
+                // sẽ nằm mở mãi với dòng `[Process completed]`.
+                logging::error("closing_book_not_saved", json!({ "err": e.to_string() }));
+            }
+        }
+        Err(e) => logging::error("closing_book_not_encoded", json!({ "err": e.to_string() })),
+    }
+}
+
+/// Mỗi vòng: cửa sổ nào hết bận thì đóng, còn bận thì CHỜ TIẾP.
+///
+/// Ba kết cục, cả ba đều nói ra: đóng được · cửa sổ không còn (ai đó đã đóng
+/// tay, hoặc `claude` thoát rồi Terminal tự dọn) · hỏi không được. Ca cuối
+/// **giữ nguyên trong sổ** — không hỏi được ≠ không còn, đúng luật `Look::Blind`.
+pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
+    let mut book = closing_book(db);
+    if book.is_empty() {
+        return;
+    }
+    let mut changed = false;
+    let mut done: Vec<String> = Vec::new();
+    for (id, c) in book.iter_mut() {
+        if now - c.c < CLOSE_CHECK_SEC {
+            continue;
+        }
+        c.c = now;
+        changed = true;
+        match crate::keys::tab_busy(c.w) {
+            Ok(true) => {
+                logging::info(
+                    "close_still_busy",
+                    json!({ "session": id, "window": c.w, "waited_sec": now - c.t }),
+                );
+            }
+            Ok(false) => {
+                match crate::keys::close_window(c.w) {
+                    Ok(()) => {
+                        logging::info(
+                            "close_done",
+                            json!({ "session": id, "window": c.w, "waited_sec": now - c.t }),
+                        );
+                        say_closed(cfg, &format!(
+                            "⏹ Đã đóng hẳn {} — CLI chạy nốt rồi thoát, cửa sổ terminal đã đóng (chờ {}s).",
+                            c.n,
+                            now - c.t
+                        ));
+                    }
+                    Err(e) => {
+                        // Cửa sổ biến mất giữa hai lượt hỏi là chuyện thường
+                        // (Terminal tự dọn khi shell thoát, tuỳ profile) — vẫn
+                        // là XONG, và vẫn phải nói ra chứ không im.
+                        logging::info(
+                            "close_window_gone",
+                            json!({ "session": id, "window": c.w,
+                                    "err": crate::logging::err_chain(&e) }),
+                        );
+                        say_closed(cfg, &format!("⏹ {} đã thoát, cửa sổ không còn.", c.n));
+                    }
+                }
+                done.push(id.clone());
+            }
+            Err(e) => {
+                // KHÔNG bỏ khỏi sổ: hỏi không được là hub mù, không phải cửa sổ
+                // đã đóng. Bỏ đi là im lặng đánh rơi việc.
+                logging::warn(
+                    "close_check_failed",
+                    json!({ "session": id, "window": c.w,
+                            "err": crate::logging::err_chain(&e) }),
+                );
+            }
+        }
+    }
+    for id in &done {
+        book.remove(id);
+    }
+    if changed || !done.is_empty() {
+        save_closing(db, &book);
+    }
+}
+
+/// Một câu ra Telegram, không cần biết lệnh đến từ đâu — lúc này lượt lệnh đã
+/// trả lời xong từ lâu, đây là tin của vòng chạy.
+fn say_closed(cfg: &Config, text: &str) {
+    if let Some(tg) = crate::telegram::inbox() {
+        if let Err(e) = tg.send_text(text) {
+            logging::error("close_ack_failed", json!({ "err": e }));
+        }
+    }
+    let _ = cfg;
+}
+
 pub const QUICK_KEY: &str = "quick:cmds";
 
 /// Ghi danh sách lệnh gợi ý, trả về các cặp (nhãn, mã nút).
@@ -1802,14 +1945,36 @@ pub fn remember_quick(db: &Db, cmds: &[String]) -> Vec<(String, String)> {
             return Vec::new();
         }
     }
+    // HAI nút cho mỗi lệnh, vì có hai chỗ chạy được và chúng KHÔNG thay nhau.
+    //
+    // 🔴 Hà 2026-08-13: *"với lệnh này chỉ chạy được trong terminal không chạy
+    // được trong cli nên cần thêm cách tạo nút"*, kèm ảnh chụp lời một phiên
+    // khác: *"`!` trong Claude Code không cấp tty, nên `ssh -t` không xin được
+    // — không phải lỗi sudo hay script"*.
+    //
+    // `▶` gõ `!<lệnh>` vào chính phiên: phiên NHÌN THẤY kết quả rồi đi tiếp
+    // được — đó là giá trị của nó, và phần lớn lệnh hợp ở đây. Nhưng chế độ
+    // `!` của TUI không cấp tty, nên `sudo`, `ssh -t`, `passwd`, `read -s` chết
+    // ngay ở dòng hỏi mật khẩu. Không vá được trong `▶`: thứ thiếu là cái tty.
+    //
+    // `🖥` mở một cửa sổ Terminal thật (`/win`) — đúng thứ chủ máy sẽ tự làm
+    // khi ngồi trước máy. Đổi lại: kết quả nằm trên cửa sổ ấy, không về điện
+    // thoại, và phải có người ngồi đó gõ.
+    //
+    // Không đoán hộ lệnh nào cần tty (một phép đoán ở đây là bấm nhầm rồi ngồi
+    // chờ một lệnh đã chết): bày cả hai, chọn là việc của người bấm. Cắt còn 3
+    // lệnh vì mỗi nút một hàng — 4 lệnh × 2 là tám hàng, dài hơn cả cái tin.
     cmds.iter()
         .enumerate()
-        .take(4)
-        .map(|(i, c)| {
-            (
-                format!("▶ {}", crate::exec::truncate(c, 48)),
-                format!("run:{i}"),
-            )
+        .take(3)
+        .flat_map(|(i, c)| {
+            [
+                (
+                    format!("▶ {}", crate::exec::truncate(c, 48)),
+                    format!("run:{i}"),
+                ),
+                ("🖥 …trong cửa sổ thật (có tty)".to_string(), format!("win:{i}")),
+            ]
         })
         .collect()
 }
@@ -2043,7 +2208,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /new [-a acc] <việc> — mở cửa sổ mới rồi gõ việc ấy vào; không nói -a thì dùng tài khoản mặc định (xem /accounts)\n\
                      /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng\n\
                      /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước)\n\
-                     /stop [id] — dừng phiên nền, hội thoại vẫn giữ\n\
+                     /stop [id] — dừng phiên NỀN, hội thoại vẫn giữ\n\
+                     /close [id] — ĐÓNG HẲN phiên đang theo (trống) hay theo id: chờ CLI chạy nốt, thoát, rồi đóng cửa sổ terminal\n\
                      /handover [id] — đóng sổ, lấy bản bàn giao + id để làm tiếp\n\
                      — Gõ thẳng vào cửa sổ phiên —\n\
                      /type <chữ> — gõ chữ vào phiên đang theo (Terminal, kèm Enter)\n\
@@ -2051,6 +2217,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      /shot — đọc chữ đang hiện trên màn của phiên\n\
                      — Vận hành —\n\
                      /cmd <dòng lệnh> — chạy một lệnh trên máy rồi trả kết quả (chạy xong là hết)\n\
+                     /win <dòng lệnh> — mở một CỬA SỔ Terminal thật rồi chạy ở đó; dùng khi lệnh cần gõ mật khẩu (sudo, ssh -t) — `!` trong CLI không có tty\n\
                      /upgrade — hub tự dựng lại chính nó từ mã hiện tại rồi khởi động lại\n\
                      /accounts — ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, /new mặc định vào tài khoản nào\n\
                      /project [tên] — xem / ghim dự án cho phòng (bỏ ghim: /project -)\n\
@@ -2079,6 +2246,46 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let probe = crate::portal::probe_now(cfg);
                 reply_in_channel(db, cfg, adapter, cmd, &probe);
                 Some(probe)
+            }
+            CommandKind::Win => {
+                // Cửa sổ THẬT, vì thứ thiếu là một cái tty — xem `CommandKind::Win`.
+                //
+                // `cd <gốc workspace> && <lệnh>`: cùng thư mục làm việc với
+                // `/cmd`, nên hai đường không đọc ra hai nghĩa khác nhau cho
+                // cùng một đường dẫn tương đối. Ghép bằng `;` chứ không `&&`
+                // — `cd` hỏng thì vẫn phải MỞ cửa sổ ra cho người ta thấy lỗi,
+                // im lặng không mở là kiểu hỏng tệ nhất ở đây.
+                let line = cmd.arg.trim().to_string();
+                let ack = if line.is_empty() {
+                    "⚠ /win cần một dòng lệnh. Ví dụ: /win sudo -v".to_string()
+                } else {
+                    let full = format!("cd {}; {line}", cfg.workspace_root.display());
+                    match crate::keys::open_window(&full) {
+                        Ok((win, tty)) => {
+                            logging::info(
+                                "win_opened",
+                                json!({ "cmd": crate::exec::truncate(&line, 120),
+                                        "window": win, "tty": tty }),
+                            );
+                            format!(
+                                "🖥 Đã mở cửa sổ Terminal ({tty}) và chạy:\n{line}\n\n\
+                                 Kết quả nằm TRÊN cửa sổ ấy, không về đây — đó là chỗ gõ mật khẩu."
+                            )
+                        }
+                        // Không nuốt: mở cửa sổ hỏng thì người bấm phải biết,
+                        // không thì họ ngồi chờ một cái cửa sổ không tồn tại.
+                        Err(e) => {
+                            let msg = crate::logging::err_chain(&e);
+                            logging::error(
+                                "win_open_failed",
+                                json!({ "cmd": crate::exec::truncate(&line, 120), "err": msg }),
+                            );
+                            format!("⚠ chưa mở được cửa sổ: {}", crate::exec::truncate(&msg, 200))
+                        }
+                    }
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
             }
             CommandKind::Cmd => {
                 // Chạy đúng MỘT lệnh rồi thôi (Hà 2026-08-12: *"chạy 1 command
@@ -2464,6 +2671,80 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 Err(e) => format!(
                                     "⚠ không dừng được: {}",
                                     crate::exec::truncate(&e.to_string(), 200)
+                                ),
+                            }
+                        }
+                    }
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+            }
+            CommandKind::Close => {
+                // Cùng cách nhắm đích với `/stop` (trống = phiên đang theo, có
+                // id = phiên ấy) — khác ở KẾT CỤC, nên vẫn hỏi lại một câu:
+                // đóng một cửa sổ là thứ không lùi lại được.
+                let want = cmd.arg.trim().to_string();
+                let want = if want.is_empty() {
+                    db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default()
+                } else {
+                    want
+                };
+                let mut live =
+                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                mark_started_by_hub(db, &mut live);
+                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                    None if want.is_empty() => {
+                        "⚠ chưa theo phiên nào — bấm một phiên rồi /close, hoặc /close <id>."
+                            .to_string()
+                    }
+                    None => format!(
+                        "⚠ không thấy phiên '{}' đang chạy",
+                        crate::exec::truncate(&want, 40)
+                    ),
+                    Some(s) => {
+                        let what = format!("Đóng hẳn phiên {} ({})?", crate::sessions::shown(s), s.account);
+                        if let Some(refusal) =
+                            ask_owner(db, cfg, adapter, cmd, &what, "đóng phiên nào")
+                        {
+                            refusal
+                        } else {
+                            match crate::sessions::close_session(cfg, s) {
+                                Ok(win) => {
+                                    remember_stopped(db, s);
+                                    logging::info(
+                                        "session_closed",
+                                        json!({ "session": s.session_id, "kind": s.kind,
+                                                "window": win }),
+                                    );
+                                    // Nói ĐÚNG cái vừa xảy ra, và ở đây "vừa
+                                    // xảy ra" mới là gõ `/exit` — cửa sổ chưa
+                                    // đóng, nó vào sổ chờ. Khai "đã đóng" lúc
+                                    // này là kể một việc chưa xảy ra, đúng thứ
+                                    // luật 3 của dự án cấm.
+                                    match win {
+                                        None => format!(
+                                            "⏹ Đã dừng phiên nền {} — nó không có cửa sổ nào để đóng. Hội thoại vẫn còn.",
+                                            crate::sessions::shown(s)
+                                        ),
+                                        Some(w) => {
+                                            let now = chrono::Utc::now().timestamp();
+                                            remember_closing(
+                                                db,
+                                                &s.session_id,
+                                                w,
+                                                &crate::sessions::shown(s),
+                                                now,
+                                            );
+                                            format!(
+                                                "⏳ Đã gõ /exit vào {} — chờ CLI chạy nốt lượt đang dở rồi mới đóng cửa sổ. Kiểm 30 giây một lần, xong tôi báo.",
+                                                crate::sessions::shown(s)
+                                            )
+                                        }
+                                    }
+                                }
+                                Err(e) => format!(
+                                    "⚠ chưa đóng được: {}",
+                                    crate::exec::truncate(&e.to_string(), 240)
                                 ),
                             }
                         }

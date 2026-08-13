@@ -3756,37 +3756,71 @@ fn short_id(session_id: &str) -> &str {
     session_id.split('-').next().unwrap_or(session_id)
 }
 
+/// `/close` — ĐÓNG HẲN: thoát CLI rồi đóng luôn cửa sổ Terminal.
+///
+/// 🔴 Hà 2026-08-13, ba câu liền: *"chưa có lệnh đóng phiên đóng luôn cửa sổ?"*
+/// · *"đang đứng ở phiên nào thì cần lệnh đóng hẳn"* · và câu chốt phân vai:
+/// *"ah stop là dừng rồi vậy dùng close"*.
+///
+/// Anh đúng, và nó chỉ ra một động từ bị gánh hai việc: `/stop` **dừng** một
+/// phiên nền (hội thoại còn nguyên, `/tell` nói tiếp được), nhưng gặp phiên có
+/// cửa sổ thì nó lại đi thoát-CLI-rồi-đóng-cửa-sổ. Một chữ, hai kết cục khác
+/// hẳn nhau về mức mất mát, và người bấm không có cách nào biết mình sắp nhận
+/// cái nào. Nay tách: `/stop` chỉ dừng, `/close` mới đóng.
+///
+/// **Không hỏi ai mở cửa sổ.** Luật cũ chỉ cho đóng phiên do chính hub mở
+/// (`started_by_hub`), lý do viết là *"cửa sổ chủ máy tự mở là việc của chủ
+/// máy"*. Nghe hợp lý mà đọc ngược phép thử của dự án: gần như mọi cửa sổ trên
+/// máy này do chủ máy tự mở, nên luật ấy làm lệnh đóng vô dụng **đúng ở chỗ hay
+/// dùng nhất** — ngồi trước máy thì gõ `/exit` rồi đóng cửa sổ là xong, cầm
+/// điện thoại thì không. Và "việc của chủ máy" thì chính chủ máy đang bấm.
+///
+/// Cửa gác đúng chỗ không phải *ai mở*, mà *phiên có đang làm dở không*:
+/// `quit_and_close` gõ `/exit`, chờ tới 30 giây cho `claude` chạy hết lượt đang
+/// xếp hàng, rồi **từ chối đóng** nếu tab vẫn bận — vì đóng lúc ấy sẽ bật hộp
+/// thoại "terminate running processes", thứ khoá mồm mọi lệnh automation sau nó.
+/// Trả `None` khi phiên là phiên NỀN (đã dừng xong, không có cửa sổ nào để
+/// đóng), `Some(window)` khi đã gõ `/exit` và cửa sổ ấy đang chờ được đóng.
+pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Option<i64>> {
+    if session.kind == "background" {
+        // Phiên nền không có cửa sổ nào để đóng: đóng hẳn nó CHÍNH LÀ dừng nó.
+        // Nói ra ở chỗ gọi, đừng để người bấm tưởng vừa có một cửa sổ biến mất.
+        stop_background(cfg, session)?;
+        return Ok(None);
+    }
+    logging::info(
+        "session_close_window",
+        json!({ "session": session.session_id, "kind": session.kind,
+                "by_hub": session.started_by_hub }),
+    );
+    let window = crate::keys::window_of(&session.tty)
+        .map_err(|e| anyhow::anyhow!("không dò được cửa sổ terminal của phiên: {e}"))?
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "không còn cửa sổ terminal nào chạy {} — phiên có lẽ đã tắt rồi",
+                if session.tty.is_empty() {
+                    "(không rõ tty)"
+                } else {
+                    &session.tty
+                }
+            )
+        })?;
+    // Chỉ GÕ `/exit`. Việc canh "CLI chạy nốt chưa" là của vòng chạy — Hà
+    // 2026-08-13: *"30 giây kiểm tra 1 lần nếu chưa xong thì chờ tiếp"*.
+    crate::keys::send_exit(window)?;
+    Ok(Some(window))
+}
+
 /// Stop a background session. Its conversation is kept, so it can be continued.
 pub fn stop_background(cfg: &Config, session: &LiveSession) -> Result<()> {
     if session.kind != "background" {
-        // Phiên CÓ CỬA SỔ do hub mở: dừng nó là thoát CLI rồi đóng cửa sổ —
-        // đúng chữ Hà dùng (2026-08-11): *"tắt hẳn là thoát cli và đóng
-        // terminal"*. `claude stop` không đụng tới hạng phiên này (nó chỉ biết
-        // job nền), nên nếu không có nhánh này thì hub MỞ được cửa sổ mà không
-        // ĐÓNG được — một cây cầu một chiều.
-        //
-        // Vẫn chỉ dừng thứ hub mở. Cửa sổ chủ máy tự mở là việc của chủ máy;
-        // `started_by_hub` do `pipeline::mark_started_by_hub` đóng dấu từ sổ
-        // riêng của hub, không phải đoán từ hình dạng phiên.
-        if !session.started_by_hub {
-            anyhow::bail!(
-                "chỉ dừng được phiên do hub mở (phiên này là {}, mở từ máy)",
-                session.kind
-            );
-        }
-        let window = crate::keys::window_of(&session.tty)
-            .map_err(|e| anyhow::anyhow!("không dò được cửa sổ terminal của phiên: {e}"))?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "không còn cửa sổ terminal nào chạy {} — phiên có lẽ đã tắt rồi",
-                    if session.tty.is_empty() {
-                        "(không rõ tty)"
-                    } else {
-                        &session.tty
-                    }
-                )
-            })?;
-        return crate::keys::quit_and_close(window);
+        // `claude stop` chỉ biết job NỀN, nên với phiên có cửa sổ thì "dừng"
+        // không có nghĩa gì thi hành được — và tự ý đóng cửa sổ ở đây là đúng
+        // cái lẫn vai mà `/close` vừa sinh ra để gỡ. Chỉ đường, đừng đoán.
+        anyhow::bail!(
+            "phiên này chạy trong một cửa sổ Terminal nên không có gì để 'dừng' — \
+             dùng /close để thoát CLI và đóng hẳn cửa sổ, hoặc /key esc để cắt lượt đang chạy"
+        );
     }
     let out = run(
         &cfg.claude_cli,

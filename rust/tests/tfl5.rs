@@ -469,7 +469,12 @@ fn ordinary_text_is_never_mistaken_for_a_command() {
         // a command the room accepts and then does nothing about.
         "/approve 12",
         "/reject 12 sai",
-        "/close 155 hết giá trị",
+        // ⚠ `/close` KHÔNG còn ở danh sách này: 2026-08-13 nó được lấy lại làm
+        // một route SỐNG (đóng hẳn một phiên — Hà: *"ah stop là dừng rồi vậy
+        // dùng close"*). Động từ của thời hộp thư chết đi thì tên của nó là chỗ
+        // trống, và lấy lại một cái tên trống là chuyện bình thường — chỉ phải
+        // nói ra ở đúng chỗ đang canh nó, không thì lượt sau có người đọc test
+        // này và tưởng route mới là một lỗi.
         "/reply 9 xong",
         "/act 12",
     ] {
@@ -635,4 +640,44 @@ fn the_cmd_verb_without_a_line_still_parses_so_the_reply_can_teach() {
     let (kind, _, arg) = tfl5::parse_command("/cmd", OWNER, &owners()).expect("parse");
     assert_eq!(kind, hub::adapters::CommandKind::Cmd);
     assert!(arg.is_empty(), "không có lệnh thì arg phải rỗng: {arg}");
+}
+
+/// `/close` là một động từ RIÊNG, không phải `/stop` đội tên khác.
+///
+/// 🔴 Hà 2026-08-13: *"ah stop là dừng rồi vậy dùng close"* — `/stop` dừng một
+/// phiên nền và giữ hội thoại, còn đóng hẳn (thoát CLI + đóng cửa sổ) là một
+/// kết cục khác hẳn về mức mất mát. Một động từ hai kết cục thì người bấm không
+/// biết mình sắp nhận cái nào.
+#[test]
+fn close_is_its_own_verb_and_takes_an_optional_id() {
+    use hub::adapters::{tfl5::parse_command, CommandKind};
+
+    let me = "u-owner";
+    let trusted = vec![me.to_string()];
+
+    // Trống = phiên đang theo (chỗ gọi tra con trỏ), nên arg rỗng là HỢP LỆ.
+    assert_eq!(
+        parse_command("/close", me, &trusted),
+        Some((CommandKind::Close, 0, String::new()))
+    );
+    // Có id thì đóng đúng phiên ấy.
+    assert_eq!(
+        parse_command("/close 0a109818", me, &trusted),
+        Some((CommandKind::Close, 0, "0a109818".to_string()))
+    );
+    // …và KHÔNG lẫn với /stop.
+    assert_eq!(
+        parse_command("/stop", me, &trusted),
+        Some((CommandKind::Stop, 0, String::new()))
+    );
+
+    // `/win` cần một dòng lệnh — trống thì không phải lệnh, đừng mở cửa sổ rỗng.
+    assert_eq!(
+        parse_command("/win sudo -v", me, &trusted),
+        Some((CommandKind::Win, 0, "sudo -v".to_string()))
+    );
+    assert_eq!(parse_command("/win", me, &trusted), None);
+
+    // Người khác gõ thì vẫn chỉ là chữ — cổng người không đổi.
+    assert_eq!(parse_command("/close", "u-nguoi-la", &trusted), None);
 }

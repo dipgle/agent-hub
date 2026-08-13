@@ -995,6 +995,32 @@ impl Inbox {
                 }
                 return;
             }
+            // `win:<n>` — cùng cuốn sổ lệnh gợi ý với `run:<n>`, khác chỗ
+            // CHẠY: một cửa sổ Terminal thật, vì `!` của TUI không cấp tty
+            // (xem `CommandKind::Win`). Một sổ, hai đường ra — không đẻ thêm
+            // danh sách lệnh thứ hai để rồi lệch nhau.
+            if let Some(n) = data.strip_prefix("win:").and_then(|n| n.parse::<usize>().ok()) {
+                match crate::db::Db::open(&self.cfg.db)
+                    .ok()
+                    .and_then(|db| crate::pipeline::quick_cmd(&db, n))
+                {
+                    Some(line) => {
+                        logging::info(
+                            "telegram_quick_cmd_window",
+                            json!({ "n": n, "cmd": crate::exec::truncate(&line, 120) }),
+                        );
+                        self.push_text(&format!("/win {line}"));
+                    }
+                    None => {
+                        if let Err(e) = self.send_text(
+                            "⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.",
+                        ) {
+                            logging::error("telegram_ack_failed", json!({ "err": e }));
+                        }
+                    }
+                }
+                return;
+            }
             if let Some(n) = data.strip_prefix("run:").and_then(|n| n.parse::<usize>().ok()) {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()

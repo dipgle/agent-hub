@@ -118,6 +118,10 @@ fn build_inner(
     // một phép so — nên nó bám theo dữ liệu thay vì bắt dữ liệu chạy theo nó.
     if announce {
         crate::pipeline::announce_changes(db, cfg, &live);
+        // Cửa sổ đang chờ đóng: ngó lại một lượt. Rẻ (một câu AppleScript cho
+        // mỗi cửa sổ, và chỉ khi đã qua 30 giây), và nó phải bám vòng chạy —
+        // chờ tại chỗ trong lượt lệnh là khoá `CMD_LOCK` (xem `CLOSING_KEY`).
+        crate::pipeline::close_pending_tick(db, cfg, chrono::Utc::now().timestamp());
     }
 
     // Only the session being read carries its full stream. Pushing every

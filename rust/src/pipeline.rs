@@ -2753,11 +2753,27 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     match db.set_cursor(FOCUS_SESSION_KEY, want) {
                         Ok(()) => {
                             let head = format!("👁 Đang theo phiên {name} ({account})");
+                            // …và ĐƯA LUÔN MÀN, đừng bắt bấm thêm một lần.
+                            //
+                            // 🔴 Hà 2026-08-13: *"bấm vào phiên sao không hiện
+                            // shot luôn mà nhận thông báo đã vào phiên rồi lại
+                            // phải bấm lệnh shot"*. Đây là đảo lại quyết định
+                            // 12-08 — và đảo có căn cứ, vì căn cứ cũ đã hết
+                            // đúng: hôm ấy bỏ cú chụp vì nó tốn **16 giây** cho
+                            // mỗi lần bấm nút. Sau khi `/shot` thôi dựng lại
+                            // ảnh chụp phiên (sổ + `ps`), đo lại tối nay:
+                            // `command_done Shot` **2,7s · 4,5s**. Cái giá biến
+                            // mất thì lý do cũng biến mất.
+                            //
+                            // Xếp hàng `/shot` chứ không gọi thẳng: cùng route,
+                            // cùng sổ, cùng cách dựng nút — chỉ khác là không
+                            // phải ngón tay nào bấm.
                             if adapter == crate::telegram::NAME {
-                                format!("{head}\n(xem màn: /shot)")
-                            } else {
-                                head
+                                if let Some(tg) = crate::telegram::inbox() {
+                                    tg.push_text("/shot");
+                                }
                             }
+                            head
                         }
                         Err(e) => format!("⚠ không theo được: {e}"),
                     }

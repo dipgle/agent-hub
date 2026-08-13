@@ -989,6 +989,36 @@ fn looks_like_prose(s: &str) -> bool {
         // …và chữ của CHÍNH hub trên màn thì tuyệt đối không phải lệnh.
         || s.contains("Lệnh thấy trên màn")
         || s.contains("bấm nút")
+        // 🔴 DẤU CỦA VĂN XUÔI, không bao giờ có trong một dòng shell.
+        //
+        // Hà 2026-08-13, ảnh chụp nút `▶ cargo test 258 · clippy 0 warning`:
+        // *"Thực sự mấy cái nút đọc không dám bấm vì không thể hiểu nó làm
+        // gì"*. Anh đúng, và cái nút ấy là **câu trong báo cáo của chính
+        // tôi** — một dòng tổng kết, không phải lệnh. Bấm vào là chạy
+        // `cargo test 258 · clippy 0 warning`, một thứ vô nghĩa.
+        //
+        // `looks_like_prose` bắt dấu phẩy và dấu ngoặc, nhưng câu ấy dùng
+        // dấu chấm giữa `·` để ngăn vế — thói quen viết của chính tôi, và
+        // nó lọt sạch mọi cửa. Ba ký tự dưới đây là dấu ĐÁNH MÁY của văn
+        // xuôi: `·` `—` `…`. Không dòng lệnh thật nào mang chúng, nên bắt
+        // chúng không bỏ sót cái nút nào có thật.
+        || s.contains('·')
+        || s.contains('—')
+        || s.contains('…')
+        // Kết bằng một con số trần: `cargo test 258` là câu ĐẾM, không phải
+        // lệnh. Cùng họ với luật trên — văn xuôi đội lốt lệnh.
+        || ends_with_bare_number(s)
+}
+
+/// `cargo test 258` · `git push 42` — từ CUỐI là một con số trần.
+///
+/// Tham số của một lệnh thật là tên, cờ, hay đường dẫn; số trần đứng cuối gần
+/// như luôn là một con số đếm trong câu văn. Bỏ sót vài lệnh hiếm có hình dạng
+/// ấy là cái giá rẻ: bỏ sót thì gõ tay, bấm nhầm thì không có nút hoàn tác.
+fn ends_with_bare_number(s: &str) -> bool {
+    s.split_whitespace()
+        .next_back()
+        .is_some_and(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_digit()))
 }
 
 /// Câu này đang CẤM một lệnh, chứ không mời chạy nó?

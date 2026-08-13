@@ -1231,3 +1231,39 @@ fn a_button_remembers_which_session_made_it() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// Câu trong BÁO CÁO không được đọc thành lệnh.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp nút `▶ cargo test 258 · clippy 0 warning`: *"Thực
+/// sự mấy cái nút đọc không dám bấm vì không thể hiểu nó làm gì"*. Cái nút ấy
+/// dựng từ một dòng tổng kết trong chính báo cáo của hub — bấm vào là chạy một
+/// thứ vô nghĩa. `looks_like_prose` bắt dấu phẩy và ngoặc, nhưng câu ấy ngăn vế
+/// bằng dấu chấm giữa `·`, và lọt sạch mọi cửa.
+#[test]
+fn a_sentence_from_a_report_is_not_a_command() {
+    use hub::keys::commands_on_screen;
+
+    for prose in [
+        "cargo test 258 · clippy 0 warning",
+        "cargo test 256 · clippy 0 · self-install đã chạy",
+        "git push — xong thì báo tôi",
+        "npm test … (còn 4 dòng)",
+        "cargo test 258",
+    ] {
+        assert!(
+            commands_on_screen(prose, 3).is_empty(),
+            "đọc câu văn thành lệnh: {prose:?} → {:?}",
+            commands_on_screen(prose, 3)
+        );
+    }
+
+    // …mà lệnh thật thì vẫn ra nút.
+    for cmd in [
+        "cargo test --offline",
+        "git -C ~/projects/hub push origin main",
+        "bash scripts/verify-acl-2026-08-13.sh",
+        "cd ~/projects/hub && git push",
+    ] {
+        assert_eq!(commands_on_screen(cmd, 3).len(), 1, "mất nút thật: {cmd:?}");
+    }
+}

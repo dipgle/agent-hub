@@ -2032,10 +2032,27 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
         .flat_map(|(i, c)| {
             [
                 (
-                    format!("▶ {}", crate::exec::truncate(c, 48)),
+                    format!("▶ chạy trong phiên: {}", crate::exec::truncate(c, 36)),
                     format!("run:{i}"),
                 ),
-                ("🖥 …trong cửa sổ thật (có tty)".to_string(), format!("win:{i}")),
+                (
+                    // 🔴 Nhãn phải đọc ĐƯỢC MỘT MÌNH. Hà 2026-08-13: *"Thực sự
+                    // mấy cái nút đọc không dám bấm vì không thể hiểu nó làm
+                    // gì"*, kèm ảnh có nút `🖥 …trong cửa sổ thật (có tty)`.
+                    //
+                    // Nhãn ấy viết như vế sau của một câu, và vế trước nằm ở
+                    // NÚT KHÁC — đúng thứ chỉ hiểu được nếu đọc hai nút liền
+                    // nhau theo đúng thứ tự. Trên điện thoại người ta đọc từng
+                    // nút một, và một cái nút không tự nói được nó làm gì thì
+                    // nó là một cái nút không ai dám bấm.
+                    //
+                    // Mỗi nút nay tự đủ: LÀM GÌ + Ở ĐÂU + VỚI LỆNH NÀO.
+                    format!(
+                        "🖥 chạy trong cửa sổ mới: {}",
+                        crate::exec::truncate(c, 34)
+                    ),
+                    format!("win:{i}"),
+                ),
             ]
         })
         .collect()

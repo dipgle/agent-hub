@@ -73,9 +73,39 @@ sổ mới xem vướng gì + tin nói đủ ba điều (vướng cái gì · c�
 KHÔNG khoe "đang chạy"). `start_fresh_after_handover` trả `FreshWindow`, vì
 `old_kept` là thứ bộ ba ẩn danh cũ không có chỗ nào chứa.
 
+### ✅ Hà uỷ quyền, và bản vá CHẠY THẬT (`3805ab1`)
+
+Hà: *"bấm hộ đi, phải kiểm tra được và bấm luôn 1"*. Nay hub tự trả lời hộp
+tin-thư-mục **trên cửa sổ chính nó vừa mở** — và **chỉ hộp ấy**: nhận theo chữ
+của lựa chọn, đòi cả ba (`trust` + `folder` + không mở đầu `no`), đổi câu chữ ⟹
+không khớp ⟹ rơi về nhánh giữ-nguyên-cửa-sổ-cũ. **Hỏng thì hỏng về phía im
+lặng.** Test ghim ranh giới: hộp công việc + hộp duyệt quyền + nhánh chối đều
+phải trả `None`; nới thành "mở đầu bằng yes" là ĐỎ ngay.
+
+Chạy thật dưới acc3 (`rust/tests/trust_dialog_live.rs`, `#[ignore]` vì mở cửa sổ
+Terminal thật): `new_window_opened` 05:21:32 → lượt chờ 20s **trượt** (hộp đang
+chặn) → `trust_dialog_answered pressed=1` 05:21:53 → `id = d499e9bc…` 05:22:18.
+Cửa sổ hiện `⏵⏵ auto mode on` — đúng rào của hub.
+
+📌 Hai bài học từ chính buổi thử này:
+- **Cửa sổ mở bằng `claude` TRẦN không có rào nào.** Tôi mở tay một cửa sổ để dò
+  acc2 và nó lên `⏵⏵ don't ask on`, trong đúng thư mục vừa cấp trước
+  `ssh/scp/sudo`. Hà bắt ngay: *"đâu có đúng?"*. Đường của hub
+  (`terminal_command`) luôn kèm `--permission-mode auto` + `DENIED_TOOLS`; **dò
+  tay thì phải đi bằng chính đường ấy**, đừng gõ `claude` trần cho nhanh.
+- **Phiên kẹt ở hộp tin-thư-mục là VÔ HÌNH với hub**: đo lúc 12:0x — tiến trình
+  `claude` sống ở `ttys002` mà `hub sessions` khai 3 phiên, không có nó. Chưa qua
+  hộp ⟹ chưa có id ⟹ không nằm trong `claude agents`. Nên khoảnh khắc DUY NHẤT
+  hub còn nhìn thấy nó là ngay sau khi tự mở cửa sổ, lúc còn cầm `tty` — cùng
+  bài học với `/new` ghép bằng tty.
+
+Trạng thái tin-thư-mục sau buổi thử: acc1 ✓ `~/projects` · acc2 ✓ `~/projects`
+(bấm hộ 11:5x) · acc3 mới có `~/projects/AI/hub`, các đường khác sẽ do hub tự bấm.
+
 ⏳ **Chưa quan sát trên tin thật:** tin tự đóng sổ ĐI TELEGRAM, nhánh `Stalled`,
 và đầu đề `/shot` mang `[AI/hub]` — cả ba cần lượt kế tiếp. Đã quan sát thật:
-`.inbox/<id ngắn>/` nhận ba ảnh Hà gửi đúng đường (`d407a8d`).
+`.inbox/<id ngắn>/` nhận ba ảnh Hà gửi đúng đường (`d407a8d`), và hub tự bấm
+qua hộp tin-thư-mục.
 
 📌 Bài học chung của cả năm lỗi: **cả năm đều nằm ở tin nhắn, không ở cơ chế.**
 Cơ chế đóng sổ chạy đúng ngay lượt đầu; thứ sai là hub kể lại việc mình vừa làm

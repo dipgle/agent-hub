@@ -131,3 +131,45 @@ fn a_template_file_is_not_a_secret_but_a_filled_in_one_is() {
     assert!(file_risk("token = sk-abcdefghijklmnop").contains(&"credential_literal".to_string()));
     assert!(file_risk("-----BEGIN RSA PRIVATE KEY-----").contains(&"private_key_block".to_string()));
 }
+
+/// Một dòng CHÚ THÍCH không được đọc thành một bí mật.
+///
+/// 🔴 Hà 2026-08-13, bấm nút 📎 lấy `mailler/scripts/dkim-doctor.sh` và nhận
+/// *"⚠ chưa gửi được … giữ lại: có dấu hiệu bí mật (secret_assignment)"*. Cả
+/// tệp 237 dòng chỉ có ĐÚNG một dòng khớp, và nó là dòng dưới đây — `pass` ở
+/// đây là **giá trị** của `spf=`, còn dấu `=` bị tóm là của `dkim=fail` ở tận
+/// cuối câu. Cầu nối `[^\n:=]*` không có trần nên nối được hai thứ chẳng liên
+/// quan.
+#[test]
+fn a_dmarc_comment_is_not_a_leaked_password() {
+    use hub::redaction::file_risk;
+
+    let real = "#   The 2026-08-10 DMARC report says spf=pass, dkim=fail for a message this";
+    assert!(
+        file_risk(real).is_empty(),
+        "chặn nhầm một dòng chú thích: {:?}",
+        file_risk(real)
+    );
+
+    // …mà cửa vẫn phải đóng đúng chỗ nó sinh ra để đóng.
+    assert_eq!(
+        file_risk("HUB_TFL5_PASSWORD=abc123xyz"),
+        vec!["secret_assignment".to_string()],
+        "biến môi trường có giá trị vẫn phải chặn"
+    );
+    assert_eq!(
+        file_risk("Mật khẩu đăng nhập: chim-non-2026"),
+        vec!["secret_assignment".to_string()],
+        "văn xuôi tiếng Việt có khoảng cách vẫn phải chặn"
+    );
+    assert_eq!(
+        file_risk("  \"api_key\": \"sk-live-abcdefgh\""),
+        vec!["secret_assignment".to_string()],
+        "JSON có nháy kép vẫn phải chặn"
+    );
+    // Bản mẫu thì không: đó là tệp người mới cần đọc nhất.
+    assert!(
+        file_risk("HUB_TFL5_PASSWORD=\nHUB_TFL5_USER=\n").is_empty(),
+        "chặn cả bản mẫu"
+    );
+}

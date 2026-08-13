@@ -108,7 +108,26 @@ fn secret_assignment() -> &'static Regex {
             // Hai vế còn lại giữ chặt: giá trị phải nằm CÙNG DÒNG (`[ \t]*`
             // không nuốt được xuống dòng) và phải KHÁC RỖNG — đó đúng là chỗ
             // `hub.env.example` khác `hub.env`.
-            r"(?i)(pass(word)?|secret|token|api[_-]?key|private[_-]?key|credential|m[aậ]t\s*kh[aẩ]u|m[aã]\s*b[ií]\s*m[aậ]t)[^\n:=]*[:=][ \t]*[^\s]",
+            //
+            // 🔴 Hà 2026-08-13, bấm nút 📎: *"Chưa lấy được file"* — hub trả
+            // *"giữ lại: có dấu hiệu bí mật (secret_assignment)"* cho
+            // `mailler/scripts/dkim-doctor.sh`. Đo ra đúng một dòng, và nó là
+            // một dòng CHÚ THÍCH:
+            //
+            //     #   The 2026-08-10 DMARC report says spf=pass, dkim=fail for
+            //
+            // Cầu nối giữa khoá và dấu `=` viết là `[^\n:=]*` — **không có
+            // trần**. Nên `pass` (ở đây là một GIÁ TRỊ của `spf=`) bắc qua
+            // `, dkim` rồi tóm lấy dấu `=` của một cặp khoá-giá-trị **khác hẳn**
+            // ở cuối câu. Cùng một họ với `??` đọc thành cửa sổ: hai thứ chẳng
+            // liên quan bị nối bằng một khoảng trống không ai đặt hạn.
+            //
+            // Vá đúng vế ấy, KHÔNG nới cửa: cầu nối không được chứa `,` hay `;`
+            // (chúng kết thúc một mệnh đề — bên kia là chuyện khác), và dài tối
+            // đa 24 ký tự, đủ cho `PASSWORD_FOR_PRODUCTION_DB=`. Văn xuôi tiếng
+            // Việt vẫn bắt được: *"Mật khẩu đăng nhập: abc"* vẫn khớp, vì đó
+            // vẫn là một bí mật bị lộ thật.
+            r"(?i)(pass(word)?|secret|token|api[_-]?key|private[_-]?key|credential|m[aậ]t\s*kh[aẩ]u|m[aã]\s*b[ií]\s*m[aậ]t)[^\n:=,;]{0,24}[:=][ \t]*[^\s]",
         )
         .expect("built-in secret-assignment pattern must compile")
     })

@@ -240,6 +240,22 @@ pub struct SessionsSnapshot {
     /// không nói vì sao là một danh sách bị cãi.
     #[serde(default)]
     pub hidden_editor: usize,
+    /// Phiên ĐÃ CHẾT từ lâu mà `claude agents` vẫn liệt kê — đã bỏ khỏi danh sách.
+    ///
+    /// 🔴 Hà 2026-08-13: *"Trên màn đang chỉ có 4 terminal, sao ds lại nhiều
+    /// thế"*. Đo ngay lúc ấy: Terminal khai đúng **4 cửa sổ**, hub kê **5 hàng**
+    /// — hàng thừa là `c19b6a82`, một phiên nền `pid 0`, hoạt động lần cuối
+    /// **hơn hai tiếng trước**, mà `claude agents` vẫn khai đều mỗi lượt.
+    ///
+    /// Luật cũ cố ý giữ hàng chết lại, lý do viết là *"một phiên kẹt là thứ cần
+    /// dọn"*. Vế ấy đúng trong vài phút đầu — lúc đó `/handover` vẫn nối vào
+    /// được, và người ta thật sự cần thấy nó. Sau đó thì nó không còn là việc
+    /// cần dọn nữa, vì **không có cách nào dọn**: tiến trình đã đi, `claude
+    /// stop` không gỡ được hàng khỏi sổ của `claude`. Nó chỉ còn là một dòng
+    /// vĩnh viễn trên màn hình, đúng thứ luật 14 gọi tên — một hàng không dẫn
+    /// vào đâu cả.
+    #[serde(default)]
+    pub hidden_dead: usize,
     /// Tên những tài khoản KHÔNG liệt kê được phiên ở lượt này.
     ///
     /// `notes` đã mang cùng chuyện này nhưng dưới dạng **một câu cho người
@@ -1899,6 +1915,54 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>) {
     }
 }
 
+/// Bỏ hàng CHẾT đã nguội. Trả về số hàng đã bỏ — đếm rồi nói ra, không nuốt.
+///
+/// Cửa là TUỔI chứ không phải trạng thái: vài phút đầu sau khi một phiên tắt,
+/// hàng của nó vẫn đáng hiện — `/handover` còn nối vào nhật ký được, và đó
+/// đúng là lúc người ta muốn thấy. Quá cửa ấy thì nó không dẫn vào đâu nữa.
+///
+/// Dùng chung mốc với `watch::MIN_RUN_SEC` là có chủ ý: cùng một câu hỏi
+/// ("việc này đủ mới để đáng cho lên màn không"), đừng để hai con số trôi khác
+/// nhau. Không đọc được mốc hoạt động thì GIỮ — không biết thì đừng bỏ.
+fn drop_stale_dead(rows: &mut Vec<LiveSession>) -> usize {
+    let now = chrono::Utc::now().timestamp();
+    let before = rows.len();
+    rows.retain(|r| {
+        // MÁY MÓC CỦA CHÍNH HUB không lên danh sách. `claude -p "/usage"` chạy
+        // mỗi 5 phút, đẻ ra một phiên thật mang id thật, không cửa sổ, không
+        // nhật ký — và nó ngồi trong `claude agents` tới cả chục phút.
+        //
+        // Luật 11b đã cấm nó GÕ CHUÔNG, nhưng chỉ chặn ở khâu nói; nó vẫn hiện
+        // trên danh sách, và đó đúng là hàng làm Hà đếm ra 5 khi màn có 4 cửa
+        // sổ. Cùng một câu trả lời: cái đó là ruột của hub, không phải việc của
+        // người dùng. Dấu nhận là `cwd` — hubd chạy từ `WorkingDirectory` riêng
+        // và con nó thừa hưởng, không phiên người nào sống ở đó.
+        if is_hub_own_probe(r) {
+            return false;
+        }
+        if r.host != "dead" {
+            return true;
+        }
+        match r
+            .last_activity
+            .as_deref()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+        {
+            Some(ts) => now - ts.timestamp() < crate::watch::MIN_RUN_SEC,
+            None => true,
+        }
+    });
+    let dropped = before - rows.len();
+    if dropped > 0 {
+        logging::info(
+            "stale_rows_hidden",
+            json!({ "count": dropped,
+                    "why": "phiên đã tắt từ lâu (claude agents vẫn khai) hoặc phép dò của chính hub — hàng không dẫn vào đâu" }),
+        );
+    }
+    dropped
+}
+
 fn mark_can_type(rows: &mut [LiveSession]) {
     if !rows.iter().any(|r| r.host == "terminal" && !r.tty.is_empty()) {
         return;
@@ -2247,6 +2311,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     }
 
     add_shell_windows(&mut out.sessions);
+    out.hidden_dead = drop_stale_dead(&mut out.sessions);
     mark_can_type(&mut out.sessions);
     link_parents(&mut out.sessions);
     // Nhãn tính SAU khi đã có đủ mọi hàng: "có trùng ai không" là một câu hỏi

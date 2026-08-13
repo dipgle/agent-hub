@@ -162,10 +162,16 @@ fn cmd_sessions(db: &hub::db::Db, cfg: &Config, as_json: bool) -> Result<()> {
     // Ẩn đi mà im lặng thì dòng đếm này nói dối. Trang điện thoại đã nói ra từ
     // 2026-08-09 (`fe/index.html`), còn dòng CLI thì chưa — mà đây mới là chỗ
     // người ngồi trước máy đối chiếu với `claude agents`.
-    let hidden = match snap.hidden_editor {
+    let mut hidden = match snap.hidden_editor {
         0 => String::new(),
         n => format!("  · {n} phiên trong VS Code không liệt kê (không có cửa sổ Terminal để gõ vào)"),
     };
+    if snap.hidden_dead > 0 {
+        hidden.push_str(&format!(
+            "  · {} hàng không liệt kê (phiên tắt từ lâu, hoặc phép dò của chính hub)",
+            snap.hidden_dead
+        ));
+    }
     println!("{} phiên đang sống  ({per}){hidden}\n", snap.sessions.len());
 
     let now = chrono::Utc::now();

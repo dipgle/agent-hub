@@ -824,6 +824,7 @@ pub fn poll(
             Some((kind, id, arg)) if ts > last_cmd_ts => {
                 newest_command_ts = newest_command_ts.max(ts);
                 out.commands.push(ChannelCommand {
+                    quiet: false,
                     kind,
                     decision_id: id,
                     arg,

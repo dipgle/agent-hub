@@ -261,24 +261,28 @@ fn clean_inbox(cfg: &Config, session_id: &str, folder: &str) {
     if short.len() < 6 || !short.chars().all(|c| c.is_ascii_hexdigit()) {
         return;
     }
-    let mut dir = cfg.workspace_root.clone();
+    // Hòm thư nay ở GỐC workspace (Hà 2026-08-13). Vẫn dọn cả đường CŨ
+    // `<dự án>/.inbox/<id>` — tệp nhận trước lúc đổi vẫn phải có người dọn,
+    // không thì đúng cái rác mà việc chia theo phiên sinh ra để tránh.
+    let mut dirs = vec![cfg.workspace_root.join(".inbox").join(short)];
     if !folder.is_empty() {
-        dir = dir.join(folder);
+        dirs.push(cfg.workspace_root.join(folder).join(".inbox").join(short));
     }
-    let dir = dir.join(".inbox").join(short);
-    if !dir.is_dir() {
-        return;
-    }
-    let n = std::fs::read_dir(&dir).map(|d| d.flatten().count()).unwrap_or(0);
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => logging::info(
-            "inbox_cleaned",
-            json!({ "session": session_id, "files": n, "dir": dir.display().to_string() }),
-        ),
-        Err(e) => logging::warn(
-            "inbox_clean_failed",
-            json!({ "dir": dir.display().to_string(), "err": e.to_string() }),
-        ),
+    for dir in dirs {
+        if !dir.is_dir() {
+            continue;
+        }
+        let n = std::fs::read_dir(&dir).map(|d| d.flatten().count()).unwrap_or(0);
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => logging::info(
+                "inbox_cleaned",
+                json!({ "session": session_id, "files": n, "dir": dir.display().to_string() }),
+            ),
+            Err(e) => logging::warn(
+                "inbox_clean_failed",
+                json!({ "dir": dir.display().to_string(), "err": e.to_string() }),
+            ),
+        }
     }
 }
 
@@ -3012,6 +3016,7 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
         // phải nới cổng, mà là nói đúng "ai đang gõ" cho một hàm vốn hỏi câu ấy.
         match tfl5::parse_command(&item.text, &owner, &cfg.trust.tfl5_user_tids) {
             Some((kind, decision_id, arg)) => cmds.push(ChannelCommand {
+                quiet: item.quiet,
                 kind,
                 decision_id,
                 arg,
@@ -3057,6 +3062,7 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
                             json!({ "session": focus, "len": text.len() }),
                         );
                         cmds.push(ChannelCommand {
+                            quiet: item.quiet,
                             kind: CommandKind::Type,
                             decision_id: 0,
                             arg: format!("{focus} {text}"),
@@ -3143,6 +3149,14 @@ fn scopeguard_log(adapter: &str, at: std::time::Instant) -> AckClock {
 
 fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, text: &str) {
     let _ = db;
+    // Bước phụ của chính hub thì im — xem `telegram::Incoming::quiet`.
+    if cmd.quiet {
+        logging::info(
+            "command_reply_muted",
+            json!({ "kind": format!("{:?}", cmd.kind), "why": "bước phụ do hub xếp hàng" }),
+        );
+        return;
+    }
     // Đồng hồ cho ĐƯỜNG TRẢ LỜI. Với phòng chat tfl5, mỗi câu trả lời là một
     // lần ĐĂNG NHẬP LẠI cộng một websocket mới (`tfl5::send` → `login`), nên nó
     // không hề rẻ như "gửi một dòng chữ" nghe có vẻ.

@@ -48,6 +48,14 @@ pub const NAME: &str = "telegram";
 pub struct Incoming {
     /// Nguyên văn dòng người ta gõ (hoặc dòng lệnh do một cái nút sinh ra).
     pub text: String,
+    /// Lệnh do CHÍNH hub xếp hàng làm bước phụ ⟹ chạy xong thì im.
+    ///
+    /// 🔴 Hà 2026-08-13: *"1 thao tác gửi 2 thông báo để làm gì"*. Nút
+    /// `⏎ Gửi` xếp hàng hai lệnh (Esc xoá ô, rồi gõ chữ) và mỗi lệnh tự trả
+    /// lời một câu — nên một cú bấm ra `✓ đã bấm 'esc'` rồi `✓ đã gửi`. Cú Esc
+    /// là RUỘT của hub, không phải việc của người đọc; đúng cùng lý do đã bỏ
+    /// dòng "(phải gửi thêm một Enter rời)" hôm qua.
+    pub quiet: bool,
 }
 
 /// Hòm thư Telegram dùng chung cho cả tiến trình.
@@ -422,15 +430,13 @@ impl Inbox {
             .as_ref()
             .and_then(|db| db.cursor_or_log(crate::pipeline::FOCUS_SESSION_KEY))
             .unwrap_or_default();
-        let folder = db
-            .as_ref()
-            .and_then(|db| db.cursor_or_log(crate::pipeline::WATCH_KEY))
-            .and_then(|v| crate::pipeline::session_folder_from_book(&v, &focus))
-            .unwrap_or_default();
-        let mut dir = self.cfg.workspace_root.clone();
-        if !folder.is_empty() {
-            dir = dir.join(&folder);
-        }
+        // MỘT hòm thư ở gốc workspace, chia theo mã phiên.
+        //
+        // Hà 2026-08-13: *"`.inbox` đã lưu theo phiên rồi thì cần gì tách theo
+        // thư mục dự án nữa → chuyển ra thư mục gốc để dùng chung"*. Đúng: id
+        // phiên đã là duy nhất, thêm một tầng dự án chỉ làm chỗ dọn rác nằm rải
+        // ra nhiều nơi — mà dọn rác là toàn bộ lý do chia theo phiên.
+        let dir = self.cfg.workspace_root.clone();
         // Xếp theo MÃ PHIÊN (Hà 2026-08-13: *"`.inbox` nên đưa vào theo mã phiên
         // cho dễ dọn rác"*). Tệp gửi cho một phiên chỉ có nghĩa trong đời phiên
         // ấy; đổ chung một chỗ thì sau một tuần không ai biết cái nào còn dùng.
@@ -504,6 +510,15 @@ impl Inbox {
 
     /// Đưa một dòng lệnh vào hàng đợi — dùng cả từ `confirm` khi nó nhặt hộ.
     pub fn push_text(&self, text: &str) {
+        self.push_inner(text, false);
+    }
+
+    /// Xếp hàng một lệnh PHỤ của chính hub — chạy xong không trả lời gì.
+    pub fn push_text_quiet(&self, text: &str) {
+        self.push_inner(text, true);
+    }
+
+    fn push_inner(&self, text: &str, quiet: bool) {
         let t = text.trim();
         if t.is_empty() {
             return;
@@ -511,7 +526,7 @@ impl Inbox {
         self.queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push_back(Incoming { text: t.to_string() });
+            .push_back(Incoming { text: t.to_string(), quiet });
         logging::info(
             "telegram_command_queued",
             json!({ "head": crate::exec::truncate(t, 40) }),
@@ -716,7 +731,8 @@ impl Inbox {
                             json!({ "n": n, "text": crate::exec::truncate(&line, 60) }),
                         );
                         // Hai lệnh, đúng thứ tự — `CMD_LOCK` giữ chúng nối đuôi.
-                        self.push_text("/key esc");
+                        // Bước phụ ⟹ IM: một cú bấm chỉ nên ra một câu trả lời.
+                        self.push_text_quiet("/key esc");
                         self.push_text(&line);
                     }
                     None => {

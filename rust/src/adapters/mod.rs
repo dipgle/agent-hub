@@ -127,6 +127,8 @@ pub enum CommandKind {
 #[derive(Debug, Clone)]
 pub struct ChannelCommand {
     pub kind: CommandKind,
+    /// Bước phụ do hub tự xếp hàng ⟹ chạy xong thì KHÔNG trả lời.
+    pub quiet: bool,
     /// The id the command acts on: a DECISION id for `Approve`/`Reject`, a
     /// MESSAGE id for `Close`/`Reply` (the two CLI verbs take message ids), and
     /// 0 when the command needs neither (`Help`).

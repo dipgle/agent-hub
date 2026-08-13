@@ -156,6 +156,77 @@ fn box_region(screen: &str) -> String {
     tail.join("\n")
 }
 
+/// Màn có đang ĐỀ XUẤT một việc và chờ một tiếng "ừ" không?
+///
+/// 🔴 Hà 2026-08-13, gửi ảnh màn `dwork`: *"một gợi ý tương tự"*. Phiên viết
+/// *"Việc tiếp theo tôi làm được ngay mà không chờ ai: dựng phân hệ quota
+/// phép… Nói một tiếng nếu anh muốn tôi vào việc đó"* — và chính Hà đã trả lời
+/// nó bằng đúng hai chữ **"Làm đi"** (log 01:48:03). Tức việc thường xuyên nhất
+/// trên điện thoại là gõ lại một câu đồng ý.
+///
+/// Nhận theo CÂU CHỮ của lời mời, không đoán theo ngữ nghĩa: một cái nút gửi
+/// "làm đi" vào nhầm lúc là một mệnh lệnh không lùi được. Mẫu lấy từ màn thật.
+pub fn asks_for_go_ahead(screen: &str) -> bool {
+    const INVITES: &[&str] = &[
+        "nói một tiếng",
+        "muốn tôi",
+        "xin xác nhận",
+        "anh chốt",
+        "anh chọn",
+        "hay ưu tiên",
+        "có muốn",
+    ];
+    let low = screen.to_lowercase();
+    INVITES.iter().any(|m| low.contains(m))
+}
+
+/// Chữ đang NẰM SẴN trong ô nhập, nếu có — thứ chỉ cần một Enter là gửi đi.
+///
+/// 🔴 Hà 2026-08-13, gửi ảnh một màn `/shot`: *"như ảnh vừa gửi có gợi ý nội
+/// dung chat cần có cách bấm nhanh để gửi nó"*. Đúng: màn ấy có sẵn dòng
+/// `❯ làm quota phép đi` nằm trong ô — chữ đã tới nơi, chỉ thiếu cú Enter — mà
+/// từ điện thoại thì không có cách nào bấm cú ấy ngoài gõ lại cả câu.
+///
+/// Trả về chữ đã dọn (bỏ khung, dấu nhắc, dòng trạng thái), để chỗ gọi vừa
+/// dựng được nhãn nút vừa biết có đáng dựng hay không.
+pub fn input_box_text(screen: &str) -> Option<String> {
+    let mut buf = String::new();
+    for line in box_region(screen).lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        // Đường kẻ khung.
+        if t.chars().all(|c| "─━-—_═".contains(c)) {
+            continue;
+        }
+        // Dòng chân (chế độ quyền, gợi ý phím) và dòng tip — không phải chữ của
+        // người gõ.
+        if t.contains("auto mode on")
+            || t.contains("esc to interrupt")
+            || t.contains("shift+tab")
+            || t.starts_with("Tip:")
+            || t.starts_with("⎿")
+        {
+            continue;
+        }
+        let t = t
+            .trim_start_matches(['❯', '>', '│', '┃', '|'])
+            .trim_matches(|c: char| c.is_whitespace())
+            .trim_end_matches(['│', '┃', '|'])
+            .trim();
+        if t.is_empty() {
+            continue;
+        }
+        if !buf.is_empty() {
+            buf.push(' ');
+        }
+        buf.push_str(t);
+    }
+    let out = buf.trim().to_string();
+    (out.chars().count() >= 2).then_some(out)
+}
+
 /// Chữ vừa gõ CÒN NẰM trong ô nhập, hay đã đi?
 ///
 /// 🔴 Hà đo 2026-08-12: *"nhận được text nhưng không tự gửi"*. Chú thích của

@@ -2487,12 +2487,43 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // `/shot` trên Telegram đi kèm NÚT cho từng lệnh thấy trên màn.
                 // Đường đi vẫn là một: nút gõ `!<lệnh>` vào phiên qua `/type`,
                 // tức cùng route, cùng sổ (xem `remember_quick`).
-                let quick = if matches!(cmd.kind, CommandKind::Shot) {
-                    let cmds = crate::keys::commands_on_screen(&ack, 4);
-                    remember_quick(db, &cmds)
-                } else {
-                    Vec::new()
-                };
+                let mut quick = Vec::new();
+                if matches!(cmd.kind, CommandKind::Shot) {
+                    let mut cmds = crate::keys::commands_on_screen(&ack, 4);
+                    let n_cmds = cmds.len();
+                    // Câu đồng ý nằm CÙNG kho với lệnh (một chỗ nhớ, một chỉ
+                    // số), nhưng đi bằng callback KHÁC: `run:` gõ `!<lệnh>` tức
+                    // chạy shell, còn đây là chữ thường gửi vào phiên.
+                    let go = crate::keys::asks_for_go_ahead(&ack);
+                    if go {
+                        cmds.push("làm đi".to_string());
+                    }
+                    let stored = remember_quick(db, &cmds);
+                    quick.extend(stored.into_iter().take(n_cmds));
+                    if go {
+                        quick.push(("✅ Làm đi".to_string(), format!("say:{n_cmds}")));
+                    }
+                }
+                // Ô nhập đang có sẵn chữ ⟹ một nút GỬI (Hà 2026-08-13: *"có gợi
+                // ý nội dung chat cần có cách bấm nhanh để gửi nó"*). Đi đúng
+                // route `/key <id> enter` đã có — nút chỉ là phím tắt của một
+                // đường đi sẵn, không phải một nhánh xử lý mới.
+                if matches!(cmd.kind, CommandKind::Shot) {
+                    // Phiên đang MỜI một tiếng "ừ" ⟹ nút gửi thẳng câu đồng ý.
+                    // Đi qua chính route `/type`, tức cùng đường chữ thường —
+                    // nút chỉ là phím tắt của thứ Hà vẫn gõ tay ("Làm đi").
+                    if crate::keys::asks_for_go_ahead(&ack) {
+                        if let Some(b) = remember_quick(db, &["làm đi".to_string()]).pop() {
+                            quick.push(("✅ Làm đi".to_string(), b.1));
+                        }
+                    }
+                    if let Some(t) = crate::keys::input_box_text(&ack) {
+                        quick.push((
+                            format!("⏎ Gửi: {}", crate::exec::truncate(&t, 40)),
+                            format!("key:{want}:enter"),
+                        ));
+                    }
+                }
                 match (quick.is_empty(), crate::telegram::inbox()) {
                     (false, Some(tg)) if adapter == crate::telegram::NAME => {
                         if let Err(e) = tg.send_buttons(&ack, &quick) {

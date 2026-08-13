@@ -742,3 +742,32 @@ fn an_attachment_name_can_never_choose_where_it_is_written() {
     // chặn tiếng Việt.
     assert_eq!(clean("báo cáo cuối.md"), "báo cáo cuối.md");
 }
+
+/// Màn có sẵn chữ trong ô nhập ⟹ đọc ra được, để dựng nút "⏎ Gửi".
+///
+/// 🔴 Hà 2026-08-13, gửi ảnh một màn `/shot`: *"như ảnh vừa gửi có gợi ý nội
+/// dung chat cần có cách bấm nhanh để gửi nó"*. Màn ấy có `❯ làm quota phép đi`
+/// nằm trong ô — chữ đã tới nơi, chỉ thiếu cú Enter — mà từ điện thoại thì
+/// không bấm được cú ấy nếu không gõ lại cả câu.
+#[test]
+fn text_waiting_in_the_input_box_is_read_back_for_a_send_button() {
+    let screen = "\
+  ⎿  Tip: Run tasks in the cloud while you keep coding locally
+────────────────────────────────────────
+❯ làm quota phép đi
+────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt";
+    assert_eq!(
+        hub::keys::input_box_text(screen).as_deref(),
+        Some("làm quota phép đi")
+    );
+
+    // Ô TRỐNG ⟹ không dựng nút: một cái nút gửi chữ rỗng là một cái nút gửi
+    // Enter vào hư không.
+    let empty = "\
+────────────────────────────────────────
+❯
+────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt";
+    assert_eq!(hub::keys::input_box_text(empty), None);
+}

@@ -697,6 +697,34 @@ impl Inbox {
                 }
                 return;
             }
+            // `say:<n>` — gửi một câu CHỮ THƯỜNG vào phiên đang theo.
+            //
+            // Khác `run:<n>` đúng một dấu `!`, mà dấu ấy đổi hẳn nghĩa: `run:`
+            // gõ `!<lệnh>` tức chạy shell trong phiên; `say:` gõ nguyên câu như
+            // chủ máy tự gõ. Dùng cho nút "✅ Làm đi" khi phiên đang mời một
+            // tiếng "ừ" (Hà 2026-08-13).
+            if let Some(n) = data.strip_prefix("say:").and_then(|n| n.parse::<usize>().ok()) {
+                match crate::db::Db::open(&self.cfg.db)
+                    .ok()
+                    .and_then(|db| crate::pipeline::quick_cmd(&db, n))
+                {
+                    Some(line) => {
+                        logging::info(
+                            "telegram_quick_say",
+                            json!({ "n": n, "text": crate::exec::truncate(&line, 60) }),
+                        );
+                        self.push_text(&line);
+                    }
+                    None => {
+                        if let Err(e) =
+                            self.send_text("⚠ gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.")
+                        {
+                            logging::error("telegram_ack_failed", json!({ "err": e }));
+                        }
+                    }
+                }
+                return;
+            }
             // `full:<n>` — bản ĐẦY ĐỦ của báo cáo đã bị rút gọn. Telegram chặn
             // ở 4096 ký tự nên cắt thành nhiều tin, cắt theo DÒNG để không đứt
             // giữa câu.

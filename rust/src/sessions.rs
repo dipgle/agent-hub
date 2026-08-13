@@ -2999,12 +2999,29 @@ fn newest_transcript_since(
 /// mới phải **trắng ngữ cảnh**, chỉ mang theo bản bàn giao làm đề bài. Đó cũng
 /// là toàn bộ lý do `HANDOVER_PROMPT` tồn tại.
 ///
-/// Trả `(tty mới, id phiên mới nếu ghép được, lý do chưa đóng được cửa sổ cũ)`.
+/// Kết quả một lượt thay cửa sổ — đủ dữ kiện để NÓI THẬT về nó.
+///
+/// `old_kept` là trường quan trọng nhất và là trường sinh sau đẻ muộn nhất: xem
+/// khối 🔴 trong [`start_fresh_after_handover`].
+pub struct FreshWindow {
+    /// tty của cửa sổ vừa mở.
+    pub tty: String,
+    /// id phiên mới, nếu nó đã kịp sinh nhật ký để ghép.
+    pub new_id: Option<String>,
+    /// vì sao chưa đóng được cửa sổ cũ (khi ĐÃ thử đóng).
+    pub closed_err: Option<String>,
+    /// cửa sổ cũ được GIỮ LẠI có chủ ý — vì phiên mới chưa chào đời.
+    pub old_kept: bool,
+    /// hộp chọn đang chờ trên cửa sổ mới, nếu đọc được.
+    pub asking: Vec<(usize, String)>,
+}
+
+/// Mở một phiên MỚI mang theo bản bàn giao, rồi đóng cửa sổ cũ.
 pub fn start_fresh_after_handover(
     cfg: &Config,
     session: &LiveSession,
     checkpoint: &str,
-) -> Result<(String, Option<String>, Option<String>)> {
+) -> Result<FreshWindow> {
     let task = format!(
         "Tiếp quản phiên trước (phiên cũ đã đầy ngữ cảnh nên hub đóng sổ và mở phiên này). \
          BÀN GIAO:\n\n{checkpoint}\n\nĐọc xong thì làm tiếp việc kế tiếp trong bàn giao."
@@ -3033,6 +3050,47 @@ pub fn start_fresh_after_handover(
         "handover_window_opened",
         json!({ "tty": tty_short, "session": new_id.clone().unwrap_or_default(), "fresh": true }),
     );
+
+    // 🔴 KHÔNG ĐÓNG CỬA SỔ CŨ KHI PHIÊN MỚI CHƯA CHỨNG MINH NÓ CHÀO ĐỜI.
+    //
+    // Trả giá thật 2026-08-13 04:30, lượt tự đóng sổ thứ hai: `hanguyen-41`
+    // (acc3, 64%) → cửa sổ mới mở ở `ttys000` lúc 04:31:37 với
+    // `handover_window_opened session:""` — id RỖNG — rồi 04:31:59 hub đóng cửa
+    // sổ cũ như thường lệ. Cửa sổ mới ấy **đứng im 22 phút**, và Hà là người
+    // phát hiện: *"mở phiên mới bị dừng giữa chừng"*, kèm ảnh chụp hộp *"Quick
+    // safety check: … 1. Yes, I trust this folder"*.
+    //
+    // Gốc KHÔNG nằm ở hub: gốc dời `~/Documents/projects` → `~/projects` hôm
+    // 08-12, mà `claude` ghi "đã tin thư mục này" theo **từng CLAUDE_CONFIG_DIR**
+    // — đo trong `.claude.json` của ba tài khoản: acc1 có bản ghi cho
+    // `/Users/hanguyen/projects`, **acc2 và acc3 KHÔNG có** (chỉ còn đường cũ).
+    // Nên cửa sổ đầu tiên mở dưới acc2/acc3 ở gốc mới luôn dừng ở hộp hỏi ⟹
+    // không có nhật ký ⟹ không có id để ghép.
+    //
+    // Cái sai của hub là **cái nó làm tiếp theo**: id rỗng nghĩa là "chưa thấy
+    // phiên nào cả", mà hub vẫn đóng cửa sổ đang làm việc của chủ máy — tức nó
+    // phá cái chắc chắn để đổi lấy cái chưa chứng minh, đúng lúc mù nhất. Nay
+    // id rỗng ⟹ **giữ nguyên cửa sổ cũ** và đọc màn cửa sổ mới xem nó vướng gì.
+    // Hai cửa sổ thì chủ máy đóng bớt được; một phiên đang làm dở bị đóng thì
+    // không lấy lại được.
+    if new_id.is_none() {
+        let asking = crate::keys::screen_of(&tty_short, 24)
+            .map(|(_, choices)| choices)
+            .unwrap_or_default();
+        logging::warn(
+            "handover_new_session_never_appeared",
+            json!({ "tty": tty_short, "old_session": session.session_id,
+                    "asking": asking.len(), "old_window": "giữ nguyên" }),
+        );
+        return Ok(FreshWindow {
+            tty: tty_short,
+            new_id: None,
+            closed_err: None,
+            old_kept: true,
+            asking,
+        });
+    }
+
     // Đóng cửa sổ CŨ. Hỏng thì KHÔNG coi là hỏng cả việc: phiên mới đã chạy, và
     // một cửa sổ thừa còn mở thì chủ máy đóng bằng tay được — nói ra là đủ.
     let closed_err = match crate::keys::window_of(&session.tty) {
@@ -3049,7 +3107,13 @@ pub fn start_fresh_after_handover(
             json!({ "session": session.session_id, "why": why }),
         );
     }
-    Ok((tty_short, new_id, closed_err))
+    Ok(FreshWindow {
+        tty: tty_short,
+        new_id,
+        closed_err,
+        old_kept: false,
+        asking: Vec::new(),
+    })
 }
 
 pub fn terminal_command(cli: &str, root: &Path, task: &str, config_dir: Option<&str>) -> String {

@@ -878,22 +878,27 @@ fn auto_handover(db: &Db, cfg: &Config) {
                 // không có cửa sổ nào để gõ vào.
                 let err_text;
                 let outcome = match &moved {
-                    Ok((tty, Some(new_id), closed_err)) => {
-                        if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, new_id) {
-                            logging::error(
-                                "focus_after_handover_failed",
-                                json!({ "err": e.to_string() }),
-                            );
+                    Ok(w) => match &w.new_id {
+                        Some(new_id) => {
+                            if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, new_id) {
+                                logging::error(
+                                    "focus_after_handover_failed",
+                                    json!({ "err": e.to_string() }),
+                                );
+                            }
+                            HandoverMove::Opened {
+                                tty: &w.tty,
+                                new_id,
+                                closed_err: w.closed_err.as_deref(),
+                            }
                         }
-                        HandoverMove::Opened {
-                            tty,
-                            new_id,
-                            closed_err: closed_err.as_deref(),
-                        }
-                    }
-                    Ok((tty, None, closed_err)) => HandoverMove::OpenedUnmatched {
-                        tty,
-                        closed_err: closed_err.as_deref(),
+                        // Phiên mới chưa chào đời ⟹ con trỏ KHÔNG chuyển: nó
+                        // phải trỏ vào một phiên gõ được, mà ở đây chưa có phiên
+                        // nào cả — và cửa sổ cũ thì hub đã giữ lại.
+                        None => HandoverMove::Stalled {
+                            tty: &w.tty,
+                            asking: &w.asking,
+                        },
                     },
                     Err(e) => {
                         err_text = e.to_string();
@@ -988,12 +993,12 @@ pub enum HandoverMove<'a> {
         new_id: &'a str,
         closed_err: Option<&'a str>,
     },
-    /// Cửa sổ mở rồi nhưng chưa ghép được id (nhật ký chưa kịp sinh trong 12s).
-    /// Con trỏ VẪN nằm ở phiên cũ — vừa tắt — nên phải nói ra, không thì chữ gõ
-    /// từ điện thoại đi vào chỗ trống.
-    OpenedUnmatched {
+    /// Cửa sổ mở rồi nhưng phiên mới KHÔNG chào đời (không có nhật ký để ghép
+    /// id sau 12 giây) — nên hub **giữ nguyên cửa sổ cũ**. `asking` là hộp chọn
+    /// đọc được trên cửa sổ mới, tức lý do nó đứng im.
+    Stalled {
         tty: &'a str,
-        closed_err: Option<&'a str>,
+        asking: &'a [(usize, String)],
     },
     /// Không mở được cửa sổ nào: trả lại dòng `--resume` cho chủ máy tự gõ.
     Failed {
@@ -1030,14 +1035,28 @@ pub fn auto_handover_notice(name: &str, pct: u8, idle_sec: u64, moved: &Handover
             ),
             *closed_err,
         ),
-        HandoverMove::OpenedUnmatched { tty, closed_err } => (
-            format!(
-                "Phiên mới (TRẮNG ngữ cảnh, mang bản bàn giao) đang chạy ở cửa sổ {tty}.\n\
-                 ⚠ chưa ghép được id của nó, nên con trỏ VẪN ở phiên cũ vừa tắt — \
-                 bấm /sessions để chọn lại trước khi gõ."
-            ),
-            *closed_err,
-        ),
+        HandoverMove::Stalled { tty, asking } => {
+            let why = if asking.is_empty() {
+                "\nKhông đọc được màn của nó — xem cửa sổ ấy trên máy.".to_string()
+            } else {
+                format!(
+                    "\nNó đang DỪNG LẠI HỎI:\n{}",
+                    asking
+                        .iter()
+                        .map(|(n, l)| format!("  {n}. {l}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            };
+            (
+                format!(
+                    "⚠ Phiên mới mở ở cửa sổ {tty} nhưng CHƯA chào đời sau 12 giây.{why}\n\
+                     ✅ Cửa sổ CŨ hub GIỮ NGUYÊN — không mất gì, phiên cũ vẫn ở đó. \
+                     Trả lời câu hỏi ở cửa sổ mới rồi đóng cửa sổ cũ."
+                ),
+                None,
+            )
+        }
         HandoverMove::Failed {
             err,
             resume_command,

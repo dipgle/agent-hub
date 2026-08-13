@@ -452,21 +452,41 @@ fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
     );
     assert!(leftover.contains("cửa sổ cũ chưa đóng được"), "{leftover}");
 
-    // Mở được cửa sổ nhưng chưa ghép được id ⟹ con trỏ VẪN ở phiên cũ vừa tắt.
-    // Đây là cái bẫy im lặng: tin trông như thành công, còn chữ gõ tiếp thì rơi
-    // vào chỗ trống.
-    let blind = auto_handover_notice(
-        "[AI/hub]",
-        80,
-        126,
-        &HandoverMove::OpenedUnmatched {
-            tty: "ttys001",
-            closed_err: None,
+    // Cửa sổ mở nhưng phiên mới KHÔNG chào đời (nó dừng ở hộp hỏi) — đo thật
+    // 2026-08-13 04:31:37: `handover_window_opened session:""`, cửa sổ ấy đứng
+    // im 22 phút ở *"1. Yes, I trust this folder"*. Tin phải nói ĐỦ ba điều:
+    // nó vướng gì, cửa sổ cũ còn nguyên, và tuyệt đối không khoe "đang chạy".
+    let asking = vec![
+        (1usize, "Yes, I trust this folder".to_string()),
+        (2usize, "No, exit".to_string()),
+    ];
+    let stalled = auto_handover_notice(
+        "[dwork]",
+        64,
+        264,
+        &HandoverMove::Stalled {
+            tty: "ttys000",
+            asking: &asking,
         },
     );
-    assert!(blind.contains("ttys001"), "{blind}");
-    assert!(blind.contains("con trỏ VẪN ở phiên cũ"), "{blind}");
-    assert!(!blind.contains("Đang theo phiên mới"), "{blind}");
+    assert!(stalled.contains("ttys000"), "{stalled}");
+    assert!(stalled.contains("Yes, I trust this folder"), "{stalled}");
+    assert!(stalled.contains("GIỮ NGUYÊN"), "{stalled}");
+    assert!(!stalled.contains("đang chạy"), "khoe phiên đang chạy: {stalled}");
+    assert!(!stalled.contains("Đang theo phiên mới"), "{stalled}");
+
+    // Không đọc được màn thì nói thẳng là không đọc được — không bịa lý do.
+    let mute = auto_handover_notice(
+        "[dwork]",
+        64,
+        264,
+        &HandoverMove::Stalled {
+            tty: "ttys000",
+            asking: &[],
+        },
+    );
+    assert!(mute.contains("Không đọc được màn"), "{mute}");
+    assert!(mute.contains("GIỮ NGUYÊN"), "{mute}");
 
     // Không mở được cửa sổ nào: trả lại dòng lệnh để chủ máy tự gõ.
     let failed = auto_handover_notice(

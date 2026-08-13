@@ -1197,7 +1197,45 @@ impl Inbox {
                             } else {
                                 format!("{head}{p}")
                             };
-                            let sent = self.send_text(&body);
+                            // 🔴 Nút phải theo BẢN ĐẦY ĐỦ nữa. Hà 2026-08-13:
+                            // *"Chọn xem đầy đủ lại không có chạy lệnh rồi"*.
+                            //
+                            // Tin rút gọn có nút `▶`/`📎` (dựng ở
+                            // `announce_changes`), nhưng bản đầy đủ đi thẳng
+                            // qua `send_text` — không nút nào. Tức bấm "Xem đầy
+                            // đủ" để ĐỌC KỸ hơn thì lại MẤT đường bấm chạy, và
+                            // đó chính là lúc lệnh hiện ra nguyên vẹn (bản rút
+                            // gọn còn cắt khối code).
+                            //
+                            // Cùng máy móc, không đẻ lối riêng: cùng
+                            // `commands_on_screen` + `paths_on_screen` + cùng
+                            // hai cuốn sổ. Gắn vào MẢNH CUỐI, vì đó là chỗ mắt
+                            // dừng lại.
+                            let sent = if last {
+                                let mut btns = db
+                                    .as_ref()
+                                    .map(|db| {
+                                        let mut b = crate::pipeline::remember_quick(
+                                            db,
+                                            &crate::keys::commands_on_screen(&text, 3),
+                                        );
+                                        b.extend(crate::pipeline::remember_files(
+                                            db,
+                                            &sid,
+                                            &crate::keys::paths_on_screen(&text, 4),
+                                        ));
+                                        b
+                                    })
+                                    .unwrap_or_default();
+                                if btns.is_empty() {
+                                    self.send_text(&body)
+                                } else {
+                                    btns.truncate(8);
+                                    self.send_buttons(&body, &btns)
+                                }
+                            } else {
+                                self.send_text(&body)
+                            };
                             if let Err(e) = sent {
                                 logging::error("telegram_ack_failed", json!({ "err": e }));
                                 break;

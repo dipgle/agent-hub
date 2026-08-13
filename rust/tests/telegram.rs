@@ -1157,3 +1157,32 @@ fn a_truncated_path_is_not_a_file_button() {
     );
     assert_eq!(got.len(), 2, "một file một nút: {got:?}");
 }
+
+/// `cd <thư mục> && <lệnh>` phải mọc ra nút chạy.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp một tin báo mang nguyên dòng
+/// `cd ~/projects/AI/codetrail && git push` mà không có cái nút nào. Danh sách
+/// động từ cố tình hẹp (nó là hàng rào, không phải bảng tra) nên `cd` không nằm
+/// trong đó, và từ đầu tiên của dòng là `cd` ⟹ 0 nút.
+#[test]
+fn a_cd_then_command_line_is_still_a_command() {
+    use hub::keys::commands_on_screen;
+
+    let got = commands_on_screen("cd ~/projects/AI/codetrail && git push", 3);
+    assert_eq!(got, vec!["cd ~/projects/AI/codetrail && git push".to_string()], "{got:?}");
+
+    // Dấu `;` cũng vậy.
+    let got = commands_on_screen("cd /tmp; bash ./run.sh", 3);
+    assert_eq!(got.len(), 1, "{got:?}");
+
+    // Hàng rào KHÔNG được nới: phần sau `&&` vẫn phải là một động từ đã biết.
+    assert!(
+        commands_on_screen("cd ~/projects && rm -rf everything", 3).is_empty(),
+        "nới hàng rào: {:?}",
+        commands_on_screen("cd ~/projects && rm -rf everything", 3)
+    );
+    // `cd` một mình không chạy gì cả.
+    assert!(commands_on_screen("cd ~/projects/AI/hub", 3).is_empty());
+    // Và câu văn có chữ "cd" ở đầu vẫn là câu văn.
+    assert!(commands_on_screen("cd vào thư mục ấy rồi chạy thử; xong báo tôi", 3).is_empty());
+}

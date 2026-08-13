@@ -721,6 +721,27 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
     // `gh` vào danh sách 2026-08-13, vì đó là cái tên trong câu Hà hỏi: màn nói
     // *"Next action is yours: merge PR #54"* và không có nút nào. `gh` là công
     // cụ merge trên máy này — cùng loại với `git`, đã nằm sẵn ở đây từ đầu.
+/// `cd <thư mục> && <lệnh>` — dạng phổ biến nhất, và nó KHÔNG bắt đầu bằng một
+/// động từ trong danh sách.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp một tin báo có nguyên dòng
+/// `cd ~/projects/AI/codetrail && git push` mà không cái nút nào. Danh sách
+/// `KNOWN` cố tình hẹp — nó là hàng rào, không phải bảng tra — nên `cd` không
+/// nằm trong đó, và từ đầu tiên của dòng là `cd` ⟹ 0 nút.
+///
+/// Không nới hàng rào bằng cách nhét `cd` vào `KNOWN`: `cd` một mình chẳng chạy
+/// gì, mà thêm nó là mở cửa cho mọi dòng bắt đầu bằng `cd`. Thay vào đó, nhận
+/// đúng HÌNH DẠNG: `cd <gì đó> &&|; <phần còn lại>` thì đem **phần còn lại** đi
+/// hỏi cùng cái hàng rào ấy. Hàng rào không đổi, chỉ hỏi đúng chỗ.
+fn after_cd(line: &str) -> Option<&str> {
+    let rest = line.strip_prefix("cd ")?;
+    let (_dir, tail) = rest
+        .split_once("&&")
+        .or_else(|| rest.split_once(';'))?;
+    let tail = tail.trim();
+    (!tail.is_empty()).then_some(tail)
+}
+
     const KNOWN: &[&str] = &[
         "git", "gh", "npm", "npx", "node", "cargo", "bash", "sh", "zsh", "python3", "pip3",
         "docker", "make", "curl", "rsync", "scp", "ssh", "sqlite3", "pnpm", "yarn", "deno", "go",
@@ -780,7 +801,11 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
         let Some(first) = line.split_whitespace().next() else {
             continue;
         };
-        let looks_like = KNOWN.contains(&first) || first.starts_with("./");
+        // `cd X && <lệnh>`: hỏi cùng hàng rào, nhưng hỏi phần sau `&&`.
+        let verb = after_cd(line)
+            .and_then(|t| t.split_whitespace().next())
+            .unwrap_or(first);
+        let looks_like = KNOWN.contains(&verb) || verb.starts_with("./");
         if !looks_like {
             continue;
         }
@@ -828,7 +853,10 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
         let Some(first) = cmd.split_whitespace().next() else {
             continue;
         };
-        if !(KNOWN.contains(&first) || first.starts_with("./")) {
+        let verb = after_cd(cmd)
+            .and_then(|t| t.split_whitespace().next())
+            .unwrap_or(first);
+        if !(KNOWN.contains(&verb) || verb.starts_with("./")) {
             continue;
         }
         if cmd.split_whitespace().count() < 2 {

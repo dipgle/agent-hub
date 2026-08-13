@@ -873,37 +873,41 @@ fn auto_handover(db: &Db, cfg: &Config) {
                 } else {
                     crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint)
                 };
-                let (where_now, leftover) = match &moved {
-                    Ok((tty, _, closed_err)) => (
-                        format!("Phiên mới (TRẮNG ngữ cảnh, mang bản bàn giao) đang chạy ở cửa sổ {tty}."),
-                        closed_err.clone().map(|e| format!("\n⚠ cửa sổ cũ chưa đóng được: {e}")),
-                    ),
-                    Err(e) => (
-                        format!(
-                            "⚠ chưa mở được cửa sổ mới ({}) — mở tay bằng:\n{}",
-                            crate::exec::truncate(&e.to_string(), 120),
-                            h.resume_command
-                        ),
-                        None,
-                    ),
-                };
                 // Con trỏ chuyển sang phiên MỚI THẬT (id ghép từ nhật ký), không
                 // phải id bản fork: bản fork chỉ là chỗ lấy bản bàn giao, nó
                 // không có cửa sổ nào để gõ vào.
-                if let Ok((_, Some(new_id), _)) = &moved {
-                    if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, new_id) {
-                        logging::error("focus_after_handover_failed", json!({ "err": e.to_string() }));
+                let err_text;
+                let outcome = match &moved {
+                    Ok((tty, Some(new_id), closed_err)) => {
+                        if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, new_id) {
+                            logging::error(
+                                "focus_after_handover_failed",
+                                json!({ "err": e.to_string() }),
+                            );
+                        }
+                        HandoverMove::Opened {
+                            tty,
+                            new_id,
+                            closed_err: closed_err.as_deref(),
+                        }
                     }
-                }
-                let msg = format!(
-                    "📋 Tự đóng sổ {} (ngữ cảnh {}%, đã rảnh {} phút) trước khi CLI phải nén ngữ cảnh.\n\
-                     Phiên mới: {}\n{}{}",
-                    crate::sessions::display_name(&s.name, &s.folder),
+                    Ok((tty, None, closed_err)) => HandoverMove::OpenedUnmatched {
+                        tty,
+                        closed_err: closed_err.as_deref(),
+                    },
+                    Err(e) => {
+                        err_text = e.to_string();
+                        HandoverMove::Failed {
+                            err: &err_text,
+                            resume_command: &h.resume_command,
+                        }
+                    }
+                };
+                let msg = auto_handover_notice(
+                    &crate::sessions::display_name(&s.name, &s.folder),
                     pct,
-                    idle_sec / 60,
-                    &h.new_session_id[..8.min(h.new_session_id.len())],
-                    where_now,
-                    leftover.unwrap_or_default()
+                    idle_sec,
+                    &outcome,
                 );
                 // Báo vào phòng: mọi thứ hub tự làm đều phải có vết ở nơi đọc
                 // được, nhất là thứ chạy khi không ai bấm.
@@ -914,6 +918,44 @@ fn auto_handover(db: &Db, cfg: &Config) {
                     &msg,
                 ) {
                     logging::error("auto_handover_notice_failed", json!({ "err": e.to_string() }));
+                }
+                // …và CÙNG CÂU ẤY sang Telegram (luật 11: hai cái mồm nói một
+                // câu, không thì về sau không ai đối chiếu được).
+                //
+                // 🔴 Đo trên lượt nổ đầu tiên 2026-08-13 04:24:36: log chỉ có
+                // `tfl5_chat_sent`, KHÔNG có một dòng telegram nào — tức hub tự
+                // đóng cửa sổ đang làm việc của chủ máy rồi báo vào đúng cái
+                // phòng anh không mở. Mà đây là tin duy nhất trong cả hub xảy
+                // ra khi **không ai bấm gì**: bỏ sót nó là bỏ sót đúng lúc cần
+                // nhất. `announce_changes` đã đi hai mồm từ đầu; chỗ này quên.
+                //
+                // Nút thì gắn có điều kiện — luật 14: chỉ trỏ vào phiên còn
+                // sống, và ở đây phiên mới sống là điều kiện của chính nhánh
+                // `Opened`. Ngoại lệ có chủ ý so với `enter_button` (nó bỏ nút
+                // khi target == phiên đang theo): ở đây hub VỪA tự chuyển con
+                // trỏ sang phiên mới, nên luật ấy sẽ gỡ nút trong 100% trường
+                // hợp — và từ 0af884c, bấm vào phiên là thấy luôn màn, tức nút
+                // này là đường ngắn nhất để nhìn tận mắt cái cửa sổ hub vừa mở.
+                let button = match &outcome {
+                    HandoverMove::Opened { new_id, .. } => Some((
+                        "👁 Xem phiên mới".to_string(),
+                        format!("sess:{new_id}"),
+                    )),
+                    _ => None,
+                };
+                match (crate::telegram::inbox(), button) {
+                    (Some(tg), Some(b)) => {
+                        if let Err(e) = tg.send_buttons(&msg, &[b]) {
+                            logging::error("auto_handover_telegram_failed", json!({ "err": e }));
+                        }
+                    }
+                    // Không có nút (hoặc không có inbox — `hub once` chạy tay):
+                    // vẫn phải tới điện thoại, thà một tin không nút còn hơn im.
+                    _ => {
+                        if let Err(e) = crate::confirm::tell(cfg, &msg) {
+                            logging::error("auto_handover_telegram_failed", json!({ "err": e }));
+                        }
+                    }
                 }
             }
             Err(e) => logging::error(
@@ -929,6 +971,89 @@ fn auto_handover(db: &Db, cfg: &Config) {
 
 /// Phiên nào đã được hub tự đóng sổ rồi — để không đóng hai lần.
 pub const AUTO_DONE_KEY: &str = "auto_handover:done";
+
+/// Chuyện gì THẬT SỰ xảy ra khi hub thay cửa sổ — ba kết cục, không gộp.
+///
+/// Gộp lại là chỗ bản đầu nói sai: nó in `h.new_session_id` (id BẢN FORK) cho cả
+/// ba, mà bản fork chỉ là chỗ lấy bản bàn giao — nó không có cửa sổ nào, không
+/// nằm trong `claude agents`, nên `/session <id ấy>` không tới đâu (route Session
+/// khớp id CHÍNH XÁC, xem `session_name_from_book`). Đo trên lượt nổ đầu tiên
+/// 2026-08-13 04:24: tin nói `Phiên mới: f0883567`, còn phiên đang chạy thật là
+/// `86fe1666` — và chính con trỏ `focus:session` đã trỏ đúng `86fe1666`. Tức tin
+/// nhắn và cuốn sổ nói hai thứ khác nhau về cùng một việc.
+pub enum HandoverMove<'a> {
+    /// Cửa sổ mới đã mở VÀ ghép được id phiên mới ⟹ con trỏ đã chuyển sang nó.
+    Opened {
+        tty: &'a str,
+        new_id: &'a str,
+        closed_err: Option<&'a str>,
+    },
+    /// Cửa sổ mở rồi nhưng chưa ghép được id (nhật ký chưa kịp sinh trong 12s).
+    /// Con trỏ VẪN nằm ở phiên cũ — vừa tắt — nên phải nói ra, không thì chữ gõ
+    /// từ điện thoại đi vào chỗ trống.
+    OpenedUnmatched {
+        tty: &'a str,
+        closed_err: Option<&'a str>,
+    },
+    /// Không mở được cửa sổ nào: trả lại dòng `--resume` cho chủ máy tự gõ.
+    Failed {
+        err: &'a str,
+        resume_command: &'a str,
+    },
+}
+
+/// Câu hub nói khi nó vừa TỰ thay cửa sổ làm việc của chủ máy.
+///
+/// Thuần, và tách ra làm hàm riêng vì đây là tin nhắn khó nhất trong cả hub: nó
+/// là thứ duy nhất báo một việc **không ai bấm ra** và **không lùi lại được** —
+/// một cửa sổ đã đóng. Ba điều nó phải nói đúng, cả ba đều đã từng sai:
+/// * **id gõ được** — id phiên MỚI THẬT, đủ dài để `/session` khớp, không phải
+///   id bản fork và không cắt còn 8 ký tự.
+/// * **con trỏ đang ở đâu** — vì trên Telegram, chữ thường gõ vào phòng đi
+///   thẳng vào phiên đang theo. Nói sai chỗ này là gửi việc vào một phiên đã tắt.
+/// * **cái gì CHƯA xong** — cửa sổ cũ chưa đóng được thì nói, đừng để chủ máy
+///   phát hiện bằng cách nhìn thấy hai cửa sổ.
+pub fn auto_handover_notice(name: &str, pct: u8, idle_sec: u64, moved: &HandoverMove) -> String {
+    let head = format!(
+        "📋 Tự đóng sổ {name} (ngữ cảnh {pct}%, đã rảnh {} phút) trước khi CLI phải nén ngữ cảnh.",
+        idle_sec / 60
+    );
+    let (body, leftover) = match moved {
+        HandoverMove::Opened {
+            tty,
+            new_id,
+            closed_err,
+        } => (
+            format!(
+                "Phiên mới {new_id} (TRẮNG ngữ cảnh, mang bản bàn giao) đang chạy ở cửa sổ {tty}.\n\
+                 👁 Đang theo phiên mới — gõ thẳng vào đây là nói với nó.",
+            ),
+            *closed_err,
+        ),
+        HandoverMove::OpenedUnmatched { tty, closed_err } => (
+            format!(
+                "Phiên mới (TRẮNG ngữ cảnh, mang bản bàn giao) đang chạy ở cửa sổ {tty}.\n\
+                 ⚠ chưa ghép được id của nó, nên con trỏ VẪN ở phiên cũ vừa tắt — \
+                 bấm /sessions để chọn lại trước khi gõ."
+            ),
+            *closed_err,
+        ),
+        HandoverMove::Failed {
+            err,
+            resume_command,
+        } => (
+            format!(
+                "⚠ chưa mở được cửa sổ mới ({}) — mở tay bằng:\n{resume_command}",
+                crate::exec::truncate(err, 120)
+            ),
+            None,
+        ),
+    };
+    let tail = leftover
+        .map(|e| format!("\n⚠ cửa sổ cũ chưa đóng được: {e}"))
+        .unwrap_or_default();
+    format!("{head}\n{body}{tail}")
+}
 
 /// Vì sao MỘT phiên nên (hoặc không nên) được tự đóng sổ lúc này.
 ///

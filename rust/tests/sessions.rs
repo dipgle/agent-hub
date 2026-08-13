@@ -406,6 +406,82 @@ fn auto_handover_only_fires_when_the_session_is_truly_done() {
     );
 }
 
+/// Tin tự đóng sổ phải mang id GÕ ĐƯỢC, và nói đúng con trỏ đang ở đâu.
+///
+/// Bắt được từ lượt nổ THẬT đầu tiên (2026-08-13 04:24, phiên `projects-06` ở
+/// 80%): tin nói `Phiên mới: f0883567` — id **bản fork**, cắt còn 8 ký tự —
+/// trong khi phiên đang chạy là `86fe1666…` và chính `focus:session` đã trỏ
+/// đúng vào đó. Bản fork không nằm trong `claude agents` và route `/session`
+/// khớp id chính xác, nên dòng ấy vô dụng theo cả hai đường.
+#[test]
+fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
+    use hub::pipeline::{auto_handover_notice, HandoverMove};
+
+    let new_id = "86fe1666-5e87-4fa9-903a-ea21bfb48208";
+    let fork_id = "f0883567-7eae-426b-8643-e56468a7de6e";
+    let ok = auto_handover_notice(
+        "[AI/hub]",
+        80,
+        126,
+        &HandoverMove::Opened {
+            tty: "ttys001",
+            new_id,
+            closed_err: None,
+        },
+    );
+    // Id ĐẦY ĐỦ của phiên thật, và tuyệt đối không phải id bản fork.
+    assert!(ok.contains(new_id), "{ok}");
+    assert!(!ok.contains(fork_id), "{ok}");
+    // Trên Telegram chữ thường đi vào phiên ĐANG THEO — nên tin phải nói con
+    // trỏ đã sang phiên mới, không thì chủ máy gõ việc vào một phiên đã tắt.
+    assert!(ok.contains("Đang theo phiên mới"), "{ok}");
+    assert!(ok.contains("[AI/hub]") && ok.contains("80%"), "{ok}");
+    // Không có gì hỏng thì không bịa ra cảnh báo.
+    assert!(!ok.contains("⚠"), "{ok}");
+
+    // Cửa sổ cũ chưa đóng được: nói ra, đừng để phát hiện bằng mắt.
+    let leftover = auto_handover_notice(
+        "[AI/hub]",
+        80,
+        126,
+        &HandoverMove::Opened {
+            tty: "ttys001",
+            new_id,
+            closed_err: Some("tab còn bận sau 10s"),
+        },
+    );
+    assert!(leftover.contains("cửa sổ cũ chưa đóng được"), "{leftover}");
+
+    // Mở được cửa sổ nhưng chưa ghép được id ⟹ con trỏ VẪN ở phiên cũ vừa tắt.
+    // Đây là cái bẫy im lặng: tin trông như thành công, còn chữ gõ tiếp thì rơi
+    // vào chỗ trống.
+    let blind = auto_handover_notice(
+        "[AI/hub]",
+        80,
+        126,
+        &HandoverMove::OpenedUnmatched {
+            tty: "ttys001",
+            closed_err: None,
+        },
+    );
+    assert!(blind.contains("ttys001"), "{blind}");
+    assert!(blind.contains("con trỏ VẪN ở phiên cũ"), "{blind}");
+    assert!(!blind.contains("Đang theo phiên mới"), "{blind}");
+
+    // Không mở được cửa sổ nào: trả lại dòng lệnh để chủ máy tự gõ.
+    let failed = auto_handover_notice(
+        "[AI/hub]",
+        80,
+        126,
+        &HandoverMove::Failed {
+            err: "osascript timeout",
+            resume_command: "claude --resume abc123",
+        },
+    );
+    assert!(failed.contains("claude --resume abc123"), "{failed}");
+    assert!(failed.contains("chưa mở được cửa sổ mới"), "{failed}");
+}
+
 /// Phiên đã chết thì không có gì "đang chạy" — kể cả nhật ký còn dở.
 ///
 /// Hồi quy do chính bản vá agent-nền đẻ ra, bắt được bằng cách chạy trên máy

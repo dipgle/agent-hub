@@ -277,18 +277,40 @@ pub fn choice_buttons(
     session_id: &str,
     labels: &[String],
     offer_enter: bool,
+    multi: bool,
 ) -> Vec<(String, String)> {
     let mut buttons: Vec<(String, String)> = labels
         .iter()
         .enumerate()
         .take(9)
         .map(|(i, l)| {
+            // Chọn nhiều thì mỗi nút là một cái CÔNG TẮC, không phải một lá
+            // phiếu — nhãn phải nói đúng thế, vì bấm xong màn hình điện thoại
+            // không đổi gì và người ta sẽ tưởng nút hỏng.
+            let head = if multi {
+                format!("☐ {}", i + 1)
+            } else {
+                format!("{}.", i + 1)
+            };
             (
-                format!("{}. {}", i + 1, crate::exec::truncate(l, 60)),
+                format!("{head} {}", crate::exec::truncate(l, 60)),
                 format!("key:{}:{}", session_id, i + 1),
             )
         })
         .collect();
+    // 🔴 Hà 2026-08-13, ảnh chụp hộp hỏi của `[codetrail]`: *"option này chọn
+    // nhiều chứ không phải chọn 1"*. Với hộp chọn-nhiều, bấm một số chỉ BẬT/TẮT
+    // một mục — phiên vẫn đứng đợi dấu Enter. Không có cái nút này thì bấm bao
+    // nhiêu cái cũng không xong việc, mà nhìn từ điện thoại y hệt lúc hỏng.
+    //
+    // Đi bằng đúng route `/key` sẵn có (`key:<id>:enter` → `/key <id> enter`),
+    // không đẻ lối riêng cho Telegram.
+    if multi {
+        buttons.push((
+            "✅ Gửi lựa chọn".to_string(),
+            format!("key:{session_id}:enter"),
+        ));
+    }
     if offer_enter {
         buttons.push(("👁 Vào phiên này".to_string(), format!("sess:{session_id}")));
     }
@@ -538,15 +560,13 @@ impl Inbox {
                 MAX_BYTES / 1_048_576
             ));
         }
-        let ext = real
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or_default()
-            .to_lowercase();
-        if !crate::keys::SENDABLE_EXT.contains(&ext.as_str()) {
-            return Err(format!("đuôi .{ext} không soi được nội dung nên hub không gửi"));
-        }
-        let body = std::fs::read_to_string(&real).map_err(|e| format!("không đọc được chữ: {e}"))?;
+        // Cổng THẬT nằm ở đây, và nó là một câu hỏi về NỘI DUNG chứ không phải
+        // về cái tên: `read_to_string` hỏng nghĩa là file không phải UTF-8,
+        // tức cổng quét rò không đọc nổi nó — mà thứ không soi được thì không
+        // rời khỏi máy này (luật 5). Danh sách đuôi chỉ để khỏi dựng cái nút
+        // chắc chắn hỏng; nó không phải hàng rào.
+        let body = std::fs::read_to_string(&real)
+            .map_err(|_| "không phải file chữ (cổng quét rò không đọc được) nên hub không gửi".to_string())?;
         let risk = crate::sessions::preview_risk(&body);
         if !risk.is_empty() {
             logging::warn(
@@ -802,18 +822,31 @@ impl Inbox {
             // nằm trong `send_document`, không nằm ở đây: một cửa đặt ở chỗ gọi
             // là một cửa chỗ gọi thứ hai sẽ quên.
             if let Some(n) = data.strip_prefix("file:").and_then(|n| n.parse::<usize>().ok()) {
-                let path = crate::db::Db::open(&self.cfg.db)
-                    .ok()
-                    .and_then(|db| crate::pipeline::quick_file(&db, n));
-                let msg = match path {
-                    Some(p) => {
-                        let expanded = shellexpand_home(&p);
-                        match self.send_document(
-                            std::path::Path::new(&expanded),
-                            &self.cfg.workspace_root,
-                        ) {
-                            Ok(()) => None,
-                            Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
+                let db = crate::db::Db::open(&self.cfg.db).ok();
+                let found = db
+                    .as_ref()
+                    .and_then(|db| crate::pipeline::quick_file(db, n));
+                let msg = match found {
+                    Some((sid, p)) => {
+                        // Cây thư mục của ĐÚNG phiên đã nhắc tới đường dẫn này.
+                        // Không tra ra được thì TỪ CHỐI — xem `session_root`.
+                        match db
+                            .as_ref()
+                            .and_then(|db| crate::pipeline::session_root(db, &self.cfg, &sid))
+                        {
+                            Some(root) => {
+                                let expanded = shellexpand_home(&p);
+                                match self
+                                    .send_document(std::path::Path::new(&expanded), &root)
+                                {
+                                    Ok(()) => None,
+                                    Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
+                                }
+                            }
+                            None => Some(format!(
+                                "⚠ chưa gửi được {p} — không biết phiên ấy làm ở thư mục nào, \
+                                 mà hub chỉ gửi file NẰM TRONG thư mục của chính phiên đó."
+                            )),
                         }
                     }
                     None => Some("⚠ đường dẫn ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.".into()),
@@ -1105,8 +1138,9 @@ impl Inbox {
         session_id: &str,
         labels: &[String],
         offer_enter: bool,
+        multi: bool,
     ) -> Result<(), String> {
-        self.send_buttons(text, &choice_buttons(session_id, labels, offer_enter))
+        self.send_buttons(text, &choice_buttons(session_id, labels, offer_enter, multi))
     }
 
     /// Gửi một câu kèm bảng nút — **mỗi nút một hàng**.

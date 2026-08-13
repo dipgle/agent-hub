@@ -349,6 +349,7 @@ fn the_message_reports_what_was_seen_and_never_repeats_itself() {
                 "Yes".into(),
                 "No, tell Claude what to do differently".into(),
             ],
+            multi: false,
         },
         None,
     );
@@ -360,7 +361,7 @@ fn the_message_reports_what_was_seen_and_never_repeats_itself() {
     // Màn bị giữ lại vì có dấu hiệu bí mật ⟹ chỉ CON SỐ, và phải nói vì sao —
     // im lặng đưa mỗi con số thì người đọc tưởng hub keo kiệt, rồi lần sau bỏ
     // qua cả những tin có chữ.
-    let hidden = e.say(&Idle::Asking { n: 2, options: vec![] }, None);
+    let hidden = e.say(&Idle::Asking { n: 2, options: vec![], multi: false }, None);
     assert!(hidden.contains('2'), "{hidden}");
     assert!(hidden.contains("bí mật"), "phải khai vì sao không có chữ: {hidden}");
 
@@ -388,6 +389,7 @@ fn a_session_that_starts_asking_is_announced_once_with_its_options() {
         header: "Nửa ngày".into(),
         question: "Đơn vắng có khai được NỬA NGÀY không?".into(),
         options: vec!["Thêm ô".into(), "Trọn ngày".into()],
+        multi: false,
     });
     let prev: BTreeMap<String, Mark> = [("a".to_string(), mark(IDLE, "ttys009", "interactive"))]
         .into_iter()

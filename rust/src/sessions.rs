@@ -1262,6 +1262,17 @@ pub struct Asking {
     pub question: String,
     /// Nhãn từng lựa chọn, theo đúng thứ tự trên màn: bấm số nào ra cái đó.
     pub options: Vec<String>,
+    /// Câu hỏi cho CHỌN NHIỀU — bấm một số là **bật/tắt** một mục, chưa gửi.
+    ///
+    /// 🔴 Hà 2026-08-13, ảnh chụp hộp hỏi của phiên `[codetrail]`: *"option này
+    /// chọn nhiều chứ không phải chọn 1"*. hub dựng 4 lựa chọn thành 4 cái nút
+    /// bấm-một-phát, tức nó khai sai bản chất câu hỏi: bấm một cái rồi ngồi chờ
+    /// một việc sẽ không xảy ra, vì phiên vẫn đang đợi dấu Enter.
+    ///
+    /// Tín hiệu lấy từ CẤU TRÚC chứ không đoán theo chữ: `multiSelect` nằm ngay
+    /// cạnh `options` trong chính lời gọi công cụ. Cùng bài học với bộ đếm
+    /// subagent — hỏi cái nhật ký ghi có cấu trúc, đừng dò chữ trên màn.
+    pub multi: bool,
 }
 
 /// Câu hỏi phiên ĐANG CHỜ người trả lời — đọc từ NHẬT KÝ, không phải từ màn.
@@ -1329,6 +1340,10 @@ pub fn pending_question(tail: &str) -> Option<Asking> {
                                 .unwrap_or_default()
                                 .to_string(),
                             options,
+                            multi: q
+                                .get("multiSelect")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false),
                         },
                     ));
                 }

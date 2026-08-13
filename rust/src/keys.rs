@@ -290,22 +290,44 @@ pub fn landed(screen: &str) -> Landed {
 /// hàng mà `claude agents` sắp khai ra — tên phiên thì `claude` tự đặt, và id
 /// thì chưa tồn tại lúc này.
 pub fn open_window(cmd: &str) -> Result<(i64, String)> {
+    // 🔴 Bản cũ hỏi `id of window 1` — **cửa sổ đang ở TRƯỚC, không phải cửa sổ
+    // vừa mở**. `do script` trả về một TAB, và tab ấy có thể nằm ở cửa sổ nào
+    // cũng được. Trả giá thật 2026-08-13 08:36, lượt tự đóng sổ của `[AI/tfl5]`:
+    //
+    //   ⚠ chưa mở được cửa sổ mới (osascript hỏng: execution error:
+    //     Can't make id of window 1 of application "Terminal" into type text. (-1700))
+    //
+    // Hà thấy hậu quả trước tôi: *"mở phiên mới rồi mà cửa sổ cũ vẫn còn nguyên
+    // trong cli là sao vậy?"* — vì `do script` **đã dựng xong cửa sổ** rồi mới
+    // chết ở dòng đọc id. Kết cục: một cửa sổ mới mồ côi (hub không biết nó
+    // tồn tại), cửa sổ cũ vẫn nguyên, một lượt fork đã tiêu, và phiên bị ghi
+    // vào sổ "đã đóng" nên sẽ không bao giờ được giúp lại.
+    //
+    // Điều đáng học không phải "AppleScript khó tính": tác giả cũ ĐÃ lường
+    // đúng hình dạng hỏng này — có hẳn một chốt ngay dưới, *"id chỉ để ghi sổ,
+    // đừng cho nó làm hỏng cả việc"*. Nhưng chốt đặt ở phía Rust, trong khi lỗi
+    // ném ra từ phía AppleScript, nên nó không bao giờ chạy tới. **Một cái chốt
+    // đặt sau chỗ hỏng là một cái chốt không tồn tại.**
+    //
+    // Nay chỉ hỏi thứ BẮT BUỘC phải có — `tty` của chính tab vừa tạo — rồi lấy
+    // id bằng `window_of`, đúng hàm đã dùng ở mọi chỗ khác. Hỏi ít đi một thứ,
+    // và không còn chỗ nào cho `window 1` sai.
     let script = format!(
         r#"tell application "Terminal"
   set w to do script {}
   delay 1
-  return ((id of window 1) as text) & "|" & (tty of w)
+  return tty of w
 end tell"#,
         as_string(cmd)
     );
-    let out = osascript(&script)?;
-    let (id, tty) = out
-        .trim()
-        .split_once('|')
-        .ok_or_else(|| anyhow!("Terminal trả về khác dạng: {}", crate::exec::truncate(&out, 120)))?;
-    // Id cửa sổ chỉ để ghi sổ, nên KHÔNG cho nó làm hỏng cả việc: cửa sổ đã
-    // dựng rồi, ném lỗi ở đây là bỏ lại một cửa sổ mồ côi trên màn hình.
-    Ok((id.trim().parse::<i64>().unwrap_or(0), tty.trim().to_string()))
+    let tty = osascript(&script)?.trim().to_string();
+    if tty.is_empty() {
+        return Err(anyhow!("Terminal mở cửa sổ nhưng không khai tty"));
+    }
+    // Id lấy sau, và hỏng thì thôi: cửa sổ đã dựng rồi, ném lỗi ở đây là bỏ lại
+    // đúng một cửa sổ mồ côi — cái giá vừa trả hôm nay.
+    let id = window_of(&tty).ok().flatten().unwrap_or(0);
+    Ok((id, tty))
 }
 
 /// Cửa sổ Terminal đang chạy `tty` này, nếu có.
@@ -697,16 +719,27 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
     out
 }
 
-/// Đuôi file hub chịu gửi ra Telegram — **chỉ file CHỮ**.
+/// Đuôi file hub CHẮC CHẮN không gửi — thứ cổng quét rò không đọc nổi.
 ///
-/// Không phải vì file nhị phân khó gửi, mà vì luật 5: thứ gì rời khỏi máy này
-/// phải qua được cổng quét rò, và **cổng ấy chỉ đọc được chữ**. Một ảnh chụp
-/// màn hình có thể mang nguyên một mật khẩu mà mọi phép quét chuỗi đều nói
-/// "sạch". Gửi cái không soi được là bịt mắt rồi ném ra ngoài.
-pub const SENDABLE_EXT: &[&str] = &[
-    "md", "html", "htm", "txt", "json", "jsonl", "csv", "log", "toml", "yaml", "yml", "rs", "js",
-    "mjs", "ts", "tsx", "jsx", "css", "sh", "py", "sql", "xml", "svg", "diff", "patch", "lock",
-    "cfg", "conf", "ini", "env",
+/// 🔴 Đây từng là một danh sách TRẮNG, và nó sai ngay trong lần dùng đầu tiên
+/// (2026-08-13): tôi mời Hà bấm thử vào `hub.env.example`, đuôi `.example`
+/// không có trong danh sách ⟹ **không có nút nào hiện ra**. Danh sách trắng
+/// bao giờ cũng thiếu — `.example`, `.gitignore`, `Makefile`, `LICENSE`, một
+/// file không đuôi — trong khi câu hỏi thật chỉ có một: *cổng quét rò đọc được
+/// nội dung này không?*
+///
+/// Câu ấy chỉ trả lời được khi MỞ FILE RA, nên nó được trả lời đúng chỗ:
+/// `Inbox::send_document` đọc bằng `read_to_string`, và file nhị phân tự rơi ở
+/// đó (không phải UTF-8). Danh sách dưới đây chỉ còn làm một việc rẻ tiền: đừng
+/// dựng cái nút mà ai cũng biết trước là bấm vào sẽ hỏng.
+///
+/// Luật gốc không đổi (luật 5): thứ gì rời khỏi máy này phải soi được. Một ảnh
+/// chụp màn hình mang nguyên mật khẩu mà mọi phép quét chuỗi đều nói "sạch".
+pub const UNSENDABLE_EXT: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "ico", "tiff", "pdf", "zip", "gz", "tgz",
+    "bz2", "xz", "7z", "rar", "dmg", "pkg", "app", "sqlite", "db", "bin", "exe", "dylib", "so",
+    "o", "a", "rlib", "wasm", "mp3", "mp4", "mov", "wav", "m4a", "avi", "webm", "ttf", "otf",
+    "woff", "woff2",
 ];
 
 /// Những ĐƯỜNG DẪN FILE hiện trên màn — thứ bấm một cái là nhận được file.
@@ -718,9 +751,12 @@ pub const SENDABLE_EXT: &[&str] = &[
 /// người đọc trên điện thoại không mở nổi.
 ///
 /// Nhận theo HÌNH DẠNG như `commands_on_screen`, và hẹp y như thế: phải là
-/// đường TUYỆT ĐỐI (`/…` hoặc `~/…`), phải có đuôi nằm trong `SENDABLE_EXT`.
+/// đường TUYỆT ĐỐI (`/…` hoặc `~/…`), và không mang đuôi nhị phân đã biết.
 /// Đường tương đối thì cố ý bỏ qua — `src/main.rs` trên màn không nói được nó
 /// nằm trong dự án nào, mà đoán sai ở đây là gửi nhầm file của dự án khác.
+///
+/// Phần "có đọc được không" KHÔNG hỏi ở đây: hàm này thuần, không chạm đĩa. Nó
+/// được hỏi đúng một lần, đúng lúc gửi — xem `UNSENDABLE_EXT`.
 pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for raw in text.lines() {
@@ -733,10 +769,12 @@ pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
             if !(t.starts_with('/') || t.starts_with("~/")) || t.len() < 4 {
                 continue;
             }
-            let Some(ext) = t.rsplit('.').next() else {
+            // Phải có TÊN FILE, không phải một thư mục: đoạn cuối có dấu chấm.
+            let Some(last) = t.rsplit('/').next().filter(|l| l.contains('.')) else {
                 continue;
             };
-            if ext == t || !SENDABLE_EXT.contains(&ext.to_lowercase().as_str()) {
+            let ext = last.rsplit('.').next().unwrap_or_default().to_lowercase();
+            if UNSENDABLE_EXT.contains(&ext.as_str()) {
                 continue;
             }
             if !out.iter().any(|x| x == t) {

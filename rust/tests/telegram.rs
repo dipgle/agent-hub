@@ -133,6 +133,7 @@ fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
         header: "Nửa ngày".into(),
         question: "Đơn vắng có khai được NỬA NGÀY không?".into(),
         options: vec!["Thêm ô nửa ngày".into(), "Luôn trọn ngày".into()],
+        multi: false,
     });
     let text = session_list_text(&[s], "", NOW);
     assert!(text.contains("⚠ dừng lại HỎI"), "tình trạng: {text}");
@@ -334,7 +335,7 @@ const SID: &str = "bc1a73db-1111-2222-3333-444444444444";
 
 #[test]
 fn the_enter_session_button_decodes_back_to_the_session_route() {
-    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], true);
+    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], true, false);
     let (label, data) = b.last().expect("thiếu nút vào phiên");
     assert!(label.contains("Vào phiên"), "nhãn khó hiểu: {label}");
     // Round-trip qua CHÍNH bộ giải mã đang chạy — nút gửi đi mà không giải ra
@@ -350,7 +351,7 @@ fn the_enter_session_button_decodes_back_to_the_session_route() {
 /// Phiên ĐANG theo thì không có nút ấy — bấm vào chỉ để tới chỗ đang đứng.
 #[test]
 fn the_followed_session_gets_no_redundant_button() {
-    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], false);
+    let b = hub::telegram::choice_buttons(SID, &["Tôi tiếp".to_string()], false, false);
     assert_eq!(b.len(), 1, "thừa nút: {b:?}");
     assert!(b[0].1.starts_with("key:"), "{:?}", b[0]);
 }
@@ -478,7 +479,7 @@ fn a_book_entry_without_a_name_is_not_good_enough_to_greet_with() {
 #[test]
 fn choice_buttons_still_answer_the_right_session() {
     let labels = vec!["Một".to_string(), "Hai".to_string(), "Ba".to_string()];
-    let b = hub::telegram::choice_buttons(SID, &labels, true);
+    let b = hub::telegram::choice_buttons(SID, &labels, true, false);
     assert_eq!(b.len(), 4, "3 lựa chọn + 1 nút vào phiên: {b:?}");
     assert_eq!(
         hub::telegram::callback_to_command(&b[2].1).as_deref(),
@@ -737,6 +738,19 @@ fn a_file_path_on_screen_becomes_something_you_can_open() {
     // màn hình có thể mang nguyên một mật khẩu.
     assert!(hub::keys::paths_on_screen("ảnh ở /tmp/man-hinh.png nhé", 4).is_empty());
     assert!(hub::keys::paths_on_screen("/tmp/data.sqlite", 4).is_empty());
+
+    // 🔴 Đuôi LẠ vẫn phải ra nút. Bản đầu dùng danh sách TRẮNG và nó sai ngay
+    // lần dùng đầu tiên: tôi mời Hà bấm thử `hub.env.example`, đuôi `.example`
+    // không có trong danh sách ⟹ không nút nào hiện. Câu hỏi thật là *đọc được
+    // chữ không*, mà câu ấy chỉ trả lời được lúc mở file — nên nó được hỏi ở
+    // `send_document`, không phải ở đây.
+    assert_eq!(
+        hub::keys::paths_on_screen("chép /tmp/hub.env.example ra", 4),
+        vec!["/tmp/hub.env.example".to_string()]
+    );
+
+    // Thư mục thì không: không có tên file thì không có gì để gửi.
+    assert!(hub::keys::paths_on_screen("mở /Users/hanguyen/projects/AI/hub xem", 4).is_empty());
 
     // Và câu CẤM thì vẫn không thành nút, y như với lệnh.
     assert!(hub::keys::paths_on_screen("⚠ đừng mở /tmp/bi-mat.md", 4).is_empty());

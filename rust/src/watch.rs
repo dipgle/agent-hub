@@ -202,6 +202,8 @@ pub enum Change {
         header: String,
         question: String,
         options: Vec<String>,
+        /// Chọn NHIỀU: bấm một số là bật/tắt, chưa gửi — xem `sessions::Asking`.
+        multi: bool,
     },
     /// Phiên đứng lại vì một LỖI — xem `ERRORED`.
     Failed {
@@ -245,7 +247,7 @@ pub enum Idle {
     /// từ 2026-08-10, mà tin báo lại chỉ mang con số — một cái chuông nói "có 3
     /// lựa chọn" thì vẫn bắt người ta mở máy ra mới biết chọn gì, tức nó chưa
     /// tiết kiệm cho ai một bước nào.
-    Asking { n: usize, options: Vec<String> },
+    Asking { n: usize, options: Vec<String>, multi: bool },
     /// Màn đang mang một LỖI API — phiên không chờ bạn, nó **hỏng**.
     ///
     /// 🔴 Hà 2026-08-12: *"vừa rồi báo lỗi api mà chưa thấy bắt được"*. Trước
@@ -295,7 +297,7 @@ impl Change {
                     // `keys::look` (màn có dấu hiệu bí mật thì rơi sang nhánh
                     // dưới), nên đây không phải chỗ để cẩn thận thêm lần nữa —
                     // chỉ cắt cho vừa một cái chuông: 5 dòng, mỗi dòng 80 ký tự.
-                    Idle::Asking { n, options } if !options.is_empty() => {
+                    Idle::Asking { n, options, multi } if !options.is_empty() => {
                         let lines: Vec<String> = options
                             .iter()
                             .take(5)
@@ -307,10 +309,17 @@ impl Change {
                         } else {
                             String::new()
                         };
-                        format!(
-                            "⚠ {name} dừng lại HỎI — cần bạn chọn:\n{}{more}",
-                            lines.join("\n")
-                        )
+                        // Chọn NHIỀU thì phải nói ra, không thì người đọc bấm
+                        // một cái rồi ngồi chờ một việc sẽ không xảy ra: phiên
+                        // vẫn đang đợi dấu Enter. (Hà 2026-08-13, ảnh chụp hộp
+                        // hỏi của [codetrail]: *"option này chọn nhiều chứ
+                        // không phải chọn 1"*.)
+                        let how = if *multi {
+                            "cần bạn chọn (CHỌN NHIỀU — bấm từng cái rồi bấm ✅ Gửi)"
+                        } else {
+                            "cần bạn chọn"
+                        };
+                        format!("⚠ {name} dừng lại HỎI — {how}:\n{}{more}", lines.join("\n"))
                     }
                     // Không đọc được chữ thì nói RÕ vì sao chỉ có con số, đừng
                     // để người ta tưởng hub keo kiệt thông tin.
@@ -733,6 +742,7 @@ pub fn changes(
                 header: a.header,
                 question: a.question,
                 options: a.options,
+                multi: a.multi,
             });
         } else if was_working && state == IDLE {
             // Cửa thời lượng: chạy chớp nhoáng thì không phải tin.

@@ -381,6 +381,11 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                             // qua được cổng quét rò rỉ, nên nội dung này đi ra
                             // ngoài được.
                             options: choices.iter().map(|(_, t)| t.clone()).collect(),
+                            // Đọc từ MÀN thì không biết được câu ấy cho chọn
+                            // mấy cái — `multiSelect` chỉ có trong nhật ký. Nói
+                            // "chọn một" khi không biết là đoán; để `false` ở
+                            // đây nghĩa là KHÔNG hứa gì thêm.
+                            multi: false,
                         }
                     }
                     // LỖI API đứng TRƯỚC "đang ở dấu nhắc": hai thứ nhìn giống
@@ -396,7 +401,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                     crate::keys::Look::Saw { .. } => crate::watch::Idle::Prompt,
                     crate::keys::Look::Withheld { choices, .. } if choices > 0 => {
                         // Chỉ con số — con số không mang chữ nào ra khỏi máy.
-                        crate::watch::Idle::Asking { n: choices, options: vec![] }
+                        crate::watch::Idle::Asking { n: choices, options: vec![], multi: false }
                     }
                     crate::keys::Look::Withheld { .. } => crate::watch::Idle::Prompt,
                     crate::keys::Look::Blind { .. } => crate::watch::Idle::Unknown,
@@ -543,11 +548,15 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // đẻ thêm một lối riêng cho Telegram.
         // Lựa chọn lấy từ NHẬT KÝ trước (đầy đủ, có cả với phiên hub không đọc
         // được màn), rồi mới tới thứ đọc được trên màn.
+        // Kèm luôn cờ CHỌN NHIỀU: nút và câu chữ phải khai đúng bản chất câu
+        // hỏi, không thì bấm một cái rồi ngồi chờ một việc không xảy ra.
         let buttons = match (&c, &idle) {
-            (crate::watch::Change::Asking { options, .. }, _) if !options.is_empty() => {
-                Some(options)
+            (crate::watch::Change::Asking { options, multi, .. }, _) if !options.is_empty() => {
+                Some((options, *multi))
             }
-            (_, crate::watch::Idle::Asking { options, .. }) if !options.is_empty() => Some(options),
+            (_, crate::watch::Idle::Asking { options, multi, .. }) if !options.is_empty() => {
+                Some((options, *multi))
+            }
             _ => None,
         };
         // Tin của một phiên KHÁC phiên đang theo phải mang theo đường vào nó.
@@ -591,7 +600,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // tắt, nhưng ở đây lý do khác — file thì vẫn còn, chỉ là một tin báo tử
         // không phải chỗ để đọc tài liệu.
         if !matches!(c, crate::watch::Change::Ended { .. }) {
-            quick.extend(remember_files(db, &crate::keys::paths_on_screen(&text, 2)));
+            quick.extend(remember_files(db, &id, &crate::keys::paths_on_screen(&text, 2)));
         }
         // "… (còn N dòng)" phải có đường đi tiếp — xem `remember_full`.
         if text.contains("… (còn ") {
@@ -606,8 +615,8 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             }
         }
         match (buttons, crate::telegram::inbox()) {
-            (Some(opts), Some(tg)) => {
-                if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some()) {
+            (Some((opts, multi)), Some(tg)) => {
+                if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some(), multi) {
                     logging::error("session_change_telegram_failed", json!({ "err": e }));
                 }
             }
@@ -1669,11 +1678,21 @@ pub const FILES_KEY: &str = "quick:files";
 /// `callback_data`, một chỗ hết hạn. Nút mang CHỈ SỐ chứ không mang đường dẫn,
 /// vì `callback_data` của Telegram chỉ có 64 byte — một đường dẫn tuyệt đối
 /// vượt trần ấy là chuyện thường, và khi vượt thì nút im lặng không hiện.
-pub fn remember_files(db: &Db, paths: &[String]) -> Vec<(String, String)> {
+///
+/// Sổ nhớ luôn **phiên nào đã nhắc tới đường dẫn ấy**, và đó là cả điểm:
+/// 🔴 Hà 2026-08-13: *"giới hạn phiên nào chỉ nhận được file nằm trong đúng thư
+/// mục của phiên đó thôi"*. Bản đầu gác ở GỐC WORKSPACE, tức một phiên dwork
+/// nhắc tới đường dẫn của tfl5 là kéo được file tfl5 về điện thoại. Gác theo
+/// phiên thì mỗi cái nút chỉ với tới đúng cây thư mục mà phiên ấy đang làm.
+///
+/// Buộc theo phiên ĐÃ SINH RA nút, không phải phiên đang theo lúc bấm: con trỏ
+/// đổi được giữa hai thời điểm ấy (bấm "Xem đầy đủ" là đổi), và lúc đó cái nút
+/// sẽ lặng lẽ đo bằng một cái thước khác.
+pub fn remember_files(db: &Db, session_id: &str, paths: &[String]) -> Vec<(String, String)> {
     if paths.is_empty() {
         return Vec::new();
     }
-    match serde_json::to_string(paths) {
+    match serde_json::to_string(&json!({ "s": session_id, "p": paths })) {
         Ok(v) => {
             if let Err(e) = db.set_cursor(FILES_KEY, &v) {
                 logging::error("quick_files_not_saved", json!({ "err": e.to_string() }));
@@ -1699,11 +1718,34 @@ pub fn remember_files(db: &Db, paths: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Đường dẫn số `n` trong sổ, nếu còn giữ.
-pub fn quick_file(db: &Db, n: usize) -> Option<String> {
+/// Đường dẫn số `n` trong sổ, kèm PHIÊN đã nhắc tới nó.
+pub fn quick_file(db: &Db, n: usize) -> Option<(String, String)> {
     let v = db.cursor_or_log(FILES_KEY)?;
-    let paths: Vec<String> = serde_json::from_str(&v).ok()?;
-    paths.get(n).cloned()
+    let st: serde_json::Value = serde_json::from_str(&v).ok()?;
+    let sid = st.get("s").and_then(|s| s.as_str()).unwrap_or_default().to_string();
+    let path = st
+        .get("p")
+        .and_then(|p| p.as_array())
+        .and_then(|a| a.get(n))
+        .and_then(|p| p.as_str())?
+        .to_string();
+    Some((sid, path))
+}
+
+/// Cây thư mục MỘT PHIÊN được phép với tới — gốc workspace + thư mục dự án của nó.
+///
+/// Không tìm thấy phiên trong sổ ⟹ trả `None`, và chỗ gọi phải TỪ CHỐI. Rơi về
+/// gốc workspace ở đây là biến "không biết phiên nào" thành "cho phép tất cả",
+/// đúng kiểu hỏng-mở-toang mà `keys::look` đã trả giá một lần.
+pub fn session_root(db: &Db, cfg: &Config, session_id: &str) -> Option<std::path::PathBuf> {
+    let book = db.cursor_or_log(WATCH_KEY)?;
+    let marks: std::collections::BTreeMap<String, crate::watch::Mark> =
+        serde_json::from_str(&book).ok()?;
+    let folder = marks.get(session_id).map(|m| m.d.clone())?;
+    if folder.trim().is_empty() {
+        return None;
+    }
+    Some(cfg.workspace_root.join(folder.trim_matches('/')))
 }
 
 pub fn remember_quick(db: &Db, cmds: &[String]) -> Vec<(String, String)> {

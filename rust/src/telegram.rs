@@ -595,7 +595,7 @@ impl Inbox {
                     .ok()
                     .and_then(|db| crate::pipeline::full_report(&db, n));
                 match full {
-                    Some(text) => {
+                    Some((sid, sname, text)) => {
                         let mut chunk = String::new();
                         let mut parts: Vec<String> = Vec::new();
                         for line in text.lines() {
@@ -608,6 +608,20 @@ impl Inbox {
                         if !chunk.trim().is_empty() {
                             parts.push(chunk);
                         }
+                        // Đọc xong một báo cáo dài thì việc kế tiếp gần như luôn
+                        // là ĐI VÀO chính phiên ấy (Hà 2026-08-13). Nút đi kèm
+                        // TIN CUỐI, và chỉ khi đó không phải phiên đang theo —
+                        // đúng luật của `pipeline::enter_button`.
+                        let focus = crate::db::Db::open(&self.cfg.db)
+                            .ok()
+                            .and_then(|db| db.cursor_or_log(crate::pipeline::FOCUS_SESSION_KEY))
+                            .unwrap_or_default();
+                        let enter = (!sid.is_empty() && sid != focus).then(|| {
+                            (
+                                format!("👁 Vào phiên {}", crate::exec::truncate(&sname, 24)),
+                                format!("sess:{sid}"),
+                            )
+                        });
                         let total = parts.len();
                         for (i, p) in parts.into_iter().enumerate() {
                             let head = if total > 1 {
@@ -615,7 +629,13 @@ impl Inbox {
                             } else {
                                 String::new()
                             };
-                            if let Err(e) = self.send_text(&format!("{head}{p}")) {
+                            let body = format!("{head}{p}");
+                            let last = i + 1 == total;
+                            let sent = match (&enter, last) {
+                                (Some(b), true) => self.send_buttons(&body, std::slice::from_ref(b)),
+                                _ => self.send_text(&body),
+                            };
+                            if let Err(e) = sent {
                                 logging::error("telegram_ack_failed", json!({ "err": e }));
                                 break;
                             }

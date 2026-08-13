@@ -81,8 +81,8 @@ fn every_row_carries_the_id_the_next_command_needs() {
     assert!(text.contains("acc3"), "{text}");
     assert!(text.contains("3e9a7fd6"), "thiếu id ngắn: {text}");
     assert!(text.contains("7c2ae1a7"), "thiếu id ngắn: {text}");
-    assert!(text.contains("▶"), "không nói phiên nào đang chạy: {text}");
-    assert!(text.contains("⏸"), "không nói phiên nào đứng chờ: {text}");
+    assert!(text.contains("🟢"), "không nói phiên nào đang chạy: {text}");
+    assert!(text.contains("🟡"), "không nói phiên nào đứng chờ: {text}");
     assert!(
         text.contains("Chưa theo phiên nào"),
         "chưa theo phiên nào thì phải nói ra: {text}"
@@ -107,9 +107,13 @@ fn the_list_tells_running_waiting_and_stopped_apart() {
     let text = session_list_text(&[a, b, c], "", NOW);
     assert!(text.contains("AI/hub · projects-ff"), "dự án đứng trước tên: {text}");
     assert!(text.contains("dwork"), "{text}");
-    assert!(text.contains("▶ đang chạy"), "{text}");
-    assert!(text.contains("⏸ đứng chờ"), "{text}");
-    assert!(text.contains("⏹ đã tắt"), "phiên đã tắt bị gộp vào 'đứng chờ': {text}");
+    // Chấm TRẠNG THÁI, không phải ký hiệu điều khiển của máy phát nhạc — Hà
+    // 2026-08-13: *"icon biểu diễn chạy và dừng bị ngược"*. `▶` nay chỉ còn
+    // nghĩa "bấm để chạy lệnh này" (`remember_quick`), một ký hiệu một nghĩa.
+    assert!(text.contains("🟢 đang chạy"), "{text}");
+    assert!(text.contains("🟡 đứng chờ"), "{text}");
+    assert!(text.contains("⚫ đã tắt"), "phiên đã tắt bị gộp vào 'đứng chờ': {text}");
+    assert!(!text.contains("▶"), "`▶` phải để dành cho NÚT chạy lệnh: {text}");
 }
 
 /// Phiên đang HỎI phải đọc ra được cả câu hỏi lẫn từng lựa chọn.
@@ -309,10 +313,10 @@ fn a_very_short_line_never_triggers_a_stray_enter() {
 fn a_button_label_still_answers_which_and_whether() {
     let s = sess("aaaaaaaa-0000-0000-0000-000000000000", "hub", "acc3", true);
     let label = session_button_label(&s);
-    assert!(label.starts_with('▶'), "{label}");
+    assert!(label.starts_with('🟢'), "{label}");
     assert!(label.contains("hub") && label.contains("acc3"), "{label}");
     let idle = session_button_label(&sess("b", "dwork", "acc1", false));
-    assert!(idle.starts_with('⏸'), "{idle}");
+    assert!(idle.starts_with('🟡'), "{idle}");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -685,16 +689,23 @@ fn a_stale_full_report_button_says_so_instead_of_showing_someone_elses() {
 
     let mut first = None;
     for i in 0..12 {
-        let (_, data) = hub::pipeline::remember_full(&db, &format!("báo cáo số {i}")).unwrap();
+        let (_, data) = hub::pipeline::remember_full(
+            &db,
+            &format!("sess-{i}"),
+            &format!("[hub] phiên {i}"),
+            &format!("báo cáo số {i}"),
+        )
+        .unwrap();
         if i == 0 {
             first = Some(data);
         }
     }
     // Bản mới nhất lấy được nguyên văn.
-    assert_eq!(
-        hub::pipeline::full_report(&db, 11).as_deref(),
-        Some("báo cáo số 11")
-    );
+    // …và mang theo CHỦ của nó, để nút "vào phiên" gắn được (Hà 2026-08-13).
+    let got = hub::pipeline::full_report(&db, 11).expect("mất bản mới nhất");
+    assert_eq!(got.0, "sess-11");
+    assert_eq!(got.1, "[hub] phiên 11");
+    assert_eq!(got.2, "báo cáo số 11");
     // Bản đầu đã rơi ra ⟹ trả None, KHÔNG trả nhầm bản khác.
     let n: usize = first.unwrap().trim_start_matches("full:").parse().unwrap();
     assert_eq!(n, 0);

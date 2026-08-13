@@ -269,6 +269,23 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         crate::watch::changes(&prev, live, chrono::Utc::now().timestamp(), &snap.blind);
     // Phiên đang theo — để biết tin nào cần kèm nút "vào phiên".
     let focused = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+    // Phiên do CHÍNH hub đóng sổ thì cái chết của nó KHÔNG phải tin.
+    //
+    // 🔴 Hà 2026-08-13, đọc đúng tin ấy: *"sao lại có thông báo này: ⏹
+    // projects-fb · AI/hub (76534706) đã tắt hẳn — nó đang chạy dở, nên xem
+    // lại"*. Log cùng lúc: `auto_handover_firing` 00:09:15 →
+    // `handover_window_opened` 00:09:49 → tin báo tử 00:10:07. Tức hub vừa cố ý
+    // đóng cửa sổ ấy xong (cách A, dựng đêm nay), rồi cái loa nhìn thấy phiên
+    // biến mất và **báo động như một cái chết bất thường** — còn thêm câu "đang
+    // chạy dở, nên xem lại", vì lúc bị đóng nó đang giữa lượt viết bản bàn giao.
+    //
+    // Một hệ thống tự làm gì đó rồi tự giật mình vì chính việc mình vừa làm là
+    // hệ thống chưa nối hai đầu với nhau. Sổ `AUTO_DONE_KEY` đã có sẵn tên
+    // những phiên ấy — chỉ là chưa ai hỏi nó ở đây.
+    let handed_over: Vec<String> = db
+        .cursor_or_log(AUTO_DONE_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
 
     match serde_json::to_string(&next) {
         // Ghi sổ TRƯỚC khi nói: nói xong mới ghi mà sập giữa chừng thì lượt sau
@@ -293,6 +310,17 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             crate::watch::Change::Ended { id, .. } => id.clone(),
         };
         let row = live.iter().find(|s| s.session_id == id);
+
+        // hub vừa tự đóng sổ phiên này ⟹ cái chết của nó là KẾ HOẠCH, không
+        // phải tin. Xem `handed_over` ở đầu hàm.
+        if matches!(c, crate::watch::Change::Ended { .. }) && handed_over.iter().any(|d| d == &id) {
+            logging::info(
+                "session_end_muted",
+                json!({ "session": id,
+                        "why": "hub vừa tự đóng sổ phiên này — cái chết của nó là kế hoạch" }),
+            );
+            continue;
+        }
 
         // NHÌN màn đúng một lần, cho đúng phiên vừa im. Chuyện này hiếm (vài
         // lần một giờ) nên nó rẻ; đọc màn cho mọi phiên mỗi vòng mới là thứ
@@ -511,7 +539,13 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         };
         // "… (còn N dòng)" phải có đường đi tiếp — xem `remember_full`.
         if text.contains("… (còn ") {
-            if let Some(b) = long.as_deref().and_then(|full| remember_full(db, full)) {
+            let shown_name = row
+                .map(|r| crate::sessions::display_name(&r.name, &r.folder))
+                .unwrap_or_else(|| c.name().to_string());
+            if let Some(b) = long
+                .as_deref()
+                .and_then(|full| remember_full(db, &id, &shown_name, full))
+            {
                 quick.push(b);
             }
         }
@@ -724,6 +758,22 @@ fn auto_handover(db: &Db, cfg: &Config) {
             .map(|t| (chrono::Utc::now() - t.with_timezone(&chrono::Utc)).num_seconds().max(0) as u64)
             .unwrap_or(0);
 
+        // RÀO CHỐNG DÂY CHUYỀN: phiên vừa sinh ra thì đừng đóng sổ, dù % có
+        // cao. Đêm 2026-08-12 bản `--resume` đẻ ra phiên mới mang nguyên ngữ
+        // cảnh cũ (62% ngay khi sinh), tức nó đủ điều kiện đóng sổ lần nữa —
+        // chỉ cần một lần rảnh là hub thay cửa sổ vô tận. Gốc đã vá (phiên mới
+        // nay TRẮNG ngữ cảnh), nhưng rào này ở lại: một cơ chế tự động thay cửa
+        // sổ của người khác thì phải có phanh riêng, không dựa vào việc "gốc đã
+        // đúng rồi".
+        let age_sec = (chrono::Utc::now().timestamp_millis() - s.started_at_ms).max(0) / 1000;
+        if pct >= cfg.auto_handover.at_percent && age_sec < 600 {
+            logging::info(
+                "auto_handover_held",
+                json!({ "session": s.session_id, "pct": pct,
+                        "why": format!("TooYoung({age_sec}s)") }),
+            );
+            continue;
+        }
         let why = auto_handover_why(
             pct,
             cfg.auto_handover.at_percent,
@@ -773,11 +823,11 @@ fn auto_handover(db: &Db, cfg: &Config) {
                 let moved = if s.tty.is_empty() {
                     Err(anyhow::anyhow!("phiên không có cửa sổ terminal"))
                 } else {
-                    crate::sessions::resume_in_new_window(cfg, s, &h.new_session_id)
+                    crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint)
                 };
                 let (where_now, leftover) = match &moved {
-                    Ok((tty, closed_err)) => (
-                        format!("Phiên mới đang chạy ở cửa sổ {tty}."),
+                    Ok((tty, _, closed_err)) => (
+                        format!("Phiên mới (TRẮNG ngữ cảnh, mang bản bàn giao) đang chạy ở cửa sổ {tty}."),
                         closed_err.clone().map(|e| format!("\n⚠ cửa sổ cũ chưa đóng được: {e}")),
                     ),
                     Err(e) => (
@@ -789,8 +839,11 @@ fn auto_handover(db: &Db, cfg: &Config) {
                         None,
                     ),
                 };
-                if moved.is_ok() {
-                    if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, &h.new_session_id) {
+                // Con trỏ chuyển sang phiên MỚI THẬT (id ghép từ nhật ký), không
+                // phải id bản fork: bản fork chỉ là chỗ lấy bản bàn giao, nó
+                // không có cửa sổ nào để gõ vào.
+                if let Ok((_, Some(new_id), _)) = &moved {
+                    if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, new_id) {
                         logging::error("focus_after_handover_failed", json!({ "err": e.to_string() }));
                     }
                 }
@@ -1176,10 +1229,19 @@ pub fn session_list_text(
         // duy nhất trong bốn cái mà người đọc PHẢI làm gì đó thì việc mới đi
         // tiếp — mà nó lại nhìn y hệt "đứng chờ" nếu không nói ra.
         let run = match (s.host.as_str(), s.asking.is_some(), s.working) {
-            ("dead", _, _) => "⏹ đã tắt",
+            // Chấm TRẠNG THÁI, không phải ký hiệu điều khiển.
+            //
+            // 🔴 Hà 2026-08-13: *"icon biểu diễn chạy và dừng bị ngược ở danh
+            // sách phiên"*. Đo ra chỗ lẫn: `▶`/`⏸`/`⏹` là bộ ký hiệu của máy
+            // phát nhạc, mà ở đó chúng là NÚT BẤM — `▶` nghĩa "bấm để chạy",
+            // `⏸` nghĩa "bấm để dừng". hub lại dùng chúng làm TÌNH TRẠNG, nên
+            // đọc ra đúng nghĩa ngược. Và chính hub cũng đang dùng `▶` làm nút
+            // chạy lệnh thật (`remember_quick`) — một ký hiệu hai nghĩa trong
+            // cùng một tin nhắn.
+            ("dead", _, _) => "⚫ đã tắt",
             (_, true, _) => "⚠ dừng lại HỎI",
-            (_, _, true) => "▶ đang chạy",
-            _ => "⏸ đứng chờ",
+            (_, _, true) => "🟢 đang chạy",
+            _ => "🟡 đứng chờ",
         };
         // Dự án ĐANG LÀM đứng trước tên: tên phiên do `claude` tự đặt
         // ("projects-ff") không nói được gì, còn `cwd` thì giống hệt nhau ở mọi
@@ -1305,18 +1367,38 @@ pub const QUICK_KEY: &str = "quick:cmds";
 /// phiên khác.
 pub const FULL_KEY: &str = "report:full";
 
+/// Một bản đầy đủ, kèm CHỦ của nó.
+///
+/// 🔴 Hà 2026-08-13: *"bấm xem đầy đủ thì thêm nút vào phiên luôn nếu nó không
+/// thuộc phiên đang chọn"*. Đúng — người đọc xong một báo cáo dài thì việc kế
+/// tiếp gần như luôn là **đi vào chính phiên ấy**; bắt họ quay ra `/sessions`
+/// rồi dò lại là cắt đứt đúng chỗ đang liền mạch. Muốn gắn được nút thì kho
+/// phải nhớ báo cáo ấy **của phiên nào**, chứ không chỉ nhớ chữ.
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct FullItem {
+    /// id phiên — thứ nút `sess:<id>` cần.
+    s: String,
+    /// tên để đọc (`[amm] hanguyen-8e`), nhãn của nút.
+    n: String,
+    t: String,
+}
+
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct FullStore {
     base: usize,
-    items: Vec<String>,
+    items: Vec<FullItem>,
 }
 
-pub fn remember_full(db: &Db, text: &str) -> Option<(String, String)> {
+pub fn remember_full(db: &Db, session_id: &str, name: &str, text: &str) -> Option<(String, String)> {
     let mut st: FullStore = db
         .cursor_or_log(FULL_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
-    st.items.push(text.to_string());
+    st.items.push(FullItem {
+        s: session_id.to_string(),
+        n: name.to_string(),
+        t: text.to_string(),
+    });
     let n = st.base + st.items.len() - 1;
     if st.items.len() > 8 {
         let cut = st.items.len() - 8;
@@ -1338,12 +1420,14 @@ pub fn remember_full(db: &Db, text: &str) -> Option<(String, String)> {
     Some(("📄 Xem đầy đủ".to_string(), format!("full:{n}")))
 }
 
-/// Bản đầy đủ số `n`, nếu còn giữ.
-pub fn full_report(db: &Db, n: usize) -> Option<String> {
+/// Bản đầy đủ số `n` — trả `(id phiên, tên để đọc, nội dung)` nếu còn giữ.
+pub fn full_report(db: &Db, n: usize) -> Option<(String, String, String)> {
     let st: FullStore = db
         .cursor_or_log(FULL_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())?;
-    n.checked_sub(st.base).and_then(|i| st.items.get(i)).cloned()
+    n.checked_sub(st.base)
+        .and_then(|i| st.items.get(i))
+        .map(|it| (it.s.clone(), it.n.clone(), it.t.clone()))
 }
 
 pub fn remember_quick(db: &Db, cmds: &[String]) -> Vec<(String, String)> {
@@ -1515,11 +1599,13 @@ fn quiet_for(last_activity: Option<&str>, now_ms: i64) -> Option<String> {
 /// Nhãn của một cái nút phiên. Cùng ba dữ kiện với dòng chữ, gọn hơn để lọt bề
 /// ngang một cái nút.
 pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
+    // Cùng bộ chấm với `session_list_text` — xem chú thích ở đó về vì sao KHÔNG
+    // dùng `▶`/`⏸`/`⏹`.
     let dot = match (s.host.as_str(), s.asking.is_some(), s.working) {
-        ("dead", _, _) => "⏹",
+        ("dead", _, _) => "⚫",
         (_, true, _) => "⚠",
-        (_, _, true) => "▶",
-        _ => "⏸",
+        (_, _, true) => "🟢",
+        _ => "🟡",
     };
     // Dự án trước, vì đó là thứ ngón tay đang tìm; tên phiên tự sinh chỉ để phân
     // biệt hai phiên cùng dự án.

@@ -103,3 +103,31 @@ fn an_error_string_never_carries_the_bot_token() {
     let plain = "không đọc được nhật ký phiên";
     assert_eq!(hub::logging::redact(plain), plain);
 }
+
+/// Cân cho TỆP hẹp hơn cân cho phần xem trước — và đó là chủ ý.
+///
+/// 🔴 Hà 2026-08-13, ngay cú bấm nút 📎 đầu tiên: *"chưa gửi được
+/// hub.env.example — giữ lại: có dấu hiệu bí mật (credential_word_vi)"*. Tệp
+/// ấy là BẢN MẪU, mọi giá trị đều rỗng; thứ khớp chỉ là chữ "Mật khẩu" trong
+/// nhãn ô nhập. Dùng cân của "thư gửi người ngoài" cho một tệp chủ máy gọi
+/// đích danh thì chặn gần hết tài liệu — và một cái cổng chặn hết là một cái
+/// cổng không ai dùng nữa.
+#[test]
+fn a_template_file_is_not_a_secret_but_a_filled_in_one_is() {
+    use hub::redaction::file_risk;
+
+    // Đúng bản mẫu đã bị chặn oan: có chữ "Mật khẩu", giá trị RỖNG.
+    let template = "# Mật khẩu tfl5 của tài khoản bot\nHUB_TFL5_PASSWORD=\nHUB_TFL5_USER=\n";
+    assert!(file_risk(template).is_empty(), "{:?}", file_risk(template));
+
+    // Tài liệu bình thường: đường dẫn máy, trích CLAUDE.md, tên host — chủ máy
+    // đã có sẵn hết, gửi vào phòng chat của chính anh thì không phải rò rỉ.
+    let doc = "Xem /Users/hanguyen/projects/AI/hub/CLAUDE.md: mục vps-a, [[abc]], blocker còn treo";
+    assert!(file_risk(doc).is_empty(), "{:?}", file_risk(doc));
+
+    // …nhưng GIÁ TRỊ thật thì chặn, cả ba hình dạng.
+    assert_eq!(file_risk("HUB_TFL5_PASSWORD=abc123xyz"), vec!["secret_assignment".to_string()]);
+    assert_eq!(file_risk("Mật khẩu: chim-non-2026"), vec!["secret_assignment".to_string()]);
+    assert!(file_risk("token = sk-abcdefghijklmnop").contains(&"credential_literal".to_string()));
+    assert!(file_risk("-----BEGIN RSA PRIVATE KEY-----").contains(&"private_key_block".to_string()));
+}

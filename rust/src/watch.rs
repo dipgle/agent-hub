@@ -731,14 +731,14 @@ pub fn changes(
         if state == ERRORED && before.is_some_and(|b| b.s != ERRORED) {
             out.push(Change::Failed {
                 id: s.session_id.clone(),
-                name: crate::sessions::display_name(&s.name, &s.folder),
+                name: crate::sessions::unique_label(now, s),
                 line: s.error.clone().unwrap_or_default(),
             });
         } else if state == ASKING && before.is_some_and(|b| b.s != ASKING) {
             let a = s.asking.clone().unwrap_or_default();
             out.push(Change::Asking {
                 id: s.session_id.clone(),
-                name: crate::sessions::display_name(&s.name, &s.folder),
+                name: crate::sessions::unique_label(now, s),
                 header: a.header,
                 question: a.question,
                 options: a.options,
@@ -749,14 +749,14 @@ pub fn changes(
             if epoch_sec - since >= MIN_RUN_SEC {
                 out.push(Change::Finished {
                     id: s.session_id.clone(),
-                    name: crate::sessions::display_name(&s.name, &s.folder),
+                    name: crate::sessions::unique_label(now, s),
                     ran_sec: epoch_sec - since,
                 });
             }
         } else if before.is_some() && state == DEAD {
             out.push(Change::Ended {
                 id: s.session_id.clone(),
-                name: crate::sessions::display_name(&s.name, &s.folder),
+                name: crate::sessions::unique_label(now, s),
                 was_working,
                 tty: s.tty.clone(),
                 kind: s.kind.clone(),
@@ -782,6 +782,29 @@ pub fn changes(
                     "session_end_muted",
                     json!({ "session": id, "lived_sec": epoch_sec - mark.f,
                             "why": "phép dò hạn mức của chính hub — cái chết của nó không phải tin" }),
+                );
+                continue;
+            }
+            // Cửa EDITOR — cùng một cái bẫy, lần thứ hai, và lần này đã biết
+            // trước nên phải dựng cửa TRƯỚC khi nâng cấp chứ không phải sau.
+            //
+            // 2026-08-13 hub thôi liệt kê phiên VS Code (Hà: *"nếu đã không
+            // thao tác được vào vs code thì bỏ đi"*). Lượt chạy ĐẦU TIÊN sau
+            // bản này, sổ cũ còn nguyên **8 hàng editor** đang sống — chúng
+            // "biến khỏi danh sách" vì lượt lọc mới vừa gạt chúng ra, và luật
+            // *"rời khỏi danh sách = đã kết thúc"* sẽ đọc thành 8 cái chết: một
+            // tràng `⏹ đã tắt` cho 8 phiên vẫn đang chạy ngon lành, y hệt vụ ba
+            // tin sai trong 8 giây ngày 08-12 (luật 11b).
+            //
+            // BỎ hẳn khỏi sổ, không giữ lại như cửa MÙ: ở cửa mù, giữ hàng là
+            // đúng vì phiên sẽ quay lại danh sách khi tài khoản hết mù. Ở đây
+            // nó sẽ KHÔNG bao giờ quay lại — hub không nhìn phiên editor nữa —
+            // nên giữ hàng chỉ là để sổ phình ra mãi.
+            if mark.o == "editor" {
+                logging::info(
+                    "session_end_muted",
+                    json!({ "session": id, "host": mark.o,
+                            "why": "phiên VS Code — hub thôi liệt kê chúng, vắng mặt là do LUẬT MỚI chứ không phải nó tắt" }),
                 );
                 continue;
             }

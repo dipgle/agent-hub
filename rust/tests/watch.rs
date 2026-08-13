@@ -670,3 +670,78 @@ fn a_session_stopped_by_an_error_rings_and_says_the_error() {
     }], NOW + 30, &[]);
     assert!(again.is_empty(), "kêu lại lần hai: {again:?}");
 }
+
+/// Bỏ phiên VS Code khỏi danh sách KHÔNG được đọc thành một tràng cáo phó.
+///
+/// 🔴 Cùng cái bẫy đã trả giá 2026-08-12 (ba tin `⏹ đã tắt` trong 8 giây cho ba
+/// phiên đang sống), lần này nhìn thấy trước: chiều 08-13 hub thôi liệt kê phiên
+/// editor (Hà: *"nếu đã không thao tác được vào vs code thì bỏ đi, chỉ làm với
+/// terminal thôi"*), mà sổ lúc ấy còn nguyên **8 hàng editor đang sống**. Lượt
+/// chạy đầu tiên sau bản mới, cả 8 "biến khỏi danh sách" cùng một nhịp — vì
+/// LUẬT đổi, không phải vì chúng tắt.
+#[test]
+fn dropping_vs_code_sessions_must_not_ring_eight_funerals() {
+    let mut editor = mark(IDLE, "", "interactive");
+    editor.o = "editor".to_string();
+    editor.n = "projects-f6".to_string();
+    editor.d = "dwork".to_string();
+    let prev: BTreeMap<String, Mark> = [("ba74012c".to_string(), editor)].into_iter().collect();
+
+    let (events, next) = changes(&prev, &[], NOW, &[]);
+    assert!(events.is_empty(), "báo tử một phiên chỉ vì hub thôi nhìn nó: {events:?}");
+    // BỎ hẳn khỏi sổ — khác cửa MÙ (ở đó phải giữ, vì phiên sẽ quay lại).
+    // Phiên editor sẽ không bao giờ quay lại danh sách nữa.
+    assert!(!next.contains_key("ba74012c"), "giữ lại thì sổ phình ra mãi");
+
+    // …và một phiên terminal biến mất trong CÙNG lượt ấy vẫn được báo: cửa mới
+    // không được gag cả cái loa.
+    let mut both = prev.clone();
+    both.insert("aaaaaaaa".to_string(), mark(IDLE, "ttys002", "interactive"));
+    let (events, _) = changes(&both, &[], NOW, &[]);
+    assert_eq!(events.len(), 1, "đúng một tin, cho phiên terminal: {events:?}");
+    assert!(matches!(events[0], Change::Ended { .. }), "{:?}", events[0]);
+}
+
+/// Hai phiên cùng dự án KHÔNG được đội chung một cái tên trong tin báo.
+///
+/// 🔴 Hà 2026-08-13: mở phiên mới trong VS Code, xong việc thì nhận tin
+/// `[dwork]`, bấm vào lại rơi đúng phiên terminal. Đo trên máy lúc ấy:
+/// `0a109818` (acc3, terminal) và `ba74012c` (acc1, editor) cùng
+/// `folder = "dwork"`; hai tin cách nhau 78 giây mang y hệt một cái tên. Trong
+/// DANH SÁCH thì còn id ngắn bên cạnh để phân biệt — trong TIN BÁO thì nhãn
+/// đứng một mình.
+#[test]
+fn two_sessions_in_one_project_get_two_different_names() {
+    let mut a = sess("0a109818-0000-0000-0000-000000000000", "hanguyen-53", "terminal", false);
+    a.folder = "dwork".into();
+    let mut b = sess("ba74012c-0000-0000-0000-000000000000", "projects-f6", "terminal", false);
+    b.folder = "dwork".into();
+
+    let prev: BTreeMap<String, Mark> = [
+        working_long("0a109818-0000-0000-0000-000000000000"),
+        working_long("ba74012c-0000-0000-0000-000000000000"),
+    ]
+    .into_iter()
+    .collect();
+    let (events, _) = changes(&prev, &[a.clone(), b.clone()], NOW, &[]);
+    let names: Vec<String> = events
+        .iter()
+        .map(|c| match c {
+            Change::Finished { name, .. } => name.clone(),
+            other => panic!("phải là Finished: {other:?}"),
+        })
+        .collect();
+    assert_eq!(names.len(), 2, "{events:?}");
+    assert_ne!(names[0], names[1], "hai phiên khác nhau, một cái tên: {names:?}");
+    assert!(names.iter().all(|n| n.starts_with("[dwork]")), "vẫn phải đọc ra dự án: {names:?}");
+    assert!(names.iter().any(|n| n.contains("0a109818")), "{names:?}");
+
+    // Một mình thì KHÔNG gánh chuỗi hex: ca hiếm không được làm phiền ca thường.
+    let solo_book: BTreeMap<String, Mark> =
+        [working_long("0a109818-0000-0000-0000-000000000000")].into_iter().collect();
+    let (solo, _) = changes(&solo_book, &[a], NOW, &[]);
+    match solo.first() {
+        Some(Change::Finished { name, .. }) => assert_eq!(name, "[dwork]", "thừa id khi không trùng"),
+        other => panic!("phải là Finished: {other:?}"),
+    }
+}

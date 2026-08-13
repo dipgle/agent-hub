@@ -317,6 +317,51 @@ pub fn choice_buttons(
     buttons
 }
 
+/// Gột lớp trang trí Markdown trước khi chữ ra Telegram.
+///
+/// 🔴 Hà 2026-08-13, gửi lại ảnh chụp chính tin của tôi: *"lệnh ở nội dung bị
+/// cắt mất mã"*. Trên ảnh, `**Thử được rồi**` hiện nguyên hai cặp sao,
+/// rào khối hiện nguyên ba dấu nháy ngược, và một dòng lệnh nằm trong nháy
+/// ngược thì bị mấy ký tự ấy cắt vụn ngay giữa.
+///
+/// Gốc: hub gửi `sendMessage` **không kèm `parse_mode`**, tức chữ thuần. Mà
+/// nguồn chữ là báo cáo của một phiên `claude` — thứ viết bằng Markdown theo
+/// bản năng. Hai bên đều đúng phần mình, và người đọc lãnh đủ.
+///
+/// Vì sao gột chứ không bật `parse_mode`: MarkdownV2 của Telegram đòi thoát
+/// **mười tám** ký tự (`_ * [ ] ( ) ~ > # + - = | { } . !`), và một dấu chấm
+/// không thoát làm **cả tin bị từ chối** — tức lỗi hiển thị nhỏ đổi thành lỗi
+/// mất tin. Với một kênh mang lệnh vận hành thì đó là đổi sai chiều.
+///
+/// Chỉ gột những gì CHẮC CHẮN là trang trí, và **giữ nguyên nội dung**:
+/// dòng rào ba-nháy-ngược biến mất còn các dòng bên trong ở lại (đó thường là
+/// chỗ chứa lệnh), cặp `**` và nháy ngược bị bóc. Không đụng tới `_` hay `*`
+/// lẻ — chúng xuất hiện trong tên tệp và đường dẫn thật.
+pub fn strip_markdown(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        let t = line.trim_start();
+        // Rào khối code: bỏ hẳn dòng ấy, giữ nội dung bên trong.
+        if t.starts_with("```") && t.trim_end().len() <= 12 {
+            continue;
+        }
+        let mut s = line.to_string();
+        if s.contains("**") {
+            s = s.replace("**", "");
+        }
+        if s.contains('`') {
+            s = s.replace('`', "");
+        }
+        out.push_str(&s);
+        out.push('\n');
+    }
+    // `lines()` bỏ dấu xuống dòng cuối; trả lại đúng hình dạng cũ.
+    if !text.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 /// `~/x` → `/Users/…/x`. Chữ trên màn hay viết gọn bằng dấu ngã, mà
 /// `Path::canonicalize` không hiểu dấu ấy — nó sẽ đi tìm một thư mục tên `~`.
 fn shellexpand_home(p: &str) -> String {
@@ -520,7 +565,97 @@ impl Inbox {
     fn api(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.token, method)
     }
+}
 
+/// `hub doctor` cho KÊNH CHÍNH — dò thật, không đọc cấu hình rồi đoán.
+///
+/// 🔴 Hà 2026-08-13: *"nội dung readme.md chưa đúng lắm, bây giờ chủ yếu là kênh
+/// telegram"*. Sửa README thì lòi ra chỗ này: `doctor` in mục `channels:` mà
+/// trong đó **chỉ có tfl5** — kênh người ta dùng hằng ngày không có một dòng
+/// nào. Người mới kéo repo về, làm đúng theo README, vẫn không có cách nào biết
+/// bot đã nối được hay chưa; họ sẽ biết bằng cách gõ một lệnh rồi ngồi chờ mãi.
+///
+/// `getMe` chứ không phải `sendMessage`: một phép dò không được đẻ ra tin nhắn.
+/// Và **không bao giờ in token** — chỉ tên biến (luật 4), tên bot, id buồng.
+pub fn health(cfg: &Config) -> crate::adapters::Health {
+    if !cfg.confirm.enabled {
+        return crate::adapters::Health {
+            ok: false,
+            detail: "tắt (confirm.enabled = false)".into(),
+        };
+    }
+    let (token, chat_id) = match (
+        crate::config::secret_from_env(&cfg.confirm.bot_token_env),
+        crate::config::secret_from_env(&cfg.confirm.chat_id_env),
+    ) {
+        (Some(t), Some(c)) => (t, c),
+        (t, c) => {
+            // Thiếu khoá là SKIP-CÓ-LOG chứ không phải hỏng — nhưng ở đây phải
+            // NÓI RA khoá nào thiếu, vì đó chính là việc người đọc phải làm tiếp.
+            let missing: Vec<&str> = [
+                (t.is_none()).then_some(cfg.confirm.bot_token_env.as_str()),
+                (c.is_none()).then_some(cfg.confirm.chat_id_env.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            return crate::adapters::Health {
+                ok: false,
+                detail: format!("thiếu bí mật trong hub.env: {}", missing.join(", ")),
+            };
+        }
+    };
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            return crate::adapters::Health {
+                ok: false,
+                detail: format!("không dựng nổi HTTP client: {e}"),
+            }
+        }
+    };
+    let url = format!("https://api.telegram.org/bot{token}/getMe");
+    let resp = match client.get(&url).send().and_then(|r| r.json::<Value>()) {
+        Ok(v) => v,
+        Err(e) => {
+            // Câu lỗi của reqwest có thể mang nguyên URL, tức mang nguyên token.
+            let msg = e.to_string().replace(&token, "<token>");
+            return crate::adapters::Health {
+                ok: false,
+                detail: format!("gọi getMe hỏng: {msg}"),
+            };
+        }
+    };
+    // `getMe` trả HTTP 200 kèm `{"ok":false}` khi token sai — cùng cái bẫy
+    // `poll_rejected` đã ghi: đọc mã HTTP là đọc nhầm chỗ.
+    if resp.get("ok").and_then(Value::as_bool) != Some(true) {
+        let why = resp
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("Telegram từ chối getMe (không có mô tả)");
+        return crate::adapters::Health {
+            ok: false,
+            detail: format!("token không dùng được: {why}"),
+        };
+    }
+    let who = resp
+        .get("result")
+        .and_then(|r| r.get("username"))
+        .and_then(Value::as_str)
+        .unwrap_or("(không tên)");
+    crate::adapters::Health {
+        ok: true,
+        detail: format!(
+            "@{who} · buồng {chat_id} · khoá từ {} + {}",
+            cfg.confirm.bot_token_env, cfg.confirm.chat_id_env
+        ),
+    }
+}
+
+impl Inbox {
     /// Gửi MỘT file ra Telegram để đọc thẳng trên điện thoại.
     ///
     /// 🔴 Hà 2026-08-13: *"các nội dung có path file thì nên cho click vào nhận
@@ -567,7 +702,9 @@ impl Inbox {
         // chắc chắn hỏng; nó không phải hàng rào.
         let body = std::fs::read_to_string(&real)
             .map_err(|_| "không phải file chữ (cổng quét rò không đọc được) nên hub không gửi".to_string())?;
-        let risk = crate::sessions::preview_risk(&body);
+        // Cân riêng cho TỆP — xem `redaction::file_risk` để biết vì sao không
+        // dùng lại cân của phần xem trước.
+        let risk = crate::redaction::file_risk(&body);
         if !risk.is_empty() {
             logging::warn(
                 "telegram_document_withheld",
@@ -871,6 +1008,15 @@ impl Inbox {
                         // `!` = chạy TRONG phiên: phiên nhìn thấy kết quả và đi
                         // tiếp được. Đi qua `/type`, tức cùng một đường gõ phím
                         // đã có, không đẻ lối riêng.
+                        //
+                        // 🔴 Tôi đã suýt định tuyến nhánh này sang `/cmd` cho
+                        // các lệnh nằm trong `DENIED_TOOLS`, và Hà chặn đúng
+                        // lúc: *"vô lý việc gõ vào phiên là hub làm mà"* ·
+                        // *"sao lại chặn được"*. Anh đúng — `--disallowedTools`
+                        // gác **lời gọi công cụ của AI**, còn `!<lệnh>` là chế
+                        // độ bash của chính TUI, tức đúng cái ngón tay chủ máy
+                        // gõ. Hai thứ khác hẳn nhau, và tôi đã lẫn chúng làm
+                        // một. Giữ nguyên một đường.
                         self.push_text(&format!("/type !{line}"));
                     }
                     None => {
@@ -1107,7 +1253,7 @@ impl Inbox {
         let client = self.client().ok_or("không dựng được HTTP client")?;
         let r = client
             .post(self.api("sendMessage"))
-            .json(&json!({ "chat_id": self.chat_id, "text": text }))
+            .json(&json!({ "chat_id": self.chat_id, "text": strip_markdown(text) }))
             .send()
             .map_err(|e| e.to_string())?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
@@ -1165,7 +1311,7 @@ impl Inbox {
             .post(self.api("sendMessage"))
             .json(&json!({
                 "chat_id": self.chat_id,
-                "text": text,
+                "text": strip_markdown(text),
                 "reply_markup": { "inline_keyboard": keyboard },
             }))
             .send()

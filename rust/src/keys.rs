@@ -620,7 +620,18 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
         }
         let mut line = raw.trim();
         // Dấu nhắc và dấu trang trí của TUI đứng trước lệnh.
-        for p in ["$ ", "❯ ", "> ", "⏵ ", "% ", "• ", "- "] {
+        //
+        // 🔴 `!` vào danh sách 2026-08-13, và nó là chỗ mỉa mai nhất trong tệp
+        // này: `!<lệnh>` là **quy ước của chính hub** — nút `▶` gõ đúng hình
+        // dạng ấy vào phiên để lệnh chạy TRONG phiên. Phiên học theo, viết
+        // `! git -C … push origin main` trong báo cáo, và hub **không nhận ra
+        // quy ước của chính mình**: `!` không có trong danh sách bóc nên từ đầu
+        // tiên là `!`, không phải `git` ⟹ 0 nút. Hà bắt được bằng ảnh chụp:
+        // *"rõ ràng có lệnh chạy trong nội dung nhưng lại không có nút để chạy
+        // nó"*.
+        //
+        // Bóc cả hai dạng: `! git …` và `!git …`.
+        for p in ["$ ", "❯ ", "> ", "⏵ ", "% ", "• ", "- ", "! ", "!"] {
             if let Some(rest) = line.strip_prefix(p) {
                 line = rest.trim();
             }
@@ -644,17 +655,11 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
             line
         };
         let line = line.trim();
-        // Câu văn thường mang một mệnh đề trong ngoặc hoặc một dấu phẩy; một
-        // dòng lệnh thật thì hiếm khi có. Thà bỏ sót một nút còn hơn dựng một
-        // cái nút chạy nhầm.
-        if line.contains(" (") || line.contains(", ") {
-            continue;
-        }
         if line.len() < 4 || line.len() > 300 {
             continue;
         }
-        // Câu văn có dấu chấm câu cuối thì không phải lệnh.
-        if line.ends_with('.') || line.ends_with(':') || line.ends_with('?') {
+        // MỘT bộ luật cho cả hai lượt quét — xem `looks_like_prose`.
+        if looks_like_prose(line) {
             continue;
         }
         let Some(first) = line.split_whitespace().next() else {
@@ -698,6 +703,11 @@ pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
         };
         let cmd = cmd.as_str();
         if cmd.len() < 4 || cmd.len() > 300 {
+            continue;
+        }
+        // CÙNG bộ luật với lượt quét theo dòng — xem `looks_like_prose`. Thiếu
+        // đúng cửa này là chỗ dòng trang trí của hub lọt ra shell.
+        if looks_like_prose(cmd) || forbids(cmd) {
             continue;
         }
         let Some(first) = cmd.split_whitespace().next() else {
@@ -786,6 +796,41 @@ pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
         out.drain(..out.len() - max);
     }
     out
+}
+
+/// Đây là CÂU VĂN chứ không phải một dòng lệnh?
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp màn phiên codetrail: *"bấm vào nút chạy lệnh thì
+/// bị dính text ngoài như này"*. Thứ hub gõ vào phiên là:
+///
+/// ```text
+/// ! ▶ Lệnh thấy trên màn (bấm nút dưới để gõ `!` vào chính phiên): • git -C … push origin main
+/// (eval):1: no matches found: (bấm nút dưới để gõ  vào chính phiên):
+/// ```
+///
+/// Tức **hub đọc lại chính dòng trang trí của nó** rồi biến thành lệnh. Cú push
+/// không hề chạy, mà nhìn thì như đã bấm.
+///
+/// Hai lỗ cùng lúc, và cái thứ hai mới đáng sợ:
+/// * `/shot` tự đính dòng *"▶ Lệnh thấy trên màn…"* vào bản trả lời, rồi lượt
+///   quét sau đọc luôn cả dòng ấy — **một vòng tự ăn chính mình**.
+/// * Lượt quét trong DẤU NHÁY thiếu sạch các cửa lọc câu văn mà lượt quét theo
+///   DÒNG đã có từ lâu (`" ("`, `", "`, dấu câu cuối). Hai lượt quét, hai bộ
+///   luật khác nhau, và không ai nhìn thấy sự lệch cho tới khi nó gõ ra shell.
+///
+/// Nay một bộ luật, dùng cho cả hai lượt — kể cả một cửa nhận ra CHÍNH chữ hub
+/// in ra màn.
+fn looks_like_prose(s: &str) -> bool {
+    // Câu văn thường mang mệnh đề trong ngoặc hoặc dấu phẩy; dòng lệnh thật thì
+    // hiếm khi có. Thà bỏ sót một nút còn hơn dựng một cái nút chạy nhầm thứ.
+    s.contains(" (")
+        || s.contains(", ")
+        || s.ends_with('.')
+        || s.ends_with(':')
+        || s.ends_with('?')
+        // …và chữ của CHÍNH hub trên màn thì tuyệt đối không phải lệnh.
+        || s.contains("Lệnh thấy trên màn")
+        || s.contains("bấm nút")
 }
 
 /// Câu này đang CẤM một lệnh, chứ không mời chạy nó?

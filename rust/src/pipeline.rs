@@ -589,10 +589,23 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         //
         // ⛔ Trừ tin BÁO TỬ: gõ vào một phiên đã tắt là gõ vào chỗ trống — cùng
         // lý do nút "vào phiên" đã bị gỡ khỏi nhánh ấy.
+        // Nút dựng từ BẢN DÀI, không từ bản đã rút gọn.
+        //
+        // 🔴 Hà 2026-08-13: *"ở [dwork] đang có lệnh và cũng không hiển thị nút
+        // chạy"*. Ảnh chụp cho thấy ba dòng `bash ./dci-deploy-be.sh …` nằm
+        // trong một khối ```, và `watch::key_points` **cố ý bỏ khối code** khi
+        // rút gọn (có test riêng cho việc ấy). Hai luật đều đúng một mình: bỏ
+        // khối code cho tin dễ đọc, và dựng nút từ chữ của tin. Ghép lại thì
+        // đúng những dòng ĐÁNG BẤM NHẤT — lệnh người ta viết trong khối code —
+        // là những dòng duy nhất không bao giờ tới được chỗ nhận diện.
+        //
+        // `long` đã qua cổng quét rò ở `last_say` (có dấu hiệu bí mật thì nó
+        // trả `None`), nên đọc nó ở đây không nới rào nào.
+        let scan = long.as_deref().unwrap_or(&text);
         let mut quick = if matches!(c, crate::watch::Change::Ended { .. }) {
             Vec::new()
         } else {
-            remember_quick(db, &crate::keys::commands_on_screen(&text, 3))
+            remember_quick(db, &crate::keys::commands_on_screen(scan, 3))
         };
         // …và file được NHẮC TỚI thì phải MỞ ĐƯỢC. Một báo cáo nói "xem
         // ARCHITECTURE.md" trên điện thoại là nói tới thứ không mở nổi, trừ khi
@@ -600,7 +613,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // tắt, nhưng ở đây lý do khác — file thì vẫn còn, chỉ là một tin báo tử
         // không phải chỗ để đọc tài liệu.
         if !matches!(c, crate::watch::Change::Ended { .. }) {
-            quick.extend(remember_files(db, &id, &crate::keys::paths_on_screen(&text, 2)));
+            quick.extend(remember_files(db, &id, &crate::keys::paths_on_screen(scan, 4)));
         }
         // "… (còn N dòng)" phải có đường đi tiếp — xem `remember_full`.
         if text.contains("… (còn ") {
@@ -1419,6 +1432,29 @@ pub const MAX_SESSION_BUTTONS: usize = 12;
 /// Mỗi dòng trả lời đúng ba câu: **phiên nào** (tên · tài khoản), **đang chạy
 /// hay đứng chờ**, và **id ngắn** để gõ tiếp `/stop`, `/handover`. Phiên đang
 /// theo có dấu 👁 vì mọi lệnh không mang id sẽ rơi vào chính nó.
+/// Phiên này mở ra từ ĐÂU — và nó trả lời luôn câu "gõ vào được không".
+///
+/// 🔴 Hà 2026-08-13, ngay sau khi phiên VS Code hiện lên danh sách: *"ở danh
+/// sách phiên nên thêm icon biểu diễn nguồn là terminal hay vs code"*. Đúng
+/// chỗ: từ hôm nay danh sách trộn hai loại phiên **trông y hệt nhau mà làm
+/// được hai việc khác nhau** — gõ thẳng (`/type` `/key` `/shot`) chỉ chạy trên
+/// phiên Terminal. Không có dấu phân biệt thì người đọc phải bấm mới biết, và
+/// biết bằng cách nhận một câu từ chối.
+///
+/// Chọn ký hiệu theo VIỆC LÀM ĐƯỢC, không theo thương hiệu: `⌨` = gõ thẳng vào
+/// được; `💻` = xem và hỏi được, gõ thì không; `🌙` = phiên nền (`--bg`), không
+/// có cửa sổ nào; `🔌` = tiến trình rời, không gắn tty.
+pub fn source_icon(host: &str) -> &'static str {
+    match host {
+        "editor" => "💻",
+        "background" => "🌙",
+        "detached" => "🔌",
+        // `dead` giữ ký hiệu của TÌNH TRẠNG (⚫) ở cột sau; ở cột nguồn thì một
+        // phiên đã tắt vẫn từng mở ra từ một cái terminal.
+        _ => "⌨",
+    }
+}
+
 pub fn session_list_text(
     sessions: &[crate::sessions::LiveSession],
     focus: &str,
@@ -1462,8 +1498,9 @@ pub fn session_list_text(
         // Nhãn dự án thay cho tên tự sinh — xem `sessions::display_name`.
         let what = crate::sessions::display_name(&s.name, &s.folder);
         out.push_str(&format!(
-            "{}{} · {} · {} · {}\n",
+            "{}{} {} · {} · {} · {}\n",
             eye,
+            source_icon(&s.host),
             what,
             s.account,
             run,
@@ -1707,7 +1744,7 @@ pub fn remember_files(db: &Db, session_id: &str, paths: &[String]) -> Vec<(Strin
     paths
         .iter()
         .enumerate()
-        .take(3)
+        .take(4)
         .map(|(i, p)| {
             let name = p.rsplit('/').next().unwrap_or(p);
             (
@@ -1822,11 +1859,17 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
             let quick_note = if quick.is_empty() {
                 String::new()
             } else {
+                // Chữ hub tự chèn để dạng COMMENT (Hà 2026-08-13: *"muốn tự chèn
+                // text thì nên để dạng comment"*), sau khi chính dòng này lọt ra
+                // shell và zsh vấp dấu ngoặc — xem `keys::looks_like_prose`.
+                // Cửa lọc đã vá, nhưng một dòng bắt đầu bằng `#` thì dù có lọt
+                // lần nữa cũng chỉ nằm im. Hai lớp, vì lớp thứ nhất đã thủng
+                // một lần.
                 format!(
-                    "\n\n▶ Lệnh thấy trên màn (bấm nút dưới để gõ `!` vào chính phiên):\n{}",
+                    "\n\n# Lệnh thấy trên màn — bấm nút dưới để gõ vào chính phiên:\n{}",
                     quick
                         .iter()
-                        .map(|c| format!("  • {c}"))
+                        .map(|c| format!("#   {c}"))
                         .collect::<Vec<_>>()
                         .join("\n")
                 )
@@ -1935,7 +1978,16 @@ pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
     // Dự án trước, vì đó là thứ ngón tay đang tìm; tên phiên tự sinh chỉ để phân
     // biệt hai phiên cùng dự án.
     let what = crate::sessions::display_name(&s.name, &s.folder);
-    format!("{} {} · {}", dot, crate::exec::truncate(&what, 32), s.account)
+    // Nguồn đứng ngay trên NÚT nữa, không chỉ trên danh sách chữ: cái nút mới là
+    // thứ ngón tay chạm vào, và nó phải nói trước rằng bấm vào một phiên VS Code
+    // thì xem được chứ gõ thì không.
+    format!(
+        "{} {} {} · {}",
+        dot,
+        source_icon(&s.host),
+        crate::exec::truncate(&what, 30),
+        s.account
+    )
 }
 
 /// Tám ký tự đầu của id — đúng thứ `claude stop` nhận, và đúng thứ trang hiện.
@@ -2273,7 +2325,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // ấy trên điện thoại sẽ đi tìm một cửa sổ ở chỗ
                                 // không có, hoặc tìm một phiên nền không tồn
                                 // tại. Nói sai chỗ còn tệ hơn không nói.
-                                let cua_so = if s.window { "cửa sổ terminal" } else { "phiên nền" };
+                                // Dùng đúng bộ ký hiệu của danh sách (xem
+                                // `source_icon`), vì từ 2026-08-13 danh sách đã
+                                // trộn cả phiên VS Code — Hà: *"nếu bật cả vs
+                                // code thì lệnh new cần xác định tạo phiên mới
+                                // ở đâu"*. Câu chào phải trả lời trước câu ấy.
+                                let cua_so = if s.window {
+                                    "⌨ cửa sổ Terminal"
+                                } else {
+                                    "🌙 phiên nền"
+                                };
                                 // NÓI RA hai điều hub vừa quyết hộ, vì cả hai
                                 // đều đổi việc gõ câu tiếp theo (Hà 2026-08-12:
                                 // *"mặc định sẽ focus luôn vào phiên mới → đặt
@@ -2795,6 +2856,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     if go {
                         quick.push(("✅ Làm đi".to_string(), format!("say:{n_cmds}")));
                     }
+                    // …và TỆP thấy trên màn cũng phải mở được ngay tại đây.
+                    //
+                    // 🔴 Hà 2026-08-13: *"trong nội dung có khá nhiều file
+                    // nhưng lại không mở được trên tele, mở nó lại ra trình
+                    // duyệt"*. Thứ anh bấm là **link Telegram tự bắt** (nó thấy
+                    // `DEPLOY.md` thì đoán là tên miền), không phải nút của
+                    // hub — mà nút của hub lúc ấy chỉ gắn ở tin TỰ PHÁT, còn
+                    // `/shot` thì không. Cùng một màn, hai luật khác nhau là
+                    // thứ người dùng đọc thành "lúc được lúc không".
+                    quick.extend(remember_files(db, &want, &crate::keys::paths_on_screen(&ack, 4)));
                 }
                 // Ô nhập đang có sẵn chữ ⟹ một nút GỬI (Hà 2026-08-13: *"có gợi
                 // ý nội dung chat cần có cách bấm nhanh để gửi nó"*). Đi đúng
@@ -3067,7 +3138,25 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     match target {
                         Some(s) => match db.set_cursor(FOCUS_SESSION_KEY, want) {
                             Ok(()) => {
-                                let how = if s.pid == 0 { " — đã dừng, vẫn nói tiếp được" } else { "" };
+                                // Nói ĐÚNG cái còn làm được, không nói chung chung.
+                                //
+                                // 🔴 Hà 2026-08-13: bấm vào một phiên nền đã
+                                // chết, hub chào *"đã dừng, vẫn nói tiếp được"*,
+                                // rồi `/shot` ngay sau đó trả *"không có cửa sổ
+                                // terminal để gõ (host: dead)"*. Hai câu của
+                                // cùng một hub, cách nhau vài giây, chọi nhau.
+                                // Câu đầu đúng theo nghĩa hẹp (`/tell` dựng lại
+                                // được phiên nền) nhưng người đọc hiểu thành
+                                // "gõ tiếp được", vì đó là thứ mọi phiên khác
+                                // cho phép.
+                                let how = match (s.pid == 0, s.host.as_str()) {
+                                    (_, "dead") => {
+                                        " — ĐÃ TẮT: chỉ còn /handover lấy bản bàn giao; gõ thẳng thì không. \
+                                         Dọn khỏi danh sách bằng /stop"
+                                    }
+                                    (true, _) => " — đã dừng, /tell nói tiếp được",
+                                    _ => "",
+                                };
                                 let head =
                                     format!("👁 Đang theo phiên {} ({}){}", s.name, s.account, how);
                                 // KHÔNG chụp lại màn ở đây (Hà 2026-08-12).

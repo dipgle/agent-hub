@@ -110,11 +110,7 @@ pub fn serve(hub_home: &Path) -> Result<()> {
     logging::info("setup_started", json!({ "port": port, "env": env_path.display().to_string() }));
     println!("\n  Mở trang cấu hình hub:\n\n    {url}\n");
     println!("  (chỉ máy này vào được — trang đóng ngay sau khi bạn bấm Lưu)\n");
-    // Mở hộ trình duyệt. Không mở được thì thôi — đường dẫn đã in ở trên rồi,
-    // và một cái `open` hỏng không phải lý do để cả lệnh hỏng.
-    if let Err(e) = std::process::Command::new("open").arg(&url).status() {
-        logging::warn("setup_open_browser_failed", json!({ "err": e.to_string() }));
-    }
+    open_window(&url);
 
     for stream in listener.incoming() {
         let mut stream = match stream {
@@ -136,6 +132,41 @@ pub fn serve(hub_home: &Path) -> Result<()> {
         }
     }
     Err(anyhow!("cổng cấu hình đóng trước khi lưu được gì"))
+}
+
+/// Mở trang cấu hình như một CỬA SỔ ỨNG DỤNG, không phải một tab lẫn trong bầy.
+///
+/// 🔴 Hà 2026-08-13: *"khi chạy ứng dụng thì hiện luôn fe hay phải vào trình
+/// duyệt để thao tác"*. Câu hỏi đúng chỗ: một trang cấu hình mở ra thành tab
+/// thứ ba mươi, cạnh Gmail và mười cái tab tài liệu, thì người không rành kỹ
+/// thuật sẽ lạc mất nó ngay.
+///
+/// Chrome/Edge có `--app=<url>`: cùng một trang, nhưng thành cửa sổ riêng,
+/// không thanh địa chỉ, không tab — nhìn và dùng như một ứng dụng. Không có
+/// trình duyệt nào trong danh sách thì rơi về `open` thường; và `open` hỏng nốt
+/// thì cũng KHÔNG làm hỏng cả lệnh, vì đường dẫn đã in ra màn hình rồi.
+fn open_window(url: &str) {
+    const APP_BROWSERS: &[&str] = &["Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium"];
+    for b in APP_BROWSERS {
+        let ok = std::process::Command::new("open")
+            .args(["-na", b, "--args", &format!("--app={url}")])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            logging::info("setup_window_opened", json!({ "as": "app", "browser": b }));
+            return;
+        }
+    }
+    match std::process::Command::new("open").arg(url).status() {
+        Ok(s) if s.success() => {
+            logging::info("setup_window_opened", json!({ "as": "browser-tab" }));
+        }
+        other => logging::warn(
+            "setup_open_failed",
+            json!({ "detail": format!("{other:?}"), "url_printed": true }),
+        ),
+    }
 }
 
 /// Trả `true` khi vừa lưu xong — chỗ gọi lấy đó làm dấu dừng.

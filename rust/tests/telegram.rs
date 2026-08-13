@@ -710,6 +710,55 @@ fn a_command_the_terminal_wrapped_is_joined_back_not_dropped() {
     assert!(hub::keys::commands_on_screen(block, 4).is_empty());
 }
 
+/// Lệnh nằm trong KHỐI CODE vẫn phải ra nút.
+///
+/// 🔴 Hà 2026-08-13: *"ở [dwork] đang có lệnh và cũng không hiển thị nút chạy"*.
+/// Ba dòng `bash ./dci-deploy-be.sh …` nằm trong một khối ```, mà
+/// `watch::key_points` **cố ý bỏ khối code** khi rút gọn tin — rồi nút lại được
+/// dựng từ bản đã rút gọn ấy. Hai luật đều đúng một mình; ghép lại thì đúng
+/// những dòng ĐÁNG BẤM NHẤT là những dòng duy nhất không tới được chỗ nhận
+/// diện. Nay `announce_changes` quét BẢN DÀI; test này giữ vế còn lại: bộ nhận
+/// diện phải đọc được khối code khi được đưa cho nó.
+#[test]
+fn commands_inside_a_fenced_block_still_become_buttons() {
+    let report = "Deploy vẫn bị chặn quyền. Ba lệnh cần bạn chạy:\n\
+        ```\n\
+        bash ./dci-deploy-be.sh module/\n\
+        bash ./dci-deploy-be.sh dci/leave-quota/\n\
+        bash ./dci-deploy-be.sh dci/config/holiday/\n\
+        ```";
+    let got = hub::keys::commands_on_screen(report, 4);
+    assert_eq!(got.len(), 3, "{got:?}");
+    assert!(got.contains(&"bash ./dci-deploy-be.sh module/".to_string()), "{got:?}");
+    assert!(
+        got.contains(&"bash ./dci-deploy-be.sh dci/config/holiday/".to_string()),
+        "{got:?}"
+    );
+    // Dấu rào ``` không phải một lệnh.
+    assert!(!got.iter().any(|c| c.contains("``")), "{got:?}");
+}
+
+/// `!<lệnh>` là quy ước của CHÍNH hub — nó phải nhận ra được chữ mình dạy.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp màn `[AI/codetrail]`: *"rõ ràng có lệnh chạy
+/// trong nội dung nhưng lại không có nút để chạy nó"*. Dòng trên màn là
+/// `! git -C ~/projects/AI/codetrail push origin main` — đúng hình dạng nút
+/// `▶` gõ vào phiên, mà `!` lại không nằm trong danh sách dấu nhắc cần bóc, nên
+/// từ đầu tiên là `!` chứ không phải `git` ⟹ 0 nút.
+#[test]
+fn hub_recognises_the_bang_prefix_it_invented() {
+    let screen = "Anh gõ giúp:\n  ! git -C ~/projects/AI/codetrail push origin main";
+    assert_eq!(
+        hub::keys::commands_on_screen(screen, 4),
+        vec!["git -C ~/projects/AI/codetrail push origin main".to_string()]
+    );
+    // Dạng không có dấu cách cũng thế.
+    assert_eq!(
+        hub::keys::commands_on_screen("!cargo test --offline", 4),
+        vec!["cargo test --offline".to_string()]
+    );
+}
+
 /// File được NHẮC TỚI phải mở được — nhưng chỉ file chữ, chỉ đường tuyệt đối.
 ///
 /// 🔴 Hà 2026-08-13: *"các nội dung có path file thì nên cho click vào nhận
@@ -933,4 +982,120 @@ fn text_waiting_in_the_input_box_is_read_back_for_a_send_button() {
 ────────────────────────────────────────
   ⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt";
     assert_eq!(hub::keys::input_box_text(empty), None);
+}
+
+/// Lệnh trên màn của phiên ĐANG THEO thì gõ thẳng vào phiên ấy — một đường.
+///
+/// 📌 Ở đây từng có một test cho `denied_for_session`, dựng trên tiền đề rằng
+/// `!<lệnh>` bị `DENIED_TOOLS` chặn. Hà chặn đúng lúc: *"vô lý việc gõ vào
+/// phiên là hub làm mà"*. `DENIED_TOOLS` gác lời gọi công cụ của AI; `!` là chế
+/// độ bash của TUI, tức ngón tay chủ máy. Một cái nút, một con đường.
+#[test]
+fn a_quick_command_button_always_types_into_the_session() {
+    assert_eq!(
+        callback_to_command("run:0"),
+        None,
+        "`run:` do Inbox tự xử, không biến thành dòng lệnh ở đây"
+    );
+}
+
+/// Danh sách phải nói phiên mở ra từ ĐÂU — vì hai nguồn làm được hai việc khác nhau.
+///
+/// 🔴 Hà 2026-08-13, ngay sau khi phiên VS Code hiện lên: *"ở danh sách phiên
+/// nên thêm icon biểu diễn nguồn là terminal hay vs code"*. Từ hôm nay danh
+/// sách trộn hai loại phiên trông y hệt nhau mà `/type` `/key` `/shot` chỉ chạy
+/// trên phiên Terminal — không có dấu phân biệt thì người đọc biết bằng cách
+/// nhận một câu từ chối.
+#[test]
+fn the_list_says_whether_a_session_lives_in_a_terminal_or_an_editor() {
+    use hub::pipeline::source_icon;
+
+    assert_eq!(source_icon("terminal"), "⌨", "gõ thẳng vào được");
+    assert_eq!(source_icon("editor"), "💻", "xem và hỏi được, gõ thì không");
+    assert_eq!(source_icon("background"), "🌙");
+    assert_eq!(source_icon("detached"), "🔌");
+
+    // ⚠ Dòng `editor` KHÔNG còn tới được danh sách: chiều 2026-08-13 hub thôi
+    // liệt kê phiên VS Code (`sessions::snapshot`, Hà: *"nếu đã không thao tác
+    // được vào vs code thì bỏ đi, chỉ làm với terminal thôi"*). Bảng tra ở trên
+    // vẫn giữ nhánh ấy — nó là một phép tra thuần, và giữ để nếu có ngày phiên
+    // editor quay lại thì ký hiệu đã sẵn. Còn phần dựng chữ dưới đây phải đo
+    // trên loại phiên CÒN xảy ra thật, không thì test canh một màn hình không
+    // ai nhìn thấy nữa.
+    let mut term = sess("aaaaaaaa-0000-0000-0000-000000000000", "projects-ff", "acc1", true);
+    term.folder = "AI/hub".into();
+    let mut bg = sess("bbbbbbbb-0000-0000-0000-000000000000", "merge init", "acc1", false);
+    bg.folder = "games".into();
+    bg.host = "background".into();
+
+    let text = session_list_text(&[term.clone(), bg.clone()], "", NOW);
+    let l_term = text.lines().find(|l| l.contains("[AI/hub]")).unwrap_or_default();
+    let l_bg = text.lines().find(|l| l.contains("[games]")).unwrap_or_default();
+    assert!(l_term.contains("⌨"), "{text}");
+    assert!(l_bg.contains("🌙"), "{text}");
+    assert!(!l_term.contains("🌙"), "gắn nhầm nguồn: {text}");
+
+    // Và trên NÚT nữa — cái nút mới là thứ ngón tay chạm vào.
+    assert!(session_button_label(&bg).contains("🌙"), "{}", session_button_label(&bg));
+    assert!(session_button_label(&term).contains("⌨"), "{}", session_button_label(&term));
+}
+
+/// Chữ ra Telegram phải sạch dấu trang trí — vì kênh ấy KHÔNG parse markdown.
+///
+/// 🔴 Hà 2026-08-13, gửi lại ảnh chụp chính tin của tôi: *"lệnh ở nội dung bị
+/// cắt mất mã"*. Trên ảnh: hai cặp sao hiện nguyên, ba dấu nháy của khối code
+/// hiện nguyên, và một dòng lệnh bị mấy ký tự ấy cắt vụn giữa chừng.
+#[test]
+fn telegram_text_loses_the_decoration_but_never_the_command() {
+    use hub::telegram::strip_markdown;
+
+    let msg = "**Thử được rồi** — ba nút `bash ./x.sh` phải hiện.\n\
+        ```\n\
+        bash ./dci-deploy-be.sh module/\n\
+        ```\n\
+        Xong.";
+    let got = strip_markdown(msg);
+    assert!(!got.contains("**"), "{got}");
+    assert!(!got.contains('`'), "{got}");
+    // NỘI DUNG trong khối code ở lại — đó thường là chỗ chứa lệnh.
+    assert!(got.contains("bash ./dci-deploy-be.sh module/"), "{got}");
+    assert!(got.contains("Thử được rồi"), "{got}");
+    assert!(got.contains("bash ./x.sh"), "{got}");
+
+    // Không đụng tới `_` và `*` lẻ: chúng nằm trong tên tệp và đường dẫn thật.
+    let path = "xem /tmp/a_b-c*.md rồi báo";
+    assert_eq!(strip_markdown(path), path);
+}
+
+/// hub KHÔNG được đọc lại chữ của chính nó rồi biến thành lệnh.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp màn phiên codetrail: *"bấm vào nút chạy lệnh thì
+/// bị dính text ngoài như này"*. Thứ gõ vào phiên là nguyên dòng trang trí của
+/// hub kèm cả câu trong ngoặc; zsh vấp dấu ngoặc và **cú push không hề chạy**,
+/// nhưng nhìn thì như đã bấm.
+#[test]
+fn hub_never_reads_its_own_decoration_back_as_a_command() {
+    // Chép đúng hình dạng dòng đã lọt ra shell.
+    let echoed = "▶ Lệnh thấy trên màn (bấm nút dưới để gõ `!` vào chính phiên):\n\
+                  • git -C ~/projects/AI/codetrail push origin main";
+    let got = hub::keys::commands_on_screen(echoed, 4);
+    // Dòng lệnh THẬT (sau dấu •) vẫn phải ra nút…
+    assert_eq!(
+        got,
+        vec!["git -C ~/projects/AI/codetrail push origin main".to_string()],
+        "{got:?}"
+    );
+    // …còn dòng trang trí thì tuyệt đối không.
+    assert!(
+        !got.iter().any(|c| c.contains("bấm nút") || c.contains("Lệnh thấy")),
+        "chữ của chính hub thành lệnh: {got:?}"
+    );
+
+    // Lượt quét trong DẤU NHÁY phải dùng CÙNG bộ luật — đây là chỗ đã thủng.
+    let in_ticks = "chạy `git push (bấm nút dưới để gõ vào phiên): thêm chữ`";
+    assert!(
+        hub::keys::commands_on_screen(in_ticks, 4).is_empty(),
+        "{:?}",
+        hub::keys::commands_on_screen(in_ticks, 4)
+    );
 }

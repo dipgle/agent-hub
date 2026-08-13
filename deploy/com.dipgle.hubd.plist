@@ -6,9 +6,27 @@
   this is the only unit there is. (There is no local web console any more; the
   phone page on tfl5 is the only UI.)
 
+  ⚠ ĐÂY LÀ BẢN MẪU — chưa chạy được cho tới khi thay ba chỗ.
+
+  launchd KHÔNG hiểu `~` hay `$HOME`: mọi đường dẫn phải là đường TUYỆT ĐỐI của
+  máy đang cài. Mà một repo công khai thì không được mang đường dẫn của máy ai
+  cả (Hà 2026-08-13: *"mọi đường dẫn file khi public phải là đường dẫn động vì
+  nó là ứng dụng công khai"*). Nên chỗ nào phải cứng thì để DẤU CHỖ, và người
+  cài thay bằng đường của chính mình:
+
+    __HOME__         → $HOME của bạn            (vd /Users/an)
+    __INSTALL_DIR__  → $HOME/Library/Application Support/hub
+    __HUB_CONFIG__   → <thư mục hub>/hub.config.json
+
+  Một dòng làm hết:
+    sed -e "s|__HOME__|$HOME|g" \
+        -e "s|__INSTALL_DIR__|$HOME/Library/Application Support/hub|g" \
+        -e "s|__HUB_CONFIG__|$PWD/hub.config.json|g" \
+        deploy/com.dipgle.hubd.plist > ~/Library/LaunchAgents/com.dipgle.hubd.plist
+
   Install:
-    deploy/install.sh                       (builds, installs a SIGNED copy)
-    cp deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/
+    ./hub self-install                      (build, ký, cài bản SIGNED)
+    # rồi dòng sed ở trên, rồi:
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist
   Status / logs:
     launchctl print gui/$(id -u)/com.dipgle.hubd | head -20
@@ -36,7 +54,7 @@
        ngoài tầm với của cargo; đổi nó phải cố ý chạy `deploy/install.sh`. -->
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/hanguyen/Library/Application Support/hub/bin/hubd</string>
+    <string>__INSTALL_DIR__/bin/hubd</string>
   </array>
 
   <!-- Thư mục làm việc phải nằm NGOÀI ~/Documents. Đo 2026-08-10: để nó ở
@@ -44,13 +62,13 @@
        `open$NOCANCEL` chờ một hộp thoại TCC không bao giờ hiện lên cho tiến
        trình nền. Không có log, không có mã lỗi, chỉ là một pid nằm im. -->
   <key>WorkingDirectory</key>
-  <string>/Users/hanguyen/Library/Application Support/hub</string>
+  <string>__INSTALL_DIR__</string>
 
   <key>EnvironmentVariables</key>
   <dict>
     <!-- gh, claude, git and sqlite3 live outside launchd's default PATH -->
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/Users/hanguyen/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/opt/homebrew/bin:/usr/local/bin:__HOME__/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <!-- Thư mục làm việc không còn nằm trong repo, nên hub không thể tìm
          `hub.config.json` bằng cách đi ngược lên từ cwd nữa. Chỉ thẳng đường:
          thiếu dòng này, hub rơi về cấu hình mặc định và ghi
@@ -63,7 +81,7 @@
          dòng dưới quay về `Documents` thì `install.sh` kế tiếp cài đè lại đường
          cũ mà không ai thấy. -->
     <key>HUB_CONFIG</key>
-    <string>/Users/hanguyen/projects/AI/hub/hub.config.json</string>
+    <string>__HUB_CONFIG__</string>
 
     <key>HUB_LOG_LEVEL</key>
     <string>info</string>
@@ -105,8 +123,8 @@
     lần, vì bản cài mang chữ ký cố định — trước đây mỗi lần build là mất quyền.
   -->
   <key>StandardOutPath</key>
-  <string>/Users/hanguyen/Library/Logs/hubd.out</string>
+  <string>__HOME__/Library/Logs/hubd.out</string>
   <key>StandardErrorPath</key>
-  <string>/Users/hanguyen/Library/Logs/hubd.err</string>
+  <string>__HOME__/Library/Logs/hubd.err</string>
 </dict>
 </plist>

@@ -47,6 +47,73 @@ const PATTERNS: [(&str, &str); 10] = [
     ),
 ];
 
+/// Cổng riêng cho MỘT TỆP chủ máy tự tay xin — hẹp hơn, và có lý do.
+///
+/// 🔴 Hà 2026-08-13, ngay lần bấm nút 📎 đầu tiên: *"chưa gửi được
+/// hub.env.example — giữ lại: có dấu hiệu bí mật (credential_word_vi)"*. Tệp
+/// ấy là **bản mẫu**, mọi giá trị đều rỗng; thứ khớp chỉ là chữ *"Mật khẩu"*
+/// trong nhãn ô nhập.
+///
+/// Nhìn kỹ thì không phải một luật lỡ tay, mà là **dùng sai cái cân**. Bộ
+/// `PATTERNS` sinh ra cho *"a reply to an outside sender"* (dòng đầu tệp này),
+/// rồi được mượn sang phần xem trước của phiên. Đem nguyên nó áp cho một tệp
+/// thì gần như mọi tài liệu trong repo đều bị chặn: `/Users/…` dính
+/// `local_filesystem_path`, `CLAUDE.md:` dính `internal_notes_citation`,
+/// `[[abc]]` dính `memory_wikilink`, và bất kỳ trang nào nhắc tới mật khẩu
+/// dính `credential_word`. Một cái cổng chặn hết thì không ai dùng cửa ấy nữa.
+///
+/// Chỗ khác nhau nằm ở NGƯỜI NHẬN và ở AI CHỌN:
+/// * Phần xem trước là **mảnh chữ hub tự chọn gửi** — không ai nhìn trước, nên
+///   phải ngờ cả những chữ chỉ *gợi ý* có bí mật.
+/// * Tệp này là thứ **chủ máy gọi đích danh**, gửi vào **phòng chat của chính
+///   anh** (gác bằng `chat_id`). Đường dẫn máy anh, ghi chú của anh, tên host
+///   của anh — anh đã có sẵn. Cái duy nhất thật sự nguy là một **GIÁ TRỊ** bí
+///   mật lọt vào một tệp anh tưởng là vô hại.
+///
+/// Nên ở đây chỉ chặn giá trị, ba hình dạng:
+/// * `credential_literal` — token có hình dạng nhận ra được.
+/// * `private_key_block` — khối khoá riêng.
+/// * `secret_assignment` — `MẬT_KHẨU = <có gì đó>`; **rỗng thì không tính**,
+///   và đó đúng là chỗ `hub.env.example` khác `hub.env`.
+pub fn file_risk(text: &str) -> Vec<String> {
+    let mut hits: Vec<String> = leak_scan(text, &[])
+        .into_iter()
+        .filter(|c| c == "credential_literal" || c == "private_key_block")
+        .collect();
+    if secret_assignment().is_match(text) {
+        hits.push("secret_assignment".to_string());
+    }
+    hits.sort();
+    hits.dedup();
+    hits
+}
+
+/// `PASSWORD=abc` — khoá nghe như bí mật, và **có giá trị đứng sau**.
+///
+/// Vế "có giá trị" là cả luật: `HUB_TFL5_PASSWORD=` trong bản mẫu thì không
+/// khớp, còn `HUB_TFL5_PASSWORD=abc` trong tệp thật thì khớp. Không có vế ấy
+/// thì mọi bản mẫu `.env` trên đời đều bị chặn, mà bản mẫu chính là tệp người
+/// mới cần đọc nhất.
+fn secret_assignment() -> &'static Regex {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| {
+        Regex::new(
+            // 🔴 KHÔNG có `\b`, và đó là cả bài học của lần chạy đầu: bản đầu
+            // viết `\bpass(word)?\b` — không khớp `HUB_TFL5_PASSWORD` vì `_`
+            // cũng là ký tự từ, nên không có ranh giới nào ở đó. Tức luật bỏ
+            // sót đúng hình dạng phổ biến nhất trên đời: **tên biến môi
+            // trường**. Ở một cái cổng bảo mật, khớp rộng là chặn nhầm (phiền),
+            // khớp hẹp là lọt (mất). Chọn rộng.
+            //
+            // Hai vế còn lại giữ chặt: giá trị phải nằm CÙNG DÒNG (`[ \t]*`
+            // không nuốt được xuống dòng) và phải KHÁC RỖNG — đó đúng là chỗ
+            // `hub.env.example` khác `hub.env`.
+            r"(?i)(pass(word)?|secret|token|api[_-]?key|private[_-]?key|credential|m[aậ]t\s*kh[aẩ]u|m[aã]\s*b[ií]\s*m[aậ]t)[^\n:=]*[:=][ \t]*[^\s]",
+        )
+        .expect("built-in secret-assignment pattern must compile")
+    })
+}
+
 fn compiled() -> &'static Vec<(Regex, &'static str)> {
     static C: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
     C.get_or_init(|| {

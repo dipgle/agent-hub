@@ -213,14 +213,18 @@ pub struct SessionsSnapshot {
     /// Per-account problems: CLI missing, not logged in, unparseable output.
     /// An account that failed must not look like an account with no sessions.
     pub notes: Vec<String>,
-    /// How many editor-hosted sessions were left out of `sessions`.
+    /// Bao nhiêu phiên trong `sessions` là phiên chạy trong EDITOR (VS Code).
     ///
-    /// This number has to reach the SCREEN, not just the log. The whole reason
-    /// the editor rows are hidden is a question Hà asked on 2026-08-09 — *"máy
-    /// đang chỉ mở 3 phiên terminal mà giao diện vẫn hiện 13 phiên?"* — and
-    /// hiding them silently sets up the mirror image of it: right now the
-    /// machine runs 11 sessions and the phone lists 3. A list that got shorter
-    /// without saying why is a list that gets argued with.
+    /// ⚠ Tên trường còn chữ `hidden` là dấu vết lịch sử: tới 2026-08-13 chúng
+    /// bị GIẤU thật, nay chỉ còn được ĐẾM và gắn ghi chú. Giữ tên để `portal`
+    /// và trang điện thoại khỏi lệch hình dạng dữ liệu trong cùng một lượt sửa;
+    /// ý nghĩa mới nằm ở đây và ở log `sessions_editor_shown`.
+    ///
+    /// Con số này phải tới được MÀN HÌNH, không chỉ nằm trong log. Nó sinh ra
+    /// từ câu Hà hỏi 2026-08-09 — *"máy đang chỉ mở 3 phiên terminal mà giao
+    /// diện vẫn hiện 13 phiên?"* — và việc giấu lặng lẽ dựng lên đúng cái ảnh
+    /// ngược lại: máy chạy 11 phiên, điện thoại kê 3. Một danh sách ngắn đi mà
+    /// không nói vì sao là một danh sách bị cãi.
     #[serde(default)]
     pub hidden_editor: usize,
     /// Tên những tài khoản KHÔNG liệt kê được phiên ở lượt này.
@@ -337,16 +341,95 @@ pub fn transcript_error(tail: &str) -> Option<String> {
 /// Đường đầy đủ chứ không phải mỗi lá cuối, vì `amm` một mình không nói được nó
 /// nằm trong `tcc`.
 ///
-/// ⚠ Hai phiên cùng một dự án thì nhãn giống nhau. Chấp nhận có ý thức: chỗ cần
-/// phân biệt là DANH SÁCH, mà ở đó mỗi dòng đã mang sẵn id ngắn (`76534706`).
+/// ⚠ Hai phiên cùng một dự án thì nhãn giống nhau — và cái "chấp nhận có ý
+/// thức" viết ở đây (*"chỗ cần phân biệt là DANH SÁCH, mà ở đó mỗi dòng đã mang
+/// sẵn id ngắn"*) đã **trả giá 2026-08-13**: trong TIN BÁO và trên NÚT thì nhãn
+/// đứng một mình, không có id nào bên cạnh. Xem `unique_label`.
 ///
 /// Chưa biết dự án thì **giữ nguyên tên** — không bịa một cái nhãn rỗng.
+/// Dự án của từng phiên, nhớ lại giữa các lượt đo.
+///
+/// 🔴 Hà 2026-08-13: *"mất phiên dwork"*. Đo ra: phiên **vẫn sống** (`ttys002`,
+/// pid 73954, chạy 2h08) — thứ mất là CÁI NHÃN. `folder_from_tail` suy dự án
+/// bằng cách tìm dấu vết đường dẫn trong đoạn nhật ký vừa nạp; lượt nào đuôi
+/// nhật ký toàn chữ hội thoại thì nó về rỗng, và `display_name` rơi xuống tên
+/// tự sinh (`hanguyen-53`). Nhãn nhấp nháy `[dwork]` ↔ `hanguyen-53` giữa hai
+/// lượt đo, mà trên điện thoại thì đọc thành **một phiên biến mất và một phiên
+/// lạ xuất hiện**.
+///
+/// Cùng một bài học đã ghi ở luật 11b: *một phép đo hỏng không phải một sự thật
+/// về thế giới*. Ở đó là `claude agents` trả danh sách rỗng ⟹ giữ nguyên hàng
+/// trong sổ; ở đây là suy-dự-án về rỗng ⟹ giữ nguyên cái nhãn đã biết.
+///
+/// Bộ nhớ nằm trong tiến trình chứ không xuống đĩa: sổ `watch:sessions` đã giữ
+/// `Mark.d` để dùng sau khi khởi động lại, còn chỗ này chỉ cần vá đúng cái
+/// nhấp nháy giữa hai lượt đo trong CÙNG một lần chạy.
+static FOLDER_MEMO: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> =
+    std::sync::OnceLock::new();
+
+fn folder_memo() -> &'static std::sync::Mutex<HashMap<String, String>> {
+    FOLDER_MEMO.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Ghi nhớ dự án của một phiên. Rỗng thì KHÔNG ghi đè cái đã biết.
+fn remember_folder(session_id: &str, folder: &str) {
+    if folder.trim().is_empty() {
+        return;
+    }
+    if let Ok(mut m) = folder_memo().lock() {
+        m.insert(session_id.to_string(), folder.to_string());
+    }
+}
+
+/// Dự án đã nhớ của phiên này, nếu từng đo được lần nào.
+fn recall_folder(session_id: &str) -> Option<String> {
+    folder_memo()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(session_id).cloned())
+        .filter(|f| !f.trim().is_empty())
+}
+
 pub fn display_name(name: &str, folder: &str) -> String {
     let f = folder.trim_matches('/');
     if f.is_empty() {
         return name.to_string();
     }
     format!("[{f}]")
+}
+
+/// Nhãn dùng để GỌI TÊN một phiên — và nó phải chỉ đúng MỘT phiên.
+///
+/// 🔴 Hà 2026-08-13, ảnh chụp Telegram: mở một phiên mới trong VS Code, gửi
+/// việc, xong thì nhận tin báo `[dwork]` — bấm vào lại rơi đúng phiên terminal.
+/// Đo lại ngay lúc ấy trên máy: `0a109818` (acc3, terminal `ttys002`) và
+/// `ba74012c` (acc1, editor) **cùng `folder = "dwork"`**, nên cùng đọc ra
+/// `[dwork]`; hai tin cách nhau 78 giây (10:13:46Z · 10:15:04Z) đội chung một
+/// cái tên, và không có gì trong tin phân biệt được chúng.
+///
+/// Gốc nằm ở chính `display_name`: nó **vứt phần phân biệt được** (tên tự sinh,
+/// duy nhất) để lấy phần KHÔNG phân biệt được (dự án, dùng chung). Chú thích cũ
+/// ở đầu tệp có ghi nhận và chấp nhận điều đó — *"chỗ cần phân biệt là DANH
+/// SÁCH, mà ở đó mỗi dòng đã mang sẵn id ngắn"*. Vế ấy đúng cho danh sách và
+/// SAI cho hai chỗ còn lại: trong tin báo và trên NÚT, cái nhãn đứng một mình,
+/// nó là tất cả những gì người đọc có.
+///
+/// Nên chỉ thêm id khi THẬT SỰ trùng: bắt mọi tin nhắn gánh một chuỗi hex cho
+/// một ca hiếm thì đổi một lỗi hiếm lấy một phiền hà thường trực.
+///
+/// Bỏ phiên editor khỏi danh sách (cùng ngày) làm ca `[dwork]` ấy hết, nhưng
+/// KHÔNG làm hết cả lớp: đo cùng lúc, `projects-fd` và `merge xem init-project`
+/// đều mang `AI/codetrail`. Vá ở đây là vá lớp.
+pub fn unique_label(rows: &[LiveSession], s: &LiveSession) -> String {
+    let base = display_name(&s.name, &s.folder);
+    let clashes = rows
+        .iter()
+        .any(|r| r.session_id != s.session_id && display_name(&r.name, &r.folder) == base);
+    if !clashes {
+        return base;
+    }
+    let short = s.session_id.split('-').next().unwrap_or(&s.session_id);
+    format!("{base}·{short}")
 }
 
 
@@ -515,6 +598,17 @@ const SECRET_LABELS: [&str; 4] = [
 /// scp / rsync / sudo / rm / docker / launchctl / *deploy* reach past this
 /// machine or destroy on it, and WebFetch/WebSearch turn a task into a channel
 /// out. Writes inside the working tree stay allowed: that is the work.
+///
+/// 📌 **Danh sách này gác AI, không gác BÀN PHÍM** — và nhầm chỗ ấy tốn của
+/// tôi một hàm (2026-08-13). Tôi viết `denied_for_session` để định tuyến nút
+/// lệnh sang `/cmd` khi lệnh nằm trong danh sách này, lý lẽ nghe rất xuôi: *nút
+/// gõ `!git push` vào phiên sẽ bị chặn, nên phải đi đường khác*. Hà chặn đúng
+/// lúc: *"vô lý việc gõ vào phiên là hub làm mà"* · *"sao lại chặn được"*.
+///
+/// Anh đúng. `--disallowedTools` gác **lời gọi công cụ của agent**. Còn
+/// `!<lệnh>` là chế độ bash của chính TUI — đúng cái ngón tay chủ máy gõ, không
+/// đi qua tầng công cụ nào. Hai thứ khác hẳn nhau, và tôi đã suýt đẻ ra con
+/// đường thứ hai cho cùng một cái nút vì lẫn chúng làm một.
 pub const DENIED_TOOLS: [&str; 17] = [
     "Bash(git push:*)",
     "Bash(git merge:*)",
@@ -1829,18 +1923,36 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
             // Phiên do extension VS Code/Cursor chạy KHÔNG lên màn.
             //
             // Hà chốt 2026-08-09: *"bỏ các phiên của editor đi, có quản lý được
-            // tin nhắn của nó đâu"*. Đúng phần cốt lõi — trên máy này 8/13 dòng
-            // là phiên editor, chúng đẩy 3 cửa sổ terminal (thứ Hà thực sự theo)
-            // xuống dưới màn, và `/stop` không dừng được chúng.
+            // tin nhắn của nó đâu"*. Sáng 2026-08-13 luật ấy bị lật lại: hỏi
+            // *"giờ áp dụng cho VS Code thì sao?"* nghe như một LỖ HỔNG của cầu
+            // nối (ngồi ở máy thì thấy, mở điện thoại thì không), nên chúng
+            // được cho hiện, kèm một dòng ghi chú "gõ thẳng thì không được".
             //
-            // Ghi rõ chỗ chưa đúng hẳn, để đừng ai coi đây là "không làm gì
-            // được với phiên editor": `/ask` và `/handover` CHẠY được trên
-            // chúng — nghiệm thu tối 08-08 fork chính phiên editor `projects-cd`
-            // và trả lời đúng ngữ cảnh. Đây là lựa chọn về MÀN HÌNH (bớt nhiễu),
-            // không phải giới hạn kỹ thuật. Bỏ dòng dưới là chúng hiện lại ngay.
+            // 🔴 Và chiều cùng ngày Hà chốt lại, sau khi CHÍNH nó cắn: *"nếu đã
+            // không thao tác được vào vs code thì bỏ đi, chỉ làm với terminal
+            // thôi"*. Đo được cái giá của một buổi cho hiện, ngay trên máy này:
+            // `0a109818` (acc3, terminal `ttys002`) và `ba74012c` (acc1,
+            // editor) **cùng mang `folder = "dwork"`** ⟹ cùng đọc ra `[dwork]`,
+            // và hai tin báo cách nhau 78 giây (10:13:46Z · 10:15:04Z) đội
+            // chung một cái tên. Hà mở phiên mới trong VS Code, nhận tin
+            // `[dwork]`, bấm vào thì rơi đúng phiên terminal.
+            //
+            // Nên đây KHÔNG phải "bớt nhiễu" nữa, nó là phép thử cầu nối đọc
+            // đúng chiều: một dòng chỉ XEM được mà không GÕ được thì nó không
+            // phải cây cầu, nó là một cái tên nữa để nhầm. `/type` `/key`
+            // `/shot` `/stop` đều đi qua Terminal.app, địa chỉ bằng tty, mà
+            // phiên editor không có cửa sổ Terminal nào — cái đó là giới hạn
+            // kỹ thuật thật, không phải lựa chọn.
+            //
+            // Cái mất, nói thẳng chứ không giấu: `/ask` và `/handover` VẪN chạy
+            // được trên phiên editor (`fork_call` chỉ cần id — nghiệm thu tối
+            // 08-08 trên `projects-cd`). Bỏ khỏi danh sách là bỏ luôn đường ấy.
             //
             // Đếm rồi log, không lặng lẽ nuốt: một danh sách ngắn đi mà không ai
-            // biết vì sao là danh sách nói dối.
+            // biết vì sao là danh sách nói dối. Con số này đi tiếp ra tận màn
+            // điện thoại (`fe/index.html`: "N phiên trong editor không hiện ở
+            // đây") — chỗ duy nhất trả lời được câu "máy đang chạy 11 phiên sao
+            // màn liệt kê 3?".
             if row.host == "editor" {
                 hidden_editor += 1;
                 continue;
@@ -1882,7 +1994,10 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                                 .ok()
                                 .and_then(|head| folder_from_tail(&head, &ws))
                         })
+                        // …và ĐỌC HỎNG THÌ NHỚ, đừng quên (xem `remember_folder`).
+                        .or_else(|| recall_folder(&row.session_id))
                         .unwrap_or_default();
+                    remember_folder(&row.session_id, &row.folder);
                     // Phiên có đang chờ một câu trả lời không — đọc từ chính
                     // đoạn nhật ký vừa nạp, không tốn thêm lần đọc nào.
                     row.asking = pending_question(&tail);
@@ -1960,21 +2075,12 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
 
     mark_can_type(&mut out.sessions);
     link_parents(&mut out.sessions);
-    // Ảnh chụp tốn bao lâu — con số này quyết định mọi lệnh bấm từ điện thoại
-    // nhanh hay chậm, vì gần như route nào cũng dựng một cái trước khi trả lời.
-    if let Ok(mut g) = SNAP_CACHE.get_or_init(|| std::sync::Mutex::new(None)).lock() {
-        *g = Some((std::time::Instant::now(), out.clone()));
-    }
-    logging::info(
-        "sessions_snapshot_ms",
-        json!({ "ms": snap_started.elapsed().as_millis(), "sessions": out.sessions.len(),
-                "hidden_editor": out.hidden_editor, "blind": out.blind.len() }),
-    );
     out.hidden_editor = hidden_editor;
     if hidden_editor > 0 {
         logging::info(
             "sessions_editor_hidden",
-            json!({ "count": hidden_editor, "why": "editor-hosted sessions are not shown on the phone" }),
+            json!({ "count": hidden_editor,
+                    "why": "phiên chạy trong VS Code — không có cửa sổ Terminal nào để gõ vào, nên không lên danh sách (Hà 2026-08-13)" }),
         );
     }
 
@@ -1985,6 +2091,21 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
             .cmp(&a.last_activity)
             .then_with(|| b.started_at_ms.cmp(&a.started_at_ms))
     });
+
+    // 🔴 Cache phải chụp bản ĐÃ XONG. Trước đây ba dòng này đứng NGAY SAU
+    // `link_parents`, tức trước cả `hidden_editor` lẫn lượt sắp xếp — nên mọi
+    // lượt đọc từ cache (`snapshot_cached`, đường đi của gần như mọi route) nhận
+    // một ảnh chụp khai `hidden_editor = 0` và xếp sai thứ tự. Cùng một họ với
+    // `sessions_snapshot_ms` bên dưới in `out.hidden_editor` trước khi nó được
+    // gán: một phép đo trỏ vào ô chưa điền thì nó đo cái ô, không đo sự thật.
+    if let Ok(mut g) = SNAP_CACHE.get_or_init(|| std::sync::Mutex::new(None)).lock() {
+        *g = Some((std::time::Instant::now(), out.clone()));
+    }
+    logging::info(
+        "sessions_snapshot_ms",
+        json!({ "ms": snap_started.elapsed().as_millis(), "sessions": out.sessions.len(),
+                "hidden_editor": out.hidden_editor, "blind": out.blind.len() }),
+    );
     out
 }
 
@@ -3720,4 +3841,44 @@ pub fn count_by_account(snap: &SessionsSnapshot) -> BTreeMap<String, usize> {
         *counts.entry(s.account.clone()).or_insert(0) += 1;
     }
     counts
+}
+
+#[cfg(test)]
+mod folder_memo_tests {
+    use super::*;
+
+    /// Một phép đo hỏng không được xoá cái nhãn đã biết.
+    ///
+    /// 🔴 Hà 2026-08-13: *"mất phiên dwork"* — trong khi phiên vẫn sống. Thứ
+    /// mất là cái nhãn: `folder_from_tail` về rỗng ở một lượt đo, và
+    /// `display_name` rơi xuống tên tự sinh.
+    #[test]
+    fn an_empty_reading_never_erases_the_project_label() {
+        let id = "memo-test-0000";
+        assert_eq!(recall_folder(id), None, "chưa đo lần nào thì chưa biết gì");
+
+        remember_folder(id, "dwork");
+        assert_eq!(recall_folder(id).as_deref(), Some("dwork"));
+
+        // Lượt đo sau về RỖNG: giữ nguyên, không ghi đè.
+        remember_folder(id, "");
+        remember_folder(id, "   ");
+        assert_eq!(
+            recall_folder(id).as_deref(),
+            Some("dwork"),
+            "một lượt đo hỏng đã xoá mất cái nhãn"
+        );
+
+        // Đo được dự án KHÁC thì đổi — phiên có thể chuyển thư mục thật.
+        remember_folder(id, "AI/hub");
+        assert_eq!(recall_folder(id).as_deref(), Some("AI/hub"));
+
+        // Và cái nhãn ấy phải đi tới tận câu chữ người đọc thấy.
+        assert_eq!(display_name("hanguyen-53", "dwork"), "[dwork]");
+        assert_eq!(
+            display_name("hanguyen-53", ""),
+            "hanguyen-53",
+            "không có dự án thì giữ tên, không bịa nhãn rỗng"
+        );
+    }
 }

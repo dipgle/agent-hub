@@ -367,6 +367,105 @@ impl Inbox {
         Some(inbox)
     }
 
+    /// Tải một tệp đính kèm về máy, rồi NÓI cho phiên biết nó nằm đâu.
+    ///
+    /// 🔴 Hà 2026-08-13: *"thêm cơ chế nhận đính kèm file vào tin nhắn"*. Cây
+    /// cầu vốn một chiều ở chỗ này: chữ thì gõ vào phiên được, còn một cái ảnh
+    /// chụp lỗi hay một tệp log thì phải ngồi vào máy mới đưa vào được.
+    ///
+    /// Ba luật, mỗi luật vá một đường hỏng đã biết:
+    /// - **tên tệp bị bóc sạch phần thư mục**: `file_name` là chuỗi do NGƯỜI
+    ///   GỬI đặt, và một cái tên chứa `..` cùng dấu gạch chéo vẫn hợp lệ với
+    ///   Telegram — ghi thẳng nó xuống là để người gửi chọn chỗ ghi;
+    /// - **về đúng dự án của phiên đang theo**, không đổ hết vào một chỗ chung:
+    ///   phiên đọc tệp bằng đường dẫn tương đối là chuyện thường;
+    /// - **hỏng thì NÓI**, đừng im: một tệp gửi đi mà không thấy hồi âm nào là
+    ///   thứ khiến người ta gửi lại lần nữa.
+    fn take_file(&self, file_id: &str, name: &str, caption: Option<&str>) {
+        let client = match self.client() {
+            Some(c) => c,
+            None => return,
+        };
+        // 1. Hỏi Telegram đường dẫn tạm của tệp.
+        let path = client
+            .post(self.api("getFile"))
+            .json(&json!({ "file_id": file_id }))
+            .send()
+            .ok()
+            .and_then(|r| r.json::<Value>().ok())
+            .and_then(|v| {
+                v.pointer("/result/file_path")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            });
+        let Some(path) = path else {
+            logging::error("telegram_getfile_failed", json!({ "name": name }));
+            let _ = self.send_text("\u{26a0} không hỏi được Telegram đường dẫn của tệp ấy.");
+            return;
+        };
+        // 2. Tải về.
+        let url = format!("https://api.telegram.org/file/bot{}/{}", self.token, path);
+        let bytes = client
+            .get(&url)
+            .send()
+            .ok()
+            .filter(|r| r.status().is_success())
+            .and_then(|r| r.bytes().ok());
+        let Some(bytes) = bytes else {
+            logging::error("telegram_file_download_failed", json!({ "name": name }));
+            let _ = self.send_text("\u{26a0} tải tệp về không được (Telegram chỉ cho bot tải tệp ≤ 20 MB).");
+            return;
+        };
+        // 3. Chỗ để: thư mục dự án của phiên đang theo, `.inbox/`.
+        let db = crate::db::Db::open(&self.cfg.db).ok();
+        let focus = db
+            .as_ref()
+            .and_then(|db| db.cursor_or_log(crate::pipeline::FOCUS_SESSION_KEY))
+            .unwrap_or_default();
+        let folder = db
+            .as_ref()
+            .and_then(|db| db.cursor_or_log(crate::pipeline::WATCH_KEY))
+            .and_then(|v| crate::pipeline::session_folder_from_book(&v, &focus))
+            .unwrap_or_default();
+        let mut dir = self.cfg.workspace_root.clone();
+        if !folder.is_empty() {
+            dir = dir.join(&folder);
+        }
+        let dir = dir.join(".inbox");
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            logging::error("telegram_inbox_mkdir_failed", json!({ "err": e.to_string() }));
+            let _ = self.send_text(&format!("\u{26a0} không tạo được thư mục nhận tệp: {e}"));
+            return;
+        }
+        // Tên tệp do NGƯỜI GỬI đặt ⟹ chỉ giữ phần tên cuối cùng.
+        let safe = std::path::Path::new(name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| !n.is_empty() && *n != "." && *n != "..")
+            .unwrap_or("tep-nhan-duoc");
+        let dest = dir.join(safe);
+        if let Err(e) = std::fs::write(&dest, &bytes) {
+            logging::error("telegram_file_write_failed", json!({ "err": e.to_string() }));
+            let _ = self.send_text(&format!("\u{26a0} không ghi được tệp: {e}"));
+            return;
+        }
+        logging::info(
+            "telegram_file_received",
+            json!({ "name": safe, "bytes": bytes.len(), "dir": dir.display().to_string() }),
+        );
+        let _ = self.send_text(&format!(
+            "\u{1f4ce} đã lưu {} ({} KB)",
+            dest.display(),
+            bytes.len() / 1024
+        ));
+        // 4. Nói cho phiên biết — đi đúng đường chữ thường đã có.
+        let line = match caption.map(str::trim).filter(|c| !c.is_empty()) {
+            Some(c) => format!("Tôi vừa gửi một tệp: {} — {}", dest.display(), c),
+            None => format!("Tôi vừa gửi một tệp: {}", dest.display()),
+        };
+        self.push_text(&line);
+    }
+
     fn api(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.token, method)
     }
@@ -663,6 +762,19 @@ impl Inbox {
             .pointer("/chat/id")
             .map(|v| v.to_string())
             .unwrap_or_default();
+        // ĐÍNH KÈM: ảnh / tệp gửi kèm tin nhắn (Hà 2026-08-13: *"thêm cơ chế
+        // nhận đính kèm file vào tin nhắn"*).
+        //
+        // Cùng cổng với chữ: chỉ nhận từ đúng `chat_id` của chủ máy. Tệp về
+        // `<thư mục dự án của phiên đang theo>/.inbox/`, rồi hub gõ MỘT DÒNG
+        // vào phiên nói đường dẫn — tức đi đúng con đường chữ thường đã có,
+        // không đẻ lối riêng cho phiên phải học.
+        if from == self.chat_id {
+            if let Some((file_id, name)) = attachment_of(msg) {
+                self.take_file(&file_id, &name, msg.get("caption").and_then(Value::as_str));
+                return;
+            }
+        }
         let Some(text) = msg.get("text").and_then(Value::as_str) else {
             return;
         };
@@ -796,4 +908,40 @@ impl Drop for Hold<'_> {
     fn drop(&mut self) {
         self.inbox.busy.store(false, Ordering::SeqCst);
     }
+}
+
+/// Tệp đính kèm của một tin nhắn Telegram, nếu có: `(file_id, tên gợi ý)`.
+///
+/// Ảnh tới dưới dạng MẢNG nhiều cỡ — lấy cỡ CUỐI (to nhất), vì cỡ đầu là bản
+/// xem trước vài KB, gửi cho phiên đọc thì chẳng thấy gì.
+fn attachment_of(msg: &Value) -> Option<(String, String)> {
+    if let Some(d) = msg.get("document") {
+        let id = d.get("file_id").and_then(Value::as_str)?;
+        let name = d
+            .get("file_name")
+            .and_then(Value::as_str)
+            .unwrap_or("tep-nhan-duoc");
+        return Some((id.to_string(), name.to_string()));
+    }
+    if let Some(p) = msg.get("photo").and_then(Value::as_array) {
+        let biggest = p.last()?;
+        let id = biggest.get("file_id").and_then(Value::as_str)?;
+        let uid = biggest
+            .get("file_unique_id")
+            .and_then(Value::as_str)
+            .unwrap_or("anh");
+        return Some((id.to_string(), format!("anh-{uid}.jpg")));
+    }
+    for (key, ext) in [("voice", "ogg"), ("audio", "mp3"), ("video", "mp4")] {
+        if let Some(v) = msg.get(key) {
+            let id = v.get("file_id").and_then(Value::as_str)?;
+            let name = v
+                .get("file_name")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{key}.{ext}"));
+            return Some((id.to_string(), name));
+        }
+    }
+    None
 }

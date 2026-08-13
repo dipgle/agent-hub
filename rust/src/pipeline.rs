@@ -1354,6 +1354,12 @@ pub const QUICK_KEY: &str = "quick:cmds";
 /// Khác biệt không nhỏ: chạy trong phiên thì **phiên nhìn thấy kết quả** và đi
 /// tiếp được, còn `/cmd` chạy ở một shell rời — kết quả về điện thoại, phiên
 /// không biết gì. Đúng thứ chủ máy làm khi ngồi trước máy.
+/// Dự án của một phiên, lấy từ SỔ — để tệp gửi từ Telegram về đúng thư mục.
+pub fn session_folder_from_book(book_json: &str, id: &str) -> Option<String> {
+    let book: BTreeMap<String, crate::watch::Mark> = serde_json::from_str(book_json).ok()?;
+    book.get(id).map(|m| m.d.clone()).filter(|d| !d.is_empty())
+}
+
 /// Nhớ bản ĐẦY ĐỦ của một báo cáo, để dòng "… (còn N dòng)" có đường đi tiếp.
 ///
 /// 🔴 Hà 2026-08-12: *"cuối tin nhắn sao lại báo còn số dòng vậy, muốn xem nốt

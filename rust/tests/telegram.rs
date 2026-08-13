@@ -713,3 +713,29 @@ fn a_stale_full_report_button_says_so_instead_of_showing_someone_elses() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Tên tệp gửi từ Telegram là chuỗi do NGƯỜI GỬI đặt — chỉ giữ phần tên cuối.
+///
+/// 🔴 Hà 2026-08-13: *"thêm cơ chế nhận đính kèm file vào tin nhắn"*. Đường
+/// nhận tệp là đường DUY NHẤT trong hub mà một chuỗi từ ngoài quyết định một
+/// đường dẫn ghi xuống đĩa, nên nó phải bị bóc thư mục trước khi chạm tới
+/// `.inbox/`.
+#[test]
+fn an_attachment_name_can_never_choose_where_it_is_written() {
+    let clean = |name: &str| -> String {
+        std::path::Path::new(name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| !n.is_empty() && *n != "." && *n != "..")
+            .unwrap_or("tep-nhan-duoc")
+            .to_string()
+    };
+    assert_eq!(clean("log.txt"), "log.txt");
+    assert_eq!(clean("thu/muc/log.txt"), "log.txt");
+    assert_eq!(clean("../../../etc/hosts"), "hosts");
+    assert_eq!(clean(".."), "tep-nhan-duoc");
+    assert_eq!(clean(""), "tep-nhan-duoc");
+    // Tên có dấu và khoảng trắng thì giữ nguyên — chỉ chặn đường dẫn, không
+    // chặn tiếng Việt.
+    assert_eq!(clean("báo cáo cuối.md"), "báo cáo cuối.md");
+}

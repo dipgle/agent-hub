@@ -1143,7 +1143,12 @@ impl Inbox {
     }
 
     /// Luồng thợ: xử lý update NỐI ĐUÔI, ngoài đường đọc.
+    ///
+    /// Cả luồng chạy ở hạng GẤP: mỗi update ở đây là một tin vừa gõ hoặc một
+    /// nút vừa bấm — tải tệp đính kèm, trả lời nút, xếp lệnh vào hàng. Không có
+    /// việc nào trong này mà người gửi không ngồi chờ (xem `exec::Lane`).
     fn work_forever(&self) {
+        let _lane = crate::exec::urgent();
         let Some(client) = self.client() else {
             // Thợ không có tay thì trả việc lại cho vòng đọc, đừng đứng im ôm
             // hàng — đó là kiểu hỏng mà từ điện thoại nhìn ra là "hub chết".

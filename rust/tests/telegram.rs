@@ -1650,3 +1650,32 @@ fn only_a_bare_acknowledgement_shrinks_to_an_emoji() {
     assert_eq!(ack_as_emoji("▶ chạy trong 4963b95c: bash deploy.sh"), None);
     assert_eq!(ack_as_emoji(""), None);
 }
+
+/// Hạng đi theo VIỆC, không theo tiến trình — và phải tự trả lại khi xong.
+///
+/// 🔴 Hà 2026-08-14: *"phải phân biệt việc gì cần xử lý nhanh chậm để chạy đúng
+/// phân loại nhân chứ"*. Mặc định là nền (vòng quét định kỳ, đẩy ảnh chụp); chỉ
+/// đường có người đang chờ mới nâng lên. Nếu guard quên trả lại thì luồng nền
+/// dùng chung sẽ ở lại hạng gấp mãi mãi, và cả phép phân loại thành vô nghĩa.
+#[test]
+fn a_lane_belongs_to_the_work_not_to_the_process() {
+    use hub::exec::{lane, urgent, Lane};
+    assert_eq!(lane(), Lane::Background, "mặc định phải là nền");
+    {
+        let _g = urgent();
+        assert_eq!(lane(), Lane::Urgent);
+        {
+            // Lồng nhau (một lệnh gấp gọi tiếp một khâu gấp) vẫn phải đúng.
+            let _g2 = urgent();
+            assert_eq!(lane(), Lane::Urgent);
+        }
+        assert_eq!(lane(), Lane::Urgent, "rời guard trong không được hạ hạng ngoài");
+    }
+    assert_eq!(lane(), Lane::Background, "xong việc thì trả lại đường");
+
+    // Luồng khác KHÔNG thừa hưởng: một lượt quét nền chạy song song với một cú
+    // bấm thì vẫn phải là nền.
+    let _g = urgent();
+    let other = std::thread::spawn(lane).join().unwrap();
+    assert_eq!(other, Lane::Background);
+}

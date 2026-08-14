@@ -2876,6 +2876,15 @@ fn short_id(session_id: &str) -> &str {
 /// that channel. Never propagates: one bad press must not fail the whole poll,
 /// but every outcome is logged.
 fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCommand]) {
+    // 🔴 TỪ ĐÂY TRỞ ĐI LÀ VIỆC CÓ NGƯỜI ĐANG CHỜ. Mọi `osascript`, mọi lần hỏi
+    // `claude`, mọi lượt đọc nhật ký sinh ra bên dưới hàm này đều là hệ quả của
+    // một ngón tay vừa bấm — nên chúng chạy ở hạng đầy đủ, còn vòng quét định
+    // kỳ thì nhường đường (xem `exec::Lane`).
+    //
+    // Đặt Ở ĐÂY chứ không ở từng chỗ gọi: đường từ cú bấm tới `osascript` xuyên
+    // chừng mười lớp, và mười chỗ đánh dấu là mười chỗ để quên. Đây là cái cửa
+    // duy nhất mọi mệnh lệnh đều đi qua.
+    let _lane = crate::exec::urgent();
     for cmd in commands {
         // ĐỒNG HỒ cho từng lệnh. Hà 2026-08-12: *"bấm vào phiên trên tele vẫn
         // đang phải đợi rất lâu"* — và lúc ấy không ai trả lời được "lâu ở khúc
@@ -4592,6 +4601,10 @@ pub fn run_telegram_now(cfg: &Config) {
     let spawned = std::thread::Builder::new()
         .name("telegram-now".into())
         .spawn(move || {
+            // Luồng này SINH RA từ một cú bấm, nên cả luồng là việc gấp — kể cả
+            // những khúc chạy trước khi tới `execute_commands` (dựng lại ảnh
+            // chụp phiên để biết bấm vào phiên nào, chẳng hạn).
+            let _lane = crate::exec::urgent();
             loop {
                 match Db::open(&cfg.db) {
                     Ok(db) => execute_telegram_commands(&db, &cfg),

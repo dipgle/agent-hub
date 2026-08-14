@@ -40,6 +40,94 @@ pub struct RunOpts<'a> {
 const POLL: Duration = Duration::from_millis(50);
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
+/// Hạng của một lời gọi: **có người đang chờ nó**, hay nó là việc vặt chạy nền.
+///
+/// 🔴 Hà 2026-08-14: *"phải phân biệt việc gì cần xử lý nhanh chậm để chạy đúng
+/// phân loại nhân chứ"*. Đúng, và nó chỉ ra chỗ tôi vừa làm thô: sáng nay hub
+/// khai `ProcessType Background` cho CẢ tiến trình (di sản của cái inbox đã
+/// xoá), tôi đổi thành `Interactive` cho CẢ tiến trình — hết nghẽn, nhưng lúc
+/// ấy một lượt đẩy ảnh chụp định kỳ cũng giành CPU ngang với ngón tay chủ máy.
+/// Cả hai bản đều sai cùng một kiểu: xếp hạng cho một TIẾN TRÌNH, trong khi
+/// hạng là thuộc tính của từng VIỆC.
+///
+/// Trần trên đặt ở plist (`Interactive`), còn ở đây là chỗ hạ xuống cho đúng
+/// việc: vòng quét định kỳ, đẩy ảnh chụp, dò sức khoẻ — không ai ngồi chờ
+/// chúng, nên chúng nhường đường.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Lane {
+    /// Việc nền: chạy khi máy rảnh, nhường ngón tay chủ máy.
+    #[default]
+    Background,
+    /// Có người đang nhìn màn hình chờ câu trả lời này.
+    Urgent,
+}
+
+thread_local! {
+    static LANE: std::cell::Cell<Lane> = const { std::cell::Cell::new(Lane::Background) };
+}
+
+/// Hạng của luồng đang chạy.
+pub fn lane() -> Lane {
+    LANE.with(|l| l.get())
+}
+
+/// Đánh dấu: mọi tiến trình con sinh ra từ luồng này, cho tới khi guard rời
+/// tầm, là việc CÓ NGƯỜI ĐANG CHỜ.
+///
+/// Theo LUỒNG chứ không theo tham số, vì đường đi từ một cú bấm nút tới lời gọi
+/// `osascript` xuyên qua chừng mười lớp (`execute_commands` → `keys::type_text`
+/// → `osascript` → `run`), và luồn một tham số qua cả mười lớp là mười chỗ để
+/// quên. Cái phải đúng ở đây là "ai gây ra lời gọi này", mà luồng thì trả lời
+/// được câu ấy sẵn.
+pub fn urgent() -> LaneGuard {
+    let prev = lane();
+    LANE.with(|l| l.set(Lane::Urgent));
+    LaneGuard(prev)
+}
+
+pub struct LaneGuard(Lane);
+
+impl Drop for LaneGuard {
+    fn drop(&mut self) {
+        LANE.with(|l| l.set(self.0));
+    }
+}
+
+/// Bọc một lệnh nền cho hệ điều hành biết nó được phép chạy chậm.
+///
+/// 🔴 Hà 2026-08-14: *"Nếu build và chạy trên win và chip Intel thì sao"*.
+/// Nên chỗ này **hỏi hệ điều hành, không gõ cứng theo chip**:
+///
+/// * **macOS** (Apple Silicon *và* Intel): `taskpolicy -b` đặt tiến trình con
+///   vào QoS nền. Trên Apple Silicon nó còn nghĩa là ưu tiên lõi tiết kiệm
+///   điện; trên Intel không có lõi ấy nên chỉ còn hạ ưu tiên lịch biểu và
+///   throttle I/O — nhẹ hơn, vẫn đúng hướng, không hại. Cùng một dòng mã, hai
+///   con chip, không cần biết chip nào.
+/// * **Hệ khác** (Windows, Linux): không có `taskpolicy`, và hub chưa chạy ở đó
+///   được vì nó lái Terminal.app bằng AppleScript. Nhánh này biên dịch thành
+///   "chạy thẳng" — mất phần nhường đường, không mất chức năng nào.
+///
+/// Không dùng `nice`: nó chỉ chỉnh ưu tiên CPU cổ điển, còn thứ đang bóp hub là
+/// QoS của macOS — hai bộ điều khiển khác nhau, và `nice` không chạm tới cái
+/// đang siết.
+#[cfg(target_os = "macos")]
+fn lane_wrap<'a>(cmd: &'a str, args: &[&'a str]) -> (String, Vec<String>) {
+    if lane() == Lane::Urgent || !Path::new(TASKPOLICY).exists() {
+        return (cmd.to_string(), args.iter().map(|s| s.to_string()).collect());
+    }
+    let mut out = vec!["-b".to_string(), cmd.to_string()];
+    out.extend(args.iter().map(|s| s.to_string()));
+    (TASKPOLICY.to_string(), out)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn lane_wrap<'a>(cmd: &'a str, args: &[&'a str]) -> (String, Vec<String>) {
+    (cmd.to_string(), args.iter().map(|s| s.to_string()).collect())
+}
+
+#[cfg(target_os = "macos")]
+const TASKPOLICY: &str = "/usr/bin/taskpolicy";
+
 /// Giết cả nhóm tiến trình của `pid` (con, cháu, chắt).
 ///
 /// Dùng `/bin/kill` thay vì `libc::kill`: crate này không có `libc` trong danh
@@ -80,9 +168,11 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
     let started = Instant::now();
     let timeout = opts.timeout.unwrap_or(Duration::from_secs(60));
 
-    let mut command = Command::new(cmd);
+    // Hạng đi kèm LỜI GỌI, không kèm tiến trình — xem `Lane`.
+    let (cmd_run, args_run) = lane_wrap(cmd, args);
+    let mut command = Command::new(&cmd_run);
     command
-        .args(args)
+        .args(&args_run)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

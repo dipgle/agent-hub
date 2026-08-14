@@ -666,7 +666,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // tắt, nhưng ở đây lý do khác — file thì vẫn còn, chỉ là một tin báo tử
         // không phải chỗ để đọc tài liệu.
         if !matches!(c, crate::watch::Change::Ended { .. }) {
-            quick.extend(remember_files(db, &id, &crate::keys::paths_on_screen(scan, 4)));
+            quick.extend(remember_files(db, cfg, &id, &crate::keys::paths_on_screen(scan, 4)));
         }
         // "… (còn N dòng)" phải có đường đi tiếp — xem `remember_full`.
         if text.contains("… (còn ") {
@@ -1986,7 +1986,57 @@ pub const FILES_KEY: &str = "quick:files";
 /// Buộc theo phiên ĐÃ SINH RA nút, không phải phiên đang theo lúc bấm: con trỏ
 /// đổi được giữa hai thời điểm ấy (bấm "Xem đầy đủ" là đổi), và lúc đó cái nút
 /// sẽ lặng lẽ đo bằng một cái thước khác.
-pub fn remember_files(db: &Db, session_id: &str, paths: &[String]) -> Vec<(String, String)> {
+pub fn remember_files(
+    db: &Db,
+    cfg: &Config,
+    session_id: &str,
+    paths: &[String],
+) -> Vec<(String, String)> {
+    // 🔴 MỘT CÁI TÊN KHÔNG PHẢI MỘT TỆP. Hà 2026-08-14, ảnh chụp một tin có nút
+    // 📎 `com.dipgle.hubd.plist`: *"Com.dipgle.hubd.plist đâu phải là file"*.
+    // Đúng — đó là một cái tên nhắc giữa câu văn của chính hub, và tệp thật thì
+    // nằm ở `~/Library/LaunchAgents`, ngoài cây làm việc của phiên.
+    //
+    // Cửa "chỉ gửi tệp NẰM TRONG thư mục phiên" vốn đã có, nhưng nó đặt ở lúc
+    // BẤM (`send_document`). Nên cái nút vẫn mọc ra, vẫn mời bấm, và chỉ trả
+    // lời "chưa gửi được" sau khi người ta bấm — tức hub dựng một lời hứa rồi
+    // để người dùng đi phát hiện hộ rằng nó rỗng. Hỏi ngay lúc DỰNG thì rẻ
+    // (một lần `stat`) và cái nút không tồn tại nếu không có gì để mở.
+    //
+    // Không tra được thư mục phiên ⟹ giữ nguyên như cũ (dựng nút): thà một nút
+    // có thể hỏng còn hơn im lặng nuốt mọi nút vì một cuốn sổ chưa kịp ghi.
+    let paths: Vec<String> = match session_root(db, cfg, session_id) {
+        Some(root) => {
+            let kept: Vec<String> = paths
+                .iter()
+                .filter(|p| {
+                    let expanded = match p.strip_prefix("~/") {
+                        Some(rest) => std::env::var("HOME")
+                            .map(|h| std::path::PathBuf::from(h).join(rest))
+                            .unwrap_or_else(|_| std::path::PathBuf::from(p.as_str())),
+                        None => std::path::PathBuf::from(p.as_str()),
+                    };
+                    let full = if expanded.is_absolute() {
+                        expanded
+                    } else {
+                        root.join(&expanded)
+                    };
+                    full.is_file() && full.starts_with(&root)
+                })
+                .cloned()
+                .collect();
+            if kept.len() < paths.len() {
+                logging::info(
+                    "quick_files_filtered",
+                    json!({ "kept": kept.len(), "seen": paths.len(),
+                            "why": "tên nhắc trong câu văn, không phải tệp nằm trong thư mục phiên" }),
+                );
+            }
+            kept
+        }
+        None => paths.to_vec(),
+    };
+    let paths = &paths[..];
     if paths.is_empty() {
         return Vec::new();
     }
@@ -4089,7 +4139,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // hub — mà nút của hub lúc ấy chỉ gắn ở tin TỰ PHÁT, còn
                     // `/shot` thì không. Cùng một màn, hai luật khác nhau là
                     // thứ người dùng đọc thành "lúc được lúc không".
-                    quick.extend(remember_files(db, &want, &crate::keys::paths_on_screen(&ack, 4)));
+                    quick.extend(remember_files(db, cfg, &want, &crate::keys::paths_on_screen(&ack, 4)));
                 }
                 // Ô nhập đang có sẵn chữ ⟹ một nút GỬI (Hà 2026-08-13: *"có gợi
                 // ý nội dung chat cần có cách bấm nhanh để gửi nó"*). Đi đúng

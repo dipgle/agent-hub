@@ -1592,6 +1592,7 @@ impl Inbox {
                                     crate::pipeline::remember_quick(db, &sid, &cmds);
                                 b.extend(crate::pipeline::remember_files(
                                     db,
+                                    &self.cfg,
                                     &sid,
                                     &crate::keys::paths_on_screen(&text, 4),
                                 ));

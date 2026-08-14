@@ -1381,6 +1381,58 @@ pub fn project_pin_key(thread_key: &str) -> String {
     format!("pin:project:{thread_key}")
 }
 
+/// Dòng "lỗi gần đây" của `/doctor`, đọc từ bảng `runs`.
+///
+/// 🔴 Viết ngày 2026-08-14 vì tôi đã **báo sai** ở ba chỗ (`CLAUDE.md`, hai
+/// commit, sổ phiên): tôi viết rằng `/doctor` đọc bảng này, và dựa vào đó để
+/// biện minh cho việc `run_once` phải ghi `runs`. Kiểm lại thì `errors_block`
+/// nằm trong `runtime::snapshot`, và hàm ấy có đúng MỘT chỗ gọi — `portal.rs`,
+/// tệp đã chết cùng trang tfl5. Tức khối lỗi ấy không có ai đọc, và `/doctor`
+/// chưa bao giờ hiện nó.
+///
+/// Sửa mã cho khớp thứ đã hứa, chứ không sửa lời hứa cho khớp mã: hai câu ấy
+/// dẫn tới hai sản phẩm khác nhau, và cái người ta cần là cái `/doctor` nói
+/// được "có 3 lỗi gần đây" thay vì im lặng đúng lúc cần nói nhất.
+///
+/// Chỉ đọc `runs`, không đọc tệp log: log là chữ nối đuôi, đã lên tới hàng chục
+/// MB, và đọc nó mỗi lần bấm `/doctor` là biến một câu hỏi rẻ thành thứ đắt
+/// nhất trong vòng.
+pub fn recent_errors_line(db: &Db) -> String {
+    match db.last_runs(40) {
+        Ok(rows) => {
+            let bad: Vec<&crate::db::RunRow> = rows
+                .iter()
+                .filter(|r| r.ok == Some(0) || r.err.as_deref().is_some_and(|e| !e.is_empty()))
+                .take(3)
+                .collect();
+            if bad.is_empty() {
+                // NÓI RÕ nó soi cái gì. "Không có lỗi" mà không nói phạm vi thì
+                // người đọc tự hiểu thành "mọi thứ ổn" — trong khi phần lớn
+                // trục trặc của hub sống ở mức `warn` và cố ý không lên đây.
+                "✅ 40 vòng gần nhất: không có lỗi (mức `error`; `warn` không tính)".to_string()
+            } else {
+                let lines: Vec<String> = bad
+                    .iter()
+                    .map(|r| {
+                        format!(
+                            "  · {} {}",
+                            crate::exec::truncate(&r.started_at, 19),
+                            crate::exec::truncate(r.err.as_deref().unwrap_or("?"), 90)
+                        )
+                    })
+                    .collect();
+                format!("⚠ lỗi gần đây:\n{}", lines.join("\n"))
+            }
+        }
+        // Không đọc được sổ thì NÓI, đừng in một dấu tích xanh — đó đúng là
+        // hình dạng "im lặng khi mù" mà luật 3 cấm.
+        Err(e) => {
+            logging::warn("doctor_runs_unreadable", json!({ "err": e.to_string() }));
+            "⚠ không đọc được sổ vòng chạy — xem logs/hub.log".to_string()
+        }
+    }
+}
+
 // 🔴 ĐÃ BỎ CẢ CHẶNG HỎI VÒNG (`ADAPTER_NAMES`, `adapter_enabled`,
 // `poll_adapter`, `ingest`), 2026-08-14, cùng lượt gỡ tfl5.
 //
@@ -3395,7 +3447,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 let jobs = jobs_line().unwrap_or_else(|| "  (không có)".to_string());
                 let probe = format!(
-                    "🩺 {} phiên đang sống{}\n⚡ lệnh chạy nền:\n{}\n📟 hubd: {}",
+                    "🩺 {} phiên đang sống{}\n⚡ lệnh chạy nền:\n{}\n📟 hubd: {}\n{}",
                     live.sessions.len(),
                     if live.blind.is_empty() {
                         String::new()
@@ -3412,6 +3464,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     } else {
                         "⚠ KHÔNG thấy bản cài — launchd đang chạy gì?"
                     },
+                    recent_errors_line(db),
                 );
                 reply_in_channel(db, cfg, adapter, cmd, &probe);
                 Some(probe)

@@ -99,9 +99,16 @@ or drive a session from a phone?** If not, it does not belong here.
   🔴 `runs` changed WRITER on 2026-08-14, not shape: it held one row per channel
   poll, and the poll stage went with tfl5. `run_once` now writes one row per
   cycle. Leaving it unwritten was the alternative, and it is the worse one — the
-  "recent errors" block in `/doctor` reads this table, so an empty writer makes
+  "recent errors" line in `/doctor` reads this table, so an empty writer makes
   a panel that can never go red. A measurement that cannot fail is worse than no
   measurement: it still occupies the screen and still reads as reassurance.
+  ⚠ That `/doctor` sentence was **false when first written here**, and the
+  correction is the point: the errors block lived in `runtime::snapshot`, whose
+  only caller was `portal.rs` — so it had no reader at all, and `/doctor` never
+  showed it. Found by Hà asking what `/doctor` actually does. Fixed by moving
+  the code to match the promise (`pipeline::recent_errors_line`), not the
+  promise to match the code. `runtime::snapshot` + `errors_block` are now
+  orphaned and should go with `portal.rs`.
   **And "one row per cycle" alone was not enough**, which is the part worth
   remembering: `run_once` almost never returns `Err` (every handler swallows its
   failure into a sentence for whoever typed the command), so every row would

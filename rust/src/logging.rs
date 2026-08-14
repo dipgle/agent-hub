@@ -23,11 +23,17 @@ static LEVEL: AtomicU8 = AtomicU8::new(INFO);
 /// sạch hay không.
 ///
 /// 🔴 Sinh ra 2026-08-14, để vá một lỗ do chính lượt gỡ tfl5 mở ra. Bảng `runs`
-/// từng được chặng hỏi vòng ghi, và `runtime::errors_block` (khối *"lỗi gần
-/// đây"* của `/doctor`) đọc nó. Chặng ấy đi, `run_once` ghi thay — nhưng vòng
-/// thì gần như không bao giờ trả `Err`, nên hàng nào cũng `ok`, nên khối ấy
-/// **rỗng vĩnh viễn**: đúng cái phép đo mù mà repo này gọi tên ở `CLAUDE.md` và
-/// `OPERATING-CHARTER §2d`.
+/// từng được chặng hỏi vòng ghi; chặng ấy đi, `run_once` ghi thay — nhưng vòng
+/// thì gần như không bao giờ trả `Err`, nên hàng nào cũng `ok`, nên bất cứ khối
+/// nào đọc nó cũng **rỗng vĩnh viễn**: đúng cái phép đo mù mà repo này gọi tên
+/// ở `CLAUDE.md` và `OPERATING-CHARTER §2d`.
+///
+/// ⚠ Bản đầu của chú thích này nói khối ấy là *"lỗi gần đây của `/doctor`"* —
+/// **sai**, và sai theo kiểu tệ nhất: nghe hợp lý nên không ai kiểm.
+/// `runtime::errors_block` sống trong `runtime::snapshot`, mà hàm ấy có đúng
+/// một chỗ gọi là `portal.rs` — tệp đã chết. Tức nó không có người đọc nào.
+/// Người đọc THẬT của `runs` lúc ấy chỉ có `hub status` trên CLI. Nay `/doctor`
+/// đọc thật, qua `pipeline::recent_errors_line`.
 ///
 /// Vì sao đo bằng NHẬT KÝ chứ không bắt từng handler trả lỗi lên: luật 3 của dự
 /// án đã bắt **mọi đường lỗi phải ghi một dòng ở đây**. Nếu luật ấy đúng thì số

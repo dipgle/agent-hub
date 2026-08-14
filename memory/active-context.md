@@ -32,7 +32,7 @@ chối được, một động từ không còn việc gì để làm, và ba th
 ### Bảng `runs` đổi NGƯỜI GHI, không đổi hình dạng
 
 Chặng hỏi vòng là thứ duy nhất ghi `runs`. Bỏ nó mà không thay người ghi thì
-khối "lỗi gần đây" của `/doctor` (`runtime::errors_block`) đọc một bảng mãi mãi
+khối "lỗi gần đây" (`runtime::errors_block`) đọc một bảng mãi mãi
 rỗng — một phép đo **không bao giờ đỏ được**, tức phép đo mù, tệ hơn không có vì
 nó vẫn chiếm chỗ và vẫn được đọc như một lời cam đoan. Nay `run_once` ghi một
 dòng mỗi vòng (mở sổ TRƯỚC, đóng sổ SAU, `ok=NULL` giữa chừng = vòng chết giữa
@@ -51,6 +51,18 @@ luật 3 vốn đã bắt mọi đường lỗi phải ghi log, nên đây là c
 `error`. Tức khối này là *lỗi*, không phải *mọi trục trặc* — phần lớn trục trặc
 của hub cố ý sống ở mức `warn`. Đã kiểm end-to-end trên bản release với cấu hình
 + DB dùng một lần: một vòng sạch ghi đúng `cycle|cycle|ok=1|(không lỗi)`.
+
+🔴 **Và một lỗi trong chính báo cáo của tôi, do Hà hỏi mới lộ** (*"Lệnh doctor
+làm gì?"*). Tôi viết ở ba chỗ rằng `/doctor` đọc bảng `runs` — **sai**.
+`errors_block` sống trong `runtime::snapshot`, hàm ấy có đúng một chỗ gọi là
+`portal.rs`, tệp đã chết ⟹ khối ấy không có người đọc nào, và `/doctor` chưa
+bao giờ hiện nó. Người đọc THẬT của `runs` chỉ là `hub status` trên CLI.
+Vá bằng cách **sửa mã cho khớp lời hứa**, không sửa lời hứa cho khớp mã:
+`pipeline::recent_errors_line` + một dòng thật trong câu trả lời `/doctor`, kèm
+bài kiểm canh cả phạm vi ("40 vòng gần nhất, mức `error`, `warn` không tính") —
+vì một dòng "không có lỗi" trần trụi sẽ bị đọc thành "mọi thứ ổn".
+⚠ Còn lại: `runtime::snapshot` + `errors_block` + `daemon_block`/`slow_block`/
+`accounts_block` nay mồ côi hẳn (chỉ `portal.rs` gọi). Nên đi cùng `portal.rs`.
 
 ### Một suýt nữa, ghi lại vì nó là đúng cái bẫy vừa mô tả
 

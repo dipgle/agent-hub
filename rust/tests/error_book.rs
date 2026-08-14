@@ -1,8 +1,7 @@
 //! Một VÒNG phải biết được nó có sạch không.
 //!
-//! 🔴 Vá ngày 2026-08-14 cho một lỗ do chính lượt gỡ tfl5 mở ra.
-//! `runtime::errors_block` — khối *"lỗi gần đây"* của `/doctor` — đọc bảng
-//! `runs`, mà người ghi bảng ấy (chặng hỏi vòng) đã đi cùng phòng chat.
+//! 🔴 Vá ngày 2026-08-14 cho một lỗ do chính lượt gỡ tfl5 mở ra. Bảng `runs`
+//! từng được chặng hỏi vòng ghi, và chặng ấy đã đi cùng phòng chat.
 //! `run_once` ghi thay, nhưng nó **gần như không bao giờ trả `Err`**: mọi handler
 //! tự nuốt lỗi thành một câu trả lời cho người gõ. Hàng nào cũng `ok` ⟹ khối ấy
 //! rỗng vĩnh viễn ⟹ đúng cái phép đo mù mà repo này lên án ở hai chỗ.
@@ -95,4 +94,51 @@ fn only_the_event_name_survives_never_the_fields() {
             "`{secret}` đi theo dòng lỗi vào sổ, rồi lên màn: {kept}"
         );
     }
+}
+
+/// 🔴 `/doctor` phải NÓI ĐƯỢC "có lỗi gần đây" — và nói được cả phạm vi nó soi.
+///
+/// Viết ngày 2026-08-14 sau khi tôi báo sai ba lần rằng `/doctor` đã đọc bảng
+/// `runs`. Nó chưa hề: `runtime::errors_block` nằm trong `runtime::snapshot`,
+/// và hàm ấy có đúng một chỗ gọi — `portal.rs`, tệp chết cùng trang tfl5.
+///
+/// Hai vế, và vế thứ hai mới là vế dễ mất: một dòng "không có lỗi" KHÔNG được
+/// đọc thành "mọi thứ ổn". Phần lớn trục trặc của hub sống ở mức `warn` và cố ý
+/// không lên đây, nên câu trả lời phải tự khai phạm vi của nó.
+#[test]
+fn doctor_says_what_it_found_and_what_it_looked_at() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = hub::db::Db::open(&dir.path().join("hub.sqlite")).expect("open db");
+
+    // Sổ trắng: phải nói rõ soi 40 vòng, và nói rõ `warn` không tính.
+    let clean = hub::pipeline::recent_errors_line(&db);
+    assert!(clean.contains("không có lỗi"), "{clean}");
+    assert!(
+        clean.contains("40") && clean.contains("warn"),
+        "một dòng 'không có lỗi' phải tự khai phạm vi, không thì nó đọc thành \
+         'mọi thứ ổn': {clean}"
+    );
+
+    // Một vòng bẩn thì phải hiện lên, kèm câu lỗi.
+    let id = db.start_run("cycle", "cycle").expect("start");
+    db.finish_run(
+        id,
+        hub::db::RunFinish {
+            ok: false,
+            n_new: 0,
+            err: Some("2 lỗi trong vòng này, gần nhất: telegram_ack_failed".into()),
+            skipped: None,
+        },
+    )
+    .expect("finish");
+    let dirty = hub::pipeline::recent_errors_line(&db);
+    assert!(dirty.contains("lỗi gần đây"), "{dirty}");
+    assert!(
+        dirty.contains("telegram_ack_failed"),
+        "phải mang theo TÊN sự kiện, không thì người đọc vẫn phải mở log: {dirty}"
+    );
+    assert!(
+        !dirty.contains("không có lỗi"),
+        "có lỗi mà vẫn in câu xanh là đúng cái phép đo mù đang chữa: {dirty}"
+    );
 }

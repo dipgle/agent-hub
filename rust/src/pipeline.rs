@@ -2458,13 +2458,23 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
             //
             // GIÁ TRỊ thì vẫn chặn — `credential_literal`, `private_key_block`,
             // `secret_assignment` — vì đó mới là thứ mất đi khi lọt ra ngoài.
-            let risk = crate::redaction::file_risk(&screen);
-            if !risk.is_empty() {
-                return format!(
-                    "📷 Màn của {what} có GIÁ TRỊ bí mật trên đó ({}) — không đưa ra ngoài.",
-                    risk.join(", ")
-                );
-            }
+            // 🔴 Hà 2026-08-14: *"Tại sao lại bị chặn, hub là cổng làm việc của
+            // tôi mà"* → *"Trong tele có thiết lập tự xoá lịch sử tin rồi nên
+            // hub không cần tính năng này nữa"*.
+            //
+            // Cổng này GỠ HẲN, và đây là lý do nó gỡ được chứ không phải nhân
+            // nhượng: rủi ro nó chặn là "một giá trị bí mật nằm lại lâu ở nơi
+            // khác", mà buồng chat này nay tự xoá — chủ máy đã dựng hàng rào ấy
+            // ở tầng dưới, đúng tầng của nó. Còn cái giá thì đã đo được: một
+            // dòng dính mẫu là vứt CẢ màn, và màn có bí mật thường đúng là màn
+            // đang gỡ chuyện xác thực, tức `/shot` tắt đúng lúc cần nhất.
+            //
+            // ⚠ KHÔNG suy rộng sang đường khác: nút 📎 gửi NGUYÊN một tệp
+            // (`redaction::file_risk` vẫn gác ở đó — một tệp `.env` lọt ra là
+            // lọt trọn bộ khoá, khác hẳn vài dòng đang hiện trên màn), và phần
+            // xem trước trong ảnh chụp vẫn qua `sessions::preview_risk` vì nó
+            // nằm lại trong một tài liệu trên server tfl5 — chỗ mà thiết lập tự
+            // xoá của Telegram không với tới.
             let choices = crate::keys::parse_choices(&screen);
             let tail: Vec<&str> = screen
                 .lines()

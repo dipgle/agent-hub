@@ -740,6 +740,11 @@ end tell"#
 /// hẹp — đoán rộng ở đây nghĩa là đưa lên màn một cái nút chạy nhầm thứ.
 ///
 /// Giữ tối đa `max` dòng CUỐI (mới nhất), bỏ trùng.
+/// Dài hơn chừng này thì KHÔNG dựng nút — trên màn nó đã bị bẻ dòng, và hub
+/// đang cầm một mẩu chứ không phải cả lệnh. Xem chỗ dùng trong
+/// [`commands_on_screen`].
+pub const BTN_CMD_MAX: usize = 60;
+
 pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
     let screen = text;
     // `gh` vào danh sách 2026-08-13, vì đó là cái tên trong câu Hà hỏi: màn nói
@@ -816,6 +821,27 @@ fn after_cd(line: &str) -> Option<&str> {
         };
         let line = line.trim();
         if line.len() < 4 || line.len() > 300 {
+            continue;
+        }
+        // 🔴 Hà 2026-08-14: *"Cả 1 khối lệnh dài này thì không được tạo nút"* —
+        // sau khi một cái nút chạy `git for-each-ref … | xargs -n1 git`, tức
+        // KHÔNG phải lệnh in trong tin: nó là mẩu cụt của một khối 380 ký tự,
+        // cắt đúng chỗ terminal bẻ dòng (~80 cột trừ thụt lề). Mẩu ấy cân bằng
+        // nháy và mở đầu bằng một lệnh quen, nên mọi hàng rào phía dưới đều
+        // thấy nó hợp lệ. Nó chạy thật, và lần ấy vô hại chỉ vì `refs/original`
+        // chưa tồn tại.
+        //
+        // Nguồn của hàm này là MÀN — chữ đã bị TUI bẻ theo bề ngang cửa sổ —
+        // nên với một lệnh dài, hub không có cách nào biết mình đang cầm cả
+        // dòng hay một mẩu. Không đoán: dài quá thì THÔI, và nói ra ở chỗ gọi.
+        // Một lệnh dán tay là phiền; một cái nút chạy lệnh khác lệnh in ra là
+        // chuyện không lùi lại được.
+        //
+        // 60 đo từ chỗ thật: lệnh quen nhất ở đây (`cd ~/projects/hub && ./hub
+        // self-install` = 40, `launchctl kickstart -k gui/501/com.dipgle.hubd`
+        // = 44) đều lọt, còn bề ngang một dòng terminal thì bắt đầu bẻ quanh
+        // 72–80 kể cả thụt lề.
+        if line.len() > BTN_CMD_MAX {
             continue;
         }
         // MỘT bộ luật cho cả hai lượt quét — xem `looks_like_prose`.

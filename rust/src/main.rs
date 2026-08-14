@@ -9,7 +9,7 @@ use hub::config::{self, Config};
 use hub::db::Db;
 use hub::exec::{run, truncate, RunOpts};
 use hub::logging;
-use hub::pipeline::{ingest, known_projects, run_once};
+use hub::pipeline::{known_projects, run_once};
 
 #[derive(Parser)]
 #[command(
@@ -54,11 +54,12 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// One cycle: read the room, run the orders in it, push the snapshot
+    /// One cycle: run the orders that arrived, then the bookkeeping
     Once,
-    /// Poll the room now
-    Ingest,
-    /// Counts, poll health, spend
+    // 🔴 `hub ingest` đã bỏ 2026-08-14 cùng chặng hỏi vòng: nó đọc phòng chat
+    // tfl5, và Telegram thì tự đẩy tới chứ không chờ ai hỏi. `hub once` vẫn còn
+    // — nó chạy nốt những gì đã tới, thứ vẫn có nghĩa.
+    /// Spend hôm nay + những vòng chạy gần đây
     Status,
     /// Every Claude CLI session alive on this machine, across all accounts
     Sessions {
@@ -82,7 +83,7 @@ fn real_main() -> Result<()> {
     logging::set_log_file(&cfg.log_file);
     // Same secret source as the daemon, so CLI and launchd behave identically.
     config::load_env_file(&cfg.hub_home);
-    let chatty = matches!(cli.command, Command::Once | Command::Ingest);
+    let chatty = matches!(cli.command, Command::Once);
     if cli.debug {
         logging::set_level_from_name("debug");
     } else if !chatty {
@@ -109,10 +110,6 @@ fn real_main() -> Result<()> {
         Command::Init { force } => cmd_init(&cfg, force),
         Command::Once => {
             println!("{}", serde_json::to_string_pretty(&run_once(&db, &cfg)?)?);
-            Ok(())
-        }
-        Command::Ingest => {
-            println!("{}", serde_json::to_string_pretty(&ingest(&db, &cfg)?)?);
             Ok(())
         }
         Command::Status => cmd_status(&db),
@@ -143,7 +140,9 @@ fn cmd_sessions(db: &hub::db::Db, cfg: &Config, as_json: bool) -> Result<()> {
     // người ngồi trước máy đối chiếu với `claude agents`.
     let mut hidden = match snap.hidden_editor {
         0 => String::new(),
-        n => format!("  · {n} phiên trong VS Code không liệt kê (không có cửa sổ Terminal để gõ vào)"),
+        n => format!(
+            "  · {n} phiên trong VS Code không liệt kê (không có cửa sổ Terminal để gõ vào)"
+        ),
     };
     if snap.hidden_dead > 0 {
         hidden.push_str(&format!(
@@ -339,7 +338,10 @@ fn cmd_status(db: &Db) -> Result<()> {
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     println!("spend hôm nay  ${:.4}", db.owner_cost_on_day(&today)?);
     println!();
-    println!("last polls:");
+    // "last polls" tới 2026-08-14 — mỗi hàng là một lượt hỏi phòng chat. Không
+    // còn ai hỏi vòng, nên hàng nay là một VÒNG (`run_once`), và cái tên phải
+    // đi theo: đọc "polls" trên một máy không poll gì cả là đọc sai.
+    println!("last cycles:");
     for r in db.last_runs(12)? {
         println!(
             "  {}  {:<9} {}  new={}{}{}",

@@ -123,7 +123,10 @@ impl Drop for LaneGuard {
 #[cfg(target_os = "macos")]
 fn lane_wrap<'a>(cmd: &'a str, args: &[&'a str]) -> (String, Vec<String>) {
     if lane() == Lane::Urgent || !Path::new(TASKPOLICY).exists() {
-        return (cmd.to_string(), args.iter().map(|s| s.to_string()).collect());
+        return (
+            cmd.to_string(),
+            args.iter().map(|s| s.to_string()).collect(),
+        );
     }
     let mut out = vec!["-b".to_string(), cmd.to_string()];
     out.extend(args.iter().map(|s| s.to_string()));
@@ -132,7 +135,10 @@ fn lane_wrap<'a>(cmd: &'a str, args: &[&'a str]) -> (String, Vec<String>) {
 
 #[cfg(not(target_os = "macos"))]
 fn lane_wrap<'a>(cmd: &'a str, args: &[&'a str]) -> (String, Vec<String>) {
-    (cmd.to_string(), args.iter().map(|s| s.to_string()).collect())
+    (
+        cmd.to_string(),
+        args.iter().map(|s| s.to_string()).collect(),
+    )
 }
 
 #[cfg(target_os = "macos")]

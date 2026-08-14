@@ -172,11 +172,9 @@ impl Db {
 
         // Phiên bản CŨ phải đọc trước khi dán phiên bản mới lên.
         let was: i64 = conn
-            .query_row(
-                "SELECT v FROM schema_meta WHERE k = 'version'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
+            .query_row("SELECT v FROM schema_meta WHERE k = 'version'", [], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()?
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);

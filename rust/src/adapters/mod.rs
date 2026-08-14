@@ -1,34 +1,17 @@
-//! The channel hub talks through.
+//! Từ vựng của KÊNH: một mệnh lệnh gõ trên điện thoại trông như thế nào khi nó
+//! tới được `pipeline`.
 //!
 //! Was five: GitHub notifications, project devlogs, email and Telegram all fed
 //! an inbox that a bounded `claude -p` call triaged. That product is gone
-//! (2026-08-08) — hub is a management channel for the Claude CLI sessions on
-//! this machine, and the only channel it needs is the tfl5 chat room the owner
-//! opens on his phone. The four ingest adapters were removed with their wiring;
-//! `git show backup/inbox-adapters` still has them.
+//! (2026-08-08); `git show backup/inbox-adapters` still has the four ingest
+//! adapters.
 //!
-//! The adapter still returns normalized messages plus the cursors it earned;
-//! the pipeline commits the messages first and the cursors second, so a crash
-//! re-polls instead of skipping.
-
-
-use std::collections::BTreeMap;
-
-#[derive(Debug, Default)]
-pub struct PollResult {
-    /// How many ordinary chat lines this poll walked past. A COUNT, not the
-    /// lines: hub stopped storing what people type on 2026-08-08 when the inbox
-    /// was deleted, and a number is all the run row ever needed.
-    pub seen: usize,
-    pub cursors: BTreeMap<String, String>,
-    /// Partial trouble that is not an adapter failure (e.g. one project's
-    /// devlog is uninitialized). Recorded on the run row — never silent.
-    pub skipped: Option<String>,
-    /// Button presses / slash commands that arrived on the channel. The
-    /// adapter only parses them; the pipeline is what actually acts, so the
-    /// approve path is identical for CLI, Telegram and the web UI.
-    pub commands: Vec<ChannelCommand>,
-}
+//! 🔴 Rồi còn một — phòng chat tfl5 — và ngày 2026-08-14 còn KHÔNG. Kênh duy
+//! nhất nay là Telegram, và nó khác cả bốn cái cũ ở một điểm đổi được hình dạng
+//! của tệp này: **nó không bị hỏi vòng, nó tự đẩy tới**. Nên `PollResult` (số
+//! dòng đã lướt qua, con trỏ kiếm được, `Skip` vì thiếu khoá) đi theo chặng hỏi
+//! vòng — xem chỗ `pipeline::ingest` từng đứng. Còn lại đúng phần không phụ
+//! thuộc kênh nào: một mệnh lệnh là gì, và trả lời nó ở đâu.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
@@ -40,8 +23,6 @@ pub enum CommandKind {
     /// mỗi bản vá của hub đều đòi một người ngồi ở máy gõ `deploy/install.sh` —
     /// tức cây cầu tự nó có một đoạn chỉ đi được khi chủ máy đang ở nhà.
     Upgrade,
-    /// Poll every channel now (the console's "Poll kênh").
-    Ingest,
     /// Run a full cycle now (the console's "Chạy 1 vòng").
     Run,
     /// Probe channels + tools for real, ignoring the cached reading (the
@@ -227,19 +208,13 @@ pub struct ChannelCommand {
     pub message_id: Option<i64>,
 }
 
-/// A deliberate skip, not a failure: a credential the operator has not set yet.
-/// The pipeline records it on the run row and logs it at warn.
-#[derive(Debug)]
-pub struct Skip(pub String);
+// 🔴 `Skip` đã bỏ 2026-08-14. Nó là "thiếu khoá thì bỏ qua CÓ GHI SỔ, không
+// phải chết máy" — luật #4, và luật ấy còn nguyên; chỉ là nay nó được thi hành
+// ngay tại kênh (`telegram::Inbox::start` không thấy khoá thì không dựng luồng
+// và nói ra), chứ không còn đi qua một dòng `runs` của chặng hỏi vòng.
 
-impl std::fmt::Display for Skip {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl std::error::Error for Skip {}
-
+/// Kênh có sống không, viết cho người đọc. `telegram::health` dựng nó; `/doctor`
+/// là chỗ đọc.
 #[derive(Debug, Clone)]
 pub struct Health {
     pub ok: bool,

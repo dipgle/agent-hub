@@ -1,10 +1,16 @@
 # hub — operating rules
 
-`hub` puts the **Claude CLI sessions running on this Mac** on a phone. One chat
-room on tfl5 carries ORDERS (`/session`, `/ask`, `/new`, `/tell`, `/stop`,
-`/handover`); a read-only snapshot travels the other way so the page can show
-what every session is doing. Nothing here reads mail, and nothing here spends
-money unless the owner presses a button.
+`hub` puts the **Claude CLI sessions running on this Mac** on a phone. One
+Telegram chat carries ORDERS (`/session`, `/ask`, `/new`, `/tell`, `/stop`,
+`/handover`) and carries back what every session is doing. Nothing here reads
+mail, and nothing here spends money unless the owner presses a button.
+
+🔴 **One channel since 2026-08-14** (Hà: *"tạm thời không dùng tfl5 để xem cứ
+xóa hết đi"*). A tfl5 chat room and a phone page ran alongside Telegram until
+then; the page had been dead for two days without anyone noticing. Gone with it:
+`portal.rs`, `live.rs`, `fe/` + 19 `.mjs`, the poll stage (`/ingest`),
+`adapters.tfl5`, `trust`, and three unused crates. History:
+`memory/ra-soat-2026-08-14.md`.
 
 Read `README.md` for the architecture and the CLI. Read `PLAN.md` for what is
 built vs. pending. This file is the rules for working ON hub.
@@ -35,9 +41,11 @@ one test, and it cuts both ways:
   waits for Terminal to report the tab idle, then closes the window — Hà's own
   definition of *tắt hẳn*.
 - **Anything he can do at the terminal but not from the phone is a gap.** Today:
-  watch more than one session's screen at once (`portal.rs:96` — live screen
-  only for the focused session), scroll back further than the captured window
-  (`portal.rs:108` — 16 lines), answer an OS dialog.
+  watch more than one session's screen at once (`/shot` reads the followed
+  session only), scroll back further than the captured window, answer an OS
+  dialog. The first two used to be pinned to `portal.rs:96`/`:108`; that file
+  went with the page on 2026-08-14, but the GAPS did not — they are properties
+  of what a phone can reach, not of the code that failed to reach it.
 
 When a choice is unclear, ask what he would do sitting at the machine, and make
 the phone do that — not something cleverer.
@@ -70,11 +78,17 @@ or drive a session from a phone?** If not, it does not belong here.
 
 - **Rust 2021**, crate in `rust/`, two binaries: `hub` (CLI) and `hubd` (loop).
   Deliberately **synchronous** — this process spends its life waiting on
-  `claude` and a 20s tfl5 long-poll, so an async runtime would add moving parts
+  `claude` and a Telegram long-poll, so an async runtime would add moving parts
   without removing a single wait. **No `unsafe` anywhere.**
 - Deps: `rusqlite` (bundled), `reqwest` (blocking + rustls), `serde`/`serde_json`,
-  `clap`, `regex`, `chrono`, `anyhow`, `tungstenite`. All in the local cargo
-  cache → `cargo build --offline` works.
+  `clap`, `regex`, `chrono`, `anyhow`, `base64`. All in the local cargo cache →
+  `cargo build --offline` works.
+  🔴 `tungstenite`, `axum` and `tokio` were dropped 2026-08-14 — **none had a
+  single `use` left in `src/`**, and cargo never said a word. `tungstenite` was
+  the `/ws/chat` socket; `axum`+`tokio` were built for a local web console
+  deleted on 2026-08-08 (rule 12) and outlived it by six days, dragging an async
+  runtime into a deliberately synchronous process. `hub setup` never used them —
+  it is a std-library `TcpListener`.
 - Store: `data/hub.sqlite` (WAL). Three tables — `runs`, `cursors`, `spend`
   (plus `schema_meta`). The four inbox tables are GONE as of schema step 4
   (2026-08-10): they had outlived the product by two days and held 379 rows no
@@ -82,7 +96,13 @@ or drive a session from a phone?** If not, it does not belong here.
   reference each other, so it has to run with `foreign_keys` OFF (the first
   version died at boot on `FOREIGN KEY constraint failed`, exit 70), and it
   logs each table with its row count rather than a silent "cleaned up".
-- Tests: `cd rust && cargo test --offline` → 104 tests, 0 warnings.
+  🔴 `runs` changed WRITER on 2026-08-14, not shape: it held one row per channel
+  poll, and the poll stage went with tfl5. `run_once` now writes one row per
+  cycle. Leaving it unwritten was the alternative, and it is the worse one — the
+  "recent errors" block in `/doctor` reads this table, so an empty writer makes
+  a panel that can never go red. A measurement that cannot fail is worse than no
+  measurement: it still occupies the screen and still reads as reassurance.
+- Tests: `cd rust && cargo test --offline` → 263 tests, 0 warnings.
 - `./hub …` is a wrapper that builds on first use then execs `rust/target/release/hub`.
 
 ## Gốc workspace: `~/projects` — và đừng gõ nó vào mã (2026-08-12)
@@ -145,24 +165,46 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    folding them together made every phone command answer *"no session
    selected"* on a broken database, with nothing in the log. Read cursors
    through **`Db::cursor_or_log`**; the gate lives in one place because twelve
-   call sites means the thirteenth forgets. Same reasoning as the visibility
-   guard inside `stickToBottom` (`fe/index.html`) and `pending_for_display`
-   (`sessions.rs`): put the rule at the source, not at every caller.
+   call sites means the thirteenth forgets. Same reasoning as
+   `pending_for_display` (`sessions.rs`) and `telegram::update_sender`: put the
+   rule at the source, not at every caller.
 4. **Credentials come from env vars only.** The config holds the *name* of the
-   env var (`user_env`, `password_env`), never the value. A missing secret means
-   SKIP-WITH-LOG (`adapters::Skip`), not a crash and not a silent no-op. Secrets
-   for the daemon come from `hub.env` (chmod 600), never the plist, never the
-   config. Log key NAMES only. The real environment always wins.
+   env var (`confirm.bot_token_env`, `confirm.chat_id_env`), never the value. A
+   missing secret means SKIP-WITH-LOG, not a crash and not a silent no-op —
+   `telegram::Inbox::start` says which key name is missing and leaves everything
+   else running. (`adapters::Skip`, the error type that used to carry this
+   through a run row, went with the poll stage on 2026-08-14; the rule did not.)
+   Secrets for the daemon come from `hub.env` (chmod 600), never the plist,
+   never the config. Log key NAMES only. The real environment always wins.
 5. **Nothing about a session leaves this Mac unscanned.** `sessions::preview_risk`
    runs every transcript preview through `redaction::leak_scan` before it can
    reach the snapshot — the first real run of `hub sessions` printed a session
-   whose latest turn stated a login password in plain text. The snapshot lands in
-   a doc on a server; that is "leaving the machine".
+   whose latest turn stated a login password in plain text. The preview ends up
+   in a Telegram message on Telegram's servers; that is "leaving the machine".
 6. **Cursors advance only after the orders they cover have run.** A crash must
-   re-poll, never skip.
-7. **The room takes ORDERS from the owner only.** `tfl5::parse_command` checks
-   `trust.tfl5_user_tids` first; anyone else typing `/new` is just typing text.
-   Being in the room is tfl5's decision; driving this Mac is the owner's.
+   re-read, never skip. 🔴 Reduced in scope 2026-08-14: the poll cursors went
+   with the poll stage, and Telegram advances its own `offset` inside
+   `getUpdates`. What is left under this rule is `focus:session`, the watch
+   book, and the project pin.
+7. **hub takes ORDERS from the owner only.** The gate is `chat_id`
+   (`HUB_TELEGRAM_CHAT_ID` in `hub.env`); anyone else typing `/new` is just
+   typing text, and the refusal is LOGGED, never silently dropped.
+
+   🔴 **One gate, at the channel** (2026-08-14). There were two: this one, and
+   `trust.tfl5_user_tids` checked inside `parse_command`. The second existed
+   because a chat ROOM lets anyone in, so being present said nothing about being
+   the owner. Telegram has no such shape. Keeping both left the inner gate
+   unable to refuse — the only call site had to invent a typist (take `first()`
+   of the owner list, compare it against that same list) — except when the list
+   was EMPTY, where it refused *everything* in silence. A gate that cannot say
+   no, and fails closed only by accident, is not defence in depth; it is a
+   second answer to a question that must have one.
+   `telegram::update_sender` is where the reading now lives, and the asymmetry
+   inside it is the part worth guarding: a BUTTON is gated on who pressed it
+   (`callback_query.from.id`), TEXT on which chat it arrived in
+   (`message.chat.id`). In a private chat those two numbers are equal, so
+   confusing them passes every hand test and only fails once the bot is added to
+   a group. Test: `tests/telegram.rs::a_message_from_another_chat_is_not_an_order`.
 
    **Call them ROUTES** (Hà 2026-08-11: *"tại sao không gọi nó là route?"* — no
    good reason, and it is the truer word). That is exactly the shape: a button
@@ -171,11 +213,13 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    code's own `CommandKind` is internal vocabulary, and speaking it at the owner
    is how `/new` ended up being explained to someone who only ever sees buttons.
    One caveat the word must not hide: these routes are **not open**. Only the
-   owner's tid can invoke them, so they are authenticated at the human layer,
+   owner's chat can invoke them, so they are authenticated at the human layer,
    not public endpoints.
 
-   Routes: session · new · ask · tell · stop · handover · type · key · **pick** ·
-   shot · project · ingest · run · doctor · set · help · **accounts**.
+   Routes: session · new · ask · tell · stop · close · handover · type · key ·
+   **pick** · shot · cmd · runin · win · project · run · doctor · set · upgrade ·
+   help · **accounts**. (`ingest`/`poll` died 2026-08-14 with the poll stage —
+   it read the chat room, and Telegram pushes.)
 
    **`/pick` vs `/key`, và vì sao phải là hai** (2026-08-13). `AskUserQuestion`
    có thể mang **nhiều câu** trong một bảng, vẽ thành một thanh tab
@@ -227,8 +271,11 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    ANSWERED if it is ever asked; it stops being asked on every screen. The
    snapshot carries no `owner_spend`, no `owner_budget`, no `cost_days`, no
    `budget`, and `cost_usd` is `#[serde(skip_serializing)]` on `Handover`,
-   `Aside` and `Told`. `portal.rs` and `fe-board-uc.mjs` both assert **absence** —
-   this grew back once already (ceiling → price tag).
+   `Aside` and `Told`. This grew back once already (ceiling → price tag).
+   ⚠ **The two guards that asserted ABSENCE are gone** (`portal.rs` and
+   `fe-board-uc.mjs`, both removed 2026-08-14). The `#[serde(skip_serializing)]`
+   attributes still hold the line at the source, but nothing tests it any more —
+   this is a real gap in the diff, not a solved one.
 10. **`claude` CLI facts that cost a real run to learn.** Do not re-derive them:
     `--bg` conflicts with `-p`, so the prompt is POSITIONAL — and
     `--disallowedTools` is VARIADIC, so a prompt placed after it is eaten as one
@@ -434,38 +481,28 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
   the consumer, and a stale one silently overwrites the new shape (twice on
   2026-08-07). `cargo build` alone updates `target/`, which nothing runs.
 - A verb that parses must have a handler. A verb with no handler is worse than
-  an unknown one: the room accepts it, nothing happens, nothing says so.
-- **Look at the picture. Every deploy ends with one.** `fe-deploy.mjs` now runs
-  `fe-shots.mjs` after a successful activate and prints
-  `ui-shots/after-<version>-*.png`; open them before saying anything is done.
-  This is mechanical on purpose. Twice on 2026-08-10 the assertions were green
-  while the screen was wrong: the "snapshot is stale" warning was **cut off**
-  mid-sentence (7/7 checks passed — they read `textContent`, which holds the
-  whole string even when the screen truncates it), and the "what is it doing"
-  line rendered **above** the session name, so the eye read `Brewing…` before
-  knowing which session. An assertion tests what you thought to check; a picture
-  shows what you didn't. `fe-shots` only reads — it never calls `claude`, so
-  there is no reason to skip it.
-- Deploying the page: `node fe-deploy.mjs <version> "<notes>"`. Bundle versions
-  are IMMUTABLE — re-using a name after editing the page ships nothing. The
-  script compares the served bytes against what it packed and fails loudly;
-  that check used to be skipped when the version was already live, and on
-  2026-08-08 it reported "ĐẠT" for a deploy that shipped nothing.
-- E2E runs against the DEPLOYED bundle, as `alice_local` (the owner). Logging in
-  as `hubbot` tests a permission nobody uses — every command comes back
-  `tfl5_command_from_non_owner`.
-- `fe-stream-uc` and `fe-aside-uc` make REAL `claude` calls on the owner's
-  account. **They are gated on that size gauge and skip by default.** Each script sizes the
-  transcript first (`USD_PER_MB = 1.75`, from a measured 0.99 MB → $1.72); if the
-  estimate is over `HUB_UC_MAX_USD` (default **$0.25**) the paid step does not
-  run, the checks behind it are NOT counted as passed, and the summary prints
-  `N BỎ QUA vì tốn hạn mức` plus what was not verified. To actually buy the
-  evidence: `HUB_UC_PAY=1 node fe-stream-uc.mjs …`.
-  Why the gate exists: on 2026-08-08 these two scripts were re-run after every
-  bundle bump and spent **$6.75 in one evening** re-proving the same thing —
-  including $1.70 lost to a mid-run server restart, and $1.10 spent by a
-  half-finished version of this very gate that printed the estimate and then
-  called anyway. A price printed is not a price stopped.
+  an unknown one: the channel accepts it, nothing happens, nothing says so.
+  🔴 The corollary bit on 2026-08-14: a verb whose handler has nothing left to
+  DO is the same bug wearing a uniform. `/ingest` still parsed, still ran, still
+  answered — with *"disabled in config"*, forever, because the channel it polled
+  no longer existed. It was deleted, not left `listed: false`.
+- **The acceptance surface shrank on 2026-08-14, and shrank UNEVENLY. Read this
+  before claiming anything is verified.** Until then, every deploy ended with a
+  picture: `fe-deploy.mjs` ran `fe-shots.mjs` after a successful activate, and
+  you opened `ui-shots/after-<version>-*.png` before saying a word. That was
+  mechanical on purpose — twice on 2026-08-10 the assertions were green while
+  the screen was wrong (a "snapshot is stale" warning **cut off** mid-sentence
+  while 7/7 checks passed, because they read `textContent`, which holds the whole
+  string even when the screen truncates it; and the "what is it doing" line
+  rendering **above** the session name, so the eye read `Brewing…` before knowing
+  which session). *An assertion tests what you thought to check; a picture shows
+  what you didn't.*
+  That whole layer is gone with the page: no `fe-*.mjs`, no screenshots, no
+  Playwright, no `HUB_UC_MAX_USD` gate. What is left is 263 Rust tests, and Rust
+  tests are exactly the kind that were green both of those times. **So the honest
+  bar is now: run the thing in the real Telegram chat and look at the reply.**
+  Do not write "verified" off a green `cargo test` — that was never sufficient
+  here, and now there is nothing behind it.
 
 ## Project layout
 
@@ -475,29 +512,27 @@ hub.config.json         config (no secrets — only env var NAMES)
 deploy/install.sh       build → install a SIGNED hubd where launchd runs it
 deploy/sign.sh          re-sign one binary with the stable identity
 deploy/make-signing-cert.sh  create that identity — ONCE, ever
-rust/src/main.rs        CLI: doctor init once ingest status sessions
-                        tfl5-say tfl5-tail portal-push
+rust/src/main.rs        CLI: doctor self-install setup init once status sessions
 rust/src/bin/hubd.rs    daemon loop (pid lock, exponential backoff, local alarm)
 rust/src/{config,db}.rs config + validation + secret_from_env() · runs/cursors/spend
-rust/src/pipeline.rs    one cycle: read the room, run the orders, answer
+rust/src/pipeline.rs    one cycle: run the orders that arrived, answer, keep books
+rust/src/telegram.rs    THE channel: getUpdates thread, buttons, files, update_sender
+rust/src/verbs.rs       pure parser: text → a route. No network, no channel, no owner
+rust/src/commands.rs    the route TABLE — one source for /help + setMyCommands
 rust/src/sessions.rs    list · stream · fork (/ask, /handover) · background (/new, /tell, /stop)
+rust/src/keys.rs        type into a real Terminal window, and read that window back
 rust/src/watch.rs       "vừa xong" / "vừa tắt" — so hai lượt ảnh chụp, nói MỘT lần
-rust/src/portal.rs      read-only snapshot pushed to tfl5 (docs, not files — see its header)
 rust/src/redaction.rs   leak scan, used by session previews
-rust/src/live.rs        held-open /ws/chat socket: wakes the cycle when an order lands
-rust/src/adapters/      tfl5 (the one channel) + the poll/command contract
+rust/src/setup.rs       `hub setup`: a 127.0.0.1 page that writes hub.env (chmod 600)
+rust/src/adapters/      what a command IS (CommandKind, ChannelCommand, Health)
 rust/tests/             integration tests + captured real fixture
-fe/index.html           the phone page, shipped to tfl5 as an app bundle
-fe-deploy.mjs           zip → Releases → Activate through the console UI, then verifies bytes
-fe-*.mjs                Playwright over the DEPLOYED bundle at 390×844:
-                        -smoke (chat), -board (tabs/health/config, absence of the inbox),
-                        -sessions + -stream (UC-S01..S04, S07), -aside (UC-S05b),
-                        -newsession (UC-S06), -subagent (UC-S02b — needs a REAL
-                        subagent running, else it exits 2 rather than passing),
-                        -config (form → /set → disk), -denied, -phone, -url, -type
-fe-shots.mjs            screenshots of all 5 screens; reads only, never calls claude
-console-acl.mjs         grant/revoke app access through the tfl5 console UI
 hub.env(.example)       secrets for launchd runs — chmod 600, gitignored
 deploy/*.plist          launchd unit (runs the INSTALLED hubd, not target/)
 legacy-node/            archived prototype
 ```
+
+🔴 **Gone 2026-08-14** (in git before `cf20874`): `rust/src/portal.rs` (read-only
+snapshot pushed to tfl5 as docs), `rust/src/live.rs` (held-open `/ws/chat`
+socket), `rust/src/adapters/tfl5.rs`, `fe/index.html` (the phone page),
+`fe-deploy.mjs`, 17 more `fe-*.mjs` Playwright scripts, `console-acl.mjs`, and
+`ui-shots/`.

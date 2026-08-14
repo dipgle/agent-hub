@@ -9,34 +9,34 @@
 //! từ chỗ dễ thấy nhất.
 //!
 //! Ở đây không có mạng, không có kênh: vào là chữ, ra là `(route, id, phần còn
-//! lại)`. Nhờ thế 44 bài kiểm của nó chạy được mà không cần một máy chủ nào — và
-//! đó cũng là lý do chúng còn nguyên vẹn sau khi cả cái kênh biến mất.
-
-use serde_json::json;
+//! lại)`. Nhờ thế các bài kiểm của nó chạy được mà không cần một máy chủ nào —
+//! và đó cũng là lý do chúng còn nguyên vẹn sau khi cả cái kênh biến mất.
 
 use crate::adapters::CommandKind;
-use crate::logging;
 
-/// Một mệnh lệnh gõ trong phòng chat, nếu chữ này là lệnh VÀ người gõ được
-/// quyền ra lệnh cho hub.
+/// Một mệnh lệnh gõ trên kênh, nếu chữ này là lệnh.
 ///
-/// Cửa tin cậy là cả điểm mấu chốt: ở trong phòng là chuyện của kênh, còn mở
-/// một phiên trên cái Mac này — hay hỏi nó một câu — là chuyện của chủ máy.
-/// Người khác gõ `/new` thì đó chỉ là một người đang gõ chữ.
-pub fn parse_command(
-    text: &str,
-    from_user_tid: &str,
-    owner_tids: &[String],
-) -> Option<(CommandKind, i64, String)> {
+/// 🔴 **Cổng người đã rời khỏi hàm này**, 2026-08-14, cùng lượt gỡ tfl5. Trước
+/// đó nó nhận thêm `(from_user_tid, owner_tids)` và từ chối người lạ — đúng khi
+/// còn một PHÒNG CHAT mà ai vào cũng gõ được. Telegram không có hình dạng ấy:
+/// cổng của nó là `chat_id`, và `telegram.rs` đã bỏ mọi tin từ buồng khác
+/// (`:1326` cho chữ, `:1731` cho nút) trước khi có gì tới được đây.
+///
+/// Nên chỗ gọi duy nhất phải tự bịa ra người gõ để đi qua chính cái cổng ấy:
+/// lấy `first()` của danh sách chủ rồi đem so với danh sách. Một cổng được dựng
+/// sao cho không bao giờ từ chối được **trừ khi danh sách rỗng** — và khi ấy nó
+/// từ chối MỌI mệnh lệnh, im lặng, chỉ để lại một dòng nhật ký. Tức là cái bẫy
+/// nằm đúng ở chỗ nó nhìn giống bảo mật nhất.
+///
+/// Luật thì không đổi, chỉ đổi chỗ đứng: **một cổng người, ở KÊNH**. Đặt hai
+/// cổng ở hai tầng cho cùng một câu hỏi là cách chắc chắn để một hôm nào đó
+/// chúng trả lời khác nhau.
+///
+/// Ở đây không có mạng, không có kênh, và nay cũng không có ai: vào là chữ, ra
+/// là `(route, id, phần còn lại)`.
+pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     let t = text.trim();
     if !t.starts_with('/') {
-        return None;
-    }
-    if !owner_tids.iter().any(|u| u == from_user_tid) {
-        logging::warn(
-            "command_from_non_owner",
-            json!({ "from_user_tid": from_user_tid, "head": crate::exec::truncate(t, 40) }),
-        );
         return None;
     }
     let mut parts = t[1..].splitn(3, char::is_whitespace);
@@ -79,7 +79,7 @@ pub fn parse_command(
         }
         // Đi lại đúng bộ phân tích này, chỉ khác cái vỏ: `/start pick_x_1_2`
         // phải cho ra y hệt `/pick_x_1_2` gõ tay. Một đường, một luật.
-        return parse_command(&format!("/{payload}"), from_user_tid, owner_tids);
+        return parse_command(&format!("/{payload}"));
     }
     // `send_<8 ký tự đầu id>` — gửi bảng đi (một dấu Enter vào đúng cửa sổ ấy).
     // Nó là `/key <id> enter` viết dưới dạng CHẠM ĐƯỢC: `/key` có tham số đứng
@@ -123,7 +123,9 @@ pub fn parse_command(
         // động từ parse được mà không có handler là tệ nhất trong hai đằng:
         // phòng chat nhận nó, không có gì xảy ra, và không có gì nói ra điều đó.
         // Không parse thì chúng là chữ thường — đúng sự thật.
-        "ingest" | "poll" => Some((CommandKind::Ingest, 0, String::new())),
+        // `/ingest` (`/poll`) đã bỏ 2026-08-14: động từ ấy đọc PHÒNG CHAT.
+        // Không parse thì nó là chữ thường — đúng sự thật, và đúng luật đã ghi
+        // ngay trên đây về `/approve` với cái hộp thư không còn tồn tại.
         "run" | "cycle" => Some((CommandKind::Run, 0, String::new())),
         "doctor" | "health" => Some((CommandKind::Doctor, 0, String::new())),
         // `/accounts` — cũng là một verb không mang id. `acc` để gõ nhanh trên
@@ -147,8 +149,11 @@ pub fn parse_command(
                 .split_once(char::is_whitespace)
                 .map(|(_, r)| r.trim().to_string())
                 .unwrap_or_default();
-            (!rest.is_empty() && rest.contains(char::is_whitespace))
-                .then_some((CommandKind::RunIn, 0, rest))
+            (!rest.is_empty() && rest.contains(char::is_whitespace)).then_some((
+                CommandKind::RunIn,
+                0,
+                rest,
+            ))
         }
         // `/close [id]` — cùng cách nhận đích với `/stop`: trống thì phiên đang
         // theo, có id thì phiên ấy. Khác `/stop` ở KẾT CỤC, không ở cách nhắm.

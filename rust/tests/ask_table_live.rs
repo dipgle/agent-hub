@@ -80,18 +80,19 @@ fn pressing_enter_actually_submits_the_input_box() {
     let w = hub::keys::window_of(&tty)
         .expect("hỏi được Terminal")
         .expect("tty phải gắn một cửa sổ");
-    let before = hub::keys::input_box_text(
-        &hub::keys::screen_of(&tty, 40).expect("đọc được màn").0,
-    );
+    let before =
+        hub::keys::input_box_text(&hub::keys::screen_of(&tty, 40).expect("đọc được màn").0);
     println!("ô nhập TRƯỚC: {before:?}");
     hub::keys::press(w, "enter").expect("gửi được phím");
     std::thread::sleep(std::time::Duration::from_millis(1500));
-    let after = hub::keys::input_box_text(
-        &hub::keys::screen_of(&tty, 40).expect("đọc được màn").0,
-    );
+    let after = hub::keys::input_box_text(&hub::keys::screen_of(&tty, 40).expect("đọc được màn").0);
     println!("ô nhập SAU : {after:?}");
     println!(
         "=> Enter {}",
-        if before != after { "CÓ tác dụng" } else { "KHÔNG tác dụng" }
+        if before != after {
+            "CÓ tác dụng"
+        } else {
+            "KHÔNG tác dụng"
+        }
     );
 }

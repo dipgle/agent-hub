@@ -40,8 +40,7 @@ static SLOW_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
 static USAGE_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
 /// Đang có một luồng đi hỏi hạn mức hay chưa — để vòng chạy kế tiếp không đẻ
 /// thêm ba tiến trình `claude` nữa trong lúc lượt trước còn dở.
-static USAGE_REFRESHING: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static USAGE_REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Called once by `hubd` at boot so "how long has it been up" is a fact rather
 /// than a guess from the first cycle.
@@ -162,12 +161,19 @@ pub fn accounts_text(cfg: &Config, live: &SessionsSnapshot, usage: &Value) -> St
         out.push_str(&format!(
             "\n{}{} · {}\n",
             acc.name,
-            if is_default { " ⭐ mặc định của /new" } else { "" },
+            if is_default {
+                " ⭐ mặc định của /new"
+            } else {
+                ""
+            },
             match mine.len() {
                 0 => "không có phiên nào".to_string(),
                 n => format!(
                     "{n} phiên: {}",
-                    mine.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ")
+                    mine.iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             }
         ));
@@ -580,9 +586,8 @@ fn auth_block(cfg: &Config) -> Value {
 /// had started it by hand. That is exactly the kind of fact that is invisible
 /// until the day it matters, so it belongs on the screen.
 fn autostart_state(cfg: &Config) -> Value {
-    let plist = crate::config::expand_home(Path::new(
-        "~/Library/LaunchAgents/com.dipgle.hubd.plist",
-    ));
+    let plist =
+        crate::config::expand_home(Path::new("~/Library/LaunchAgents/com.dipgle.hubd.plist"));
     let installed = plist.exists();
     let loaded = if installed {
         match run(

@@ -3,7 +3,7 @@
 //! 🔴 Hà 2026-08-14: *"Tại sao không tạo lib lệnh để map khi nhận"*.
 //!
 //! Không có lý do tốt nào; đó là nợ tích tụ. Trước tệp này, một cái tên lệnh
-//! sống ở **ba chỗ rời nhau**: 26 nhánh `match` trong `tfl5::parse_command`,
+//! sống ở **ba chỗ rời nhau**: 26 nhánh `match` trong `verbs::parse_command`,
 //! một khối chữ `/help` gõ tay trong `pipeline.rs`, và bảng `callback_data` ở
 //! `telegram.rs`. Ba chỗ không ai bắt phải giống nhau, nên chúng lệch theo thời
 //! gian — và lệch ở đây có một hình dạng rất khó thấy: lệnh vẫn parse, vẫn
@@ -243,15 +243,10 @@ pub const ROUTES: &[Route] = &[
         help: "Kiểm kênh, khoá, công cụ",
         listed: true,
     },
-    Route {
-        name: "ingest",
-        aliases: &["poll"],
-        kind: CommandKind::Ingest,
-        arg: Arg::None,
-        usage: "",
-        help: "Đọc phòng chat ngay",
-        listed: false,
-    },
+    // 🔴 `/ingest` (`/poll`) đã bỏ 2026-08-14: nó đọc PHÒNG CHAT, và phòng chat
+    // đi rồi. Telegram không có gì để đọc-ngay — nó tự đẩy tới. Bỏ hẳn khỏi bảng
+    // chứ không để `listed: false`: một lệnh ẩn vẫn là một lệnh gõ được, và nó
+    // sẽ trả lời bằng một câu vô nghĩa.
     Route {
         name: "run",
         aliases: &["cycle"],
@@ -328,7 +323,8 @@ mod tests {
                 }
                 assert!(n.len() <= 32, "tên quá dài: {n}");
                 assert!(
-                    n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                    n.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
                     "tên có ký tự Telegram không nhận: {n}"
                 );
             }
@@ -350,7 +346,11 @@ mod tests {
     fn help_lists_every_route_and_lookup_finds_them_all() {
         let h = help_text();
         for r in ROUTES {
-            assert!(h.contains(&format!("/{}", r.name)), "thiếu trong help: {}", r.name);
+            assert!(
+                h.contains(&format!("/{}", r.name)),
+                "thiếu trong help: {}",
+                r.name
+            );
             assert_eq!(lookup(r.name).map(|x| x.name), Some(r.name));
             for a in r.aliases {
                 assert_eq!(lookup(a).map(|x| x.name), Some(r.name), "alias {a}");

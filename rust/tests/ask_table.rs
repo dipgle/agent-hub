@@ -82,14 +82,23 @@ fn the_bell_says_how_many_questions_are_in_the_table() {
         rest: a.rest,
     };
     let said = c.say(&Idle::Unknown, None);
-    assert!(said.contains("câu 1/2"), "phải nói đang ở câu mấy trên mấy: {said}");
+    assert!(
+        said.contains("câu 1/2"),
+        "phải nói đang ở câu mấy trên mấy: {said}"
+    );
     assert!(said.contains("Bảng 2 câu"), "{said}");
     assert!(
         said.contains("trả lời HẾT rồi mới gửi được"),
         "phải nói ra cái ràng buộc, không thì bấm một cái rồi tưởng xong: {said}"
     );
-    assert!(said.contains("Đăng nhập"), "câu 2 phải đọc được ngay trên chuông: {said}");
-    assert!(said.contains("Không phân biệt"), "kèm lựa chọn của câu 2: {said}");
+    assert!(
+        said.contains("Đăng nhập"),
+        "câu 2 phải đọc được ngay trên chuông: {said}"
+    );
+    assert!(
+        said.contains("Không phân biệt"),
+        "kèm lựa chọn của câu 2: {said}"
+    );
 }
 
 /// Bảng MỘT câu không mọc thêm chữ: câu nói cũ đã đúng, và thêm "câu 1/1" vào
@@ -150,6 +159,12 @@ fn the_send_command_carries_its_id_inside_the_name() {
         }],
     };
     let txt = hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a);
-    assert!(txt.contains("/send_4963b95c"), "phải là lệnh chạm được: {txt}");
-    assert!(!txt.contains("/key "), "không được dùng dạng có tham số rời: {txt}");
+    assert!(
+        txt.contains("/send_4963b95c"),
+        "phải là lệnh chạm được: {txt}"
+    );
+    assert!(
+        !txt.contains("/key "),
+        "không được dùng dạng có tham số rời: {txt}"
+    );
 }

@@ -124,7 +124,10 @@ fn a_missing_cursor_is_silent_but_a_broken_read_is_not() {
     assert_eq!(db.cursor_or_log("focus:session"), None);
 
     db.set_cursor("focus:session", "abc-123").unwrap();
-    assert_eq!(db.cursor_or_log("focus:session").as_deref(), Some("abc-123"));
+    assert_eq!(
+        db.cursor_or_log("focus:session").as_deref(),
+        Some("abc-123")
+    );
 
     // Đặt rỗng = "thôi theo phiên nào cả": vẫn là một giá trị ĐÃ ĐẶT, chỗ gọi
     // tự lọc bằng `.filter(|s| !s.is_empty())` chứ hàm này không đoán hộ.
@@ -160,7 +163,11 @@ fn schema_step_4_drops_the_dead_inbox_tables_and_nothing_else() {
       CREATE TABLE cursors (k TEXT PRIMARY KEY, v TEXT, updated_at TEXT NOT NULL);
       INSERT INTO cursors VALUES ('focus:session','abc','2026-08-10T00:00:00Z');
     ";
-    let out = Command::new("sqlite3").arg(&path).arg(seed).output().unwrap();
+    let out = Command::new("sqlite3")
+        .arg(&path)
+        .arg(seed)
+        .output()
+        .unwrap();
     assert!(out.status.success(), "dựng fixture hỏng: {out:?}");
 
     // Mở bằng chính hub — bước nâng cấp chạy ở đây.
@@ -177,10 +184,16 @@ fn schema_step_4_drops_the_dead_inbox_tables_and_nothing_else() {
         .unwrap();
     let names = String::from_utf8_lossy(&names.stdout);
     for gone in ["messages", "outbox", "decisions", "dead_letter"] {
-        assert!(!names.split('\n').any(|l| l.trim() == gone), "còn {gone}: {names}");
+        assert!(
+            !names.split('\n').any(|l| l.trim() == gone),
+            "còn {gone}: {names}"
+        );
     }
     for kept in ["cursors", "runs", "spend", "schema_meta"] {
-        assert!(names.split('\n').any(|l| l.trim() == kept), "mất {kept}: {names}");
+        assert!(
+            names.split('\n').any(|l| l.trim() == kept),
+            "mất {kept}: {names}"
+        );
     }
 
     // Chạy lại lần nữa: không nổ, không làm gì thêm (phiên bản đã là 4).

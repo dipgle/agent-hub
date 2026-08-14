@@ -1,5 +1,68 @@
 # active context — hub
 
+## 📋 2026-08-14 (tối) — gỡ nốt dấu vết tfl5 khỏi cấu hình, cổng người và sổ sách
+
+Nối tiếp `cf20874` (cắt kênh + trang). Lượt này gỡ những thứ chỉ lộ ra **sau khi**
+kênh đã đi: cấu hình khai một kênh không tồn tại, một cổng bảo mật không còn từ
+chối được, một động từ không còn việc gì để làm, và ba thư viện không ai gọi.
+
+**Cài lúc 15:48:17Z, pid 67374, chữ ký `cert`.** 263 test · clippy 0 · fmt sạch
+(exit đọc trực tiếp, không qua `| tail`).
+
+### Bốn thứ gỡ, và vì sao từng thứ đáng gỡ chứ không phải dọn dẹp
+
+1. **`Tfl5Cfg` + `Adapters` + `Trust`** (`config.rs`). `trusted_sources` chưa bao
+   giờ được đọc — khai trong cấu hình, đặt trong test, không một chỗ nào hỏi tới.
+2. **Cổng tid trong `parse_command`.** Đây là phần đáng nhớ nhất. Sau khi phòng
+   chat đóng, chỗ gọi DUY NHẤT phải tự bịa ra người gõ để đi qua chính cái cổng
+   ấy: `cfg.trust.tfl5_user_tids.first()` đem so với `cfg.trust.tfl5_user_tids`.
+   Một cổng cấu tạo sao cho **không bao giờ từ chối được** — trừ đúng một trường
+   hợp: danh sách RỖNG, và khi ấy nó từ chối **mọi** mệnh lệnh trong im lặng.
+   Tức là gỡ `trust` khỏi `hub.config.json` mà quên cổng này thì hub câm hẳn.
+   Nay một cổng, ở KÊNH: `telegram::update_sender` + `chat_id`.
+3. **Cả chặng hỏi vòng** (`ADAPTER_NAMES`, `adapter_enabled`, `poll_adapter`,
+   `pipeline::ingest`, route `/ingest`, `hub ingest`). Không còn kênh nào để hỏi;
+   `poll_adapter` trả `unknown adapter` cho chính cái tên duy nhất trong danh
+   sách. `/ingest` chỉ còn một câu trả lời khả dĩ: *"disabled in config"*.
+4. **`tungstenite` + `axum` + `tokio`.** Không một dòng `use` nào trong `src/`,
+   và cargo không kêu một tiếng. `axum`+`tokio` dựng cho bảng điều khiển web bị
+   xoá từ 08-08 — sống thừa sáu ngày, kéo một runtime bất đồng bộ vào một tiến
+   trình cố ý đồng bộ.
+
+### Bảng `runs` đổi NGƯỜI GHI, không đổi hình dạng
+
+Chặng hỏi vòng là thứ duy nhất ghi `runs`. Bỏ nó mà không thay người ghi thì
+khối "lỗi gần đây" của `/doctor` (`runtime::errors_block`) đọc một bảng mãi mãi
+rỗng — một phép đo **không bao giờ đỏ được**, tức phép đo mù, tệ hơn không có vì
+nó vẫn chiếm chỗ và vẫn được đọc như một lời cam đoan. Nay `run_once` ghi một
+dòng mỗi vòng (mở sổ TRƯỚC, đóng sổ SAU, `ok=NULL` giữa chừng = vòng chết giữa
+đường). `hub status` đổi nhãn "last polls" → "last cycles".
+
+⚠ **Nợ phải ghi:** nguồn của khối ấy nay MỎNG hơn trước. Vòng hiếm khi trả `Err`;
+lỗi thật nằm trong các handler, và chúng ghi log chứ không ghi `runs`. Chưa vá.
+
+### Một suýt nữa, ghi lại vì nó là đúng cái bẫy vừa mô tả
+
+Sửa `hub.config.json` (bỏ `adapters`+`trust`) trong khi daemon **cũ** đang chạy ⟹
+bản cũ đọc lại cấu hình, `tfl5_user_tids` rỗng ⟹ cổng ở mục 2 chuyển sang từ chối
+**mọi** lệnh Telegram, im lặng. Kiểm bằng log: dòng `command_from_non_owner` gần
+nhất là **2026-08-08**, tức trong cửa sổ ~24 giây ấy **không có lệnh nào tới** —
+rủi ro có thật, thiệt hại không có. Bài học cho lần sau: **đổi cấu hình và cài
+binary phải cùng một nhịp**, đúng luật "contract + consumer ship cùng commit".
+
+### Còn dở
+
+- **19 tệp `.mjs` + `fe/` + `ui-shots/` + `rust/src/{live,portal}.rs` vẫn trên
+  đĩa và trong chỉ mục git** — không còn được biên dịch, không còn ai gọi. Lệnh
+  `git rm` bị hook chặn 6 lần rồi bị từ chối quyền; **phải để Hà gõ tay**.
+- `.runner-allowlist` còn `bash ../hub ingest` (lệnh đã chết) và
+  `node ../ui-smoke.mjs`. Claude sửa allowlist = self-grant, bị chặn — Hà tự sửa.
+- **Mất hai chốt canh "không hiện tiền trên màn"** (`portal.rs` và
+  `fe-board-uc.mjs` cùng assert ABSENCE). `#[serde(skip_serializing)]` vẫn giữ
+  luật ở nguồn, nhưng **không còn test nào canh**. Đã ghi vào `CLAUDE.md` §9.
+- **Nghiệm thu thật chưa có:** mới chứng minh daemon lên, đăng ký 10 lệnh, chạy
+  vòng sạch. Một mệnh lệnh gõ THẬT trong buồng Telegram thì chưa — Hà phải gõ.
+
 ## 📋 2026-08-13 (sáng) — lượt tự đóng sổ THẬT đầu tiên, và ba lỗi nó lôi ra
 
 `auto_handover` bật lúc 04:13Z, nổ lần đầu **04:23:30Z** (`projects-06`, 80%,

@@ -258,10 +258,9 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
                 // Vòng đọc lệnh đang đứng im vì mượn đường, nên bỏ qua ở đây là
                 // mệnh lệnh ấy BIẾN MẤT — đúng nghĩa lỗi im lặng. Nhặt hộ vào
                 // hàng đợi, vòng sau chạy.
-                if let (Some(i), Some(t)) = (
-                    shared,
-                    u.pointer("/message/text").and_then(Value::as_str),
-                ) {
+                if let (Some(i), Some(t)) =
+                    (shared, u.pointer("/message/text").and_then(Value::as_str))
+                {
                     let from = u
                         .pointer("/message/chat/id")
                         .map(|v| v.to_string())

@@ -8,6 +8,13 @@ Sổ UC đầy đủ (kèm bằng chứng chạy thật): `UC.md`. Vì sao nhán
 
 ## Đã xong, đã chạy thật
 
+🔴 **Đọc trước bảng này (2026-08-14).** Phần lớn cột "Bằng chứng" trỏ vào các
+kịch bản `fe-*-uc.mjs` chạy Playwright trên bundle tfl5. **Những kịch bản ấy đã
+bị xoá** cùng trang điện thoại — bằng chứng là chuyện ĐÃ XẢY RA nên giữ nguyên
+văn, nhưng **không chạy lại được**, và một dòng ở đây không còn tự chứng minh
+mình nữa. Việc gì cần khẳng định lại thì phải khẳng định bằng đường Telegram
+thật. Mã cũ nằm trong git trước `cf20874`.
+
 | UC | Việc | Bằng chứng |
 |---|---|---|
 | S01 | Danh sách mọi phiên đang sống, mọi tài khoản | `fe-sessions-uc` 9/9 |

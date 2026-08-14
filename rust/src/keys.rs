@@ -797,53 +797,80 @@ fn commands_in(text: &str, max: usize, max_len: usize) -> Vec<String> {
     // `gh` vào danh sách 2026-08-13, vì đó là cái tên trong câu Hà hỏi: màn nói
     // *"Next action is yours: merge PR #54"* và không có nút nào. `gh` là công
     // cụ merge trên máy này — cùng loại với `git`, đã nằm sẵn ở đây từ đầu.
-/// `cd <thư mục> && <lệnh>` — dạng phổ biến nhất, và nó KHÔNG bắt đầu bằng một
-/// động từ trong danh sách.
-///
-/// 🔴 Hà 2026-08-13, ảnh chụp một tin báo có nguyên dòng
-/// `cd ~/projects/AI/codetrail && git push` mà không cái nút nào. Danh sách
-/// `KNOWN` cố tình hẹp — nó là hàng rào, không phải bảng tra — nên `cd` không
-/// nằm trong đó, và từ đầu tiên của dòng là `cd` ⟹ 0 nút.
-///
-/// Không nới hàng rào bằng cách nhét `cd` vào `KNOWN`: `cd` một mình chẳng chạy
-/// gì, mà thêm nó là mở cửa cho mọi dòng bắt đầu bằng `cd`. Thay vào đó, nhận
-/// đúng HÌNH DẠNG: `cd <gì đó> &&|; <phần còn lại>` thì đem **phần còn lại** đi
-/// hỏi cùng cái hàng rào ấy. Hàng rào không đổi, chỉ hỏi đúng chỗ.
-/// Đuôi của một dòng lệnh vừa bị cửa sổ bẻ — hoặc `None` nếu không chắc.
-///
-/// Cố ý HẸP, vì nối nhầm là dựng ra một lệnh chưa ai viết: đuôi phải là một
-/// mẩu liền (không dấu cách) hoặc một tham số `-x`/`--x`. Một câu văn ở dòng
-/// dưới thì không phải đuôi, và lúc ấy chỗ gọi bỏ luôn cái nút.
-fn wrap_tail(next: Option<&str>) -> Option<String> {
-    let t = next?.trim();
-    if t.is_empty() || t.len() > 60 {
-        return None;
-    }
-    // Dấu nhắc / gạch đầu dòng = một dòng MỚI, không phải phần tiếp. `-` KHÔNG
-    // nằm đây: một tham số `-v` hay `--expect-symbol` bắt đầu đúng như thế.
-    for p in ["$", "❯", ">", "⏵", "%", "•", "!", "#", "⎿", "│"] {
-        if t.starts_with(p) {
+    /// `cd <thư mục> && <lệnh>` — dạng phổ biến nhất, và nó KHÔNG bắt đầu bằng một
+    /// động từ trong danh sách.
+    ///
+    /// 🔴 Hà 2026-08-13, ảnh chụp một tin báo có nguyên dòng
+    /// `cd ~/projects/AI/codetrail && git push` mà không cái nút nào. Danh sách
+    /// `KNOWN` cố tình hẹp — nó là hàng rào, không phải bảng tra — nên `cd` không
+    /// nằm trong đó, và từ đầu tiên của dòng là `cd` ⟹ 0 nút.
+    ///
+    /// Không nới hàng rào bằng cách nhét `cd` vào `KNOWN`: `cd` một mình chẳng chạy
+    /// gì, mà thêm nó là mở cửa cho mọi dòng bắt đầu bằng `cd`. Thay vào đó, nhận
+    /// đúng HÌNH DẠNG: `cd <gì đó> &&|; <phần còn lại>` thì đem **phần còn lại** đi
+    /// hỏi cùng cái hàng rào ấy. Hàng rào không đổi, chỉ hỏi đúng chỗ.
+    /// Đuôi của một dòng lệnh vừa bị cửa sổ bẻ — hoặc `None` nếu không chắc.
+    ///
+    /// Cố ý HẸP, vì nối nhầm là dựng ra một lệnh chưa ai viết: đuôi phải là một
+    /// mẩu liền (không dấu cách) hoặc một tham số `-x`/`--x`. Một câu văn ở dòng
+    /// dưới thì không phải đuôi, và lúc ấy chỗ gọi bỏ luôn cái nút.
+    fn wrap_tail(next: Option<&str>) -> Option<String> {
+        let t = next?.trim();
+        if t.is_empty() || t.len() > 60 {
             return None;
         }
+        // Dấu nhắc / gạch đầu dòng = một dòng MỚI, không phải phần tiếp. `-` KHÔNG
+        // nằm đây: một tham số `-v` hay `--expect-symbol` bắt đầu đúng như thế.
+        for p in ["$", "❯", ">", "⏵", "%", "•", "!", "#", "⎿", "│"] {
+            if t.starts_with(p) {
+                return None;
+            }
+        }
+        let one_token = !t.contains(char::is_whitespace);
+        let a_flag = t.starts_with('-');
+        (one_token || a_flag).then(|| t.to_string())
     }
-    let one_token = !t.contains(char::is_whitespace);
-    let a_flag = t.starts_with('-');
-    (one_token || a_flag).then(|| t.to_string())
-}
 
-fn after_cd(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("cd ")?;
-    let (_dir, tail) = rest
-        .split_once("&&")
-        .or_else(|| rest.split_once(';'))?;
-    let tail = tail.trim();
-    (!tail.is_empty()).then_some(tail)
-}
+    fn after_cd(line: &str) -> Option<&str> {
+        let rest = line.strip_prefix("cd ")?;
+        let (_dir, tail) = rest.split_once("&&").or_else(|| rest.split_once(';'))?;
+        let tail = tail.trim();
+        (!tail.is_empty()).then_some(tail)
+    }
 
     const KNOWN: &[&str] = &[
-        "git", "gh", "npm", "npx", "node", "cargo", "bash", "sh", "zsh", "python3", "pip3",
-        "docker", "make", "curl", "rsync", "scp", "ssh", "sqlite3", "pnpm", "yarn", "deno", "go",
-        "rustup", "brew", "launchctl", "osascript", "open", "code", "tail", "grep", "rg", "find",
+        "git",
+        "gh",
+        "npm",
+        "npx",
+        "node",
+        "cargo",
+        "bash",
+        "sh",
+        "zsh",
+        "python3",
+        "pip3",
+        "docker",
+        "make",
+        "curl",
+        "rsync",
+        "scp",
+        "ssh",
+        "sqlite3",
+        "pnpm",
+        "yarn",
+        "deno",
+        "go",
+        "rustup",
+        "brew",
+        "launchctl",
+        "osascript",
+        "open",
+        "code",
+        "tail",
+        "grep",
+        "rg",
+        "find",
         "ls",
     ];
     let mut out: Vec<String> = Vec::new();
@@ -1107,7 +1134,10 @@ fn dedupe_same_script(out: &mut Vec<String>) {
     fn shape(cmd: &str) -> String {
         cmd.split_whitespace()
             .map(|w| {
-                if w.ends_with(".sh") || w.ends_with(".mjs") || w.ends_with(".py") || w.ends_with(".js")
+                if w.ends_with(".sh")
+                    || w.ends_with(".mjs")
+                    || w.ends_with(".py")
+                    || w.ends_with(".js")
                 {
                     w.rsplit('/').next().unwrap_or(w)
                 } else {
@@ -1296,8 +1326,23 @@ fn ends_with_bare_number(s: &str) -> bool {
 /// lệch hẳn: bỏ sót thì gõ tay, bấm nhầm thì không có nút hoàn tác.
 fn forbids(context: &str) -> bool {
     const MARKS: &[&str] = &[
-        "block", "⚠", "❌", "🔴", "never", "do not", "don't", "denied", "refus", "dangerous",
-        "đừng", "cấm", "không được", "không nên", "từ chối", "nguy hiểm", "thay vì",
+        "block",
+        "⚠",
+        "❌",
+        "🔴",
+        "never",
+        "do not",
+        "don't",
+        "denied",
+        "refus",
+        "dangerous",
+        "đừng",
+        "cấm",
+        "không được",
+        "không nên",
+        "từ chối",
+        "nguy hiểm",
+        "thay vì",
         // 🔴 Thêm 2026-08-14, sau khi Hà bấm một nút và nhận về một lệnh xoá
         // trần: *"Nút lệnh chạy ko đúng"*. Chữ ấy hub bắt được từ một THÔNG BÁO
         // CHẶN của hook — *"the command runs … which permanently deletes tracked
@@ -1308,7 +1353,11 @@ fn forbids(context: &str) -> bool {
         // mời: một lời cảnh báo bao giờ cũng nói hậu quả ("permanently",
         // "irreversible") hoặc đưa đường thay thế ("safer form"), còn
         // "pretooluse" thì đúng tên cái cổng đã chặn.
-        "safer form", "permanently", "irreversible", "pretooluse", "hook stopped",
+        "safer form",
+        "permanently",
+        "irreversible",
+        "pretooluse",
+        "hook stopped",
     ];
     let c = context.to_lowercase();
     MARKS.iter().any(|m| c.contains(m))
@@ -1331,9 +1380,21 @@ fn forbids(context: &str) -> bool {
 fn destructive(cmd: &str) -> bool {
     let c = cmd.trim().to_lowercase();
     const HEADS: &[&str] = &[
-        "rm ", "rmdir ", "git rm", "git reset --hard", "git clean", "git push --force",
-        "git push -f", "shred ", "truncate ", "drop table", "drop database", "kill ",
-        "pkill ", "killall ", "launchctl bootout",
+        "rm ",
+        "rmdir ",
+        "git rm",
+        "git reset --hard",
+        "git clean",
+        "git push --force",
+        "git push -f",
+        "shred ",
+        "truncate ",
+        "drop table",
+        "drop database",
+        "kill ",
+        "pkill ",
+        "killall ",
+        "launchctl bootout",
     ];
     HEADS.iter().any(|h| c.starts_with(h) || c == h.trim())
 }
@@ -1411,8 +1472,12 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
         let t = line.trim();
         // Bỏ dấu con trỏ ❯ nếu có, rồi tìm "<số>." ở đầu.
         let t = t.strip_prefix('❯').map(str::trim_start).unwrap_or(t);
-        let Some((num, rest)) = t.split_once('.') else { continue };
-        let Ok(n) = num.trim().parse::<usize>() else { continue };
+        let Some((num, rest)) = t.split_once('.') else {
+            continue;
+        };
+        let Ok(n) = num.trim().parse::<usize>() else {
+            continue;
+        };
         if n == 0 || n > 9 {
             continue;
         }
@@ -1586,7 +1651,9 @@ impl Activity {
 /// Đọc dòng trạng thái đang quay, nếu có.
 pub fn activity(screen: &str) -> Option<Activity> {
     for line in screen.lines().rev() {
-        let Some(open) = line.find(" (") else { continue };
+        let Some(open) = line.find(" (") else {
+            continue;
+        };
         let inside = &line[open + 2..];
         // "<số>m <số>s" — cùng cái neo `is_busy` dùng.
         let mins: String = inside.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -1687,7 +1754,10 @@ pub fn look(tty: &str, lines: usize) -> Look {
         }
         Err(e) => {
             // Không im lặng: hỏng ở đây làm chốt an toàn phía dưới mất căn cứ.
-            logging::warn("keys_window_probe_failed", json!({ "tty": tty, "err": e.to_string() }));
+            logging::warn(
+                "keys_window_probe_failed",
+                json!({ "tty": tty, "err": e.to_string() }),
+            );
             return Look::Blind {
                 why: format!("không hỏi được Terminal cửa sổ nào: {e}"),
             };
@@ -1696,7 +1766,10 @@ pub fn look(tty: &str, lines: usize) -> Look {
     let screen = match screen_text(w) {
         Ok(s) => s,
         Err(e) => {
-            logging::warn("keys_screen_read_failed", json!({ "window": w, "err": e.to_string() }));
+            logging::warn(
+                "keys_screen_read_failed",
+                json!({ "window": w, "err": e.to_string() }),
+            );
             return Look::Blind {
                 why: format!("không đọc được chữ trên màn: {e}"),
             };
@@ -1825,7 +1898,10 @@ mod tests {
     /// không lùi lại được.
     #[test]
     fn an_arrow_goes_only_when_we_are_sure_there_is_no_dialog() {
-        let quiet = Look::Saw { body: "$ ".into(), choices: vec![] };
+        let quiet = Look::Saw {
+            body: "$ ".into(),
+            choices: vec![],
+        };
         assert_eq!(arrow_verdict(&quiet), Arrow::Send);
 
         let asking = Look::Saw {
@@ -1836,14 +1912,22 @@ mod tests {
 
         // Màn có bí mật: CHỮ bị giữ lại, nhưng con số lựa chọn vẫn chắc chắn —
         // nên chốt không bị mù chỉ vì màn đang hiện một mật khẩu.
-        let secret_quiet = Look::Withheld { choices: 0, risk: vec!["credential_word_vi".into()] };
+        let secret_quiet = Look::Withheld {
+            choices: 0,
+            risk: vec!["credential_word_vi".into()],
+        };
         assert_eq!(arrow_verdict(&secret_quiet), Arrow::Send);
-        let secret_asking = Look::Withheld { choices: 2, risk: vec!["credential_word_vi".into()] };
+        let secret_asking = Look::Withheld {
+            choices: 2,
+            risk: vec!["credential_word_vi".into()],
+        };
         assert_eq!(arrow_verdict(&secret_asking), Arrow::RefuseDialog);
 
         // Không nhìn được thì KHÔNG gửi — và câu từ chối phải mang theo lý do,
         // không thì người ta không biết bấm lại có ích gì không.
-        let blind = Look::Blind { why: "osascript hết giờ".into() };
+        let blind = Look::Blind {
+            why: "osascript hết giờ".into(),
+        };
         match arrow_verdict(&blind) {
             Arrow::RefuseBlind(why) => assert!(why.contains("osascript"), "phải nói lý do: {why}"),
             other => panic!("mù mà vẫn gửi: {other:?}"),
@@ -1875,11 +1959,15 @@ mod tests {
     #[test]
     fn busy_is_read_from_the_clock_not_the_word() {
         use super::is_busy;
-        assert!(is_busy("✶ Unravelling… (2m 36s · ↓ 2.0k tokens · thinking)"));
+        assert!(is_busy(
+            "✶ Unravelling… (2m 36s · ↓ 2.0k tokens · thinking)"
+        ));
         assert!(is_busy("✻ Pondering… (12m 4s · ↑ 900 tokens)"));
         assert!(is_busy("· Herding cats… (0m 8s ·)"));
         // Rảnh: dấu nhắc trống, dòng gợi ý, không có đồng hồ.
-        assert!(!is_busy("❯ \n⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt"));
+        assert!(!is_busy(
+            "❯ \n⏵⏵ auto mode on (shift+tab to cycle) · esc to interrupt"
+        ));
         assert!(!is_busy(""));
         // Ngoặc có số nhưng KHÔNG phải đồng hồ thì không tính.
         assert!(!is_busy("Đã sửa 3 tệp (xem lại 2 chỗ)"));
@@ -1906,7 +1994,10 @@ mod tests {
         // Không có mũi tên hai đầu ⟹ không phải thanh tab. Dựng bảng từ một
         // dòng văn xuôi là bịa ra một cái hộp không có thật, rồi gửi phím vào.
         assert!(super::ask_table("tôi đã đánh dấu ☐ vào ô ấy").is_none());
-        assert!(super::ask_table("← quay lại · tiếp →").is_none(), "không có ô nào");
+        assert!(
+            super::ask_table("← quay lại · tiếp →").is_none(),
+            "không có ô nào"
+        );
     }
 
     #[test]
@@ -1975,8 +2066,14 @@ mod tests {
         // khai `/dev/ttys005` (đo 2026-08-11, hai trong ba là xác). Khớp tty
         // trần là trả về một cửa sổ ma: màn hình sai lên điện thoại, `/type` gõ
         // vào chỗ không ai đọc.
-        assert!(s.contains("count of (processes of t)) > 0"), "phải lọc tab còn sống:\n{s}");
-        assert!(s.contains("busy of t"), "phải ưu tiên tab đang chạy chương trình:\n{s}");
+        assert!(
+            s.contains("count of (processes of t)) > 0"),
+            "phải lọc tab còn sống:\n{s}"
+        );
+        assert!(
+            s.contains("busy of t"),
+            "phải ưu tiên tab đang chạy chương trình:\n{s}"
+        );
         assert!(s.trim_end().ends_with("end tell"), "kết thúc sai:\n{s}");
         // Số dấu nháy phải CHẴN — lẻ nghĩa là có một chuỗi treo lửng.
         assert_eq!(s.matches('"').count() % 2, 0, "dấu nháy lẻ:\n{s}");
@@ -1987,7 +2084,11 @@ mod tests {
         // Đếm `"try"` trần là sai: nó nằm trong cả `end try`. Mỗi `try` phải có
         // đúng một `end try` — đó mới là điều cần kiểm.
         assert_eq!(s.matches("end try").count(), 1, "{s}");
-        assert_eq!(s.matches("try").count() - s.matches("end try").count(), 1, "{s}");
+        assert_eq!(
+            s.matches("try").count() - s.matches("end try").count(),
+            1,
+            "{s}"
+        );
     }
 
     /// Thoát chuỗi sai là script hỏng cú pháp — hoặc đổi nghĩa, thứ tệ hơn.
@@ -2000,4 +2101,3 @@ mod tests {
         assert_eq!(as_string(""), "\"\"");
     }
 }
-

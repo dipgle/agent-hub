@@ -185,7 +185,10 @@ pub fn remember_sent(cfg: &Config, resp: &Value) {
                 logging::error("telegram_sent_not_saved", json!({ "err": e.to_string() }));
             }
         }
-        Err(e) => logging::error("telegram_sent_not_encodable", json!({ "err": e.to_string() })),
+        Err(e) => logging::error(
+            "telegram_sent_not_encodable",
+            json!({ "err": e.to_string() }),
+        ),
     }
 }
 
@@ -289,7 +292,10 @@ pub fn prune_sent(cfg: &Config, db: &crate::db::Db) {
                 logging::error("telegram_prune_not_saved", json!({ "err": e.to_string() }));
             }
         }
-        Err(e) => logging::error("telegram_prune_not_encodable", json!({ "err": e.to_string() })),
+        Err(e) => logging::error(
+            "telegram_prune_not_encodable",
+            json!({ "err": e.to_string() }),
+        ),
     }
     logging::info(
         "telegram_pruned",
@@ -432,6 +438,34 @@ fn shellexpand_home(p: &str) -> String {
     }
 }
 
+/// Ai gửi cái update này — đọc theo ĐÚNG hình dạng của nó.
+///
+/// 🔴 Tách ra thành hàm thuần ngày 2026-08-14, khi cổng người thứ hai
+/// (`trust.tfl5_user_tids`, kiểm trong `verbs::parse_command`) đi cùng phòng
+/// chat tfl5. Từ đây `chat_id` là **cổng người DUY NHẤT** của hub — cái gì gác
+/// một mình thì phải kiểm được một mình.
+///
+/// Hai hình dạng đọc ở hai chỗ khác nhau, và sự bất đối xứng ấy là cố ý:
+///
+/// * **Nút** hỏi NGƯỜI BẤM (`callback_query.from.id`). Một cú bấm mang danh
+///   tính của ngón tay bấm nó, và với buồng riêng thì `from.id` chính là
+///   `chat_id`.
+/// * **Chữ** hỏi BUỒNG (`message.chat.id`), không hỏi người gửi. Đọc nhầm sang
+///   `from.id` ở nhánh này là một lỗi rất khó thấy: trong buồng riêng hai số ấy
+///   BẰNG NHAU, nên mọi thử nghiệm tay đều xanh — chỉ tới khi bot bị kéo vào
+///   một nhóm thì hub mới bắt đầu nhận lệnh từ cả nhóm, hoặc từ chối chính chủ.
+///
+/// `None` = không đọc ra được ⟹ chỗ gọi từ chối. Fail closed.
+pub fn update_sender(u: &Value) -> Option<String> {
+    if let Some(cb) = u.get("callback_query") {
+        return cb.pointer("/from/id").map(|v| v.to_string());
+    }
+    u.get("message")
+        .or_else(|| u.get("edited_message"))
+        .and_then(|m| m.pointer("/chat/id"))
+        .map(|v| v.to_string())
+}
+
 pub fn callback_to_command(data: &str) -> Option<String> {
     if let Some(rest) = data.strip_prefix("key:") {
         let (sid, n) = rest.split_once(':')?;
@@ -512,7 +546,9 @@ pub fn deep_link(payload: &str) -> Option<String> {
 /// hẳn MarkdownV2, thứ bắt escape MỌI ký tự mã 1–126. Đó cũng là lý do hub gột
 /// Markdown suốt từ đầu thay vì bật nó lên.
 pub fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 pub fn inbox() -> Option<&'static Inbox> {
@@ -580,10 +616,16 @@ impl Inbox {
             .name("telegram-inbox".into())
             .spawn(move || worker.read_forever())
             .map_err(|e| {
-                logging::error("telegram_inbox_spawn_failed", json!({ "err": e.to_string() }));
+                logging::error(
+                    "telegram_inbox_spawn_failed",
+                    json!({ "err": e.to_string() }),
+                );
             })
             .ok()?;
-        logging::info("telegram_inbox_started", json!({ "chat_id_env": cfg.confirm.chat_id_env }));
+        logging::info(
+            "telegram_inbox_started",
+            json!({ "chat_id_env": cfg.confirm.chat_id_env }),
+        );
         // Khai bộ lệnh ở nền: một lượt HTTP, và hỏng thì chỉ mất phần gợi ý —
         // không được phép cản buồng thư khởi động. Nhưng KHÔNG im lặng.
         let reg = inbox.clone();
@@ -595,7 +637,10 @@ impl Inbox {
                 }
             })
             .map_err(|e| {
-                logging::warn("telegram_commands_spawn_failed", json!({ "err": e.to_string() }));
+                logging::warn(
+                    "telegram_commands_spawn_failed",
+                    json!({ "err": e.to_string() }),
+                );
             })
             .ok();
         Some(inbox)
@@ -664,7 +709,9 @@ impl Inbox {
             .and_then(|r| r.bytes().ok());
         let Some(bytes) = bytes else {
             logging::error("telegram_file_download_failed", json!({ "name": name }));
-            let _ = self.send_text("\u{26a0} tải tệp về không được (Telegram chỉ cho bot tải tệp ≤ 20 MB).");
+            let _ = self.send_text(
+                "\u{26a0} tải tệp về không được (Telegram chỉ cho bot tải tệp ≤ 20 MB).",
+            );
             return;
         };
         // 3. Chỗ để: thư mục dự án của phiên đang theo, `.inbox/`.
@@ -693,7 +740,10 @@ impl Inbox {
             dir.join(&short)
         };
         if let Err(e) = std::fs::create_dir_all(&dir) {
-            logging::error("telegram_inbox_mkdir_failed", json!({ "err": e.to_string() }));
+            logging::error(
+                "telegram_inbox_mkdir_failed",
+                json!({ "err": e.to_string() }),
+            );
             let _ = self.send_text(&format!("\u{26a0} không tạo được thư mục nhận tệp: {e}"));
             return;
         }
@@ -705,7 +755,10 @@ impl Inbox {
             .unwrap_or("tep-nhan-duoc");
         let dest = dir.join(safe);
         if let Err(e) = std::fs::write(&dest, &bytes) {
-            logging::error("telegram_file_write_failed", json!({ "err": e.to_string() }));
+            logging::error(
+                "telegram_file_write_failed",
+                json!({ "err": e.to_string() }),
+            );
             // Hỏng thì KHÔNG rút thành emoji: một dấu mặt buồn không nói được
             // hỏng ở đâu, mà đây đúng lúc người gửi cần biết.
             mark("😢");
@@ -718,7 +771,10 @@ impl Inbox {
         );
         // ✍ = đã nhận và đã ghi xuống đĩa. Đường dẫn KHÔNG cần thành một tin
         // riêng: nó đi vào phiên ngay dưới đây, tức tới đúng chỗ cần nó.
-        if !mark(crate::pipeline::ack_emoji(None, crate::pipeline::Ack::Saved)) {
+        if !mark(crate::pipeline::ack_emoji(
+            None,
+            crate::pipeline::Ack::Saved,
+        )) {
             let _ = self.send_text(&format!(
                 "\u{1f4ce} đã lưu {} ({} KB)",
                 dest.display(),
@@ -895,10 +951,16 @@ impl Inbox {
     ///   thì cái cổng chỉ còn là hình thức.
     /// * **Trần dung lượng**: Telegram chặn ở 50 MB, nhưng hub chặn sớm hơn
     ///   nhiều — một file 5 MB đọc trên điện thoại là chuyện không xảy ra.
-    pub fn send_document(&self, path: &std::path::Path, root: &std::path::Path) -> Result<(), String> {
+    pub fn send_document(
+        &self,
+        path: &std::path::Path,
+        root: &std::path::Path,
+    ) -> Result<(), String> {
         const MAX_BYTES: u64 = 5 * 1024 * 1024;
 
-        let real = path.canonicalize().map_err(|e| format!("không mở được: {e}"))?;
+        let real = path
+            .canonicalize()
+            .map_err(|e| format!("không mở được: {e}"))?;
         let root_real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         if !real.starts_with(&root_real) {
             return Err(format!(
@@ -922,8 +984,9 @@ impl Inbox {
         // tức cổng quét rò không đọc nổi nó — mà thứ không soi được thì không
         // rời khỏi máy này (luật 5). Danh sách đuôi chỉ để khỏi dựng cái nút
         // chắc chắn hỏng; nó không phải hàng rào.
-        let body = std::fs::read_to_string(&real)
-            .map_err(|_| "không phải file chữ (cổng quét rò không đọc được) nên hub không gửi".to_string())?;
+        let body = std::fs::read_to_string(&real).map_err(|_| {
+            "không phải file chữ (cổng quét rò không đọc được) nên hub không gửi".to_string()
+        })?;
         // Cân riêng cho TỆP — xem `redaction::file_risk` để biết vì sao không
         // dùng lại cân của phần xem trước.
         let risk = crate::redaction::file_risk(&body);
@@ -971,7 +1034,9 @@ impl Inbox {
         } else {
             Err(format!(
                 "telegram từ chối: {}",
-                v.get("description").and_then(Value::as_str).unwrap_or("không rõ")
+                v.get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("không rõ")
             ))
         }
     }
@@ -1020,7 +1085,11 @@ impl Inbox {
         self.queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push_back(Incoming { text: t.to_string(), quiet, msg_id });
+            .push_back(Incoming {
+                text: t.to_string(),
+                quiet,
+                msg_id,
+            });
         logging::info(
             "telegram_command_queued",
             json!({ "head": crate::exec::truncate(t, 40) }),
@@ -1038,7 +1107,11 @@ impl Inbox {
 
     /// Còn lệnh nào đang chờ không — để luồng chạy-ngay vét nốt trước khi thoát.
     pub fn has_pending(&self) -> bool {
-        !self.queue.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+        !self
+            .queue
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
     }
 
     /// Lấy hết lệnh đang chờ. Vòng chạy gọi mỗi lượt.
@@ -1062,7 +1135,11 @@ impl Inbox {
         // 2026-08-12 khi đổi bot: gõ `/start` mà im, và mọi giả thuyết (token
         // sai · chưa khởi động lại · chat_id lệch) đều nghe hợp lý như nhau.
         // Chỉ tên công khai của bot, không bao giờ token (luật §4).
-        match client.get(self.api("getMe")).send().and_then(|r| r.json::<Value>()) {
+        match client
+            .get(self.api("getMe"))
+            .send()
+            .and_then(|r| r.json::<Value>())
+        {
             Ok(v) => match poll_rejected(&v) {
                 None => {
                     // GIỮ LẠI tên bot: deep link (`t.me/<bot>?start=…`) là cách
@@ -1311,10 +1388,7 @@ impl Inbox {
         }
         // ── Nút bấm ──────────────────────────────────────────────────────────
         if let Some(cb) = u.get("callback_query") {
-            let from = cb
-                .pointer("/from/id")
-                .map(|v| v.to_string())
-                .unwrap_or_default();
+            let from = update_sender(u).unwrap_or_default();
             let data = cb.get("data").and_then(Value::as_str).unwrap_or("");
             // Trả lời cái nút ngay, nếu không nó quay mãi trên máy người bấm.
             if let Some(cbid) = cb.get("id").and_then(Value::as_str) {
@@ -1353,7 +1427,10 @@ impl Inbox {
             // đường dừng thì chỉ đổi một cái chết ồn ào (bị giết ở giây 120)
             // lấy một sự im lặng dài — và im lặng dài thì người ta bấm lại, rồi
             // một lệnh triển khai chạy hai lần.
-            if let Some(n) = data.strip_prefix("stopjob:").and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(n) = data
+                .strip_prefix("stopjob:")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 let msg = match crate::pipeline::stop_job(n) {
                     Ok(m) => m,
                     Err(e) => format!("⚠ {e}"),
@@ -1370,7 +1447,10 @@ impl Inbox {
             // thoại. Mọi cửa (trong cây làm việc · quét rò · trần dung lượng)
             // nằm trong `send_document`, không nằm ở đây: một cửa đặt ở chỗ gọi
             // là một cửa chỗ gọi thứ hai sẽ quên.
-            if let Some(n) = data.strip_prefix("file:").and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(n) = data
+                .strip_prefix("file:")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 let db = crate::db::Db::open(&self.cfg.db).ok();
                 let found = db
                     .as_ref()
@@ -1385,9 +1465,7 @@ impl Inbox {
                         {
                             Some(root) => {
                                 let expanded = shellexpand_home(&p);
-                                match self
-                                    .send_document(std::path::Path::new(&expanded), &root)
-                                {
+                                match self.send_document(std::path::Path::new(&expanded), &root) {
                                     Ok(()) => None,
                                     Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
                                 }
@@ -1411,7 +1489,10 @@ impl Inbox {
             // CHẠY: một cửa sổ Terminal thật, vì `!` của TUI không cấp tty
             // (xem `CommandKind::Win`). Một sổ, hai đường ra — không đẻ thêm
             // danh sách lệnh thứ hai để rồi lệch nhau.
-            if let Some(n) = data.strip_prefix("win:").and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(n) = data
+                .strip_prefix("win:")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
@@ -1427,16 +1508,19 @@ impl Inbox {
                         self.push_text(&format!("/win {line}"));
                     }
                     None => {
-                        if let Err(e) = self.send_text(
-                            "⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.",
-                        ) {
+                        if let Err(e) = self
+                            .send_text("⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.")
+                        {
                             logging::error("telegram_ack_failed", json!({ "err": e }));
                         }
                     }
                 }
                 return;
             }
-            if let Some(n) = data.strip_prefix("run:").and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(n) = data
+                .strip_prefix("run:")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
@@ -1503,9 +1587,9 @@ impl Inbox {
                         self.push_text(&format!("/runin {sid} {line}"));
                     }
                     None => {
-                        if let Err(e) = self.send_text(
-                            "⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.",
-                        ) {
+                        if let Err(e) = self
+                            .send_text("⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.")
+                        {
                             logging::error("telegram_ack_failed", json!({ "err": e }));
                         }
                     }
@@ -1520,7 +1604,10 @@ impl Inbox {
             // biệt được "gợi ý mờ" (ô rỗng thật) với "chữ đã gõ" (ô có chữ) —
             // màn đọc về không mang màu. Không xoá thì ca thứ hai thành
             // `pushpush`.
-            if let Some(n) = data.strip_prefix("box:").and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(n) = data
+                .strip_prefix("box:")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
@@ -1554,7 +1641,10 @@ impl Inbox {
             // dòng lệnh cho phiên chạy; `say:` gõ nguyên câu như
             // chủ máy tự gõ. Dùng cho nút "✅ Làm đi" khi phiên đang mời một
             // tiếng "ừ" (Hà 2026-08-13).
-            if let Some(n) = data.strip_prefix("say:").and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(n) = data
+                .strip_prefix("say:")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
@@ -1581,7 +1671,10 @@ impl Inbox {
             // `full:<n>` — bản ĐẦY ĐỦ của báo cáo đã bị rút gọn. Telegram chặn
             // ở 4096 ký tự nên cắt thành nhiều tin, cắt theo DÒNG để không đứt
             // giữa câu.
-            if let Some(n) = data.strip_prefix("full:").and_then(|n| n.parse::<usize>().ok()) {
+            if let Some(n) = data
+                .strip_prefix("full:")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
                 let full = crate::db::Db::open(&self.cfg.db)
                     .ok()
                     .and_then(|db| crate::pipeline::full_report(&db, n));
@@ -1665,8 +1758,7 @@ impl Inbox {
                         let mut btns = db
                             .as_ref()
                             .map(|db| {
-                                let mut b =
-                                    crate::pipeline::remember_quick(db, &sid, &cmds);
+                                let mut b = crate::pipeline::remember_quick(db, &sid, &cmds);
                                 b.extend(crate::pipeline::remember_files(
                                     db,
                                     &self.cfg,
@@ -1703,10 +1795,7 @@ impl Inbox {
         let Some(msg) = u.get("message").or_else(|| u.get("edited_message")) else {
             return;
         };
-        let from = msg
-            .pointer("/chat/id")
-            .map(|v| v.to_string())
-            .unwrap_or_default();
+        let from = update_sender(u).unwrap_or_default();
         // ĐÍNH KÈM: ảnh / tệp gửi kèm tin nhắn (Hà 2026-08-13: *"thêm cơ chế
         // nhận đính kèm file vào tin nhắn"*).
         //
@@ -1918,45 +2007,47 @@ impl Inbox {
         )
     }
 
-/// Xếp nút thành hàng: mặc định mỗi nút một hàng, RIÊNG nút file thì gộp.
-///
-/// 🔴 Hà 2026-08-13, ảnh chụp ba nút 📎 chồng nhau dưới một tin: *"sao không
-/// chèn thẳng nút xem file vào nội dung cho gọn thay vì nút độc lập"*.
-///
-/// Nói thẳng chỗ KHÔNG làm được: Telegram không có nút nằm giữa chữ. Bàn phím
-/// `inline_keyboard` luôn là một khối dưới tin, và thứ duy nhất chèn được vào
-/// nội dung là một đường dẫn siêu liên kết — mà một đường dẫn thì không gọi
-/// được bot để lấy file về. Nên "chèn vào nội dung" không có đường thi hành;
-/// phần *"cho gọn"* thì có, và đó là phần thật của yêu cầu.
-///
-/// Luật cũ — mỗi nút một hàng — viết cho nhãn DÀI (tên phiên kèm trạng thái):
-/// xếp ngang là cắt cụt, mà nút đọc không hết thì bấm bằng đoán. Nút file
-/// không thuộc ca ấy: nhãn là một tên file, ngắn. Ba nút file ngốn ba hàng
-/// trong khi chúng vừa gọn một hàng.
-///
-/// Gộp theo `callback_data` bắt đầu bằng `file:` chứ không theo vị trí: đó là
-/// dấu hiệu của thứ đang xếp, không phải một quy ước đếm-thứ-tự mà chỗ gọi
-/// phải nhớ giữ đúng. Ba nút một hàng — bốn thì nhãn bắt đầu bị cắt trên 390px.
-pub fn keyboard_rows(buttons: &[(String, String)]) -> Vec<Vec<Value>> {
-    let mut rows: Vec<Vec<Value>> = Vec::new();
-    for (label, data) in buttons {
-        let cell = json!({ "text": label, "callback_data": data });
-        let joinable = data.starts_with("file:");
-        match rows.last_mut() {
-            Some(last)
-                if joinable
-                    && last.len() < 3
-                    && last.first().and_then(|c| c.get("callback_data"))
-                        .and_then(Value::as_str)
-                        .is_some_and(|d| d.starts_with("file:")) =>
-            {
-                last.push(cell);
+    /// Xếp nút thành hàng: mặc định mỗi nút một hàng, RIÊNG nút file thì gộp.
+    ///
+    /// 🔴 Hà 2026-08-13, ảnh chụp ba nút 📎 chồng nhau dưới một tin: *"sao không
+    /// chèn thẳng nút xem file vào nội dung cho gọn thay vì nút độc lập"*.
+    ///
+    /// Nói thẳng chỗ KHÔNG làm được: Telegram không có nút nằm giữa chữ. Bàn phím
+    /// `inline_keyboard` luôn là một khối dưới tin, và thứ duy nhất chèn được vào
+    /// nội dung là một đường dẫn siêu liên kết — mà một đường dẫn thì không gọi
+    /// được bot để lấy file về. Nên "chèn vào nội dung" không có đường thi hành;
+    /// phần *"cho gọn"* thì có, và đó là phần thật của yêu cầu.
+    ///
+    /// Luật cũ — mỗi nút một hàng — viết cho nhãn DÀI (tên phiên kèm trạng thái):
+    /// xếp ngang là cắt cụt, mà nút đọc không hết thì bấm bằng đoán. Nút file
+    /// không thuộc ca ấy: nhãn là một tên file, ngắn. Ba nút file ngốn ba hàng
+    /// trong khi chúng vừa gọn một hàng.
+    ///
+    /// Gộp theo `callback_data` bắt đầu bằng `file:` chứ không theo vị trí: đó là
+    /// dấu hiệu của thứ đang xếp, không phải một quy ước đếm-thứ-tự mà chỗ gọi
+    /// phải nhớ giữ đúng. Ba nút một hàng — bốn thì nhãn bắt đầu bị cắt trên 390px.
+    pub fn keyboard_rows(buttons: &[(String, String)]) -> Vec<Vec<Value>> {
+        let mut rows: Vec<Vec<Value>> = Vec::new();
+        for (label, data) in buttons {
+            let cell = json!({ "text": label, "callback_data": data });
+            let joinable = data.starts_with("file:");
+            match rows.last_mut() {
+                Some(last)
+                    if joinable
+                        && last.len() < 3
+                        && last
+                            .first()
+                            .and_then(|c| c.get("callback_data"))
+                            .and_then(Value::as_str)
+                            .is_some_and(|d| d.starts_with("file:")) =>
+                {
+                    last.push(cell);
+                }
+                _ => rows.push(vec![cell]),
             }
-            _ => rows.push(vec![cell]),
         }
+        rows
     }
-    rows
-}
 
     /// Gửi một câu kèm bảng nút — **mỗi nút một hàng**.
     ///
@@ -1989,10 +2080,7 @@ pub fn keyboard_rows(buttons: &[(String, String)]) -> Vec<Vec<Value>> {
             // chuyện khác nhau, mà từ máy này không nhìn thấy màn hình điện
             // thoại — không có dòng này thì câu "đã có nút" chỉ là suy luận từ
             // việc không có lỗi.
-            logging::info(
-                "telegram_buttons_sent",
-                json!({ "count": buttons.len() }),
-            );
+            logging::info("telegram_buttons_sent", json!({ "count": buttons.len() }));
             Ok(())
         } else {
             Err(v

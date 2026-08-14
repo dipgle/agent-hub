@@ -52,41 +52,26 @@ struct Field {
     required: bool,
 }
 
+// 🔴 Ba ô tfl5 (`HUB_TFL5_USER`, `HUB_TFL5_PASSWORD`, `HUB_TFL5_ALICE_PASSWORD`)
+// đã bỏ 2026-08-14 cùng cái kênh. Hai ô còn lại nay là BẮT BUỘC, và đó là thay
+// đổi có nghĩa chứ không phải dọn dẹp: khi còn phòng chat thì Telegram là kênh
+// phụ, *"bỏ trống cũng chạy"*. Nay nó là kênh DUY NHẤT — thiếu khoá thì hub
+// không có mồm nào để nghe, nên trang phải nói thẳng ngay lúc nhập, thay vì để
+// người ta lưu xong rồi ngồi đợi một con bot không bao giờ trả lời.
 const FIELDS: &[Field] = &[
-    Field {
-        key: "HUB_TFL5_USER",
-        label: "Tài khoản tfl5",
-        hint: "Tên đăng nhập của con bot trên tfl5 — KHÔNG phải tài khoản bạn dùng hằng ngày.",
-        secret: false,
-        required: true,
-    },
-    Field {
-        key: "HUB_TFL5_PASSWORD",
-        label: "Mật khẩu tfl5",
-        hint: "Mật khẩu của tài khoản bot ở trên.",
-        secret: true,
-        required: true,
-    },
     Field {
         key: "HUB_TELEGRAM_BOT_TOKEN",
         label: "Token bot Telegram",
-        hint: "Xin ở @BotFather. Bỏ trống cũng chạy — khi ấy chỉ mất kênh Telegram, phòng tfl5 vẫn là kênh chính.",
+        hint: "Xin ở @BotFather. Đây là kênh DUY NHẤT của hub — thiếu khoá này thì không ra lệnh được từ điện thoại.",
         secret: true,
-        required: false,
+        required: true,
     },
     Field {
         key: "HUB_TELEGRAM_CHAT_ID",
         label: "Chat ID Telegram",
-        hint: "Nhắn một câu cho bot rồi mở https://api.telegram.org/bot<TOKEN>/getUpdates và đọc message.chat.id",
+        hint: "Nhắn một câu cho bot rồi mở https://api.telegram.org/bot<TOKEN>/getUpdates và đọc message.chat.id. Đây cũng là CỔNG: chỉ buồng chat này ra lệnh được cho hub.",
         secret: false,
-        required: false,
-    },
-    Field {
-        key: "HUB_TFL5_ALICE_PASSWORD",
-        label: "Mật khẩu tài khoản CHỦ (chỉ để chạy test E2E)",
-        hint: "Chỉ cần nếu bạn chạy bộ kiểm thử fe-*.mjs. Không chạy test thì bỏ trống.",
-        secret: true,
-        required: false,
+        required: true,
     },
 ];
 
@@ -107,7 +92,10 @@ pub fn serve(hub_home: &Path) -> Result<()> {
     );
     let url = format!("http://127.0.0.1:{port}/?t={ticket}");
 
-    logging::info("setup_started", json!({ "port": port, "env": env_path.display().to_string() }));
+    logging::info(
+        "setup_started",
+        json!({ "port": port, "env": env_path.display().to_string() }),
+    );
     println!("\n  Mở trang cấu hình hub:\n\n    {url}\n");
     println!("  (chỉ máy này vào được — trang đóng ngay sau khi bạn bấm Lưu)\n");
     open_window(&url);
@@ -122,7 +110,10 @@ pub fn serve(hub_home: &Path) -> Result<()> {
         };
         match handle(&mut stream, &ticket, &env_path) {
             Ok(true) => {
-                logging::info("setup_saved", json!({ "env": env_path.display().to_string() }));
+                logging::info(
+                    "setup_saved",
+                    json!({ "env": env_path.display().to_string() }),
+                );
                 println!("  ✅ Đã ghi {} (chmod 600).", env_path.display());
                 println!("  Kiểm tra thật:  ./hub doctor");
                 return Ok(());
@@ -146,7 +137,12 @@ pub fn serve(hub_home: &Path) -> Result<()> {
 /// trình duyệt nào trong danh sách thì rơi về `open` thường; và `open` hỏng nốt
 /// thì cũng KHÔNG làm hỏng cả lệnh, vì đường dẫn đã in ra màn hình rồi.
 fn open_window(url: &str) {
-    const APP_BROWSERS: &[&str] = &["Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium"];
+    const APP_BROWSERS: &[&str] = &[
+        "Google Chrome",
+        "Microsoft Edge",
+        "Brave Browser",
+        "Chromium",
+    ];
     for b in APP_BROWSERS {
         let ok = std::process::Command::new("open")
             .args(["-na", b, "--args", &format!("--app={url}")])
@@ -192,7 +188,12 @@ fn handle(stream: &mut TcpStream, ticket: &str, env_path: &Path) -> Result<bool>
     // Cái vé, không phải cái cổng, mới là hàng rào — mọi tiến trình trên máy đều
     // gọi được loopback.
     if !target.contains(&format!("t={ticket}")) {
-        respond(stream, "403 Forbidden", "text/plain; charset=utf-8", b"ve khong dung")?;
+        respond(
+            stream,
+            "403 Forbidden",
+            "text/plain; charset=utf-8",
+            b"ve khong dung",
+        )?;
         return Ok(false);
     }
 
@@ -202,13 +203,23 @@ fn handle(stream: &mut TcpStream, ticket: &str, env_path: &Path) -> Result<bool>
         let form = parse_form(&String::from_utf8_lossy(&body));
         let written = save_env(env_path, &form)?;
         let page = saved_page(&written);
-        respond(stream, "200 OK", "text/html; charset=utf-8", page.as_bytes())?;
+        respond(
+            stream,
+            "200 OK",
+            "text/html; charset=utf-8",
+            page.as_bytes(),
+        )?;
         return Ok(true);
     }
 
     let have = existing_keys(env_path);
     let page = form_page(ticket, &have);
-    respond(stream, "200 OK", "text/html; charset=utf-8", page.as_bytes())?;
+    respond(
+        stream,
+        "200 OK",
+        "text/html; charset=utf-8",
+        page.as_bytes(),
+    )?;
     Ok(false)
 }
 
@@ -318,7 +329,9 @@ fn percent_decode(s: &str) -> String {
 }
 
 fn esc(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 const STYLE: &str = "body{font:16px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;\
@@ -378,7 +391,10 @@ fn saved_page(written: &[String]) -> String {
         format!(
             "<p>Đã ghi {} khoá:</p><ul>{}</ul>",
             written.len(),
-            written.iter().map(|k| format!("<li><code>{}</code></li>", esc(k))).collect::<String>()
+            written
+                .iter()
+                .map(|k| format!("<li><code>{}</code></li>", esc(k)))
+                .collect::<String>()
         )
     };
     format!(
@@ -387,7 +403,7 @@ fn saved_page(written: &[String]) -> String {
          <title>Đã lưu</title><style>{STYLE}</style></head><body>\
          <h1>✅ Đã lưu</h1>{list}\
          <p>Bước tiếp theo, chạy ở terminal:</p>\
-         <p><code>./hub doctor</code> — kiểm tra thật: đăng nhập tfl5, tìm claude CLI, đọc thư mục dự án.</p>\
+         <p><code>./hub doctor</code> — kiểm tra thật: hỏi Telegram, tìm claude CLI, đọc thư mục dự án.</p>\
          <p><code>./hub self-install</code> — cài daemon để hub tự chạy cùng máy.</p>\
          <p style=\"color:#666\">Đóng tab này được rồi.</p></body></html>"
     )
@@ -402,17 +418,29 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("hubsetup{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("hub.env");
-        std::fs::write(&p, "HUB_TFL5_USER=bot\nHUB_TFL5_PASSWORD=cu\nNGUOI_KHAC_THEM=giu\n").unwrap();
+        std::fs::write(
+            &p,
+            "HUB_TELEGRAM_CHAT_ID=8110\nHUB_TELEGRAM_BOT_TOKEN=cu\nNGUOI_KHAC_THEM=giu\n",
+        )
+        .unwrap();
 
         let mut form = BTreeMap::new();
-        form.insert("HUB_TFL5_PASSWORD".to_string(), "moi".to_string());
-        form.insert("HUB_TFL5_USER".to_string(), "   ".to_string()); // để trống
+        form.insert("HUB_TELEGRAM_BOT_TOKEN".to_string(), "moi".to_string());
+        form.insert("HUB_TELEGRAM_CHAT_ID".to_string(), "   ".to_string()); // để trống
         let written = save_env(&p, &form).unwrap();
 
         let after = read_env(&p);
-        assert_eq!(written, vec!["HUB_TFL5_PASSWORD"]);
-        assert_eq!(after.get("HUB_TFL5_PASSWORD").unwrap(), "moi", "phải nhận giá trị mới");
-        assert_eq!(after.get("HUB_TFL5_USER").unwrap(), "bot", "ô trống KHÔNG được xoá khoá cũ");
+        assert_eq!(written, vec!["HUB_TELEGRAM_BOT_TOKEN"]);
+        assert_eq!(
+            after.get("HUB_TELEGRAM_BOT_TOKEN").unwrap(),
+            "moi",
+            "phải nhận giá trị mới"
+        );
+        assert_eq!(
+            after.get("HUB_TELEGRAM_CHAT_ID").unwrap(),
+            "8110",
+            "ô trống KHÔNG được xoá khoá cũ"
+        );
         assert_eq!(
             after.get("NGUOI_KHAC_THEM").unwrap(),
             "giu",
@@ -429,13 +457,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("hubsetup2{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("hub.env");
-        std::fs::write(&p, "HUB_TFL5_PASSWORD=matkhau-that-cua-ha\n").unwrap();
+        std::fs::write(&p, "HUB_TELEGRAM_BOT_TOKEN=khoa-that-cua-ha\n").unwrap();
 
         let have = existing_keys(&p);
-        assert_eq!(have, vec!["HUB_TFL5_PASSWORD"], "chỉ TÊN khoá được lấy ra");
+        assert_eq!(
+            have,
+            vec!["HUB_TELEGRAM_BOT_TOKEN"],
+            "chỉ TÊN khoá được lấy ra"
+        );
         let page = form_page("ve", &have);
         assert!(
-            !page.contains("matkhau-that-cua-ha"),
+            !page.contains("khoa-that-cua-ha"),
             "giá trị bí mật lọt ra trang HTTP"
         );
         assert!(page.contains("✓ đã có"), "phải nói khoá ấy đã có");
@@ -444,8 +476,9 @@ mod tests {
 
     #[test]
     fn a_password_with_punctuation_survives_the_form_encoding() {
-        let form = parse_form("HUB_TFL5_PASSWORD=a%26b%3Dc%20d%2B&HUB_TFL5_USER=b%C3%B4t");
-        assert_eq!(form.get("HUB_TFL5_PASSWORD").unwrap(), "a&b=c d+");
-        assert_eq!(form.get("HUB_TFL5_USER").unwrap(), "bôt");
+        let form =
+            parse_form("HUB_TELEGRAM_BOT_TOKEN=a%26b%3Dc%20d%2B&HUB_TELEGRAM_CHAT_ID=b%C3%B4t");
+        assert_eq!(form.get("HUB_TELEGRAM_BOT_TOKEN").unwrap(), "a&b=c d+");
+        assert_eq!(form.get("HUB_TELEGRAM_CHAT_ID").unwrap(), "bôt");
     }
 }

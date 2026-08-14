@@ -15,9 +15,13 @@ fn write_config(json: &str) -> (tempfile::TempDir, std::path::PathBuf) {
 #[test]
 fn defaults_are_bounded_and_dial_nothing_on_their_own() {
     let d = Config::default();
-    // A fresh install talks to no room until it is told which one.
-    assert!(!d.adapters.tfl5.enabled);
-    assert!(d.trust.tfl5_user_tids.is_empty());
+    // 🔴 Hai dòng "chưa nối kênh nào" (`adapters.tfl5.enabled`,
+    // `trust.tfl5_user_tids`) đi cùng tfl5 ngày 2026-08-14. Câu hỏi ấy nay
+    // không trả lời được từ tệp cấu hình: kênh duy nhất là Telegram, và nó bật
+    // hay tắt là do có KHOÁ trong `hub.env` hay không — một bí mật, cố ý không
+    // nằm trong tệp này. Thứ còn kiểm được ở đây là tên biến, không phải giá trị.
+    assert_eq!(d.confirm.bot_token_env, "HUB_TELEGRAM_BOT_TOKEN");
+    assert_eq!(d.confirm.chat_id_env, "HUB_TELEGRAM_CHAT_ID");
     // And one call has a stop on it, in money and in time.
     assert!(d.call.max_budget_usd > 0.0 && d.call.max_budget_usd <= 5.0);
     assert!(d.call.timeout_sec >= 10 && d.call.timeout_sec <= 3600);
@@ -25,15 +29,15 @@ fn defaults_are_bounded_and_dial_nothing_on_their_own() {
 
 #[test]
 fn config_file_overrides_merge_deeply_and_paths_become_absolute() {
-    let (_dir, file) = write_config(
-        r#"{ "adapters": { "tfl5": { "room": "hub" } }, "call": { "timeout_sec": 300 } }"#,
-    );
+    let (_dir, file) =
+        write_config(r#"{ "confirm": { "timeout_sec": 45 }, "call": { "timeout_sec": 300 } }"#);
     let cfg = config::load(Some(&file)).unwrap();
 
     assert_eq!(cfg.call.timeout_sec, 300);
-    assert_eq!(cfg.adapters.tfl5.room, "hub");
+    assert_eq!(cfg.confirm.timeout_sec, 45);
     // untouched sibling keys survive the merge
-    assert_eq!(cfg.adapters.tfl5.limit, 50);
+    assert_eq!(cfg.confirm.bot_token_env, "HUB_TELEGRAM_BOT_TOKEN");
+    assert!(cfg.confirm.enabled, "anh em cùng bảng phải giữ mặc định");
     assert_eq!(cfg.call.max_budget_usd, CallCfg::default().max_budget_usd);
     assert!(cfg.db.is_absolute() && cfg.log_file.is_absolute());
     assert!(cfg.workspace_root.is_absolute());
@@ -44,11 +48,17 @@ fn config_file_overrides_merge_deeply_and_paths_become_absolute() {
 /// `daily_budget_usd`, `max_triage_per_cycle`, `web`, `leak_patterns`) is
 /// simply unknown to serde now — a hub that refused to start because of a stale
 /// key would be a hub that cannot be upgraded without hand-editing json first.
+///
+/// 🔴 `adapters` và `trust` vào cùng danh sách ấy ngày 2026-08-14, và lượt này
+/// KHÔNG phải giả thiết: `hub.config.json` thật trên máy đang mang cả hai, với
+/// một `app_tid` thật và hai `user_tid` thật. Nếu chúng làm hub từ chối khởi
+/// động thì chủ máy mất kênh duy nhất của mình vì một tệp cũ.
 #[test]
 fn a_config_from_the_inbox_era_still_loads_and_its_dead_keys_are_ignored() {
     let (_dir, file) = write_config(
         r#"{
-            "adapters": { "tfl5": { "room": "hub" } },
+            "adapters": { "tfl5": { "enabled": true, "room": "hub", "app_tid": "a-1234" } },
+            "trust": { "tfl5_user_tids": ["u-owner"], "trusted_sources": ["cli"] },
             "triage": { "model": "sonnet", "max_budget_usd": 0.5 },
             "act": { "enabled": true },
             "autonomy": { "default": "L2" },
@@ -60,7 +70,6 @@ fn a_config_from_the_inbox_era_still_loads_and_its_dead_keys_are_ignored() {
         }"#,
     );
     let cfg = config::load(Some(&file)).unwrap();
-    assert_eq!(cfg.adapters.tfl5.room, "hub");
     // The dead `triage.max_budget_usd` must NOT quietly become the live one.
     assert_eq!(cfg.call.max_budget_usd, CallCfg::default().max_budget_usd);
     let text = serde_json::to_string(&cfg).unwrap();
@@ -71,6 +80,9 @@ fn a_config_from_the_inbox_era_still_loads_and_its_dead_keys_are_ignored() {
         "routing",
         "daily_budget_usd",
         "web",
+        "adapters",
+        "trust",
+        "tfl5",
     ] {
         assert!(
             !text.contains(gone),
@@ -93,23 +105,15 @@ fn an_invalid_config_file_is_rejected_at_load_time() {
     assert!(err.contains("invalid hub config"), "{err}");
 }
 
-/// The room is the only way in, so a hub configured to listen to a room nobody
-/// may command is a hub that silently ignores its owner. Both halves are
-/// checked at startup rather than discovered in a log line.
-#[test]
-fn a_room_with_no_owner_and_no_app_is_refused_at_startup() {
-    let mut no_owner = Config::default();
-    no_owner.adapters.tfl5.enabled = true;
-    no_owner.adapters.tfl5.app_tid = "a-1234".into();
-    let err = config::validate(&no_owner).unwrap_err().to_string();
-    assert!(err.contains("tfl5_user_tids"), "{err}");
-
-    let mut no_app = Config::default();
-    no_app.adapters.tfl5.enabled = true;
-    no_app.trust.tfl5_user_tids = vec!["u-owner".into()];
-    let err = config::validate(&no_app).unwrap_err().to_string();
-    assert!(err.contains("app_tid"), "{err}");
-}
+// 🔴 `a_room_with_no_owner_and_no_app_is_refused_at_startup` đã bỏ 2026-08-14.
+// Nó canh hai luật của PHÒNG CHAT ("bật kênh thì phải có `app_tid`", "bật kênh
+// thì danh sách chủ không được rỗng"), và cả hai đi cùng cái phòng.
+//
+// Câu hỏi tương đương của Telegram — "có khoá chưa" — cố ý KHÔNG trả lời được
+// ở đây: khoá là bí mật trong `hub.env`, không phải một trường trong tệp cấu
+// hình, nên `validate()` không nhìn thấy nó và không được giả vờ nhìn thấy.
+// Chỗ canh đúng là `telegram::Inbox::start`: thiếu khoá thì không dựng luồng và
+// NÓI RA (luật #4 — thiếu bí mật là SKIP-WITH-LOG, không phải chết máy).
 
 #[test]
 fn a_call_with_no_ceiling_is_refused() {
@@ -143,11 +147,15 @@ fn secrets_come_from_the_environment_never_the_config_file() {
         "no credential literal may appear in config"
     );
     assert!(!text.contains("gho_"));
-    // The mailler and Telegram key names went with their adapters; the tfl5
-    // credentials are the ones left, and only their NAMES may appear.
+    // 🔴 Tên khoá tfl5 đi cùng kênh 2026-08-14; hai tên còn lại là của Telegram,
+    // và vẫn chỉ được có TÊN trong tệp này.
     assert!(
-        text.contains("HUB_TFL5_USER") && text.contains("HUB_TFL5_PASSWORD"),
+        text.contains("HUB_TELEGRAM_BOT_TOKEN") && text.contains("HUB_TELEGRAM_CHAT_ID"),
         "only the env var NAME belongs in config"
+    );
+    assert!(
+        !text.contains("HUB_TFL5"),
+        "tên khoá của một kênh đã gỡ không được mọc lại trong cấu hình"
     );
     assert!(
         !text.contains("password\":\"") || text.contains("password_env"),
@@ -167,7 +175,10 @@ fn secrets_come_from_the_environment_never_the_config_file() {
 fn acc_cfg() -> hub::config::Config {
     let mut c = hub::config::Config::default();
     c.claude_accounts = vec![
-        hub::config::ClaudeAccountCfg { name: "acc1".into(), config_dir: None },
+        hub::config::ClaudeAccountCfg {
+            name: "acc1".into(),
+            config_dir: None,
+        },
         hub::config::ClaudeAccountCfg {
             name: "acc2".into(),
             config_dir: Some("~/.claude-acc2".into()),
@@ -177,7 +188,10 @@ fn acc_cfg() -> hub::config::Config {
 }
 
 fn snap_with(sessions: Vec<hub::sessions::LiveSession>) -> hub::sessions::SessionsSnapshot {
-    hub::sessions::SessionsSnapshot { sessions, ..Default::default() }
+    hub::sessions::SessionsSnapshot {
+        sessions,
+        ..Default::default()
+    }
 }
 
 fn row(account: &str, name: &str) -> hub::sessions::LiveSession {
@@ -198,12 +212,22 @@ fn the_accounts_list_names_the_one_that_new_lands_on() {
         .lines()
         .find(|l| l.starts_with("acc1"))
         .unwrap_or_else(|| panic!("thiếu dòng acc1:\n{said}"));
-    assert!(line.contains("mặc định"), "không nói acc nào là mặc định: {line}");
     assert!(
-        !said.lines().find(|l| l.starts_with("acc2")).unwrap().contains("mặc định"),
+        line.contains("mặc định"),
+        "không nói acc nào là mặc định: {line}"
+    );
+    assert!(
+        !said
+            .lines()
+            .find(|l| l.starts_with("acc2"))
+            .unwrap()
+            .contains("mặc định"),
         "acc có config_dir riêng không phải mặc định:\n{said}"
     );
-    assert!(said.contains("projects-7c"), "không nói phiên nào của acc nào:\n{said}");
+    assert!(
+        said.contains("projects-7c"),
+        "không nói phiên nào của acc nào:\n{said}"
+    );
 }
 
 /// Tài khoản KHÔNG liệt kê được phiên thì "0 phiên" là con số của một phép đo
@@ -212,21 +236,25 @@ fn the_accounts_list_names_the_one_that_new_lands_on() {
 fn a_blind_account_says_its_zero_is_not_trustworthy() {
     let mut live = snap_with(vec![]);
     live.blind.push("acc2".into());
-    live.notes.push("acc2: spawn claude failed: No such file or directory".into());
+    live.notes
+        .push("acc2: spawn claude failed: No such file or directory".into());
     let said = hub::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}));
-    assert!(said.contains("KHÔNG liệt kê được"), "không cảnh báo tài khoản mù:\n{said}");
-    assert!(said.contains("spawn claude failed"), "không nói lý do:\n{said}");
+    assert!(
+        said.contains("KHÔNG liệt kê được"),
+        "không cảnh báo tài khoản mù:\n{said}"
+    );
+    assert!(
+        said.contains("spawn claude failed"),
+        "không nói lý do:\n{said}"
+    );
 }
 
 /// "Chưa đo xong" KHÁC "đã đo và bằng 0" — một con số bịa trông y hệt số thật.
 #[test]
 fn usage_still_being_measured_says_so_instead_of_showing_zero() {
     let live = snap_with(vec![]);
-    let said = hub::runtime::accounts_text(
-        &acc_cfg(),
-        &live,
-        &serde_json::json!({ "pending": true }),
-    );
+    let said =
+        hub::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({ "pending": true }));
     assert!(said.contains("đang đo"), "phải nói đang đo:\n{said}");
     assert!(!said.contains("0%"), "không được bịa 0%:\n{said}");
 }
@@ -273,7 +301,10 @@ fn the_example_from_the_owner_parses_to_account_project_and_no_task() {
     let (f, rest) = hub::pipeline::split_flags("-a acc2 -s dwork", NEW_FLAGS);
     assert_eq!(f.get("a").map(String::as_str), Some("acc2"));
     assert_eq!(f.get("s").map(String::as_str), Some("dwork"));
-    assert!(rest.is_empty(), "không có đề bài mà lại sinh ra chữ: {rest}");
+    assert!(
+        rest.is_empty(),
+        "không có đề bài mà lại sinh ra chữ: {rest}"
+    );
 }
 
 /// 🔴 Cờ LẠ phải ở nguyên trong đề bài.
@@ -291,7 +322,11 @@ fn unknown_flags_stay_in_the_text_body() {
 #[test]
 fn an_empty_flag_does_not_eat_the_next_one() {
     let (f, _) = hub::pipeline::split_flags("-a -s dwork", NEW_FLAGS);
-    assert_eq!(f.get("a").map(String::as_str), Some(""), "cờ trống phải rỗng, không nuốt -s");
+    assert_eq!(
+        f.get("a").map(String::as_str),
+        Some(""),
+        "cờ trống phải rỗng, không nuốt -s"
+    );
     assert_eq!(f.get("s").map(String::as_str), Some("dwork"));
 }
 
@@ -315,16 +350,28 @@ fn an_empty_task_opens_a_plain_session_with_no_positional_argument() {
         "",
         None,
     );
-    assert!(!cmd.contains("'' --disallowedTools"), "đề bài rỗng vẫn được truyền vào: {cmd}");
-    assert!(cmd.contains("--permission-mode auto --disallowedTools"), "{cmd}");
+    assert!(
+        !cmd.contains("'' --disallowedTools"),
+        "đề bài rỗng vẫn được truyền vào: {cmd}"
+    );
+    assert!(
+        cmd.contains("--permission-mode auto --disallowedTools"),
+        "{cmd}"
+    );
     // Phiên mở từ điện thoại phải ở CHẾ ĐỘ AUTO (Hà 2026-08-12: *"mở được phiên
     // rồi nhưng chưa chuyển tự động sang auto mode on"*) — hộp thoại xin phép
     // hiện trên một màn hình không ai đang nhìn thì phiên đứng im vô hạn.
     // Nhưng rào thì KHÔNG được nới: `auto` bỏ bước HỎI, `--disallowedTools` bỏ
     // bước LÀM, và vế sau mới là hàng rào (điều 1).
-    assert!(cmd.contains("--permission-mode auto"), "thiếu auto mode: {cmd}");
+    assert!(
+        cmd.contains("--permission-mode auto"),
+        "thiếu auto mode: {cmd}"
+    );
     for guard in ["Bash(git push:*)", "Bash(sudo:*)", "Bash(rm:*)"] {
-        assert!(cmd.contains(guard), "rào '{guard}' biến mất khỏi lệnh: {cmd}");
+        assert!(
+            cmd.contains(guard),
+            "rào '{guard}' biến mất khỏi lệnh: {cmd}"
+        );
     }
     // …và có đề bài thì nó vẫn phải đứng TRƯỚC `--disallowedTools` (cờ variadic).
     let with = hub::sessions::terminal_command(
@@ -376,7 +423,10 @@ fn a_session_that_just_ended_is_still_askable() {
 /// thầm chạy trên một cuộc hội thoại chẳng liên quan, và vẫn tính hạn mức.
 #[test]
 fn an_old_ended_session_is_not_resurrected() {
-    let book = [ended("cu-lam-roi", T_NOW - hub::pipeline::ENDED_KEEP_SEC - 1)];
+    let book = [ended(
+        "cu-lam-roi",
+        T_NOW - hub::pipeline::ENDED_KEEP_SEC - 1,
+    )];
     assert!(hub::pipeline::pick_ended(&book, "cu-lam-roi", T_NOW).is_none());
 }
 
@@ -425,5 +475,9 @@ fn a_timeout_is_its_own_answer() {
 fn a_truncated_output_says_how_much_is_missing() {
     let big = "x".repeat(hub::pipeline::CMD_OUT_MAX + 250);
     let out = hub::pipeline::cmd_report(Some(0), false, &big, "", 10);
-    assert!(out.contains("còn 250 ký tự"), "{}", &out[out.len().saturating_sub(120)..]);
+    assert!(
+        out.contains("còn 250 ký tự"),
+        "{}",
+        &out[out.len().saturating_sub(120)..]
+    );
 }

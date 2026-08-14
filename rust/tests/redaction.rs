@@ -20,10 +20,7 @@ fn hosts_ips_paths_wikilinks_and_credentials_are_caught() {
     let cases = [
         ("deploy chạy trên vps-a rồi reload", "internal_host"),
         ("node ở 46.250.231.130:41100", "ip_address"),
-        (
-            "xem /Users/hanguyen/projects/tfl5",
-            "local_filesystem_path",
-        ),
+        ("xem /Users/hanguyen/projects/tfl5", "local_filesystem_path"),
         (
             "chi tiết ở [[tfl5-deploy-nopasswd-scope]]",
             "memory_wikilink",
@@ -126,8 +123,14 @@ fn a_template_file_is_not_a_secret_but_a_filled_in_one_is() {
     assert!(file_risk(doc).is_empty(), "{:?}", file_risk(doc));
 
     // …nhưng GIÁ TRỊ thật thì chặn, cả ba hình dạng.
-    assert_eq!(file_risk("HUB_TFL5_PASSWORD=abc123xyz"), vec!["secret_assignment".to_string()]);
-    assert_eq!(file_risk("Mật khẩu: chim-non-2026"), vec!["secret_assignment".to_string()]);
+    assert_eq!(
+        file_risk("HUB_TFL5_PASSWORD=abc123xyz"),
+        vec!["secret_assignment".to_string()]
+    );
+    assert_eq!(
+        file_risk("Mật khẩu: chim-non-2026"),
+        vec!["secret_assignment".to_string()]
+    );
     assert!(file_risk("token = sk-abcdefghijklmnop").contains(&"credential_literal".to_string()));
     assert!(file_risk("-----BEGIN RSA PRIVATE KEY-----").contains(&"private_key_block".to_string()));
 }

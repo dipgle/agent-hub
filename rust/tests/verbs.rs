@@ -5,38 +5,22 @@
 //! gỡ ngày 2026-08-14 (Hà: *"tạm thời không dùng tfl5 để xem cứ xóa hết đi"*),
 //! và những bài kiểm ấy đi theo nó.
 //!
-//! Thứ ở lại là phần đã luôn đúng ở mọi kênh: chữ người gõ → một route. Cửa tin
-//! cậy trong đó là ranh giới an toàn thật sự — kênh quyết ai được VÀO phòng,
-//! hub quyết ai được RA LỆNH cho cái máy này.
+//! 🔴 Cùng ngày, **cổng người cũng rời khỏi đây** — và cần nói rõ vì đây từng là
+//! chỗ ghi "ranh giới an toàn thật sự". `parse_command` nhận thêm
+//! `(from_user_tid, owner_tids)` khi hub sống trong một PHÒNG CHAT: ai cũng vào
+//! phòng được, nên phải hỏi thêm ai được ra lệnh. Telegram không có hình dạng
+//! ấy — cổng của nó là `chat_id`, gác ở `telegram.rs` trước khi một chữ nào tới
+//! được bộ phân tích. Giữ cả hai tầng thì tầng dưới không bao giờ từ chối được
+//! (chỗ gọi phải tự bịa ra người gõ để đi qua chính nó), trừ đúng một trường
+//! hợp: danh sách chủ RỖNG, và khi ấy nó nuốt sạch mọi mệnh lệnh trong im lặng.
+//!
+//! Luật không đổi, chỗ đứng thì đổi. Những bài kiểm "người lạ gõ vẫn chỉ là
+//! chữ" ở tệp này nay nằm tại `tests/telegram.rs`
+//! (`a_message_from_another_chat_is_not_an_order`) — kiểm đúng cái cổng thật.
+//!
+//! Thứ ở lại đây là phần đã luôn đúng ở mọi kênh: chữ người gõ → một route.
 
 use hub::verbs::parse_command;
-
-// ----------------------------------------------------------------------
-// Slash commands in the room. The trust check is the security boundary:
-// tfl5 decides who may ENTER the room, hub decides who may give it ORDERS.
-// ----------------------------------------------------------------------
-
-const OWNER: &str = "u-owner";
-
-fn owners() -> Vec<String> {
-    vec![OWNER.to_string()]
-}
-
-#[test]
-fn a_stranger_typing_a_command_is_just_typing() {
-    // THE BOUNDARY. Being in the room must never be enough to drive this Mac.
-    // It is not silently dropped either — returning None means the line stays
-    // an ordinary message in an ordinary conversation.
-    assert!(parse_command("/stop", "u-stranger", &owners()).is_none());
-    assert!(parse_command("/new tfl5 sửa CI", "u-stranger", &owners()).is_none());
-}
-
-#[test]
-fn an_empty_owner_list_grants_nobody_command_rights() {
-    // Fail closed: an unconfigured trust list must not mean "everyone".
-    assert!(parse_command("/stop", OWNER, &[]).is_none());
-    assert!(parse_command("/approve 12", "", &[]).is_none());
-}
 
 /// `/sessions` (số nhiều) hỏi DANH SÁCH; `/session <id>` chọn một phiên.
 ///
@@ -48,19 +32,21 @@ fn an_empty_owner_list_grants_nobody_command_rights() {
 #[test]
 fn the_plural_asks_for_the_list_and_never_picks_a_session() {
     for line in ["/sessions", "/phiens", "/danhsach"] {
-        let (kind, id, arg) = parse_command(line, OWNER, &owners()).expect("parsed");
+        let (kind, id, arg) = parse_command(line).expect("parsed");
         assert_eq!(kind, hub::adapters::CommandKind::Session, "{line}");
         assert_eq!(id, 0, "{line}");
         assert_eq!(arg, "", "{line} phải là danh sách, không mang id");
     }
-    let (_, _, arg) =
-        parse_command("/sessions 3e9a7fd6-3050", OWNER, &owners()).expect("parsed");
-    assert_eq!(arg, "", "số nhiều mà nuốt id thì nó lặng lẽ đổi phiên đang theo");
+    let (_, _, arg) = parse_command("/sessions 3e9a7fd6-3050").expect("parsed");
+    assert_eq!(
+        arg, "",
+        "số nhiều mà nuốt id thì nó lặng lẽ đổi phiên đang theo"
+    );
 
     // Số ít vẫn giữ nguyên hai nghĩa cũ.
-    let (_, _, arg) = parse_command("/session abc-123", OWNER, &owners()).expect("parsed");
+    let (_, _, arg) = parse_command("/session abc-123").expect("parsed");
     assert_eq!(arg, "abc-123");
-    let (_, _, arg) = parse_command("/session", OWNER, &owners()).expect("parsed");
+    let (_, _, arg) = parse_command("/session").expect("parsed");
     assert_eq!(arg, "");
 }
 
@@ -69,17 +55,13 @@ fn a_side_question_keeps_every_word_including_the_slashes() {
     // The whole remainder is the question, not just the first token — a
     // question is a sentence, and one that arrives truncated is worse than one
     // refused. It also must survive text that looks like more commands.
-    let (kind, id, arg) = parse_command(
-        "/ask lệnh /run vừa rồi đã chạy xong chưa, còn kẹt ở đâu?",
-        OWNER,
-        &owners(),
-    )
-    .expect("parsed");
+    let (kind, id, arg) =
+        parse_command("/ask lệnh /run vừa rồi đã chạy xong chưa, còn kẹt ở đâu?").expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::Ask);
     assert_eq!(id, 0, "the target is the focused session, never an id");
     assert_eq!(arg, "lệnh /run vừa rồi đã chạy xong chưa, còn kẹt ở đâu?");
 
-    let (kind, _, arg) = parse_command("/hoi đang làm gì đấy", OWNER, &owners()).unwrap();
+    let (kind, _, arg) = parse_command("/hoi đang làm gì đấy").unwrap();
     assert_eq!(kind, hub::adapters::CommandKind::Ask);
     assert_eq!(arg, "đang làm gì đấy");
 }
@@ -90,81 +72,42 @@ fn an_empty_side_question_never_reaches_the_wallet() {
     // nothing. Returning None keeps it an ordinary message, so the person sees
     // it was not understood instead of being billed for silence.
     for t in ["/ask", "/ask   ", "/hoi"] {
-        assert!(
-            parse_command(t, OWNER, &owners()).is_none(),
-            "sai với: {t}"
-        );
+        assert!(parse_command(t).is_none(), "sai với: {t}");
     }
 }
 
 #[test]
-fn a_stranger_cannot_spend_money_asking() {
-    // `/ask` forks a session and bills the owner, so it sits behind the same
-    // gate as `/approve` — being in the room is tfl5's decision, spending the
-    // owner's money is not.
-    assert!(
-        parse_command("/ask bí mật gì trong phiên đó?", "u-stranger", &owners()).is_none()
-    );
-    assert!(parse_command("/ask bí mật gì trong phiên đó?", OWNER, &[]).is_none());
-}
-
-#[test]
 fn starting_a_session_needs_both_a_project_and_a_task() {
-    let (kind, id, arg) =
-        parse_command("/new tfl5 sửa nút Releases bị vỡ regex", OWNER, &owners())
-            .expect("parsed");
+    let (kind, id, arg) = parse_command("/new dwork sửa nút Releases bị vỡ regex").expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::New);
     assert_eq!(id, 0);
-    assert_eq!(arg, "tfl5 sửa nút Releases bị vỡ regex");
+    assert_eq!(arg, "dwork sửa nút Releases bị vỡ regex");
 
     // A project with no task would start an agent with nothing to do — and it
     // would still cost money while it worked that out.
-    for t in ["/new", "/new tfl5", "/new   "] {
-        assert!(
-            parse_command(t, OWNER, &owners()).is_none(),
-            "sai với: {t}"
-        );
+    for t in ["/new", "/new dwork", "/new   "] {
+        assert!(parse_command(t).is_none(), "sai với: {t}");
     }
 }
 
 #[test]
 fn stop_defaults_to_the_session_being_read() {
-    let (kind, _, arg) = parse_command("/stop", OWNER, &owners()).expect("parsed");
+    let (kind, _, arg) = parse_command("/stop").expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::Stop);
     assert_eq!(arg, "", "empty means: whatever /session is following");
 
-    let (_, _, arg) = parse_command("/stop a3a24ccd-6ad8", OWNER, &owners()).unwrap();
+    let (_, _, arg) = parse_command("/stop a3a24ccd-6ad8").unwrap();
     assert_eq!(arg, "a3a24ccd-6ad8");
 }
 
 #[test]
 fn telling_a_session_keeps_the_whole_sentence() {
-    let (kind, id, arg) = parse_command(
-        "/tell chạy lại test rồi báo kết quả, đừng commit",
-        OWNER,
-        &owners(),
-    )
-    .expect("parsed");
+    let (kind, id, arg) =
+        parse_command("/tell chạy lại test rồi báo kết quả, đừng commit").expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::Tell);
     assert_eq!(id, 0);
     assert_eq!(arg, "chạy lại test rồi báo kết quả, đừng commit");
-    assert!(parse_command("/tell", OWNER, &owners()).is_none());
-}
-
-#[test]
-fn a_stranger_cannot_start_or_steer_a_session() {
-    // These three spend money and run tools on the owner's machine, so they sit
-    // behind exactly the same gate as `/approve`.
-    for t in ["/new tfl5 xoá hết đi", "/stop", "/tell chạy rm -rf"] {
-        assert!(
-            parse_command(t, "u-stranger", &owners()).is_none(),
-            "người lạ không được gọi: {t}"
-        );
-        assert!(
-            parse_command(t, OWNER, &[]).is_none(),
-            "danh sách chủ rỗng thì không ai được gọi: {t}"
-        );
-    }
+    assert!(parse_command("/tell").is_none());
 }
 
 #[test]
@@ -186,26 +129,15 @@ fn ordinary_text_is_never_mistaken_for_a_command() {
         "/reply 9 xong",
         "/act 12",
     ] {
-        assert!(
-            parse_command(t, OWNER, &owners()).is_none(),
-            "sai với: {t}"
-        );
+        assert!(parse_command(t).is_none(), "sai với: {t}");
     }
 }
 
 #[test]
 fn help_needs_no_decision_id() {
-    let (kind, id, _) = parse_command("/help", OWNER, &owners()).expect("parsed");
+    let (kind, id, _) = parse_command("/help").expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::Help);
     assert_eq!(id, 0);
-}
-
-#[test]
-fn the_new_verbs_are_owner_only_too() {
-    // Same boundary as approve: a stranger in the room must not be able to
-    // close someone's item or send mail in hub's name.
-    assert!(parse_command("/close 41", "u-stranger", &owners()).is_none());
-    assert!(parse_command("/reply 41 xin chào", "u-stranger", &owners()).is_none());
 }
 
 /// REGRESSION (2026-08-07, cost real money): the live socket ingested every
@@ -222,7 +154,7 @@ fn the_live_path_and_the_poller_agree_on_what_counts_as_a_command() {
         "/tell chạy nốt test đi",
     ] {
         assert!(
-            parse_command(text, OWNER, &owners()).is_some(),
+            parse_command(text).is_some(),
             "cả hai đường phải coi đây là LỆNH, không phải tin nhắn: {text}"
         );
     }
@@ -230,7 +162,7 @@ fn the_live_path_and_the_poller_agree_on_what_counts_as_a_command() {
     // socket would start silently swallowing questions.
     for text in ["hôm nay CI sao rồi?", "/approve 12", "closing the issue"] {
         assert!(
-            parse_command(text, OWNER, &owners()).is_none(),
+            parse_command(text).is_none(),
             "đây là tin nhắn thường, không được nuốt: {text}"
         );
     }
@@ -238,47 +170,53 @@ fn the_live_path_and_the_poller_agree_on_what_counts_as_a_command() {
 
 #[test]
 fn set_needs_both_a_key_and_a_value() {
-    let (kind, _, arg) =
-        parse_command("/set autonomy.default L1", OWNER, &owners()).expect("parsed");
+    let (kind, _, arg) = parse_command("/set auto_handover.at_percent 70").expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::SetConfig);
-    assert_eq!(arg, "autonomy.default L1");
+    assert_eq!(arg, "auto_handover.at_percent 70");
     // A key with no value would blank the field — refuse it here.
-    assert!(parse_command("/set autonomy.default", OWNER, &owners()).is_none());
-    assert!(parse_command("/set", OWNER, &owners()).is_none());
-    // And it stays owner-only, like every other verb.
-    assert!(parse_command("/set autonomy.default L2", "u-stranger", &owners()).is_none());
+    assert!(parse_command("/set auto_handover.at_percent").is_none());
+    assert!(parse_command("/set").is_none());
 }
 
+/// 🔴 `/ingest` (`/poll`) đã CHẾT ngày 2026-08-14, và chỗ này canh cái xác.
+///
+/// Động từ ấy đọc phòng chat tfl5. Sau khi phòng đóng, nó chỉ còn một câu trả
+/// lời khả dĩ — *"disabled in config"* — tức đúng thứ luật riêng của dự án gọi
+/// là tệ hơn một động từ không tồn tại: kênh nhận nó, không có gì xảy ra, và
+/// không có gì nói ra điều đó. Nay nó phải đọc như CHỮ THƯỜNG.
 #[test]
-fn the_cycle_verbs_take_no_id() {
+fn the_cycle_verbs_take_no_id_and_ingest_is_no_longer_one_of_them() {
     for (text, want) in [
-        ("/ingest", hub::adapters::CommandKind::Ingest),
-        ("/poll", hub::adapters::CommandKind::Ingest),
         ("/run", hub::adapters::CommandKind::Run),
+        ("/cycle", hub::adapters::CommandKind::Run),
         ("/doctor", hub::adapters::CommandKind::Doctor),
+        ("/health", hub::adapters::CommandKind::Doctor),
     ] {
-        let (kind, id, _) = parse_command(text, OWNER, &owners()).expect(text);
+        let (kind, id, _) = parse_command(text).expect(text);
         assert_eq!(kind, want, "sai verb cho {text}");
         assert_eq!(id, 0, "{text} không nhận id");
+    }
+    for dead in ["/ingest", "/poll"] {
+        assert!(
+            parse_command(dead).is_none(),
+            "{dead} đọc một cái phòng không còn tồn tại — phải là chữ thường"
+        );
     }
 }
 
 #[test]
 fn project_pin_reads_shows_and_clears() {
-    let (kind, _, arg) = parse_command("/project tfl5", OWNER, &owners()).expect("parsed");
+    let (kind, _, arg) = parse_command("/project dwork").expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::Project);
-    assert_eq!(arg, "tfl5");
+    assert_eq!(arg, "dwork");
     // No name = "what is pinned right now?"
-    let (kind, _, arg) = parse_command("/project", OWNER, &owners()).expect("parsed");
+    let (kind, _, arg) = parse_command("/project").expect("parsed");
     assert_eq!(kind, hub::adapters::CommandKind::Project);
     assert_eq!(arg, "");
     // "-" clears it.
-    let (_, _, arg) = parse_command("/project -", OWNER, &owners()).expect("parsed");
+    let (_, _, arg) = parse_command("/project -").expect("parsed");
     assert_eq!(arg, "-");
-    // Still owner-only: the pin decides where every later question is routed.
-    assert!(parse_command("/project sdvi", "u-stranger", &owners()).is_none());
 }
-
 
 /// 🔴 Mệnh lệnh đụng vào một phiên sống thì phải TỰ NÓI nó đụng vào phiên nào.
 ///
@@ -309,11 +247,17 @@ fn an_order_that_touches_a_session_carries_that_sessions_id() {
 
     // Không có id ⟹ None, để chỗ gọi rơi về con trỏ focus CÓ LOG. Quan trọng
     // hơn: một câu tiếng Việt không được nuốt mất chữ đầu.
-    assert_eq!(split_target("Tóm tắt trong 1 câu: phiên này đang làm gì?"), None);
+    assert_eq!(
+        split_target("Tóm tắt trong 1 câu: phiên này đang làm gì?"),
+        None
+    );
     assert_eq!(split_target("down"), None);
     assert_eq!(split_target(""), None);
     // Chuỗi dài mà không phải uuid cũng không được nhận nhầm.
-    assert_eq!(split_target("khong-phai-uuid-nhung-rat-dai-va-co-gach-noi xin chao"), None);
+    assert_eq!(
+        split_target("khong-phai-uuid-nhung-rat-dai-va-co-gach-noi xin chao"),
+        None
+    );
 }
 
 /// `/accounts` — Hà 2026-08-12: *"chưa có lệnh xem danh sách acc"*.
@@ -323,8 +267,12 @@ fn an_order_that_touches_a_session_carries_that_sessions_id() {
 #[test]
 fn the_accounts_verb_answers_to_three_spellings() {
     for text in ["/accounts", "/acc", "/taikhoan"] {
-        let (kind, id, arg) = parse_command(text, OWNER, &owners()).expect(text);
-        assert_eq!(kind, hub::adapters::CommandKind::Accounts, "sai verb cho {text}");
+        let (kind, id, arg) = parse_command(text).expect(text);
+        assert_eq!(
+            kind,
+            hub::adapters::CommandKind::Accounts,
+            "sai verb cho {text}"
+        );
         assert_eq!(id, 0, "{text} không nhận id");
         assert!(arg.is_empty(), "{text} không nhận tham số: {arg}");
     }
@@ -336,8 +284,7 @@ fn the_accounts_verb_answers_to_three_spellings() {
 /// Phần sau động từ phải giữ NGUYÊN VĂN: một dòng shell có `|`, `&&`, dấu nháy.
 #[test]
 fn the_cmd_verb_keeps_the_whole_line_verbatim() {
-    let (kind, id, arg) =
-        parse_command("/cmd git -C ~/x status | head -3", OWNER, &owners()).expect("parse");
+    let (kind, id, arg) = parse_command("/cmd git -C ~/x status | head -3").expect("parse");
     assert_eq!(kind, hub::adapters::CommandKind::Cmd);
     assert_eq!(id, 0);
     assert_eq!(arg, "git -C ~/x status | head -3", "dòng lệnh bị cắt xén");
@@ -345,7 +292,7 @@ fn the_cmd_verb_keeps_the_whole_line_verbatim() {
 
 #[test]
 fn the_cmd_verb_without_a_line_still_parses_so_the_reply_can_teach() {
-    let (kind, _, arg) = parse_command("/cmd", OWNER, &owners()).expect("parse");
+    let (kind, _, arg) = parse_command("/cmd").expect("parse");
     assert_eq!(kind, hub::adapters::CommandKind::Cmd);
     assert!(arg.is_empty(), "không có lệnh thì arg phải rỗng: {arg}");
 }
@@ -359,36 +306,29 @@ fn the_cmd_verb_without_a_line_still_parses_so_the_reply_can_teach() {
 #[test]
 fn close_is_its_own_verb_and_takes_an_optional_id() {
     use hub::adapters::CommandKind;
-    use hub::verbs::parse_command;
-
-    let me = "u-owner";
-    let trusted = vec![me.to_string()];
 
     // Trống = phiên đang theo (chỗ gọi tra con trỏ), nên arg rỗng là HỢP LỆ.
     assert_eq!(
-        parse_command("/close", me, &trusted),
+        parse_command("/close"),
         Some((CommandKind::Close, 0, String::new()))
     );
     // Có id thì đóng đúng phiên ấy.
     assert_eq!(
-        parse_command("/close 0a109818", me, &trusted),
+        parse_command("/close 0a109818"),
         Some((CommandKind::Close, 0, "0a109818".to_string()))
     );
     // …và KHÔNG lẫn với /stop.
     assert_eq!(
-        parse_command("/stop", me, &trusted),
+        parse_command("/stop"),
         Some((CommandKind::Stop, 0, String::new()))
     );
 
     // `/win` cần một dòng lệnh — trống thì không phải lệnh, đừng mở cửa sổ rỗng.
     assert_eq!(
-        parse_command("/win sudo -v", me, &trusted),
+        parse_command("/win sudo -v"),
         Some((CommandKind::Win, 0, "sudo -v".to_string()))
     );
-    assert_eq!(parse_command("/win", me, &trusted), None);
-
-    // Người khác gõ thì vẫn chỉ là chữ — cổng người không đổi.
-    assert_eq!(parse_command("/close", "u-nguoi-la", &trusted), None);
+    assert_eq!(parse_command("/win"), None);
 }
 
 /// `/runin <id> <lệnh>` — máy chạy, phiên đọc.
@@ -399,22 +339,20 @@ fn close_is_its_own_verb_and_takes_an_optional_id() {
 #[test]
 fn runin_needs_both_a_session_and_a_command() {
     use hub::adapters::CommandKind;
-    use hub::verbs::parse_command;
-
-    let me = "u-owner";
-    let trusted = vec![me.to_string()];
 
     assert_eq!(
-        parse_command("/runin 4963b95c cargo test --offline", me, &trusted),
-        Some((CommandKind::RunIn, 0, "4963b95c cargo test --offline".to_string()))
+        parse_command("/runin 4963b95c cargo test --offline"),
+        Some((
+            CommandKind::RunIn,
+            0,
+            "4963b95c cargo test --offline".to_string()
+        ))
     );
     // Thiếu lệnh ⟹ không nhận.
-    assert_eq!(parse_command("/runin 4963b95c", me, &trusted), None);
+    assert_eq!(parse_command("/runin 4963b95c"), None);
     // Thiếu id ⟹ không nhận: một `/runin` không id sẽ rơi vào phiên đang theo,
     // đúng con đường đã gõ nhầm phiên tối 08-13.
-    assert_eq!(parse_command("/runin", me, &trusted), None);
-    // Người khác gõ thì vẫn chỉ là chữ.
-    assert_eq!(parse_command("/runin 4963b95c ls", "u-la", &trusted), None);
+    assert_eq!(parse_command("/runin"), None);
 }
 
 /// 🔴 Hà 2026-08-14: *"thêm 1 cái icon để bấm chạy bên trong text chỗ cuối dòng
@@ -426,7 +364,6 @@ fn runin_needs_both_a_session_and_a_command() {
 /// đầu (*"sao không dùng Deep Links"*) và tôi đã đi vòng mất mấy lượt.
 #[test]
 fn a_deep_link_payload_round_trips_back_into_the_same_command() {
-    let owners = owners();
     // Bấm icon ⟹ Telegram gửi `/start <payload>` ⟹ phải ra ĐÚNG lệnh gõ tay.
     for (payload, typed) in [
         ("run_0", "/run_0"),
@@ -435,11 +372,11 @@ fn a_deep_link_payload_round_trips_back_into_the_same_command() {
         ("upgrade", "/upgrade"),
     ] {
         assert_eq!(
-            parse_command(&format!("/start {payload}"), OWNER, &owners),
-            parse_command(typed, OWNER, &owners),
+            parse_command(&format!("/start {payload}")),
+            parse_command(typed),
             "payload {payload} phải cởi ra đúng như gõ tay"
         );
     }
     // `/start` trống thì không phải lệnh gì cả — đừng đoán hộ.
-    assert!(parse_command("/start", OWNER, &owners).is_none());
+    assert!(parse_command("/start").is_none());
 }

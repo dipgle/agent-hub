@@ -2,18 +2,24 @@
 name = "hub"
 version = "0.1.0"
 edition = "2021"
-description = "Comms hub: email / GitHub / project devlog / chat -> claude triage -> reply, brief, or branch"
+description = "hub — quản lý các phiên Claude CLI trên máy này, điều khiển từ Telegram"
 
-# The hub itself is synchronous: it spends its life waiting on `gh`, `claude`
-# and a 20s Telegram long-poll, so an async runtime would add moving parts
-# without removing a wait. tokio/axum exist ONLY for the local web UI
-# (`hub web`), where handlers push blocking work onto spawn_blocking.
-# Same dependency family as mailler so the workspace keeps one toolchain.
+# The hub is synchronous: it spends its life waiting on `claude` and a Telegram
+# long-poll, so an async runtime would add moving parts without removing a wait.
+#
+# 🔴 Ba thư viện gỡ ngày 2026-08-14, cùng lượt gỡ tfl5 — cả ba đều KHÔNG còn một
+# dòng `use` nào trong `src/`, và cargo không hề kêu một tiếng về chuyện đó:
+#
+# * `tungstenite` — WebSocket `/ws/chat`, đường DUY NHẤT đăng được tin lên phòng
+#   chat tfl5. Sống trong `live.rs`, và `live.rs` đã ra khỏi `lib.rs`.
+# * `axum` + `tokio` — dựng cho bảng điều khiển web chạy tại máy (`hub web`).
+#   Bảng ấy bị xoá từ 2026-08-08 (luật #12: *"trang điện thoại là UI duy nhất"*),
+#   nhưng hai thư viện thì ở lại thêm sáu ngày, kéo theo cả một runtime bất đồng
+#   bộ vào một tiến trình cố ý đồng bộ. Trang cấu hình `hub setup` KHÔNG dùng
+#   chúng — nó là `TcpListener` của thư viện chuẩn (`setup.rs`).
 [dependencies]
 anyhow = "1"
-axum = { version = "0.7", default-features = false, features = ["http1", "json", "tokio", "query"] }
-# tfl5's JSON write path (`/app/file/save`) takes the body base64-encoded;
-# already in the tree as a transitive dependency, so `--offline` still builds.
+# `keys.rs` chụp màn cửa sổ terminal rồi gửi ảnh đi dưới dạng base64.
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
@@ -22,12 +28,6 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "macros"] }
-# Chat with tfl5 needs a WebSocket: tfl5 exposes `/ws/chat` as the ONLY way to
-# post a message (`ws_chat.rs:181 routes()` has history + admin endpoints only).
-# tungstenite's client API is blocking, so this stays out of the async runtime —
-# the pipeline is still synchronous.
-tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 
 [dev-dependencies]
 tempfile = "3"

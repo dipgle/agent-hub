@@ -1,9 +1,14 @@
 //! hub — the Claude CLI sessions running on this Mac, driven from a phone.
 //!
-//! One chat room on tfl5 carries ORDERS (`/session`, `/ask`, `/new`, `/tell`,
-//! `/stop`, `/handover`), and a read-only snapshot travels the other way so the
-//! page can show what every session is doing. Nothing here reads mail, and
-//! nothing here spends money unless the owner presses a button.
+//! One Telegram chat carries ORDERS (`/session`, `/ask`, `/new`, `/tell`,
+//! `/stop`, `/handover`) and carries back what every session is doing. Nothing
+//! here reads mail, and nothing here spends money unless the owner presses a
+//! button.
+//!
+//! 🔴 It carried them alongside a tfl5 chat room and a phone page until
+//! 2026-08-14 (Hà: *"tạm thời không dùng tfl5 để xem cứ xóa hết đi"*). The page
+//! had been dead for two days without anyone noticing — which is what a
+//! one-person product gets for keeping two front doors.
 //!
 //! It used to be an inbox: GitHub notifications, project devlogs, email and
 //! Telegram all fed one queue that a bounded `claude -p` call triaged and
@@ -33,8 +38,8 @@ pub mod pipeline;
 /// password from leaving this Mac is not optional.
 pub mod redaction;
 pub mod runtime;
-pub mod setup;
 pub mod sessions;
+pub mod setup;
 /// Telegram làm kênh RA LỆNH hai chiều, không chỉ cái loa.
 pub mod telegram;
 pub mod verbs;

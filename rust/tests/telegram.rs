@@ -74,7 +74,12 @@ fn callback_data_fits_telegrams_64_byte_ceiling() {
 fn every_row_carries_the_id_the_next_command_needs() {
     let live = vec![
         sess("3e9a7fd6-3050-4a54-ba52-0dfb24de033c", "hub", "acc3", true),
-        sess("7c2ae1a7-1111-2222-3333-444455556666", "dwork", "acc1", false),
+        sess(
+            "7c2ae1a7-1111-2222-3333-444455556666",
+            "dwork",
+            "acc1",
+            false,
+        ),
     ];
     let text = session_list_text(&live, "", NOW);
     assert!(text.contains("hub"), "{text}");
@@ -89,7 +94,10 @@ fn every_row_carries_the_id_the_next_command_needs() {
     );
     // Id ĐẦY ĐỦ không lên màn: nó dài gấp bốn lần chỗ nó chiếm mà không thêm
     // một thông tin nào — `claude stop` và `/session` đều nhận id ngắn.
-    assert!(!text.contains("-3050-"), "id đầy đủ chiếm chỗ vô ích: {text}");
+    assert!(
+        !text.contains("-3050-"),
+        "id đầy đủ chiếm chỗ vô ích: {text}"
+    );
 }
 
 /// BA tình trạng, không phải hai — và dự án phải đọc được.
@@ -98,25 +106,49 @@ fn every_row_carries_the_id_the_next_command_needs() {
 /// thông tin để biết phiên đang làm dự án hay thư mục nào"*.
 #[test]
 fn the_list_tells_running_waiting_and_stopped_apart() {
-    let mut a = sess("aaaaaaaa-0000-0000-0000-000000000000", "projects-ff", "acc3", true);
+    let mut a = sess(
+        "aaaaaaaa-0000-0000-0000-000000000000",
+        "projects-ff",
+        "acc3",
+        true,
+    );
     a.folder = "AI/hub".into();
-    let mut b = sess("bbbbbbbb-0000-0000-0000-000000000000", "projects-11", "acc1", false);
+    let mut b = sess(
+        "bbbbbbbb-0000-0000-0000-000000000000",
+        "projects-11",
+        "acc1",
+        false,
+    );
     b.folder = "dwork".into();
-    let mut c = sess("cccccccc-0000-0000-0000-000000000000", "Tự chạy lại", "acc3", false);
+    let mut c = sess(
+        "cccccccc-0000-0000-0000-000000000000",
+        "Tự chạy lại",
+        "acc3",
+        false,
+    );
     c.host = "dead".into();
     let text = session_list_text(&[a, b, c], "", NOW);
     // Nhãn là ĐƯỜNG DỰ ÁN, không kèm tên tự sinh (Hà 2026-08-13: *"cần gì đoạn
     // text project-xx làm gì"*).
     assert!(text.contains("[AI/hub]"), "{text}");
     assert!(text.contains("[dwork]"), "{text}");
-    assert!(!text.contains("projects-ff"), "tên tự sinh vẫn còn chiếm chỗ: {text}");
+    assert!(
+        !text.contains("projects-ff"),
+        "tên tự sinh vẫn còn chiếm chỗ: {text}"
+    );
     // Chấm TRẠNG THÁI, không phải ký hiệu điều khiển của máy phát nhạc — Hà
     // 2026-08-13: *"icon biểu diễn chạy và dừng bị ngược"*. `▶` nay chỉ còn
     // nghĩa "bấm để chạy lệnh này" (`remember_quick`), một ký hiệu một nghĩa.
     assert!(text.contains("🟢 đang chạy"), "{text}");
     assert!(text.contains("🟡 đứng chờ"), "{text}");
-    assert!(text.contains("⚫ đã tắt"), "phiên đã tắt bị gộp vào 'đứng chờ': {text}");
-    assert!(!text.contains("▶"), "`▶` phải để dành cho NÚT chạy lệnh: {text}");
+    assert!(
+        text.contains("⚫ đã tắt"),
+        "phiên đã tắt bị gộp vào 'đứng chờ': {text}"
+    );
+    assert!(
+        !text.contains("▶"),
+        "`▶` phải để dành cho NÚT chạy lệnh: {text}"
+    );
 }
 
 /// Phiên đang HỎI phải đọc ra được cả câu hỏi lẫn từng lựa chọn.
@@ -126,7 +158,12 @@ fn the_list_tells_running_waiting_and_stopped_apart() {
 /// — mà nó là trạng thái DUY NHẤT cần người đọc làm gì đó thì việc mới đi tiếp.
 #[test]
 fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
-    let mut s = sess("aaaaaaaa-0000-0000-0000-000000000000", "projects-11", "acc1", false);
+    let mut s = sess(
+        "aaaaaaaa-0000-0000-0000-000000000000",
+        "projects-11",
+        "acc1",
+        false,
+    );
     s.folder = "dwork".into();
     s.last_text = Some("[dùng AskUserQuestion]".into());
     s.asking = Some(hub::sessions::Asking {
@@ -139,12 +176,21 @@ fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
     let text = session_list_text(&[s], "", NOW);
     assert!(text.contains("⚠ dừng lại HỎI"), "tình trạng: {text}");
     assert!(text.contains("Nửa ngày"), "nhãn câu hỏi: {text}");
-    assert!(text.contains("NỬA NGÀY không?"), "nguyên văn câu hỏi: {text}");
-    assert!(text.contains("1. Thêm ô nửa ngày"), "lựa chọn có SỐ để bấm: {text}");
+    assert!(
+        text.contains("NỬA NGÀY không?"),
+        "nguyên văn câu hỏi: {text}"
+    );
+    assert!(
+        text.contains("1. Thêm ô nửa ngày"),
+        "lựa chọn có SỐ để bấm: {text}"
+    );
     assert!(text.contains("2. Luôn trọn ngày"), "{text}");
     // Câu cuối ("[dùng AskUserQuestion]") không nói thêm được gì khi đã có câu
     // hỏi thật — nó chỉ đẩy phiên sau ra khỏi màn.
-    assert!(!text.contains("💬"), "câu cuối chen vào chỗ của câu hỏi: {text}");
+    assert!(
+        !text.contains("💬"),
+        "câu cuối chen vào chỗ của câu hỏi: {text}"
+    );
 }
 
 /// Phiên đang theo phải nhận ra được: mọi lệnh KHÔNG mang id sẽ rơi vào nó.
@@ -152,14 +198,22 @@ fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
 fn the_followed_session_is_marked() {
     let live = vec![
         sess("aaaaaaaa-0000-0000-0000-000000000000", "hub", "acc3", true),
-        sess("bbbbbbbb-0000-0000-0000-000000000000", "dwork", "acc1", false),
+        sess(
+            "bbbbbbbb-0000-0000-0000-000000000000",
+            "dwork",
+            "acc1",
+            false,
+        ),
     ];
     let text = session_list_text(&live, "bbbbbbbb-0000-0000-0000-000000000000", NOW);
     let followed = text
         .lines()
         .find(|l| l.contains("dwork"))
         .unwrap_or_default();
-    assert!(followed.starts_with("👁"), "dòng đang theo không có dấu: {text}");
+    assert!(
+        followed.starts_with("👁"),
+        "dòng đang theo không có dấu: {text}"
+    );
     let other = text.lines().find(|l| l.contains("hub")).unwrap_or_default();
     assert!(!other.starts_with("👁"), "đánh dấu nhầm phiên: {text}");
 }
@@ -170,7 +224,12 @@ fn the_followed_session_is_marked() {
 /// đang nhắm vào cái phiên không còn nữa, và người đọc tưởng mình chưa chọn gì.
 #[test]
 fn a_focus_that_no_longer_exists_is_said_out_loud() {
-    let live = vec![sess("aaaaaaaa-0000-0000-0000-000000000000", "hub", "acc3", true)];
+    let live = vec![sess(
+        "aaaaaaaa-0000-0000-0000-000000000000",
+        "hub",
+        "acc3",
+        true,
+    )];
     let text = session_list_text(&live, "deadbeef-0000-0000-0000-000000000000", NOW);
     assert!(text.contains("deadbeef"), "{text}");
     assert!(text.contains("không còn sống"), "{text}");
@@ -180,7 +239,14 @@ fn a_focus_that_no_longer_exists_is_said_out_loud() {
 #[test]
 fn a_truncated_list_says_how_many_it_hid() {
     let live: Vec<LiveSession> = (0..MAX_SESSION_BUTTONS + 3)
-        .map(|i| sess(&format!("{i:08}-0000-0000-0000-000000000000"), &format!("p{i}"), "acc1", false))
+        .map(|i| {
+            sess(
+                &format!("{i:08}-0000-0000-0000-000000000000"),
+                &format!("p{i}"),
+                "acc1",
+                false,
+            )
+        })
         .collect();
     let text = session_list_text(&live, "", NOW);
     assert!(
@@ -188,7 +254,10 @@ fn a_truncated_list_says_how_many_it_hid() {
         "tổng số phải đúng: {text}"
     );
     assert!(text.contains("còn 3 phiên nữa"), "cắt mà im: {text}");
-    assert!(text.contains("/session <id>"), "cắt rồi phải chỉ đường khác: {text}");
+    assert!(
+        text.contains("/session <id>"),
+        "cắt rồi phải chỉ đường khác: {text}"
+    );
 }
 
 #[test]
@@ -217,7 +286,10 @@ fn each_row_carries_the_same_facts_as_the_card_on_the_page() {
     assert!(text.contains("tự duyệt"), "chế độ quyền: {text}");
     assert!(text.contains("2 subagent"), "{text}");
     assert!(text.contains("im 12 phút"), "{text}");
-    assert!(text.contains("💬 Đã sửa xong phần redaction"), "câu cuối: {text}");
+    assert!(
+        text.contains("💬 Đã sửa xong phần redaction"),
+        "câu cuối: {text}"
+    );
     // Xuống dòng trong câu cuối phải bị dẹp: một dòng 💬 vỡ làm ba dòng thì
     // danh sách năm phiên trông như mười lăm.
     assert!(!text.contains("Đã sửa xong\n"), "còn xuống dòng: {text}");
@@ -235,7 +307,10 @@ fn a_running_session_is_never_described_as_quiet() {
     s.activity = Some("Brewing… 2m 14s".into());
     let text = session_list_text(&[s], "", NOW);
     assert!(text.contains("Brewing…"), "đang làm gì: {text}");
-    assert!(!text.contains("im 12 phút"), "phiên đang chạy mà bảo im: {text}");
+    assert!(
+        !text.contains("im 12 phút"),
+        "phiên đang chạy mà bảo im: {text}"
+    );
 }
 
 /// Chọn phiên xong thì CHỮ THƯỜNG là chữ gõ vào phiên ấy.
@@ -245,8 +320,15 @@ fn a_running_session_is_never_described_as_quiet() {
 #[test]
 fn plain_text_is_something_to_type_into_the_session() {
     assert_eq!(text_for_session("chạy test đi"), Some("chạy test đi"));
-    assert_eq!(text_for_session("  có lỗi gì không?  "), Some("có lỗi gì không?"));
-    assert_eq!(text_for_session("2"), Some("2"), "một con số cũng là câu trả lời");
+    assert_eq!(
+        text_for_session("  có lỗi gì không?  "),
+        Some("có lỗi gì không?")
+    );
+    assert_eq!(
+        text_for_session("2"),
+        Some("2"),
+        "một con số cũng là câu trả lời"
+    );
 }
 
 /// Một LỆNH gõ nhầm KHÔNG được biến thành lượt gõ thật.
@@ -278,7 +360,10 @@ fn text_still_sitting_in_the_input_box_is_recognised_even_when_wrapped() {
                   │ > Phải thêm thông tin để biết phiên │\n\
                   │   đang làm dự án nào                │\n\
                   ╰──────────────╯";
-    assert!(hub::keys::still_in_box(screen, typed), "so nguyên văn thì trượt");
+    assert!(
+        hub::keys::still_in_box(screen, typed),
+        "so nguyên văn thì trượt"
+    );
     // Đã gửi đi rồi thì ô trống — không được nhận nhầm là còn.
     let after = "╭──────────────╮\n│ >                    │\n╰──────────────╯";
     assert!(!hub::keys::still_in_box(after, typed));
@@ -346,7 +431,11 @@ fn the_enter_session_button_decodes_back_to_the_session_route() {
         Some(format!("/session {SID}").as_str())
     );
     // …và vẫn dưới trần 64 byte của Telegram.
-    assert!(data.len() <= 64, "callback_data {} byte: {data}", data.len());
+    assert!(
+        data.len() <= 64,
+        "callback_data {} byte: {data}",
+        data.len()
+    );
 }
 
 /// Phiên ĐANG theo thì không có nút ấy — bấm vào chỉ để tới chỗ đang đứng.
@@ -399,7 +488,10 @@ fn a_taken_over_window_sends_you_to_the_session_that_holds_it() {
         hub::pipeline::enter_button(&ended(DEAD, "hub-67"), DEAD, Some((HEIR, "hub-ec")), "khac")
             .expect("mất đường vào phiên đang giữ cửa sổ");
     assert!(label.contains("hub-ec"), "nhãn gọi nhầm tên: {label}");
-    assert!(!label.contains("hub-67"), "nhãn gọi tên phiên đã chết: {label}");
+    assert!(
+        !label.contains("hub-67"),
+        "nhãn gọi tên phiên đã chết: {label}"
+    );
     assert_eq!(
         callback_to_command(&data).as_deref(),
         Some(format!("/session {HEIR}").as_str())
@@ -465,7 +557,10 @@ fn an_unknown_id_falls_through_instead_of_inventing_a_name() {
     let b = book_json(SID, "projects-fb", "acc1");
     assert_eq!(hub::pipeline::session_name_from_book(&b, "khong-co"), None);
     assert_eq!(hub::pipeline::session_name_from_book("{}", SID), None);
-    assert_eq!(hub::pipeline::session_name_from_book("khong-phai-json", SID), None);
+    assert_eq!(
+        hub::pipeline::session_name_from_book("khong-phai-json", SID),
+        None
+    );
 }
 
 /// Sổ cũ (ghi từ trước khi nhớ tên) có id mà tên rỗng — cũng phải rơi xuống
@@ -520,7 +615,10 @@ fn a_message_past_the_limit_is_deleted() {
 #[test]
 fn a_message_past_telegrams_own_window_is_dropped_not_retried() {
     let (due, gone) = hub::telegram::due_for_delete(&[(9, T0 - 49 * H)], T0, 36);
-    assert!(due.is_empty(), "gọi xoá một tin Telegram không cho xoá: {due:?}");
+    assert!(
+        due.is_empty(),
+        "gọi xoá một tin Telegram không cho xoá: {due:?}"
+    );
     assert_eq!(gone, vec![9], "phải bỏ khỏi sổ, đừng giữ lại thử mãi");
 }
 
@@ -602,7 +700,11 @@ fn a_command_on_screen_is_picked_up_with_its_arguments() {
 #[test]
 fn prose_is_not_mistaken_for_a_command() {
     let screen = "Tôi sẽ chạy git để kiểm tra.\nls các thư mục xong rồi.\nfind ra nguyên nhân:";
-    assert!(hub::keys::commands_on_screen(screen, 4).is_empty(), "{:?}", hub::keys::commands_on_screen(screen, 4));
+    assert!(
+        hub::keys::commands_on_screen(screen, 4).is_empty(),
+        "{:?}",
+        hub::keys::commands_on_screen(screen, 4)
+    );
 }
 
 /// Dấu nhắc shell đứng trước lệnh phải bị bóc, và lệnh trần (không tham số) bỏ qua.
@@ -613,17 +715,27 @@ fn prompts_are_stripped_and_bare_verbs_ignored() {
     let screen = "$ cargo test --offline\n❯ cargo\n  ./deploy/install.sh --no-build";
     let got = hub::keys::commands_on_screen(screen, 4);
     assert!(got.contains(&"cargo test --offline".to_string()), "{got:?}");
-    assert!(got.contains(&"./deploy/install.sh --no-build".to_string()), "{got:?}");
-    assert!(!got.iter().any(|c| c == "cargo"), "lệnh trần vẫn lọt: {got:?}");
+    assert!(
+        got.contains(&"./deploy/install.sh --no-build".to_string()),
+        "{got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "cargo"),
+        "lệnh trần vẫn lọt: {got:?}"
+    );
 }
 
 /// Giữ các dòng CUỐI (mới nhất) và bỏ trùng.
 #[test]
 fn only_the_latest_few_survive_and_duplicates_collapse() {
-    let screen = "git status\ngit status\nnpm run build\ncargo test --offline\nnode fe-smoke.mjs a b c";
+    let screen =
+        "git status\ngit status\nnpm run build\ncargo test --offline\nnode fe-smoke.mjs a b c";
     let got = hub::keys::commands_on_screen(screen, 2);
     assert_eq!(got.len(), 2, "{got:?}");
-    assert_eq!(got[1], "node fe-smoke.mjs a b c", "phải giữ dòng mới nhất: {got:?}");
+    assert_eq!(
+        got[1], "node fe-smoke.mjs a b c",
+        "phải giữ dòng mới nhất: {got:?}"
+    );
 }
 
 /// 🔴 Đo trên bản THẬT, lượt `/shot` đầu tiên (2026-08-12 21:15): màn có dòng
@@ -663,7 +775,10 @@ fn a_command_quoted_in_a_report_becomes_a_button_cut_at_the_backticks() {
         got.contains(&"git -C ~/projects/AI/tcc/amm push origin main".to_string()),
         "{got:?}"
     );
-    assert!(got.contains(&"bash ./deploy.sh perapp-storage".to_string()), "{got:?}");
+    assert!(
+        got.contains(&"bash ./deploy.sh perapp-storage".to_string()),
+        "{got:?}"
+    );
     // Câu VĂN mở đầu bằng một lệnh thì KHÔNG thành nút — nút chạy nhầm thứ còn
     // tệ hơn không có nút.
     assert!(
@@ -688,13 +803,16 @@ fn a_command_quoted_in_a_report_becomes_a_button_cut_at_the_backticks() {
 /// này, tức nó loại đúng những lệnh dài — thứ đáng có nút nhất.
 #[test]
 fn a_command_the_terminal_wrapped_is_joined_back_not_dropped() {
-    let screen = "※ recap: Goal was fixing what the tfl5 walk found; that's done, pushed, and PR \n  \
+    let screen =
+        "※ recap: Goal was fixing what the tfl5 walk found; that's done, pushed, and PR \n  \
                   #54 is open with all tests green. Next action is yours: merge PR #54, then \n  \
                   deploy with `bash scripts/deploy.sh walk-fixes-0813 --expect-symbol \n  \
                   renderChatPending`. (disable recaps in /config)";
     assert_eq!(
         hub::keys::commands_on_screen(screen, 4),
-        vec!["bash scripts/deploy.sh walk-fixes-0813 --expect-symbol renderChatPending".to_string()]
+        vec![
+            "bash scripts/deploy.sh walk-fixes-0813 --expect-symbol renderChatPending".to_string()
+        ]
     );
 
     // …nhưng bẻ GIỮA MỘT TỪ thì KHÔNG nối: nối lại là bịa ra một lệnh khác, và
@@ -730,7 +848,10 @@ fn commands_inside_a_fenced_block_still_become_buttons() {
         ```";
     let got = hub::keys::commands_on_screen(report, 4);
     assert_eq!(got.len(), 3, "{got:?}");
-    assert!(got.contains(&"bash ./dci-deploy-be.sh module/".to_string()), "{got:?}");
+    assert!(
+        got.contains(&"bash ./dci-deploy-be.sh module/".to_string()),
+        "{got:?}"
+    );
     assert!(
         got.contains(&"bash ./dci-deploy-be.sh dci/config/holiday/".to_string()),
         "{got:?}"
@@ -774,7 +895,10 @@ fn a_file_path_on_screen_becomes_something_you_can_open() {
         got.contains(&"/Users/hanguyen/projects/AI/hub/ARCHITECTURE.md".to_string()),
         "{got:?}"
     );
-    assert!(got.contains(&"~/projects/AI/hub/README.md".to_string()), "{got:?}");
+    assert!(
+        got.contains(&"~/projects/AI/hub/README.md".to_string()),
+        "{got:?}"
+    );
 
     // Dấu chấm cuối câu không được dính vào tên file.
     let dot = hub::keys::paths_on_screen("xem /tmp/bao-cao.md.", 4);
@@ -1023,22 +1147,46 @@ fn the_list_says_whether_a_session_lives_in_a_terminal_or_an_editor() {
     // editor quay lại thì ký hiệu đã sẵn. Còn phần dựng chữ dưới đây phải đo
     // trên loại phiên CÒN xảy ra thật, không thì test canh một màn hình không
     // ai nhìn thấy nữa.
-    let mut term = sess("aaaaaaaa-0000-0000-0000-000000000000", "projects-ff", "acc1", true);
+    let mut term = sess(
+        "aaaaaaaa-0000-0000-0000-000000000000",
+        "projects-ff",
+        "acc1",
+        true,
+    );
     term.folder = "AI/hub".into();
-    let mut bg = sess("bbbbbbbb-0000-0000-0000-000000000000", "merge init", "acc1", false);
+    let mut bg = sess(
+        "bbbbbbbb-0000-0000-0000-000000000000",
+        "merge init",
+        "acc1",
+        false,
+    );
     bg.folder = "games".into();
     bg.host = "background".into();
 
     let text = session_list_text(&[term.clone(), bg.clone()], "", NOW);
-    let l_term = text.lines().find(|l| l.contains("[AI/hub]")).unwrap_or_default();
-    let l_bg = text.lines().find(|l| l.contains("[games]")).unwrap_or_default();
+    let l_term = text
+        .lines()
+        .find(|l| l.contains("[AI/hub]"))
+        .unwrap_or_default();
+    let l_bg = text
+        .lines()
+        .find(|l| l.contains("[games]"))
+        .unwrap_or_default();
     assert!(l_term.contains("⌨"), "{text}");
     assert!(l_bg.contains("🌙"), "{text}");
     assert!(!l_term.contains("🌙"), "gắn nhầm nguồn: {text}");
 
     // Và trên NÚT nữa — cái nút mới là thứ ngón tay chạm vào.
-    assert!(session_button_label(&bg).contains("🌙"), "{}", session_button_label(&bg));
-    assert!(session_button_label(&term).contains("⌨"), "{}", session_button_label(&term));
+    assert!(
+        session_button_label(&bg).contains("🌙"),
+        "{}",
+        session_button_label(&bg)
+    );
+    assert!(
+        session_button_label(&term).contains("⌨"),
+        "{}",
+        session_button_label(&term)
+    );
 }
 
 /// Chữ ra Telegram phải sạch dấu trang trí — vì kênh ấy KHÔNG parse markdown.
@@ -1088,7 +1236,8 @@ fn hub_never_reads_its_own_decoration_back_as_a_command() {
     );
     // …còn dòng trang trí thì tuyệt đối không.
     assert!(
-        !got.iter().any(|c| c.contains("bấm nút") || c.contains("Lệnh thấy")),
+        !got.iter()
+            .any(|c| c.contains("bấm nút") || c.contains("Lệnh thấy")),
         "chữ của chính hub thành lệnh: {got:?}"
     );
 
@@ -1122,7 +1271,11 @@ fn file_buttons_share_a_row_and_say_which_file_is_which() {
     let rows = Inbox::keyboard_rows(&buttons);
     assert_eq!(rows.len(), 3, "{rows:?}");
     assert_eq!(rows[0].len(), 1, "nút phiên phải đứng riêng: {rows:?}");
-    assert_eq!(rows[1].len(), 3, "ba nút file phải chung một hàng: {rows:?}");
+    assert_eq!(
+        rows[1].len(),
+        3,
+        "ba nút file phải chung một hàng: {rows:?}"
+    );
     assert_eq!(rows[2].len(), 1, "{rows:?}");
 
     // Quá 3 thì xuống hàng — 4 nút trên 390px là bắt đầu cắt nhãn.
@@ -1143,7 +1296,8 @@ fn file_buttons_share_a_row_and_say_which_file_is_which() {
 fn a_truncated_path_is_not_a_file_button() {
     use hub::keys::paths_on_screen;
 
-    let screen = "cargo test --manifest-path /Users/hanguyen/projects/AI/hub/rust/Cargo.toml… (46s)\n\
+    let screen =
+        "cargo test --manifest-path /Users/hanguyen/projects/AI/hub/rust/Cargo.toml… (46s)\n\
                   clippy > /tmp/cq.log 2>&1\n\
                   đọc /Users/hanguyen/projects/AI/hub/rust/Cargo.toml xem";
     let got = paths_on_screen(screen, 4);
@@ -1170,7 +1324,11 @@ fn a_cd_then_command_line_is_still_a_command() {
     use hub::keys::commands_on_screen;
 
     let got = commands_on_screen("cd ~/projects/AI/codetrail && git push", 3);
-    assert_eq!(got, vec!["cd ~/projects/AI/codetrail && git push".to_string()], "{got:?}");
+    assert_eq!(
+        got,
+        vec!["cd ~/projects/AI/codetrail && git push".to_string()],
+        "{got:?}"
+    );
 
     // Dấu `;` cũng vậy.
     let got = commands_on_screen("cd /tmp; bash ./run.sh", 3);
@@ -1234,7 +1392,10 @@ fn a_button_remembers_which_session_made_it() {
     // Sổ CŨ (mảng trần, chưa có tên phiên) ⟹ None: thà bắt bấm lại /shot còn
     // hơn gõ một dòng lệnh vào một phiên đoán bừa.
     db.set_cursor("quick:cmds", r#"["git push"]"#).unwrap();
-    assert!(quick_cmd(&db, 0).is_none(), "sổ cũ mà vẫn đoán ra một phiên");
+    assert!(
+        quick_cmd(&db, 0).is_none(),
+        "sổ cũ mà vẫn đoán ra một phiên"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -1302,14 +1463,29 @@ fn a_table_with_several_questions_gets_a_button_for_every_question() {
     let data: Vec<&str> = b.iter().map(|(_, d)| d.as_str()).collect();
     // Câu 1 mang số câu như mọi câu khác: một khuôn duy nhất thì chỗ nhận lệnh
     // không phải nhớ hai luật.
-    assert!(data.contains(&format!("pick:{SID}:1.1").as_str()), "{data:?}");
-    assert!(data.contains(&format!("pick:{SID}:1.2").as_str()), "{data:?}");
+    assert!(
+        data.contains(&format!("pick:{SID}:1.1").as_str()),
+        "{data:?}"
+    );
+    assert!(
+        data.contains(&format!("pick:{SID}:1.2").as_str()),
+        "{data:?}"
+    );
     // Và câu 2 — thứ trước bản vá KHÔNG có nút nào dẫn tới.
-    assert!(data.contains(&format!("pick:{SID}:2.1").as_str()), "{data:?}");
-    assert!(data.contains(&format!("pick:{SID}:2.2").as_str()), "{data:?}");
+    assert!(
+        data.contains(&format!("pick:{SID}:2.1").as_str()),
+        "{data:?}"
+    );
+    assert!(
+        data.contains(&format!("pick:{SID}:2.2").as_str()),
+        "{data:?}"
+    );
     // Trả lời đủ mọi ô rồi bảng VẪN đứng chờ một dấu Enter (`✔ Submit` là một
     // tab riêng trên ảnh) — không có nút này thì mọi cú bấm trên kia vô nghĩa.
-    assert!(data.contains(&format!("key:{SID}:enter").as_str()), "{data:?}");
+    assert!(
+        data.contains(&format!("key:{SID}:enter").as_str()),
+        "{data:?}"
+    );
     // Nhãn phải đọc được trong một liếc trên màn 390px: số câu ▸ số lựa chọn.
     assert!(
         b.iter().any(|(l, _)| l.starts_with("2▸1 Không phân biệt")),
@@ -1327,7 +1503,13 @@ fn a_table_with_several_questions_gets_a_button_for_every_question() {
 /// cho "nhất quán" là bắt cả một đường đang tốt gánh rủi ro của đường mới.
 #[test]
 fn a_single_question_keeps_the_old_shape() {
-    let b = hub::telegram::choice_buttons(SID, &["Có".to_string(), "Không".to_string()], false, false, &[]);
+    let b = hub::telegram::choice_buttons(
+        SID,
+        &["Có".to_string(), "Không".to_string()],
+        false,
+        false,
+        &[],
+    );
     let data: Vec<&str> = b.iter().map(|(_, d)| d.as_str()).collect();
     assert!(data.contains(&format!("key:{SID}:1").as_str()), "{data:?}");
     assert!(!data.iter().any(|d| d.starts_with("pick:")), "{data:?}");
@@ -1357,7 +1539,10 @@ fn the_rebuild_command_gets_a_button_that_goes_through_upgrade() {
     // Hàng rào HẸP: nới ra thì `npm install` cũng thành "dựng lại hub", và
     // người bấm nhận một câu trả lời nói về chuyện khác hẳn.
     for cmd in ["npm install", "cargo install cargo-nextest", "git pull"] {
-        assert!(!hub::pipeline::is_self_rebuild(cmd), "không được nhận: {cmd}");
+        assert!(
+            !hub::pipeline::is_self_rebuild(cmd),
+            "không được nhận: {cmd}"
+        );
     }
     assert_eq!(callback_to_command("upgrade"), Some("/upgrade".to_string()));
 }
@@ -1453,9 +1638,15 @@ fn every_option_becomes_a_tappable_command_next_to_its_question() {
 fn a_short_id_names_a_session_only_when_something_follows_it() {
     use hub::pipeline::{same_session, split_target};
     let full = "4963b95c-93b0-46e3-baf9-40bbfacbef2f";
-    assert!(same_session(full, "4963b95c"), "8 ký tự đầu là một cái tên thật");
+    assert!(
+        same_session(full, "4963b95c"),
+        "8 ký tự đầu là một cái tên thật"
+    );
     assert!(same_session(full, full));
-    assert!(!same_session(full, "4963b95"), "7 ký tự thì không — nửa vời là mơ hồ");
+    assert!(
+        !same_session(full, "4963b95"),
+        "7 ký tự thì không — nửa vời là mơ hồ"
+    );
     assert!(!same_session(full, ""), "rỗng không trỏ vào đâu cả");
     // `/pick 4963b95c 2.1` → nhắm đúng phiên ấy.
     assert_eq!(
@@ -1470,14 +1661,20 @@ fn a_short_id_names_a_session_only_when_something_follows_it() {
 fn a_link_is_only_built_for_payloads_telegram_accepts() {
     // Chưa biết tên bot (chưa kịp getMe) ⟹ None ⟹ chỗ gọi rơi về nút. Một liên
     // kết không bấm được thì tệ hơn một cái nút.
-    assert!(hub::telegram::deep_link("run_0").is_none(), "chưa có getMe trong test");
+    assert!(
+        hub::telegram::deep_link("run_0").is_none(),
+        "chưa có getMe trong test"
+    );
     // Escape đúng ba ký tự Telegram đòi, không hơn: MarkdownV2 mới là thứ bắt
     // escape mọi ký tự 1–126, và đó là lý do hub gột Markdown suốt từ đầu.
     assert_eq!(
         hub::telegram::html_escape("a < b & c > d"),
         "a &lt; b &amp; c &gt; d"
     );
-    assert_eq!(hub::telegram::html_escape("cd ~/x && ./hub"), "cd ~/x &amp;&amp; ./hub");
+    assert_eq!(
+        hub::telegram::html_escape("cd ~/x && ./hub"),
+        "cd ~/x &amp;&amp; ./hub"
+    );
 }
 
 /// Phép đo trễ chỉ được đo cái nó thật sự đo được.
@@ -1537,7 +1734,8 @@ fn a_button_press_carries_no_timestamp_to_measure_lag_from() {
 #[test]
 fn a_report_is_not_a_screen_so_its_lines_are_never_half_a_command() {
     // Đúng dòng trong ảnh Hà gửi (80 ký tự).
-    let deploy = "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814";
+    let deploy =
+        "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814";
     assert_eq!(deploy.len(), 81, "dòng chuẩn của ca này");
     let report = format!(
         "2. Bản vá chưa lên prod. Ba commit đang chờ ở local.\n\n\
@@ -1560,8 +1758,14 @@ fn a_report_is_not_a_screen_so_its_lines_are_never_half_a_command() {
     );
     // Nới trần KHÔNG được biến thành mở cửa: cả một KHỐI lệnh vẫn không ra nút
     // (Hà cùng ngày: *"Cả 1 khối lệnh dài này thì không được tạo nút"*).
-    let block = format!("git for-each-ref --format='%(refname)' refs/original {}", "| xargs -n1 git update-ref -d ".repeat(8));
-    assert!(block.len() > hub::keys::BTN_CMD_REPORT_MAX, "khối chuẩn phải dài hơn trần");
+    let block = format!(
+        "git for-each-ref --format='%(refname)' refs/original {}",
+        "| xargs -n1 git update-ref -d ".repeat(8)
+    );
+    assert!(
+        block.len() > hub::keys::BTN_CMD_REPORT_MAX,
+        "khối chuẩn phải dài hơn trần"
+    );
     assert!(hub::keys::commands_in_report(&block, 3).is_empty());
 }
 
@@ -1659,7 +1863,10 @@ fn only_a_bare_acknowledgement_shrinks_to_an_emoji() {
     assert_eq!(ack_as_emoji("⏹ đã bảo dừng: bash deploy.sh"), Some("👌"));
     // Còn lại phải giữ nguyên chữ — chúng MANG THÔNG TIN.
     assert_eq!(ack_as_emoji("⚠ không gõ được: cửa sổ đã đóng"), None);
-    assert_eq!(ack_as_emoji("✅ Đã chạy trên máy rồi dán kết quả vào [hub]: …"), None);
+    assert_eq!(
+        ack_as_emoji("✅ Đã chạy trên máy rồi dán kết quả vào [hub]: …"),
+        None
+    );
     assert_eq!(ack_as_emoji("📋 4 phiên đang sống: …"), None);
     assert_eq!(ack_as_emoji("📷 Màn của [hub]:\n…"), None);
     assert_eq!(ack_as_emoji("▶ chạy trong 4963b95c: bash deploy.sh"), None);
@@ -1684,7 +1891,11 @@ fn a_lane_belongs_to_the_work_not_to_the_process() {
             let _g2 = urgent();
             assert_eq!(lane(), Lane::Urgent);
         }
-        assert_eq!(lane(), Lane::Urgent, "rời guard trong không được hạ hạng ngoài");
+        assert_eq!(
+            lane(),
+            Lane::Urgent,
+            "rời guard trong không được hạ hạng ngoài"
+        );
     }
     assert_eq!(lane(), Lane::Background, "xong việc thì trả lại đường");
 
@@ -1760,14 +1971,25 @@ fn a_project_always_gets_the_same_mark() {
     // Không phụ thuộc hoa/thường hay dấu ngoặc của nhãn.
     assert_eq!(project_emoji("dwork"), project_emoji("[DWork]"));
     // Tên khác nhau thì (gần như luôn) dấu khác nhau — kiểm trên bộ tên thật.
-    let names = ["hub", "tfl5", "dwork", "sdvi", "codetrail", "social", "anpha1"];
+    let names = [
+        "hub",
+        "tfl5",
+        "dwork",
+        "sdvi",
+        "codetrail",
+        "social",
+        "anpha1",
+    ];
     let marks: std::collections::HashSet<_> = names.iter().map(|n| project_emoji(n)).collect();
     assert!(marks.len() >= names.len() - 1, "trùng quá nhiều: {marks:?}");
     // Tên rỗng thì rơi về dấu chung, không hoảng.
     assert_eq!(project_emoji(""), "👍");
 
     // …và câu "đã gửi" dùng đúng dấu của phiên nó vừa gửi vào.
-    assert_eq!(ack_as_emoji("✓ đã gửi · 🟩 [tfl5]"), Some(project_emoji("tfl5")));
+    assert_eq!(
+        ack_as_emoji("✓ đã gửi · 🟩 [tfl5]"),
+        Some(project_emoji("tfl5"))
+    );
     // Còn "vào hàng chờ" vẫn là trạng thái riêng của nó.
     assert_eq!(ack_as_emoji("✓ vào hàng chờ · 🟩 [tfl5]"), Some("👌"));
 }
@@ -1790,7 +2012,10 @@ fn a_warning_about_a_command_is_not_an_invitation_to_run_it() {
         tracked source files from the real repo with no backup. Safer form: first\n\
         verify the files are backed up, then run it only after confirming.\n";
     let got = hub::keys::commands_in_report(warning, 4);
-    assert!(got.is_empty(), "không được dựng nút nào từ một lời cấm: {got:?}");
+    assert!(
+        got.is_empty(),
+        "không được dựng nút nào từ một lời cấm: {got:?}"
+    );
 
     // …và ngay cả khi câu văn quanh nó hoàn toàn trung tính, lệnh phá huỷ vẫn
     // không thành nút.
@@ -1814,4 +2039,68 @@ fn a_warning_about_a_command_is_not_an_invitation_to_run_it() {
         "{:?}",
         hub::keys::commands_in_report(ok, 4)
     );
+}
+
+/// 🔴 CỔNG NGƯỜI — nay là cổng DUY NHẤT của hub (2026-08-14).
+///
+/// Tới sáng nay còn hai lớp: `chat_id` ở kênh, và `trust.tfl5_user_tids` kiểm
+/// trong `verbs::parse_command`. Lớp thứ hai đi cùng phòng chat tfl5, và nó
+/// đáng đi — chỗ gọi phải tự bịa ra "người gõ" (lấy `first()` của danh sách chủ
+/// rồi đem so với chính danh sách ấy) nên nó không bao giờ từ chối được, TRỪ khi
+/// danh sách rỗng, và khi ấy nó nuốt sạch mọi mệnh lệnh trong im lặng.
+///
+/// Nên bài kiểm này thay chỗ cho năm bài "người lạ gõ vẫn chỉ là chữ" từng nằm ở
+/// `tests/verbs.rs`. Nó canh thứ mà một phép so `a == b` không canh nổi: **đọc
+/// đúng ô nào trong JSON**. Trong buồng riêng, `message.chat.id` và
+/// `message.from.id` BẰNG NHAU — nên lẫn hai ô ấy thì mọi thử nghiệm tay đều
+/// xanh, và chỉ lộ ra khi bot bị kéo vào một nhóm.
+#[test]
+fn a_message_from_another_chat_is_not_an_order() {
+    use hub::telegram::update_sender;
+    use serde_json::json;
+
+    const OWNER: &str = "8110";
+
+    // CHỮ: hỏi BUỒNG. `from.id` ở đây là người gõ trong nhóm — đọc nhầm sang nó
+    // là mở cổng cho cả nhóm.
+    let in_group = json!({
+        "message": { "chat": { "id": 4242 }, "from": { "id": 8110 }, "text": "/stop" }
+    });
+    assert_eq!(
+        update_sender(&in_group).as_deref(),
+        Some("4242"),
+        "chữ phải gác theo buồng (chat.id), không theo người gõ (from.id)"
+    );
+    assert_ne!(update_sender(&in_group).as_deref(), Some(OWNER));
+
+    // Buồng riêng của chủ máy: hai ô bằng nhau, và lệnh đi qua.
+    let mine = json!({
+        "message": { "chat": { "id": 8110 }, "from": { "id": 8110 }, "text": "/stop" }
+    });
+    assert_eq!(update_sender(&mine).as_deref(), Some(OWNER));
+
+    // Tin đã sửa cũng là tin — nếu không, sửa một dòng cũ thành `/stop` là một
+    // đường vòng qua cổng.
+    let edited = json!({
+        "edited_message": { "chat": { "id": 4242 }, "text": "/stop" }
+    });
+    assert_eq!(update_sender(&edited).as_deref(), Some("4242"));
+
+    // NÚT: hỏi NGƯỜI BẤM. Bất đối xứng có chủ ý — xem `update_sender`.
+    let stranger_pressed = json!({
+        "callback_query": { "id": "c1", "from": { "id": 4242 }, "data": "key:enter" }
+    });
+    assert_eq!(update_sender(&stranger_pressed).as_deref(), Some("4242"));
+    assert_ne!(update_sender(&stranger_pressed).as_deref(), Some(OWNER));
+
+    // Hình dạng lạ ⟹ None ⟹ chỗ gọi từ chối. Fail CLOSED: một update không đọc
+    // ra được người gửi không được coi như của chủ máy.
+    for weird in [
+        json!({}),
+        json!({ "message": { "text": "/stop" } }),
+        json!({ "channel_post": { "chat": { "id": 8110 }, "text": "/stop" } }),
+        json!({ "callback_query": { "id": "c1", "data": "key:enter" } }),
+    ] {
+        assert_eq!(update_sender(&weird), None, "phải từ chối: {weird}");
+    }
 }

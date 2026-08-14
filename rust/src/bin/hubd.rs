@@ -343,9 +343,6 @@ fn real_main() -> Result<()> {
             "pid": my_pid,
             "db": cfg.db.display().to_string(),
             "interval_sec": cfg.poll_interval_sec,
-            "adapters": {
-                "tfl5": cfg.adapters.tfl5.enabled,
-            }
         }),
     );
 
@@ -444,8 +441,6 @@ fn real_main() -> Result<()> {
     }
 }
 
-
-
 // 🔴 ĐÃ BỎ cả nhánh BÁM SÁT (`follow_sleep` + `idle_activity_sleep`),
 // 2026-08-14, cùng lượt gỡ tfl5 theo lời Hà: *"tạm thời không dùng tfl5 để xem
 // cứ xóa hết đi"*.
@@ -457,6 +452,11 @@ fn real_main() -> Result<()> {
 //
 // Thứ chúng phục vụ trên Telegram thì đã có đường riêng: cái loa "vừa xong /
 // vừa tắt" (`watch.rs`) chạy trong chính vòng, và `/shot` đọc màn khi được hỏi.
-fn follow_sleep(_cfg: &hub::config::Config, _db: &Db, waker: &hub::runtime::Waker, delay: Duration) {
+fn follow_sleep(
+    _cfg: &hub::config::Config,
+    _db: &Db,
+    waker: &hub::runtime::Waker,
+    delay: Duration,
+) {
     waker.sleep(delay);
 }

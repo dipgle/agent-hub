@@ -105,7 +105,7 @@ Cách dễ nhất để điền:
 
 ```bash
 ./hub setup      # mở một trang ở 127.0.0.1, điền form, tự ghi hub.env chmod 600
-./hub doctor     # kiểm tra THẬT: đăng nhập tfl5, tìm claude CLI, đọc thư mục app
+./hub doctor     # kiểm tra THẬT: hỏi Telegram, tìm claude CLI, đọc thư mục app
 ```
 
 Trang `setup` chạy trên chính máy cài hub, có vé một lần trong URL, **không bao
@@ -114,20 +114,20 @@ tự đóng sau khi lưu. Ô để trống = giữ nguyên giá trị cũ.
 
 ---
 
-## 4. Một app tfl5 cho **mỗi người** — đừng dùng chung
+## 4. Một bot Telegram cho **mỗi người** — đừng dùng chung
 
-Đây là câu hỏi hay gặp nhất, và câu trả lời dứt khoát: **tự tạo app của bạn trên
-tfl5, khai vào `hub.env`.** Đừng nối vào app của người khác.
+Đây là câu hỏi hay gặp nhất, và câu trả lời dứt khoát: **tự xin bot của bạn ở
+@BotFather, khai vào `hub.env`.** Đừng nối vào bot của người khác.
 
 Ba lý do, đều nằm trong chính thiết kế:
 
-1. **Ảnh chụp trạng thái mang chữ đang hiện trên màn phiên của bạn.** Nó đi vào
-   một doc trong app tfl5. App dùng chung = màn hình của nhiều người nằm một
-   chỗ; sai một ACL là lộ hết.
-2. **hub chỉ nhận lệnh từ một tài khoản** (`trust.tfl5_user_tids`). App dùng
-   chung biến đúng một dòng kiểm tra ấy thành thứ duy nhất ngăn người lạ
-   **điều khiển máy của bạn** — `/new`, `/type`, `/cmd` đều chạy bằng shell của
-   chính bạn.
+1. **Tin hub gửi đi mang chữ đang hiện trên màn phiên của bạn** — kể cả những
+   dòng chưa kịp vào nhật ký. Bot dùng chung = màn hình của nhiều người đi qua
+   một con bot.
+2. **hub chỉ nhận lệnh từ một buồng chat** (`HUB_TELEGRAM_CHAT_ID`), và từ
+   2026-08-14 đó là **cổng người duy nhất**. Bot dùng chung biến đúng một phép
+   so ấy thành thứ duy nhất ngăn người lạ **điều khiển máy của bạn** — `/new`,
+   `/type`, `/cmd` đều chạy bằng shell của chính bạn.
 3. **Hạn mức và quyền sở hữu**: phiên `claude` tiêu hạn mức tài khoản của bạn.
 
 ---
@@ -135,13 +135,13 @@ Ba lý do, đều nằm trong chính thiết kế:
 ## 5. Đường đi của một mệnh lệnh
 
 ```
-điện thoại ──► phòng chat tfl5 ──► hubd đọc lệnh ──► claude CLI trên máy bạn
-     ▲                                    │
-     └────────── ảnh chụp read-only ◄─────┘
+điện thoại ──► Telegram ──► hubd (long-poll getUpdates) ──► claude CLI trên máy bạn
+     ▲                              │
+     └──── tin báo + nút bấm ◄──────┘
 ```
 
-Cả hai chiều đều do **máy bạn gọi ra ngoài** — không mở cổng nào vào máy. Telegram
-là kênh phụ song song: cùng câu chữ, thêm nút bấm.
+Cả hai chiều đều do **máy bạn gọi ra ngoài** — không mở cổng nào vào máy. Một
+kênh, một cái mồm: phòng chat tfl5 chạy song song tới 2026-08-14 thì đóng.
 
 Mọi cú bấm đều là phím tắt của một **route** đã có (`/session`, `/new`, `/ask`,
 `/type`, `/key`, `/shot`, `/cmd`…), đi cùng hàng đợi và để lại cùng một vết trong
@@ -174,4 +174,5 @@ thiếu thì phần lịch sử sự kiện trống, không có gì hỏng.
   Accessibility: `System Events keystroke` bị từ chối thẳng, hub không dùng.
 - **Claude CLI** (`claude`) trong `PATH`.
 - **Rust** để build (`cargo build --release`).
-- Một **tài khoản tfl5** + (không bắt buộc) một **bot Telegram**.
+- Một **bot Telegram** (@BotFather) + `chat_id` của buồng chat riêng với nó.
+  Không còn "không bắt buộc": từ 2026-08-14 đây là kênh duy nhất.

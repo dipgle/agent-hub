@@ -198,7 +198,11 @@ pub struct Mark {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Change {
     /// Đang chạy → đứng lại ở dấu nhắc. Lượt việc đã xong.
-    Finished { id: String, name: String, ran_sec: i64 },
+    Finished {
+        id: String,
+        name: String,
+        ran_sec: i64,
+    },
     /// Rời khỏi danh sách hoặc mất tiến trình. **Không tự nhận là "tắt hẳn"** —
     /// chỗ gọi còn phải dò cửa sổ terminal mới biết nói câu nào (xem `Mark`).
     /// Phiên vừa DỪNG LẠI HỎI — câu hỏi và các lựa chọn lấy từ nhật ký.
@@ -255,7 +259,11 @@ pub enum Idle {
     /// từ 2026-08-10, mà tin báo lại chỉ mang con số — một cái chuông nói "có 3
     /// lựa chọn" thì vẫn bắt người ta mở máy ra mới biết chọn gì, tức nó chưa
     /// tiết kiệm cho ai một bước nào.
-    Asking { n: usize, options: Vec<String>, multi: bool },
+    Asking {
+        n: usize,
+        options: Vec<String>,
+        multi: bool,
+    },
     /// Màn đang mang một LỖI API — phiên không chờ bạn, nó **hỏng**.
     ///
     /// 🔴 Hà 2026-08-12: *"vừa rồi báo lỗi api mà chưa thấy bắt được"*. Trước
@@ -292,7 +300,10 @@ impl Change {
             // Lỗi: nói THẲNG ra dòng lỗi. Người đọc không cần biết nó im bao
             // lâu — họ cần biết nó hỏng vì cái gì.
             Change::Failed { name, line, .. } => {
-                let head = format!("🔴 {name} đang dừng vì LỖI:\n{}", crate::exec::truncate(line, 200));
+                let head = format!(
+                    "🔴 {name} đang dừng vì LỖI:\n{}",
+                    crate::exec::truncate(line, 200)
+                );
                 match tail {
                     Some(t) if !t.trim().is_empty() => format!("{head}\n\n«{}»", t.trim()),
                     _ => head,
@@ -360,7 +371,14 @@ impl Change {
             // Câu hỏi ĐI KÈM tin: người đọc phải quyết được ngay trên điện
             // thoại, không phải mở máy ra mới biết nó hỏi gì. Nhãn ngắn
             // (`header`) đứng trước vì nó đọc được trong một liếc.
-            Change::Asking { name, header, question, options, rest, .. } => {
+            Change::Asking {
+                name,
+                header,
+                question,
+                options,
+                rest,
+                ..
+            } => {
                 // Bảng mấy câu thì nói ngay ở dòng đầu. Con số này quyết định
                 // việc người đọc sắp làm: một câu thì bấm xong là xong, nhiều
                 // câu thì bấm xong VẪN CHƯA GỬI — và đó đúng là chỗ hub từng để
@@ -397,7 +415,11 @@ impl Change {
                         rest.len() + 1
                     ));
                     for (i, q) in rest.iter().enumerate() {
-                        let label = if q.header.is_empty() { &q.question } else { &q.header };
+                        let label = if q.header.is_empty() {
+                            &q.question
+                        } else {
+                            &q.header
+                        };
                         let opts = q
                             .options
                             .iter()
@@ -408,7 +430,11 @@ impl Change {
                             "\n{}. {}{}",
                             i + 2,
                             crate::exec::truncate(label, 60),
-                            if opts.is_empty() { String::new() } else { format!(": {opts}") }
+                            if opts.is_empty() {
+                                String::new()
+                            } else {
+                                format!(": {opts}")
+                            }
                         ));
                     }
                 }
@@ -726,7 +752,9 @@ pub fn changes(
         // đầu. Không có mốc thì lấy lúc này — thiếu chính xác một lượt, và lượt
         // ấy sẽ bị coi là ngắn, tức im. Thà lỡ một tin còn hơn một tin sai.
         let since = if was_working {
-            before.and_then(|b| working_since(&b.s)).unwrap_or(epoch_sec)
+            before
+                .and_then(|b| working_since(&b.s))
+                .unwrap_or(epoch_sec)
         } else {
             epoch_sec
         };
@@ -894,7 +922,11 @@ pub fn changes(
                 // Tên lấy TỪ SỔ (xem `Mark::n`): hàng của phiên đã đi mất cùng
                 // danh sách. Sổ cũ chưa có tên thì đành id ngắn — nhưng nói rõ
                 // đó là id, đừng để người đọc tưởng đấy là tên.
-                name: if mark.l.is_empty() { name_from_mark(id, mark) } else { mark.l.clone() },
+                name: if mark.l.is_empty() {
+                    name_from_mark(id, mark)
+                } else {
+                    mark.l.clone()
+                },
                 was_working: mark.s.starts_with(WORKING),
                 // ĐÂY là lý do sổ phải nhớ `tty`: hàng của phiên đã biến mất,
                 // nên không còn chỗ nào hỏi nó chạy ở cửa sổ nào.

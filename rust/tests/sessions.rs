@@ -61,7 +61,10 @@ fn a_turn_that_is_only_tool_calls_still_says_what_it_was_doing() {
     // Two of the live sessions were mid-tool-call, which has no text at all.
     // An empty row would read as "idle" when the session is actually working.
     let tail = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{}}]},"timestamp":"2026-08-08T02:00:00Z"}"#;
-    assert_eq!(parse_tail(tail, &no_background()).last_text.as_deref(), Some("[dùng Bash]"));
+    assert_eq!(
+        parse_tail(tail, &no_background()).last_text.as_deref(),
+        Some("[dùng Bash]")
+    );
 }
 
 #[test]
@@ -69,7 +72,10 @@ fn a_half_line_at_the_start_of_the_tail_is_skipped_not_fatal() {
     // The tail starts mid-file by design (256 KB from the end), so the first
     // line is usually a fragment.
     let tail = "ontent\":\"cụt\"}}\n{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ổn\"}]}}";
-    assert_eq!(parse_tail(tail, &no_background()).last_text.as_deref(), Some("ổn"));
+    assert_eq!(
+        parse_tail(tail, &no_background()).last_text.as_deref(),
+        Some("ổn")
+    );
 }
 
 #[test]
@@ -249,27 +255,51 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
     assert_eq!(classify_host(vscode, "interactive", "??"), "editor");
     assert_eq!(classify_host(vscode, "interactive", "ttys009"), "editor");
     assert_eq!(
-        classify_host("/Users/x/.cursor/extensions/anthropic.claude-code/claude", "interactive", "??"),
+        classify_host(
+            "/Users/x/.cursor/extensions/anthropic.claude-code/claude",
+            "interactive",
+            "??"
+        ),
         "editor"
     );
     assert_eq!(
-        classify_host("/Applications/Cursor.app/Contents/Resources/claude", "interactive", "??"),
+        classify_host(
+            "/Applications/Cursor.app/Contents/Resources/claude",
+            "interactive",
+            "??"
+        ),
         "editor"
     );
 
     // Dòng terminal thật, chép nguyên từ `ps` trên máy này (tty ttys005).
     assert_eq!(
-        classify_host("claude tiếp /Users/hanguyen/projects/AI/hub", "interactive", "ttys005"),
+        classify_host(
+            "claude tiếp /Users/hanguyen/projects/AI/hub",
+            "interactive",
+            "ttys005"
+        ),
         "terminal"
     );
-    assert_eq!(classify_host("claude tiếp tfl5", "interactive", "ttys006"), "terminal");
+    assert_eq!(
+        classify_host("claude tiếp tfl5", "interactive", "ttys006"),
+        "terminal"
+    );
 
     // KHÔNG có tty thì KHÔNG được gọi là terminal. Trước 2026-08-09 nhãn này
     // suy bằng loại trừ, nên một `claude` do script hay cron chạy vẫn đọc là
     // "terminal" — màn hình khai một thứ chưa ai kiểm. `ps` in `??` hoặc `-`.
-    assert_eq!(classify_host("claude tiếp dwork", "interactive", "??"), "detached");
-    assert_eq!(classify_host("claude tiếp dwork", "interactive", "-"), "detached");
-    assert_eq!(classify_host("claude tiếp dwork", "interactive", ""), "detached");
+    assert_eq!(
+        classify_host("claude tiếp dwork", "interactive", "??"),
+        "detached"
+    );
+    assert_eq!(
+        classify_host("claude tiếp dwork", "interactive", "-"),
+        "detached"
+    );
+    assert_eq!(
+        classify_host("claude tiếp dwork", "interactive", ""),
+        "detached"
+    );
 
     // `kind` thắng đường dẫn: phiên hub mở bằng `--bg` là của hub, dù binary
     // nào tình cờ đứng trước trong PATH. Thiếu vế này, một phiên nền mở từ
@@ -279,7 +309,11 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
 
     // Tên dự án có chữ "vscode" KHÔNG phải phiên editor; dấu hiệu là thư mục ẩn.
     assert_eq!(
-        classify_host("claude tiếp /Users/hanguyen/projects/vscode-notes", "interactive", "ttys002"),
+        classify_host(
+            "claude tiếp /Users/hanguyen/projects/vscode-notes",
+            "interactive",
+            "ttys002"
+        ),
         "terminal"
     );
 }
@@ -298,16 +332,25 @@ fn pending_subagents_are_counted_by_id_not_by_name() {
     let one_came_back = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a1","content":"xong"}]}}"#;
     let other_tool = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Bash","input":{}}]}}"#;
 
-    assert_eq!(parse_tail(started_two, &no_background()).pending_subagents, 2);
+    assert_eq!(
+        parse_tail(started_two, &no_background()).pending_subagents,
+        2
+    );
     assert_eq!(
         parse_tail(&format!("{started_two}\n{one_came_back}"), &no_background()).pending_subagents,
         1
     );
     // Công cụ khác không phải subagent.
-    assert_eq!(parse_tail(other_tool, &no_background()).pending_subagents, 0);
+    assert_eq!(
+        parse_tail(other_tool, &no_background()).pending_subagents,
+        0
+    );
     // Không có gì thì không có gì — và một dòng hỏng không được làm hỏng cả bộ.
     assert_eq!(parse_tail("", &no_background()).pending_subagents, 0);
-    assert_eq!(parse_tail("{ đây không phải json", &no_background()).pending_subagents, 0);
+    assert_eq!(
+        parse_tail("{ đây không phải json", &no_background()).pending_subagents,
+        0
+    );
 }
 
 /// Subagent CHẠY NỀN: `tool_result` về ngay, nên nó KHÔNG phải dấu kết thúc.
@@ -472,7 +515,10 @@ fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
     assert!(stalled.contains("ttys000"), "{stalled}");
     assert!(stalled.contains("Yes, I trust this folder"), "{stalled}");
     assert!(stalled.contains("GIỮ NGUYÊN"), "{stalled}");
-    assert!(!stalled.contains("đang chạy"), "khoe phiên đang chạy: {stalled}");
+    assert!(
+        !stalled.contains("đang chạy"),
+        "khoe phiên đang chạy: {stalled}"
+    );
     assert!(!stalled.contains("Đang theo phiên mới"), "{stalled}");
 
     // Không đọc được màn thì nói thẳng là không đọc được — không bịa lý do.
@@ -604,7 +650,10 @@ fn prose_that_merely_mentions_the_notice_closes_nothing() {
     // 256KB cắt thì trượt `from_str` và bị bỏ cả dòng. Còn thứ mở mà không đóng
     // thì đúng là lời văn, và lời văn không được đóng lệnh gọi nào.
     let dangling = r#"{"type":"user","message":{"content":[{"type":"text","text":"nói về <task-notification> rồi trích <tool-use-id>b1</tool-use-id> mà không đóng khối"}]}}"#;
-    assert_eq!(parse_tail(&format!("{launched}\n{dangling}"), &bg).pending_subagents, 1);
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{dangling}"), &bg).pending_subagents,
+        1
+    );
 }
 
 /// Thông báo kết thúc tới bằng BA đường, không phải một.
@@ -624,11 +673,17 @@ fn a_stop_notice_arrives_by_three_different_roads() {
     // Đường 1 ở dạng THẬT của nó: `message.content` là chuỗi thuần, không phải
     // mảng khối. Đếm trên 384 tệp nhật ký của máy này: 355 chuỗi / 4 mảng.
     let plain = r#"{"type":"user","message":{"role":"user","content":"<task-notification>\n<tool-use-id>q1</tool-use-id>\n<status>completed</status>\n</task-notification>"}}"#;
-    assert_eq!(parse_tail(&format!("{launched}\n{plain}"), &bg).pending_subagents, 1);
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{plain}"), &bg).pending_subagents,
+        1
+    );
 
     // Đường 2: xếp hàng, chữ nằm thẳng ở `content`.
     let queued = r#"{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<tool-use-id>q1</tool-use-id>\n<status>completed</status>\n</task-notification>"}"#;
-    assert_eq!(parse_tail(&format!("{launched}\n{queued}"), &bg).pending_subagents, 1);
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{queued}"), &bg).pending_subagents,
+        1
+    );
 
     // Đường 3: đính kèm, chữ nằm ở `attachment.prompt`.
     let attached = r#"{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>\n<tool-use-id>a1</tool-use-id>\n<status>completed</status>\n</task-notification>"}}"#;
@@ -648,7 +703,10 @@ fn a_notice_without_a_tool_use_id_closes_nothing() {
     let bg: HashSet<String> = ["b1".to_string()].into_iter().collect();
     let launched = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"b1","name":"Agent","input":{}}]}}"#;
     let monitor = r#"{"type":"queue-operation","operation":"enqueue","content":"<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event</summary>\n</task-notification>"}"#;
-    assert_eq!(parse_tail(&format!("{launched}\n{monitor}"), &bg).pending_subagents, 1);
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{monitor}"), &bg).pending_subagents,
+        1
+    );
 }
 
 /// Chuỗi thẻ HỎNG không được sinh id rác, và không được bỏ sót id thật.
@@ -665,12 +723,18 @@ fn a_malformed_id_sequence_matches_the_javascript_twin() {
 
     // Thẻ mở lồng nhau: `real` vẫn phải được nhận ra là ĐÃ XONG.
     let broken = r#"{"type":"queue-operation","content":"<task-notification><tool-use-id>UNCLOSED<tool-use-id>real</tool-use-id></task-notification>"}"#;
-    assert_eq!(parse_tail(&format!("{launched}\n{broken}"), &bg).pending_subagents, 0);
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{broken}"), &bg).pending_subagents,
+        0
+    );
 
     // Id RỖNG không đóng gì (và không được làm hỏng vòng quét).
     let bg2: HashSet<String> = ["".to_string(), "real".to_string()].into_iter().collect();
     let empty = r#"{"type":"queue-operation","content":"<task-notification><tool-use-id></tool-use-id></task-notification>"}"#;
-    assert_eq!(parse_tail(&format!("{launched}\n{empty}"), &bg2).pending_subagents, 1);
+    assert_eq!(
+        parse_tail(&format!("{launched}\n{empty}"), &bg2).pending_subagents,
+        1
+    );
 }
 
 /// Cửa sổ Terminal mà `/new` mở ra — dòng lệnh phải đúng ĐẾN TỪNG THỨ TỰ.
@@ -688,7 +752,12 @@ mod cua_so_moi {
     /// đầu tiên (`CLAUDE.md` §10). Test đọc VỊ TRÍ, không đọc câu chữ.
     #[test]
     fn de_bai_dung_truoc_co_variadic() {
-        let cmd = terminal_command("claude", Path::new("/Users/x/projects"), "[hub] dọn nợ", None);
+        let cmd = terminal_command(
+            "claude",
+            Path::new("/Users/x/projects"),
+            "[hub] dọn nợ",
+            None,
+        );
         let de_bai = cmd.find("dọn nợ").expect("đề bài phải có trong lệnh");
         let co = cmd.find("--disallowedTools").expect("phải có rào công cụ");
         assert!(
@@ -696,7 +765,10 @@ mod cua_so_moi {
             "đề bài bị đẩy ra sau cờ variadic ⟹ phiên sẽ dựng lên rỗng: {cmd}"
         );
         // Và rào công cụ phải thật sự có hàng, không phải một cờ trống.
-        assert!(cmd.trim_end().len() > co + "--disallowedTools".len() + 3, "{cmd}");
+        assert!(
+            cmd.trim_end().len() > co + "--disallowedTools".len() + 3,
+            "{cmd}"
+        );
     }
 
     /// Nháy đơn trong đề bài không được phép thoát ra ngoài chuỗi.
@@ -719,7 +791,10 @@ mod cua_so_moi {
             0,
             "nháy đơn lẻ ⟹ chuỗi shell hở: {cmd}"
         );
-        assert!(cmd.contains(r"'\''rm -rf /'\''"), "phải bọc lại nháy của người dùng: {cmd}");
+        assert!(
+            cmd.contains(r"'\''rm -rf /'\''"),
+            "phải bọc lại nháy của người dùng: {cmd}"
+        );
     }
 
     /// Chạy đúng tài khoản: `CLAUDE_CONFIG_DIR` phải đứng trước lệnh `claude`.
@@ -731,7 +806,9 @@ mod cua_so_moi {
             "việc",
             Some("/Users/x/.claude-acc2"),
         );
-        let env = cmd.find("CLAUDE_CONFIG_DIR").expect("phải cắm biến tài khoản");
+        let env = cmd
+            .find("CLAUDE_CONFIG_DIR")
+            .expect("phải cắm biến tài khoản");
         let cli = cmd.find("'claude'").expect("phải gọi claude");
         assert!(env < cli, "biến môi trường phải đứng trước lệnh: {cmd}");
         assert!(cmd.contains("/Users/x/.claude-acc2"), "{cmd}");
@@ -794,7 +871,10 @@ fn a_btw_answer_is_cut_out_of_the_screen_not_shipped_whole() {
 
     ↑/↓ to scroll · c to copy · f to fork · Esc to close";
     let out = hub::sessions::btw_answer(screen, "Tóm tắt trong 1 câu: phiên này đang làm việc gì?");
-    assert!(out.contains("chưa có trao đổi nào"), "mất câu trả lời:\n{out}");
+    assert!(
+        out.contains("chưa có trao đổi nào"),
+        "mất câu trả lời:\n{out}"
+    );
     assert!(!out.contains("Claude Code v"), "còn logo khởi động:\n{out}");
     assert!(!out.contains("Esc to close"), "còn chân bảng phím:\n{out}");
     assert!(!out.contains("/btw"), "còn chính câu vừa gõ:\n{out}");
@@ -818,11 +898,20 @@ fn an_uncuttable_screen_still_returns_something() {
 #[test]
 fn a_panel_still_writing_is_not_an_answer() {
     let writing = "    /btw Tóm tắt trong 1 câu: phiên này đang làm việc gì?\n      ✳ Answering…\n    Esc to close";
-    assert!(!hub::sessions::btw_panel_finished(writing), "bảng đang viết mà đã coi là xong");
+    assert!(
+        !hub::sessions::btw_panel_finished(writing),
+        "bảng đang viết mà đã coi là xong"
+    );
 
     let done = "    /btw Tóm tắt?\n\n      Phiên này chưa làm gì cả.\n\n    ↑/↓ to scroll · c to copy · f to fork · Esc to close";
-    assert!(hub::sessions::btw_panel_finished(done), "bảng đã xong mà không nhận ra");
-    assert!(!hub::sessions::btw_panel_finished("❯ \n  ⏵⏵ auto mode on"), "màn thường không phải bảng");
+    assert!(
+        hub::sessions::btw_panel_finished(done),
+        "bảng đã xong mà không nhận ra"
+    );
+    assert!(
+        !hub::sessions::btw_panel_finished("❯ \n  ⏵⏵ auto mode on"),
+        "màn thường không phải bảng"
+    );
 }
 
 /// Câu hỏi dài bị TUI ngắt dòng thì phép cắt vẫn phải đúng.
@@ -901,7 +990,9 @@ fn a_question_that_was_answered_is_no_longer_pending() {
     let answer = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"The user answered"}]}}"#;
     assert!(hub::sessions::pending_question(&format!("{ask}\n{answer}")).is_none());
     // Hỏi tiếp sau khi đã trả lời câu trước ⟹ câu SAU mới là câu đang chờ.
-    let ask2 = ask.replace("toolu_1", "toolu_2").replace("\"question\":\"q\"", "\"question\":\"q2\"");
+    let ask2 = ask
+        .replace("toolu_1", "toolu_2")
+        .replace("\"question\":\"q\"", "\"question\":\"q2\"");
     let a = hub::sessions::pending_question(&format!("{ask}\n{answer}\n{ask2}"))
         .expect("câu thứ hai còn treo");
     assert_eq!(a.question, "q2");
@@ -915,7 +1006,10 @@ fn a_question_that_smells_of_secrets_keeps_the_fact_but_not_the_words() {
     let a = hub::sessions::pending_question(tail).expect("vẫn phải báo là đang kẹt");
     assert!(a.options.is_empty(), "không đưa lựa chọn ra: {a:?}");
     assert!(!a.question.contains("Abcd1234"), "lộ bí mật: {a:?}");
-    assert!(a.question.contains("bí mật"), "phải nói vì sao trống: {a:?}");
+    assert!(
+        a.question.contains("bí mật"),
+        "phải nói vì sao trống: {a:?}"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1014,7 +1108,10 @@ fn the_chain_from_transcript_to_message_keeps_the_closing_sentence() {
     let report = format!(
         "**Bắt được thủ phạm rồi** — đối chứng cùng một thời điểm.\n\n{filler}\n\nNói \"dọn đi\" là mình chạy phần an toàn."
     );
-    assert!(report.chars().count() > 2600, "mẫu thử phải dài hơn trần cũ");
+    assert!(
+        report.chars().count() > 2600,
+        "mẫu thử phải dài hơn trần cũ"
+    );
     let tail = serde_json::json!({
         "type": "assistant",
         "message": {"role": "assistant", "content": [{"type": "text", "text": report}]}
@@ -1115,8 +1212,7 @@ fn a_process_without_a_terminal_has_no_window_to_be_taken_over() {
     // Còn tty THẬT thì vẫn phải nhận ra — luật này không được siết lan.
     let live = vec![ghost("heir", "ttys002")];
     assert_eq!(
-        hub::sessions::window_taken_over("dead", "ttys002", &live)
-            .map(|s| s.session_id.as_str()),
+        hub::sessions::window_taken_over("dead", "ttys002", &live).map(|s| s.session_id.as_str()),
         Some("heir")
     );
 }
@@ -1260,7 +1356,10 @@ fn a_session_name_says_which_project_it_is_working_on() {
 fn a_transcript_being_written_beats_a_stale_idle_flag() {
     let w = hub::sessions::is_working;
     // Ca thật đo được: CLI nói idle, nhật ký vừa ghi 1 giây trước.
-    assert!(w(Some("idle"), 0, Some(1)), "tin `idle` trong khi nhật ký đang lớn lên");
+    assert!(
+        w(Some("idle"), 0, Some(1)),
+        "tin `idle` trong khi nhật ký đang lớn lên"
+    );
     assert!(w(Some("done"), 0, Some(3)));
     // …nhưng im lâu rồi thì `idle` vẫn là `idle` — cửa mới không được siết lan.
     assert!(!w(Some("idle"), 0, Some(60)));
@@ -1350,9 +1449,18 @@ fn a_filing_drawer_is_not_part_of_the_name() {
     label_sessions(&mut rows, &root);
 
     assert_eq!(rows[0].label, "[hub]", "ngăn kéo AI/ vẫn bám vào nhãn");
-    assert_eq!(rows[1].label, "[tcc/amm]", "rút gọn quá tay, mất chỗ đứng của amm");
-    assert_eq!(rows[2].label, "[dwork]", "dự án ở gốc thì không có gì để bỏ");
-    assert_eq!(rows[3].label, "[khong/co/that]", "đoán bừa khi không kiểm được");
+    assert_eq!(
+        rows[1].label, "[tcc/amm]",
+        "rút gọn quá tay, mất chỗ đứng của amm"
+    );
+    assert_eq!(
+        rows[2].label, "[dwork]",
+        "dự án ở gốc thì không có gì để bỏ"
+    );
+    assert_eq!(
+        rows[3].label, "[khong/co/that]",
+        "đoán bừa khi không kiểm được"
+    );
 
     // Và `folder` KHÔNG bị đụng: nó là một mẩu đường dẫn thật, `clean_inbox`
     // ghép nó vào gốc workspace để tìm hòm thư cũ (`AI/hub/.inbox` có thật

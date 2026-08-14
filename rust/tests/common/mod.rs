@@ -2,17 +2,15 @@
 //! so helpers used by only some of them are legitimately unused elsewhere.
 #![allow(dead_code)]
 
-use hub::config::{Adapters, Config, NotifyCfg, Trust};
+use hub::config::{Config, NotifyCfg};
 use hub::db::Db;
 use tempfile::TempDir;
 
 pub fn cfg_for_tests() -> Config {
     Config {
-        adapters: Adapters::default(),
-        trust: Trust {
-            tfl5_user_tids: vec!["u-owner".into()],
-            trusted_sources: vec!["cli".into()],
-        },
+        // 🔴 `adapters` + `trust` gỡ 2026-08-14 cùng tfl5. Thứ còn phải đặt tay
+        // ở đây là cái duy nhất có tác dụng phụ ra ngoài tiến trình: một bài
+        // kiểm không được bắn thông báo lên màn hình máy thật.
         notify: NotifyCfg {
             macos_notification: false,
             ..NotifyCfg::default()

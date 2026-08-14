@@ -1,7 +1,7 @@
 //! Config loading + validation.
 //!
 //! Secrets NEVER live in the config file — only the NAME of the env var that
-//! holds them (`user_env`, `password_env`). Charter DoD #8.
+//! holds them (`confirm.bot_token_env`, `confirm.chat_id_env`). Charter DoD #8.
 //!
 //! `#[serde(default)]` on every struct reproduces the prototype's deep-merge:
 //! a key absent from hub.config.json falls back to the default, and sibling
@@ -41,7 +41,11 @@ pub struct AutoHandoverCfg {
 
 impl Default for AutoHandoverCfg {
     fn default() -> Self {
-        Self { enabled: true, at_percent: 80, idle_sec: 120 }
+        Self {
+            enabled: true,
+            at_percent: 80,
+            idle_sec: 120,
+        }
     }
 }
 
@@ -130,86 +134,29 @@ pub fn default_call_timeout() -> u64 {
     240
 }
 
-/// The tfl5 chat room hub talks through. `base_url` is the tfl5 server, NOT a
-/// port hub opens — hub only ever dials out (see `adapters/tfl5.rs`).
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Tfl5Cfg {
-    pub enabled: bool,
-    pub base_url: String,
-    pub app_tid: String,
-    pub room: String,
-    /// Env var NAMES only — the values never live in this file (rule #3).
-    pub user_env: String,
-    pub password_env: String,
-    pub limit: i64,
-    /// First poll of a room that already has history: take the tip as the
-    /// baseline rather than replaying every old line looking for orders.
-    pub backfill: bool,
-    /// How long to wait for tfl5 to echo a sent message back before calling
-    /// delivery unconfirmed.
-    pub reply_timeout_sec: u64,
-    /// Hold lines younger than this before reading them, so a burst that is
-    /// still being typed arrives whole. 0 disables the wait.
-    pub silence_window_sec: u64,
-    /// Ignore anything shorter than this. "ok" and "👍" are not orders.
-    pub min_chars: usize,
-    /// Hold the `/ws/chat` socket open in `hubd` so tfl5 pushes messages
-    /// instead of hub asking every cycle. The poller stays on regardless as
-    /// the durable backstop — turning this off costs latency, not messages.
-    pub live: bool,
-}
-
-impl Default for Tfl5Cfg {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            base_url: "http://localhost:8090".into(),
-            app_tid: String::new(),
-            room: "hub".into(),
-            user_env: "HUB_TFL5_USER".into(),
-            password_env: "HUB_TFL5_PASSWORD".into(),
-            limit: 50,
-            backfill: false,
-            reply_timeout_sec: 15,
-            silence_window_sec: 10,
-            min_chars: 3,
-            live: true,
-        }
-    }
-}
-
-/// One channel. Was five until 2026-08-08 — see `adapters/mod.rs`.
-///
-/// Unknown keys in an existing `hub.config.json` are ignored by serde, so a
-/// file still carrying `github`/`devlog`/`email`/`telegram` loads fine; the
-/// next `config::save` drops them.
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Adapters {
-    pub tfl5: Tfl5Cfg,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Trust {
-    /// tfl5 `user_tid`s hub treats as the owner. Deliberately SEPARATE from
-    /// tfl5's own ACL: tfl5 answers "may this account enter the room", which is
-    /// not the same question as "may this person make hub act". Everyone in the
-    /// room is untrusted here until listed, and `tfl5::parse_command` refuses
-    /// their orders outright (logged, never silently dropped).
-    pub tfl5_user_tids: Vec<String>,
-    pub trusted_sources: Vec<String>,
-}
-
-impl Default for Trust {
-    fn default() -> Self {
-        Self {
-            tfl5_user_tids: vec![],
-            trusted_sources: vec!["cli".into()],
-        }
-    }
-}
+// 🔴 ĐÃ BỎ `Tfl5Cfg`, `Adapters` và `Trust`, 2026-08-14, cùng lượt gỡ tfl5 theo
+// lời Hà: *"tạm thời không dùng tfl5 để xem cứ xóa hết đi"*.
+//
+// `adapters.tfl5` khai một KÊNH không còn tồn tại: máy chủ, phòng, hai tên biến
+// môi trường, trần thời gian chờ tiếng vọng. Kênh đi rồi thì mọi ô ấy chỉ còn là
+// chỗ để gõ vào cho vui.
+//
+// `trust` thì đáng nói kỹ hơn, vì nó nghe như một cái cổng bảo mật:
+//
+// * `trusted_sources` **chưa bao giờ được đọc** — khai trong cấu hình, đặt trong
+//   test, không một chỗ nào hỏi tới nó. Một hàng rào không ai đi qua.
+// * `tfl5_user_tids` là cổng THẬT của phòng chat, nhưng sau khi phòng đóng thì
+//   `pipeline` phải tự bịa ra người gõ để đi qua chính nó: lấy `first()` của
+//   danh sách rồi đem so với danh sách ấy. Một cổng cấu tạo sao cho không bao
+//   giờ từ chối được — trừ đúng một trường hợp: danh sách RỖNG, và khi ấy nó từ
+//   chối **mọi** mệnh lệnh, im lặng, chỉ để lại một dòng `command_from_non_owner`
+//   trong nhật ký. Tức là gỡ tfl5 khỏi `hub.config.json` mà giữ cổng này lại thì
+//   Telegram câm hẳn, không ai hiểu vì sao.
+//
+// Cổng người thật nay ở đúng chỗ nó thuộc về — KÊNH: `telegram.rs` chỉ nhận tin
+// từ `chat_id` của chủ máy (`telegram.rs:1326` cho chữ, `:1731` cho nút), khoá
+// lấy từ `hub.env`. Xem `verbs::parse_command` để biết vì sao bộ phân tích lệnh
+// không còn nhận tham số "ai đang gõ".
 
 /// One project, registered under its FOLDER NAME — which is also the name
 /// `/project` and `/new` accept.
@@ -270,8 +217,6 @@ pub struct Config {
     /// Xác nhận lần hai cho lệnh không lùi lại được — xem [`ConfirmCfg`].
     #[serde(default)]
     pub confirm: ConfirmCfg,
-    pub adapters: Adapters,
-    pub trust: Trust,
     /// THE project registry, keyed by folder name under `project_roots`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub projects: BTreeMap<String, ProjectCfg>,
@@ -316,8 +261,6 @@ impl Default for Config {
             call: CallCfg::default(),
             auto_handover: AutoHandoverCfg::default(),
             confirm: ConfirmCfg::default(),
-            adapters: Adapters::default(),
-            trust: Trust::default(),
             projects: BTreeMap::new(),
             notify: NotifyCfg::default(),
             claude_cli: default_claude_cli(),
@@ -377,16 +320,11 @@ pub fn validate(cfg: &Config) -> Result<()> {
     if cfg.call.timeout_sec < 10 {
         problems.push("call.timeout_sec must be >= 10".into());
     }
-    // The room is where orders come from, so an app_tid that is not set means
-    // hub is listening to nothing — say it at startup, not in a silent no-op.
-    if cfg.adapters.tfl5.enabled && cfg.adapters.tfl5.app_tid.trim().is_empty() {
-        problems.push("adapters.tfl5.enabled needs adapters.tfl5.app_tid".into());
-    }
-    // Without an owner tid every slash command in the room is refused, and the
-    // refusal is only visible in the log — a hub nobody can drive.
-    if cfg.adapters.tfl5.enabled && cfg.trust.tfl5_user_tids.is_empty() {
-        problems.push("trust.tfl5_user_tids is empty, so no one can give hub an order".into());
-    }
+    // 🔴 Hai luật của phòng chat tfl5 (`app_tid` phải có, `trust.tfl5_user_tids`
+    // không được rỗng) đã đi theo cái kênh, 2026-08-14. Cổng của Telegram không
+    // kiểm được ở đây: khoá của nó là BÍ MẬT (`hub.env`), không phải một trường
+    // trong tệp cấu hình — `telegram::Inbox::start` tự bỏ qua CÓ LOG khi thiếu
+    // khoá, đúng luật #4 (thiếu bí mật là SKIP-WITH-LOG, không phải chết máy).
     if !problems.is_empty() {
         bail!("invalid hub config:\n  - {}", problems.join("\n  - "));
     }
@@ -654,7 +592,7 @@ pub fn project_bases(cfg: &Config) -> Vec<PathBuf> {
 /// Load `<hub_home>/hub.env` (KEY=VALUE lines) into the process environment.
 ///
 /// launchd does NOT read your shell profile, so an auto-started daemon has no
-/// `HUB_TFL5_PASSWORD`. Putting secrets in the plist works but spreads them
+/// `HUB_TELEGRAM_BOT_TOKEN`. Putting secrets in the plist works but spreads them
 /// into a file that gets synced/backed up; a single chmod-600 env file next to
 /// the config is easier to keep private. Values already present in the
 /// environment always win, so an interactive shell can still override.

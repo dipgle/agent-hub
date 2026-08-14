@@ -325,7 +325,9 @@ pub fn transcript_error(tail: &str) -> Option<String> {
         let Ok(r) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        let Some(msg) = r.get("message") else { continue };
+        let Some(msg) = r.get("message") else {
+            continue;
+        };
         if msg.get("role").and_then(Value::as_str) != Some("assistant") {
             continue;
         }
@@ -570,7 +572,6 @@ pub fn project_dot(folder: &str) -> &'static str {
     DOTS[(h % DOTS.len() as u32) as usize]
 }
 
-
 /// Cửa sổ của một phiên, lấy từ SỔ rồi bắt `ps` chứng thực — **không spawn
 /// `claude`**.
 ///
@@ -608,7 +609,8 @@ pub fn window_target_from_book(book_json: &str, id: &str) -> Option<LiveSession>
     let now_tty = out.stdout.trim();
     // `ps` in `ttys002`, sổ cũng giữ `ttys002` — nhưng đừng tin vào một chuỗi
     // rỗng: pid chết thì `ps` in ra không có gì, và "" == "" là một cái bẫy.
-    if now_tty.is_empty() || now_tty.trim_start_matches("/dev/") != mark.y.trim_start_matches("/dev/")
+    if now_tty.is_empty()
+        || now_tty.trim_start_matches("/dev/") != mark.y.trim_start_matches("/dev/")
     {
         return None;
     }
@@ -1070,7 +1072,10 @@ fn background_agent_calls(transcript: &Path) -> HashSet<String> {
         let entry = match entry {
             Ok(e) => e,
             Err(e) => {
-                logging::warn("subagent_meta_entry_failed", json!({ "err": e.to_string() }));
+                logging::warn(
+                    "subagent_meta_entry_failed",
+                    json!({ "err": e.to_string() }),
+                );
                 continue;
             }
         };
@@ -1197,7 +1202,9 @@ fn stopped_background_calls(tail: &str) -> HashSet<String> {
                 // Khoan dung ấy còn KHÔNG CẦN: mỗi bản ghi là một dòng JSON trọn
                 // vẹn, dòng bị cắt thì `from_str` trượt và bị bỏ cả dòng — nên
                 // thông báo nào đọc được cũng đã nguyên vẹn.
-                let Some(end) = rest.find(NOTE_CLOSE) else { break };
+                let Some(end) = rest.find(NOTE_CLOSE) else {
+                    break;
+                };
                 let (inside, after) = rest.split_at(end);
                 let mut scan = inside;
                 while let Some(k) = scan.find(OPEN) {
@@ -1412,7 +1419,11 @@ pub const SAY_MAX: usize = 12_000;
 /// vòng, vì ảnh chụp đi lên mạng 10 giây một lần còn thứ này chỉ cần đúng lúc
 /// hub sắp mở miệng.
 pub fn last_say(cfg: &Config, session: &LiveSession, max_chars: usize) -> Option<String> {
-    let path = transcript_path(&cfg.claude_transcript_root(), &session.cwd, &session.session_id);
+    let path = transcript_path(
+        &cfg.claude_transcript_root(),
+        &session.cwd,
+        &session.session_id,
+    );
     let tail = read_tail(&path).ok()?;
     last_prose(&tail, max_chars)
 }
@@ -1449,7 +1460,9 @@ pub fn last_prose(tail: &str, max_chars: usize) -> Option<String> {
         if record.get("type").and_then(Value::as_str) != Some("assistant") {
             continue;
         }
-        let Some(text) = text_of(&record) else { continue };
+        let Some(text) = text_of(&record) else {
+            continue;
+        };
         let prose = strip_tool_marks(&text);
         if prose.is_empty() {
             continue;
@@ -1616,7 +1629,10 @@ pub fn pending_question(tail: &str) -> Option<Asking> {
         }
     }
     // Cái CUỐI còn treo: hỏi xong rồi hỏi tiếp thì câu sau mới là câu đang chờ.
-    let (_, mut asking) = asked.into_iter().rev().find(|(id, _)| !answered.contains(id))?;
+    let (_, mut asking) = asked
+        .into_iter()
+        .rev()
+        .find(|(id, _)| !answered.contains(id))?;
     // Điều 5: chữ này rời khỏi máy (vào ảnh chụp, vào Telegram) nên phải qua
     // cổng quét rò rỉ như mọi phần xem trước khác. Có dấu hiệu thì giữ lại chữ,
     // KHÔNG giữ lại sự thật là phiên đang kẹt.
@@ -1641,8 +1657,16 @@ pub fn pending_question(tail: &str) -> Option<Asking> {
 /// Một mục `questions[i]` trong lời gọi `AskUserQuestion` → [`Question`].
 fn question_of(q: &Value) -> Question {
     Question {
-        header: q.get("header").and_then(Value::as_str).unwrap_or_default().to_string(),
-        question: q.get("question").and_then(Value::as_str).unwrap_or_default().to_string(),
+        header: q
+            .get("header")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        question: q
+            .get("question")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
         options: q
             .get("options")
             .and_then(Value::as_array)
@@ -1653,7 +1677,10 @@ fn question_of(q: &Value) -> Question {
                     .collect()
             })
             .unwrap_or_default(),
-        multi: q.get("multiSelect").and_then(Value::as_bool).unwrap_or(false),
+        multi: q
+            .get("multiSelect")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -2049,7 +2076,10 @@ fn drop_stale_dead(rows: &mut Vec<LiveSession>) -> usize {
 }
 
 fn mark_can_type(rows: &mut [LiveSession]) {
-    if !rows.iter().any(|r| r.host == "terminal" && !r.tty.is_empty()) {
+    if !rows
+        .iter()
+        .any(|r| r.host == "terminal" && !r.tty.is_empty())
+    {
         return;
     }
     let owned = match crate::keys::terminal_ttys() {
@@ -2123,8 +2153,9 @@ fn link_parents(rows: &mut [LiveSession]) {
 ///
 /// Vòng chạy KHÔNG dùng đệm: cái loa so hai lượt ảnh chụp, mà so một tấm cũ với
 /// chính nó thì không có sự kiện nào hiện ra.
-static SNAP_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<(std::time::Instant, SessionsSnapshot)>>> =
-    std::sync::OnceLock::new();
+static SNAP_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<Option<(std::time::Instant, SessionsSnapshot)>>,
+> = std::sync::OnceLock::new();
 
 /// Ảnh chụp còn dùng được nếu chưa quá `max_age`, không thì dựng mới.
 pub fn snapshot_cached(cfg: &Config, max_age: std::time::Duration) -> SessionsSnapshot {
@@ -2347,7 +2378,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // kết thúc vì tiến trình chết mang chúng đi cùng. Đó đúng là
                     // "subagent ma chạy mãi trên màn" mà bộ đếm này sinh ra để
                     // tránh; tiến trình còn sống là điều kiện cần của chữ "đang".
-                    row.pending_subagents = pending_for_display(&row.host, parsed.pending_subagents);
+                    row.pending_subagents =
+                        pending_for_display(&row.host, parsed.pending_subagents);
                     // "Đang làm việc" tính SAU khi đã có cả mốc hoạt động lẫn
                     // số subagent — hai thứ này mới nói được, `status` thì im
                     // với mọi phiên terminal.
@@ -2439,7 +2471,10 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     // một ảnh chụp khai `hidden_editor = 0` và xếp sai thứ tự. Cùng một họ với
     // `sessions_snapshot_ms` bên dưới in `out.hidden_editor` trước khi nó được
     // gán: một phép đo trỏ vào ô chưa điền thì nó đo cái ô, không đo sự thật.
-    if let Ok(mut g) = SNAP_CACHE.get_or_init(|| std::sync::Mutex::new(None)).lock() {
+    if let Ok(mut g) = SNAP_CACHE
+        .get_or_init(|| std::sync::Mutex::new(None))
+        .lock()
+    {
         *g = Some((std::time::Instant::now(), out.clone()));
     }
     let after_rows = snap_started.elapsed();
@@ -3071,7 +3106,10 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
         }
     };
     if let Err(e) = crate::keys::type_into(window, &format!("/btw {question}"), true) {
-        logging::warn("btw_type_failed", json!({ "session": session.session_id, "err": e.to_string() }));
+        logging::warn(
+            "btw_type_failed",
+            json!({ "session": session.session_id, "err": e.to_string() }),
+        );
         return None;
     }
     // Chờ BẢNG TRẢ LỜI ĐÓNG LẠI, không phải chờ "màn đổi và phiên thôi bận".
@@ -3193,7 +3231,10 @@ pub fn btw_answer(screen: &str, question: &str) -> String {
     // Không cắt được thì thà trả cả màn còn hơn trả rỗng — nhưng nói ra là đã
     // không cắt được, đừng im lặng đưa một đống chữ.
     if text.is_empty() {
-        logging::info("btw_answer_uncut", json!({ "why": "không tìm thấy mốc cắt trên màn" }));
+        logging::info(
+            "btw_answer_uncut",
+            json!({ "why": "không tìm thấy mốc cắt trên màn" }),
+        );
         return screen.trim().to_string();
     }
     text
@@ -3408,7 +3449,8 @@ fn start_in_terminal(
         let after = std::time::Instant::now() + Duration::from_secs(20);
         while std::time::Instant::now() < after {
             std::thread::sleep(Duration::from_millis(500));
-            if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), root, opened_at)
+            if let Some(id) =
+                newest_transcript_since(&cfg.claude_transcript_root(), root, opened_at)
             {
                 logging::info(
                     "new_session_matched_by_transcript",
@@ -4018,8 +4060,8 @@ pub fn start_background(
                     "CLAUDE_CONFIG_DIR".into(),
                     account.and_then(|a| account_dir(cfg, a)),
                 )],
-            ..Default::default()
-        },
+                ..Default::default()
+            },
         ) {
             Ok(out) if out.code == Some(0) => true,
             Ok(out) => {

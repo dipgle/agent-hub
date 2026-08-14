@@ -28,9 +28,11 @@ phải gõ gì cả — hub gắn sẵn nút.
   lựa chọn của một phiên đang dừng lại hỏi, `📄 Xem đầy đủ` (mở luôn phiên ấy),
   `📎` lấy một tệp phiên vừa nhắc tới, `👁 Vào phiên`, `⏎ Gửi`.
 - **Cổng người:** biến `HUB_TELEGRAM_CHAT_ID` trong `hub.env`. Tin từ chat khác
-  bị **ghi log rồi bỏ**, không im lặng. Cùng luật với `trust.tfl5_user_tids` của
-  phòng chat: ở trong buồng là chuyện của Telegram, lái cái máy này là chuyện
-  của chủ máy.
+  bị **ghi log rồi bỏ**, không im lặng. Từ 2026-08-14 đây là cổng người **duy
+  nhất** — cổng thứ hai (`trust.tfl5_user_tids`, kiểm trong bộ phân tích lệnh)
+  đi cùng phòng chat, và nó đáng đi: sau khi phòng đóng, chỗ gọi phải tự bịa ra
+  "người gõ" để đi qua chính nó, nên nó không bao giờ từ chối được — trừ khi
+  danh sách rỗng, và khi ấy nó nuốt sạch mọi mệnh lệnh trong im lặng.
 - **Chỉ nói khi có thay đổi.** `watch.rs` so hai lượt ảnh chụp rồi báo đúng một
   lần: phiên vừa xong, phiên dừng lại hỏi, phiên dừng vì lỗi, phiên đã tắt. Báo
   theo *trạng thái* trên một vòng lặp 10 giây là cái điện thoại rung mãi không
@@ -40,9 +42,13 @@ phải gõ gì cả — hub gắn sẵn nút.
   Terminal nào — một dòng chỉ xem được mà không lái được thì nó không phải cây
   cầu, nó là một cái tên nữa để nhầm. Số phiên bị bỏ vẫn được đếm và nói ra.
 
-**Phòng chat tfl5 + trang điện thoại vẫn chạy song song** (`adapters.tfl5`),
-dùng chung đúng một bộ lệnh và một bộ sổ. Trang tfl5 là chỗ xem *rộng* — luồng
-hội thoại của phiên, bảng sức khoẻ, form cấu hình; Telegram là chỗ dùng *nhanh*.
+> **Kênh thứ hai đã đóng ngày 2026-08-14.** Tới hôm ấy còn một phòng chat trên
+> tfl5 và một trang điện thoại chạy song song với Telegram. Hà: *"tạm thời không
+> dùng tfl5 để xem cứ xóa hết đi"* — trang đã tắt thở từ hai ngày trước mà không
+> ai nhận ra, đúng cái giá của hai giao diện cho một sản phẩm một người dùng.
+> Đi theo nó: `portal.rs`, `live.rs` (socket `/ws/chat`), cả chặng hỏi vòng
+> (`/ingest`), `adapters.tfl5`, `trust`, và ba thư viện không còn ai gọi
+> (`tungstenite`, `axum`, `tokio`).
 
 > **Trước đây hub là một hộp thư** (GitHub · devlog · email · Telegram → triage
 > bằng `claude -p` → duyệt/gửi). Nhánh đó đã **xoá hẳn ngày 2026-08-08**: 65%
@@ -56,13 +62,13 @@ hội thoại của phiên, bảng sức khoẻ, form cấu hình; Telegram là 
 ```bash
 cd ~/projects/hub
 ./hub setup           # trang cấu hình ở 127.0.0.1 → ghi hub.env (chmod 600)
-./hub doctor          # kiểm tra thật: claude CLI, Telegram, phòng chat, thư mục dự án
+./hub doctor          # kiểm tra thật: claude CLI, Telegram, thư mục dự án
 ./hub sessions        # mọi phiên claude đang sống, mọi tài khoản
-./hub once            # một vòng: đọc kênh → chạy lệnh trong đó → đẩy ảnh chụp
+./hub once            # một vòng: chạy những lệnh đã tới → sổ sách → cái loa
 ```
 
-Bí mật (bot token Telegram, tài khoản tfl5) nằm trong `hub.env` (chmod 600),
-**chỉ tên biến** nằm trong `hub.config.json`. Xem `hub.env.example`.
+Bí mật (token bot Telegram + chat id) nằm trong `hub.env` (chmod 600), **chỉ tên
+biến** nằm trong `hub.config.json`. Xem `hub.env.example`.
 
 `hub setup` chỉ nghe ở `127.0.0.1`, vào bằng vé một lần trong URL, và **không
 bao giờ hiện lại giá trị đã lưu** — nó chỉ nói khoá ấy *đã có* hay *chưa có*.
@@ -107,12 +113,12 @@ khoẻ** có một hàng nói thẳng điều đó.
 vòng chạy được đếm và backoff luỹ thừa (tối đa 10 phút), sau 5 lần liên tiếp thì
 ghi `logs/notify.log` + hiện thông báo macOS.
 
-## Lệnh (giống hệt nhau ở Telegram và phòng chat tfl5)
+## Lệnh
 
-Chỉ chủ máy ra lệnh được — Telegram gác bằng `chat_id`, phòng chat gác bằng
-`trust.tfl5_user_tids`; người khác gõ `/new` thì đó chỉ là chữ. Hai kênh đi qua
-**cùng một bộ phân tích** (`tfl5::parse_command`), nên không có động từ nào chỉ
-chạy được ở một bên.
+Chỉ chủ máy ra lệnh được: Telegram gác bằng `chat_id` (`telegram::update_sender`
+đọc đúng ô cho từng hình dạng update), người khác gõ `/new` thì đó chỉ là chữ.
+Bộ phân tích (`verbs::parse_command`) là hàm thuần — vào là chữ, ra là một
+route — nên nó không biết và không cần biết lệnh tới từ kênh nào.
 
 **Phiên Claude**
 
@@ -141,8 +147,8 @@ chạy được ở một bên.
 | `/accounts` | ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, `/new` mặc định vào tài khoản nào |
 | `/cmd <dòng lệnh>` | chạy một lệnh trên máy rồi trả kết quả (chạy xong là hết) |
 | `/upgrade` | hub tự dựng lại chính nó từ mã hiện tại rồi khởi động lại |
-| `/project [tên]` | xem/ghim dự án cho kênh (`/project -` để bỏ ghim) |
-| `/ingest` · `/run` · `/doctor` | đọc kênh ngay · chạy một vòng · kiểm tra thật |
+| `/project [tên]` | xem/ghim dự án cho buồng chat (`/project -` để bỏ ghim) |
+| `/run` · `/doctor` | chạy một vòng ngay · kiểm tra thật |
 | `/set <khoá> <giá trị>` | sửa một trường cấu hình (validate + backup + ghi nguyên tử) |
 | `/help` | bảng này, đọc thẳng từ mã |
 
@@ -165,14 +171,14 @@ không hiện.
   nhật ký GỐC: y nguyên số byte, y nguyên mtime.
 - **Xem trước nội dung phiên bị quét rò rỉ** trước khi lên ảnh chụp
   (`redaction::leak_scan`) — lần chạy thật đầu tiên đã in ra một phiên có mật
-  khẩu trong lượt cuối. Cổng đặt ở NGUỒN (`sessions::snapshot`), nên cả Telegram
-  lẫn trang tfl5 đều đi qua nó; không kênh nào tự bịa thêm nội dung.
+  khẩu trong lượt cuối. Cổng đặt ở NGUỒN (`sessions::snapshot`), không ở từng
+  chỗ gửi — nên một kênh mọc thêm sau này cũng không đi vòng qua được.
 - **Bấm phím thì phải NHÌN trước.** Một mũi tên trong `claude` vừa di chuyển vừa
   xác nhận, nên hub chỉ gửi khi **chứng minh được** màn không có hộp chọn —
   `keys::look` trả `Saw`/`Withheld`/`Blind` chứ không gộp cả ba vào `None`, vì
   gộp là fail OPEN đúng lúc hub mù nhất (kể cả lúc trên màn đang có mật khẩu).
-- **Trang chỉ đọc**: mọi thứ thay đổi trạng thái đều đi qua Telegram hoặc phòng
-  chat dưới dạng LỆNH, nên luôn có dấu vết ở nơi người đọc được.
+- **Một đường vào, một cuốn sổ**: mọi thứ đổi trạng thái đều đi qua Telegram
+  dưới dạng LỆNH, nên luôn có dấu vết ở nơi người đọc được.
 
 ## Cấu hình
 
@@ -188,19 +194,18 @@ không hiện.
                "bot_token_env": "HUB_TELEGRAM_BOT_TOKEN",
                "chat_id_env": "HUB_TELEGRAM_CHAT_ID",   // đây là cổng người
                "timeout_sec": 90 },
-  "adapters": { "tfl5": { "enabled": true, "app_tid": "a-…", "room": "hub",
-                          "user_env": "HUB_TFL5_USER",
-                          "password_env": "HUB_TFL5_PASSWORD", "live": true } },
-  "trust": { "tfl5_user_tids": ["u-…"] },                  // ai ra lệnh được (phòng chat)
   "auto_handover": { "enabled": true, "at_percent": 60, "idle_sec": 120 },
-  "projects": { "tfl5": {}, "sdvi": {} },                  // tên thư mục
+  "projects": { "dwork": {}, "sdvi": {} },                 // tên thư mục
   "claude_accounts": [{ "name": "acc1" }, { "name": "acc2", "config_dir": "~/.claude-acc2" }]
 }
 ```
 
 Khoá cũ của thời hộp thư (`triage`, `act`, `autonomy`, `routing`,
 `daily_budget_usd`, `max_triage_per_cycle`, `web`, `leak_patterns`) nay là khoá
-lạ: tệp cũ vẫn nạp được, lần ghi kế tiếp thì rụng.
+lạ, và từ 2026-08-14 có thêm `adapters` + `trust` (phòng chat tfl5): tệp cũ vẫn
+nạp được, lần ghi kế tiếp thì rụng. Đó không phải chuyện lý thuyết — tệp thật
+trên máy đang mang cả hai, và một hub từ chối khởi động vì một khoá cũ là một
+hub cắt đứt chủ máy khỏi kênh duy nhất của mình.
 
 ## Dữ liệu
 
@@ -208,8 +213,8 @@ lạ: tệp cũ vẫn nạp được, lần ghi kế tiếp thì rụng.
 
 | bảng | giữ gì |
 |---|---|
-| `runs` | mỗi lượt đọc kênh: ok/lỗi/skip, để bảng Sức khoẻ không phải đoán |
-| `cursors` | mốc đọc kênh, phiên đang theo, sổ `watch:sessions`, bản bàn giao/hỏi-bên-lề gần nhất |
+| `runs` | mỗi **vòng** (`run_once`): ok/lỗi, để `/doctor` không phải đoán. Tới 2026-08-14 đây là mỗi lượt ĐỌC KÊNH; chặng ấy đi cùng tfl5, và bảng phải đổi người ghi chứ không được bỏ trống — một khối "lỗi gần đây" luôn rỗng là phép đo mù, tệ hơn không có |
+| `cursors` | phiên đang theo, sổ `watch:sessions`, ghim dự án, bản bàn giao/hỏi-bên-lề gần nhất |
 | `spend` | mỗi lần gọi `claude` do bạn bấm, kèm thước đo độ lớn — ghi để trả lời được, không để trưng |
 
 (cộng `schema_meta`.) Bốn bảng của thời hộp thư đã đi hẳn ở bước schema 4
@@ -218,52 +223,28 @@ dòng không truy vấn nào với tới. Migration ấy chạy với `foreign_k
 bảng tham chiếu lẫn nhau; bản đầu chết ngay lúc khởi động, exit 70) và **log
 từng bảng kèm số dòng** chứ không "đã dọn xong" một câu.
 
-## Trang trên điện thoại (tfl5)
+## Trang trên điện thoại — ĐÃ GỠ (2026-08-14)
 
-Kênh chính là Telegram; trang này là chỗ **xem rộng** — luồng hội thoại đầy đủ
-của một phiên, bảng sức khoẻ, form cấu hình. `fe/index.html` được đóng gói thành
-một bundle của app tfl5:
+`fe/index.html` (bốn tab: Phiên · Trao đổi · Sức khoẻ · Cấu hình), `fe-deploy.mjs`
+và 18 kịch bản nghiệm thu `fe-*.mjs` chạy Playwright trên bundle đã deploy — tất
+cả đi cùng phòng chat tfl5.
 
-```bash
-node fe-deploy.mjs v56 "đổi gì đó"     # zip → Releases → Activate → đối chiếu byte
-```
-
-Bốn tab: **Phiên** (danh sách + luồng + các nút Hỏi/Bàn giao/Dừng/Mở),
-**Trao đổi** (phòng chat), **Sức khoẻ** (dò thật + lịch sử lượt chạy),
-**Cấu hình** (form cho từng trường, mỗi thay đổi đi qua `/set`).
-
-Nghiệm thu chạy trên **bundle đã deploy**, ở cỡ điện thoại 390×844, đăng nhập
-bằng tài khoản chủ:
-
-```bash
-node fe-board-uc.mjs                 # 4 tab · sức khoẻ · cấu hình · KHÔNG có hộp việc/số tiền
-node fe-sessions-uc.mjs  <app> <user> <pass>
-node fe-stream-uc.mjs    <app> <user> <pass>   # bước /handover: có cổng giá
-node fe-aside-uc.mjs     <app> <user> <pass>   # bước /ask: có cổng giá
-node fe-newsession-uc.mjs <app> <user> <pass>
-node fe-subagent-uc.mjs                # UC-S02b: phiên đang chạy subagent (cần có subagent THẬT)
-node fe-config-uc.mjs · fe-denied-uc.mjs · fe-smoke.mjs · fe-phone-uc.mjs
-```
-
-**Cổng hạn mức.** Hai kịch bản trên có một bước gọi `claude` thật, độ lớn tỉ lệ
-độ dài nhật ký (mốc đo: 0.99 MB → thước đo $1.72). Chúng **ước lượng trước và
-mặc định KHÔNG gọi**: quá `HUB_UC_MAX_USD` (mặc định $0.25 quy theo giá API) thì
-bỏ qua bước đó, không tính là đạt, và in rõ *"N BỎ QUA vì tốn hạn mức"* kèm thứ
-chưa nghiệm thu. Muốn có bằng chứng ấy:
-
-```bash
-HUB_UC_PAY=1 node fe-stream-uc.mjs <app> <user> <pass>
-```
+Vì sao đáng ghi lại chứ không xoá lặng: bản rà soát 2026-08-14 đo được trang ấy
+**đã tắt thở hai ngày** mà không ai nhận ra. Một sản phẩm một người dùng nuôi hai
+giao diện thì cái ít dùng hơn sẽ hỏng âm thầm, và bộ nghiệm thu của nó — vốn là
+thứ phải phát hiện ra điều đó — lại là thứ ít được chạy nhất. Lịch sử đầy đủ:
+`memory/ra-soat-2026-08-14.md`; mã còn nguyên trong git trước `cf20874`.
 
 ## Test
 
 ```bash
-cd rust && cargo test --offline     # 250 test, 0 warning
+cd rust && cargo test --offline           # 263 test
 cargo clippy --all-targets -- -D warnings
+cargo fmt --check
 ```
 
 Test xanh là điều kiện cần, không phải đủ: đường thật phải chạy ít nhất một lần
-(`./hub once` + một kịch bản `fe-*.mjs` trên bundle đã deploy).
+(`./hub once`, rồi một mệnh lệnh gõ THẬT trong buồng Telegram).
 
 ## Bản Node cũ
 

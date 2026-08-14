@@ -1,8 +1,12 @@
 # UC — quản lý phiên Claude CLI từ điện thoại
 
 Sổ use case cho hướng đã chốt 2026-08-08: *hub là BE quản lý các phiên làm việc
-`claude` CLI trên máy local; giao diện trên tfl5 để theo dõi và xử lý việc từ
-điện thoại.*
+`claude` CLI trên máy local; giao diện trên điện thoại để theo dõi và xử lý việc.*
+
+🔴 Giao diện ấy là **trang tfl5** cho tới 2026-08-14, rồi đóng (Hà: *"tạm thời
+không dùng tfl5 để xem cứ xóa hết đi"*). Mọi UC dưới đây giữ nguyên vạch đích;
+chỗ nghiệm thu chuyển từ bundle `fe/` sang buồng Telegram. Những dòng "bằng chứng"
+ghi ngày cũ thì giữ nguyên văn — bằng chứng đã chụp thì không sửa cho hợp thời.
 
 **Chuẩn Hà đặt ra (08-08):** *"ui uc phải biết, phải nhìn thấy giống như đang
 ngồi máy"*. Vậy vạch đích **không** phải "xem tóm tắt phiên" mà là **thấy đúng
@@ -631,7 +635,9 @@ và **thấy màn hình** của nó.
 **Cách làm — một đường, một cuốn sổ.** Vòng `getUpdates` thường trực
 (`telegram.rs`) đẩy tin chữ vào hàng đợi, `execute_telegram_commands` cho chúng đi
 qua **đúng `parse_command` + `execute_commands` của phòng chat**. Cổng người là
-`chat_id` (cùng vai với `trust.tfl5_user_tids`): tin từ người khác được LOG rồi bỏ.
+`chat_id`: tin từ buồng khác được LOG rồi bỏ. (Từ 2026-08-14 đây là cổng DUY
+NHẤT — cổng thứ hai `trust.tfl5_user_tids` đi cùng phòng chat, xem
+`verbs::parse_command`.)
 Cái nút cũng không đẻ ra động từ mới — `callback_to_command` biến `sess:<id>` /
 `key:<id>:<n>` thành đúng dòng lệnh mà ngón tay sẽ gõ.
 

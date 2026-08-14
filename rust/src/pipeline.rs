@@ -5622,6 +5622,12 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
         logging::error("cycle_run_row_failed", json!({ "err": e.to_string() }));
         0
     });
+    // Vòng này có sạch không — đo bằng số dòng lỗi nó sinh ra, không bằng việc
+    // nó có trả `Err` hay không. Xem `logging::ERRORS`: `run_once` gần như không
+    // bao giờ trả `Err` (mọi handler đều tự nuốt lỗi thành một câu trả lời cho
+    // người gõ), nên một hàng `runs` chỉ ghi `Ok/Err` của chính nó là một hàng
+    // luôn luôn `ok` — và khối "lỗi gần đây" đọc nó sẽ rỗng vĩnh viễn.
+    let errors_before = logging::error_count();
     execute_telegram_commands(db, cfg);
     // Dọn tin Telegram quá hạn (Hà 2026-08-12: *"tự xóa tin nhắn cũ hơn 1.5
     // ngày"*). Rẻ khi không có gì tới hạn: một phép so trên một danh sách số.
@@ -5640,12 +5646,19 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     if run_id != 0 {
         // Đóng sổ KHÔNG được nuốt: một vòng chạy xong mà hàng vẫn `ok=NULL` sẽ
         // đọc ra y hệt một vòng chết giữa đường.
+        let n_errors = logging::error_count().saturating_sub(errors_before);
+        // Chỉ TÊN sự kiện đi vào hàng này, không bao giờ `fields` — hàng này
+        // lên màn điện thoại qua `/doctor`, xem `logging::last_error`.
+        let err = (n_errors > 0).then(|| {
+            let what = logging::last_error_msg().unwrap_or_else(|| "?".into());
+            format!("{n_errors} lỗi trong vòng này, gần nhất: {what}")
+        });
         if let Err(e) = db.finish_run(
             run_id,
             RunFinish {
-                ok: true,
+                ok: n_errors == 0,
                 n_new: 0,
-                err: None,
+                err,
                 skipped: None,
             },
         ) {

@@ -102,6 +102,20 @@ or drive a session from a phone?** If not, it does not belong here.
   "recent errors" block in `/doctor` reads this table, so an empty writer makes
   a panel that can never go red. A measurement that cannot fail is worse than no
   measurement: it still occupies the screen and still reads as reassurance.
+  **And "one row per cycle" alone was not enough**, which is the part worth
+  remembering: `run_once` almost never returns `Err` (every handler swallows its
+  failure into a sentence for whoever typed the command), so every row would
+  have been `ok` and the panel would have been blind a second time, one commit
+  after the warning against it. So a cycle is judged by the `error` LINES it
+  produced (`logging::error_count`), not by its own return value — rule 3
+  already requires every error path to log, so this is the same claim read from
+  the other end, not an approximation. Only the event NAME is carried onto the
+  row, never `fields`: that string reaches the phone through `/doctor`, and
+  `fields` is where a bot token leaked once already.
+  📐 Measured before trusting it (`logs/hub.log`, 2026-08-14): 83,060 `info` ·
+  1,626 `warn` · 120 `error`. So this panel means *errors*, not *all trouble* —
+  most of hub's trouble lives at `warn` and deliberately stays there. An empty
+  block reads "no ERRORS", never "nothing worth looking at".
 - Tests: `cd rust && cargo test --offline` → 263 tests, 0 warnings.
 - `./hub …` is a wrapper that builds on first use then execs `rust/target/release/hub`.
 

@@ -7,7 +7,7 @@
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{json, Value};
@@ -18,6 +18,46 @@ const WARN: u8 = 30;
 const ERROR: u8 = 40;
 
 static LEVEL: AtomicU8 = AtomicU8::new(INFO);
+
+/// Đếm dòng mức `error` kể từ lúc tiến trình bật, để một VÒNG biết được nó có
+/// sạch hay không.
+///
+/// 🔴 Sinh ra 2026-08-14, để vá một lỗ do chính lượt gỡ tfl5 mở ra. Bảng `runs`
+/// từng được chặng hỏi vòng ghi, và `runtime::errors_block` (khối *"lỗi gần
+/// đây"* của `/doctor`) đọc nó. Chặng ấy đi, `run_once` ghi thay — nhưng vòng
+/// thì gần như không bao giờ trả `Err`, nên hàng nào cũng `ok`, nên khối ấy
+/// **rỗng vĩnh viễn**: đúng cái phép đo mù mà repo này gọi tên ở `CLAUDE.md` và
+/// `OPERATING-CHARTER §2d`.
+///
+/// Vì sao đo bằng NHẬT KÝ chứ không bắt từng handler trả lỗi lên: luật 3 của dự
+/// án đã bắt **mọi đường lỗi phải ghi một dòng ở đây**. Nếu luật ấy đúng thì số
+/// dòng `error` CHÍNH LÀ số lỗi — không phải một phép xấp xỉ, mà là cùng một
+/// mệnh đề đọc từ đầu kia. Còn nếu luật ấy sai ở đâu đó thì cái sai nằm ở chỗ
+/// nuốt lỗi, không phải ở đây.
+static ERRORS: AtomicU64 = AtomicU64::new(0);
+
+/// Tên sự kiện của dòng `error` gần nhất — **chỉ `msg`, không bao giờ `fields`**.
+///
+/// Đây là ranh giới có chủ ý, không phải tiết kiệm: `msg` là một hằng chuỗi viết
+/// trong mã (`telegram_reaction_failed`), còn `fields` mang dữ liệu chạy thật —
+/// đường dẫn, câu lỗi của thư viện, và đã từng mang nguyên khoá bot (xem
+/// `redact`). Chuỗi này đi vào một hàng `runs`, rồi từ đó lên màn điện thoại qua
+/// `/doctor`; cho `fields` đi cùng là mở lại đúng con đường rò `redact` sinh ra
+/// để bịt, chỉ khác là lần này nó chảy qua cơ sở dữ liệu.
+fn last_error() -> &'static Mutex<Option<String>> {
+    static E: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    E.get_or_init(|| Mutex::new(None))
+}
+
+/// Bao nhiêu dòng `error` đã ghi kể từ lúc tiến trình bật. Chỉ tăng.
+pub fn error_count() -> u64 {
+    ERRORS.load(Ordering::Relaxed)
+}
+
+/// Tên sự kiện lỗi gần nhất, nếu có.
+pub fn last_error_msg() -> Option<String> {
+    last_error().lock().ok().and_then(|g| g.clone())
+}
 
 fn log_file() -> &'static Mutex<Option<PathBuf>> {
     static F: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
@@ -51,6 +91,18 @@ pub fn now_iso() -> String {
 }
 
 fn emit(level: u8, level_name: &str, msg: &str, fields: Value) {
+    // Đếm TRƯỚC cửa lọc mức, và nói rõ đây là bảo hiểm chứ chưa phải hành vi
+    // quan sát được: hôm nay `set_level_from_name` không nhận mức nào cao hơn
+    // `error`, nên không cách nào giấu một dòng lỗi qua đường ấy — tức thứ tự
+    // này chưa kiểm được từ ngoài. Nó đặt ở đây vì cái ngày ai đó thêm mức
+    // `off`, thứ tự ngược lại sẽ biến một cái núm log thành cái núm làm sạch
+    // bảng sức khoẻ mà không sửa gì, và không ai nhớ ra để đổi.
+    if level >= ERROR {
+        ERRORS.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut slot) = last_error().lock() {
+            *slot = Some(msg.to_string());
+        }
+    }
     if level < LEVEL.load(Ordering::Relaxed) {
         return;
     }

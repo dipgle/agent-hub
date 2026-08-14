@@ -38,8 +38,19 @@ nó vẫn chiếm chỗ và vẫn được đọc như một lời cam đoan. Na
 dòng mỗi vòng (mở sổ TRƯỚC, đóng sổ SAU, `ok=NULL` giữa chừng = vòng chết giữa
 đường). `hub status` đổi nhãn "last polls" → "last cycles".
 
-⚠ **Nợ phải ghi:** nguồn của khối ấy nay MỎNG hơn trước. Vòng hiếm khi trả `Err`;
-lỗi thật nằm trong các handler, và chúng ghi log chứ không ghi `runs`. Chưa vá.
+~~⚠ Nợ: nguồn của khối ấy MỎNG hơn trước~~ → **đã vá cùng ngày** (`logging::
+error_count`). Ghi "một hàng mỗi vòng" thôi thì chưa đủ, và đây là chỗ suýt tự
+mâu thuẫn: `run_once` gần như không bao giờ trả `Err` (mọi handler nuốt lỗi
+thành câu trả lời cho người gõ), nên hàng nào cũng `ok` ⟹ mù lần hai, ngay sau
+commit lên án chuyện mù. Nay vòng được chấm bằng **số dòng `error` nó sinh ra**;
+luật 3 vốn đã bắt mọi đường lỗi phải ghi log, nên đây là cùng một mệnh đề đọc từ
+đầu kia. Chỉ TÊN sự kiện vào hàng, không bao giờ `fields` — chuỗi ấy lên màn qua
+`/doctor`, mà `fields` chính là chỗ khoá bot từng rò (08-11).
+
+**Đo trước khi tin** (`logs/hub.log`): 83.060 `info` · 1.626 `warn` · 120
+`error`. Tức khối này là *lỗi*, không phải *mọi trục trặc* — phần lớn trục trặc
+của hub cố ý sống ở mức `warn`. Đã kiểm end-to-end trên bản release với cấu hình
++ DB dùng một lần: một vòng sạch ghi đúng `cycle|cycle|ok=1|(không lỗi)`.
 
 ### Một suýt nữa, ghi lại vì nó là đúng cái bẫy vừa mô tả
 

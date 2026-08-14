@@ -496,6 +496,20 @@ impl Inbox {
             })
             .ok()?;
         logging::info("telegram_inbox_started", json!({ "chat_id_env": cfg.confirm.chat_id_env }));
+        // Khai bộ lệnh ở nền: một lượt HTTP, và hỏng thì chỉ mất phần gợi ý —
+        // không được phép cản buồng thư khởi động. Nhưng KHÔNG im lặng.
+        let reg = inbox.clone();
+        std::thread::Builder::new()
+            .name("telegram-setcommands".into())
+            .spawn(move || {
+                if let Err(e) = reg.register_commands() {
+                    logging::warn("telegram_commands_register_failed", json!({ "err": e }));
+                }
+            })
+            .map_err(|e| {
+                logging::warn("telegram_commands_spawn_failed", json!({ "err": e.to_string() }));
+            })
+            .ok();
         Some(inbox)
     }
 
@@ -609,6 +623,42 @@ impl Inbox {
 
     fn api(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.token, method)
+    }
+
+    /// Khai bộ lệnh với Telegram — gõ `/` là hiện gợi ý, và menu ☰ có nội dung.
+    ///
+    /// 🔴 Hà 2026-08-14: *"Tại sao không tạo lib lệnh để map khi nhận"*. Câu hỏi
+    /// ấy lôi ra một thứ còn tệ hơn ba-nguồn-sự-thật: `setMyCommands` **chưa
+    /// từng được gọi**. Cả một tầng giao diện Telegram cho sẵn — danh sách gợi
+    /// ý khi gõ `/`, menu ☰ — bỏ không từ đầu, trong khi chủ máy vẫn phải nhớ
+    /// tên lệnh trong đầu hoặc mở `/help` ra đọc.
+    ///
+    /// Danh sách lấy từ `commands::for_telegram()`, tức cùng cái bảng sinh ra
+    /// `/help`. Gọi mỗi lần khởi động: rẻ (một lượt HTTP), và nó tự sửa khi
+    /// bảng đổi — không có bước "nhớ chạy tay" nào để mà quên.
+    pub fn register_commands(&self) -> Result<(), String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let list: Vec<Value> = crate::commands::for_telegram()
+            .into_iter()
+            .map(|(c, d)| json!({ "command": c, "description": d }))
+            .collect();
+        let n = list.len();
+        let r = client
+            .post(self.api("setMyCommands"))
+            .json(&json!({ "commands": list }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            logging::info("telegram_commands_registered", json!({ "count": n }));
+            Ok(())
+        } else {
+            Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối setMyCommands")
+                .to_string())
+        }
     }
 }
 

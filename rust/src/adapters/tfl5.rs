@@ -654,8 +654,30 @@ pub fn parse_command(
             return Some((CommandKind::RunQuick, 0, n.to_string()));
         }
     }
+    // BẢNG LỆNH trả lời trước, cho mọi route có cách đọc tham số CHUẨN — xem
+    // `crate::commands`. Nhánh `match` bên dưới chỉ còn giữ những route có luật
+    // riêng thật sự (`/new` đọc cờ, `/runin` đòi id đứng trước, `/sessions` cố
+    // ý KHÔNG nhận id…), và mỗi cái đều đã khai trong bảng với `Arg::Custom`
+    // nên `/help` lẫn menu Telegram vẫn thấy chúng.
+    if let Some(r) = crate::commands::lookup(&verb) {
+        let rest = || {
+            t[1..]
+                .split_once(char::is_whitespace)
+                .map(|(_, r)| r.trim().to_string())
+                .unwrap_or_default()
+        };
+        match r.arg {
+            crate::commands::Arg::None => return Some((r.kind, 0, String::new())),
+            crate::commands::Arg::Rest => return Some((r.kind, 0, rest())),
+            crate::commands::Arg::RestRequired => {
+                let v = rest();
+                return (!v.is_empty()).then_some((r.kind, 0, v));
+            }
+            // Luật riêng: rơi xuống `match` bên dưới.
+            crate::commands::Arg::Custom => {}
+        }
+    }
     match verb.as_str() {
-        "help" | "?" => Some((CommandKind::Help, 0, String::new())),
         // `/approve` `/reject` `/close` `/reply` `/act` were parsed here until
         // 2026-08-08. They acted on an inbox that no longer exists, and a verb
         // that parses but has no handler is the worst of both: the room accepts

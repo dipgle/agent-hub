@@ -12,6 +12,7 @@
 //! standing between the owner and his own machine.
 
 pub mod adapters;
+pub mod commands;
 pub mod config;
 /// Xác nhận lần hai qua Telegram cho lệnh không lùi lại được.
 pub mod confirm;

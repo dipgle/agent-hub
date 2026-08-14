@@ -1,0 +1,356 @@
+//! BẢNG LỆNH — một nguồn sự thật cho mọi thứ liên quan tới một cái tên lệnh.
+//!
+//! 🔴 Hà 2026-08-14: *"Tại sao không tạo lib lệnh để map khi nhận"*.
+//!
+//! Không có lý do tốt nào; đó là nợ tích tụ. Trước tệp này, một cái tên lệnh
+//! sống ở **ba chỗ rời nhau**: 26 nhánh `match` trong `tfl5::parse_command`,
+//! một khối chữ `/help` gõ tay trong `pipeline.rs`, và bảng `callback_data` ở
+//! `telegram.rs`. Ba chỗ không ai bắt phải giống nhau, nên chúng lệch theo thời
+//! gian — và lệch ở đây có một hình dạng rất khó thấy: lệnh vẫn parse, vẫn
+//! chạy, chỉ **không ai biết nó tồn tại**. `/pick` là ví dụ sống: nó ra đời
+//! sáng nay, hoạt động ngay, và `/help` không hề nhắc tới nó cho tới khi tôi
+//! nhớ ra phải sửa tay dòng thứ 27.
+//!
+//! Cái thứ tư còn tệ hơn, vì nó chưa từng tồn tại: **`setMyCommands`**. hub
+//! chưa bao giờ khai lệnh của mình với Telegram, nên gõ `/` trong buồng chat
+//! không gợi ý gì và menu ☰ trống trơn — cả một tầng giao diện có sẵn, miễn
+//! phí, bỏ không suốt từ đầu.
+//!
+//! Bảng này giữ đúng những gì Telegram ràng buộc, và test khoá lại: tên lệnh
+//! **≤32 ký tự**, chỉ **chữ Latin thường, số, gạch dưới** (tài liệu Bot API,
+//! mục *Commands*) — luật ấy không phải sở thích của hub mà là điều kiện để
+//! Telegram chịu tô sáng cái tên ấy trong một tin nhắn.
+
+use crate::adapters::CommandKind;
+
+/// Phần chữ đi sau tên lệnh được đọc thế nào.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arg {
+    /// Không nhận gì: chữ đi sau bị bỏ qua (`/doctor`, `/sessions`).
+    None,
+    /// Nguyên văn phần còn lại, được phép rỗng (`/session [id]`, `/close [id]`).
+    Rest,
+    /// Nguyên văn phần còn lại, và **bắt buộc** (`/win <lệnh>`, `/key <phím>`).
+    RestRequired,
+    /// Luật riêng, `parse_command` tự xử — khai ở đây để `/help` và
+    /// `setMyCommands` vẫn thấy nó (`/new` đọc cờ, `/runin` đòi id đứng trước).
+    Custom,
+}
+
+/// Một lệnh: tên, các tên gọi khác, việc nó làm, và câu mô tả DUY NHẤT.
+pub struct Route {
+    /// Tên chính — cũng là tên đăng ký với Telegram. Phải hợp lệ (xem test).
+    pub name: &'static str,
+    pub aliases: &'static [&'static str],
+    pub kind: CommandKind,
+    pub arg: Arg,
+    /// Cú pháp hiện trong `/help`, ví dụ `<câu hỏi>` hay `[id]`.
+    pub usage: &'static str,
+    /// Một câu, dùng cho CẢ `/help` LẪN menu lệnh của Telegram.
+    pub help: &'static str,
+    /// Có khai với Telegram không. Lệnh ít dùng để `false` cho menu khỏi loãng —
+    /// nó vẫn parse như thường, chỉ không nằm trong danh sách gợi ý.
+    pub listed: bool,
+}
+
+/// Mọi lệnh phòng chat hiểu. Thứ tự ở đây là thứ tự hiện trong `/help`.
+pub const ROUTES: &[Route] = &[
+    Route {
+        name: "sessions",
+        aliases: &["phiens", "danhsach"],
+        kind: CommandKind::Session,
+        arg: Arg::None,
+        usage: "",
+        help: "Danh sách phiên đang sống",
+        listed: true,
+    },
+    Route {
+        name: "session",
+        aliases: &["phien"],
+        kind: CommandKind::Session,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Theo một phiên; '-' để thôi theo",
+        listed: true,
+    },
+    Route {
+        name: "shot",
+        aliases: &["chup"],
+        kind: CommandKind::Shot,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Đọc màn đang hiện của phiên",
+        listed: true,
+    },
+    Route {
+        name: "ask",
+        aliases: &["hoi"],
+        kind: CommandKind::Ask,
+        arg: Arg::Custom,
+        usage: "<câu hỏi>",
+        help: "Hỏi bên lề, phiên gốc không bị đụng",
+        listed: true,
+    },
+    Route {
+        name: "new",
+        aliases: &["moi"],
+        kind: CommandKind::New,
+        arg: Arg::Custom,
+        usage: "[-a acc] [-s dự án] <việc>",
+        help: "Mở cửa sổ mới rồi giao việc",
+        listed: true,
+    },
+    Route {
+        name: "tell",
+        aliases: &["noi"],
+        kind: CommandKind::Tell,
+        arg: Arg::Custom,
+        usage: "<nội dung>",
+        help: "Nói tiếp vào phiên nền đã dừng",
+        listed: false,
+    },
+    Route {
+        name: "type",
+        aliases: &["go"],
+        kind: CommandKind::Type,
+        arg: Arg::RestRequired,
+        usage: "<chữ>",
+        help: "Gõ chữ vào cửa sổ phiên",
+        listed: false,
+    },
+    Route {
+        name: "key",
+        aliases: &["phim"],
+        kind: CommandKind::Key,
+        arg: Arg::RestRequired,
+        usage: "<up|down|left|right|enter|esc|tab|space|1-9>",
+        help: "Bấm một phím vào cửa sổ phiên",
+        listed: false,
+    },
+    Route {
+        name: "pick",
+        aliases: &["chon"],
+        kind: CommandKind::Pick,
+        arg: Arg::RestRequired,
+        usage: "<câu>.<lựa chọn>",
+        help: "Trả lời một câu của bảng hỏi nhiều câu",
+        listed: true,
+    },
+    Route {
+        name: "stop",
+        aliases: &["dung"],
+        kind: CommandKind::Stop,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Dừng phiên nền, hội thoại vẫn giữ",
+        listed: false,
+    },
+    Route {
+        name: "close",
+        aliases: &["dong", "dongphien"],
+        kind: CommandKind::Close,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Đóng hẳn phiên và cửa sổ của nó",
+        listed: false,
+    },
+    Route {
+        name: "handover",
+        aliases: &["bangiao"],
+        kind: CommandKind::Handover,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Đóng sổ, mở phiên mới nối tiếp",
+        listed: false,
+    },
+    Route {
+        name: "cmd",
+        aliases: &["sh"],
+        kind: CommandKind::Cmd,
+        arg: Arg::Rest,
+        usage: "<dòng lệnh>",
+        help: "Chạy một lệnh trên máy, trả kết quả về",
+        listed: true,
+    },
+    Route {
+        name: "win",
+        aliases: &["cuaso"],
+        kind: CommandKind::Win,
+        arg: Arg::RestRequired,
+        usage: "<dòng lệnh>",
+        help: "Chạy trong cửa sổ Terminal thật (có tty)",
+        listed: false,
+    },
+    Route {
+        name: "runin",
+        aliases: &[],
+        kind: CommandKind::RunIn,
+        arg: Arg::Custom,
+        usage: "<id> <dòng lệnh>",
+        help: "Máy chạy, kết quả dán vào phiên ấy",
+        listed: false,
+    },
+    Route {
+        name: "upgrade",
+        aliases: &["capnhat"],
+        kind: CommandKind::Upgrade,
+        arg: Arg::None,
+        usage: "",
+        help: "Dựng lại hub từ mã hiện tại rồi khởi động lại",
+        listed: true,
+    },
+    Route {
+        name: "accounts",
+        aliases: &["acc", "taikhoan"],
+        kind: CommandKind::Accounts,
+        arg: Arg::None,
+        usage: "",
+        help: "Các tài khoản Claude trên máy",
+        listed: true,
+    },
+    Route {
+        name: "project",
+        aliases: &["duan"],
+        kind: CommandKind::Project,
+        arg: Arg::Rest,
+        usage: "[tên|-]",
+        help: "Ghim dự án cho cuộc trò chuyện này",
+        listed: false,
+    },
+    Route {
+        name: "set",
+        aliases: &["cauhinh"],
+        kind: CommandKind::SetConfig,
+        // Luật riêng: đòi CẢ khoá lẫn giá trị. `/set autonomy.default` (thiếu
+        // vế sau) phải KHÔNG parse — một lệnh đổi cấu hình mà nuốt nửa câu là
+        // một lệnh đổi cấu hình sang giá trị rỗng. Test `tfl5.rs` giữ chỗ này.
+        arg: Arg::Custom,
+        usage: "<khoá> <giá trị>",
+        help: "Đổi một mục cấu hình",
+        listed: false,
+    },
+    Route {
+        name: "doctor",
+        aliases: &["health"],
+        kind: CommandKind::Doctor,
+        arg: Arg::None,
+        usage: "",
+        help: "Kiểm kênh, khoá, công cụ",
+        listed: true,
+    },
+    Route {
+        name: "ingest",
+        aliases: &["poll"],
+        kind: CommandKind::Ingest,
+        arg: Arg::None,
+        usage: "",
+        help: "Đọc phòng chat ngay",
+        listed: false,
+    },
+    Route {
+        name: "run",
+        aliases: &["cycle"],
+        kind: CommandKind::Run,
+        arg: Arg::None,
+        usage: "",
+        help: "Chạy một vòng ngay",
+        listed: false,
+    },
+    Route {
+        name: "help",
+        aliases: &["?"],
+        kind: CommandKind::Help,
+        arg: Arg::None,
+        usage: "",
+        help: "Danh sách lệnh",
+        listed: true,
+    },
+];
+
+/// Tra một động từ (đã hạ chữ thường, không có dấu `/`) ra route của nó.
+pub fn lookup(verb: &str) -> Option<&'static Route> {
+    ROUTES
+        .iter()
+        .find(|r| r.name == verb || r.aliases.contains(&verb))
+}
+
+/// Chữ cho `/help`, sinh TỪ BẢNG — nên một lệnh mới không thể ra đời mà thiếu
+/// dòng của nó, và không dòng nào tả một lệnh đã chết.
+pub fn help_text() -> String {
+    let mut out = String::from("Lệnh dùng được trong phòng này:\n");
+    for r in ROUTES {
+        out.push_str(&format!("/{}", r.name));
+        if !r.usage.is_empty() {
+            out.push(' ');
+            out.push_str(r.usage);
+        }
+        out.push_str(" — ");
+        out.push_str(r.help);
+        out.push('\n');
+    }
+    out.push_str(
+        "\nChọn phiên xong thì CHỮ THƯỜNG gõ ở đây đi thẳng vào phiên ấy.\n\
+         Lệnh dạng /pick_<id>_<câu>_<lựa chọn> và /run_<n> là chữ chạm-được \
+         hub tự chèn vào tin — chạm là chạy.",
+    );
+    out
+}
+
+/// Danh sách khai với Telegram (`setMyCommands`).
+pub fn for_telegram() -> Vec<(&'static str, &'static str)> {
+    ROUTES
+        .iter()
+        .filter(|r| r.listed)
+        .map(|r| (r.name, r.help))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Luật của Telegram, không phải sở thích của hub: tên lệnh ≤32 ký tự, chỉ
+    /// chữ thường Latin + số + gạch dưới. Sai luật thì Telegram thôi tô sáng nó
+    /// trong tin — mà tô sáng chính là cách hub cho bấm từ trong chữ.
+    #[test]
+    fn every_command_name_is_one_telegram_will_highlight() {
+        for r in ROUTES {
+            for n in std::iter::once(&r.name).chain(r.aliases.iter()) {
+                // `?` là lối gõ tắt cũ, không khai với Telegram — nhưng vẫn phải
+                // parse được, nên nó là ngoại lệ DUY NHẤT và có tên ở đây.
+                if *n == "?" {
+                    continue;
+                }
+                assert!(n.len() <= 32, "tên quá dài: {n}");
+                assert!(
+                    n.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+                    "tên có ký tự Telegram không nhận: {n}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_two_routes_answer_to_the_same_name() {
+        let mut seen: Vec<&str> = Vec::new();
+        for r in ROUTES {
+            for n in std::iter::once(&r.name).chain(r.aliases.iter()) {
+                assert!(!seen.contains(n), "tên trùng: {n}");
+                seen.push(n);
+            }
+        }
+    }
+
+    #[test]
+    fn help_lists_every_route_and_lookup_finds_them_all() {
+        let h = help_text();
+        for r in ROUTES {
+            assert!(h.contains(&format!("/{}", r.name)), "thiếu trong help: {}", r.name);
+            assert_eq!(lookup(r.name).map(|x| x.name), Some(r.name));
+            for a in r.aliases {
+                assert_eq!(lookup(a).map(|x| x.name), Some(r.name), "alias {a}");
+            }
+        }
+        assert!(lookup("khongcolenhnay").is_none());
+    }
+}

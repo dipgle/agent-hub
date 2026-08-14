@@ -2733,32 +2733,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 }
             }
             CommandKind::Help => {
-                let ack = "Lệnh dùng được trong phòng này:\n\
-                     — Phiên Claude —\n\
-                     /sessions (hay /session trống) — danh sách phiên đang sống; bấm nút để theo một phiên (bấm 📄 Xem đầy đủ cũng vào phiên ấy luôn)\n\
-                     chọn phiên xong thì CHỮ THƯỜNG gõ ở đây đi thẳng vào phiên ấy · /session - để thôi theo\n\
-                     /new [-a acc] <việc> — mở cửa sổ mới rồi gõ việc ấy vào; không nói -a thì dùng tài khoản mặc định (xem /accounts)\n\
-                     /ask <câu hỏi> — hỏi bên lề phiên đang theo; phiên gốc KHÔNG bị đụng\n\
-                     /tell <nội dung> — nói tiếp vào phiên nền (phải dừng nó trước)\n\
-                     /stop [id] — dừng phiên NỀN, hội thoại vẫn giữ\n\
-                     /close [id] — ĐÓNG HẲN phiên đang theo (trống) hay theo id: chờ CLI chạy nốt, thoát, rồi đóng cửa sổ terminal\n\
-                     /handover [id] — đóng sổ, lấy bản bàn giao + id để làm tiếp\n\
-                     — Gõ thẳng vào cửa sổ phiên —\n\
-                     /type <chữ> — gõ chữ vào phiên đang theo (Terminal, kèm Enter)\n\
-                     /key <up|down|left|right|enter|esc|tab|space|1-9> — bấm một phím\n\
-                     /pick <câu>.<lựa chọn> — trả lời MỘT câu của bảng hỏi nhiều câu, ví dụ /pick 2.1 (bảng chỉ gửi được khi hết ô trống → /key enter)\n\
-                     /shot — đọc chữ đang hiện trên màn của phiên\n\
-                     — Vận hành —\n\
-                     /cmd <dòng lệnh> — chạy một lệnh trên máy rồi trả kết quả (chạy xong là hết)\n\
-                     /win <dòng lệnh> — mở một CỬA SỔ Terminal thật rồi chạy ở đó; dùng khi lệnh cần gõ mật khẩu (sudo, ssh -t)\n\
-                     /runin <id> <dòng lệnh> — hub chạy trên máy rồi DÁN kết quả (kèm lệnh + mã thoát) vào phiên ấy; không tốn hạn mức\n\
-                     /upgrade — hub tự dựng lại chính nó từ mã hiện tại rồi khởi động lại\n\
-                     /accounts — ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, /new mặc định vào tài khoản nào\n\
-                     /project [tên] — xem / ghim dự án cho phòng (bỏ ghim: /project -)\n\
-                     /ingest · /run · /doctor — poll kênh · chạy một vòng · kiểm tra thật\n\
-                     /set <khoá> <giá trị> — sửa một trường cấu hình\n\
-                     /help — bảng này"
-                    .to_string();
+                // Chữ này SINH TỪ BẢNG (`commands::help_text`), không gõ tay:
+                // một lệnh mới không thể ra đời mà thiếu dòng của nó, và
+                // không dòng nào còn tả một lệnh đã chết. 🔴 Hà 2026-08-14:
+                // *"Tại sao không tạo lib lệnh để map khi nhận"*.
+                let ack = crate::commands::help_text();
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }

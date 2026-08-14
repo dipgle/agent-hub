@@ -4148,6 +4148,30 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             if let Some(msg) = refusal {
                                 msg
                             } else {
+                            // 🔴 Hà 2026-08-14, ảnh chụp [dwork]: *"Bấm enter
+                            // xong chưa thấy có tác dụng"*. Kiểm log thì hub ĐÃ
+                            // gửi phím thật (`keys_typed kind=key`), và đọc màn
+                            // ngay sau đó thì ô nhập TRỐNG, phiên đứng nguyên ở
+                            // lượt cũ — tức Enter rơi vào một ô rỗng.
+                            //
+                            // Cái nằm trong ô lúc ấy là GỢI Ý MỜ của TUI (chữ
+                            // xám bày lại từ lịch sử), không phải chữ ai gõ. Mà
+                            // `contents of tab` bỏ sạch MÀU, nên hub không phân
+                            // biệt nổi hai thứ ấy — bài học này đã ghi từ
+                            // 08-13, và cái nút ⏎ vẫn hiện ra vì `input_box_text`
+                            // đọc gợi ý mờ thành "ô có chữ".
+                            //
+                            // Chưa phân biệt được thì ĐỪNG khẳng định: chụp màn
+                            // trước, so với màn sau, và nếu không đổi gì thì nói
+                            // đúng như thế thay vì báo "✓ đã bấm".
+                            let before = if is_key {
+                                match crate::keys::look(&s.tty, 24) {
+                                    crate::keys::Look::Saw { body, .. } => Some(body),
+                                    _ => None,
+                                }
+                            } else {
+                                None
+                            };
                             let res = if is_key {
                                 crate::keys::press(w, typed.trim())
                             } else {
@@ -4310,7 +4334,26 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         .map(|(body, _)| crate::keys::landed(body));
                                     let name = crate::sessions::shown(&s);
                                     if is_key {
+                                        let unchanged = match (&before, &view) {
+                                            (Some(a), Some((b, _))) => a == b,
+                                            _ => false,
+                                        };
+                                        if unchanged {
+                                            logging::info(
+                                                "keys_press_no_effect",
+                                                json!({ "session": s.session_id,
+                                                        "key": typed.trim(),
+                                                        "why": "màn không đổi sau khi bấm" }),
+                                            );
+                                            format!(
+                                                "⚠ đã bấm '{}' nhưng màn KHÔNG đổi · {name}\n                                                 Chữ trong ô nhập nhiều khả năng là GỢI Ý MỜ của TUI \
+                                                 (hub đọc màn không thấy màu nên không phân biệt được \
+                                                 với chữ đã gõ). Muốn gửi câu ấy thì gõ thẳng nó ở đây.",
+                                                typed.trim()
+                                            )
+                                        } else {
                                         format!("✓ đã bấm '{}' · {name}", typed.trim())
+                                        }
                                     } else if what == Some(crate::keys::Landed::Queued) {
                                         format!("✓ vào hàng chờ · {name}")
                                     } else {

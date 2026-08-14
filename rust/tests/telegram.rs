@@ -1523,3 +1523,44 @@ fn a_button_press_carries_no_timestamp_to_measure_lag_from() {
     );
     assert_eq!(text_sent_at(&json!({ "my_chat_member": {} })), None);
 }
+
+/// Trần độ dài phải theo NGUỒN — báo cáo không bị bẻ dòng như màn.
+///
+/// 🔴 Hà 2026-08-14, ảnh chụp bản đầy đủ của `[tfl5]`: *"Có lệnh bash sao lại ko
+/// có nút bấm chạy cho nó, tôi vẫn để chờ ở đấy để bạn làm"*. Trong tin có hai
+/// dòng lệnh; chỉ dòng `git` có nút. Đo đúng hai dòng ấy: `git …` = 56 ký tự,
+/// `bash …` = 81, và trần cũ là 60 — nó đứng đúng giữa hai dòng.
+///
+/// Trần 60 sinh ra cho nguồn MÀN, nơi TUI đã bẻ dòng theo bề ngang cửa sổ nên
+/// một dòng dài có thể chỉ là một mẩu cụt. Chữ của báo cáo đến từ nhật ký
+/// `.jsonl`, không qua cửa sổ nào — ở đó dài là dài THẬT.
+#[test]
+fn a_report_is_not_a_screen_so_its_lines_are_never_half_a_command() {
+    // Đúng dòng trong ảnh Hà gửi (80 ký tự).
+    let deploy = "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814";
+    assert_eq!(deploy.len(), 81, "dòng chuẩn của ca này");
+    let report = format!(
+        "2. Bản vá chưa lên prod. Ba commit đang chờ ở local.\n\n\
+         git -C /Users/hanguyen/projects/AI/tfl5 push origin main\n\n\
+         {deploy}\n"
+    );
+    // BÁO CÁO: cả hai dòng đều bấm chạy được.
+    assert_eq!(
+        hub::keys::commands_in_report(&report, 3),
+        vec![
+            "git -C /Users/hanguyen/projects/AI/tfl5 push origin main".to_string(),
+            deploy.to_string(),
+        ]
+    );
+    // MÀN: dòng dài vẫn bị từ chối — lý do của trần 60 không đổi ở đó.
+    assert_eq!(
+        hub::keys::commands_on_screen(&report, 3),
+        vec!["git -C /Users/hanguyen/projects/AI/tfl5 push origin main".to_string()],
+        "trên màn, một dòng 80 ký tự có thể là mẩu cụt của một lệnh dài hơn"
+    );
+    // Nới trần KHÔNG được biến thành mở cửa: cả một KHỐI lệnh vẫn không ra nút
+    // (Hà cùng ngày: *"Cả 1 khối lệnh dài này thì không được tạo nút"*).
+    let block = format!("git for-each-ref --format='%(refname)' refs/original {}", "| xargs -n1 git update-ref -d ".repeat(8));
+    assert!(block.len() > hub::keys::BTN_CMD_REPORT_MAX, "khối chuẩn phải dài hơn trần");
+    assert!(hub::keys::commands_in_report(&block, 3).is_empty());
+}

@@ -800,7 +800,41 @@ end tell"#
 /// [`commands_on_screen`].
 pub const BTN_CMD_MAX: usize = 60;
 
+/// Trần cho nguồn KHÔNG bị bẻ dòng — chữ của một BÁO CÁO, đọc từ nhật ký.
+///
+/// 🔴 Hà 2026-08-14, ảnh chụp một bản đầy đủ của `[tfl5]` có hai dòng lệnh mà
+/// chỉ dòng ngắn có nút: *"Có lệnh bash sao lại ko có nút bấm chạy cho nó"*.
+/// Đo đúng hai dòng ấy:
+///   `git -C /Users/hanguyen/projects/AI/tfl5 push origin main`            = 56
+///   `bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-…`    = 80
+/// Trần 60 đứng đúng giữa hai dòng đó. Mà lý do của trần 60 — *"trên màn nó đã
+/// bị bẻ dòng, hub đang cầm một mẩu chứ không phải cả lệnh"* — chỉ đúng cho
+/// nguồn MÀN. Chữ của một báo cáo đến từ nhật ký `.jsonl`, nguyên văn model
+/// viết ra, không đi qua bề ngang cửa sổ nào cả: ở đó một dòng dài là một dòng
+/// dài THẬT, và từ chối nó là từ chối đúng những lệnh đáng bấm nhất (đường dẫn
+/// tuyệt đối + tham số là hình dạng chuẩn của một lệnh triển khai).
+///
+/// Vẫn có trần, không bỏ hẳn: bài học sáng cùng ngày (*"Cả 1 khối lệnh dài này
+/// thì không được tạo nút"*) là về một khối 380 ký tự. 200 nhận trọn một lệnh
+/// deploy có đường dẫn tuyệt đối, và vẫn chặn cả khối.
+pub const BTN_CMD_REPORT_MAX: usize = 200;
+
+/// Lệnh trên MÀN — chữ đã qua bề ngang cửa sổ, nên trần ngắn (`BTN_CMD_MAX`).
 pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
+    commands_in(text, max, BTN_CMD_MAX)
+}
+
+/// Lệnh trong một BÁO CÁO (chữ lấy từ nhật ký, không bị bẻ dòng).
+///
+/// Cùng một bộ luật với [`commands_on_screen`] — cùng hàng rào `KNOWN`, cùng
+/// `looks_like_prose`, cùng `forbids` — khác đúng MỘT cửa: trần độ dài. Khác
+/// nhau ở đâu thì phải nói ra ở đó, chứ không đẻ ra bộ luật thứ hai để rồi hai
+/// bên lệch nhau lúc nào không biết.
+pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
+    commands_in(text, max, BTN_CMD_REPORT_MAX)
+}
+
+fn commands_in(text: &str, max: usize, max_len: usize) -> Vec<String> {
     let screen = text;
     // `gh` vào danh sách 2026-08-13, vì đó là cái tên trong câu Hà hỏi: màn nói
     // *"Next action is yours: merge PR #54"* và không có nút nào. `gh` là công
@@ -896,7 +930,7 @@ fn after_cd(line: &str) -> Option<&str> {
         // self-install` = 40, `launchctl kickstart -k gui/501/com.dipgle.hubd`
         // = 44) đều lọt, còn bề ngang một dòng terminal thì bắt đầu bẻ quanh
         // 72–80 kể cả thụt lề.
-        if line.len() > BTN_CMD_MAX {
+        if line.len() > max_len {
             continue;
         }
         // MỘT bộ luật cho cả hai lượt quét — xem `looks_like_prose`.

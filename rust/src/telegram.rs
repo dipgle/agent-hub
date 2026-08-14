@@ -1491,18 +1491,6 @@ impl Inbox {
                     .and_then(|db| crate::pipeline::full_report(&db, n));
                 match full {
                     Some((sid, sname, text)) => {
-                        let mut chunk = String::new();
-                        let mut parts: Vec<String> = Vec::new();
-                        for line in text.lines() {
-                            if chunk.len() + line.len() + 1 > 3500 {
-                                parts.push(std::mem::take(&mut chunk));
-                            }
-                            chunk.push_str(line);
-                            chunk.push('\n');
-                        }
-                        if !chunk.trim().is_empty() {
-                            parts.push(chunk);
-                        }
                         // Đọc xong một báo cáo dài thì việc kế tiếp gần như luôn
                         // là ĐI VÀO chính phiên ấy — nên hub ĐI LUÔN, không đưa
                         // thêm một cái nút nữa.
@@ -1550,64 +1538,55 @@ impl Inbox {
                             }
                         };
                         let tail = crate::pipeline::full_report_follow_note(&sname, moved);
-                        let total = parts.len();
-                        for (i, p) in parts.into_iter().enumerate() {
-                            let head = if total > 1 {
-                                format!("📄 ({}/{})\n", i + 1, total)
-                            } else {
-                                String::new()
-                            };
-                            let last = i + 1 == total;
-                            let body = if last {
-                                format!("{head}{p}{tail}")
-                            } else {
-                                format!("{head}{p}")
-                            };
-                            // 🔴 Nút phải theo BẢN ĐẦY ĐỦ nữa. Hà 2026-08-13:
-                            // *"Chọn xem đầy đủ lại không có chạy lệnh rồi"*.
-                            //
-                            // Tin rút gọn có nút `▶`/`📎` (dựng ở
-                            // `announce_changes`), nhưng bản đầy đủ đi thẳng
-                            // qua `send_text` — không nút nào. Tức bấm "Xem đầy
-                            // đủ" để ĐỌC KỸ hơn thì lại MẤT đường bấm chạy, và
-                            // đó chính là lúc lệnh hiện ra nguyên vẹn (bản rút
-                            // gọn còn cắt khối code).
-                            //
-                            // Cùng máy móc, không đẻ lối riêng: cùng
-                            // `commands_on_screen` + `paths_on_screen` + cùng
-                            // hai cuốn sổ. Gắn vào MẢNH CUỐI, vì đó là chỗ mắt
-                            // dừng lại.
-                            let sent = if last {
-                                let mut btns = db
-                                    .as_ref()
-                                    .map(|db| {
-                                        let mut b = crate::pipeline::remember_quick(
-                                            db,
-                                            &sid,
-                                            &crate::keys::commands_on_screen(&text, 3),
-                                        );
-                                        b.extend(crate::pipeline::remember_files(
-                                            db,
-                                            &sid,
-                                            &crate::keys::paths_on_screen(&text, 4),
-                                        ));
-                                        b
-                                    })
-                                    .unwrap_or_default();
-                                if btns.is_empty() {
-                                    self.send_text(&body)
-                                } else {
-                                    btns.truncate(8);
-                                    self.send_buttons(&body, &btns)
-                                }
-                            } else {
-                                self.send_text(&body)
-                            };
-                            if let Err(e) = sent {
-                                logging::error("telegram_ack_failed", json!({ "err": e }));
-                                break;
-                            }
-                        }
+                        // 🔴 Nút phải theo BẢN ĐẦY ĐỦ nữa. Hà 2026-08-13:
+                        // *"Chọn xem đầy đủ lại không có chạy lệnh rồi"*.
+                        //
+                        // …và một ngày sau, cùng một chỗ, cùng một hình dạng:
+                        // *"Có lệnh bash sao lại ko có nút bấm chạy cho nó …
+                        // gắn icon bấm được ngay sau chuỗi lệnh đó"*
+                        // (2026-08-14). Lần trước vá bằng cách treo NÚT dưới
+                        // mảnh cuối; nhưng một khối nút ở đáy một báo cáo dài
+                        // bắt người đọc tự ghép "nút nào ứng với dòng nào", và
+                        // đúng lúc bấm "Xem đầy đủ" để đọc kỹ thì đường bấm lại
+                        // nghèo hơn tin rút gọn (nơi icon ▶️ đã nằm ngay cuối
+                        // dòng lệnh từ sáng).
+                        //
+                        // Nay đi CHUNG máy móc với tin tự phát:
+                        // `say_with_command_icons` — cắt ngay sau dòng lệnh,
+                        // dán icon vào cuối chính dòng ấy, chia nhỏ cho vừa trần
+                        // Telegram. Không còn "📄 (i/n)": mẩu nay cắt theo Ý
+                        // (kết bằng một dòng lệnh) chứ không theo số ký tự, nên
+                        // một cái đánh số đo bằng độ dài chỉ nói sai.
+                        //
+                        // 🔴 `commands_in_report`, KHÔNG phải
+                        // `commands_on_screen`: chữ này lấy từ nhật ký phiên,
+                        // không đi qua bề ngang cửa sổ nào — xem
+                        // `keys::BTN_CMD_REPORT_MAX` (chính cái trần 60 đã chặn
+                        // dòng `bash …/deploy.sh …` dài 80 ký tự trong ảnh Hà
+                        // gửi).
+                        let body = format!("{text}{tail}");
+                        let cmds = crate::keys::commands_in_report(&text, 3);
+                        let mut btns = db
+                            .as_ref()
+                            .map(|db| {
+                                let mut b =
+                                    crate::pipeline::remember_quick(db, &sid, &cmds);
+                                b.extend(crate::pipeline::remember_files(
+                                    db,
+                                    &sid,
+                                    &crate::keys::paths_on_screen(&text, 4),
+                                ));
+                                b
+                            })
+                            .unwrap_or_default();
+                        btns.truncate(8);
+                        crate::pipeline::say_with_command_icons(
+                            self,
+                            &body,
+                            &cmds,
+                            &btns,
+                            "telegram_ack_failed",
+                        );
                     }
                     None => {
                         if let Err(e) = self

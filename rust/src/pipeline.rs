@@ -1691,6 +1691,29 @@ pub struct Closing {
 /// Bao lâu ngó lại một lần. Hà nói thẳng con số này.
 const CLOSE_CHECK_SEC: i64 = 30;
 
+/// Chờ tới đây mà cửa sổ vẫn bận thì THÔI CHỜ IM — nói ra và trả quyền quyết
+/// định lại cho chủ máy.
+///
+/// 🔴 Hà 2026-08-14: *"Rõ ràng phiên dwork dừng rồi, tôi gửi lệnh close rồi 1h
+/// hay lại xem shot nó vẫn ở đó"*. Đọc log đúng như thế: `/close` lúc 11:06:19,
+/// hub gõ `/exit`, rồi `close_still_busy` đều đặn 30 giây một lần — 20s · 60s ·
+/// 133s · 167s · 204s · 247s… và **không một dòng nào ra tới Telegram**. Câu hứa
+/// gửi đi lúc đầu là *"Kiểm 30 giây một lần, xong tôi báo"*, nên im lặng ở đây
+/// đọc thành "đang chạy êm", trong khi sự thật là hub đang chờ một điều kiện có
+/// thể không bao giờ tới.
+///
+/// Vì sao nó có thể không bao giờ tới: `/exit` gõ vào một phiên ĐANG CHẠY thì
+/// nằm trong hàng chờ của TUI cho tới khi lượt hiện tại xong — mà một lượt
+/// `claude` chạy hàng chục phút là chuyện thường ở đây. Chờ vô hạn không sai về
+/// logic, nó chỉ sai ở chỗ IM.
+///
+/// Mười phút: dài hơn hẳn một lượt bình thường, ngắn hơn hẳn một tiếng ngồi
+/// đoán.
+const CLOSE_GIVE_UP_SEC: i64 = 600;
+
+/// Bao lâu thì nhắc một câu ra kênh chat trong lúc còn chờ.
+const CLOSE_SAY_EVERY_SEC: i64 = 120;
+
 /// Ghi một cửa sổ vào sổ chờ đóng.
 pub fn remember_closing(db: &Db, session_id: &str, window: i64, shown_name: &str, now: i64) {
     let mut book = closing_book(db);
@@ -1791,10 +1814,41 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
         changed = true;
         match crate::keys::tab_busy(c.w) {
             Ok(true) => {
+                let waited = now - c.t;
                 logging::info(
                     "close_still_busy",
-                    json!({ "session": id, "window": c.w, "waited_sec": now - c.t }),
+                    json!({ "session": id, "window": c.w, "waited_sec": waited }),
                 );
+                // Hết kiên nhẫn thì NÓI, và trả quyền quyết định lại: hub không
+                // tự đóng cứng một cửa sổ đang chạy dở — đóng khi còn tiến trình
+                // sống làm Terminal bật hộp thoại "terminate running processes?",
+                // mà một hộp thoại thì khoá mọi lệnh tự động sau nó (bài học
+                // 08-11, xem `keys::close_window`).
+                if waited >= CLOSE_GIVE_UP_SEC {
+                    say_closed(cfg, &format!(
+                        "⚠ {} vẫn chưa đóng được sau {} phút — cửa sổ còn bận, tức CLI đang chạy dở \
+                         một lượt và `/exit` nằm trong hàng chờ của nó.\nhub THÔI chờ (không tự đóng \
+                         cửa sổ đang chạy: làm thế Terminal bật hộp thoại và khoá luôn mọi lệnh sau \
+                         đó). Gõ /close lần nữa khi phiên rảnh, hoặc dừng lượt đang chạy rồi /close.",
+                        c.n,
+                        waited / 60
+                    ));
+                    done.push(id.clone());
+                    logging::warn(
+                        "close_gave_up",
+                        json!({ "session": id, "window": c.w, "waited_sec": waited }),
+                    );
+                } else if waited >= CLOSE_SAY_EVERY_SEC && (waited / CLOSE_SAY_EVERY_SEC) != ((waited - CLOSE_CHECK_SEC) / CLOSE_SAY_EVERY_SEC) {
+                    // Nhắc thưa thôi, nhưng phải có: một lời hứa "xong tôi báo"
+                    // mà im mười phút thì người ta đi kiểm tay, đúng cái hub
+                    // sinh ra để khỏi phải làm.
+                    say_closed(cfg, &format!(
+                        "⏳ {} chưa đóng được — còn bận sau {} phút. hub vẫn chờ (bỏ cuộc ở phút thứ {}).",
+                        c.n,
+                        waited / 60,
+                        CLOSE_GIVE_UP_SEC / 60
+                    ));
+                }
             }
             Ok(false) => {
                 match crate::keys::close_window(c.w) {

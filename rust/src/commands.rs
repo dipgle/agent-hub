@@ -100,9 +100,12 @@ pub const ROUTES: &[Route] = &[
         name: "new",
         aliases: &["moi"],
         kind: CommandKind::New,
-        arg: Arg::Custom,
-        usage: "[-a acc] [-s dự án] <việc>",
-        help: "Mở cửa sổ mới rồi giao việc",
+        // 🔴 `Custom` → `Rest` ngày 2026-08-14: đề bài KHÔNG bắt buộc. Chạm vào
+        // dòng này trong menu Telegram chỉ gửi đúng `/new`, nên một lệnh
+        // `listed: true` mà đòi tham số là một lệnh không bấm được.
+        arg: Arg::Rest,
+        usage: "[-a acc] [-s dự án] [việc]",
+        help: "Mở cửa sổ Terminal mới (kèm việc, hoặc để trống rồi nói sau)",
         listed: true,
     },
     Route {

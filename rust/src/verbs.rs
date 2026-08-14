@@ -221,18 +221,28 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
                 .unwrap_or_default();
             Some((CommandKind::Handover, 0, want))
         }
-        // `/new <dự án> <việc>` — mở một phiên trong dự án ấy.
-        "new" | "moi" => {
-            let rest = t[1..]
-                .split_once(char::is_whitespace)
-                .map(|(_, r)| r.trim().to_string())
-                .unwrap_or_default();
-            (!rest.is_empty() && rest.contains(char::is_whitespace)).then_some((
-                CommandKind::New,
-                0,
-                rest,
-            ))
-        }
+        // 🔴 `/new` KHÔNG còn nhánh riêng ở đây, 2026-08-14 (Hà: *"Lệnh new nữa
+        // chưa chạy đc"*). Nó đi bằng bảng lệnh, `Arg::Rest` — nhận cả câu, kể
+        // cả câu RỖNG.
+        //
+        // Cổng cũ đòi `rest` có ít nhất một dấu cách. Luật ấy đúng khi từ đầu
+        // tiên còn là TÊN DỰ ÁN — nhưng luật kia đã bị bỏ ngày 2026-08-13 (Hà:
+        // *"lệnh new chỉ cần tham số sử dụng acc nào và text gửi đi là gì"*),
+        // còn cái cổng thì ở lại. Từ đó `/new` gõ trơn bị trả về `None`, rơi vào
+        // nhánh "không phải lệnh", và hub đáp *"Chưa hiểu lệnh này"* — về một
+        // động từ chính nó vừa khai với Telegram bằng `setMyCommands` và đang
+        // hiện trong menu. Đo được **ba lần** trong nhật ký: 13-08 13:27,
+        // 14-08 08:13, 14-08 22:27.
+        //
+        // Chạm vào một lệnh trong menu Telegram chỉ gửi lại ĐÚNG token lệnh —
+        // chữ sau dấu cách rơi mất (xem khối `pick_` ở đầu hàm). Nên với một
+        // lệnh `listed: true`, "gõ trơn" không phải cách dùng sai: nó là cách
+        // dùng MẶC ĐỊNH, cách duy nhất một ngón tay chạm tới được.
+        //
+        // Và handler đã sẵn sàng từ lâu: `name.is_empty()` ⟹ gốc workspace,
+        // `task` rỗng ⟹ mở cửa sổ rồi nói sau — đúng luật 7 của `CLAUDE.md`
+        // (*"An empty task is allowed on the window path"*). Chỉ mỗi cái cổng
+        // này chưa ai gỡ.
         // `/stop [id]` — trống nghĩa là phiên đang theo.
         "stop" | "dung" => {
             let want = t[1..]

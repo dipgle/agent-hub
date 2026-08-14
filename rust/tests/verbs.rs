@@ -76,18 +76,56 @@ fn an_empty_side_question_never_reaches_the_wallet() {
     }
 }
 
+/// 🔴 REGRESSION — `/new` gõ trơn phải MỞ ĐƯỢC CỬA SỔ (Hà 2026-08-14: *"Lệnh
+/// new nữa chưa chạy đc"*).
+///
+/// Bài kiểm ở đây trước ngày ấy tên là `starting_a_session_needs_both_a_project_
+/// and_a_task`, và nó khoá đúng con lỗi lại: bắt `/new`, `/new dwork`, `/new   `
+/// đều phải là `None`. Luật ấy đúng khi từ đầu tiên còn là TÊN DỰ ÁN — nhưng
+/// luật kia đã bị bỏ ngày 2026-08-13, còn bài kiểm thì ở lại, và từ đó nó không
+/// canh một hành vi nữa mà **bảo vệ một hành vi hỏng**.
+///
+/// Cái giá đo được trong nhật ký: `/new` → `telegram_not_a_command` ba lần
+/// (13-08 13:27 · 14-08 08:13 · 14-08 22:27), mỗi lần hub đáp *"Chưa hiểu lệnh
+/// này"* về một động từ chính nó vừa khai với Telegram và đang hiện trong menu.
+/// Chạm vào một dòng trong menu chỉ gửi đúng token lệnh, nên với lệnh
+/// `listed: true` thì "gõ trơn" là cách dùng MẶC ĐỊNH, không phải cách dùng sai.
+///
+/// Bài học chung, đáng giữ hơn con lỗi: **một bài kiểm sống lâu hơn lý do của
+/// nó thì nó đổi phe.**
 #[test]
-fn starting_a_session_needs_both_a_project_and_a_task() {
-    let (kind, id, arg) = parse_command("/new dwork sửa nút Releases bị vỡ regex").expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::New);
-    assert_eq!(id, 0);
-    assert_eq!(arg, "dwork sửa nút Releases bị vỡ regex");
+fn a_bare_new_opens_a_window_because_that_is_what_tapping_the_menu_sends() {
+    use hub::adapters::CommandKind;
 
-    // A project with no task would start an agent with nothing to do — and it
-    // would still cost money while it worked that out.
-    for t in ["/new", "/new dwork", "/new   "] {
-        assert!(parse_command(t).is_none(), "sai với: {t}");
-    }
+    // Gõ trơn — đúng thứ Telegram gửi khi chạm vào `/new` trong menu.
+    assert_eq!(
+        parse_command("/new"),
+        Some((CommandKind::New, 0, String::new())),
+        "chạm vào /new trong menu mà bị từ chối thì lệnh ấy không bấm được"
+    );
+    assert_eq!(
+        parse_command("/moi"),
+        Some((CommandKind::New, 0, String::new()))
+    );
+    // Khoảng trắng thừa cũng vậy — không có gì để phân biệt với gõ trơn.
+    assert_eq!(
+        parse_command("/new   "),
+        Some((CommandKind::New, 0, String::new()))
+    );
+
+    // MỘT chữ cũng là một đề bài. Cổng cũ đòi có dấu cách, nên `/new sua` —
+    // một câu ngắn hoàn toàn hợp lệ — cũng rơi mất cùng một chỗ.
+    let (kind, _, arg) = parse_command("/new sua").expect("một chữ vẫn là đề bài");
+    assert_eq!(kind, CommandKind::New);
+    assert_eq!(arg, "sua");
+
+    // Cả câu là ĐỀ BÀI, không phải "<dự án> <việc>" — chỗ chỉ thư mục là `-s`.
+    // Đây chính là luật đã đổi 2026-08-13, sau khi `/new Tại sao lại có phiên
+    // này…` bị đọc thành tên thư mục và trả về `⚠ không biết dự án 'Tại'`.
+    let (_, _, arg) = parse_command("/new Tại sao lại có phiên này chạy?").expect("parsed");
+    assert_eq!(arg, "Tại sao lại có phiên này chạy?");
+    let (_, _, arg) = parse_command("/new -s dwork sửa lịch làm việc").expect("parsed");
+    assert_eq!(arg, "-s dwork sửa lịch làm việc", "cờ phải tới nguyên vẹn");
 }
 
 #[test]

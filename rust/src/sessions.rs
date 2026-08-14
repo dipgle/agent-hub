@@ -2159,8 +2159,14 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     // Thứ THẬT SỰ chữa được độ trễ bấm nút là `snapshot_cached` — đo cùng ngày:
     // một lệnh `/session` 11,6s → **1,5s**. Đừng thử lại đường song song mà
     // không đo trước.
+    // Thời gian NGỒI CHỜ `claude agents` cộng dồn, tách khỏi thời gian đọc nhật
+    // ký — hai khúc này chữa bằng hai cách khác hẳn nhau.
+    let mut ms_ask = 0u128;
     for account in &cfg.claude_accounts_or_ambient() {
-        let raw = match list_account(account, &cfg.claude_cli) {
+        let ask_started = std::time::Instant::now();
+        let listed = list_account(account, &cfg.claude_cli);
+        ms_ask += ask_started.elapsed().as_millis();
+        let raw = match listed {
             Ok(v) => v,
             Err(e) => {
                 // An account that failed to answer is NOT an account with zero
@@ -2395,6 +2401,14 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
         }
     }
 
+    // 🔴 Phép đo CHIA KHÚC. Hà 2026-08-14: *"máy khỏe, chỉ phục vụ 1 kênh
+    // chat, vài lệnh không liên tục, vậy tại sao lại nghẽn"* — câu ấy không trả
+    // lời được bằng `sessions_snapshot_ms`, thứ chỉ in một con số tổng. Và đo
+    // ngoài thì mọi thành phần đều rẻ: `claude agents --json` 0,3s mỗi tài
+    // khoản (cả ba ~1s), `osascript` liệt kê tab 0,13s, `ps` 0,04s, cả lệnh
+    // `hub sessions` 3,0s — trong khi daemon in 12–24s. Một con số tổng không
+    // nói được khúc nào ăn mất mười mấy giây, nên nó không dẫn tới chỗ nào cả.
+    let after_loop = snap_started.elapsed();
     add_shell_windows(&mut out.sessions);
     out.hidden_dead = drop_stale_dead(&mut out.sessions);
     mark_can_type(&mut out.sessions);
@@ -2428,10 +2442,16 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     if let Ok(mut g) = SNAP_CACHE.get_or_init(|| std::sync::Mutex::new(None)).lock() {
         *g = Some((std::time::Instant::now(), out.clone()));
     }
+    let after_rows = snap_started.elapsed();
     logging::info(
         "sessions_snapshot_ms",
         json!({ "ms": snap_started.elapsed().as_millis(), "sessions": out.sessions.len(),
-                "hidden_editor": out.hidden_editor, "blind": out.blind.len() }),
+                "hidden_editor": out.hidden_editor, "blind": out.blind.len(),
+                // Ba khúc, cộng lại đúng bằng tổng — nên khúc nào phình ra thì
+                // nhìn một cái là thấy, không phải suy.
+                "ms_ask_accounts": ms_ask,
+                "ms_read_rows": after_loop.as_millis().saturating_sub(ms_ask),
+                "ms_finish": after_rows.saturating_sub(after_loop).as_millis() }),
     );
     out
 }

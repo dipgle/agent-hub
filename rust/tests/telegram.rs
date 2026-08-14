@@ -1479,3 +1479,47 @@ fn a_link_is_only_built_for_payloads_telegram_accepts() {
     );
     assert_eq!(hub::telegram::html_escape("cd ~/x && ./hub"), "cd ~/x &amp;&amp; ./hub");
 }
+
+/// Phép đo trễ chỉ được đo cái nó thật sự đo được.
+///
+/// 🔴 Khoá lại một phép đo đã NÓI DỐI (2026-08-14). `telegram_update_lag` rơi
+/// về `callback_query.message.date` khi update là một cú bấm nút — nhưng đó là
+/// dấu thời gian của **tin nhắn chứa cái nút**, tức lúc BOT gửi nó đi. Telegram
+/// không có trường nào mang thời điểm bấm.
+///
+/// Bằng chứng nó sai, từ `logs/hub.log` ngày 08-14: ba dòng "trễ" 190s · 239s ·
+/// 304s quy đúng về MỘT mốc 08:00:20 — lúc hub gửi danh sách 4 phiên. Ba cú bấm
+/// vào cùng một danh sách, và con số leo thang chỉ vì cái danh sách mỗi lúc một
+/// cũ. Trong quãng ấy hub vẫn nhận và chạy 6 update khác.
+///
+/// Một phép đo luôn có số để in là thứ khiến người đọc đi vá nhầm chỗ; ở đây nó
+/// suýt đổi cả kiến trúc vòng đọc để chữa một độ trễ chưa từng tồn tại.
+#[test]
+fn a_button_press_carries_no_timestamp_to_measure_lag_from() {
+    use hub::telegram::text_sent_at;
+    use serde_json::json;
+
+    // Tin CHỮ: có mốc thật, đo được.
+    assert_eq!(
+        text_sent_at(&json!({ "message": { "date": 1_786_462_200, "text": "/session" } })),
+        Some(1_786_462_200)
+    );
+    assert_eq!(
+        text_sent_at(&json!({ "edited_message": { "date": 1_786_462_201, "text": "sửa" } })),
+        Some(1_786_462_201)
+    );
+    // Cú BẤM NÚT: `message.date` bên trong là tuổi của tin chứa nút — KHÔNG
+    // được nhận là mốc gửi. Không có mốc thì không in số nào.
+    assert_eq!(
+        text_sent_at(&json!({
+            "callback_query": {
+                "id": "42",
+                "data": "sess:4963b95c-93b0-46e3-baf9-40bbfacbef2f",
+                "message": { "date": 1_786_462_000 }
+            }
+        })),
+        None,
+        "bấm nút thì không có mốc — chứ không phải lấy tạm tuổi của tin có nút"
+    );
+    assert_eq!(text_sent_at(&json!({ "my_chat_member": {} })), None);
+}

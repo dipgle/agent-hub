@@ -32,7 +32,7 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -58,6 +58,9 @@ pub struct Incoming {
     pub quiet: bool,
 }
 
+/// Hàng update chờ thợ, kèm mốc NHẬN của từng cái (để đo thời gian nằm chờ).
+type Inflight = (Mutex<VecDeque<(Value, std::time::Instant)>>, Condvar);
+
 /// Hòm thư Telegram dùng chung cho cả tiến trình.
 #[derive(Clone)]
 pub struct Inbox {
@@ -66,6 +69,22 @@ pub struct Inbox {
     offset: Arc<Mutex<i64>>,
     /// `confirm::ask` đang giữ đường đọc.
     busy: Arc<AtomicBool>,
+    /// Update đã NHẬN nhưng chưa xử lý: vòng đọc đẩy vào, luồng thợ lấy ra.
+    ///
+    /// Vì sao phải có, và vì sao đúng MỘT thợ (2026-08-14): đường đọc
+    /// `getUpdates` là đường DUY NHẤT hub nghe được điện thoại (luật 1 của tệp
+    /// này), nên mọi giây tiêu ở đó là một giây điếc. Mà `handle_update` có
+    /// nhánh tiêu giây thật: tải một tệp đính kèm mất **3,8s và 5,0s** trong
+    /// hai lượt đo được của ngày 08-14 (`telegram_update_slow`), chưa kể
+    /// `sendMessage` 0,9–2,9s cho mỗi câu trả lời lỗi.
+    ///
+    /// Một thợ, không phải nhiều: hai update chạy song song là hai bàn tay cùng
+    /// gõ vào một Terminal, và thứ tự "Esc xoá ô → gõ chữ" (nút ⏎ Gửi) sẽ đảo.
+    /// Nối đuôi là ĐÚNG; nằm trong vòng đọc mới là sai.
+    inflight: Arc<Inflight>,
+    /// Không dựng được luồng thợ ⟹ vòng đọc tự xử lý. Chậm còn hơn điếc, và
+    /// KHÔNG im lặng: `telegram_worker_inline` nói ra vì sao nó chậm.
+    inline: Arc<AtomicBool>,
     token: String,
     chat_id: String,
     /// Cấu hình, để `push_text` gọi được `pipeline::run_telegram_now`.
@@ -521,12 +540,30 @@ impl Inbox {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             offset: Arc::new(Mutex::new(0)),
             busy: Arc::new(AtomicBool::new(false)),
+            inflight: Arc::new((Mutex::new(VecDeque::new()), Condvar::new())),
+            inline: Arc::new(AtomicBool::new(false)),
             token,
             chat_id,
             cfg: std::sync::Arc::new(cfg.clone()),
             waker,
         };
         let _ = INBOX.set(inbox.clone());
+        // Luồng THỢ trước, vòng đọc sau: dựng ngược thì có một khoảnh khắc
+        // update đã tới mà chưa ai nhặt, và nó nằm im tới update kế tiếp.
+        let hand = inbox.clone();
+        if let Err(e) = std::thread::Builder::new()
+            .name("telegram-work".into())
+            .spawn(move || hand.work_forever())
+        {
+            // Không nuốt: mất thợ thì mọi update chạy ngay trong vòng đọc, tức
+            // hub điếc đúng bằng thời gian xử lý. Nói ra, rồi vẫn chạy.
+            inbox.inline.store(true, Ordering::SeqCst);
+            logging::error(
+                "telegram_worker_spawn_failed",
+                json!({ "err": e.to_string(),
+                        "fallback": "vòng đọc tự xử lý — chậm hơn, không mất lệnh" }),
+            );
+        }
         let worker = inbox.clone();
         std::thread::Builder::new()
             .name("telegram-inbox".into())
@@ -1056,8 +1093,77 @@ impl Inbox {
                 if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
                     self.set_offset(id + 1);
                 }
-                self.handle_update(&client, u);
+                self.hand_off(&client, u);
             }
+        }
+    }
+
+    /// Giao một update cho luồng thợ — và quay lại nghe NGAY.
+    ///
+    /// Con dấu `offset` đã tiến trước khi tới đây (xem chỗ gọi), nên update này
+    /// sẽ không được Telegram giao lại lần nữa: bỏ nó ở đây là mất hẳn một mệnh
+    /// lệnh. Vì thế hàng đợi **không có trần** và không bao giờ vứt bớt; cái nó
+    /// có là một tiếng kêu khi dài bất thường.
+    fn hand_off(&self, client: &reqwest::blocking::Client, u: &Value) {
+        if self.inline.load(Ordering::SeqCst) {
+            self.handle_update(client, u);
+            return;
+        }
+        let (lock, cv) = &*self.inflight;
+        let depth = {
+            let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
+            q.push_back((u.clone(), std::time::Instant::now()));
+            q.len()
+        };
+        cv.notify_one();
+        // Hàng dài = thợ đang tắc (một tệp lớn) hoặc thợ đã chết. Cả hai đều
+        // phải nhìn thấy được từ log, vì cả hai trông giống hệt nhau từ điện
+        // thoại: gõ rồi không thấy gì.
+        if depth > 5 {
+            logging::warn(
+                "telegram_backlog",
+                json!({ "depth": depth,
+                        "why": "update đã nhận nhưng thợ chưa xử lý kịp" }),
+            );
+        }
+    }
+
+    /// Luồng thợ: xử lý update NỐI ĐUÔI, ngoài đường đọc.
+    fn work_forever(&self) {
+        let Some(client) = self.client() else {
+            // Thợ không có tay thì trả việc lại cho vòng đọc, đừng đứng im ôm
+            // hàng — đó là kiểu hỏng mà từ điện thoại nhìn ra là "hub chết".
+            self.inline.store(true, Ordering::SeqCst);
+            logging::error(
+                "telegram_worker_inline",
+                json!({ "why": "không dựng được HTTP client cho luồng thợ" }),
+            );
+            return;
+        };
+        loop {
+            let (lock, cv) = &*self.inflight;
+            let (u, at) = {
+                let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
+                loop {
+                    if let Some(item) = q.pop_front() {
+                        break item;
+                    }
+                    q = cv.wait(q).unwrap_or_else(|e| e.into_inner());
+                }
+            };
+            // 🔴 Phép đo THAY CHO `telegram_update_lag` ở nhánh nút bấm: hai mốc
+            // này là đồng hồ của chính hub (nhận → cầm), nên nó đo đúng cái câu
+            // hỏi "hub có bị dồn không" mà không phải mượn một dấu thời gian của
+            // Telegram rồi đọc sai ý nghĩa của nó.
+            let waited = at.elapsed();
+            if waited.as_millis() > 2000 {
+                logging::warn(
+                    "telegram_update_wait",
+                    json!({ "ms": waited.as_millis(),
+                            "why": "update nằm trong hàng của hub chừng ấy trước khi tới lượt" }),
+                );
+            }
+            self.handle_update(&client, &u);
         }
     }
 
@@ -1073,23 +1179,43 @@ impl Inbox {
         // số này đo đúng quãng "gõ xong → hub cầm được", không lẫn phần sau.
         // Chỉ kêu khi quá 3 giây: dưới ngưỡng ấy là long-poll chạy đúng, và một
         // dòng log cho mỗi tin nhắn là tự dựng rác cho mình.
+        //
+        // 🔴 CHỈ CHO TIN CHỮ — và đây là một phép đo đã từng NÓI DỐI, gỡ ra
+        // ngày 2026-08-14 sau khi đọc lại chính những con số nó in.
+        //
+        // Bản đầu rơi về `callback_query.message.date` khi update là một cú bấm
+        // nút. Nhưng `callback_query.message` là **tin nhắn CHỨA cái nút**, nên
+        // `date` của nó là lúc *bot gửi tin ấy đi* — không phải lúc ngón tay
+        // bấm. Telegram KHÔNG cho biết lúc bấm; không có trường nào mang nó.
+        // Tức mỗi cú bấm vào một tin cũ tự sinh ra một "độ trễ" bằng đúng tuổi
+        // của tin đó.
+        //
+        // Bằng chứng, từ `logs/hub.log` cùng ngày — 16/17 dòng `..._lag` là ảo,
+        // mỗi dòng quy đúng về một lượt `telegram_buttons_sent`:
+        //   190s @08:03:30 · 239s @08:04:19 · 304s @08:05:24 → **cùng một mốc
+        //   08:00:20**, là lúc hub gửi danh sách 4 phiên (`buttons_sent 4`).
+        //   Ba lần bấm vào cùng một danh sách, và "trễ" leo 190→239→304 chỉ vì
+        //   cái danh sách mỗi lúc một cũ. Trong quãng ấy hub vẫn nhận và chạy
+        //   6 update khác — nó không hề đứng.
+        // Không một tin CHỮ nào của ngày hôm ấy vượt ngưỡng 3 giây.
+        //
+        // Cái đo được cho một cú bấm nằm ở `telegram_update_wait` (thời gian
+        // nằm trong hàng đợi của chính hub) và ở `command_done` — hai mốc hub
+        // tự cầm đồng hồ, không phải một mốc mượn của Telegram rồi đọc sai.
         let started = std::time::Instant::now();
-        let sent_at = u
-            .pointer("/message/date")
-            .or_else(|| u.pointer("/callback_query/message/date"))
-            .and_then(Value::as_i64);
-        if let Some(sent) = sent_at {
+        if let Some(sent) = text_sent_at(u) {
             let lag = chrono::Utc::now().timestamp() - sent;
             if lag > 3 {
                 logging::warn(
                     "telegram_update_lag",
                     json!({ "sec": lag,
-                            "why": "quãng từ lúc Telegram nhận tin tới lúc vòng đọc của hub cầm được nó" }),
+                            "why": "quãng từ lúc Telegram nhận TIN CHỮ tới lúc hub cầm được nó" }),
                 );
             }
         }
-        // Đo luôn phần hub tự tiêu: một update nặng (tải ảnh đính kèm) chặn
-        // đúng vòng đọc này, nên tin gửi ngay sau nó phải đợi.
+        // Đo luôn phần hub tự tiêu: một update nặng (tải ảnh đính kèm) giữ luồng
+        // thợ, nên update tới sau phải xếp hàng sau nó — nhưng KHÔNG còn chặn
+        // đường đọc `getUpdates` (xem `hand_off`).
         let _guard = UpdateTimer(started);
         struct UpdateTimer(std::time::Instant);
         impl Drop for UpdateTimer {
@@ -1099,7 +1225,7 @@ impl Inbox {
                     logging::warn(
                         "telegram_update_slow",
                         json!({ "ms": ms,
-                                "why": "vòng đọc xử lý update này đồng bộ — tin tới sau phải chờ hết chừng ấy" }),
+                                "why": "luồng thợ tiêu chừng ấy cho MỘT update — update tới sau xếp hàng sau nó" }),
                     );
                 }
             }
@@ -1715,6 +1841,18 @@ pub fn keyboard_rows(buttons: &[(String, String)]) -> Vec<Vec<Value>> {
                 .to_string())
         }
     }
+}
+
+/// Dấu thời gian Telegram đóng lúc NHẬN TIN — chỉ có với tin chữ.
+///
+/// Hàm thuần, tách ra để kiểm được: đây là chỗ một phép đo đã nói dối suốt
+/// ngày 2026-08-14 (xem `handle_update`). Một cú bấm nút KHÔNG có mốc nào —
+/// `callback_query.message.date` là tuổi của tin chứa cái nút, và trả nó ra ở
+/// đây là biến "bấm vào một tin cũ" thành "hub trễ 5 phút".
+pub fn text_sent_at(u: &Value) -> Option<i64> {
+    u.pointer("/message/date")
+        .or_else(|| u.pointer("/edited_message/date"))
+        .and_then(Value::as_i64)
 }
 
 /// Quyền đọc đang được `confirm::ask` mượn; trả lại khi rời tầm.

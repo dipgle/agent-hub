@@ -649,6 +649,21 @@ pub fn parse_command(
             return Some((CommandKind::Pick, 0, format!("{} {}.{}", f[0], f[1], f[2])));
         }
     }
+    // `/start <payload>` — đường VỀ của deep link. Bấm icon `▶️` trong chữ là
+    // Telegram gửi đúng câu này, nên payload phải được cởi ra thành lệnh thật.
+    // Không có nhánh này thì cái icon chỉ mở lại buồng chat rồi thôi.
+    if verb == "start" {
+        let payload = t[1..]
+            .split_once(char::is_whitespace)
+            .map(|(_, r)| r.trim().to_string())
+            .unwrap_or_default();
+        if payload.is_empty() {
+            return None;
+        }
+        // Đi lại đúng bộ phân tích này, chỉ khác cái vỏ: `/start pick_x_1_2`
+        // phải cho ra y hệt `/pick_x_1_2` gõ tay. Một đường, một luật.
+        return parse_command(&format!("/{payload}"), from_user_tid, owner_tids);
+    }
     // `send_<8 ký tự đầu id>` — gửi bảng đi (một dấu Enter vào đúng cửa sổ ấy).
     // Nó là `/key <id> enter` viết dưới dạng CHẠM ĐƯỢC: `/key` có tham số đứng
     // sau dấu cách, mà chạm thì chỉ gửi lại token lệnh — chữ sau rơi mất.

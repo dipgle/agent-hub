@@ -704,8 +704,19 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                         logging::error("session_change_telegram_failed", json!({ "err": e }));
                     }
                 } else {
-                    // Nút LỆNH đi theo dòng của nó; mọi nút khác dồn xuống mẩu
-                    // cuối, nơi chúng vẫn đứng cạnh nhau như cũ.
+                    // 🔴 Hà 2026-08-14: *"thêm 1 cái icon để bấm chạy bên trong
+                    // text chỗ cuối dòng lệnh"* · *"chứ ko phải đi thay icon"*.
+                    //
+                    // Icon nằm GIỮA CHỮ thì không thể là nút — bàn phím Telegram
+                    // luôn treo dưới đáy tin. Thứ đặt được vào giữa chữ là một
+                    // LIÊN KẾT: deep link về chính bot (`t.me/<bot>?start=run_0`),
+                    // bấm là Telegram gửi `/start run_0`, và `parse_command` cởi
+                    // payload ra thành đúng lệnh ấy. Nên dòng lệnh nay đọc là:
+                    //
+                    //     cd ~/projects/hub && ./hub self-install ▶️
+                    //
+                    // Rơi về nút CHỈ khi chưa biết tên bot (chưa kịp `getMe`) —
+                    // một liên kết không bấm được thì tệ hơn một cái nút.
                     let is_cmd_btn =
                         |d: &str| d.starts_with("run:") || d == "upgrade";
                     let cmd_btns: Vec<(String, String)> =
@@ -715,17 +726,60 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                     let last = slices.len().saturating_sub(1);
                     for (n, (part, idx)) in slices.into_iter().enumerate() {
                         let mut row: Vec<(String, String)> = Vec::new();
-                        if let Some((_, data)) = idx.and_then(|i| cmd_btns.get(i)) {
-                            let icon = if data == "upgrade" { "🔧" } else { "▶" };
-                            row.push((icon.to_string(), data.clone()));
-                        }
+                        // ICON TRONG CHỮ: dựng liên kết cho lệnh của mẩu này.
+                        // `run:<i>` → payload `run_<i>`; nút cài lại hub →
+                        // `upgrade`. Cùng bộ ký tự mà tên lệnh cho phép, nên
+                        // payload đi thẳng, không mã hoá gì thêm.
+                        let inline_icon = idx
+                            .and_then(|i| cmd_btns.get(i))
+                            .and_then(|(_, data)| {
+                                let payload = if data == "upgrade" {
+                                    "upgrade".to_string()
+                                } else {
+                                    data.replace("run:", "run_")
+                                };
+                                let icon = if data == "upgrade" { "🔧" } else { "▶️" };
+                                crate::telegram::deep_link(&payload)
+                                    .map(|href| (href, icon, data.clone()))
+                            });
                         if n == last {
                             row.extend(rest_btns.clone());
                         }
-                        if part.trim().is_empty() && row.is_empty() {
+                        // Chưa biết tên bot ⟹ chưa dựng được liên kết ⟹ rơi về
+                        // cái nút. Một liên kết không bấm được tệ hơn một nút.
+                        if inline_icon.is_none() {
+                            if let Some((_, data)) = idx.and_then(|i| cmd_btns.get(i)) {
+                                let icon = if data == "upgrade" { "🔧" } else { "▶" };
+                                row.insert(0, (icon.to_string(), data.clone()));
+                            }
+                        }
+                        if part.trim().is_empty() && row.is_empty() && inline_icon.is_none() {
                             continue;
                         }
-                        if let Err(e) = tg.send_buttons(&part, &row) {
+                        let sent = match &inline_icon {
+                            // Có liên kết ⟹ đi đường HTML, và icon dán ngay
+                            // CUỐI dòng lệnh (mẩu này kết thúc bằng đúng dòng
+                            // ấy — xem `command_slices`).
+                            Some((href, icon, _)) => {
+                                let html = format!(
+                                    "{} <a href=\"{}\">{}</a>",
+                                    crate::telegram::html_escape(&part),
+                                    crate::telegram::html_escape(href),
+                                    icon
+                                );
+                                if row.is_empty() {
+                                    tg.send_html(&html)
+                                } else {
+                                    // Mẩu cuối vẫn còn nút khác (vào phiên, mở
+                                    // tệp): gửi chữ+icon trước, nút theo sau.
+                                    let r = tg.send_html(&html);
+                                    let _ = tg.send_buttons("⤵", &row);
+                                    r
+                                }
+                            }
+                            None => tg.send_buttons(&part, &row),
+                        };
+                        if let Err(e) = sent {
                             logging::error(
                                 "session_change_telegram_failed",
                                 json!({ "err": e, "slice": n }),

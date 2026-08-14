@@ -1465,3 +1465,17 @@ fn a_short_id_names_a_session_only_when_something_follows_it() {
     // …còn `/type deadbeef` trống thì vẫn là CHỮ gõ vào phiên đang theo.
     assert_eq!(split_target("deadbeef"), None);
 }
+
+#[test]
+fn a_link_is_only_built_for_payloads_telegram_accepts() {
+    // Chưa biết tên bot (chưa kịp getMe) ⟹ None ⟹ chỗ gọi rơi về nút. Một liên
+    // kết không bấm được thì tệ hơn một cái nút.
+    assert!(hub::telegram::deep_link("run_0").is_none(), "chưa có getMe trong test");
+    // Escape đúng ba ký tự Telegram đòi, không hơn: MarkdownV2 mới là thứ bắt
+    // escape mọi ký tự 1–126, và đó là lý do hub gột Markdown suốt từ đầu.
+    assert_eq!(
+        hub::telegram::html_escape("a < b & c > d"),
+        "a &lt; b &amp; c &gt; d"
+    );
+    assert_eq!(hub::telegram::html_escape("cd ~/x && ./hub"), "cd ~/x &amp;&amp; ./hub");
+}

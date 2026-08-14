@@ -445,6 +445,46 @@ pub fn callback_to_command(data: &str) -> Option<String> {
 /// nên đây là "một cái duy nhất" theo đúng nghĩa đen.
 static INBOX: OnceLock<Inbox> = OnceLock::new();
 
+/// Tên công khai của bot, đọc từ `getMe` lúc khởi động.
+///
+/// 🔴 Hà 2026-08-14: *"thêm 1 cái icon để bấm chạy bên trong text chỗ cuối dòng
+/// lệnh"* · *"chứ ko phải đi thay icon"*. Một icon nằm GIỮA CHỮ thì không thể
+/// là nút — bàn phím Telegram luôn treo dưới đáy tin. Thứ đặt được vào giữa chữ
+/// là một LIÊN KẾT, và liên kết chạy được lệnh chỉ có một dạng: deep link về
+/// chính bot, `https://t.me/<bot>?start=<payload>`. Nên cái tên này là điều
+/// kiện cần của cả tính năng.
+static BOT_USERNAME: OnceLock<String> = OnceLock::new();
+
+/// `<a href="…">▶️</a>` — icon bấm được, đặt ngay sau dòng lệnh.
+///
+/// `None` khi chưa biết tên bot (chưa kịp `getMe`, hoặc mạng hỏng): chỗ gọi
+/// phải rơi về chữ thường, KHÔNG bịa ra một liên kết không bấm được.
+///
+/// Payload theo đúng luật Telegram: chỉ `A-Za-z0-9_-`, tối đa 64 ký tự. Trùng
+/// đúng bộ ký tự mà tên lệnh cho phép, nên `run_0` hay `pick_4963b95c_2_1` đi
+/// qua cả hai đường mà không phải mã hoá gì thêm.
+pub fn deep_link(payload: &str) -> Option<String> {
+    let bot = BOT_USERNAME.get()?;
+    if payload.is_empty()
+        || payload.len() > 64
+        || !payload
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return None;
+    }
+    Some(format!("https://t.me/{bot}?start={payload}"))
+}
+
+/// Chữ thường → chữ an toàn cho `parse_mode=HTML`.
+///
+/// Telegram chỉ đòi ba ký tự này (tài liệu Bot API, mục *HTML style*) — nhẹ hơn
+/// hẳn MarkdownV2, thứ bắt escape MỌI ký tự mã 1–126. Đó cũng là lý do hub gột
+/// Markdown suốt từ đầu thay vì bật nó lên.
+pub fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
 pub fn inbox() -> Option<&'static Inbox> {
     INBOX.get()
 }
@@ -932,13 +972,26 @@ impl Inbox {
         // Chỉ tên công khai của bot, không bao giờ token (luật §4).
         match client.get(self.api("getMe")).send().and_then(|r| r.json::<Value>()) {
             Ok(v) => match poll_rejected(&v) {
-                None => logging::info(
-                    "telegram_bot_identity",
-                    json!({
-                        "username": v.get("result").and_then(|r| r.get("username")).and_then(Value::as_str),
-                        "id": v.get("result").and_then(|r| r.get("id")).and_then(Value::as_i64),
-                    }),
-                ),
+                None => {
+                    // GIỮ LẠI tên bot: deep link (`t.me/<bot>?start=…`) là cách
+                    // duy nhất đặt một ICON BẤM ĐƯỢC vào giữa dòng chữ, mà nó
+                    // đòi đúng cái tên này. Trước đây tên ấy chỉ được in ra log
+                    // rồi vứt.
+                    if let Some(u) = v
+                        .get("result")
+                        .and_then(|r| r.get("username"))
+                        .and_then(Value::as_str)
+                    {
+                        let _ = BOT_USERNAME.set(u.to_string());
+                    }
+                    logging::info(
+                        "telegram_bot_identity",
+                        json!({
+                            "username": v.get("result").and_then(|r| r.get("username")).and_then(Value::as_str),
+                            "id": v.get("result").and_then(|r| r.get("id")).and_then(Value::as_i64),
+                        }),
+                    )
+                }
                 Some(why) => logging::error("telegram_bot_unusable", json!({ "why": why })),
             },
             Err(e) => logging::warn(
@@ -1454,6 +1507,39 @@ impl Inbox {
                 .get("description")
                 .and_then(Value::as_str)
                 .unwrap_or("Telegram từ chối deleteMessage")
+                .to_string())
+        }
+    }
+
+    /// Gửi một tin đã dựng sẵn dưới dạng HTML (`parse_mode=HTML`).
+    ///
+    /// Chỗ gọi tự chịu trách nhiệm escape phần CHỮ (`html_escape`) và chỉ chèn
+    /// thẻ mình cố ý — ở đây là `<a href="…">▶️</a>` và `<code>`. Không gột
+    /// Markdown: chữ đã qua tay chỗ gọi rồi, gột thêm là sửa cái mình vừa dựng.
+    pub fn send_html(&self, html: &str) -> Result<(), String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let r = client
+            .post(self.api("sendMessage"))
+            .json(&json!({
+                "chat_id": self.chat_id,
+                "text": html,
+                "parse_mode": "HTML",
+                // Xem trước liên kết sẽ nở một khung to đùng dưới mỗi tin có
+                // icon — đúng thứ không ai muốn khi cái link ấy chỉ là một nút
+                // trá hình.
+                "link_preview_options": { "is_disabled": true },
+            }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            remember_sent(&self.cfg, &v);
+            Ok(())
+        } else {
+            Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối sendMessage (HTML)")
                 .to_string())
         }
     }

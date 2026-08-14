@@ -706,3 +706,30 @@ fn runin_needs_both_a_session_and_a_command() {
     // Người khác gõ thì vẫn chỉ là chữ.
     assert_eq!(parse_command("/runin 4963b95c ls", "u-la", &trusted), None);
 }
+
+/// 🔴 Hà 2026-08-14: *"thêm 1 cái icon để bấm chạy bên trong text chỗ cuối dòng
+/// lệnh"* · *"chứ ko phải đi thay icon"*.
+///
+/// Một icon nằm GIỮA CHỮ không thể là nút — bàn phím Telegram luôn treo dưới
+/// đáy tin. Thứ đặt được vào giữa chữ là một LIÊN KẾT, và liên kết chạy được
+/// lệnh chỉ có một dạng: deep link về chính bot. Đó đúng là thứ Hà hỏi ngay từ
+/// đầu (*"sao không dùng Deep Links"*) và tôi đã đi vòng mất mấy lượt.
+#[test]
+fn a_deep_link_payload_round_trips_back_into_the_same_command() {
+    let owners = owners();
+    // Bấm icon ⟹ Telegram gửi `/start <payload>` ⟹ phải ra ĐÚNG lệnh gõ tay.
+    for (payload, typed) in [
+        ("run_0", "/run_0"),
+        ("pick_4963b95c_2_1", "/pick_4963b95c_2_1"),
+        ("send_4963b95c", "/send_4963b95c"),
+        ("upgrade", "/upgrade"),
+    ] {
+        assert_eq!(
+            tfl5::parse_command(&format!("/start {payload}"), OWNER, &owners),
+            tfl5::parse_command(typed, OWNER, &owners),
+            "payload {payload} phải cởi ra đúng như gõ tay"
+        );
+    }
+    // `/start` trống thì không phải lệnh gì cả — đừng đoán hộ.
+    assert!(tfl5::parse_command("/start", OWNER, &owners).is_none());
+}

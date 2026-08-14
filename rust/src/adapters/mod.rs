@@ -104,6 +104,14 @@ pub enum CommandKind {
     /// (mũi tên + số) vào MỘT `do script`, nên chỉ có đúng một dấu xuống dòng,
     /// ở cuối, chỗ mình chọn.
     Pick,
+    /// `/run_<n>` — chạy lệnh thứ `n` trong sổ lệnh vừa thấy trên màn.
+    ///
+    /// Anh em sinh đôi của nút `run:<n>`, khác đúng một chỗ và chỗ ấy là cả lý
+    /// do nó tồn tại: nó là **chữ nằm trong tin**, nên Telegram tự tô sáng và
+    /// chạm là chạy — không cần một khối nút ở cuối tin. `arg` là con số; dòng
+    /// lệnh thật nằm trong sổ (`pipeline::quick_cmd`), nên nó KHÔNG thể bị cắt
+    /// cụt như một cái nhãn nút.
+    RunQuick,
     /// Ask the focused session a question WITHOUT interrupting it. `arg` is the
     /// question; the target is whatever `/session` is following.
     ///

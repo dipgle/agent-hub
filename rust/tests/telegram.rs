@@ -1411,3 +1411,55 @@ fn a_message_with_no_command_line_is_not_cut_at_all() {
     assert_eq!(s.len(), 1);
     assert_eq!(s[0].1, None, "không tách khi lệnh không nằm trong tin");
 }
+
+/// 🔴 Hà 2026-08-14: *"Sao không dùng Deep Links để định dạng bên trong nội
+/// dung văn bản như khối lệnh thay vì tạo 1 cái nút rất khó hiểu"* · *"Hạn chế
+/// dùng khối nút ở cuối tin"*.
+///
+/// Tài liệu Bot API (mục Commands): *"Highlight commands in messages. When the
+/// user taps a highlighted command, that command is immediately sent again."*
+/// Nên lựa chọn không cần nút — nó cần được VIẾT RA đúng chỗ nó thuộc về.
+#[test]
+fn every_option_becomes_a_tappable_command_next_to_its_question() {
+    let a = hub::sessions::Asking {
+        header: "Vá ACL".into(),
+        question: "Server nên xử sao?".into(),
+        options: vec!["Từ chối".into(), "Vẫn lưu".into()],
+        multi: false,
+        rest: vec![hub::sessions::Question {
+            header: "Đăng nhập".into(),
+            question: "Phân biệt hoa thường?".into(),
+            options: vec!["Không phân biệt".into()],
+            multi: true,
+        }],
+    };
+    let txt = hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a);
+    // Tham số nằm trong TÊN lệnh: chạm chỉ gửi lại token, chữ sau dấu cách rơi.
+    assert!(txt.contains("/pick_4963b95c_1_1 Từ chối"), "{txt}");
+    assert!(txt.contains("/pick_4963b95c_1_2 Vẫn lưu"), "{txt}");
+    assert!(txt.contains("/pick_4963b95c_2_1 Không phân biệt"), "{txt}");
+    // Tên lệnh phải lọt trần 32 ký tự của Telegram.
+    for tok in txt.split_whitespace().filter(|w| w.starts_with("/pick_")) {
+        assert!(tok.len() <= 32, "tên lệnh quá dài: {tok} ({})", tok.len());
+    }
+    // Câu chọn-nhiều phải khai đúng bản chất, và bảng phải nói cách gửi.
+    assert!(txt.contains("(CHỌN NHIỀU)"), "{txt}");
+    assert!(txt.contains("enter"), "{txt}");
+}
+
+#[test]
+fn a_short_id_names_a_session_only_when_something_follows_it() {
+    use hub::pipeline::{same_session, split_target};
+    let full = "4963b95c-93b0-46e3-baf9-40bbfacbef2f";
+    assert!(same_session(full, "4963b95c"), "8 ký tự đầu là một cái tên thật");
+    assert!(same_session(full, full));
+    assert!(!same_session(full, "4963b95"), "7 ký tự thì không — nửa vời là mơ hồ");
+    assert!(!same_session(full, ""), "rỗng không trỏ vào đâu cả");
+    // `/pick 4963b95c 2.1` → nhắm đúng phiên ấy.
+    assert_eq!(
+        split_target("4963b95c 2.1"),
+        Some(("4963b95c".to_string(), "2.1".to_string()))
+    );
+    // …còn `/type deadbeef` trống thì vẫn là CHỮ gõ vào phiên đang theo.
+    assert_eq!(split_target("deadbeef"), None);
+}

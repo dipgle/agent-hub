@@ -1518,6 +1518,24 @@ pub struct Question {
 /// câu hỏi, nhãn, mô tả — và nó có mặt cả với phiên hub KHÔNG đọc được màn
 /// (VS Code, iTerm, phiên nền). Cách nhận biết "chưa trả lời" thì dùng lại đúng
 /// khuôn của bộ đếm subagent: `tool_use` nào chưa có `tool_result` mang id ấy.
+/// Bảng hỏi đang treo của MỘT phiên, tra thẳng theo id.
+///
+/// 🔴 Hà 2026-08-14, ảnh `/shot` một phiên đang mở bảng: *"Vẫn chưa xử lý được
+/// option à"* — màn đã hiện đủ, nút "Làm đi" đã hết trùng, mà nút chọn vẫn
+/// vắng. Gốc: `/shot` đi ĐƯỜNG NHANH (`window_target_from_book`), và đường ấy
+/// dựng `LiveSession` từ cuốn sổ cửa sổ — sổ chỉ giữ tên, tty, pid, tài khoản,
+/// nên `asking` rơi về `None` qua `..Default::default()`. Bộ nút hỏi một trường
+/// mà con đường ấy chưa bao giờ điền.
+///
+/// Đường nhanh vẫn giữ (nó có mặt vì đường chậm từng mất 117–134 giây trên máy
+/// đang swap); chỗ này chỉ trả tiền một lần đọc tệp KHI đã biết là cần —
+/// tức đúng lúc dựng nút cho một phiên, không phải mỗi vòng cho mọi phiên.
+pub fn asking_of(cfg: &crate::config::Config, session_id: &str) -> Option<Asking> {
+    let path = find_transcript(&cfg.claude_transcript_root(), session_id)?;
+    let tail = read_tail(&path).ok()?;
+    pending_question(&tail)
+}
+
 pub fn pending_question(tail: &str) -> Option<Asking> {
     let mut asked: Vec<(String, Asking)> = Vec::new();
     let mut answered: HashSet<String> = HashSet::new();

@@ -623,6 +623,37 @@ pub fn parse_command(
     // No verb takes a numeric id any more — the ones that did (`/approve 12`,
     // `/close 87`) pointed at inbox rows. Session verbs take a session id or
     // nothing, and each one re-splits the text for itself.
+    // ⭐ LỆNH TỰ TÔ SÁNG — tham số nằm trong TÊN lệnh, không phải sau dấu cách.
+    //
+    // 🔴 Hà 2026-08-14: *"Sao không dùng Deep Links để định dạng bên trong nội
+    // dung văn bản như khối lệnh thay vì tạo 1 cái nút rất khó hiểu"* →
+    // *"Hạn chế dùng khối nút ở cuối tin"*.
+    //
+    // Anh chỉ đúng chỗ tôi đã kết luận sai: tôi bảo Telegram không đặt nút giữa
+    // chữ được — đúng với `inline_keyboard`, nhưng nó KHÔNG phải cách duy nhất
+    // để bấm. Tài liệu Bot API (mục *Commands*) nói thẳng: *"Highlight commands
+    // in messages. When the user taps a highlighted command, that command is
+    // immediately sent again."* Tức chỉ cần IN `/lệnh` vào giữa câu là nó thành
+    // thứ chạm được, đứng đúng chỗ nó nói tới, không cần một khối nút ở cuối
+    // tin mà người đọc phải tự ghép "nút nào ứng với đoạn nào".
+    //
+    // Ràng buộc là cả thiết kế: tên lệnh **≤32 ký tự, chỉ Latin/số/gạch dưới**,
+    // và chạm chỉ gửi lại ĐÚNG token lệnh — chữ sau dấu cách rơi mất. Nên tham
+    // số phải nằm trong tên: `/pick_4963b95c_2_1` (18 ký tự) mang đủ phiên, câu
+    // và lựa chọn; `/run_0` trỏ vào sổ lệnh thay vì chép dòng lệnh vào nhãn —
+    // và đó cũng là lý do nó không thể cắt cụt như cái nút hôm nay đã làm.
+    if let Some(rest) = verb.strip_prefix("pick_") {
+        // `pick_<8 ký tự đầu id>_<câu>_<lựa chọn>`
+        let f: Vec<&str> = rest.split('_').collect();
+        if f.len() == 3 && !f[0].is_empty() {
+            return Some((CommandKind::Pick, 0, format!("{} {}.{}", f[0], f[1], f[2])));
+        }
+    }
+    if let Some(n) = verb.strip_prefix("run_") {
+        if n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty() {
+            return Some((CommandKind::RunQuick, 0, n.to_string()));
+        }
+    }
     match verb.as_str() {
         "help" | "?" => Some((CommandKind::Help, 0, String::new())),
         // `/approve` `/reject` `/close` `/reply` `/act` were parsed here until

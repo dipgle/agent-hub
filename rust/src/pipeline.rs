@@ -166,10 +166,28 @@ pub fn split_target(arg: &str) -> Option<(String, String)> {
         Some((h, r)) => (h, r.trim()),
         None => (arg, ""),
     };
-    let looks_like_id = head.len() >= 32
+    let full_uuid = head.len() >= 32
         && head.matches('-').count() == 4
         && head.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
-    looks_like_id.then(|| (head.to_string(), rest.to_string()))
+    // Id NGẮN (8 ký tự hex) cũng là một cái tên phiên thật: hub in nó khắp nơi
+    // (`f7612183`), và một lệnh tự tô sáng thì BẮT BUỘC phải dùng nó — tên lệnh
+    // chỉ được 32 ký tự, một uuid đầy đủ đã 36. Hẹp có chủ ý: đúng 8, toàn hex,
+    // và phải có chữ đi sau — `/type deadbeef` trống thì vẫn là chữ gõ vào
+    // phiên, không phải một lệnh nhắm vào phiên `deadbeef`.
+    let short_id = head.len() == 8
+        && head.chars().all(|c| c.is_ascii_hexdigit())
+        && !rest.is_empty();
+    (full_uuid || short_id).then(|| (head.to_string(), rest.to_string()))
+}
+
+/// Hai chuỗi này có chỉ vào CÙNG một phiên không?
+///
+/// `want` được phép là **8 ký tự đầu** của id — dạng hub in ra khắp nơi, và là
+/// dạng DUY NHẤT một lệnh tự tô sáng dùng được (tên lệnh tối đa 32 ký tự, một
+/// uuid đã 36). Khớp tiền tố chỉ nhận đúng độ dài ấy: nửa vời hơn thì hai phiên
+/// khác nhau có thể cùng khớp, và gõ vào nhầm phiên là thứ không lùi lại được.
+pub fn same_session(id: &str, want: &str) -> bool {
+    !want.is_empty() && (id == want || (want.len() == 8 && id.starts_with(want)))
 }
 
 /// Sổ ghi trạng thái từng phiên ở lượt trước, để thấy được CHUYỂN trạng thái.
@@ -1349,7 +1367,7 @@ fn stopped_session(db: &Db, want: &str) -> Option<crate::sessions::LiveSession> 
         }
     };
     match serde_json::from_str::<crate::sessions::LiveSession>(&raw) {
-        Ok(s) if s.session_id == want => Some(s),
+        Ok(s) if same_session(&s.session_id, want) => Some(s),
         Ok(_) => None,
         Err(e) => {
             logging::warn(
@@ -2220,6 +2238,60 @@ pub fn command_slices(text: &str, cmds: &[String]) -> Vec<(String, Option<usize>
     out
 }
 
+/// Bảng hỏi viết thành CHỮ CHẠM ĐƯỢC, mỗi lựa chọn một lệnh tự tô sáng.
+///
+/// 🔴 Hà 2026-08-14: *"Sao không dùng Deep Links để định dạng bên trong nội
+/// dung văn bản như khối lệnh thay vì tạo 1 cái nút rất khó hiểu"* · *"Hạn chế
+/// dùng khối nút ở cuối tin"*.
+///
+/// Tài liệu Bot API, mục *Commands*: *"Highlight commands in messages. When the
+/// user taps a highlighted command, that command is immediately sent again."*
+/// Nên một lựa chọn không cần cái nút nào cả — nó chỉ cần được VIẾT RA đúng chỗ
+/// nó thuộc về, ngay dưới câu hỏi của nó. Khối nút ở cuối tin bắt người đọc tự
+/// ghép "nút nào ứng với đoạn nào", và đó đúng là chỗ hôm nay đẻ ra hai nút
+/// "Làm đi" chồng nhau mà không ai biết cái nào là cái nào.
+///
+/// Tham số nằm trong TÊN lệnh vì chạm chỉ gửi lại token lệnh — chữ sau dấu cách
+/// rơi mất. `pick_<8 ký tự đầu id>_<câu>_<lựa chọn>` = 17 ký tự, dưới trần 32.
+pub fn ask_command_lines(session_id: &str, a: &crate::sessions::Asking) -> String {
+    let sid: String = session_id.chars().take(8).collect();
+    if sid.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    let all = std::iter::once((a.header.clone(), a.question.clone(), a.options.clone(), a.multi))
+        .chain(
+            a.rest
+                .iter()
+                .map(|q| (q.header.clone(), q.question.clone(), q.options.clone(), q.multi)),
+        );
+    for (qi, (header, question, options, multi)) in all.enumerate() {
+        if options.is_empty() {
+            continue;
+        }
+        let head = if header.is_empty() { question.clone() } else { header };
+        out.push_str(&format!(
+            "\n\n▸ Câu {} — {}{}",
+            qi + 1,
+            crate::exec::truncate(&head, 60),
+            if multi { " (CHỌN NHIỀU)" } else { "" }
+        ));
+        for (oi, label) in options.iter().take(9).enumerate() {
+            out.push_str(&format!(
+                "\n/pick_{sid}_{}_{} {}",
+                qi + 1,
+                oi + 1,
+                crate::exec::truncate(label, 60)
+            ));
+        }
+    }
+    if !out.is_empty() {
+        // Bảng chỉ đi khi hết ô trống — nói ngay tại chỗ, kèm đúng cái lệnh gửi.
+        out.push_str(&format!("\n\nTrả lời hết rồi gửi: /key {session_id} enter"));
+    }
+    out
+}
+
 /// Dòng lệnh này có phải là "hub dựng lại chính hub" không?
 ///
 /// Hàng rào HẸP có chủ ý — đây là danh sách hai đường duy nhất cài lại hubd
@@ -2635,6 +2707,31 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
         // "Không tìm thấy decision #0" as its reply. That whole stage went with
         // the inbox on 2026-08-08; there are no decisions left to look up.
         let answered: Option<String> = match cmd.kind {
+            // `/run_<n>` — bản CHỮ của nút `▶`, và là bản đáng tin hơn: dòng
+            // lệnh nằm trong sổ chứ không nằm trong nhãn, nên nó không thể bị
+            // cắt cụt (xem `keys::BTN_CMD_MAX`). Chạm chữ tô sáng là chạy.
+            CommandKind::RunQuick => {
+                let n = cmd.arg.trim().parse::<usize>().unwrap_or(usize::MAX);
+                match quick_cmd(db, n) {
+                    Some((sid, line)) => {
+                        logging::info(
+                            "run_quick",
+                            json!({ "n": n, "session": sid,
+                                    "cmd": crate::exec::truncate(&line, 120) }),
+                        );
+                        // Cùng đường với cái nút: MÁY chạy, PHIÊN đọc.
+                        let ack = format!("▶ chạy trong {sid}: {line}");
+                        reply_in_channel(db, cfg, adapter, cmd, &ack);
+                        if let Some(tg) = crate::telegram::inbox() {
+                            tg.push_text(&format!("/runin {sid} {line}"));
+                        }
+                        Some(ack)
+                    }
+                    None => Some(
+                        "⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.".to_string(),
+                    ),
+                }
+            }
             CommandKind::Help => {
                 let ack = "Lệnh dùng được trong phòng này:\n\
                      — Phiên Claude —\n\
@@ -2718,7 +2815,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 }
                 let live =
                     crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
-                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                let ack = match live.sessions.iter().find(|s| same_session(&s.session_id, &want)) {
                     None => format!(
                         "⚠ không thấy phiên '{}' đang chạy — lệnh KHÔNG chạy.",
                         crate::exec::truncate(&want, 40)
@@ -2988,7 +3085,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let target = live
                     .sessions
                     .iter()
-                    .find(|s| s.session_id == want)
+                    .find(|s| same_session(&s.session_id, &want))
                     .cloned()
                     .or_else(|| ended_session(db, &want));
                 let ack = match target.as_ref() {
@@ -3242,7 +3339,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // vì nó xét `kind`, không xét quyền sở hữu.
                 let mut live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 mark_started_by_hub(db, &mut live);
-                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                let ack = match live.sessions.iter().find(|s| same_session(&s.session_id, &want)) {
                     None if want.is_empty() => "⚠ chưa mở phiên nào.".to_string(),
                     None => format!(
                         "⚠ không thấy phiên '{}' đang chạy",
@@ -3305,7 +3402,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let mut live =
                     crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                 mark_started_by_hub(db, &mut live);
-                let ack = match live.sessions.iter().find(|s| s.session_id == want) {
+                let ack = match live.sessions.iter().find(|s| same_session(&s.session_id, &want)) {
                     None if want.is_empty() => {
                         "⚠ chưa theo phiên nào — bấm một phiên rồi /close, hoặc /close <id>."
                             .to_string()
@@ -3377,7 +3474,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let target = live
                     .sessions
                     .iter()
-                    .find(|s| s.session_id == want)
+                    .find(|s| same_session(&s.session_id, &want))
                     .cloned()
                     .or_else(|| stopped_session(db, &want));
                 let ack = match target.as_ref() {
@@ -3461,7 +3558,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 };
                 let target = booked.or_else(|| {
                     live.as_ref()
-                        .and_then(|l| l.sessions.iter().find(|s| s.session_id == want).cloned())
+                        .and_then(|l| l.sessions.iter().find(|s| same_session(&s.session_id, &want)).cloned())
                 });
                 // Id của phiên ĐANG được thao tác — giữ TRƯỚC khi `match` nuốt mất
                 // `target`. Mọi cái nút dựng bên dưới phải buộc vào phiên này, không
@@ -3477,7 +3574,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // bảng `AskUserQuestion` (mỗi lựa chọn có một dòng mô tả bên
                 // dưới, đúng hình dạng luật "liền dòng" loại bỏ — đo được: 0
                 // mục trên chính màn ấy). Nhật ký thì đọc ra đủ.
-                let shot_asking = target.as_ref().and_then(|s| s.asking.clone());
+                // Đường NHANH không mang `asking` (sổ cửa sổ không giữ trường
+                // ấy) — nên hỏi thẳng nhật ký khi ảnh chụp không trả lời được.
+                let shot_asking = target
+                    .as_ref()
+                    .and_then(|s| s.asking.clone())
+                    .or_else(|| {
+                        (!shot_sid.is_empty())
+                            .then(|| crate::sessions::asking_of(cfg, &shot_sid))
+                            .flatten()
+                    });
                 let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
@@ -3508,7 +3614,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     .trim()
                                     .parse::<usize>()
                                     .unwrap_or(SHOT_LINES);
-                                screen_report(&s, w, n)
+                                let mut out = screen_report(&s, w, n);
+                                // Phiên đang mở bảng hỏi ⟹ viết luôn từng lựa
+                                // chọn thành lệnh chạm-được, ngay dưới màn.
+                                if let Some(a) = shot_asking.as_ref() {
+                                    out.push_str(&ask_command_lines(&shot_sid, a));
+                                }
+                                out
                             } else if matches!(cmd.kind, CommandKind::Pick) {
                                 // Bảng nhiều câu đi đường riêng: nó phải ĐỌC
                                 // trước khi gõ (đang đứng ở câu nào), và gõ cả
@@ -3823,15 +3935,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // với tin tự phát (`telegram::choice_buttons`), không đẻ
                     // lối riêng: `pick:<id>:<câu>.<lựa chọn>` cho mọi câu, kèm
                     // `✅ Gửi lựa chọn`.
-                    if let Some(a) = shot_asking.as_ref() {
-                        quick.extend(crate::telegram::choice_buttons(
-                            &shot_sid,
-                            &a.options,
-                            false,
-                            a.multi,
-                            &a.rest,
-                        ));
-                    }
+                    // Bảng hỏi đi bằng CHỮ chạm được, không bằng khối nút — xem
+                    // `ask_command_lines`. Phần chữ ấy nối vào cuối `ack` ngay
+                    // dưới, chứ không dựng nút nào.
                     // Ô nhập có chữ ⟹ một cái nút GỬI. Đúng một icon.
                     //
                     // 🔴 Hà 2026-08-13, ảnh chụp nút `⏎ Gửi: # Lệnh thấy trên
@@ -3918,11 +4024,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let target = live
                     .sessions
                     .iter()
-                    .find(|s| s.session_id == want)
+                    .find(|s| same_session(&s.session_id, &want))
                     .cloned()
                     .or_else(|| ended_session(db, &want));
                 let from_ended =
-                    target.is_some() && !live.sessions.iter().any(|s| s.session_id == want);
+                    target.is_some() && !live.sessions.iter().any(|s| same_session(&s.session_id, &want));
                 let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên trên màn Phiên rồi hỏi lại."
@@ -4110,7 +4216,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     let target = live
                         .sessions
                         .iter()
-                        .find(|s| s.session_id == want)
+                        .find(|s| same_session(&s.session_id, want))
                         .cloned()
                         .or_else(|| stopped_session(db, want));
                     match target {

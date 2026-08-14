@@ -57,9 +57,11 @@ binary phải cùng một nhịp**, đúng luật "contract + consumer ship cùn
   `git rm` bị hook chặn 6 lần rồi bị từ chối quyền; **phải để Hà gõ tay**.
 - `.runner-allowlist` còn `bash ../hub ingest` (lệnh đã chết) và
   `node ../ui-smoke.mjs`. Claude sửa allowlist = self-grant, bị chặn — Hà tự sửa.
-- **Mất hai chốt canh "không hiện tiền trên màn"** (`portal.rs` và
-  `fe-board-uc.mjs` cùng assert ABSENCE). `#[serde(skip_serializing)]` vẫn giữ
-  luật ở nguồn, nhưng **không còn test nào canh**. Đã ghi vào `CLAUDE.md` §9.
+- ~~Mất hai chốt canh "không hiện tiền trên màn"~~ → **đã vá cùng ngày**
+  (`f228d96`): `tests/no_money_on_screen.rs` soi hình dạng tuần tự hoá của
+  `Handover`/`Aside`/`Told` + bản chụp phiên, tức đứng THẤP HƠN hai chốt cũ (vốn
+  soi ảnh chụp của một kênh nên chết theo kênh). Kiểm tay là **đỏ được**: gỡ
+  `skip_serializing` khỏi `Handover::cost_usd` ⟹ exit 101. 266 test.
 - **Nghiệm thu thật chưa có:** mới chứng minh daemon lên, đăng ký 10 lệnh, chạy
   vòng sạch. Một mệnh lệnh gõ THẬT trong buồng Telegram thì chưa — Hà phải gõ.
 

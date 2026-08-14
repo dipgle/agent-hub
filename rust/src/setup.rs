@@ -15,8 +15,8 @@
 //!
 //! Nó cũng là NGOẠI LỆ có căn cứ cho luật 12 (*"trang điện thoại là UI duy
 //! nhất"*): luật ấy sinh ra để chặn một bảng điều khiển vận hành thứ hai. Còn
-//! đây là bước MỒI — lúc này chưa có tài khoản tfl5 thì chưa có phòng chat nào
-//! để mà ra lệnh. Không có bước mồi thì không có cái UI kia.
+//! đây là bước MỒI — lúc này chưa có khoá bot thì chưa có buồng chat nào để mà
+//! ra lệnh. Không có bước mồi thì không có cái UI kia.
 //!
 //! Bốn ranh giới, và cả bốn đều là quyết định chứ không phải mặc định:
 //! * **Chỉ 127.0.0.1**, không bao giờ `0.0.0.0` — trang này không có việc gì ở
@@ -376,9 +376,10 @@ fn form_page(ticket: &str, have: &[String]) -> String {
          <h1>Cấu hình hub</h1>\
          <p class=\"lead\">Trang này chỉ chạy trên máy của bạn. Bấm Lưu là nó ghi thẳng vào \
          <code>hub.env</code> (chmod 600) rồi tự đóng — không có gì đi ra ngoài.</p>\
-         <div class=\"note\"><b>Một app tfl5 cho riêng bạn.</b> Đừng dùng chung app với người khác: \
-         ảnh chụp trạng thái mang <i>chữ đang hiện trên màn</i> phiên của bạn, và hub chỉ nhận lệnh \
-         từ đúng một tài khoản. Dùng chung nghĩa là màn hình nhiều người nằm một chỗ.</div>\
+         <div class=\"note\"><b>Một bot Telegram cho riêng bạn.</b> Đừng dùng chung bot với người \
+         khác: tin hub gửi đi mang <i>chữ đang hiện trên màn</i> phiên của bạn, và <code>chat_id</code> \
+         dưới đây là cổng DUY NHẤT — đúng một phép so ấy là thứ ngăn người lạ chạy lệnh bằng shell \
+         của bạn.</div>\
          <form method=\"POST\" action=\"/save?t={ticket}\">{inputs}<button>Lưu</button></form>\
          </body></html>"
     )

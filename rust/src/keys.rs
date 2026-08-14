@@ -851,6 +851,28 @@ fn commands_in(text: &str, max: usize, max_len: usize) -> Vec<String> {
 /// gì, mà thêm nó là mở cửa cho mọi dòng bắt đầu bằng `cd`. Thay vào đó, nhận
 /// đúng HÌNH DẠNG: `cd <gì đó> &&|; <phần còn lại>` thì đem **phần còn lại** đi
 /// hỏi cùng cái hàng rào ấy. Hàng rào không đổi, chỉ hỏi đúng chỗ.
+/// Đuôi của một dòng lệnh vừa bị cửa sổ bẻ — hoặc `None` nếu không chắc.
+///
+/// Cố ý HẸP, vì nối nhầm là dựng ra một lệnh chưa ai viết: đuôi phải là một
+/// mẩu liền (không dấu cách) hoặc một tham số `-x`/`--x`. Một câu văn ở dòng
+/// dưới thì không phải đuôi, và lúc ấy chỗ gọi bỏ luôn cái nút.
+fn wrap_tail(next: Option<&str>) -> Option<String> {
+    let t = next?.trim();
+    if t.is_empty() || t.len() > 60 {
+        return None;
+    }
+    // Dấu nhắc / gạch đầu dòng = một dòng MỚI, không phải phần tiếp. `-` KHÔNG
+    // nằm đây: một tham số `-v` hay `--expect-symbol` bắt đầu đúng như thế.
+    for p in ["$", "❯", ">", "⏵", "%", "•", "!", "#", "⎿", "│"] {
+        if t.starts_with(p) {
+            return None;
+        }
+    }
+    let one_token = !t.contains(char::is_whitespace);
+    let a_flag = t.starts_with('-');
+    (one_token || a_flag).then(|| t.to_string())
+}
+
 fn after_cd(line: &str) -> Option<&str> {
     let rest = line.strip_prefix("cd ")?;
     let (_dir, tail) = rest
@@ -867,11 +889,103 @@ fn after_cd(line: &str) -> Option<&str> {
         "ls",
     ];
     let mut out: Vec<String> = Vec::new();
-    for raw in screen.lines() {
+    let rows: Vec<&str> = screen.lines().collect();
+    // Bề ngang cửa sổ, đo từ chính màn: dòng dài nhất. Chỉ có nghĩa khi nguồn
+    // là MÀN — chữ báo cáo không bị bẻ, nên `wrapped` tắt luật này đi.
+    //
+    // Bề ngang chỉ ĐO ĐƯỢC khi có đủ dòng để đo: trên một mẩu chữ ba dòng, dòng
+    // dài nhất chính là dòng đang xét, và "chỗ trống còn lại" ra 0 cho mọi
+    // dòng — phép đo tự khẳng định điều nó định kiểm. Một màn Terminal thật
+    // luôn dày hơn thế.
+    const MIN_ROWS_FOR_WIDTH: usize = 6;
+    let wrapped = max_len == BTN_CMD_MAX && rows.len() >= MIN_ROWS_FOR_WIDTH;
+    let width = rows.iter().map(|l| l.chars().count()).max().unwrap_or(0);
+    for (li, raw) in rows.iter().enumerate() {
+        let raw = *raw;
         // Câu đang CẤM một lệnh thì không phải câu mời chạy nó.
         if forbids(raw) {
             continue;
         }
+        // 🔴 MỘT LỆNH CỤT LÀ MỘT LỆNH KHÁC. Đo được 2026-08-14 trên màn thật
+        // của `[tfl5]`, ba dòng liền nhau trong câu trả lời `/shot`:
+        //     [10] len=58  "  git -C /Users/hanguyen/projects/AI/tfl5 push origin main"
+        //     [11] len=57  "  bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh"
+        //     [12] len=27  "  static-cache-refresh-0814"
+        // Cửa sổ rộng ~58, nên dòng 11 là NỬA ĐẦU của một lệnh bị bẻ — mà nửa
+        // ấy dài 55 sau khi trim, tức LỌT trần 60 và ra một cái nút. Sổ ghi lại
+        // đúng như thế: `bash …/scripts/deploy.sh`, không có tên bản. Bấm vào
+        // là chạy một lệnh triển khai THIẾU tham số, trên một dự án thật.
+        //
+        // Trần `BTN_CMD_MAX` sinh ra để chặn chuyện này nhưng chỉ chặn được mẩu
+        // DÀI; mẩu cụt lại thường NGẮN, nên nó lọt qua đúng cái cửa dựng ra để
+        // giữ nó. Phép đo đúng không phải độ dài, mà là **dòng có chạm mép cửa
+        // sổ không**.
+        //
+        // Và phép đo phải trỏ đúng chỗ: dòng bị bẻ KHÔNG dài bằng mép. TUI bẻ
+        // theo TỪ, nên nó dừng ở khoảng trắng cuối cùng lọt vào bề ngang —
+        // dòng 11 dài 57 trên một cửa sổ rộng 80. Đo "chạm mép" bằng độ dài là
+        // đo trượt; tôi đã viết bản ấy trước, và chính phân bố độ dài của màn
+        // thật (max 80, ba dòng đạt 80) bác bỏ nó.
+        //
+        // Dấu hiệu ĐÚNG của word-wrap: **từ đầu tiên của dòng sau không vừa
+        // vào chỗ trống còn lại** — 25 ký tự `static-cache-refresh-0814` không
+        // lọt vào 23 chỗ trống, nên nó bị đẩy xuống. Một câu văn đi sau một
+        // dòng lệnh thì ngược lại: từ đầu của nó thường vừa, tức nó xuống dòng
+        // vì người viết muốn thế.
+        //
+        // Nối lại bằng MỘT dấu cách (word-wrap nuốt đúng một cái). Có dấu hiệu
+        // bẻ mà đuôi không nhận ra được ⟹ **THÔI, không dựng nút**: thà thiếu
+        // một cái nút còn hơn một cái nút chạy lệnh khác lệnh in ra.
+        //
+        // Nối LẶP, vì một lệnh dài bị bẻ hai lần vẫn là một lệnh — nhưng có
+        // trần: bẻ quá ba lần thì đây là một đoạn văn, không phải một dòng.
+        let mut joined = String::new();
+        let mut cap = max_len;
+        let mut cur = raw;
+        let mut k = li;
+        if wrapped && width > 0 {
+            for _ in 0..3 {
+                // Chỗ trống đo trên DÒNG MÀN cuối cùng đã gộp (`rows[k]`),
+                // không trên chuỗi đã nối: chuỗi nối dài hơn bề ngang cửa sổ
+                // theo đúng định nghĩa, nên đo trên nó thì "chỗ trống" luôn
+                // bằng 0 và mọi dòng kế tiếp đều trông như bị đẩy xuống.
+                let space_left = width.saturating_sub(rows[k].chars().count());
+                let pushed = rows
+                    .get(k + 1)
+                    .and_then(|n| n.split_whitespace().next())
+                    .is_some_and(|w| w.chars().count() + 1 > space_left);
+                if !pushed {
+                    break;
+                }
+                match wrap_tail(rows.get(k + 1).copied()) {
+                    Some(tail) => {
+                        joined = format!("{} {}", cur.trim_end(), tail);
+                        // Đã nối xong thì đây là dòng TRỌN VẸN, không còn là
+                        // mẩu — nên trần "sợ mẩu cụt" thôi áp: một lệnh
+                        // triển khai có đường dẫn tuyệt đối vượt 60 là chuyện
+                        // thường, và đúng nó là thứ đáng bấm.
+                        cap = BTN_CMD_REPORT_MAX;
+                        cur = joined.as_str();
+                        k += 1;
+                    }
+                    // Có dấu hiệu bẻ mà đuôi không nhận ra được ⟹ THÔI —
+                    // nhưng chỉ khi CHƯA nối được lần nào. Đã nối xong một
+                    // lần thì dòng đang cầm là trọn vẹn, và cái đứng sau nó
+                    // chỉ là dòng kế tiếp của màn.
+                    None => {
+                        if joined.is_empty() {
+                            cur = "";
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        if cur.is_empty() {
+            continue;
+        }
+        let max_len = cap;
+        let raw = cur;
         let mut line = raw.trim();
         // Dấu nhắc và dấu trang trí của TUI đứng trước lệnh.
         //

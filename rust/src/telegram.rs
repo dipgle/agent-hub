@@ -1634,6 +1634,30 @@ impl Inbox {
             return;
         }
         self.push_text(text);
+        // 🔴 Hà 2026-08-14, ảnh chụp buồng chat sau khi bấm icon ▶️: *"Sao bấm
+        // lại thành lệnh start à"*.
+        //
+        // Đúng, và đó là cái GIÁ của một icon nằm GIỮA CHỮ: Telegram không đặt
+        // nút vào giữa chữ được, thứ đặt được là một liên kết
+        // `t.me/<bot>?start=run_0`, và bấm nó thì client GỬI `/start run_0` —
+        // rồi hiển thị nó rút gọn còn `/start`, giấu mất payload. Nên chủ máy
+        // thấy chính mình vừa gõ một câu chẳng nói gì.
+        //
+        // Không bỏ được cơ chế (bỏ là mất icon trong chữ, quay về khối nút ở
+        // đáy — thứ vừa bị chê), nhưng cái vết thì dọn được: trong buồng chat
+        // RIÊNG, bot xoá được tin đến (Bot API, `deleteMessage`, trong 48 giờ).
+        // Xoá hỏng thì thôi, không phải lỗi chặn việc — nhưng phải có dòng nói
+        // ra, đừng im.
+        if text == "/start" || text.starts_with("/start ") {
+            if let Some(mid) = msg.get("message_id").and_then(Value::as_i64) {
+                if let Err(e) = self.delete_message(mid) {
+                    logging::info(
+                        "telegram_start_echo_kept",
+                        json!({ "why": e, "what": "tiếng vọng /start của một cú bấm icon" }),
+                    );
+                }
+            }
+        }
     }
 
     /// Xoá MỘT tin của chính bot. `Err` mang nguyên câu Telegram trả lời, vì

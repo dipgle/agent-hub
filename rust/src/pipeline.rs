@@ -2296,13 +2296,29 @@ pub fn say_with_command_icons(
                 row.insert(0, (icon.to_string(), data.clone()));
             }
         }
-        if part.trim().is_empty() && row.is_empty() && inline_icon.is_none() {
+        // 🔴 Đo phép đo Ở ĐÚNG CHỖ TELEGRAM ĐO: `strip_markdown` bỏ hẳn dòng
+        // rào ```, nên một mẩu chỉ chứa rào (chuyện thường khi cắt ngay sau một
+        // dòng lệnh nằm trong khối code) trông đầy chữ ở đây mà tới Telegram là
+        // RỖNG. Đo được ngay lượt chạy thật đầu tiên, 2026-08-14 08:58:32:
+        // `telegram_ack_failed {"err":"Bad Request: message text is empty",
+        // "slice":1}`. Kiểm `part.trim()` là kiểm chữ hub cầm, không phải chữ
+        // Telegram nhận.
+        let shown = crate::telegram::strip_markdown(&part);
+        if shown.trim().is_empty() && inline_icon.is_none() {
+            // Không còn chữ nào, nhưng nút thì vẫn phải giao — bỏ luôn cả nút
+            // là đánh rơi đường bấm, đúng loại hỏng im lặng luật 3 cấm.
+            if row.is_empty() {
+                continue;
+            }
+            if let Err(e) = tg.send_buttons("⤵", &row) {
+                logging::error(log_key, json!({ "err": e, "slice": n }));
+            }
             continue;
         }
         // Một mẩu dài hơn trần thì đi làm nhiều tin, và **icon bám mẩu CUỐI** —
         // đó là mẩu chứa dòng lệnh (xem `command_slices`). Gắn vào mẩu đầu là
         // đặt cái icon cách dòng lệnh của nó vài màn hình.
-        let mut chunks = split_for_telegram(&part);
+        let mut chunks = split_for_telegram(&shown);
         let tail = chunks.pop().unwrap_or_default();
         for (k, head) in chunks.into_iter().enumerate() {
             if let Err(e) = tg.send_text(&head) {
@@ -4012,9 +4028,14 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Đường đi vẫn là một: nút gõ dòng lệnh vào phiên qua `/type`,
                 // tức cùng route, cùng sổ (xem `remember_quick`).
                 let mut quick = Vec::new();
+                // Giữ riêng ĐÚNG các dòng lệnh (không kèm "làm đi"), vì icon
+                // trong chữ phải bám đúng dòng sinh ra nó — xem
+                // `say_with_command_icons`.
+                let mut cmd_lines: Vec<String> = Vec::new();
                 if matches!(cmd.kind, CommandKind::Shot) {
                     let mut cmds = crate::keys::commands_on_screen(&ack, 4);
                     let n_cmds = cmds.len();
+                    cmd_lines = cmds[..n_cmds].to_vec();
                     // Câu đồng ý nằm CÙNG kho với lệnh (một chỗ nhớ, một chỉ
                     // số), nhưng đi bằng callback KHÁC: `run:` gõ một DÒNG
                     // LỆNH, còn đây là một câu chữ thường.
@@ -4135,10 +4156,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 }
                 match (quick.is_empty(), crate::telegram::inbox()) {
                     (false, Some(tg)) if adapter == crate::telegram::NAME => {
-                        if let Err(e) = tg.send_buttons(&ack, &quick) {
-                            logging::error("quick_buttons_failed", json!({ "err": e }));
-                            reply_in_channel(db, cfg, adapter, cmd, &ack);
-                        }
+                        // 🔴 Hà 2026-08-14, ảnh chụp câu trả lời `/shot`: *"Vẫn
+                        // thấy hiện nút kiểu cũ là sao"*. Vì đây là đường THỨ BA
+                        // dùng cùng cuốn sổ nút, và nó chưa được nối vào máy móc
+                        // icon-trong-chữ (hai đường kia: tin tự phát, bản đầy
+                        // đủ). Đúng cái hình dạng đã lặp ba lần trong tệp này:
+                        // vá một chỗ, quên chỗ bên cạnh, vì không ai bắt ba chỗ
+                        // phải giống nhau. Nay CHÚNG GỌI CHUNG MỘT HÀM.
+                        say_with_command_icons(
+                            tg,
+                            &ack,
+                            &cmd_lines,
+                            &quick,
+                            "quick_buttons_failed",
+                        );
                     }
                     _ => reply_in_channel(db, cfg, adapter, cmd, &ack),
                 }

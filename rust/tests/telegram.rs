@@ -1564,3 +1564,42 @@ fn a_report_is_not_a_screen_so_its_lines_are_never_half_a_command() {
     assert!(block.len() > hub::keys::BTN_CMD_REPORT_MAX, "khối chuẩn phải dài hơn trần");
     assert!(hub::keys::commands_in_report(&block, 3).is_empty());
 }
+
+/// Một lệnh CỤT là một lệnh KHÁC — và cụt thì thường NGẮN, nên trần độ dài
+/// không bắt được nó.
+///
+/// 🔴 Màn THẬT của `[tfl5]` trong câu trả lời `/shot` lúc 2026-08-14 08:59,
+/// chép nguyên văn từ log (`channel_command_handled`, kind Shot). Cửa sổ rộng
+/// 80 — ba dòng đạt đúng 80 — và dòng lệnh bị bẻ theo TỪ nên nó chỉ dài 57:
+///   [11] 57  "  bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh"
+///   [12] 27  "  static-cache-refresh-0814"
+/// 55 ký tự sau trim ⟹ LỌT trần 60 ⟹ ra một cái nút, và sổ `quick:cmds` ghi
+/// đúng bản cụt ấy. Bấm vào là chạy một lệnh triển khai THIẾU tên bản, trên dự
+/// án thật.
+///
+/// Phép đo phải là DẤU HIỆU WORD-WRAP, không phải độ dài: từ
+/// `static-cache-refresh-0814` (25 ký tự) không lọt vào 23 chỗ trống còn lại,
+/// nên nó bị đẩy xuống. Bản đầu của phép đo này hỏi "dòng có chạm mép không"
+/// và trượt, vì một dòng bị bẻ theo từ thì KHÔNG chạm mép.
+#[test]
+fn a_command_cut_at_the_window_edge_is_rejoined_or_dropped() {
+    let screen = "uc_site_e2e 1/1 · clippy -D warnings 0. \n  Hai điều tôi nói rõ để không ai đọc quá lời:\n  1. Chưa xác nhận cpanel/codetrail thật sự chạy nhánh STATIC trên prod — ssh\n  vps-a bị chặn trong phiên này nên tôi không đọc được cấu hình service. Nếu hoá\n  ra nó chạy chế độ full thì bản vá này vẫn đúng và vẫn cần, nhưng nguyên nhân\n  ca của codetrail sẽ là chuyện khác và tôi phải đo tiếp.\n  2. Bản vá chưa lên prod. Ba commit đang chờ ở local: sổ sách, vá hạn mức fd,\n  và cái này.\n  git -C /Users/hanguyen/projects/AI/tfl5 push origin main\n  bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh\n  static-cache-refresh-0814\n✻ Cooked for 13m 15s\n";
+    let got = hub::keys::commands_on_screen(screen, 4);
+    assert!(
+        got.iter().any(|c| c
+            == "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814"),
+        "đuôi bị bẻ phải được nối lại: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.ends_with("deploy.sh")),
+        "không được còn bản cụt nào: {got:?}"
+    );
+    // Dòng `git …` (58, đứng trước một dòng bắt đầu bằng "bash") KHÔNG bị nối:
+    // từ "bash" lọt thoải mái vào 22 chỗ trống, tức nó xuống dòng vì người viết
+    // muốn thế, không phải vì cửa sổ.
+    assert!(
+        got.iter()
+            .any(|c| c == "git -C /Users/hanguyen/projects/AI/tfl5 push origin main"),
+        "{got:?}"
+    );
+}

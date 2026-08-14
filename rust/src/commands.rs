@@ -56,22 +56,27 @@ pub struct Route {
 /// Mọi lệnh phòng chat hiểu. Thứ tự ở đây là thứ tự hiện trong `/help`.
 pub const ROUTES: &[Route] = &[
     Route {
-        name: "sessions",
-        aliases: &["phiens", "danhsach"],
-        kind: CommandKind::Session,
-        arg: Arg::None,
-        usage: "",
-        help: "Danh sách phiên đang sống",
-        listed: true,
-    },
-    Route {
         name: "session",
         aliases: &["phien"],
         kind: CommandKind::Session,
         arg: Arg::Rest,
         usage: "[id]",
-        help: "Theo một phiên; '-' để thôi theo",
+        help: "Trống = danh sách phiên; kèm id để theo; '-' để thôi theo",
         listed: true,
+    },
+    // 🔴 Hà 2026-08-14: *"trong ds lệnh bỏ sessions đi vì lệnh session trống
+    // thay thế rồi"*. Bỏ khỏi DANH SÁCH, không bỏ khỏi bộ phân tích: hai dòng
+    // gần giống nhau trong một menu bảy chữ thì tốn chỗ và bắt người đọc so
+    // từng chữ, nhưng `/sessions` đã nằm trong tay quen (và trong mấy trăm tin
+    // cũ) — gỡ hẳn là biến một lệnh đang chạy thành "không hiểu lệnh này".
+    Route {
+        name: "sessions",
+        aliases: &["phiens", "danhsach"],
+        kind: CommandKind::Session,
+        arg: Arg::None,
+        usage: "",
+        help: "Danh sách phiên đang sống (như /session trống)",
+        listed: false,
     },
     Route {
         name: "shot",

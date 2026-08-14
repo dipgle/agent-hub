@@ -355,8 +355,54 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
     // *"Expected string but found end of script. (-2741)"*. Một dòng thừa viết
     // cho dễ hiểu lại làm hỏng cả tính năng — và nó chỉ lộ khi CHẠY THẬT, vì
     // test của tệp này chỉ kiểm phần thoát chuỗi.
-    let out = osascript(&script)?;
-    Ok(out.trim().parse::<i64>().ok())
+    match osascript(&script) {
+        Ok(out) => {
+            let id = out.trim().parse::<i64>().ok();
+            if let Some(w) = id {
+                remember_window(&dev, w);
+            }
+            Ok(id)
+        }
+        // 🔴 Hà 2026-08-14, gõ một câu vào phiên và nhận `⚠ không tìm được cửa
+        // sổ: osascript quá 20s`. Cửa sổ ấy vẫn nằm đó — thứ hỏng là phép HỎI:
+        // máy đang tải nặng thì một lời gọi AppleScript vượt trần 20 giây.
+        //
+        // Mà id cửa sổ là thứ KHÔNG ĐỔI suốt đời cửa sổ, còn `window_of` thì bị
+        // gọi ở mọi `/type`, `/key`, `/shot` — tức hub hỏi lại Terminal hàng
+        // chục lần một điều không đổi, đúng lúc Terminal đang bận nhất. Nhớ lấy
+        // câu trả lời cũ và dùng khi phép hỏi hết giờ: sai lầm tệ nhất của bản
+        // nhớ (cửa sổ đã đóng) chỉ dẫn tới một `do script` hỏng có thông báo,
+        // còn hỏng như hiện nay là mất hẳn đường gõ.
+        Err(e) => match recall_window(&dev) {
+            Some(w) => {
+                logging::warn(
+                    "window_of_from_cache",
+                    json!({ "tty": dev, "window": w, "err": e.to_string(),
+                            "why": "hỏi Terminal hết giờ — dùng id cửa sổ đã nhớ" }),
+                );
+                Ok(Some(w))
+            }
+            None => Err(e),
+        },
+    }
+}
+
+/// Sổ nhớ `tty → id cửa sổ`. Bé, và cố ý không có hạn dùng: id chỉ đổi khi cửa
+/// sổ đóng, và lúc ấy `do script` hỏng ra lỗi rõ ràng chứ không im.
+static WINDOW_CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
+    std::sync::OnceLock::new();
+
+fn remember_window(dev: &str, w: i64) {
+    let m = WINDOW_CACHE.get_or_init(Default::default);
+    if let Ok(mut g) = m.lock() {
+        g.insert(dev.to_string(), w);
+    }
+}
+
+fn recall_window(dev: &str) -> Option<i64> {
+    let m = WINDOW_CACHE.get_or_init(Default::default);
+    let g = m.lock().ok()?;
+    g.get(dev).copied()
 }
 
 /// MỌI tty mà Terminal.app đang giữ — một lời gọi cho cả danh sách.

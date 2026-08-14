@@ -1603,3 +1603,50 @@ fn a_command_cut_at_the_window_edge_is_rejoined_or_dropped() {
         "{got:?}"
     );
 }
+
+/// Icon phải bám được vào dòng mà CỬA SỔ đã bẻ làm đôi.
+///
+/// 🔴 Hà 2026-08-14: *"Rõ ràng là 1 dòng sao lại biến thành 2"*. `cmds` mang
+/// bản đã nối lại (đầy đủ), còn chữ của màn thì vẫn là hai dòng — nên so nguyên
+/// chuỗi sẽ trượt, mẩu không cắt được, và icon rơi về khối nút ở đáy: đúng thứ
+/// vừa bị chê. Khớp theo phần đầu thì cắt đúng chỗ.
+#[test]
+fn an_icon_still_finds_the_line_the_window_broke_in_two() {
+    let screen = "  và cái này.\n  \
+bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh\n  \
+static-cache-refresh-0814\n✻ Cooked for 13m 15s\n";
+    let full = "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814";
+    let slices = hub::pipeline::command_slices(screen, &[full.to_string()]);
+    assert!(
+        slices.iter().any(|(_, i)| *i == Some(0)),
+        "phải cắt được một mẩu kết bằng dòng lệnh: {slices:?}"
+    );
+    // …và không nhầm sang một lệnh khác chỉ vì vài ký tự đầu giống nhau.
+    let other = "bash /Users/hanguyen/projects/AI/OTHER/scripts/deploy.sh xyz";
+    let slices2 = hub::pipeline::command_slices(screen, &[other.to_string()]);
+    assert!(
+        slices2.iter().all(|(_, i)| i.is_none()),
+        "lệnh của dự án khác không được khớp: {slices2:?}"
+    );
+}
+
+/// Chỉ câu XÁC NHẬN TRƠN mới rút thành emoji được.
+///
+/// 🔴 Hà 2026-08-14: *"Có thể đổi cách phản hồi tin đã gửi bằng 1 emoji trực
+/// tiếp vào tin nhắn cho gọn"*. Đúng cho `✓ đã gửi` — dòng ấy không mang gì
+/// ngoài "đã nhận". Sai cho mọi câu khác: một lời từ chối hay một báo lỗi mà
+/// biến thành mặt cười là giấu đúng thứ người ta cần đọc.
+#[test]
+fn only_a_bare_acknowledgement_shrinks_to_an_emoji() {
+    use hub::pipeline::ack_as_emoji;
+    assert_eq!(ack_as_emoji("✓ đã gửi · [hub]"), Some("👍"));
+    assert_eq!(ack_as_emoji("✓ đã bấm 'esc' · [hub]"), Some("👍"));
+    // "vào hàng chờ" là một trạng thái KHÁC (phiên đang bận), đáng dấu khác.
+    assert_eq!(ack_as_emoji("✓ vào hàng chờ · [tfl5]"), Some("👌"));
+    // Còn lại phải giữ nguyên chữ.
+    assert_eq!(ack_as_emoji("⚠ không gõ được: cửa sổ đã đóng"), None);
+    assert_eq!(ack_as_emoji("👁 Đang theo phiên [tfl5] (acc1)"), None);
+    assert_eq!(ack_as_emoji("📷 Màn của [hub]:\n…"), None);
+    assert_eq!(ack_as_emoji("▶ chạy trong 4963b95c: bash deploy.sh"), None);
+    assert_eq!(ack_as_emoji(""), None);
+}

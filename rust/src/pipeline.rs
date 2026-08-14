@@ -2180,6 +2180,29 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
 /// Mỗi lệnh khớp ĐÚNG MỘT LẦN, ở dòng đầu tiên chứa nó: một báo cáo hay nhắc
 /// lại cùng một lệnh ở phần tóm tắt, và hai cái nút giống hệt nhau cho cùng
 /// một việc là mời người ta bấm hai lần.
+/// Dòng này có mang lệnh ấy không — kể cả khi cửa sổ đã bẻ nó làm đôi.
+///
+/// 🔴 Hà 2026-08-14: *"Rõ ràng là 1 dòng sao lại biến thành 2"*. Đúng, và đó là
+/// cái giá của việc đọc chữ **hiển thị** (`contents of selected tab`) thay vì
+/// chữ **gốc**: Terminal bẻ dòng theo bề ngang cửa sổ, nên một lệnh dài 83 ký
+/// tự nằm trên một cửa sổ rộng 80 về tới đây là hai dòng. `commands_on_screen`
+/// nối chúng lại, nên `cmds` mang bản ĐẦY ĐỦ — còn `text` thì vẫn là chữ đã bị
+/// bẻ. So nguyên chuỗi ở đây là so bản đầy đủ với một nửa, và nó trượt: mẩu
+/// không cắt được, icon rơi về khối nút ở đáy, tức đúng thứ vừa bị chê.
+///
+/// Khớp theo PHẦN ĐẦU, đủ dài để không nhầm hai lệnh khác nhau (12 ký tự trở
+/// lên; `git -C /User…` đã vượt).
+fn line_carries(line: &str, cmd: &str) -> bool {
+    let c = cmd.trim();
+    if line.contains(c) {
+        return true;
+    }
+    // Cắt theo ranh giới ký tự, không theo byte: đường dẫn có dấu tiếng Việt là
+    // chuyện có thật trong workspace này.
+    let head: String = c.chars().take(40).collect();
+    head.chars().count() >= 12 && line.contains(&head)
+}
+
 pub fn command_slices(text: &str, cmds: &[String]) -> Vec<(String, Option<usize>)> {
     let mut out: Vec<(String, Option<usize>)> = Vec::new();
     let mut buf: Vec<&str> = Vec::new();
@@ -2189,7 +2212,7 @@ pub fn command_slices(text: &str, cmds: &[String]) -> Vec<(String, Option<usize>
         let hit = cmds
             .iter()
             .enumerate()
-            .find(|(i, c)| !used[*i] && !c.trim().is_empty() && line.contains(c.trim()));
+            .find(|(i, c)| !used[*i] && !c.trim().is_empty() && line_carries(line, c));
         if let Some((i, _)) = hit {
             used[i] = true;
             out.push((buf.join("\n"), Some(i)));
@@ -4630,7 +4653,8 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
                 arg,
                 chat_id: inbox.chat_id().to_string(),
                 callback_id: String::new(),
-                message_id: None,
+                // Tin đã sinh ra lệnh — chỗ trả lời sẽ thả emoji lên chính nó.
+                message_id: item.msg_id,
             }),
             // Không phải lệnh — hai đường rất khác nhau, xem `text_for_session`.
             None => match text_for_session(&item.text) {
@@ -4676,7 +4700,7 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
                             arg: format!("{focus} {text}"),
                             chat_id: inbox.chat_id().to_string(),
                             callback_id: String::new(),
-                            message_id: None,
+                            message_id: item.msg_id,
                         });
                     }
                 }
@@ -4765,6 +4789,29 @@ fn scopeguard_log(adapter: &str, at: std::time::Instant) -> AckClock {
     AckClock { adapter: adapter.to_string(), at }
 }
 
+/// Câu trả lời này có rút gọn được thành MỘT emoji không — và emoji nào.
+///
+/// Hàm thuần, kiểm được. Luật hẹp có chủ ý: chỉ những câu **xác nhận trơn** mới
+/// đổi được, tức câu mà toàn bộ nội dung là "đã nhận, xong". Mọi câu còn lại —
+/// từ chối (`⚠`), báo lỗi, câu có số liệu, câu mời làm bước tiếp — phải giữ
+/// nguyên chữ: một mặt cười thay cho một lời từ chối là giấu mất đúng thứ người
+/// ta cần đọc.
+///
+/// Emoji lấy từ BẢNG CỐ ĐỊNH của Telegram (`ReactionTypeEmoji`) — `✓` và `▶`
+/// không nằm trong bảng ấy nên không dùng được, dù chúng hợp nghĩa hơn.
+pub fn ack_as_emoji(ack: &str) -> Option<&'static str> {
+    let t = ack.trim();
+    if !t.starts_with('✓') {
+        return None;
+    }
+    // "vào hàng chờ" ≠ "đã gửi": phiên đang bận thì chữ nằm trong hàng của TUI,
+    // và đó là một trạng thái khác, đáng một dấu khác.
+    if t.contains("hàng chờ") {
+        return Some("👌");
+    }
+    Some("👍")
+}
+
 fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, text: &str) {
     let _ = db;
     // Bước phụ của chính hub thì im — xem `telegram::Incoming::quiet`.
@@ -4785,6 +4832,34 @@ fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, 
     // trống, còn câu trả lời nằm trong một tệp trên máy.
     if adapter == crate::telegram::NAME {
         if let Some(i) = crate::telegram::inbox() {
+            // 🔴 Hà 2026-08-14: *"Có thể đổi cách phản hồi tin đã gửi bằng 1
+            // emoji trực tiếp vào tin nhắn cho gọn"*.
+            //
+            // Một câu gõ vào phiên tốn HAI dòng trong buồng chat: câu của chủ
+            // máy, rồi `✓ đã gửi · [tên]` của hub — mà dòng thứ hai không mang
+            // gì ngoài "đã nhận". Thả emoji lên chính tin ấy nói đúng chừng
+            // ấy, không chiếm dòng nào.
+            //
+            // CHỈ cho câu xác nhận trơn (`ack_as_emoji`): một lời từ chối, một
+            // câu hỏi, một báo lỗi thì vẫn phải đọc được thành chữ — đổi nó
+            // thành một mặt cười là giấu mất thứ người ta cần biết.
+            if let (Some(mid), Some(e)) = (cmd.message_id, ack_as_emoji(text)) {
+                match i.react(mid, e) {
+                    Ok(()) => {
+                        logging::info(
+                            "telegram_ack_as_reaction",
+                            json!({ "emoji": e, "kind": format!("{:?}", cmd.kind) }),
+                        );
+                        return;
+                    }
+                    // Thả không được thì NÓI rồi rơi về chữ — im lặng ở đây là
+                    // một câu trả lời biến mất.
+                    Err(err) => logging::warn(
+                        "telegram_reaction_failed",
+                        json!({ "err": err, "fallback": "gửi lại bằng chữ" }),
+                    ),
+                }
+            }
             if let Err(e) = i.send_text(text) {
                 logging::error("telegram_ack_failed", json!({ "err": e }));
             }

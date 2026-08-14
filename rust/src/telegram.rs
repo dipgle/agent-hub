@@ -48,6 +48,15 @@ pub const NAME: &str = "telegram";
 pub struct Incoming {
     /// Nguyên văn dòng người ta gõ (hoặc dòng lệnh do một cái nút sinh ra).
     pub text: String,
+    /// Tin nào đã sinh ra lệnh này — để trả lời bằng một EMOJI thả thẳng lên
+    /// nó thay vì đẻ thêm một tin.
+    ///
+    /// 🔴 Hà 2026-08-14: *"Có thể đổi cách phản hồi tin đã gửi bằng 1 emoji
+    /// trực tiếp vào tin nhắn cho gọn"*. Gõ một câu vào phiên hiện nay tốn HAI
+    /// tin trong buồng chat: câu của chủ máy, rồi `✓ đã gửi · [tên]` của hub —
+    /// mà tin thứ hai không mang thông tin nào ngoài "đã nhận". Thả 👍 lên
+    /// chính tin ấy nói đúng chừng ấy, và không chiếm dòng nào.
+    pub msg_id: Option<i64>,
     /// Lệnh do CHÍNH hub xếp hàng làm bước phụ ⟹ chạy xong thì im.
     ///
     /// 🔴 Hà 2026-08-13: *"1 thao tác gửi 2 thông báo để làm gì"*. Nút
@@ -949,15 +958,20 @@ impl Inbox {
 
     /// Đưa một dòng lệnh vào hàng đợi — dùng cả từ `confirm` khi nó nhặt hộ.
     pub fn push_text(&self, text: &str) {
-        self.push_inner(text, false);
+        self.push_inner(text, false, None);
+    }
+
+    /// Như `push_text`, nhưng NHỚ tin đã sinh ra nó — xem `Incoming::msg_id`.
+    pub fn push_text_from(&self, text: &str, msg_id: Option<i64>) {
+        self.push_inner(text, false, msg_id);
     }
 
     /// Xếp hàng một lệnh PHỤ của chính hub — chạy xong không trả lời gì.
     pub fn push_text_quiet(&self, text: &str) {
-        self.push_inner(text, true);
+        self.push_inner(text, true, None);
     }
 
-    fn push_inner(&self, text: &str, quiet: bool) {
+    fn push_inner(&self, text: &str, quiet: bool, msg_id: Option<i64>) {
         let t = text.trim();
         if t.is_empty() {
             return;
@@ -965,7 +979,7 @@ impl Inbox {
         self.queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push_back(Incoming { text: t.to_string(), quiet });
+            .push_back(Incoming { text: t.to_string(), quiet, msg_id });
         logging::info(
             "telegram_command_queued",
             json!({ "head": crate::exec::truncate(t, 40) }),
@@ -1633,7 +1647,7 @@ impl Inbox {
             );
             return;
         }
-        self.push_text(text);
+        self.push_text_from(text, msg.get("message_id").and_then(Value::as_i64));
         // 🔴 Hà 2026-08-14, ảnh chụp buồng chat sau khi bấm icon ▶️: *"Sao bấm
         // lại thành lệnh start à"*.
         //
@@ -1711,6 +1725,39 @@ impl Inbox {
                 .get("description")
                 .and_then(Value::as_str)
                 .unwrap_or("Telegram từ chối sendMessage (HTML)")
+                .to_string())
+        }
+    }
+
+    /// Thả MỘT emoji lên chính tin của chủ máy, thay cho một câu trả lời.
+    ///
+    /// 🔴 Hà 2026-08-14: *"Có thể đổi cách phản hồi tin đã gửi bằng 1 emoji
+    /// trực tiếp vào tin nhắn cho gọn"*.
+    ///
+    /// Telegram chỉ nhận emoji trong một BẢNG CỐ ĐỊNH (Bot API,
+    /// `ReactionTypeEmoji`) — `✓` hay `▶` không nằm trong đó và sẽ bị từ chối,
+    /// nên chỗ gọi phải chọn từ bảng ấy. `Err` mang nguyên câu Telegram trả
+    /// lời: chỗ gọi cần phân biệt "phiên bản Telegram không cho thả" với "emoji
+    /// sai", và cả hai đều phải rơi về một câu chữ chứ không được im.
+    pub fn react(&self, message_id: i64, emoji: &str) -> Result<(), String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let r = client
+            .post(self.api("setMessageReaction"))
+            .json(&json!({
+                "chat_id": self.chat_id,
+                "message_id": message_id,
+                "reaction": [{ "type": "emoji", "emoji": emoji }],
+            }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            Ok(())
+        } else {
+            Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối setMessageReaction")
                 .to_string())
         }
     }

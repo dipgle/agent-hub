@@ -657,7 +657,13 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             // BÁO CÁO, không phải màn: `scan` là `long` — chữ đọc thẳng từ
             // nhật ký phiên, chưa qua bề ngang cửa sổ nào. Xem
             // `keys::BTN_CMD_REPORT_MAX`.
-            crate::keys::commands_in_report(scan, 3)
+            // 🔴 HAI, không phải ba. Hà 2026-08-14, ảnh chụp một tin mang ba
+            // nút lệnh: *"sao lắm nút lệnh thế"*. Một báo cáo dài nhắc tới
+            // nhiều lệnh, nhưng thứ chủ máy cần bấm ngay thì gần như luôn là
+            // câu chốt — những cái còn lại chỉ là chữ trong lời kể. Ba nút gần
+            // giống nhau không cho thêm lựa chọn nào, chúng bắt người đọc dừng
+            // lại đoán xem cái nào mới đúng.
+            crate::keys::commands_in_report(scan, 2)
         };
         let mut quick = remember_quick(db, &id, &cmds);
         // …và file được NHẮC TỚI thì phải MỞ ĐƯỢC. Một báo cáo nói "xem
@@ -1909,18 +1915,18 @@ fn say_closed(cfg: &Config, text: &str) {
 
 pub const QUICK_KEY: &str = "quick:cmds";
 
-/// Ghi danh sách lệnh gợi ý, trả về các cặp (nhãn, mã nút).
-///
-/// Nút gõ dòng lệnh VÀO PHIÊN chứ không chạy ngoài (Hà 2026-08-12: *"có thể sẽ
-/// chạy được trực tiếp từ ô chát trong cli bằng cách thêm ký tự `!` ở đầu"*).
-/// Khác biệt không nhỏ: chạy trong phiên thì **phiên nhìn thấy kết quả** và đi
-/// tiếp được, còn `/cmd` chạy ở một shell rời — kết quả về điện thoại, phiên
-/// không biết gì. Đúng thứ chủ máy làm khi ngồi trước máy.
-/// Dự án của một phiên, lấy từ SỔ — để tệp gửi từ Telegram về đúng thư mục.
-pub fn session_folder_from_book(book_json: &str, id: &str) -> Option<String> {
-    let book: BTreeMap<String, crate::watch::Mark> = serde_json::from_str(book_json).ok()?;
-    book.get(id).map(|m| m.d.clone()).filter(|d| !d.is_empty())
-}
+// Ghi chú về NÚT LỆNH (chú thích của `remember_quick`, để lạc lại đây từ một
+// lượt sửa cũ — nay là chú thích thường, không phải tài liệu của hàm bên dưới):
+// nút gõ dòng lệnh VÀO PHIÊN chứ không chạy ngoài (Hà 2026-08-12: *"có thể sẽ
+// chạy được trực tiếp từ ô chát trong cli bằng cách thêm ký tự `!` ở đầu"*).
+// Khác biệt không nhỏ: chạy trong phiên thì phiên nhìn thấy kết quả và đi tiếp
+// được, còn `/cmd` chạy ở một shell rời — kết quả về điện thoại, phiên không
+// biết gì.
+//
+// 🔴 ĐÃ XOÁ `session_folder_from_book` (2026-08-14): `session_root` làm đúng
+// việc ấy và làm đủ hơn — nó ghép luôn với `workspace_root` rồi trả đường dẫn
+// thật, nên mọi chỗ gọi đều chọn nó. Hai hàm cùng đọc một cuốn sổ để trả lời
+// một câu là hai chỗ để lệch nhau.
 
 /// Nhớ bản ĐẦY ĐỦ của một báo cáo, để dòng "… (còn N dòng)" có đường đi tiếp.
 ///
@@ -2613,6 +2619,89 @@ fn watch_long_job(
             &fb_adapter,
             &fb_chat,
             "⚠ không dựng được luồng chạy nền — lệnh KHÔNG chạy.",
+        );
+    }
+}
+
+/// Mở một phiên mới ở luồng riêng, rồi báo lại khi nó chào đời.
+///
+/// 🔴 Hà 2026-08-14: *"kiểm tra lệnh new đi đã chạy được cơ chế mới chưa"*.
+/// Chưa — và ba lượt gần nhất đo được **64,7s · 39,4s · 61,5s** ngồi chờ trong
+/// khi giữ `CMD_LOCK`. Thời gian ấy là việc thật (chờ nhật ký phiên sinh ra để
+/// biết id, rồi bấm hộ hộp tin-thư-mục nếu cần), nhưng chỗ ngồi chờ thì sai.
+///
+/// Hai tin, vì có hai sự kiện thật: "đã bấm mở" và "phiên đã sống". Con trỏ
+/// theo dõi chỉ chuyển ở tin thứ hai — lúc ấy mới có id để mà chuyển.
+fn watch_new_session(
+    cfg: Config,
+    name: String,
+    dir: std::path::PathBuf,
+    task: String,
+    account: Option<String>,
+    adapter: String,
+    chat_id: String,
+) {
+    let (fb_cfg, fb_adapter, fb_chat) = (cfg.clone(), adapter.clone(), chat_id.clone());
+    let spawned = std::thread::Builder::new()
+        .name("new-session".into())
+        .spawn(move || {
+            let _lane = crate::exec::urgent();
+            let started =
+                crate::sessions::start_background(&cfg, &name, &dir, &task, account.as_deref());
+            let ack = match started {
+                Ok(s) => {
+                    // Sổ sách trước, câu chào sau: một câu nói "đang theo phiên
+                    // này" mà sổ chưa ghi là câu làm người ta gõ việc vào nhầm
+                    // chỗ.
+                    match Db::open(&cfg.db) {
+                        Ok(db) => {
+                            remember_started(&db, &s.session_id);
+                            if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, &s.session_id) {
+                                logging::error(
+                                    "focus_after_start_failed",
+                                    json!({ "err": e.to_string() }),
+                                );
+                            }
+                        }
+                        Err(e) => logging::error(
+                            "new_session_db_failed",
+                            json!({ "err": e.to_string(),
+                                    "why": "phiên đã mở nhưng sổ chưa ghi — con trỏ chưa chuyển" }),
+                        ),
+                    }
+                    logging::info(
+                        "session_started",
+                        json!({ "project": s.project, "session": s.session_id, "cwd": s.cwd }),
+                    );
+                    let cua_so = if s.window {
+                        "⌨ cửa sổ Terminal"
+                    } else {
+                        "🌙 phiên nền"
+                    };
+                    format!(
+                        "🚀 Đã mở {} cho {}.\nPhiên {} — đang chạy trên máy.\n\n🎯 Nay đang theo phiên này: gõ thẳng câu hỏi ở đây là vào nó.\n⚠ Nó chạy không hỏi ai. Tắt bằng /stop.",
+                        cua_so,
+                        s.project,
+                        &s.session_id[..8.min(s.session_id.len())]
+                    )
+                }
+                // Không cắt 200 như các ack khác: lời báo hỏng ở đây MANG THEO
+                // cách gỡ, và cắt 200 chặt đúng nửa đó — người đọc nhận được
+                // tin xấu mà không nhận được lối ra.
+                Err(e) => format!(
+                    "⚠ không mở được phiên: {}",
+                    crate::exec::truncate(&e.to_string(), 700)
+                ),
+            };
+            say_back(&cfg, &adapter, &chat_id, &ack);
+        });
+    if let Err(e) = spawned {
+        logging::error("new_session_spawn_failed", json!({ "err": e.to_string() }));
+        say_back(
+            &fb_cfg,
+            &fb_adapter,
+            &fb_chat,
+            "⚠ không dựng được luồng mở phiên — KHÔNG có cửa sổ nào được mở.",
         );
     }
 }
@@ -3743,76 +3832,41 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             || known.contains(&name.to_string())
                             || cfg.projects.contains_key(name) =>
                     {
-                        match crate::sessions::start_background(cfg, name, &d, task, account.as_deref()) {
-                            Ok(s) => {
-                                // Follow it straight away: the person who just
-                                // started a job wants to watch it, and making
-                                // them hunt for it in the list is a step hub
-                                // can take for them.
-                                remember_started(db, &s.session_id);
-                                if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, &s.session_id) {
-                                    logging::error(
-                                        "focus_after_start_failed",
-                                        json!({ "err": e.to_string() }),
-                                    );
-                                }
-                                logging::info(
-                                    "session_started",
-                                    json!({ "project": s.project, "session": s.session_id, "cwd": s.cwd }),
-                                );
-                                // Câu chào phải mô tả thứ VỪA xảy ra.
-                                //
-                                // Bản cũ nói "phiên nền … tại <thư mục dự án>"
-                                // và cả hai vế nay đều sai: từ 2026-08-11 hub
-                                // mở một CỬA SỔ thật, và mở ở GỐC WORKSPACE
-                                // (thư mục duy nhất cả ba tài khoản đã duyệt —
-                                // dự án được nói trong đề bài). Người đọc câu
-                                // ấy trên điện thoại sẽ đi tìm một cửa sổ ở chỗ
-                                // không có, hoặc tìm một phiên nền không tồn
-                                // tại. Nói sai chỗ còn tệ hơn không nói.
-                                // Dùng đúng bộ ký hiệu của danh sách (xem
-                                // `source_icon`), vì từ 2026-08-13 danh sách đã
-                                // trộn cả phiên VS Code — Hà: *"nếu bật cả vs
-                                // code thì lệnh new cần xác định tạo phiên mới
-                                // ở đâu"*. Câu chào phải trả lời trước câu ấy.
-                                let cua_so = if s.window {
-                                    "⌨ cửa sổ Terminal"
-                                } else {
-                                    "🌙 phiên nền"
-                                };
-                                // NÓI RA hai điều hub vừa quyết hộ, vì cả hai
-                                // đều đổi việc gõ câu tiếp theo (Hà 2026-08-12:
-                                // *"mặc định sẽ focus luôn vào phiên mới → đặt
-                                // câu hỏi luôn vào phiên mới này"*):
-                                //   • tài khoản nào — `/new` không mang `-a`
-                                //     thì LUÔN rơi vào tài khoản mặc định,
-                                //     không phải chọn ngẫu nhiên;
-                                //   • con trỏ đang theo đã chuyển sang phiên
-                                //     này, nên chữ thường gõ ở phòng chat đi
-                                //     thẳng vào nó.
-                                // Việc focus đã có từ trước; thứ thiếu là câu
-                                // nói ra — một tính năng không ai biết là một
-                                // tính năng không tồn tại.
-                                let acc_said = account
+                        // 🔴 KHÔNG CHỜ TẠI CHỖ. Hà 2026-08-14: *"kiểm tra lệnh
+                        // new đi đã chạy được cơ chế mới chưa"* — chưa, và đo
+                        // được ba lượt gần nhất: **64,7s · 39,4s · 61,5s**.
+                        // Suốt chừng ấy `/new` giữ `CMD_LOCK`, nên mọi lệnh
+                        // khác của chủ máy xếp hàng phía sau một cái cửa sổ
+                        // đang khởi động.
+                        //
+                        // Thời gian ấy không phải lãng phí: hub chờ nhật ký
+                        // phiên sinh ra để biết ID (20 giây), rồi nếu chưa có
+                        // thì bấm hộ hộp tin-thư-mục và chờ thêm 20 giây nữa.
+                        // Việc đúng, chỗ ngồi chờ thì sai — đúng cùng bệnh với
+                        // `/runin` đã chữa sáng nay.
+                        //
+                        // Nay: mở cửa sổ ở luồng riêng, trả lời NGAY, và báo
+                        // lần hai khi phiên chào đời. Con trỏ theo dõi chuyển
+                        // ở LƯỢT SAU chứ không phải bây giờ — nên tin đầu phải
+                        // nói thẳng điều đó, không thì chữ gõ ngay sau khi bấm
+                        // sẽ rơi vào phiên cũ mà không ai biết vì sao.
+                        {
+                            watch_new_session(
+                                cfg.clone(),
+                                name.to_string(),
+                                d.clone(),
+                                task.to_string(),
+                                account.clone(),
+                                adapter.to_string(),
+                                cmd.chat_id.clone(),
+                            );
+                            format!(
+                                "⌨ Đang mở cửa sổ Terminal{}…\nhub báo lại khi phiên chào đời (thường 15–60 giây, vì nó chờ nhật ký phiên sinh ra để biết id).\n⚠ Con trỏ CHƯA chuyển — gõ chữ lúc này vẫn vào phiên đang theo.",
+                                account
                                     .as_deref()
                                     .map(|a| format!(" bằng {a}"))
-                                    .unwrap_or_else(|| " bằng tài khoản mặc định".to_string());
-                                format!(
-                                    "🚀 Đã mở {} cho {}{}.\nPhiên {} — đang chạy trên máy, xem màn sống ngay trên thẻ của nó.\n\n🎯 Đang theo phiên này: gõ thẳng câu hỏi ở đây là vào nó (hoặc /ask để hỏi trên bản sao).\n⚠ Nó chạy không hỏi ai. Tắt bằng nút Tắt hẳn hoặc /stop.",
-                                    cua_so,
-                                    s.project,
-                                    acc_said,
-                                    &s.session_id[..8.min(s.session_id.len())]
-                                )
-                            }
-                            // Không cắt 200 như các ack khác: lời báo hỏng ở đây
-                            // MANG THEO cách gỡ, và cắt 200 chặt đúng nửa đó —
-                            // người đọc nhận được tin xấu mà không nhận được
-                            // lối ra.
-                            Err(e) => format!(
-                                "⚠ không mở được phiên: {}",
-                                crate::exec::truncate(&e.to_string(), 700)
-                            ),
+                                    .unwrap_or_else(|| " bằng tài khoản mặc định".to_string()),
+                            )
                         }
                     }
                     _ => format!(
@@ -4702,11 +4756,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 if want.is_empty() {
                     let live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
                     let focus = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
-                    let ack = session_list_text(
+                    let mut ack = session_list_text(
                         &live.sessions,
                         &focus,
                         chrono::Utc::now().timestamp_millis(),
                     );
+                    // Việc đang chạy nền cũng là thứ "máy này đang làm gì", nên
+                    // nó thuộc về đúng cái danh sách người ta mở nhiều nhất —
+                    // chứ không phải một route `/jobs` thứ hai phải nhớ tên.
+                    // Chỉ hiện khi CÓ việc: một dòng "không có việc nào" trên
+                    // màn 390px là một dòng trống trả bằng chỗ.
+                    if let Some(jobs) = jobs_line() {
+                        ack.push_str("\n\n⚡ đang chạy trên máy:\n");
+                        ack.push_str(&jobs);
+                    }
                     // Trên Telegram mỗi phiên là một NÚT, và gửi ngay tại đây —
                     // để `reply_in_channel` gửi thêm lần nữa là chủ máy nhận hai
                     // tin cùng nội dung, một cái bấm được một cái không.
@@ -5190,6 +5253,118 @@ fn scopeguard_log(adapter: &str, at: std::time::Instant) -> AckClock {
 ///
 /// Emoji lấy từ BẢNG CỐ ĐỊNH của Telegram (`ReactionTypeEmoji`) — `✓` và `▶`
 /// không nằm trong bảng ấy nên không dùng được, dù chúng hợp nghĩa hơn.
+/// Emoji RIÊNG của một dự án, sinh từ chính cái tên.
+///
+/// 🔴 Hà 2026-08-14: *"tự tạo emoji theo tên dự án được không? → add vào để
+/// dùng làm phản hồi"*. Được, và nó nói được nhiều hơn một dấu 👍 chung: nhìn
+/// cái dấu là biết chữ vừa rơi vào phiên NÀO — thứ đáng biết nhất khi trong máy
+/// có bốn phiên và hai trong số đó cùng tên dự án.
+///
+/// Sinh từ tên chứ không tra bảng tay: dự án mới thêm vào là có dấu ngay, không
+/// phải sửa mã. Cùng một tên thì luôn ra cùng một dấu (tổng byte, chia dư) —
+/// một cái dấu đổi giữa chừng còn tệ hơn không có dấu, vì người ta học nó rồi
+/// bị nó lừa (cùng bài học với nhãn màu đổi sau mỗi lần khởi động).
+///
+/// Bảng chỉ gồm emoji Telegram CHO PHÉP thả (`ReactionTypeEmoji`) — ngoài bảng
+/// ấy thì API từ chối, và một dấu bị từ chối là một tin chữ mọc lại.
+pub fn project_emoji(name: &str) -> &'static str {
+    // Cố ý chọn những dấu KHÁC HẲN nhau về hình, không phải sắc thái cảm xúc:
+    // trên một dòng chat, người ta phân biệt bằng bóng hình chứ không bằng nét
+    // mặt.
+    const PALETTE: &[&str] = &[
+        "🔥", "🎉", "🐳", "🦄", "🍓", "🍌", "🏆", "⚡", "💯", "🌭", "🎄", "👻", "👾", "🎃",
+        "🙈", "🗿", "🆒", "💊", "😎", "🕊",
+    ];
+    let key = name.trim().trim_matches(|c| c == '[' || c == ']').to_lowercase();
+    if key.is_empty() {
+        return "👍";
+    }
+    // FNV-1a chứ không phải tổng byte: bản đầu cộng byte rồi chia dư, và trên
+    // đúng bảy cái tên có thật của máy này (`hub · tfl5 · dwork · sdvi ·
+    // codetrail · social · anpha1`) nó ra chỉ **năm** dấu — hai cặp trùng nhau,
+    // tức mất đúng cái công dụng vừa dựng. Tổng byte không phân biệt được thứ
+    // tự chữ, mà tên dự án thì thường cùng bộ chữ cái.
+    let mut h: u32 = 0x811c_9dc5;
+    for b in key.bytes() {
+        h ^= b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    PALETTE[(h as usize) % PALETTE.len()]
+}
+
+/// Tên dự án của phiên ĐANG THEO — để dấu thả lên một tấm ảnh nói được nó vừa
+/// tới phiên nào.
+///
+/// `None` khi chưa theo phiên nào hoặc sổ chưa biết dự án: chỗ gọi rơi về dấu
+/// chung, chứ không đoán một cái tên.
+pub fn project_of_focus(cfg: &Config) -> Option<String> {
+    let db = Db::open(&cfg.db).ok()?;
+    let id = db.cursor_or_log(FOCUS_SESSION_KEY)?;
+    let book = db.cursor_or_log(WATCH_KEY)?;
+    let marks: std::collections::BTreeMap<String, crate::watch::Mark> =
+        serde_json::from_str(&book).ok()?;
+    let folder = marks.get(&id).map(|m| m.d.clone())?;
+    let name = folder.trim_matches('/').rsplit('/').next()?.to_string();
+    if name.is_empty() {
+        return None;
+    }
+    // Trả về TÊN, không phải dấu: `ack_emoji` tự băm tên: đưa cho nó một cái
+    // dấu thì nó băm luôn cái dấu ấy và ra một dấu khác — một lỗi im lặng,
+    // suýt nữa đã vào bản cài (bắt được lúc đọc lại kiểu trả về).
+    Some(name)
+}
+
+/// Tên dự án nằm trong `[...]` của một câu trả lời, nếu có.
+fn project_in(ack: &str) -> Option<&str> {
+    let i = ack.find('[')?;
+    let j = ack[i + 1..].find(']')? + i + 1;
+    let name = &ack[i + 1..j];
+    (!name.is_empty() && name.len() <= 40).then_some(name)
+}
+
+/// Một TRẠNG THÁI mà hub có thể trả lời bằng đúng một dấu.
+///
+/// 🔴 Hà 2026-08-14: *"viết bộ render tự động emoji các trạng thái cho từng ứng
+/// dụng?"*. Đây là cái bảng ấy — một chỗ khai, mọi chỗ đọc.
+///
+/// Luật chia dấu, và nó không tuỳ hứng: **trạng thái nào mà câu hỏi kế tiếp là
+/// "vào phiên nào?" thì mang dấu của DỰ ÁN; còn lại mang dấu của TRẠNG THÁI.**
+/// Gõ một câu vào phiên xong, thứ đáng biết là nó rơi vào đâu (bốn phiên đang
+/// mở, hai cùng tên dự án). Còn "vào hàng chờ" hay "đang chạy" thì thứ đáng
+/// biết là chính cái trạng thái ấy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ack {
+    /// Chữ đã tới phiên.
+    Sent,
+    /// Phiên đang bận nên chữ nằm trong hàng chờ của TUI.
+    Queued,
+    /// Con trỏ theo dõi vừa chuyển.
+    Focused,
+    /// Một lệnh dài vừa bắt đầu chạy nền.
+    Running,
+    /// Đã dừng theo yêu cầu.
+    Stopped,
+    /// Tệp gửi lên đã ghi xuống đĩa.
+    Saved,
+    /// Phiên đã được cho xem thứ vừa gửi.
+    Seen,
+}
+
+/// Bộ sinh dấu: (ứng dụng, trạng thái) → đúng một emoji Telegram thả được.
+pub fn ack_emoji(project: Option<&str>, k: Ack) -> &'static str {
+    match k {
+        // Hai cái này trả lời câu "vào phiên nào" ⟹ mang dấu của dự án.
+        Ack::Sent => project.map(project_emoji).unwrap_or("👍"),
+        Ack::Seen => project.map(project_emoji).unwrap_or("👀"),
+        // Còn lại: trạng thái quan trọng hơn nơi chốn.
+        Ack::Queued => "👌",
+        Ack::Focused => "👀",
+        Ack::Running => "⚡",
+        Ack::Stopped => "👌",
+        Ack::Saved => "✍",
+    }
+}
+
 pub fn ack_as_emoji(ack: &str) -> Option<&'static str> {
     let t = ack.trim();
     // 🔴 Hà 2026-08-14: *"Mọi tin tôi gửi phản hồi hết bằng emoji đi"* · *"Vì nó
@@ -5201,20 +5376,25 @@ pub fn ack_as_emoji(ack: &str) -> Option<&'static str> {
     if t.starts_with('✓') {
         // "vào hàng chờ" ≠ "đã gửi": phiên đang bận thì chữ nằm trong hàng của
         // TUI, và đó là một trạng thái khác, đáng một dấu khác.
-        return Some(if t.contains("hàng chờ") { "👌" } else { "👍" });
+        if t.contains("hàng chờ") {
+            return Some(ack_emoji(None, Ack::Queued));
+        }
+        // Gửi được rồi thì dấu nói luôn VÀO ĐÂU (xem `project_emoji`); không
+        // đọc ra tên dự án thì rơi về 👍 như Hà chốt.
+        return Some(ack_emoji(project_in(t), Ack::Sent));
     }
     // Đổi phiên đang theo: người bấm vừa chọn phiên nào thì tự biết, câu trả
     // lời chỉ xác nhận là con trỏ đã nhúc nhích.
     if t.starts_with('👁') {
-        return Some("👀");
+        return Some(ack_emoji(None, Ack::Focused));
     }
     // Lệnh dài vừa được nhận và bắt đầu chạy — kết quả sẽ tới sau, bằng chữ.
     if t.starts_with("▶ đang chạy") {
-        return Some("⚡");
+        return Some(ack_emoji(None, Ack::Running));
     }
     // Đã bảo dừng.
     if t.starts_with('⏹') {
-        return Some("👌");
+        return Some(ack_emoji(None, Ack::Stopped));
     }
     None
 }

@@ -304,32 +304,10 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
     })
 }
 
-/// Run and parse stdout as JSON.
-pub fn run_json(cmd: &str, args: &[&str], opts: RunOpts) -> Result<serde_json::Value> {
-    let r = run(cmd, args, opts)?;
-    if r.timed_out {
-        return Err(anyhow!("{cmd} timed out after {}ms", r.ms));
-    }
-    if r.code != Some(0) {
-        let detail = if r.stderr.trim().is_empty() {
-            &r.stdout
-        } else {
-            &r.stderr
-        };
-        return Err(anyhow!(
-            "{cmd} exit {:?}: {}",
-            r.code,
-            truncate(detail, 500)
-        ));
-    }
-    serde_json::from_str(&r.stdout).map_err(|e| {
-        anyhow!(
-            "{cmd} returned unparseable JSON: {e}; head={}",
-            truncate(&r.stdout, 200)
-        )
-    })
-}
-
+// 🔴 ĐÃ XOÁ `run_json` (2026-08-14): mọi chỗ đọc JSON của hub nay tự gọi `run`
+// rồi tự phân tích, vì mỗi chỗ cần một câu lỗi khác nhau — `claude agents` hỏng
+// khác hẳn `tfl5` hỏng, và câu lỗi là thứ người ta đọc lúc 2 giờ sáng. Một lớp
+// bọc chung không ai dùng thì chỉ là một đường thứ hai để quên.
 pub fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         return s.to_string();

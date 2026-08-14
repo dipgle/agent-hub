@@ -191,25 +191,15 @@ impl Db {
         Ok(Db { conn })
     }
 
-    /// Explicit transaction control (rusqlite's `Transaction` needs `&mut`,
-    /// and the whole store is shared behind `&self`). Used to make "decision +
-    /// outbox rows + message status" ONE commit point: a crash mid-way used to
-    /// leave a queued reply behind a message that would be triaged again —
-    /// paying twice and sending twice.
-    pub fn begin(&self) -> Result<()> {
-        self.conn.execute_batch("BEGIN IMMEDIATE")?;
-        Ok(())
-    }
-
-    pub fn commit(&self) -> Result<()> {
-        self.conn.execute_batch("COMMIT")?;
-        Ok(())
-    }
-
-    pub fn rollback(&self) -> Result<()> {
-        self.conn.execute_batch("ROLLBACK")?;
-        Ok(())
-    }
+    // 🔴 ĐÃ XOÁ cả bộ điều khiển giao dịch — `begin`/`commit`/`rollback`
+    // (2026-08-14). Chú thích của chúng nói thẳng chúng phục vụ ai: *"decision
+    // + outbox rows + message status ONE commit point"* — tức cái hộp thư đã bị
+    // xoá ngày 08-08. Không còn giao dịch nhiều bảng nào trong hub.
+    //
+    // Ghi lại một bước hụt của chính lượt dọn này, vì nó đúng loại sai đã ghi
+    // ở luật 7: tôi viết "giữ `commit` lại, nó dùng trong lượt nâng cấp lược
+    // đồ" — nghe hợp lý, và sai. Đếm lại thì `commit()` có ĐÚNG 0 chỗ gọi. Một
+    // mệnh đề nghe hợp lý mà chưa đếm thì vẫn chỉ là một mệnh đề.
 
     // ── decisions ──
 

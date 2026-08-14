@@ -28,7 +28,6 @@
 //! lên trước khi gõ. Tức là gõ từ điện thoại sẽ **giật tiêu điểm** trên máy.
 //! Không có đường vòng: đó là cách macOS cho gõ vào một tiến trình interactive.
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
@@ -708,62 +707,21 @@ pub fn press_seq(window: i64, keys: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Chụp cửa sổ ấy ra PNG.
-///
-/// Đây là đường DUY NHẤT hub nhìn thấy câu hỏi đang chờ: hộp chọn nằm trên màn
-/// hình, chưa vào nhật ký, nên không có cách nào đọc nó từ tệp.
-///
-/// ⚠ Cần quyền **Screen Recording** cho tiến trình chạy hub. Không có quyền thì
-/// `screencapture` trả về ảnh trống chứ KHÔNG báo lỗi — nên hàm này kiểm cỡ tệp
-/// và coi ảnh quá nhỏ là hỏng, thay vì đưa lên màn một khung đen.
-pub fn capture(window: i64, out_dir: &std::path::Path) -> Result<PathBuf> {
-    std::fs::create_dir_all(out_dir)?;
-    let path = out_dir.join(format!("window-{window}.png"));
-    let out = run(
-        "screencapture",
-        &[
-            "-x",
-            "-o",
-            "-l",
-            &window.to_string(),
-            &path.display().to_string(),
-        ],
-        RunOpts {
-            timeout: Some(Duration::from_secs(20)),
-            ..Default::default()
-        },
-    )?;
-    if out.code != Some(0) {
-        return Err(anyhow!(
-            "screencapture hỏng: {}",
-            crate::exec::truncate(out.stderr.trim(), 200)
-        ));
-    }
-    // Thu nhỏ TRƯỚC khi gửi đi. Ảnh Retina của một cửa sổ terminal là 1–3 MB;
-    // base64 hoá lên gấp rưỡi và nhét vào một doc thì mỗi lần chụp là vài MB
-    // đi qua mạng cho một thứ chỉ để LIẾC. 1200px vẫn đọc rõ chữ terminal.
-    // `sips` có sẵn trong macOS, không thêm phụ thuộc nào.
-    let _ = run(
-        "sips",
-        &["-Z", "1200", &path.display().to_string()],
-        RunOpts {
-            timeout: Some(Duration::from_secs(20)),
-            ..Default::default()
-        },
-    );
-    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-    if size < 2048 {
-        logging::warn(
-            "capture_too_small",
-            json!({ "window": window, "bytes": size,
-                    "why": "thường là thiếu quyền Screen Recording" }),
-        );
-        return Err(anyhow!(
-            "ảnh chụp rỗng ({size} byte) — nhiều khả năng hub chưa được cấp quyền Screen Recording"
-        ));
-    }
-    Ok(path)
-}
+// 🔴 ĐÃ XOÁ: cả nhánh CHỤP ẢNH MÀN HÌNH (`capture` → PNG, `capture_base64` →
+// base64, và bộ mã hoá `b64` đi kèm), 2026-08-14.
+//
+// Nó từng là "đường DUY NHẤT hub nhìn thấy câu hỏi đang chờ", cho tới khi Hà
+// hỏi *"sao lại đẩy ảnh, dựng lại đúng option chứ?"* (08-10) và hoá ra Terminal
+// cho đọc thẳng `contents of selected tab` — chữ thuần, không OCR, không vài
+// trăm KB base64, và chữ thì đi qua được cổng quét rò rỉ còn ảnh thì không.
+// Từ hôm ấy `screen_text` làm hết việc, còn ba hàm kia nằm lại **không một chỗ
+// gọi nào** suốt bốn ngày.
+//
+// Chúng ra đi vì đúng câu Hà hỏi hôm nay: *"Tức là bạn đang chụp ảnh thay vì
+// lấy text thuần à"*. Mã chết mang tên `capture` thì câu trả lời "hub không
+// chụp ảnh" luôn có một dấu hỏi treo phía sau, kể cả khi nó đúng. Nó cũng là
+// thứ duy nhất còn đòi quyền **Screen Recording** — bỏ đi là bớt luôn một quyền
+// hệ thống hub không dùng tới.
 
 /// CHỮ đang hiện trên màn của cửa sổ ấy.
 ///
@@ -1119,10 +1077,54 @@ fn after_cd(line: &str) -> Option<&str> {
             out.push(cmd.to_string());
         }
     }
+    dedupe_same_script(&mut out);
     if out.len() > max {
         out.drain(..out.len() - max);
     }
     out
+}
+
+/// Hai cách VIẾT của cùng một lệnh thì chỉ giữ một — bản cụ thể hơn.
+///
+/// 🔴 Hà 2026-08-14, ảnh chụp một tin báo mang ba nút: *"sao lắm nút lệnh
+/// thế"*. Hai trong ba là `bash ./deploy.sh` và `bash scripts/deploy.sh` — cùng
+/// một việc, viết hai kiểu ở hai chỗ khác nhau trong cùng một báo cáo. Trên màn
+/// 390px, hai cái nút gần giống nhau không cho thêm lựa chọn nào; chúng bắt
+/// người đọc dừng lại đoán xem cái nào mới đúng.
+///
+/// ⚠ Hẹp có chủ ý, và bản đầu đã quá rộng: nó gộp theo TÊN TỆP, nên ba dòng
+/// `bash ./dci-deploy-be.sh module/` · `… dci/leave-quota/` · `… dci/config/…`
+/// (ba việc khác nhau, chỉ trùng script) rút còn một — có test cũ bắt được
+/// ngay. Luật đúng là so CẢ DÒNG sau khi rút đường dẫn script về tên tệp: chỉ
+/// gộp khi hai dòng khác nhau đúng ở chỗ viết đường dẫn, còn tham số thì y hệt.
+fn dedupe_same_script(out: &mut Vec<String>) {
+    fn shape(cmd: &str) -> String {
+        cmd.split_whitespace()
+            .map(|w| {
+                if w.ends_with(".sh") || w.ends_with(".mjs") || w.ends_with(".py") || w.ends_with(".js")
+                {
+                    w.rsplit('/').next().unwrap_or(w)
+                } else {
+                    w
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+    let mut keep: Vec<String> = Vec::new();
+    for cmd in out.iter() {
+        let s = shape(cmd);
+        match keep.iter().position(|k| shape(k) == s) {
+            // Cùng một lệnh, hai cách viết: giữ bản nói rõ tệp nằm đâu.
+            Some(i) => {
+                if cmd.len() > keep[i].len() {
+                    keep[i] = cmd.clone();
+                }
+            }
+            None => keep.push(cmd.clone()),
+        }
+    }
+    *out = keep;
 }
 
 /// Đuôi file hub CHẮC CHẮN không gửi — thứ cổng quét rò không đọc nổi.
@@ -1718,34 +1720,6 @@ pub fn screen_of(tty: &str, lines: usize) -> Option<(String, Vec<(usize, String)
     }
 }
 
-/// Ảnh cửa sổ, đã thu nhỏ, dưới dạng base64 để đi trong một doc.
-///
-/// Doc chứ KHÔNG phải file: `portal.rs` đã bỏ `/app/file/save` vì tệp nằm dưới
-/// cây asset công khai với ACL rỗng — ai cũng đọc được. Ảnh chụp một cửa sổ
-/// terminal có thể chứa mật khẩu, token, đường dẫn riêng; nó phải đi đúng con
-/// đường mà ảnh chụp trạng thái đang đi, tức doc gác bằng ACL của app.
-pub fn capture_base64(window: i64, tmp_dir: &std::path::Path) -> Result<(String, u64)> {
-    let path = capture(window, tmp_dir)?;
-    let bytes = std::fs::read(&path)?;
-    let n = bytes.len() as u64;
-    Ok((b64(&bytes), n))
-}
-
-/// base64 chuẩn, tự viết để khỏi thêm một crate cho 20 dòng.
-fn b64(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for c in data.chunks(3) {
-        let b = [c[0], *c.get(1).unwrap_or(&0), *c.get(2).unwrap_or(&0)];
-        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-        out.push(T[(n >> 18) as usize & 63] as char);
-        out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
-    }
-    out
-}
-
 /// Dòng LỖI API đang hiện trên màn, nếu có.
 ///
 /// 🔴 Hà 2026-08-12: *"vừa rồi báo lỗi api mà chưa thấy bắt được"*. Một phiên
@@ -1950,20 +1924,6 @@ mod tests {
         // Nhưng hộp thật giãn một dòng trống thì vẫn phải nhận ra.
         let spaced = "❯ 1. Yes\n\n  2. No, tell Claude what to do differently";
         assert_eq!(parse_choices(spaced).len(), 2, "{spaced}");
-    }
-
-    #[test]
-    fn base64_matches_the_standard() {
-        use super::b64;
-        assert_eq!(b64(b""), "");
-        assert_eq!(b64(b"f"), "Zg==");
-        assert_eq!(b64(b"fo"), "Zm8=");
-        assert_eq!(b64(b"foo"), "Zm9v");
-        assert_eq!(b64(b"foob"), "Zm9vYg==");
-        assert_eq!(b64(b"fooba"), "Zm9vYmE=");
-        assert_eq!(b64(b"foobar"), "Zm9vYmFy");
-        assert_eq!(b64(&[0xff, 0xff, 0xff]), "////");
-        assert_eq!(b64(&[0x00, 0x00, 0x00]), "AAAA");
     }
 
     #[test]

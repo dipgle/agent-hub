@@ -1639,8 +1639,17 @@ static-cache-refresh-0814\n✻ Cooked for 13m 15s\n";
 #[test]
 fn only_a_bare_acknowledgement_shrinks_to_an_emoji() {
     use hub::pipeline::ack_as_emoji;
-    assert_eq!(ack_as_emoji("✓ đã gửi · [hub]"), Some("👍"));
-    assert_eq!(ack_as_emoji("✓ đã bấm 'esc' · [hub]"), Some("👍"));
+    // "đã gửi" nay mang dấu RIÊNG của dự án (Hà 2026-08-14) — nhìn dấu là biết
+    // chữ vừa rơi vào phiên nào; không đọc ra tên thì mới rơi về 👍.
+    assert_eq!(
+        ack_as_emoji("✓ đã gửi · [hub]"),
+        Some(hub::pipeline::project_emoji("hub"))
+    );
+    assert_eq!(ack_as_emoji("✓ đã gửi · không rõ phiên"), Some("👍"));
+    assert_eq!(
+        ack_as_emoji("✓ đã bấm 'esc' · [hub]"),
+        Some(hub::pipeline::project_emoji("hub"))
+    );
     // "vào hàng chờ" là một trạng thái KHÁC (phiên đang bận), đáng dấu khác.
     assert_eq!(ack_as_emoji("✓ vào hàng chờ · [tfl5]"), Some("👌"));
     // Xác nhận thuần khác, cùng luật (Hà: *"nó đơn giản là xác nhận thôi không
@@ -1713,4 +1722,52 @@ fn a_message_typed_while_hub_restarts_is_not_thrown_away() {
     let press = json!({ "callback_query": { "id": "1", "data": "run:0",
                                             "message": { "date": now - 86_400 } } });
     assert_eq!(text_sent_at(&press), None);
+}
+
+/// Hai cách viết cùng một script chỉ đáng MỘT cái nút.
+///
+/// 🔴 Hà 2026-08-14, ảnh chụp một tin báo mang ba nút lệnh: *"sao lắm nút lệnh
+/// thế"*. Hai trong ba là `bash ./deploy.sh` và `bash scripts/deploy.sh` — cùng
+/// một việc, viết hai kiểu ở hai chỗ khác nhau trong cùng một báo cáo.
+#[test]
+fn two_spellings_of_one_script_are_one_button() {
+    let report = "Chạy `bash ./deploy.sh` để lên bản mới.\n\
+                  Chi tiết: `bash scripts/deploy.sh` đọc biến môi trường.\n\
+                  Sau đó `cargo test --offline` cho chắc.\n";
+    let got = hub::keys::commands_in_report(report, 4);
+    let deploys: Vec<_> = got.iter().filter(|c| c.contains("deploy.sh")).collect();
+    assert_eq!(deploys.len(), 1, "chỉ một nút cho một script: {got:?}");
+    assert!(
+        deploys[0].contains("scripts/deploy.sh"),
+        "giữ bản nói rõ tệp nằm đâu: {deploys:?}"
+    );
+    // Lệnh KHÁC script thì vẫn giữ nguyên — dedupe không được ăn lan.
+    assert!(got.iter().any(|c| c.starts_with("cargo test")), "{got:?}");
+}
+
+/// Mỗi dự án một dấu, sinh từ chính cái tên — và không bao giờ đổi.
+///
+/// 🔴 Hà 2026-08-14: *"tự tạo emoji theo tên dự án được không? → add vào để
+/// dùng làm phản hồi"*. Cái dấu phải ỔN ĐỊNH: người ta học nó rồi, một cái dấu
+/// đổi giữa chừng còn tệ hơn không có dấu (cùng bài học với nhãn màu đổi sau
+/// mỗi lần khởi động).
+#[test]
+fn a_project_always_gets_the_same_mark() {
+    use hub::pipeline::{ack_as_emoji, project_emoji};
+    // Ổn định: gọi bao nhiêu lần cũng một kết quả.
+    assert_eq!(project_emoji("tfl5"), project_emoji("tfl5"));
+    assert_eq!(project_emoji("hub"), project_emoji("hub"));
+    // Không phụ thuộc hoa/thường hay dấu ngoặc của nhãn.
+    assert_eq!(project_emoji("dwork"), project_emoji("[DWork]"));
+    // Tên khác nhau thì (gần như luôn) dấu khác nhau — kiểm trên bộ tên thật.
+    let names = ["hub", "tfl5", "dwork", "sdvi", "codetrail", "social", "anpha1"];
+    let marks: std::collections::HashSet<_> = names.iter().map(|n| project_emoji(n)).collect();
+    assert!(marks.len() >= names.len() - 1, "trùng quá nhiều: {marks:?}");
+    // Tên rỗng thì rơi về dấu chung, không hoảng.
+    assert_eq!(project_emoji(""), "👍");
+
+    // …và câu "đã gửi" dùng đúng dấu của phiên nó vừa gửi vào.
+    assert_eq!(ack_as_emoji("✓ đã gửi · 🟩 [tfl5]"), Some(project_emoji("tfl5")));
+    // Còn "vào hàng chờ" vẫn là trạng thái riêng của nó.
+    assert_eq!(ack_as_emoji("✓ vào hàng chờ · 🟩 [tfl5]"), Some("👌"));
 }

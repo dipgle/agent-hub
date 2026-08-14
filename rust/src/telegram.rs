@@ -716,7 +716,7 @@ impl Inbox {
         );
         // ✍ = đã nhận và đã ghi xuống đĩa. Đường dẫn KHÔNG cần thành một tin
         // riêng: nó đi vào phiên ngay dưới đây, tức tới đúng chỗ cần nó.
-        if !mark("\u{270d}") {
+        if !mark(crate::pipeline::ack_emoji(None, crate::pipeline::Ack::Saved)) {
             let _ = self.send_text(&format!(
                 "\u{1f4ce} đã lưu {} ({} KB)",
                 dest.display(),
@@ -728,10 +728,22 @@ impl Inbox {
             Some(c) => format!("Tôi vừa gửi một tệp: {} — {}", dest.display(), c),
             None => format!("Tôi vừa gửi một tệp: {}", dest.display()),
         };
-        self.push_text(&line);
+        // 🔴 MANG THEO message_id. Hà 2026-08-14, sau khi gửi một tấm ảnh:
+        // *"khi tôi gửi ảnh vẫn đang nhận lại 1 phản hồi"*.
+        //
+        // Hai dấu ✍👀 dưới đây thả đúng, nhưng dòng "Tôi vừa gửi một tệp: …" đi
+        // vào phiên qua `push_text` — đường KHÔNG mang id của tin gốc — nên câu
+        // xác nhận của nó (`✓ đã gửi · [tên]`) không biết thả lên đâu và rơi về
+        // một tin chữ. Tức đúng một tin thừa, sinh ra bởi chính cái nhánh vừa
+        // được dựng để bỏ tin thừa.
+        self.push_text_from(&line, msg_id);
         // 👀 = phiên đã được cho xem. Hai dấu chồng lên nhau đọc thành hai bước
         // đã xong, đúng cái "nhiều emoji cho mỗi tình trạng" Hà xin.
-        mark("\u{1f440}");
+        let of = crate::pipeline::project_of_focus(&self.cfg);
+        mark(crate::pipeline::ack_emoji(
+            of.as_deref(),
+            crate::pipeline::Ack::Seen,
+        ));
     }
 
     fn api(&self, method: &str) -> String {
@@ -1815,25 +1827,48 @@ impl Inbox {
     /// sai", và cả hai đều phải rơi về một câu chữ chứ không được im.
     pub fn react(&self, message_id: i64, emoji: &str) -> Result<(), String> {
         let client = self.client().ok_or("không dựng được HTTP client")?;
-        let r = client
-            .post(self.api("setMessageReaction"))
-            .json(&json!({
-                "chat_id": self.chat_id,
-                "message_id": message_id,
-                "reaction": [{ "type": "emoji", "emoji": emoji }],
-            }))
-            .send()
-            .map_err(|e| e.to_string())?;
-        let v: Value = r.json().unwrap_or_else(|_| json!({}));
-        if v.get("ok").and_then(Value::as_bool) == Some(true) {
-            Ok(())
-        } else {
-            Err(v
-                .get("description")
-                .and_then(Value::as_str)
-                .unwrap_or("Telegram từ chối setMessageReaction")
-                .to_string())
+        // 🔴 THỬ LẠI, đừng bỏ cuộc ở cú trượt đầu. Hà 2026-08-14: *"Đã gửi vào
+        // phiên thành công thì LUÔN cập nhật lại emoji like"* — sau khi thấy
+        // một tin trả lời bằng chữ thay vì dấu.
+        //
+        // Đo đúng ca ấy (11:34:57): `error sending request for url …` — mạng
+        // chập một nhịp, không phải Telegram từ chối. Bản đầu coi mọi `Err` như
+        // nhau và rơi thẳng về chữ, tức một cú trượt mạng đủ để phá cả quy ước
+        // mà chủ máy vừa đặt ra.
+        //
+        // Chỉ thử lại lỗi GỬI (mạng). Telegram trả lời mà từ chối — emoji sai
+        // bảng, tin quá cũ để thả — thì thử lại mười lần cũng cùng một câu, và
+        // lúc ấy rơi về chữ mới là đúng.
+        let mut last = String::new();
+        for attempt in 0..3 {
+            if attempt > 0 {
+                std::thread::sleep(Duration::from_millis(400 * attempt as u64));
+            }
+            let sent = client
+                .post(self.api("setMessageReaction"))
+                .json(&json!({
+                    "chat_id": self.chat_id,
+                    "message_id": message_id,
+                    "reaction": [{ "type": "emoji", "emoji": emoji }],
+                }))
+                .send();
+            match sent {
+                Ok(r) => {
+                    let v: Value = r.json().unwrap_or_else(|_| json!({}));
+                    if v.get("ok").and_then(Value::as_bool) == Some(true) {
+                        return Ok(());
+                    }
+                    // Telegram đã trả lời: đây là câu trả lời cuối cùng.
+                    return Err(v
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("Telegram từ chối setMessageReaction")
+                        .to_string());
+                }
+                Err(e) => last = logging::redact(&e.to_string()),
+            }
         }
+        Err(last)
     }
 
     /// Gửi một câu ra Telegram. `Err` chứ không nuốt — chỗ gọi phải log.

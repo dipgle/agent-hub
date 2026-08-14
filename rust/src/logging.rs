@@ -60,7 +60,22 @@ fn emit(level: u8, level_name: &str, msg: &str, fields: Value) {
             obj.insert(k, v);
         }
     }
-    let text = line.to_string();
+    // 🔴 CỬA GÁC ĐẶT Ở ĐÂY, không ở từng chỗ gọi — và đây là lần thứ hai cùng
+    // một bí mật chảy ra cùng một đường.
+    //
+    // `redact` đã có từ 08-11, sau khi vòng đọc Telegram hỏng mạng vài lần và
+    // để lại 28 dòng log mang nguyên khoá bot. Nhưng nó là thứ CHỖ GỌI phải
+    // nhớ bọc — nên hôm nay, 08-14, một nhánh mới (`Inbox::react`) quên bọc, và
+    // token lại nằm nguyên trong `logs/hub.log`:
+    //   telegram_reaction_failed err="error sending request for url
+    //   (https://api.telegram.org/bot<token>/setMessageReaction)"
+    // Chính tôi viết nhánh ấy sáng nay, và chính tôi đã ghi cái bài học "đặt
+    // luật ở NGUỒN, vì chỗ gọi thứ mười ba sẽ quên" ba lần trong repo này.
+    //
+    // Mọi dòng log đều đi qua đúng một hàm — nên gác ở đây thì không nhánh nào
+    // quên được nữa, kể cả nhánh viết sau. `redact` chỉ làm việc thật khi chuỗi
+    // có `/bot`, nên cái giá là một lần `find` cho mỗi dòng.
+    let text = redact(&line.to_string());
 
     // Every level goes to stderr: stdout is the DATA channel. `hub sessions
     // --json` and `portal-push --dry-run` are meant to be piped into a parser,

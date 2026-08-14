@@ -35,6 +35,16 @@ pub struct RunOpts<'a> {
     /// selected by `CLAUDE_CONFIG_DIR`, and the default account is selected by
     /// the variable being ABSENT, not by pointing it at the default directory.
     pub env: Vec<(String, Option<String>)>,
+    /// Nơi nhận PID của tiến trình con, ngay sau khi nó được dựng.
+    ///
+    /// 🔴 Hà 2026-08-14: *"Có những lệnh sẽ chạy khá lâu nên cần cơ chế theo dõi
+    /// riêng thay vì cố định timeout"*. Theo dõi được thì cũng phải DỪNG được,
+    /// mà dừng thì phải biết giết ai. `run()` chặn tới khi xong, nên pid phải đi
+    /// ra bằng đường này — chỗ gọi lấy nó ngay lúc lệnh bắt đầu, không phải chờ
+    /// lệnh kết thúc mới biết mình vừa chạy gì.
+    ///
+    /// Không dùng thì để `None`: đường cũ không đổi một chữ.
+    pub pid_out: Option<mpsc::Sender<u32>>,
 }
 
 const POLL: Duration = Duration::from_millis(50);
@@ -204,6 +214,13 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
     let mut child = command
         .spawn()
         .map_err(|e| anyhow!("spawn {cmd} failed: {e}"))?;
+
+    // Nói ra pid NGAY, trước cả khi đọc một byte đầu ra: chỗ gọi đang chờ đúng
+    // con số này để ghi sổ "đang chạy" và để dựng cái nút dừng. Kênh đóng rồi
+    // thì thôi — chỗ gọi bỏ cuộc là chuyện của chỗ gọi, không phải lỗi ở đây.
+    if let Some(tx) = &opts.pid_out {
+        let _ = tx.send(child.id());
+    }
 
     // stdin in its own thread: a big prompt must not deadlock against a child
     // that is already writing to stdout.

@@ -613,7 +613,24 @@ impl Inbox {
     ///   phiên đọc tệp bằng đường dẫn tương đối là chuyện thường;
     /// - **hỏng thì NÓI**, đừng im: một tệp gửi đi mà không thấy hồi âm nào là
     ///   thứ khiến người ta gửi lại lần nữa.
-    fn take_file(&self, file_id: &str, name: &str, caption: Option<&str>) {
+    fn take_file(&self, file_id: &str, name: &str, caption: Option<&str>, msg_id: Option<i64>) {
+        // 🔴 Hà 2026-08-14: *"Đối với tin nhắn ảnh cũng đổi thành phản hồi bằng
+        // nhiều emoji cho mỗi tình trạng"* · *"Mọi tin tôi gửi phản hồi hết
+        // bằng emoji đi"*. Một tấm ảnh gửi lên vốn đẻ ra HAI tin của bot ("đã
+        // lưu …" rồi "đã gửi vào phiên"), mà cả hai chỉ nói "đã nhận" — trên
+        // một màn 390px thì đó là hai dòng đẩy đúng cái ảnh vừa gửi lên khỏi
+        // tầm mắt. Mỗi tình trạng nay là một dấu thả lên chính tấm ảnh ấy.
+        let mark = |e: &str| {
+            if let Some(mid) = msg_id {
+                if let Err(err) = self.react(mid, e) {
+                    // Thả không được thì rơi về chữ, và nói vì sao.
+                    logging::warn("telegram_reaction_failed", json!({ "err": err }));
+                    return false;
+                }
+                return true;
+            }
+            false
+        };
         let client = match self.client() {
             Some(c) => c,
             None => return,
@@ -687,6 +704,9 @@ impl Inbox {
         let dest = dir.join(safe);
         if let Err(e) = std::fs::write(&dest, &bytes) {
             logging::error("telegram_file_write_failed", json!({ "err": e.to_string() }));
+            // Hỏng thì KHÔNG rút thành emoji: một dấu mặt buồn không nói được
+            // hỏng ở đâu, mà đây đúng lúc người gửi cần biết.
+            mark("😢");
             let _ = self.send_text(&format!("\u{26a0} không ghi được tệp: {e}"));
             return;
         }
@@ -694,17 +714,24 @@ impl Inbox {
             "telegram_file_received",
             json!({ "name": safe, "bytes": bytes.len(), "dir": dir.display().to_string() }),
         );
-        let _ = self.send_text(&format!(
-            "\u{1f4ce} đã lưu {} ({} KB)",
-            dest.display(),
-            bytes.len() / 1024
-        ));
+        // ✍ = đã nhận và đã ghi xuống đĩa. Đường dẫn KHÔNG cần thành một tin
+        // riêng: nó đi vào phiên ngay dưới đây, tức tới đúng chỗ cần nó.
+        if !mark("\u{270d}") {
+            let _ = self.send_text(&format!(
+                "\u{1f4ce} đã lưu {} ({} KB)",
+                dest.display(),
+                bytes.len() / 1024
+            ));
+        }
         // 4. Nói cho phiên biết — đi đúng đường chữ thường đã có.
         let line = match caption.map(str::trim).filter(|c| !c.is_empty()) {
             Some(c) => format!("Tôi vừa gửi một tệp: {} — {}", dest.display(), c),
             None => format!("Tôi vừa gửi một tệp: {}", dest.display()),
         };
         self.push_text(&line);
+        // 👀 = phiên đã được cho xem. Hai dấu chồng lên nhau đọc thành hai bước
+        // đã xong, đúng cái "nhiều emoji cho mỗi tình trạng" Hà xin.
+        mark("\u{1f440}");
     }
 
     fn api(&self, method: &str) -> String {
@@ -1050,23 +1077,24 @@ impl Inbox {
                 json!({ "err": logging::redact(&e.to_string()) }),
             ),
         }
-        // Bắt đầu từ mốc HIỆN TẠI, không đọc lại lịch sử: hub vừa khởi động lại
-        // mà chạy luôn mấy lệnh gõ từ hôm qua là một kiểu bất ngờ tệ.
-        if let Ok(v) = client
-            .get(format!("{}?offset=-1&timeout=0", self.api("getUpdates")))
-            .send()
-            .and_then(|r| r.json::<Value>())
-        {
-            if let Some(id) = v
-                .get("result")
-                .and_then(Value::as_array)
-                .and_then(|a| a.last())
-                .and_then(|u| u.get("update_id"))
-                .and_then(Value::as_i64)
-            {
-                self.set_offset(id + 1);
-            }
-        }
+        // 🔴 KHÔNG nhảy con dấu về hiện tại nữa — và đây là một tin nhắn ĐÃ MẤT
+        // THẬT. Hà 2026-08-14, ngay sau một lượt cài lại: *"Vừa rồi đã dừng ko
+        // nhận được tin nhắn"*.
+        //
+        // Bản cũ mở đầu bằng `getUpdates?offset=-1`, tức bảo Telegram "coi như
+        // tôi đã nhận hết", rồi vứt sạch mọi thứ tồn đọng. Lý do viết ra thì
+        // đúng — *"hub vừa khởi động lại mà chạy luôn mấy lệnh gõ từ hôm qua là
+        // một kiểu bất ngờ tệ"* — nhưng cách làm quá thô: nó không phân biệt
+        // một câu gõ từ hôm qua với một câu gõ CÁCH ĐÂY BỐN GIÂY, trong lúc hub
+        // đang khởi động lại. Mà hub khởi động lại nhiều lần mỗi ngày, mỗi lần
+        // là một cửa sổ vài giây nuốt trọn mọi thứ rơi vào đó, im lặng.
+        //
+        // Nay con dấu giữ nguyên (Telegram còn giữ update chưa nhận), và cái
+        // gác chuyển sang đúng câu hỏi mà nó vốn muốn hỏi: **tin này gõ lúc
+        // nào**. Xem `TOO_OLD_SEC` trong `handle_update`. Nút bấm thì KHÔNG lọc
+        // theo tuổi — Telegram không nói lúc bấm (bài học sáng nay), mà một cú
+        // bấm tồn đọng thì cùng lắm rơi vào sổ đã đổi và tự trả lời "lệnh ấy đã
+        // cũ".
         loop {
             if self.busy.load(Ordering::SeqCst) {
                 std::thread::sleep(Duration::from_millis(400));
@@ -1222,6 +1250,24 @@ impl Inbox {
         // nằm trong hàng đợi của chính hub) và ở `command_done` — hai mốc hub
         // tự cầm đồng hồ, không phải một mốc mượn của Telegram rồi đọc sai.
         let started = std::time::Instant::now();
+        // Tin CHỮ cũ hơn chừng này thì hub bỏ, có ghi log: đó là câu gõ từ một
+        // lần chạy trước, không phải việc đang cần làm. Mười lăm phút rộng hơn
+        // hẳn mọi lượt cài lại (vài giây tới một phút) và hẹp hơn hẳn một buổi
+        // máy tắt — chỗ giữa ấy không có ca nào mơ hồ.
+        const TOO_OLD_SEC: i64 = 900;
+        if let Some(sent) = text_sent_at(u) {
+            let age = chrono::Utc::now().timestamp() - sent;
+            if age > TOO_OLD_SEC {
+                logging::warn(
+                    "telegram_update_too_old",
+                    json!({ "sec": age,
+                            "head": u.pointer("/message/text").and_then(Value::as_str)
+                                .map(|t| crate::exec::truncate(t, 40)),
+                            "why": "tin gõ từ một lần chạy trước — bỏ, không chạy" }),
+                );
+                return;
+            }
+        }
         if let Some(sent) = text_sent_at(u) {
             let lag = chrono::Utc::now().timestamp() - sent;
             if lag > 3 {
@@ -1284,6 +1330,23 @@ impl Inbox {
                 let _ = self.send_text(
                     "⌛ Nút này thuộc một câu hỏi đã đóng sổ — hub không làm gì. Gửi lại lệnh nếu vẫn cần.",
                 );
+                return;
+            }
+            // `stopjob:<n>` — dừng một lệnh đang chạy nền.
+            //
+            // 🔴 Hà 2026-08-14: *"Có những lệnh sẽ chạy khá lâu nên cần cơ chế
+            // theo dõi riêng thay vì cố định timeout"*. Bỏ trần mà không có
+            // đường dừng thì chỉ đổi một cái chết ồn ào (bị giết ở giây 120)
+            // lấy một sự im lặng dài — và im lặng dài thì người ta bấm lại, rồi
+            // một lệnh triển khai chạy hai lần.
+            if let Some(n) = data.strip_prefix("stopjob:").and_then(|n| n.parse::<usize>().ok()) {
+                let msg = match crate::pipeline::stop_job(n) {
+                    Ok(m) => m,
+                    Err(e) => format!("⚠ {e}"),
+                };
+                if let Err(e) = self.send_text(&msg) {
+                    logging::error("telegram_ack_failed", json!({ "err": e }));
+                }
                 return;
             }
             // `run:<n>` — nút gửi nhanh một lệnh thấy trên màn. Chữ nằm trong
@@ -1639,7 +1702,12 @@ impl Inbox {
         // không đẻ lối riêng cho phiên phải học.
         if from == self.chat_id {
             if let Some((file_id, name)) = attachment_of(msg) {
-                self.take_file(&file_id, &name, msg.get("caption").and_then(Value::as_str));
+                self.take_file(
+                    &file_id,
+                    &name,
+                    msg.get("caption").and_then(Value::as_str),
+                    msg.get("message_id").and_then(Value::as_i64),
+                );
                 return;
             }
         }

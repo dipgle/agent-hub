@@ -2872,6 +2872,7 @@ fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkRe
                 "CLAUDE_CONFIG_DIR".into(),
                 account_dir(cfg, &session.account),
             )],
+            ..Default::default()
         },
     )?;
     if out.timed_out {
@@ -3914,6 +3915,7 @@ pub fn start_background(
                 "CLAUDE_CONFIG_DIR".into(),
                 account.and_then(|a| account_dir(cfg, a)),
             )],
+            ..Default::default()
         },
     )?;
     if out.code != Some(0) {
@@ -4016,7 +4018,8 @@ pub fn start_background(
                     "CLAUDE_CONFIG_DIR".into(),
                     account.and_then(|a| account_dir(cfg, a)),
                 )],
-            },
+            ..Default::default()
+        },
         ) {
             Ok(out) if out.code == Some(0) => true,
             Ok(out) => {
@@ -4161,6 +4164,7 @@ pub fn stop_background(cfg: &Config, session: &LiveSession) -> Result<()> {
                 "CLAUDE_CONFIG_DIR".into(),
                 account_dir(cfg, &session.account),
             )],
+            ..Default::default()
         },
     )?;
     if out.code != Some(0) {
@@ -4230,6 +4234,7 @@ pub fn tell(cfg: &Config, session: &LiveSession, text: &str) -> Result<Told> {
                 "CLAUDE_CONFIG_DIR".into(),
                 account_dir(cfg, &session.account),
             )],
+            ..Default::default()
         },
     )?;
     if out.timed_out {

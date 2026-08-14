@@ -1643,9 +1643,15 @@ fn only_a_bare_acknowledgement_shrinks_to_an_emoji() {
     assert_eq!(ack_as_emoji("✓ đã bấm 'esc' · [hub]"), Some("👍"));
     // "vào hàng chờ" là một trạng thái KHÁC (phiên đang bận), đáng dấu khác.
     assert_eq!(ack_as_emoji("✓ vào hàng chờ · [tfl5]"), Some("👌"));
-    // Còn lại phải giữ nguyên chữ.
+    // Xác nhận thuần khác, cùng luật (Hà: *"nó đơn giản là xác nhận thôi không
+    // cần thông tin"*).
+    assert_eq!(ack_as_emoji("👁 Đang theo phiên [tfl5] (acc1)"), Some("👀"));
+    assert_eq!(ack_as_emoji("▶ đang chạy — bash deploy.sh abc"), Some("⚡"));
+    assert_eq!(ack_as_emoji("⏹ đã bảo dừng: bash deploy.sh"), Some("👌"));
+    // Còn lại phải giữ nguyên chữ — chúng MANG THÔNG TIN.
     assert_eq!(ack_as_emoji("⚠ không gõ được: cửa sổ đã đóng"), None);
-    assert_eq!(ack_as_emoji("👁 Đang theo phiên [tfl5] (acc1)"), None);
+    assert_eq!(ack_as_emoji("✅ Đã chạy trên máy rồi dán kết quả vào [hub]: …"), None);
+    assert_eq!(ack_as_emoji("📋 4 phiên đang sống: …"), None);
     assert_eq!(ack_as_emoji("📷 Màn của [hub]:\n…"), None);
     assert_eq!(ack_as_emoji("▶ chạy trong 4963b95c: bash deploy.sh"), None);
     assert_eq!(ack_as_emoji(""), None);
@@ -1678,4 +1684,33 @@ fn a_lane_belongs_to_the_work_not_to_the_process() {
     let _g = urgent();
     let other = std::thread::spawn(lane).join().unwrap();
     assert_eq!(other, Lane::Background);
+}
+
+/// Tin gửi trong lúc hub khởi động lại KHÔNG được mất.
+///
+/// 🔴 Hà 2026-08-14, ngay sau một lượt cài lại: *"Vừa rồi đã dừng ko nhận được
+/// tin nhắn"*. Bản cũ mở đầu bằng `getUpdates?offset=-1` — bảo Telegram "coi
+/// như đã nhận hết" rồi vứt sạch phần tồn đọng. Lý do viết ra thì đúng (đừng
+/// chạy lệnh gõ từ hôm qua), nhưng nó không phân biệt được một câu gõ hôm qua
+/// với một câu gõ bốn giây trước, trong đúng cửa sổ hub đang khởi động lại.
+///
+/// Cái gác nay hỏi đúng câu nó vốn muốn hỏi — TIN NÀY GÕ LÚC NÀO — và câu đó
+/// chỉ trả lời được cho tin chữ (`text_sent_at`); nút bấm không mang mốc nào,
+/// nên không bị lọc theo tuổi.
+#[test]
+fn a_message_typed_while_hub_restarts_is_not_thrown_away() {
+    use hub::telegram::text_sent_at;
+    use serde_json::json;
+    let now = 1_786_462_200i64;
+    // Tin vừa gõ (4 giây trước) — phải có mốc để so, và mốc ấy nói "còn mới".
+    let fresh = json!({ "message": { "date": now - 4, "text": "chạy test đi" } });
+    assert_eq!(text_sent_at(&fresh), Some(now - 4));
+    assert!(now - text_sent_at(&fresh).unwrap() < 900);
+    // Tin của hôm qua — cùng phép đo ấy nói "quá cũ", nên nó bị bỏ CÓ LOG.
+    let stale = json!({ "message": { "date": now - 86_400, "text": "/new dwork" } });
+    assert!(now - text_sent_at(&stale).unwrap() > 900);
+    // Nút bấm: không có mốc ⟹ không lọc theo tuổi (Telegram không nói lúc bấm).
+    let press = json!({ "callback_query": { "id": "1", "data": "run:0",
+                                            "message": { "date": now - 86_400 } } });
+    assert_eq!(text_sent_at(&press), None);
 }

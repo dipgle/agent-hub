@@ -2289,6 +2289,302 @@ pub fn command_slices(text: &str, cmds: &[String]) -> Vec<(String, Option<usize>
 /// cái icon và thẻ `<a>` bọc nó.
 const TG_TEXT_MAX: usize = 3500;
 
+/// Trần AN TOÀN cho một lệnh chạy nền: một giờ.
+///
+/// Không phải "thời gian một lệnh được phép chạy" — đó là câu hỏi không ai trả
+/// lời đúng được từ trước, và trần 120 giây cũ chính là một câu trả lời sai.
+/// Đây là cái phanh cuối: một tiến trình treo một tiếng thì nó treo thật, và bỏ
+/// nó chạy tới sáng là bỏ lại một thứ đang giữ tài nguyên mà không ai nhớ.
+const LONG_JOB_MAX_SEC: u64 = 3600;
+
+/// Bao lâu thì nhắc một lần rằng lệnh vẫn đang chạy.
+const LONG_JOB_TICK_SEC: u64 = 90;
+
+/// Việc đang chạy nền, để **theo dõi và dừng được** — thứ Hà đòi thay cho một
+/// con số timeout.
+#[derive(Debug, Clone)]
+struct Job {
+    n: usize,
+    pid: u32,
+    line: String,
+    session: String,
+    started: std::time::Instant,
+}
+
+static JOBS: std::sync::Mutex<Vec<Job>> = std::sync::Mutex::new(Vec::new());
+static JOB_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Dừng một việc đang chạy. `Err` mang câu nói ra được cho người bấm.
+///
+/// Giết cả NHÓM tiến trình, không riêng đứa con: `zsh -lc "bash deploy.sh"` đẻ
+/// tiếp cháu chắt, và giết mỗi `zsh` để lại nguyên đàn phía dưới — cùng bài học
+/// đã trả giá với `claude` (xem `exec::kill_group`).
+pub fn stop_job(n: usize) -> Result<String, String> {
+    let job = {
+        let jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+        jobs.iter().find(|j| j.n == n).cloned()
+    };
+    let Some(job) = job else {
+        return Err("việc ấy đã xong hoặc đã dừng rồi".to_string());
+    };
+    let out = std::process::Command::new("/bin/kill")
+        .args(["-TERM", &format!("-{}", job.pid)])
+        .output()
+        .map_err(|e| e.to_string())?;
+    logging::info(
+        "long_job_stop_asked",
+        json!({ "n": n, "pid": job.pid, "ok": out.status.success(),
+                "cmd": crate::exec::truncate(&job.line, 120) }),
+    );
+    Ok(format!(
+        "⏹ đã bảo dừng: {}",
+        crate::exec::truncate(&job.line, 100)
+    ))
+}
+
+/// Danh sách việc đang chạy, cho `/jobs` và cho câu trả lời khi có người hỏi.
+pub fn jobs_line() -> Option<String> {
+    let jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+    if jobs.is_empty() {
+        return None;
+    }
+    Some(
+        jobs.iter()
+            .map(|j| {
+                format!(
+                    "#{} · {}s · [{}] {}",
+                    j.n,
+                    j.started.elapsed().as_secs(),
+                    j.session.chars().take(8).collect::<String>(),
+                    crate::exec::truncate(&j.line, 60)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+/// Chạy một lệnh ở luồng riêng, theo dõi nó, rồi báo lại — thay cho việc ngồi
+/// chờ tới một cái trần.
+///
+/// 🔴 Hà 2026-08-14: *"Có những lệnh sẽ chạy khá lâu nên cần cơ chế theo dõi
+/// riêng thay vì cố định timeout"*.
+///
+/// Ba việc, và cái thứ ba mới là thứ trước đây thiếu:
+/// 1. **Chạy**, với cái phanh cuối một tiếng (`LONG_JOB_MAX_SEC`) — chạm phanh
+///    thì NÓI rõ là bị dừng vì quá lâu, không lẫn với "lệnh chạy xong".
+/// 2. **Báo lại** khi xong: cùng báo cáo, cùng đường dán vào phiên, cùng cổng
+///    quét bí mật như đường cũ.
+/// 3. **Theo dõi trong lúc chạy**: mỗi 90 giây nhắc một câu kèm nút ⏹ dừng.
+///    Không có bước này thì "bỏ trần" chỉ đổi một cái chết ồn ào thành một sự
+///    im lặng dài — mà im lặng dài thì người ta bấm lại lần nữa, và lần thứ hai
+///    là một lệnh triển khai chạy hai lần.
+fn watch_long_job(
+    cfg: Config,
+    s: crate::sessions::LiveSession,
+    root: std::path::PathBuf,
+    line: String,
+    adapter: String,
+    chat_id: String,
+) {
+    let n = JOB_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    // Bản sao cho nhánh "không dựng được luồng": luồng nuốt bản gốc, mà đúng ca
+    // ấy mới cần nói ra là lệnh KHÔNG chạy.
+    let (fb_cfg, fb_adapter, fb_chat) = (cfg.clone(), adapter.clone(), chat_id.clone());
+    let spawned = std::thread::Builder::new()
+        .name(format!("long-job-{n}"))
+        .spawn(move || {
+            // Việc này do một ngón tay gây ra ⟹ hạng gấp (xem `exec::Lane`).
+            let _lane = crate::exec::urgent();
+            let (tx, rx) = std::sync::mpsc::channel::<u32>();
+            let ticker_line = line.clone();
+            let ticker_cfg = cfg.clone();
+            let ticker_adapter = adapter.clone();
+            let ticker_chat = chat_id.clone();
+            // Người báo tin: sống bằng cách hỏi cuốn sổ, nên nó tự tắt đúng lúc
+            // việc rời sổ — không cần thêm một kênh thứ hai để bảo nó dừng.
+            let ticker = std::thread::Builder::new()
+                .name(format!("long-job-tick-{n}"))
+                .spawn(move || loop {
+                    std::thread::sleep(std::time::Duration::from_secs(LONG_JOB_TICK_SEC));
+                    let still = {
+                        let jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+                        jobs.iter().find(|j| j.n == n).map(|j| j.started.elapsed())
+                    };
+                    match still {
+                        Some(el) => {
+                            // Nút ⏹ đi KÈM câu nhắc, không bắt nhớ một động từ:
+                            // `/stop` đã là route dừng PHIÊN, nên một lệnh chữ
+                            // ở đây vừa trùng tên vừa mời gõ nhầm thứ đáng sợ
+                            // hơn hẳn — dừng cả phiên thay vì dừng một lệnh.
+                            let text = format!(
+                                "⏳ vẫn đang chạy ({} phút) — {}",
+                                el.as_secs() / 60,
+                                crate::exec::truncate(&ticker_line, 100),
+                            );
+                            match (
+                                ticker_adapter == crate::telegram::NAME,
+                                crate::telegram::inbox(),
+                            ) {
+                                (true, Some(tg)) => {
+                                    if let Err(e) = tg.send_buttons(
+                                        &text,
+                                        &[("⏹ dừng lệnh này".to_string(), format!("stopjob:{n}"))],
+                                    ) {
+                                        logging::error("telegram_ack_failed", json!({ "err": e }));
+                                    }
+                                }
+                                _ => say_back(&ticker_cfg, &ticker_adapter, &ticker_chat, &text),
+                            }
+                        }
+                        None => break,
+                    }
+                });
+            if let Err(e) = &ticker {
+                // Mất người báo tin thì việc vẫn chạy — chỉ là chạy im. Nói ra.
+                logging::warn("long_job_ticker_failed", json!({ "n": n, "err": e.to_string() }));
+            }
+            let watcher = {
+                let line = line.clone();
+                let session = s.session_id.clone();
+                std::thread::Builder::new()
+                    .name(format!("long-job-pid-{n}"))
+                    .spawn(move || {
+                        if let Ok(pid) = rx.recv() {
+                            let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+                            jobs.push(Job {
+                                n,
+                                pid,
+                                line,
+                                session,
+                                started: std::time::Instant::now(),
+                            });
+                            logging::info("long_job_started", json!({ "n": n, "pid": pid }));
+                        }
+                    })
+            };
+            if let Err(e) = &watcher {
+                logging::warn("long_job_book_failed", json!({ "n": n, "err": e.to_string() }));
+            }
+            let out = crate::exec::run(
+                "/bin/zsh",
+                &["-lc", &line],
+                crate::exec::RunOpts {
+                    cwd: Some(root.as_path()),
+                    timeout: Some(std::time::Duration::from_secs(LONG_JOB_MAX_SEC)),
+                    pid_out: Some(tx),
+                    ..Default::default()
+                },
+            );
+            {
+                let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+                jobs.retain(|j| j.n != n);
+            }
+            let ack = match out {
+                Ok(r) => {
+                    logging::info(
+                        "runin_ran",
+                        json!({ "session": s.session_id, "code": r.code,
+                                "timed_out": r.timed_out, "ms": r.ms, "n": n,
+                                "cmd": crate::exec::truncate(&line, 120) }),
+                    );
+                    let report = cmd_report(r.code, r.timed_out, &r.stdout, &r.stderr, r.ms);
+                    let block = format!(
+                        "[hub đã chạy hộ lệnh này trên máy — cwd {}, KHÔNG có tty]\n$ {}\n{}",
+                        root.display(),
+                        line,
+                        report
+                    );
+                    // Đầu ra nằm lại trong NHẬT KÝ phiên, tức trên đĩa mãi mãi —
+                    // gác giá trị bí mật trước khi nó vào đó.
+                    let risk = crate::redaction::file_risk(&block);
+                    if !risk.is_empty() {
+                        format!(
+                            "🔒 Lệnh chạy xong nhưng hub GIỮ LẠI kết quả, không dán vào phiên: có dấu hiệu bí mật ({}). Xem trên máy.",
+                            risk.join(", ")
+                        )
+                    } else {
+                        match crate::keys::window_of(&s.tty) {
+                            Ok(Some(w)) => match crate::keys::type_into(w, &block, true) {
+                                Ok(()) => {
+                                    for wait_ms in [400u64, 1000] {
+                                        std::thread::sleep(std::time::Duration::from_millis(
+                                            wait_ms,
+                                        ));
+                                        let _ = crate::keys::press(w, "enter");
+                                    }
+                                    format!(
+                                        "✅ Đã chạy trên máy rồi dán kết quả vào {}:\n$ {}\n{}",
+                                        crate::sessions::shown(&s),
+                                        line,
+                                        crate::exec::truncate(&report, 400)
+                                    )
+                                }
+                                Err(e) => format!(
+                                    "⚠ chạy xong nhưng KHÔNG dán được vào phiên: {}\n\n$ {}\n{}",
+                                    crate::exec::truncate(&e.to_string(), 160),
+                                    line,
+                                    crate::exec::truncate(&report, 600)
+                                ),
+                            },
+                            _ => format!(
+                                "⚠ phiên {} không có cửa sổ terminal để dán vào. Kết quả:\n\n$ {}\n{}",
+                                crate::sessions::shown(&s),
+                                line,
+                                crate::exec::truncate(&report, 600)
+                            ),
+                        }
+                    }
+                }
+                Err(e) => {
+                    logging::error(
+                        "runin_failed",
+                        json!({ "err": e.to_string(), "n": n,
+                                "cmd": crate::exec::truncate(&line, 120) }),
+                    );
+                    format!(
+                        "⚠ không chạy được: {}",
+                        crate::exec::truncate(&e.to_string(), 200)
+                    )
+                }
+            };
+            say_back(&cfg, &adapter, &chat_id, &ack);
+        });
+    if let Err(e) = spawned {
+        // Không dựng được luồng thì lệnh KHÔNG chạy — và câu này phải tới được
+        // người bấm, không chỉ nằm trong log.
+        logging::error("long_job_spawn_failed", json!({ "err": e.to_string() }));
+        say_back(
+            &fb_cfg,
+            &fb_adapter,
+            &fb_chat,
+            "⚠ không dựng được luồng chạy nền — lệnh KHÔNG chạy.",
+        );
+    }
+}
+
+/// Nói một câu về kênh đã gõ lệnh, từ một luồng không cầm `ChannelCommand`.
+fn say_back(cfg: &Config, adapter: &str, chat_id: &str, text: &str) {
+    if adapter == crate::telegram::NAME {
+        if let Some(i) = crate::telegram::inbox() {
+            if let Err(e) = i.send_text(text) {
+                logging::error("telegram_ack_failed", json!({ "err": e }));
+            }
+        }
+        return;
+    }
+    if adapter == tfl5::NAME {
+        if let Err(e) = tfl5::send(&cfg.adapters.tfl5, chat_id, None, text) {
+            logging::error(
+                "tfl5_command_ack_failed",
+                json!({ "target": chat_id, "err": logging::err_chain(&e) }),
+            );
+        }
+        return;
+    }
+    logging::info("long_job_ack_dropped", json!({ "adapter": adapter, "ack": text }));
+}
+
 /// Gửi một tin CÓ LỆNH TRONG CHỮ: cắt ngay sau mỗi dòng lệnh, dán icon ▶️ chạm
 /// được vào cuối dòng ấy, các nút còn lại treo dưới mẩu cuối.
 ///
@@ -3071,100 +3367,35 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 continue;
                             }
                         };
-                        let out = crate::exec::run(
-                            "/bin/zsh",
-                            &["-lc", &line],
-                            crate::exec::RunOpts {
-                                cwd: Some(root.as_path()),
-                                timeout: Some(std::time::Duration::from_secs(
-                                    cfg.call.timeout_sec.min(120),
-                                )),
-                                ..Default::default()
-                            },
+                        // 🔴 Hà 2026-08-14, ảnh chụp một cú bấm ▶ trên [tfl5]:
+                        // *"Có những lệnh sẽ chạy khá lâu nên cần cơ chế theo
+                        // dõi riêng thay vì cố định timeout"*. Trên ảnh:
+                        // `⏱ quá giờ sau 120.9s — đã giết cả nhóm tiến trình`,
+                        // cho một lệnh triển khai.
+                        //
+                        // Trần 120 giây ấy không đo cái gì cả — nó là một con
+                        // số tròn, và với đúng những lệnh đáng bấm từ điện
+                        // thoại (build, test, deploy) thì nó bảo đảm GIẾT giữa
+                        // chừng. Tệ hơn: giết một lệnh triển khai ở giây thứ
+                        // 120 để lại một trạng thái không ai biết là gì.
+                        //
+                        // Cái sai gốc là CHỜ TẠI CHỖ: chờ thì buộc phải chọn
+                        // giữa "chặn kênh chat" và "giết lệnh", mà cả hai đều
+                        // sai. Nay lệnh chạy ở luồng riêng, hub trả lời NGAY,
+                        // rồi theo dõi và báo lại — xem `watch_long_job`.
+                        watch_long_job(
+                            cfg.clone(),
+                            s.clone(),
+                            root.clone(),
+                            line.clone(),
+                            adapter.to_string(),
+                            cmd.chat_id.clone(),
                         );
-                        match out {
-                            Ok(r) => {
-                                logging::info(
-                                    "runin_ran",
-                                    json!({ "session": s.session_id, "code": r.code,
-                                            "timed_out": r.timed_out, "ms": r.ms,
-                                            "cmd": crate::exec::truncate(&line, 120) }),
-                                );
-                                let report =
-                                    cmd_report(r.code, r.timed_out, &r.stdout, &r.stderr, r.ms);
-                                // 🔴 NGỮ CẢNH PHẢI ĐI CÙNG. Hà 2026-08-13:
-                                // *"nhưng ngữ cảnh lại bị mất dấu"*. Dán mỗi
-                                // đầu ra vào phiên là đưa một kết quả không có
-                                // nguyên nhân: phiên không biết lệnh nào đẻ ra
-                                // nó, chạy ở thư mục nào, có tty không — mà cả
-                                // ba đều đổi cách đọc kết quả ấy.
-                                //
-                                // Nên khối dán vào mang đủ dấu vết, và nói rõ
-                                // AI đã chạy: phiên không được tưởng chính nó
-                                // vừa chạy, không thì lượt sau nó kể lại một
-                                // việc nó chưa làm.
-                                let block = format!(
-                                    "[hub đã chạy hộ lệnh này trên máy — \
-                                     cwd {}, KHÔNG có tty]\n$ {}\n{}",
-                                    root.display(),
-                                    line,
-                                    report
-                                );
-                                // Đầu ra sẽ nằm lại trong NHẬT KÝ phiên, tức
-                                // trên đĩa, mãi mãi — gác giá trị bí mật trước
-                                // khi nó vào đó.
-                                let risk = crate::redaction::file_risk(&block);
-                                if !risk.is_empty() {
-                                    format!(
-                                        "🔒 Lệnh chạy xong nhưng hub GIỮ LẠI kết quả, không dán vào phiên: có dấu hiệu bí mật ({}). Xem trên máy.",
-                                        risk.join(", ")
-                                    )
-                                } else {
-                                    match crate::keys::window_of(&s.tty) {
-                                        Ok(Some(w)) => match crate::keys::type_into(w, &block, true)
-                                        {
-                                            Ok(()) => {
-                                                for wait_ms in [400u64, 1000] {
-                                                    std::thread::sleep(
-                                                        std::time::Duration::from_millis(wait_ms),
-                                                    );
-                                                    let _ = crate::keys::press(w, "enter");
-                                                }
-                                                format!(
-                                                    "✅ Đã chạy trên máy rồi dán kết quả vào {}:\n$ {}\n{}",
-                                                    crate::sessions::shown(s),
-                                                    line,
-                                                    crate::exec::truncate(&report, 400)
-                                                )
-                                            }
-                                            Err(e) => format!(
-                                                "⚠ chạy xong nhưng KHÔNG dán được vào phiên: {}\n\n$ {}\n{}",
-                                                crate::exec::truncate(&e.to_string(), 160),
-                                                line,
-                                                crate::exec::truncate(&report, 600)
-                                            ),
-                                        },
-                                        // Không có cửa sổ ⟹ không dán được.
-                                        // Vẫn TRẢ kết quả về điện thoại: lệnh
-                                        // đã chạy rồi, nuốt nó đi là mất công.
-                                        _ => format!(
-                                            "⚠ phiên {} không có cửa sổ terminal để dán vào. Kết quả:\n\n$ {}\n{}",
-                                            crate::sessions::shown(s),
-                                            line,
-                                            crate::exec::truncate(&report, 600)
-                                        ),
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                logging::error(
-                                    "runin_failed",
-                                    json!({ "err": e.to_string(),
-                                            "cmd": crate::exec::truncate(&line, 120) }),
-                                );
-                                format!("⚠ không chạy được: {}", crate::exec::truncate(&e.to_string(), 200))
-                            }
-                        }
+                        format!(
+                            "▶ đang chạy — {}\ntrong {} · hub báo lại khi xong, không còn trần 120 giây.",
+                            crate::exec::truncate(&line, 120),
+                            crate::sessions::shown(s),
+                        )
                     }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
@@ -4864,15 +5095,31 @@ fn scopeguard_log(adapter: &str, at: std::time::Instant) -> AckClock {
 /// không nằm trong bảng ấy nên không dùng được, dù chúng hợp nghĩa hơn.
 pub fn ack_as_emoji(ack: &str) -> Option<&'static str> {
     let t = ack.trim();
-    if !t.starts_with('✓') {
-        return None;
+    // 🔴 Hà 2026-08-14: *"Mọi tin tôi gửi phản hồi hết bằng emoji đi"* · *"Vì nó
+    // đơn giản là xác nhận thôi không cần thông tin"*. Đó chính là phép thử,
+    // và nó cắt cả hai chiều: câu nào chỉ nói "đã nhận, đã làm" thì thành một
+    // dấu; câu nào MANG THÔNG TIN — kết quả lệnh, màn hình, danh sách phiên,
+    // một lời từ chối kèm lý do — thì giữ nguyên chữ, vì rút nó thành mặt cười
+    // là vứt đúng phần người ta cần đọc.
+    if t.starts_with('✓') {
+        // "vào hàng chờ" ≠ "đã gửi": phiên đang bận thì chữ nằm trong hàng của
+        // TUI, và đó là một trạng thái khác, đáng một dấu khác.
+        return Some(if t.contains("hàng chờ") { "👌" } else { "👍" });
     }
-    // "vào hàng chờ" ≠ "đã gửi": phiên đang bận thì chữ nằm trong hàng của TUI,
-    // và đó là một trạng thái khác, đáng một dấu khác.
-    if t.contains("hàng chờ") {
+    // Đổi phiên đang theo: người bấm vừa chọn phiên nào thì tự biết, câu trả
+    // lời chỉ xác nhận là con trỏ đã nhúc nhích.
+    if t.starts_with('👁') {
+        return Some("👀");
+    }
+    // Lệnh dài vừa được nhận và bắt đầu chạy — kết quả sẽ tới sau, bằng chữ.
+    if t.starts_with("▶ đang chạy") {
+        return Some("⚡");
+    }
+    // Đã bảo dừng.
+    if t.starts_with('⏹') {
         return Some("👌");
     }
-    Some("👍")
+    None
 }
 
 fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, text: &str) {

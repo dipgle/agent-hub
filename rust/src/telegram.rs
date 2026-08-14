@@ -102,16 +102,18 @@ pub struct Inbox {
     /// toàn cục — chép cả `Config` mỗi lượt bấm nút là chép một cây cấu hình
     /// cho một việc chỉ cần đọc.
     cfg: std::sync::Arc<Config>,
-    /// Đánh thức vòng chạy khi có lệnh mới.
+    /// Đánh thức vòng chạy khi có lệnh mới — nay ở `runtime::Waker`.
     ///
-    /// 🔴 Đo 2026-08-11: gõ `/help` lúc 21:31:34, hub chạy nó lúc **21:33:50**
-    /// — **2 phút 16 giây**. `execute_telegram_commands` đứng đầu `run_once`,
-    /// mà vòng ngủ 120 giây, nên lệnh tới ngay sau lúc vòng vừa đọc hàng đợi
-    /// thì nằm chờ trọn một vòng. Phòng chat tfl5 không bị vì socket
-    /// `/ws/chat` gọi `wake()`; kênh này lúc đầu thì không có gì gọi.
-    /// Một lệnh gõ tay mà đợi hai phút thì người ta gõ lại lần nữa — và lần
-    /// thứ hai là một mệnh lệnh THẬT chạy hai lần.
-    waker: Option<Arc<crate::live::Waker>>,
+    /// 🔴 Nhà cũ của nó là `live.rs`, cái socket của phòng chat tfl5, gỡ ngày
+    /// 2026-08-14. Nó sinh ra vì một phép
+    // đo thật: 2026-08-11, gõ `/help` lúc 21:31:34, hub chạy lúc 21:33:50 — hai
+    // phút mười sáu giây, vì lệnh tới ngay sau lúc vòng 120 giây vừa đọc hàng
+    /// đợi. Phòng chat tfl5 không dính nhờ socket `/ws/chat` gọi `wake()`.
+    ///
+    /// Từ khi có `run_telegram_now` (08-12), LỆNH đã chạy ngay ở luồng riêng;
+    /// cú đánh thức nay lo phần còn lại — ảnh chụp, cái loa "vừa xong / vừa
+    /// tắt", bảng sức khoẻ — thứ nếu không có nó thì đi sau sự thật 120 giây.
+    waker: Option<Arc<crate::runtime::Waker>>,
 }
 
 /// Một cú bấm nút → **đúng dòng lệnh mà ngón tay sẽ gõ**, không phải một nhánh
@@ -520,7 +522,7 @@ pub fn inbox() -> Option<&'static Inbox> {
 impl Inbox {
     /// Dựng hòm thư và chạy vòng đọc nền. `None` khi thiếu bí mật — SKIP-CÓ-LOG,
     /// không phải lỗi (luật 4 của dự án: thiếu khoá thì bỏ qua và nói ra).
-    pub fn start(cfg: &Config, waker: Option<Arc<crate::live::Waker>>) -> Option<Inbox> {
+    pub fn start(cfg: &Config, waker: Option<Arc<crate::runtime::Waker>>) -> Option<Inbox> {
         if !cfg.confirm.enabled {
             logging::info(
                 "telegram_inbox_off",
@@ -1023,7 +1025,7 @@ impl Inbox {
             "telegram_command_queued",
             json!({ "head": crate::exec::truncate(t, 40) }),
         );
-        // Đánh thức NGAY, đừng để lệnh nằm hết giấc ngủ của vòng (xem `waker`).
+        // Đánh thức NGAY để phần CÒN LẠI của hub bắt kịp (xem `waker`).
         if let Some(w) = &self.waker {
             w.wake();
         }

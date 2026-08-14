@@ -1024,6 +1024,9 @@ fn after_cd(line: &str) -> Option<&str> {
         if line.split_whitespace().count() < 2 {
             continue;
         }
+        if destructive(line) {
+            continue;
+        }
         if !out.iter().any(|x| x == line) {
             out.push(line.to_string());
         }
@@ -1071,6 +1074,9 @@ fn after_cd(line: &str) -> Option<&str> {
             continue;
         }
         if cmd.split_whitespace().count() < 2 {
+            continue;
+        }
+        if destructive(cmd) {
             continue;
         }
         if !out.iter().any(|x| x == cmd) {
@@ -1292,9 +1298,44 @@ fn forbids(context: &str) -> bool {
     const MARKS: &[&str] = &[
         "block", "⚠", "❌", "🔴", "never", "do not", "don't", "denied", "refus", "dangerous",
         "đừng", "cấm", "không được", "không nên", "từ chối", "nguy hiểm", "thay vì",
+        // 🔴 Thêm 2026-08-14, sau khi Hà bấm một nút và nhận về một lệnh xoá
+        // trần: *"Nút lệnh chạy ko đúng"*. Chữ ấy hub bắt được từ một THÔNG BÁO
+        // CHẶN của hook — *"the command runs … which permanently deletes tracked
+        // source files … Safer form: …"*. Cả đoạn là lời CẤM một lệnh, và hub
+        // đọc nó thành lời MỜI chạy lệnh ấy.
+        //
+        // Mấy mẫu dưới là chữ ký của loại văn bản đó, không phải của một câu
+        // mời: một lời cảnh báo bao giờ cũng nói hậu quả ("permanently",
+        // "irreversible") hoặc đưa đường thay thế ("safer form"), còn
+        // "pretooluse" thì đúng tên cái cổng đã chặn.
+        "safer form", "permanently", "irreversible", "pretooluse", "hook stopped",
     ];
     let c = context.to_lowercase();
     MARKS.iter().any(|m| c.contains(m))
+}
+
+/// Lệnh PHÁ HUỶ thì không bao giờ được thành một cái nút.
+///
+/// 🔴 Hà 2026-08-14: *"Nút lệnh chạy ko đúng"* — và cái nút ấy mời chạy một
+/// lệnh xoá. Bấm một cái là chạy, không có bước xác nhận nào ở giữa; nên một
+/// cái nút mời làm việc không lùi lại được là một cái bẫy, kể cả khi lệnh viết
+/// đúng cú pháp.
+///
+/// Cửa này ĐỘC LẬP với `forbids`, và cố ý thế: `forbids` hỏi *"câu văn quanh nó
+/// có phải lời cấm không"* — một phép đoán trên chữ của người khác; còn đây hỏi
+/// *"chính lệnh này có phá gì không"*, đọc thẳng từ động từ. Một trong hai
+/// trượt thì cái kia vẫn giữ.
+///
+/// Muốn chạy thật thì vẫn còn đường: gõ thẳng nó vào phiên, hoặc `/win` mở một
+/// cửa sổ có tty. Thứ bị bỏ ở đây chỉ là cái nút bấm-một-phát.
+fn destructive(cmd: &str) -> bool {
+    let c = cmd.trim().to_lowercase();
+    const HEADS: &[&str] = &[
+        "rm ", "rmdir ", "git rm", "git reset --hard", "git clean", "git push --force",
+        "git push -f", "shred ", "truncate ", "drop table", "drop database", "kill ",
+        "pkill ", "killall ", "launchctl bootout",
+    ];
+    HEADS.iter().any(|h| c.starts_with(h) || c == h.trim())
 }
 
 /// Nối lại một lệnh bị MÀN HÌNH bẻ dòng — hoặc từ chối, nếu không chắc.

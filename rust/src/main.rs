@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use hub::config::{self, Config};
@@ -14,7 +14,7 @@ use hub::pipeline::{ingest, known_projects, run_once};
 #[derive(Parser)]
 #[command(
     name = "hub",
-    about = "hub — quản lý các phiên Claude CLI trên máy này, điều khiển từ phòng chat tfl5",
+    about = "hub — quản lý các phiên Claude CLI trên máy này, điều khiển từ Telegram",
     version
 )]
 struct Cli {
@@ -60,29 +60,11 @@ enum Command {
     Ingest,
     /// Counts, poll health, spend
     Status,
-    /// Post a message into the tfl5 chat room (hub dials out; nothing listens)
-    Tfl5Say {
-        /// The message text
-        text: Vec<String>,
-    },
     /// Every Claude CLI session alive on this machine, across all accounts
     Sessions {
         /// Machine-readable, for the portal snapshot and for scripting
         #[arg(long)]
         json: bool,
-    },
-    /// Read recent messages from the tfl5 chat room
-    Tfl5Tail {
-        /// How many messages to show
-        #[arg(long, default_value_t = 20)]
-        limit: i64,
-    },
-    /// Push the read-only status snapshot to the tfl5 app so the chat page can
-    /// show the sessions and health next to the conversation
-    PortalPush {
-        /// Print the snapshot instead of uploading it
-        #[arg(long)]
-        dry_run: bool,
     },
 }
 
@@ -135,9 +117,6 @@ fn real_main() -> Result<()> {
         }
         Command::Status => cmd_status(&db),
         Command::Sessions { json } => cmd_sessions(&db, &cfg, json),
-        Command::Tfl5Say { text } => cmd_tfl5_say(&cfg, &text.join(" ")),
-        Command::Tfl5Tail { limit } => cmd_tfl5_tail(&cfg, limit),
-        Command::PortalPush { dry_run } => cmd_portal_push(&db, &cfg, dry_run),
     }
 }
 
@@ -214,83 +193,6 @@ fn cmd_sessions(db: &hub::db::Db, cfg: &Config, as_json: bool) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Publish the snapshot the tfl5 chat page reads. `--dry-run` prints it so the
-/// shape can be inspected without a round trip (and without credentials).
-fn cmd_portal_push(db: &Db, cfg: &Config, dry_run: bool) -> Result<()> {
-    if dry_run {
-        let snap = hub::portal::build(db, cfg)?;
-        println!("{}", serde_json::to_string_pretty(&snap)?);
-        return Ok(());
-    }
-    let out = hub::portal::push(cfg, db)?;
-    println!(
-        "đã đẩy ảnh chụp ({} mục, {} byte) vào resource {}{}",
-        out.items,
-        out.bytes,
-        hub::portal::RESOURCE_MA,
-        if out.resource_created {
-            " (vừa tạo resource)"
-        } else {
-            ""
-        }
-    );
-    Ok(())
-}
-
-/// Post one line into the tfl5 room and report the receipt tfl5 handed back.
-fn cmd_tfl5_say(cfg: &Config, text: &str) -> Result<()> {
-    if text.trim().is_empty() {
-        bail!("cần nội dung: hub tfl5-say \"…\"");
-    }
-    let c = &cfg.adapters.tfl5;
-    if c.app_tid.is_empty() {
-        bail!(
-            "adapters.tfl5.app_tid chưa đặt trong {}",
-            cfg.config_file.display()
-        );
-    }
-    let s = hub::adapters::tfl5::login(c)?;
-    match hub::adapters::tfl5::send_text(c, &s, &c.app_tid, &c.room, text)? {
-        Some(tid) => println!("đã gửi vào {} · room {} · tid {tid}", c.app_tid, c.room),
-        // `send_text` only returns Ok(None) if tfl5 ever changes its echo
-        // contract; say so rather than printing a success we did not observe.
-        None => println!("gửi xong nhưng tfl5 không trả tid — chưa xác nhận được"),
-    }
-    Ok(())
-}
-
-/// Show the tail of the room, oldest line first (history comes newest-first).
-fn cmd_tfl5_tail(cfg: &Config, limit: i64) -> Result<()> {
-    let c = &cfg.adapters.tfl5;
-    if c.app_tid.is_empty() {
-        bail!(
-            "adapters.tfl5.app_tid chưa đặt trong {}",
-            cfg.config_file.display()
-        );
-    }
-    let s = hub::adapters::tfl5::login(c)?;
-    let mut rows = hub::adapters::tfl5::history(c, &s, limit, None)?;
-    rows.reverse();
-    if rows.is_empty() {
-        println!("(phòng {} chưa có tin nào)", c.room);
-    }
-    for m in rows {
-        println!(
-            "{}  {:<16}  {}",
-            m["ts"].as_i64().map(iso_ms).unwrap_or_default(),
-            m["from"].as_str().unwrap_or("?"),
-            m["text"].as_str().unwrap_or("")
-        );
-    }
-    Ok(())
-}
-
-fn iso_ms(ms: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(ms)
-        .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_else(|| ms.to_string())
 }
 
 // ─── commands ────────────────────────────────────────────────────────────
@@ -379,19 +281,11 @@ fn cmd_doctor(db: &Db, cfg: &Config) -> Result<()> {
         if tg.ok { "OK  " } else { "FAIL" },
         truncate(&tg.detail, 90)
     );
-    for name in hub::pipeline::ADAPTER_NAMES {
-        // Same table the ingest loop uses — see `pipeline::adapter_enabled`.
-        if !hub::pipeline::adapter_enabled(cfg, name) {
-            println!("  {name:<9} off        (adapters.{name}.enabled = false)");
-            continue;
-        }
-        let h = hub::adapters::tfl5::health(&cfg.adapters.tfl5);
-        println!(
-            "  {name:<9} {}       {}",
-            if h.ok { "OK  " } else { "FAIL" },
-            truncate(&h.detail, 90)
-        );
-    }
+    // 🔴 Vòng dò sức khoẻ các "adapter" đã bỏ 2026-08-14: chỉ còn đúng một
+    // kênh, và nó vừa được in ngay phía trên. Một vòng lặp trên danh sách rỗng
+    // in ra không dòng nào, nhưng nó để lại ấn tượng rằng hub còn nhiều kênh —
+    // và cái ấn tượng ấy là thứ khiến người ta đi tìm một trang không còn tồn
+    // tại.
 
     println!();
     let projects = known_projects(cfg);

@@ -1771,3 +1771,47 @@ fn a_project_always_gets_the_same_mark() {
     // Còn "vào hàng chờ" vẫn là trạng thái riêng của nó.
     assert_eq!(ack_as_emoji("✓ vào hàng chờ · 🟩 [tfl5]"), Some("👌"));
 }
+
+/// Một lời CẤM không phải một lời mời, và một lệnh phá huỷ không phải một cái nút.
+///
+/// 🔴 Hà 2026-08-14, ảnh chụp Telegram: *"Nút lệnh chạy ko đúng"*. Cái nút ấy
+/// mời chạy một lệnh xoá trần, và hub bắt được chữ đó từ một THÔNG BÁO CHẶN của
+/// hook — "the command runs … which permanently deletes tracked source files …
+/// Safer form: …". Cả đoạn là lời cấm; hub đọc thành lời mời.
+///
+/// Hai cửa, độc lập nhau: câu văn quanh nó có phải lời cấm không (`forbids`),
+/// và chính lệnh ấy có phá gì không (`destructive`). Một cửa trượt thì cửa kia
+/// vẫn giữ — vì bấm nút là chạy, không có bước xác nhận nào ở giữa.
+#[test]
+fn a_warning_about_a_command_is_not_an_invitation_to_run_it() {
+    // Nguyên văn hình dạng thông báo của hook.
+    let warning = "PreToolUse:Bash hook stopped continuation: BLOCK — the command runs\n\
+        git rm -q rust/src/live.rs rust/src/portal.rs which permanently deletes\n\
+        tracked source files from the real repo with no backup. Safer form: first\n\
+        verify the files are backed up, then run it only after confirming.\n";
+    let got = hub::keys::commands_in_report(warning, 4);
+    assert!(got.is_empty(), "không được dựng nút nào từ một lời cấm: {got:?}");
+
+    // …và ngay cả khi câu văn quanh nó hoàn toàn trung tính, lệnh phá huỷ vẫn
+    // không thành nút.
+    let neutral = "Bước tiếp theo trong quy trình dọn dẹp kho mã của dự án:\n\
+                   git rm rust/src/live.rs\n\
+                   Sau đó chạy lại toàn bộ bài kiểm để chắc chắn mọi thứ ổn.\n";
+    assert!(
+        !hub::keys::commands_in_report(neutral, 4)
+            .iter()
+            .any(|c| c.contains("git rm")),
+        "lệnh xoá không bao giờ là một cái nút"
+    );
+    // Lệnh lành thì vẫn ra nút như thường — cửa không được ăn lan.
+    let ok = "Chạy lại bộ kiểm tra cho chắc trước khi đóng sổ nhé bạn:\n\
+              cargo test --offline\n\
+              Rồi báo lại kết quả giúp tôi.\n";
+    assert!(
+        hub::keys::commands_in_report(ok, 4)
+            .iter()
+            .any(|c| c.starts_with("cargo test")),
+        "{:?}",
+        hub::keys::commands_in_report(ok, 4)
+    );
+}

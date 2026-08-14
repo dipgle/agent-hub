@@ -17,7 +17,8 @@ use anyhow::Result;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::adapters::{tfl5, ChannelCommand, CommandKind, PollResult, Skip};
+use crate::adapters::{ChannelCommand, CommandKind, PollResult, Skip};
+use crate::verbs;
 use crate::config::Config;
 use crate::db::{Db, RunFinish};
 use crate::logging;
@@ -575,9 +576,8 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             }
         }
         logging::info("session_change", json!({ "text": text }));
-        if let Err(e) = tfl5::send(&cfg.adapters.tfl5, "", None, &text) {
-            logging::error("session_change_room_failed", json!({ "err": logging::err_chain(&e) }));
-        }
+        // (Nhánh gửi vào phòng chat tfl5 đã bỏ 2026-08-14 — xem `verbs.rs`.
+        // Telegram nay là cái mồm duy nhất, và nó nằm ngay dưới đây.)
         // Phiên đang DỪNG LẠI HỎI thì tin nhắn phải BẤM ĐƯỢC.
         //
         // Hà 2026-08-11: *"lựa chọn vừa rồi không thể hiện được trên tele để
@@ -1017,16 +1017,6 @@ fn auto_handover(db: &Db, cfg: &Config) {
                     idle_sec,
                     &outcome,
                 );
-                // Báo vào phòng: mọi thứ hub tự làm đều phải có vết ở nơi đọc
-                // được, nhất là thứ chạy khi không ai bấm.
-                if let Err(e) = crate::adapters::tfl5::send(
-                    &cfg.adapters.tfl5,
-                    &cfg.adapters.tfl5.room,
-                    None,
-                    &msg,
-                ) {
-                    logging::error("auto_handover_notice_failed", json!({ "err": e.to_string() }));
-                }
                 // …và CÙNG CÂU ẤY sang Telegram (luật 11: hai cái mồm nói một
                 // câu, không thì về sau không ai đối chiếu được).
                 //
@@ -1381,10 +1371,11 @@ fn poll_adapter(
     name: &str,
     cursors: &BTreeMap<String, String>,
 ) -> Result<PollResult> {
-    match name {
-        "tfl5" => tfl5::poll(&cfg.adapters.tfl5, cursors, &cfg.trust.tfl5_user_tids),
-        other => Err(anyhow::anyhow!("unknown adapter {other}")),
-    }
+    let _ = cursors;
+    let _ = cfg;
+    // Không còn kênh nào để hỏi vòng: tfl5 đã gỡ 2026-08-14, và Telegram thì
+    // KHÔNG hỏi vòng — nó tự đẩy tới qua `getUpdates` ở luồng riêng.
+    Err(anyhow::anyhow!("unknown adapter {name}"))
 }
 
 pub fn ingest(db: &Db, cfg: &Config) -> Result<Value> {
@@ -2707,21 +2698,12 @@ fn watch_new_session(
 }
 
 /// Nói một câu về kênh đã gõ lệnh, từ một luồng không cầm `ChannelCommand`.
-fn say_back(cfg: &Config, adapter: &str, chat_id: &str, text: &str) {
+fn say_back(_cfg: &Config, adapter: &str, _chat_id: &str, text: &str) {
     if adapter == crate::telegram::NAME {
         if let Some(i) = crate::telegram::inbox() {
             if let Err(e) = i.send_text(text) {
                 logging::error("telegram_ack_failed", json!({ "err": e }));
             }
-        }
-        return;
-    }
-    if adapter == tfl5::NAME {
-        if let Err(e) = tfl5::send(&cfg.adapters.tfl5, chat_id, None, text) {
-            logging::error(
-                "tfl5_command_ack_failed",
-                json!({ "target": chat_id, "err": logging::err_chain(&e) }),
-            );
         }
         return;
     }
@@ -3435,7 +3417,36 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 Some(what.to_string())
             }
             CommandKind::Doctor => {
-                let probe = crate::portal::probe_now(cfg);
+                // 🔴 `/doctor` từng gọi `portal::probe_now` — nó dò SỨC KHOẺ
+                // CỦA TFL5 (đăng nhập được không, đẩy doc được không). Kênh ấy
+                // đã gỡ ngày 2026-08-14, nên câu hỏi đổi: thứ đáng dò bây giờ
+                // là cái máy này và những phiên đang chạy trên nó.
+                let live = crate::sessions::snapshot_cached(
+                    cfg,
+                    std::time::Duration::from_secs(20),
+                );
+                let jobs = jobs_line().unwrap_or_else(|| "  (không có)".to_string());
+                let probe = format!(
+                    "🩺 {} phiên đang sống{}\n⚡ lệnh chạy nền:\n{}\n📟 hubd: {}",
+                    live.sessions.len(),
+                    if live.blind.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {} tài khoản không hỏi được", live.blind.len())
+                    },
+                    jobs,
+                    if std::path::Path::new(
+                        &crate::config::expand_home(std::path::Path::new(
+                            "~/Library/Application Support/hub/bin/hubd",
+                        )),
+                    )
+                    .exists()
+                    {
+                        "bản cài có mặt"
+                    } else {
+                        "⚠ KHÔNG thấy bản cài — launchd đang chạy gì?"
+                    },
+                );
                 reply_in_channel(db, cfg, adapter, cmd, &probe);
                 Some(probe)
             }
@@ -5099,7 +5110,7 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
         // `parse_command` gác theo tid của phòng chat. Ở đây cổng đã gác bằng
         // chat_id rồi, nên truyền tid chủ máy vào cho nó đi đúng nhánh — KHÔNG
         // phải nới cổng, mà là nói đúng "ai đang gõ" cho một hàm vốn hỏi câu ấy.
-        match tfl5::parse_command(&item.text, &owner, &cfg.trust.tfl5_user_tids) {
+        match verbs::parse_command(&item.text, &owner, &cfg.trust.tfl5_user_tids) {
             Some((kind, decision_id, arg)) => cmds.push(ChannelCommand {
                 quiet: item.quiet,
                 kind,
@@ -5399,7 +5410,7 @@ pub fn ack_as_emoji(ack: &str) -> Option<&'static str> {
     None
 }
 
-fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, text: &str) {
+fn reply_in_channel(db: &Db, _cfg: &Config, adapter: &str, cmd: &ChannelCommand, text: &str) {
     let _ = db;
     // Bước phụ của chính hub thì im — xem `telegram::Incoming::quiet`.
     if cmd.quiet {
@@ -5453,19 +5464,13 @@ fn reply_in_channel(db: &Db, cfg: &Config, adapter: &str, cmd: &ChannelCommand, 
         }
         return;
     }
-    if adapter != tfl5::NAME {
-        logging::info(
-            "channel_command_ack",
-            json!({ "adapter": adapter, "ack": text }),
-        );
-        return;
-    }
-    if let Err(e) = tfl5::send(&cfg.adapters.tfl5, &cmd.chat_id, None, text) {
-        logging::error(
-            "tfl5_command_ack_failed",
-            json!({ "target": cmd.chat_id, "err": logging::err_chain(&e) }),
-        );
-    }
+    // Kênh lạ: KHÔNG im. Trước 2026-08-14 nhánh này còn tfl5; nay chỉ còn
+    // Telegram, nên tới được đây nghĩa là có ai đó thêm một kênh mà quên nối
+    // đường trả lời.
+    logging::info(
+        "channel_command_ack",
+        json!({ "adapter": adapter, "ack": text }),
+    );
 }
 
 /// Today's OWNER spend — what the person set off by pressing a button.

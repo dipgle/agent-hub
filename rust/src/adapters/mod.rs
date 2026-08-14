@@ -11,7 +11,6 @@
 //! the pipeline commits the messages first and the cursors second, so a crash
 //! re-polls instead of skipping.
 
-pub mod tfl5;
 
 use std::collections::BTreeMap;
 

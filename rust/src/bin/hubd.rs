@@ -16,18 +16,16 @@
 use std::fs;
 use std::path::PathBuf;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use serde_json::json;
 
-use hub::adapters::Skip;
 use hub::config;
 use hub::db::Db;
 use hub::exec::{run, RunOpts};
 use hub::logging;
 use hub::pipeline::run_once;
-use hub::portal;
 
 /// The one alarm that must reach a person who is not looking at the logs: a
 /// file line plus a macOS banner.
@@ -324,10 +322,11 @@ fn real_main() -> Result<()> {
     // The room pushes instead of hub asking: one socket held open, and a wake
     // so a message that lands mid-sleep does not wait out the poll interval.
     // The poller stays enabled as the durable backstop — see `live.rs`.
-    let waker = hub::live::Waker::new();
-    if cfg.adapters.tfl5.enabled && cfg.adapters.tfl5.live {
-        hub::live::spawn(cfg.clone(), waker.clone());
-    }
+    // 🔴 Socket giữ mở với phòng chat tfl5 đã gỡ ngày 2026-08-14 (Hà: *"tạm
+    // thời không dùng tfl5 để xem cứ xóa hết đi"*). `Waker` thì ở lại — nó là
+    // đồng hồ ngủ của chính vòng này, không phải của kênh ấy; nhà mới:
+    // `runtime::Waker`.
+    let waker = hub::runtime::Waker::new();
 
     // Telegram làm KÊNH RA LỆNH, không chỉ cái loa (Hà 2026-08-11: *"làm việc
     // hoàn toàn qua kênh tele"*). Vòng đọc chạy nền; thiếu khoá thì nó tự bỏ
@@ -406,22 +405,6 @@ fn real_main() -> Result<()> {
             }
         }
 
-        // Publish the read-only snapshot the tfl5 chat page renders. A failure
-        // here must not stop the loop — the pipeline already did its work and
-        // the console still shows everything — but it is logged, never
-        // swallowed, and `Skip` (channel off / no credentials) is not an error.
-        match portal::push(&cfg, &db) {
-            Ok(p) => logging::info(
-                "portal_push_ok",
-                json!({ "items": p.items, "bytes": p.bytes }),
-            ),
-            Err(e) if e.downcast_ref::<Skip>().is_some() => {}
-            Err(e) => logging::error(
-                "portal_push_failed",
-                json!({ "err": logging::err_chain(&e) }),
-            ),
-        }
-
         // If someone else took the lock (manual override), step aside — but
         // only when the file actually SAYS so.
         //
@@ -461,178 +444,19 @@ fn real_main() -> Result<()> {
     }
 }
 
-/// How often the follow loop looks at the transcript, and the floor between two
-/// pushes of the same stream. Short enough to feel live, long enough that a
-/// busy session cannot turn into a push flood.
-const FOLLOW_TICK: Duration = Duration::from_secs(2);
-const FOLLOW_MIN_GAP: Duration = Duration::from_secs(4);
 
-/// Nhịp làm mới dòng "đang làm gì" trên DANH SÁCH, khi không ai mở phiên nào.
-///
-/// Hà 2026-08-11: *"đồng bộ lên ui hơi chậm, bạn đang để bao lâu"*. Đo được:
-/// **~133 giây** — đúng nhịp vòng đầy đủ. Không rút ngắn vòng ấy, vì mỗi vòng
-/// tốn **3.05s** (`claude agents` cho từng tài khoản); rút xuống 15s là để máy
-/// chạy 20% thời gian chỉ để hỏi lại một danh sách gần như không đổi.
-///
-/// Thay vào đó tách theo TỐC ĐỘ ĐỔI: *phiên nào tồn tại* — chậm, giữ nguyên
-/// vòng; *phiên đang làm gì* — nhanh, và đọc một màn chỉ **0.09s**.
-const ACTIVITY_TICK: Duration = Duration::from_secs(12);
 
-/// Ngủ hết `delay`, nhưng cứ `ACTIVITY_TICK` một lần thì đọc lại MÀN của các
-/// phiên gõ vào được và đẩy ảnh chụp nếu dòng "đang làm gì" đổi.
-///
-/// Danh sách phiên lấy MỘT LẦN ở đầu giấc ngủ (3.05s), rồi mỗi nhịp chỉ đọc màn
-/// (0.09s × số phiên có cửa sổ, thường 2-4). Phiên mới xuất hiện / biến mất vẫn
-/// do vòng đầy đủ phát hiện — đường này không tự nhận biết điều đó, và nó cũng
-/// không cho cái loa "vừa xong / vừa tắt" ăn nửa ảnh chụp (`announce = false`).
-fn idle_activity_sleep(
-    cfg: &hub::config::Config,
-    db: &Db,
-    waker: &hub::live::Waker,
-    delay: Duration,
-) {
-    let mut live = hub::sessions::snapshot(cfg);
-    // Không có phiên nào gõ vào được thì không có gì để đọc — ngủ thẳng, đừng
-    // đốt một lời gọi AppleScript mỗi 12 giây cho hư không.
-    if !live.sessions.iter().any(|s| s.can_type) {
-        waker.sleep(delay);
-        return;
-    }
-    let started = Instant::now();
-    while started.elapsed() < delay {
-        let slice = ACTIVITY_TICK.min(delay.saturating_sub(started.elapsed()));
-        if slice.is_zero() {
-            break;
-        }
-        // Có lệnh tới: nhường cho vòng chính chạy ngay.
-        if waker.sleep(slice) {
-            return;
-        }
-        // Ai đó vừa mở một phiên trên điện thoại ⟹ đường bám sát hơn tiếp quản
-        // ở vòng sau; thôi phần việc của danh sách.
-        if db
-            .cursor_or_log(hub::pipeline::FOCUS_SESSION_KEY)
-            .is_some_and(|id| !id.is_empty())
-        {
-            return;
-        }
-        if !hub::sessions::refresh_activity(&mut live.sessions) {
-            continue;
-        }
-        match portal::push_snapshot(cfg, db, Some(live.clone())) {
-            Ok(p) => logging::info(
-                "portal_push_activity",
-                json!({ "bytes": p.bytes, "why": "dòng 'đang làm gì' vừa đổi" }),
-            ),
-            Err(e) if e.downcast_ref::<Skip>().is_some() => {}
-            Err(e) => logging::error(
-                "portal_push_failed",
-                json!({ "err": logging::err_chain(&e), "activity": true }),
-            ),
-        }
-    }
-}
-
-/// Sleep for `delay`, but while a session is focused, wake every couple of
-/// seconds and re-publish as soon as its transcript grows.
-///
-/// Only the transcript's mtime is read per tick — no `claude` calls, no
-/// pipeline, no money. A push happens only when the file actually changed, so
-/// an idle session costs one stat() every two seconds.
-fn follow_sleep(cfg: &hub::config::Config, db: &Db, waker: &hub::live::Waker, delay: Duration) {
-    let focus = db
-        .cursor_or_log(hub::pipeline::FOCUS_SESSION_KEY)
-        .filter(|id| !id.is_empty());
-    let Some(session_id) = focus else {
-        // KHÔNG mở phiên nào ⟹ người ta đang nhìn DANH SÁCH. Dòng "đang làm gì"
-        // trên đó vẫn phải sống, chứ không đứng im tới vòng sau.
-        idle_activity_sleep(cfg, db, waker, delay);
-        return;
-    };
-    // A session hub just started has NO transcript for the first few seconds.
-    // This used to give up here and sleep the whole cycle, so pressing "Mở
-    // phiên" on the phone and then waiting **122 seconds** for it to appear was
-    // the normal experience (measured 2026-08-08) — for the one action that
-    // should feel immediate. Keep looking instead; the file shows up.
-    let root = cfg.claude_transcript_root();
-    let mut path = hub::sessions::find_transcript(&root, &session_id);
-
-    let started = Instant::now();
-    let mut seen = path.as_deref().and_then(hub::sessions::transcript_mtime);
-    // `tty` của phiên đang theo, đọc MỘT LẦN: nó không đổi trong đời phiên, và
-    // hỏi lại mỗi 2 giây là một lần `claude agents` vô ích.
-    let tty = hub::sessions::snapshot(cfg)
-        .sessions
-        .iter()
-        .find(|s| s.session_id == session_id)
-        .map(|s| s.tty.clone())
-        .filter(|t| !t.is_empty() && t != "??");
-    let mut screen_seen: Option<u64> = None;
-    let mut last_push = Instant::now();
-    while started.elapsed() < delay {
-        let slice = FOLLOW_TICK.min(delay.saturating_sub(started.elapsed()));
-        if slice.is_zero() {
-            break;
-        }
-        // A chat message woke us: hand back so the main loop runs a full
-        // cycle now instead of ticking through the rest of the slices.
-        if waker.sleep(slice) {
-            return;
-        }
-        // Someone closed the session (or opened another one): stop following.
-        match db.cursor_or_log(hub::pipeline::FOCUS_SESSION_KEY) {
-            Some(id) if id == session_id => {}
-            _ => return,
-        }
-
-        // Still waiting for the file to exist. `find_transcript` is a shallow
-        // readdir, cheap enough to repeat every couple of seconds, and only
-        // while there is nothing to watch.
-        if path.is_none() {
-            path = hub::sessions::find_transcript(&root, &session_id);
-            if path.is_none() {
-                continue;
-            }
-            // It just appeared — that IS the news. Push now rather than waiting
-            // for a second write.
-            seen = None;
-        }
-        // Hai nguồn tin, không phải một.
-        //
-        // `mtime` của nhật ký bắt được việc phiên LÀM; nó không bắt được việc
-        // phiên DỪNG LẠI HỎI — lúc ấy tệp đứng yên hàng phút trong khi màn hình
-        // đang chờ một phím. Nên vòng bám nhìn cả chữ trên màn, và đổi chữ cũng
-        // là tin đáng đẩy. Băm cho rẻ: so chuỗi vài KB mỗi 2 giây thì không
-        // đáng gì, nhưng giữ nguyên chuỗi trong bộ nhớ thì đáng.
-        let now = path.as_deref().and_then(hub::sessions::transcript_mtime);
-        let screen_now = tty
-            .as_deref()
-            .and_then(|t| hub::keys::screen_of(t, 16))
-            .map(|(s, _)| {
-                let mut h: u64 = 1469598103934665603;
-                for b in s.as_bytes() {
-                    h ^= *b as u64;
-                    h = h.wrapping_mul(1099511628211);
-                }
-                h
-            });
-        let changed = now != seen || (screen_now.is_some() && screen_now != screen_seen);
-        if !changed || last_push.elapsed() < FOLLOW_MIN_GAP {
-            continue;
-        }
-        seen = now;
-        screen_seen = screen_now;
-        last_push = Instant::now();
-        match portal::push(cfg, db) {
-            Ok(p) => logging::info(
-                "portal_push_follow",
-                json!({ "session": session_id, "bytes": p.bytes }),
-            ),
-            Err(e) if e.downcast_ref::<Skip>().is_some() => {}
-            Err(e) => logging::error(
-                "portal_push_failed",
-                json!({ "err": logging::err_chain(&e), "follow": true }),
-            ),
-        }
-    }
+// 🔴 ĐÃ BỎ cả nhánh BÁM SÁT (`follow_sleep` + `idle_activity_sleep`),
+// 2026-08-14, cùng lượt gỡ tfl5 theo lời Hà: *"tạm thời không dùng tfl5 để xem
+// cứ xóa hết đi"*.
+//
+// Hai hàm ấy tồn tại vì đúng một lý do: **đẩy ảnh chụp lên trang tfl5 sớm hơn
+// nhịp vòng** — theo dõi nhật ký phiên đang mở, đọc lại màn, và bơm một bản
+// cập nhật mỗi khi có gì đổi. Trang đi thì việc ấy không còn ai đọc; giữ lại là
+// đốt một lượt AppleScript mỗi 12 giây cho hư không.
+//
+// Thứ chúng phục vụ trên Telegram thì đã có đường riêng: cái loa "vừa xong /
+// vừa tắt" (`watch.rs`) chạy trong chính vòng, và `/shot` đọc màn khi được hỏi.
+fn follow_sleep(_cfg: &hub::config::Config, _db: &Db, waker: &hub::runtime::Waker, delay: Duration) {
+    waker.sleep(delay);
 }

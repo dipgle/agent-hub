@@ -45,6 +45,53 @@ static USAGE_REFRESHING: std::sync::atomic::AtomicBool =
 
 /// Called once by `hubd` at boot so "how long has it been up" is a fact rather
 /// than a guess from the first cycle.
+/// Cho phép một luồng nói với vòng chạy: *"có thứ vừa tới, đừng ngồi hết giấc
+/// ngủ nữa"*.
+///
+/// 🔴 Chuyển từ `live.rs` sang đây ngày 2026-08-14, khi Hà chốt bỏ trang tfl5:
+/// *"tạm thời không dùng tfl5 để xem cứ xóa hết đi"*. `live.rs` là cái socket
+/// giữ mở với phòng chat tfl5 — nó đi theo kênh ấy. Nhưng `Waker` thì không:
+/// hubd dùng nó để NGỦ (`waker.sleep(slice)`) ở ba chỗ, và Telegram dùng nó để
+/// cắt giấc ngủ khi có lệnh.
+///
+/// Vì sao cái cắt giấc ngủ ấy đáng giữ, dù `run_telegram_now` đã chạy lệnh ngay
+/// ở luồng riêng: lệnh chạy xong thì ẢNH CHỤP vẫn cũ cho tới vòng sau, nên cái
+/// loa "vừa xong / vừa tắt" và trang trạng thái đi sau thực tế tới 120 giây.
+/// Đánh thức là để phần CÒN LẠI của hub bắt kịp thứ vừa xảy ra.
+#[derive(Default)]
+pub struct Waker {
+    inner: std::sync::Mutex<bool>,
+    cv: std::sync::Condvar,
+}
+
+impl Waker {
+    pub fn new() -> std::sync::Arc<Waker> {
+        std::sync::Arc::new(Waker::default())
+    }
+
+    pub fn wake(&self) {
+        *self.inner.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.cv.notify_all();
+    }
+
+    /// Ngủ tối đa `d`, trả về **true** khi bị đánh thức sớm.
+    ///
+    /// Chỗ gọi cần biết là cái nào: vòng bám sát ngủ thành từng lát, và một lát
+    /// kết thúc vì có tin tới thì phải trả quyền cho một vòng đầy đủ chứ không
+    /// tích tiếp. Cờ được xoá ngay sau khi đọc — một cú đánh thức giữa chừng
+    /// không bị mất, nhưng cũng không bị tính hai lần.
+    pub fn sleep(&self, d: Duration) -> bool {
+        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut flagged, _) = self
+            .cv
+            .wait_timeout_while(guard, d, |woken| !*woken)
+            .unwrap_or_else(|e| e.into_inner());
+        let woken = *flagged;
+        *flagged = false;
+        woken
+    }
+}
+
 pub fn mark_start() {
     let _ = STARTED_AT.set(chrono::Utc::now().timestamp_millis());
 }

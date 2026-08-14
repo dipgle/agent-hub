@@ -25,10 +25,8 @@ pub mod exec;
 /// thấy một phiên đang dừng lại hỏi — câu hỏi ấy nằm trên màn hình chứ chưa vào
 /// nhật ký.
 pub mod keys;
-pub mod live;
 pub mod logging;
 pub mod pipeline;
-pub mod portal;
 /// Kept from the inbox era on purpose: `sessions.rs` runs every transcript
 /// preview through `leak_scan` before it can travel to a doc on a server. The
 /// product that needed a full outbound leak gate is gone; the gate that stops a
@@ -39,4 +37,5 @@ pub mod setup;
 pub mod sessions;
 /// Telegram làm kênh RA LỆNH hai chiều, không chỉ cái loa.
 pub mod telegram;
+pub mod verbs;
 pub mod watch;

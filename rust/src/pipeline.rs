@@ -4040,7 +4040,22 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     let has_choices = !crate::keys::parse_choices(&ack).is_empty()
                         || crate::keys::ask_table(&ack).is_some()
                         || shot_asking.is_some();
-                    if !running && !has_choices && !shot_sid.is_empty() {
+                    // 🔴 Hà 2026-08-14: *"Sao ô nhắc trống, cũng không có gợi ý
+                    // mờ mà vẫn có nút enter"*. Vì điều kiện trên KHÔNG hỏi
+                    // trong ô có gì — chú thích cũ tự bào chữa rằng nút này là
+                    // "một CỬ CHỈ, không phải một nội dung", đúng về bản chất
+                    // phím và sai về chỗ đặt: một cử chỉ gửi vào ô rỗng thì
+                    // không gửi gì cả, nên cái nút chỉ còn là tiếng ồn — và
+                    // tiếng ồn trên màn 390px thì đắt.
+                    //
+                    // Đọc ô nhập CHỈ để quyết định CÓ HIỆN NÚT hay không, không
+                    // để dựng nội dung: đó đúng ranh giới mà bài học cũ đặt ra
+                    // (không phân biệt được "gợi ý mờ" với "chữ đã gõ" vì màn
+                    // đọc về mất màu). Có chữ hay không thì đọc được; chữ ấy
+                    // của ai thì không, và ở đây không cần biết.
+                    let box_has_text = crate::keys::input_box_text(&ack)
+                        .is_some_and(|t| !t.trim().is_empty());
+                    if !running && !has_choices && box_has_text && !shot_sid.is_empty() {
                         quick.push(("⏎".to_string(), format!("key:{shot_sid}:enter")));
                     }
                     // text đó tới phiên"*) — nhưng nó đứng trên một phép đo hub

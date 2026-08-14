@@ -2104,3 +2104,32 @@ fn a_message_from_another_chat_is_not_an_order() {
         assert_eq!(update_sender(&weird), None, "phải từ chối: {weird}");
     }
 }
+
+/// Trần "sợ mẩu cụt" chỉ được áp khi có MẨU CỤT.
+///
+/// 🔴 Hà 2026-08-14, ảnh chụp `/shot` của [AI/tfl5]: *"Rõ ràng có lệnh ở tfl5 mà
+/// không thấy chèn nút chạy"*. Màn ấy chép nguyên từ log:
+///   bề ngang 173 cột · [10] 122 ký tự · [11] 68 ký tự — hai lệnh TRỌN VẸN,
+///   không một chỗ bẻ nào, chỉ vượt trần 60.
+/// Trần 60 sinh ra để chống mẩu cụt, thứ chỉ tồn tại khi cửa sổ bẻ dòng.
+#[test]
+fn a_long_line_on_a_wide_window_is_whole_not_a_stub() {
+    // Dòng độn cho màn đủ rộng (173 cột) và đủ dày để đo được bề ngang.
+    let pad = "─".repeat(173);
+    let screen = format!(
+        "{pad}\n  │ git merge-base --is-ancestor pr/32 pr/26 │ thoát 0 │\n{pad}\n\
+         Nếu anh muốn tự kiểm hai mệnh đề ấy thì đây là hai lệnh sạch:\n  \
+         git -C /Users/hanguyen/projects/AI/tfl5 merge-base --is-ancestor pr/32 pr/26 && echo CHUA_TRON_VEN\n  \
+         git -C /Users/hanguyen/projects/AI/tfl5 log --oneline pr/26..pr/32\n\
+         Lệnh đầu in ra dòng chữ đó nếu #32 nằm trọn trong #26.\n{pad}\n"
+    );
+    let got = hub::keys::commands_on_screen(&screen, 4);
+    assert!(
+        got.iter().any(|c| c.contains("log --oneline pr/26..pr/32")),
+        "lệnh 68 ký tự trên màn rộng 173 phải ra nút: {got:?}"
+    );
+    assert!(
+        got.iter().any(|c| c.contains("merge-base --is-ancestor pr/32 pr/26")),
+        "lệnh 122 ký tự cũng thế: {got:?}"
+    );
+}

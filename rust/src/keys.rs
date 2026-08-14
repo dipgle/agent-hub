@@ -940,6 +940,26 @@ fn commands_in(text: &str, max: usize, max_len: usize) -> Vec<String> {
                     .and_then(|n| n.split_whitespace().next())
                     .is_some_and(|w| w.chars().count() + 1 > space_left);
                 if !pushed {
+                    // 🔴 KHÔNG BỊ ĐẨY ⟹ KHÔNG BỊ BẺ ⟹ dòng này TRỌN VẸN, nên
+                    // cái trần "sợ mẩu cụt" không có việc gì ở đây.
+                    //
+                    // Hà 2026-08-14, ảnh chụp `/shot` của [AI/tfl5]: *"Rõ ràng
+                    // có lệnh ở tfl5 mà không thấy chèn nút chạy"*. Đọc đúng
+                    // màn ấy ra khỏi log:
+                    //   bề ngang cửa sổ .......... 173 cột
+                    //   [10] 122 ký tự  git -C …/tfl5 merge-base --is-ancestor …
+                    //   [11]  68 ký tự  git -C …/tfl5 log --oneline pr/26..pr/32
+                    // Hai lệnh TRỌN VẸN, không một chỗ bẻ nào — chỉ vượt trần
+                    // 60. Mà trần 60 sinh ra để chống MẨU CỤT, thứ chỉ tồn tại
+                    // khi cửa sổ bẻ dòng. Áp nó lên một dòng không hề bị bẻ là
+                    // áp một cái thuốc lên một bệnh không có.
+                    //
+                    // Phép đo đã nằm sẵn ngay trên: `pushed`. Nó trả lời đúng
+                    // câu "dòng này có bị bẻ không" bằng chính bề ngang đo được
+                    // từ màn, thay vì bằng một con số tròn đoán trước.
+                    if joined.is_empty() {
+                        cap = BTN_CMD_REPORT_MAX;
+                    }
                     break;
                 }
                 match wrap_tail(rows.get(k + 1).copied()) {

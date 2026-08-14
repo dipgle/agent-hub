@@ -649,6 +649,14 @@ pub fn parse_command(
             return Some((CommandKind::Pick, 0, format!("{} {}.{}", f[0], f[1], f[2])));
         }
     }
+    // `send_<8 ký tự đầu id>` — gửi bảng đi (một dấu Enter vào đúng cửa sổ ấy).
+    // Nó là `/key <id> enter` viết dưới dạng CHẠM ĐƯỢC: `/key` có tham số đứng
+    // sau dấu cách, mà chạm thì chỉ gửi lại token lệnh — chữ sau rơi mất.
+    if let Some(sid) = verb.strip_prefix("send_") {
+        if !sid.is_empty() && sid.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some((CommandKind::Key, 0, format!("{sid} enter")));
+        }
+    }
     if let Some(n) = verb.strip_prefix("run_") {
         if n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty() {
             return Some((CommandKind::RunQuick, 0, n.to_string()));

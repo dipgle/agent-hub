@@ -1444,7 +1444,9 @@ fn every_option_becomes_a_tappable_command_next_to_its_question() {
     }
     // Câu chọn-nhiều phải khai đúng bản chất, và bảng phải nói cách gửi.
     assert!(txt.contains("(CHỌN NHIỀU)"), "{txt}");
-    assert!(txt.contains("enter"), "{txt}");
+    // Lệnh gửi bảng cũng phải CHẠM ĐƯỢC: tham số nằm trong tên, không đứng sau
+    // dấu cách (chạm chỉ gửi lại token lệnh).
+    assert!(txt.contains("/send_4963b95c"), "{txt}");
 }
 
 #[test]

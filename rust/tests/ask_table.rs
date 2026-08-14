@@ -122,3 +122,34 @@ fn walking_to_another_question_counts_the_arrows_and_never_overshoots() {
     // đây là một lần chốt hộ chủ máy vào câu bên cạnh.
     assert_eq!(pick_keys(1, 1, 3), vec!["3"]);
 }
+
+/// 🔴 Hà 2026-08-14, sau khi chạm hai dòng lệnh: *"bấm rồi nhưng không được"*.
+///
+/// Nhưng log nói ngược lại — `pick_sent keys:["1"]` rồi `pick_sent
+/// keys:["right","1"]`, và phiên tfl5 sau đó `working:true asking:false`. Tức
+/// hai cú bấm ĐÚNG, bảng được trả lời và gửi đi. Cái hỏng là câu chữ: bảng
+/// biến mất bị gọi là *"đọc lại KHÔNG thấy bảng đâu"* — nghe như một thất bại,
+/// trong khi đó là kết cục TỐT NHẤT.
+///
+/// Làm đúng rồi báo sai cũng là một lỗi, chỉ hỏng ở khâu cuối: người ta bấm
+/// lại một việc đã xong.
+#[test]
+fn the_send_command_carries_its_id_inside_the_name() {
+    // `/key <id> enter` KHÔNG chạm được: Telegram gửi lại mỗi `/key`, tham số
+    // sau dấu cách rơi mất — đúng cái Hà gặp lúc 09:06 (*"Chưa hiểu lệnh này"*).
+    let a = hub::sessions::Asking {
+        header: "Vá ACL".into(),
+        question: "Server nên xử sao?".into(),
+        options: vec!["Từ chối".into()],
+        multi: false,
+        rest: vec![hub::sessions::Question {
+            header: "Đăng nhập".into(),
+            question: "Phân biệt hoa thường?".into(),
+            options: vec!["Không".into()],
+            multi: false,
+        }],
+    };
+    let txt = hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a);
+    assert!(txt.contains("/send_4963b95c"), "phải là lệnh chạm được: {txt}");
+    assert!(!txt.contains("/key "), "không được dùng dạng có tham số rời: {txt}");
+}

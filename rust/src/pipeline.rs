@@ -2286,8 +2286,13 @@ pub fn ask_command_lines(session_id: &str, a: &crate::sessions::Asking) -> Strin
         }
     }
     if !out.is_empty() {
-        // Bảng chỉ đi khi hết ô trống — nói ngay tại chỗ, kèm đúng cái lệnh gửi.
-        out.push_str(&format!("\n\nTrả lời hết rồi gửi: /key {session_id} enter"));
+        // 🔴 Dòng này từng viết `/key <id> enter` — và Hà chạm đúng vào nó lúc
+        // 09:06, Telegram gửi mỗi `/key`, hub trả *"Chưa hiểu lệnh này"*. Tôi
+        // tự viết ra luật "chạm chỉ gửi lại token lệnh, chữ sau dấu cách rơi
+        // mất" ở ngay tệp bên cạnh, rồi dẫm đúng vào nó ở dòng này.
+        //
+        // Tham số phải nằm TRONG tên: `/send_<8 ký tự đầu id>`.
+        out.push_str(&format!("\n\nTrả lời hết rồi gửi: /send_{sid}"));
     }
     out
 }
@@ -2475,15 +2480,37 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
                 format!("✅ {name} · câu {q} ({label}) → chọn {opt}. Còn {a} câu chưa trả lời.")
             }
         }
-        // Không đổi: nói thẳng là không đổi. Đây đúng chỗ hub từng báo "đã bấm"
-        // cho một cú bấm không tới đâu.
+        // Bảng đã đủ TỪ TRƯỚC: chọn lại một câu đã trả lời thì số ô trống không
+        // đổi, và đó là chuyện bình thường — không phải cảnh báo.
+        (Some(0), Some(0)) => format!(
+            "✅ {name} · câu {q} ({label}) → chọn {opt}. Bảng đã ĐỦ (chọn lại câu đã trả lời) — \
+             bấm /send_{sid} để gửi.",
+            sid = s.session_id.chars().take(8).collect::<String>()
+        ),
         (Some(b), Some(a)) if a == b => format!(
             "⚠ Đã gửi phím tới {name} nhưng bảng KHÔNG đổi (vẫn {b} câu trống). Có thể câu ấy \
              cho chọn nhiều, hoặc phím chưa tới. `/shot` để nhìn trước khi bấm tiếp."
         ),
+        // 🔴 Bảng BIẾN MẤT là kết cục TỐT NHẤT, không phải chuyện đáng ngờ: trả
+        // lời nốt ô cuối thì `claude` gửi bảng đi và vẽ màn khác. Bản trước gọi
+        // đúng cảnh ấy là *"đọc lại KHÔNG thấy bảng đâu"*, nên Hà bấm hai cú
+        // ĐÚNG (`['1']` rồi `['right','1']`, log `pick_sent` làm chứng), phiên
+        // tfl5 nhận câu trả lời và chạy tiếp — mà tin báo đọc ra như hỏng, và
+        // anh nhắn *"bấm rồi nhưng không được"*.
+        //
+        // Làm đúng rồi báo sai cũng là một lỗi, chỉ hỏng ở khâu cuối: người
+        // dùng bấm lại một việc đã xong. Phân biệt bằng thứ đo được — phiên có
+        // đang chạy không.
+        (_, None)
+            if crate::keys::is_busy(
+                &crate::keys::screen_of(&s.tty, 8).map(|x| x.0).unwrap_or_default(),
+            ) =>
+        {
+            format!("✅ {name} · câu {q} ({label}) → chọn {opt}. Bảng ĐÃ GỬI ĐI — phiên đang chạy tiếp.")
+        }
         _ => format!(
-            "⚠ Đã gửi phím tới {name} nhưng đọc lại KHÔNG thấy bảng đâu — có thể nó vừa được gửi \
-             đi, có thể màn đã đổi sang thứ khác. `/shot` để nhìn."
+            "✅ {name} · câu {q} ({label}) → chọn {opt}. Bảng không còn trên màn — nhiều khả năng \
+             nó vừa được gửi đi. `/shot` để nhìn."
         ),
     }
 }

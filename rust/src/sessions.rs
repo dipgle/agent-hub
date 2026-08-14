@@ -2739,6 +2739,12 @@ pub struct Handover {
     /// the same struct is serialised into the cursor the portal snapshot
     /// carries, so a field left visible here would put a price back on the
     /// phone screen through the back door (2026-08-08).
+    ///
+    /// 🔴 Chốt canh dòng này từng là `portal.rs::the_snapshot_carries_no_inbox_
+    /// and_no_money` + `fe-board-uc.mjs`; cả hai đi cùng trang tfl5 ngày
+    /// 2026-08-14. Nay là `tests/no_money_on_screen.rs`, và nó đã được kiểm là
+    /// **đỏ được**: gỡ `skip_serializing` khỏi đúng dòng này ⟹ test tắt (exit
+    /// 101, *"Handover: `cost_usd` lọt ra ngoài"*).
     #[serde(default, skip_serializing)]
     pub cost_usd: f64,
     pub ts: String,

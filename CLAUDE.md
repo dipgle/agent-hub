@@ -272,10 +272,19 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    snapshot carries no `owner_spend`, no `owner_budget`, no `cost_days`, no
    `budget`, and `cost_usd` is `#[serde(skip_serializing)]` on `Handover`,
    `Aside` and `Told`. This grew back once already (ceiling → price tag).
-   ⚠ **The two guards that asserted ABSENCE are gone** (`portal.rs` and
-   `fe-board-uc.mjs`, both removed 2026-08-14). The `#[serde(skip_serializing)]`
-   attributes still hold the line at the source, but nothing tests it any more —
-   this is a real gap in the diff, not a solved one.
+   The two guards that asserted ABSENCE (`portal.rs` and `fe-board-uc.mjs`) went
+   with the page on 2026-08-14 and were **replaced the same day** by
+   `tests/no_money_on_screen.rs`, which stands LOWER than either: it reads the
+   serialised shape of the three structs themselves, not one channel's snapshot,
+   so it still holds for a sender nobody has written yet. Three things it does
+   that the old pair did not — copy them when writing the next absence guard:
+   it fills `cost_usd` with a value **no other field could produce** (so the
+   assert cannot pass by the number simply being 0.0); it asserts the JSON
+   contains something expected BEFORE asserting what it lacks (an empty
+   serialisation must not read as "clean"); and it carries a test that
+   deliberately feeds the guard a leak to prove the guard can go red. Verified
+   by hand as well: dropping `skip_serializing` from `Handover::cost_usd` turns
+   it red with exit 101.
 10. **`claude` CLI facts that cost a real run to learn.** Do not re-derive them:
     `--bg` conflicts with `-p`, so the prompt is POSITIONAL — and
     `--disallowedTools` is VARIADIC, so a prompt placed after it is eaten as one

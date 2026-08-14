@@ -738,7 +738,12 @@ fn two_sessions_in_one_project_get_two_different_names() {
         .collect();
     assert_eq!(names.len(), 2, "{events:?}");
     assert_ne!(names[0], names[1], "hai phiên khác nhau, một cái tên: {names:?}");
-    assert!(names.iter().all(|n| n.starts_with("[dwork]")), "vẫn phải đọc ra dự án: {names:?}");
+    // Nhãn nay mở đầu bằng một ô vuông màu theo dự án (Hà 2026-08-14: *"đánh
+    // dấu màu vào tin nhận theo từng dự án để dễ nhận biết"*) — cùng dự án thì
+    // cùng màu, nên hai phiên này phải mang CÙNG một ô.
+    assert!(names.iter().all(|n| n.contains("[dwork]")), "vẫn phải đọc ra dự án: {names:?}");
+    let dot = hub::sessions::project_dot("dwork");
+    assert!(names.iter().all(|n| n.starts_with(dot)), "màu phải suy từ tên dự án: {names:?}");
     assert!(names.iter().any(|n| n.contains("0a109818")), "{names:?}");
 
     // Một mình thì KHÔNG gánh chuỗi hex: ca hiếm không được làm phiền ca thường.
@@ -748,7 +753,11 @@ fn two_sessions_in_one_project_get_two_different_names() {
     hub::sessions::label_sessions(&mut solo_rows, std::path::Path::new("/Users/hanguyen/projects"));
     let (solo, _) = changes(&solo_book, &solo_rows, NOW, &[]);
     match solo.first() {
-        Some(Change::Finished { name, .. }) => assert_eq!(name, "[dwork]", "thừa id khi không trùng"),
+        Some(Change::Finished { name, .. }) => assert_eq!(
+            name,
+            &format!("{} [dwork]", hub::sessions::project_dot("dwork")),
+            "thừa id khi không trùng"
+        ),
         other => panic!("phải là Finished: {other:?}"),
     }
 }

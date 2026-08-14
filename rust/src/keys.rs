@@ -619,7 +619,16 @@ fn key_payload(keyname: &str) -> Result<String> {
     // Ký tự điều khiển gửi qua `do script` như mọi chuỗi khác. Mũi tên là dãy
     // thoát ANSI: ESC [ A/B/C/D — đúng thứ terminal nhận khi người ta bấm.
     Ok(match keyname {
-        "enter" => "\"\"".to_string(), // chuỗi rỗng: `do script` tự kèm xuống dòng
+        // 🔴 Đo 2026-08-14 (Hà: *"Vậy là tôi bấm enter không có tác dụng rồi"*):
+        // gửi CHUỖI RỖNG và để `do script` tự chèn xuống dòng thì ô nhập KHÔNG
+        // nhúc nhích — đo trước/sau bằng `input_box_text`, chữ y nguyên. Lý do
+        // cùng họ với bài học dấu Enter hồi 08-12: TUI đọc cả lượt ghi như một
+        // cú DÁN, và dán một dòng trống thì chỉ là một dòng trống.
+        //
+        // CR (ASCII 13) là thứ terminal thật gửi khi người ta bấm Return, nên
+        // gửi đúng ký tự ấy thay vì trông chờ vào cái xuống dòng `do script`
+        // tự thêm.
+        "enter" => "(ASCII character 10)".to_string(),
         "esc" => "(ASCII character 27)".to_string(),
         "up" => "((ASCII character 27) & \"[A\")".to_string(),
         "down" => "((ASCII character 27) & \"[B\")".to_string(),

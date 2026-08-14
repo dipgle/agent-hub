@@ -1062,6 +1062,48 @@ impl Inbox {
     }
 
     fn handle_update(&self, client: &reqwest::blocking::Client, u: &Value) {
+        // 🔴 Hà 2026-08-14: *"Gửi 1 lúc hub mới nhận được"* · *"sao tự nhiên
+        // phản hồi rất chậm với tele"*. Trước dòng này, câu ấy KHÔNG trả lời
+        // được bằng log: hub chỉ ghi lúc nó xếp lệnh vào hàng, không ghi tin
+        // được gõ lúc nào — nên "chậm" có thể nằm ở Telegram, ở vòng đọc, ở
+        // hàng chờ, hay ở chính lượt làm việc của phiên, và cả bốn nghe hợp lý
+        // như nhau. Đúng cái bẫy đã trả giá với `/upgrade` sáng nay.
+        //
+        // `message.date` là giây UNIX Telegram đóng dấu lúc NHẬN tin, nên hiệu
+        // số này đo đúng quãng "gõ xong → hub cầm được", không lẫn phần sau.
+        // Chỉ kêu khi quá 3 giây: dưới ngưỡng ấy là long-poll chạy đúng, và một
+        // dòng log cho mỗi tin nhắn là tự dựng rác cho mình.
+        let started = std::time::Instant::now();
+        let sent_at = u
+            .pointer("/message/date")
+            .or_else(|| u.pointer("/callback_query/message/date"))
+            .and_then(Value::as_i64);
+        if let Some(sent) = sent_at {
+            let lag = chrono::Utc::now().timestamp() - sent;
+            if lag > 3 {
+                logging::warn(
+                    "telegram_update_lag",
+                    json!({ "sec": lag,
+                            "why": "quãng từ lúc Telegram nhận tin tới lúc vòng đọc của hub cầm được nó" }),
+                );
+            }
+        }
+        // Đo luôn phần hub tự tiêu: một update nặng (tải ảnh đính kèm) chặn
+        // đúng vòng đọc này, nên tin gửi ngay sau nó phải đợi.
+        let _guard = UpdateTimer(started);
+        struct UpdateTimer(std::time::Instant);
+        impl Drop for UpdateTimer {
+            fn drop(&mut self) {
+                let ms = self.0.elapsed().as_millis();
+                if ms > 1500 {
+                    logging::warn(
+                        "telegram_update_slow",
+                        json!({ "ms": ms,
+                                "why": "vòng đọc xử lý update này đồng bộ — tin tới sau phải chờ hết chừng ấy" }),
+                    );
+                }
+            }
+        }
         // ── Nút bấm ──────────────────────────────────────────────────────────
         if let Some(cb) = u.get("callback_query") {
             let from = cb

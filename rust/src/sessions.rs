@@ -534,11 +534,40 @@ pub fn label_sessions(rows: &mut [LiveSession], root: &Path) {
 /// `display_name` là nói đúng một phần (dự án đúng, chỉ thiếu vế duy-nhất) —
 /// và im lặng trả chuỗi rỗng thì màn hình có một cái tên trống.
 pub fn shown(s: &LiveSession) -> String {
-    if s.label.is_empty() {
+    let name = if s.label.is_empty() {
         display_name(&s.name, &s.folder)
     } else {
         s.label.clone()
+    };
+    format!("{} {name}", project_dot(&s.folder))
+}
+
+/// Một ô vuông màu ĐỨNG TRƯỚC tên dự án, cùng dự án thì cùng màu, mãi mãi.
+///
+/// 🔴 Hà 2026-08-14: *"Có cách nào đánh dấu màu vào tin nhận theo từng dự án để
+/// dễ nhận biết"*. Telegram KHÔNG cho tô màu chữ tuỳ ý — bộ định dạng của nó là
+/// đậm/nghiêng/gạch/khối mã/spoiler, không có thuộc tính màu (tài liệu Bot API,
+/// mục *HTML style*). Thứ mang được màu vào một dòng chữ là **emoji**, nên nhãn
+/// dự án đi kèm một ô vuông màu.
+///
+/// Màu phải suy TỪ TÊN chứ không phát theo thứ tự gặp: hub khởi động lại vài
+/// lần một ngày, và một cái nhãn đổi màu sau mỗi lần khởi động thì tệ hơn không
+/// có màu — người đọc học màu ấy rồi bị nó lừa. Băm tên là hàm thuần: cùng dự
+/// án ⟹ cùng màu trên mọi tin, mọi máy, mọi lần chạy.
+pub fn project_dot(folder: &str) -> &'static str {
+    const DOTS: [&str; 8] = ["🟦", "🟩", "🟨", "🟧", "🟪", "🟫", "🟥", "⬜"];
+    let key = folder.trim();
+    if key.is_empty() {
+        return "⬜";
     }
+    // FNV-1a 32-bit: đủ tản cho tám ô, và viết gọn trong năm dòng — không kéo
+    // thêm một crate băm vào đây cho một việc trang trí.
+    let mut h: u32 = 0x811c_9dc5;
+    for b in key.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    DOTS[(h % DOTS.len() as u32) as usize]
 }
 
 

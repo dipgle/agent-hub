@@ -597,6 +597,32 @@ fn autostart_state(cfg: &Config) -> Value {
 /// KHÔNG đụng vào bản đang cài nếu bất kỳ bước nào hỏng: build hỏng, không tìm
 /// thấy danh tính ký, hay chữ ký ra không phải `certificate root` thì dừng tại
 /// chỗ, xoá bản tạm, và bản đang chạy còn nguyên.
+/// Đường tới `cargo`, KHÔNG tin vào `PATH`.
+///
+/// 🔴 Hà 2026-08-14 gõ `/upgrade` lúc 08:26 và bản cài không đổi. hub báo đúng
+/// chứ không im — *"⚠ không dựng lại được (bản đang chạy GIỮ NGUYÊN): spawn
+/// cargo failed: No such file or directory"* — nhưng tin ấy trôi mất giữa mấy
+/// tin khác, nên nhìn từ điện thoại y hệt một cái lệnh không làm gì.
+///
+/// Gốc: `hubd` chạy dưới launchd, và `PATH` của nó là dòng khai trong plist —
+/// dòng ấy liệt kê `gh`, `claude`, `git`, `sqlite3` nhưng **không có
+/// `~/.cargo/bin`**, vì route `/upgrade` (bản Rust của `install.sh`) mới ra đời
+/// 2026-08-13, sau khi dòng PATH được viết. Chạy tay ở Terminal thì thấy cargo,
+/// chạy từ điện thoại thì không — đúng một cái cầu gãy nhịp cuối.
+///
+/// Vá hai tầng vì mỗi tầng hỏng theo một kiểu: plist thêm `~/.cargo/bin` (đường
+/// đúng cho MỌI lệnh sau này), và hàm này tự tìm (đường đúng cho một bản cài đã
+/// nằm sẵn trên máy người khác, nơi không ai sửa plist hộ).
+fn cargo_bin() -> String {
+    if let Some(home) = std::env::var_os("HOME") {
+        let p = std::path::PathBuf::from(home).join(".cargo/bin/cargo");
+        if p.exists() {
+            return p.display().to_string();
+        }
+    }
+    "cargo".to_string()
+}
+
 pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     let rust_dir = source_tree(cfg);
     if !rust_dir.is_dir() {
@@ -604,7 +630,7 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     }
     // 1. Build.
     let out = run(
-        "cargo",
+        &cargo_bin(),
         &["build", "--release", "--offline"],
         RunOpts {
             cwd: Some(&rust_dir),

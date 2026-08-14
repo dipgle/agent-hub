@@ -66,9 +66,14 @@
 
   <key>EnvironmentVariables</key>
   <dict>
-    <!-- gh, claude, git and sqlite3 live outside launchd's default PATH -->
+    <!-- gh, claude, git and sqlite3 live outside launchd's default PATH.
+         `~/.cargo/bin` thêm 2026-08-14: route `/upgrade` dựng lại hub bằng
+         `cargo build --release`, và thiếu nó thì lệnh ấy chết ngay câu đầu —
+         *"spawn cargo failed: No such file or directory"* — trong khi chạy tay
+         ở Terminal vẫn chạy, vì shell đăng nhập có PATH khác hẳn. Một cây cầu
+         gãy đúng nhịp cuối, và chỉ gãy cho người đứng ở đầu bên kia. -->
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:__HOME__/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <string>/opt/homebrew/bin:/usr/local/bin:__HOME__/.cargo/bin:__HOME__/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <!-- Thư mục làm việc không còn nằm trong repo, nên hub không thể tìm
          `hub.config.json` bằng cách đi ngược lên từ cwd nữa. Chỉ thẳng đường:
          thiếu dòng này, hub rơi về cấu hình mặc định và ghi

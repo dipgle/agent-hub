@@ -381,3 +381,31 @@ fn a_deep_link_payload_round_trips_back_into_the_same_command() {
     // `/start` trống thì không phải lệnh gì cả — đừng đoán hộ.
     assert!(parse_command("/start").is_none());
 }
+
+/// `/terminal <lệnh>` — cửa sổ Terminal THẬT, và cái tên phải tự nói ra điều đó.
+///
+/// 🔴 Hà 2026-08-15, sau khi route này bị gỡ vì "0 lượt dùng": *"cái tên win hơi
+/// mơ hồ mà bạn cũng không đưa vào help nên tôi ko hề biết"*. Con số 0 ấy đo
+/// **sự vô hình** — route để `listed: false` nên không vào menu ☰ và không hiện
+/// khi gõ `/` — chứ không đo sự vô dụng. Nay tên là `/terminal`, nằm trong menu,
+/// và hai tên cũ vẫn nhận để nút hay thói quen cũ không gãy.
+#[test]
+fn the_terminal_verb_says_what_it_opens() {
+    use hub::adapters::CommandKind;
+    for name in ["/terminal", "/win", "/cuaso", "/tty"] {
+        assert_eq!(
+            parse_command(&format!("{name} sudo -v")),
+            Some((CommandKind::Win, 0, "sudo -v".to_string())),
+            "{name} phải mở được cửa sổ"
+        );
+        // Trống thì không phải lệnh — đừng mở một cửa sổ rỗng.
+        assert_eq!(parse_command(name), None, "{name} trơn");
+    }
+    // Và nó phải NHÌN THẤY ĐƯỢC: có trong danh sách gửi lên menu Telegram.
+    assert!(
+        hub::commands::for_telegram()
+            .iter()
+            .any(|(c, _)| *c == "terminal"),
+        "route vô hình là route không ai gọi — đó là cả bài học của lần gỡ nhầm"
+    );
+}

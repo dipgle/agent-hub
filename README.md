@@ -145,6 +145,7 @@ route — nên nó không biết và không cần biết lệnh tới từ kênh
 | Lệnh | Việc |
 |---|---|
 | `/accounts` | ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, `/new` mặc định vào tài khoản nào |
+| `/terminal <dòng lệnh>` | mở cửa sổ Terminal thật (có tty) rồi chạy lệnh — cho `sudo`, `ssh -t`, `passwd`; cửa sổ ở lại để gõ mật khẩu |
 | `/upgrade` | hub tự dựng lại chính nó từ mã hiện tại rồi khởi động lại |
 | `/run` · `/doctor` | chạy một vòng ngay · kiểm tra thật |
 | `/set <khoá> <giá trị>` | sửa một trường cấu hình (validate + backup + ghi nguyên tử) |

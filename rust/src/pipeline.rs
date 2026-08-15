@@ -3579,6 +3579,113 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }
+            CommandKind::Win => {
+                // 🔴 TRỐNG = XEM DANH SÁCH. Hà 2026-08-15: *"Đặt là terminal và
+                // win thì liệt kê danh sách terminal, có đang chạy gì không"*.
+                //
+                // Cùng hình dạng với `/session`: động từ trơn hỏi *"đang có
+                // những gì"*, động từ kèm tham số mới là *"làm cái này"*. Trước
+                // đó `/terminal` trơn trả `None` — tức gõ tên một route rồi
+                // nhận lại sự im lặng, đúng cái làm người ta tưởng nó hỏng.
+                //
+                // `keys::terminal_tabs` đã có sẵn từ 08-13 và trả trọn thứ cần
+                // trong MỘT lượt osascript: tty, có bận không, và tiến trình
+                // đang chạy. Ghép thêm tên phiên nếu tty ấy khớp một phiên
+                // `claude` — vì "cửa sổ này là phiên [tfl5]" mới là câu trả lời
+                // người ta cần, không phải "ttys007".
+                if cmd.arg.trim().is_empty() {
+                    let ack = match crate::keys::terminal_tabs() {
+                        Err(e) => format!(
+                            "⚠ không hỏi được Terminal: {}",
+                            crate::exec::truncate(&e.to_string(), 200)
+                        ),
+                        Ok(tabs) if tabs.is_empty() => {
+                            "Không có cửa sổ Terminal nào đang mở.".to_string()
+                        }
+                        Ok(tabs) => {
+                            let live = crate::sessions::snapshot_cached(
+                                cfg,
+                                std::time::Duration::from_secs(20),
+                            );
+                            let mut out =
+                                format!("🖥 {} cửa sổ Terminal đang mở:\n", tabs.len());
+                            for tb in &tabs {
+                                let who = live
+                                    .sessions
+                                    .iter()
+                                    .find(|s| s.tty == tb.tty)
+                                    .map(|s| format!(" · {}", crate::sessions::shown(s)));
+                                let doing = match tb.cli() {
+                                    Some(p) => p.to_string(),
+                                    None => "dấu nhắc trống".to_string(),
+                                };
+                                out.push_str(&format!(
+                                    "\n{} {}{}\n    {}",
+                                    if tb.busy { "🟢" } else { "⚪" },
+                                    tb.tty,
+                                    who.unwrap_or_default(),
+                                    doing
+                                ));
+                            }
+                            out.push_str(
+                                "\n\n🟢 = đang chạy gì đó · ⚪ = rảnh\n\
+                                 /terminal <lệnh> để mở một cửa sổ mới có tty.",
+                            );
+                            out
+                        }
+                    };
+                    reply_in_channel(db, cfg, adapter, cmd, &ack);
+                    Some(ack)
+                } else {
+                // Cửa sổ THẬT, vì thứ thiếu là một cái tty — xem `CommandKind::Win`.
+                //
+                // 🔴 CHẠY ĐÚNG DÒNG ANH GÕ, không bọc thêm gì. Hà 2026-08-13:
+                // *"tại sao lệnh chỉ có 1 dòng mà chèn thêm text vào làm gì?"*.
+                // Bản đầu ghép `cd <gốc workspace>; <lệnh>` để cwd khớp `/cmd`
+                // — lý do nghe hợp lý, và cái giá là mọi cửa sổ mở ra đều bắt
+                // đầu bằng một dòng anh không gõ, dài hơn cả lệnh thật.
+                //
+                // Phép thử cầu nối trả lời gọn: ngồi trước máy anh mở cửa sổ
+                // rồi dán ĐÚNG dòng ấy, không ai tự thêm một `cd` vào trước.
+                // Cần thư mục thì gõ `cd` — như ở terminal. Đổi lại, câu trả
+                // lời phải NÓI RA cửa sổ mở ở đâu, vì đó là thứ vừa đổi.
+                let line = cmd.arg.trim().to_string();
+                let ack = if line.is_empty() {
+                    "⚠ /win cần một dòng lệnh. Ví dụ: /win sudo -v".to_string()
+                } else {
+                    match crate::keys::open_window(&line) {
+                        Ok((win, tty)) => {
+                            logging::info(
+                                "win_opened",
+                                json!({ "cmd": crate::exec::truncate(&line, 120),
+                                        "window": win, "tty": tty }),
+                            );
+                            format!(
+                                "🖥 Đã mở cửa sổ Terminal ({tty}) và chạy đúng dòng này:\n{line}\n\n\
+                                 Cửa sổ mở ở thư mục mặc định của shell, không phải gốc workspace — \
+                                 cần chỗ khác thì gõ cd. Kết quả nằm TRÊN cửa sổ ấy, không về đây: \
+                                 đó là chỗ gõ mật khẩu."
+                            )
+                        }
+                        // Không nuốt: mở cửa sổ hỏng thì người bấm phải biết,
+                        // không thì họ ngồi chờ một cái cửa sổ không tồn tại.
+                        Err(e) => {
+                            let msg = crate::logging::err_chain(&e);
+                            logging::error(
+                                "win_open_failed",
+                                json!({ "cmd": crate::exec::truncate(&line, 120), "err": msg }),
+                            );
+                            format!(
+                                "⚠ chưa mở được cửa sổ: {}",
+                                crate::exec::truncate(&msg, 200)
+                            )
+                        }
+                    }
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+                }
+            }
             CommandKind::Accounts => {
                 // Một ảnh chụp thật, không phải con số nhớ từ lượt trước: câu
                 // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì

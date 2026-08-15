@@ -238,13 +238,17 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    not public endpoints.
 
    Routes: session · new · ask · tell · stop · close · handover · type · key ·
-   **pick** · shot · runin · run · doctor · set · upgrade · help · **accounts**.
+   **pick** · shot · runin · **terminal** · run · doctor · set · upgrade · help ·
+   **accounts**.
    (`ingest`/`poll` died 2026-08-14 with the poll stage — it read the chat room,
    and Telegram pushes. `cmd`/`win`/`project` died 2026-08-15: đo trên toàn bộ
    log thì `win` và `project` chưa chạy lần nào từ 26/07, `cmd` đúng một lần và
    lần ấy là chạm menu nên chẳng thực thi gì. Hà chốt *"Bỏ cả 3"*, và về `cmd`:
    *"Không cần cmd vì có terminal là dán vào được"* — ngồi ở máy thì dán thẳng,
-   đúng phép thử cầu nối.)
+   đúng phép thử cầu nối. `win` KHÔI PHỤC ngay sau đó thành `/terminal`: Hà —
+   *"cái tên win hơi mơ hồ mà bạn cũng không đưa vào help nên tôi ko hề biết"*.
+   Con số "0 lượt dùng" đo SỰ VÔ HÌNH — route để `listed: false` thì không vào
+   menu ☰ — chứ không đo sự vô dụng. Đừng lấy nó làm bằng chứng để gỡ lần nữa.)
 
    **`/pick` vs `/key`, và vì sao phải là hai** (2026-08-13). `AskUserQuestion`
    có thể mang **nhiều câu** trong một bảng, vẽ thành một thanh tab

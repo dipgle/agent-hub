@@ -136,6 +136,42 @@ pub enum CommandKind {
     /// chạy nốt mới đóng hẳn"*): gõ `/exit`, chờ tới 30 giây cho `claude` chạy
     /// hết lượt đang xếp hàng, còn bận thì TỪ CHỐI đóng — đóng lúc ấy bật hộp
     /// thoại "terminate running processes", thứ khoá mồm mọi lệnh sau nó.
+    /// 🔴 KHÔI PHỤC 2026-08-15, vài phút sau khi bị gỡ — và lý do gỡ nó là một
+    /// LỖI PHÉP ĐO của tôi. Tôi lấy "0 lượt dùng trong toàn bộ log" làm bằng
+    /// chứng rằng route này thừa. Hà chỉ ra chỗ sai: *"cái tên win hơi mơ hồ mà
+    /// bạn cũng không đưa vào help nên tôi ko hề biết"*.
+    ///
+    /// Đúng: nó `listed: false` nên KHÔNG vào menu ☰ và không hiện khi gõ `/`;
+    /// `/help` có in nó, nhưng lẫn trong 24 dòng phải chủ động đi tìm. Con số 0
+    /// ấy đo **sự vô hình**, không đo sự vô dụng — một thứ không ai nhìn thấy
+    /// thì đương nhiên không ai gọi, và điều đó chẳng nói gì về việc nó có đáng
+    /// giữ hay không.
+    ///
+    /// Nay tên là `/terminal` (giữ `win`, `cuaso` làm alias) và `listed: true`.
+    /// `/win <lệnh>` — chạy trong một **cửa sổ Terminal thật**, không phải nền.
+    ///
+    /// 🔴 Hà 2026-08-13, gửi ảnh chụp lời một phiên khác: *"`!` trong Claude
+    /// Code không cấp tty, nên `ssh -t` không xin được — không phải lỗi sudo
+    /// hay script. Cần một cửa sổ terminal thật, dán đúng dòng này rồi gõ mật
+    /// khẩu"*, rồi chốt: *"với lệnh này chỉ chạy được trong terminal không chạy
+    /// được trong cli nên cần thêm cách tạo nút"*.
+    ///
+    /// `/cmd` sinh tiến trình con KHÔNG có tty, nên mọi thứ đòi bàn phím —
+    /// `sudo`, `ssh -t`, `passwd`, một `read -s` — chết ngay ở dòng hỏi, và
+    /// chết theo kiểu khó đọc (*"a terminal is required"*), chứ không phải kiểu
+    /// "lệnh sai". Đây không phải lỗi vá được trong `/cmd`: **cái thiếu là một
+    /// cái tty**, mà tty thì chỉ cửa sổ mới có.
+    ///
+    /// Nên đúng như luật cầu nối: ngồi ở máy anh sẽ mở một cửa sổ rồi dán vào
+    /// đó. `/win` làm đúng thế — `keys::open_window`, cùng đường `/new` đã đi.
+    /// Cửa sổ **ở lại** sau khi lệnh chạy xong: đó là chỗ gõ mật khẩu, và cũng
+    /// là chỗ đọc kết quả.
+    ///
+    /// Hai đường này KHÔNG thay nhau: `/cmd` trả kết quả về điện thoại (đọc
+    /// được từ xa, không cần đứng dậy), `/win` cần người ngồi trước máy. Nút
+    /// `🖥` chỉ mọc kèm KẾT QUẢ của `/cmd`, tức đúng lúc đã biết đường kia
+    /// không đi được.
+    Win,
     Close,
     /// `/accounts` — ba tài khoản `claude` trên máy này: phiên nào đang chạy
     /// bằng tài khoản nào, còn bao nhiêu hạn mức, và **`/new` không nói `@acc`

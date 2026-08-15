@@ -190,6 +190,18 @@ pub const ROUTES: &[Route] = &[
         listed: true,
     },
     Route {
+        name: "terminal",
+        aliases: &["win", "cuaso", "tty"],
+        kind: CommandKind::Win,
+        // 🔴 `Rest`, không phải `RestRequired`: trơn = XEM DANH SÁCH (Hà
+        // 2026-08-15). `RestRequired` trả `None` cho `/terminal` trơn — tức gõ
+        // đúng tên một route rồi nhận lại sự im lặng.
+        arg: Arg::Rest,
+        usage: "[dòng lệnh]",
+        help: "Xem cửa sổ Terminal đang mở · kèm lệnh thì mở cửa sổ mới (có tty)",
+        listed: true,
+    },
+    Route {
         name: "accounts",
         aliases: &["acc", "taikhoan"],
         kind: CommandKind::Accounts,

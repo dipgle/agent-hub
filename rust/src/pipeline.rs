@@ -900,6 +900,22 @@ fn auto_handover(db: &Db, cfg: &Config) {
         .cursor_or_log(AUTO_DONE_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
+    // 🔴 Ngữ cảnh LÚC BÀN GIAO của từng phiên — để "đã bàn giao" thôi là một
+    // bản án chung thân.
+    //
+    // Hà 2026-08-15: *"cả 2 phiên hiện tại đều đang gần full rồi, vậy mà hub
+    // không tắt để mở phiên mới"*. Log: 14/08 13:15 bàn giao nổ ở 67%, mở xong
+    // phiên kế nhiệm, nhưng phiên cũ đang chạy dở nên không đóng được — rồi id
+    // ấy vào sổ `AUTO_DONE_KEY` và **1.791 lượt kiểm sau đó đều trả
+    // `AlreadyDone`**, trong khi phiên cũ phình tiếp từ 67% lên 80%.
+    //
+    // Cái sổ ấy trả lời đúng câu "đã bàn giao chưa", nhưng câu cần hỏi là "còn
+    // cần bàn giao nữa không". Nay: đã bàn giao mà ngữ cảnh vẫn leo thêm một
+    // mốc thì hỏi lại từ đầu.
+    let done_at: std::collections::BTreeMap<String, u8> = db
+        .cursor_or_log(AUTO_PCT_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
 
     for s in &live.sessions {
         if s.host == "dead" || s.context_tokens == 0 {
@@ -952,7 +968,15 @@ fn auto_handover(db: &Db, cfg: &Config) {
         let why = auto_handover_why(
             pct,
             cfg.auto_handover.at_percent,
-            done.iter().any(|d| d == &s.session_id),
+            // "Đã bàn giao" chỉ còn tính khi ngữ cảnh CHƯA leo thêm một mốc
+            // kể từ lần ấy — xem `done_at` và `AUTO_RETRY_STEP`.
+            done.iter().any(|d| d == &s.session_id)
+                && pct
+                    < done_at
+                        .get(&s.session_id)
+                        .copied()
+                        .unwrap_or(cfg.auto_handover.at_percent)
+                        .saturating_add(AUTO_RETRY_STEP),
             screen.is_some(),
             screen
                 .as_ref()
@@ -989,6 +1013,25 @@ fn auto_handover(db: &Db, cfg: &Config) {
                 if let Ok(v) = serde_json::to_string(&next) {
                     let _ = db.set_cursor(AUTO_DONE_KEY, &v);
                 }
+                // Ghi luôn ngữ cảnh lúc này, để lần sau biết nó đã leo thêm
+                // bao nhiêu kể từ lần bàn giao ấy.
+                {
+                    let mut at: std::collections::BTreeMap<String, u8> = db
+                        .cursor_or_log(AUTO_PCT_KEY)
+                        .and_then(|v| serde_json::from_str(&v).ok())
+                        .unwrap_or_default();
+                    at.insert(s.session_id.clone(), pct);
+                    // Cùng trần với sổ `done`: nhớ 50 phiên gần nhất là đủ, và
+                    // một cuốn sổ lớn mãi thì đến ngày nào đó ai cũng ngại đọc.
+                    while at.len() > 50 {
+                        if let Some(k) = at.keys().next().cloned() {
+                            at.remove(&k);
+                        }
+                    }
+                    if let Ok(v) = serde_json::to_string(&at) {
+                        let _ = db.set_cursor(AUTO_PCT_KEY, &v);
+                    }
+                }
                 if let Err(e) =
                     db.record_spend("auto_handover", &h.new_session_id, h.cost_usd, &s.name)
                 {
@@ -1016,6 +1059,40 @@ fn auto_handover(db: &Db, cfg: &Config) {
                                     "focus_after_handover_failed",
                                     json!({ "err": e.to_string() }),
                                 );
+                            }
+                            // 🔴 ĐÓNG HỤT THÌ GIAO CHO SỔ ĐÓNG, đừng bỏ đó.
+                            //
+                            // Hà 2026-08-15: *"cả 2 phiên hiện tại đều đang gần
+                            // full rồi, vậy mà hub không tắt để mở phiên mới"*.
+                            // Log kể đúng chuyện đã xảy ra: 14/08 13:15 bàn giao
+                            // nổ ở 67%, 13:16 mở xong phiên kế nhiệm, rồi
+                            // `handover_old_window_not_closed` — *"đã gõ /exit
+                            // nhưng phiên vẫn đang chạy dở sau 30 giây"*. Sau đó
+                            // KHÔNG AI thử lại: cờ `AlreadyDone` bật, 1.791 lượt
+                            // kiểm tiếp theo đều dừng ở đó, và phiên cũ cứ phình
+                            // từ 67% lên 80% với hai cửa sổ cùng sống.
+                            //
+                            // Gốc là một định nghĩa sai: bàn giao coi là XONG khi
+                            // mở được phiên mới, trong khi việc chưa xong chừng
+                            // nào phiên cũ còn sống. Máy móc để làm nốt thì đã
+                            // có sẵn từ `/close`: sổ đóng ngó lại mỗi 30 giây,
+                            // nhắc ra chat mỗi 2 phút, bỏ cuộc ở phút thứ 10 và
+                            // NÓI RA. Đưa cửa sổ hụt vào đúng cuốn sổ ấy.
+                            if w.closed_err.is_some() {
+                                if let Ok(Some(old_w)) = crate::keys::window_of(&s.tty) {
+                                    remember_closing(
+                                        db,
+                                        &s.session_id,
+                                        old_w,
+                                        &crate::sessions::shown(s),
+                                        chrono::Utc::now().timestamp(),
+                                    );
+                                    logging::info(
+                                        "handover_close_deferred",
+                                        json!({ "session": s.session_id, "window": old_w,
+                                                "why": "phiên cũ còn chạy dở — sổ đóng sẽ ngó lại" }),
+                                    );
+                                }
                             }
                             HandoverMove::Opened {
                                 tty: &w.tty,
@@ -1091,6 +1168,16 @@ fn auto_handover(db: &Db, cfg: &Config) {
 
 /// Phiên nào đã được hub tự đóng sổ rồi — để không đóng hai lần.
 pub const AUTO_DONE_KEY: &str = "auto_handover:done";
+
+/// Ngữ cảnh lúc bàn giao của từng phiên (`sid` → `%`).
+pub const AUTO_PCT_KEY: &str = "auto_handover:pct";
+
+/// Leo thêm chừng này phần trăm kể từ lần bàn giao trước thì HỎI LẠI.
+///
+/// Mười điểm: đủ rộng để một lượt trả lời dài không tự châm ngòi, đủ hẹp để một
+/// phiên đã bàn giao hụt không kịp bò từ 67% lên 80% trong im lặng — đúng quãng
+/// đã xảy ra thật ngày 2026-08-14.
+const AUTO_RETRY_STEP: u8 = 10;
 
 /// Chuyện gì THẬT SỰ xảy ra khi hub thay cửa sổ — ba kết cục, không gộp.
 ///

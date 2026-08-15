@@ -398,8 +398,14 @@ fn the_terminal_verb_says_what_it_opens() {
             Some((CommandKind::Win, 0, "sudo -v".to_string())),
             "{name} phải mở được cửa sổ"
         );
-        // Trống thì không phải lệnh — đừng mở một cửa sổ rỗng.
-        assert_eq!(parse_command(name), None, "{name} trơn");
+        // 🔴 Trơn = XEM DANH SÁCH cửa sổ (Hà 2026-08-15), không phải None.
+        // Bản trước trả `None`: gõ đúng tên một route rồi nhận lại sự im lặng —
+        // đúng thứ làm người ta tưởng nó hỏng.
+        assert_eq!(
+            parse_command(name),
+            Some((CommandKind::Win, 0, String::new())),
+            "{name} trơn phải là 'liệt kê', không phải im lặng"
+        );
     }
     // Và nó phải NHÌN THẤY ĐƯỢC: có trong danh sách gửi lên menu Telegram.
     assert!(

@@ -921,3 +921,35 @@ fn two_sessions_in_one_project_get_two_different_names() {
         other => panic!("phải là Finished: {other:?}"),
     }
 }
+
+/// "Đã bàn giao" không được là một bản án chung thân.
+///
+/// 🔴 Hà 2026-08-15: *"cả 2 phiên hiện tại đều đang gần full rồi, vậy mà hub
+/// không tắt để mở phiên mới"*. Log kể đúng chuyện: 14/08 13:15 bàn giao nổ ở
+/// 67%, phiên kế nhiệm mở xong, nhưng phiên cũ đang chạy dở nên không đóng
+/// được — rồi id ấy vào sổ và **1.791 lượt kiểm sau đó đều trả `AlreadyDone`**,
+/// trong khi phiên cũ phình tiếp lên 80%.
+///
+/// Cuốn sổ ấy trả lời đúng câu "đã bàn giao chưa"; câu cần hỏi là "còn cần bàn
+/// giao nữa không".
+#[test]
+fn a_session_that_refilled_after_a_handover_asks_again() {
+    use hub::pipeline::{auto_handover_why, AutoWhy};
+    // Ngay sau khi bàn giao ở 67%: im lặng, đúng.
+    assert_eq!(
+        auto_handover_why(67, 60, true, true, false, false, 0, 300, 120),
+        AutoWhy::AlreadyDone
+    );
+    // Leo thêm vài điểm vẫn im — một lượt trả lời dài không được tự châm ngòi.
+    assert_eq!(
+        auto_handover_why(74, 60, true, true, false, false, 0, 300, 120),
+        AutoWhy::AlreadyDone
+    );
+    // …nhưng leo hẳn một mốc (≥10) thì phải HỎI LẠI, không im nữa.
+    // (Chỗ gọi tính lại cờ `already_done` theo `done_at + AUTO_RETRY_STEP`, nên
+    // ở đây nó tới như `false`.)
+    assert_eq!(
+        auto_handover_why(78, 60, false, true, false, false, 0, 300, 120),
+        AutoWhy::Do
+    );
+}

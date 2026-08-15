@@ -692,7 +692,7 @@ fn a_command_on_screen_is_picked_up_with_its_arguments() {
                   Chạy nốt lệnh này:\n\
                     git -C ~/projects/AI/tcc/amm push origin main\n\
                   Xong thì báo lại.";
-    let got = hub::keys::commands_on_screen(screen, 4);
+    let got = hub::keys::commands_in_report(screen, 4);
     assert_eq!(got, vec!["git -C ~/projects/AI/tcc/amm push origin main"]);
 }
 
@@ -701,9 +701,9 @@ fn a_command_on_screen_is_picked_up_with_its_arguments() {
 fn prose_is_not_mistaken_for_a_command() {
     let screen = "Tôi sẽ chạy git để kiểm tra.\nls các thư mục xong rồi.\nfind ra nguyên nhân:";
     assert!(
-        hub::keys::commands_on_screen(screen, 4).is_empty(),
+        hub::keys::commands_in_report(screen, 4).is_empty(),
         "{:?}",
-        hub::keys::commands_on_screen(screen, 4)
+        hub::keys::commands_in_report(screen, 4)
     );
 }
 
@@ -713,7 +713,7 @@ fn prompts_are_stripped_and_bare_verbs_ignored() {
     // `cargo` trần: đủ dài để qua cửa độ dài, nên nó ghim ĐÚNG luật "phải có
     // tham số" chứ không ăn theo một luật khác.
     let screen = "$ cargo test --offline\n❯ cargo\n  ./deploy/install.sh --no-build";
-    let got = hub::keys::commands_on_screen(screen, 4);
+    let got = hub::keys::commands_in_report(screen, 4);
     assert!(got.contains(&"cargo test --offline".to_string()), "{got:?}");
     assert!(
         got.contains(&"./deploy/install.sh --no-build".to_string()),
@@ -730,7 +730,7 @@ fn prompts_are_stripped_and_bare_verbs_ignored() {
 fn only_the_latest_few_survive_and_duplicates_collapse() {
     let screen =
         "git status\ngit status\nnpm run build\ncargo test --offline\nnode fe-smoke.mjs a b c";
-    let got = hub::keys::commands_on_screen(screen, 2);
+    let got = hub::keys::commands_in_report(screen, 2);
     assert_eq!(got.len(), 2, "{got:?}");
     assert_eq!(
         got[1], "node fe-smoke.mjs a b c",
@@ -746,7 +746,7 @@ fn only_the_latest_few_survive_and_duplicates_collapse() {
 fn a_command_quoted_inside_prose_keeps_only_the_command() {
     let screen = "  `git push origin main` (a plain push to main) executed from a nested-repo";
     assert_eq!(
-        hub::keys::commands_on_screen(screen, 4),
+        hub::keys::commands_in_report(screen, 4),
         vec!["git push origin main"]
     );
 }
@@ -755,7 +755,7 @@ fn a_command_quoted_inside_prose_keeps_only_the_command() {
 #[test]
 fn a_sentence_with_a_comma_is_not_a_command() {
     let screen = "git status trước, rồi push sau";
-    assert!(hub::keys::commands_on_screen(screen, 4).is_empty());
+    assert!(hub::keys::commands_in_report(screen, 4).is_empty());
 }
 
 /// Lệnh nằm trong DẤU NHÁY giữa câu văn cũng phải bấm chạy được.
@@ -770,7 +770,7 @@ fn a_command_quoted_in_a_report_becomes_a_button_cut_at_the_backticks() {
         1. `git -C ~/projects/AI/tcc/amm push origin main` (3 commit, hook chặn tôi push main)\n\
         2. Chạy `bash ./deploy.sh perapp-storage` rồi kiểm lại.\n\
         cargo test --all-targets chưa chạy lại sau bản vá SDK đó.";
-    let got = hub::keys::commands_on_screen(report, 4);
+    let got = hub::keys::commands_in_report(report, 4);
     assert!(
         got.contains(&"git -C ~/projects/AI/tcc/amm push origin main".to_string()),
         "{got:?}"
@@ -789,7 +789,7 @@ fn a_command_quoted_in_a_report_becomes_a_button_cut_at_the_backticks() {
     // phía sau, ra một cái nút chạy nhầm thứ.
     let prose = "Nhắc tới `git push origin main` (a plain push to main) executed from…";
     assert_eq!(
-        hub::keys::commands_on_screen(prose, 4),
+        hub::keys::commands_in_report(prose, 4),
         vec!["git push origin main".to_string()]
     );
 }
@@ -809,7 +809,7 @@ fn a_command_the_terminal_wrapped_is_joined_back_not_dropped() {
                   deploy with `bash scripts/deploy.sh walk-fixes-0813 --expect-symbol \n  \
                   renderChatPending`. (disable recaps in /config)";
     assert_eq!(
-        hub::keys::commands_on_screen(screen, 4),
+        hub::keys::commands_in_report(screen, 4),
         vec![
             "bash scripts/deploy.sh walk-fixes-0813 --expect-symbol renderChatPending".to_string()
         ]
@@ -819,14 +819,14 @@ fn a_command_the_terminal_wrapped_is_joined_back_not_dropped() {
     // một cái nút chạy nhầm thứ tệ hơn hẳn một cái nút thiếu.
     let cut_mid_word = "chạy `bash scripts/deploy.sh walk-fix\nes-0813 --expect-symbol x`";
     assert!(
-        hub::keys::commands_on_screen(cut_mid_word, 4).is_empty(),
+        hub::keys::commands_in_report(cut_mid_word, 4).is_empty(),
         "{:?}",
-        hub::keys::commands_on_screen(cut_mid_word, 4)
+        hub::keys::commands_in_report(cut_mid_word, 4)
     );
 
     // Và một KHỐI chữ trong cặp nháy vẫn không phải một cái nút.
     let block = "xem `line one here\n\nline two here\nline three\nline four\nline five`";
-    assert!(hub::keys::commands_on_screen(block, 4).is_empty());
+    assert!(hub::keys::commands_in_report(block, 4).is_empty());
 }
 
 /// Lệnh nằm trong KHỐI CODE vẫn phải ra nút.
@@ -846,7 +846,7 @@ fn commands_inside_a_fenced_block_still_become_buttons() {
         bash ./dci-deploy-be.sh dci/leave-quota/\n\
         bash ./dci-deploy-be.sh dci/config/holiday/\n\
         ```";
-    let got = hub::keys::commands_on_screen(report, 4);
+    let got = hub::keys::commands_in_report(report, 4);
     assert_eq!(got.len(), 3, "{got:?}");
     assert!(
         got.contains(&"bash ./dci-deploy-be.sh module/".to_string()),
@@ -871,12 +871,12 @@ fn commands_inside_a_fenced_block_still_become_buttons() {
 fn hub_recognises_the_bang_prefix_it_invented() {
     let screen = "Anh gõ giúp:\n  ! git -C ~/projects/AI/codetrail push origin main";
     assert_eq!(
-        hub::keys::commands_on_screen(screen, 4),
+        hub::keys::commands_in_report(screen, 4),
         vec!["git -C ~/projects/AI/codetrail push origin main".to_string()]
     );
     // Dạng không có dấu cách cũng thế.
     assert_eq!(
-        hub::keys::commands_on_screen("!cargo test --offline", 4),
+        hub::keys::commands_in_report("!cargo test --offline", 4),
         vec!["cargo test --offline".to_string()]
     );
 }
@@ -942,27 +942,27 @@ fn a_warning_about_a_command_never_becomes_a_button_for_it() {
     // Chép nguyên hình dạng câu của bộ gác.
     let block = "BLOCK: `git filter-branch --force` on `rewrite/main` rewrites commit history";
     assert!(
-        hub::keys::commands_on_screen(block, 4).is_empty(),
+        hub::keys::commands_in_report(block, 4).is_empty(),
         "{:?}",
-        hub::keys::commands_on_screen(block, 4)
+        hub::keys::commands_in_report(block, 4)
     );
 
     // Và câu cảnh báo của chính hub.
     let mine = "⚠ Nút lệnh của hub vừa mời anh bấm `git filter-branch --force` — đừng bấm";
-    assert!(hub::keys::commands_on_screen(mine, 4).is_empty(), "{mine}");
+    assert!(hub::keys::commands_in_report(mine, 4).is_empty(), "{mine}");
 
     // Lệnh đứng đầu dòng trong một dòng cảnh báo cũng không.
     let bare = "❌ KHÔNG ĐƯỢC chạy dòng này:\n⚠ git push --force origin main";
     assert!(
-        hub::keys::commands_on_screen(bare, 4).is_empty(),
+        hub::keys::commands_in_report(bare, 4).is_empty(),
         "{:?}",
-        hub::keys::commands_on_screen(bare, 4)
+        hub::keys::commands_in_report(bare, 4)
     );
 
     // …nhưng câu MỜI chạy thì vẫn phải ra nút, không thì cửa này ăn hết.
     let invite = "Chạy giúp tôi `cargo test --offline` rồi báo lại";
     assert_eq!(
-        hub::keys::commands_on_screen(invite, 4),
+        hub::keys::commands_in_report(invite, 4),
         vec!["cargo test --offline".to_string()]
     );
 }
@@ -1006,12 +1006,12 @@ fn the_full_report_says_where_the_cursor_went_only_when_it_really_went() {
 fn a_gh_command_is_known_so_a_merge_can_be_pressed() {
     let screen = "Việc của anh:\n  gh pr merge 54 --squash --delete-branch";
     assert_eq!(
-        hub::keys::commands_on_screen(screen, 4),
+        hub::keys::commands_in_report(screen, 4),
         vec!["gh pr merge 54 --squash --delete-branch".to_string()]
     );
     // Câu VĂN nhắc chuyện merge thì vẫn không thành nút.
     let prose = "Next action is yours: merge PR #54, then deploy";
-    assert!(hub::keys::commands_on_screen(prose, 4).is_empty());
+    assert!(hub::keys::commands_in_report(prose, 4).is_empty());
 }
 
 /// Số trên nút "xem đầy đủ" không được LỆCH khi bản cũ rơi ra khỏi kho.
@@ -1227,7 +1227,7 @@ fn hub_never_reads_its_own_decoration_back_as_a_command() {
     // Chép đúng hình dạng dòng đã lọt ra shell.
     let echoed = "▶ Lệnh thấy trên màn (bấm nút dưới để gõ `!` vào chính phiên):\n\
                   • git -C ~/projects/AI/codetrail push origin main";
-    let got = hub::keys::commands_on_screen(echoed, 4);
+    let got = hub::keys::commands_in_report(echoed, 4);
     // Dòng lệnh THẬT (sau dấu •) vẫn phải ra nút…
     assert_eq!(
         got,
@@ -1244,9 +1244,9 @@ fn hub_never_reads_its_own_decoration_back_as_a_command() {
     // Lượt quét trong DẤU NHÁY phải dùng CÙNG bộ luật — đây là chỗ đã thủng.
     let in_ticks = "chạy `git push (bấm nút dưới để gõ vào phiên): thêm chữ`";
     assert!(
-        hub::keys::commands_on_screen(in_ticks, 4).is_empty(),
+        hub::keys::commands_in_report(in_ticks, 4).is_empty(),
         "{:?}",
-        hub::keys::commands_on_screen(in_ticks, 4)
+        hub::keys::commands_in_report(in_ticks, 4)
     );
 }
 
@@ -1321,9 +1321,9 @@ fn a_truncated_path_is_not_a_file_button() {
 /// trong đó, và từ đầu tiên của dòng là `cd` ⟹ 0 nút.
 #[test]
 fn a_cd_then_command_line_is_still_a_command() {
-    use hub::keys::commands_on_screen;
+    use hub::keys::commands_in_report;
 
-    let got = commands_on_screen("cd ~/projects/AI/codetrail && git push", 3);
+    let got = commands_in_report("cd ~/projects/AI/codetrail && git push", 3);
     assert_eq!(
         got,
         vec!["cd ~/projects/AI/codetrail && git push".to_string()],
@@ -1331,19 +1331,19 @@ fn a_cd_then_command_line_is_still_a_command() {
     );
 
     // Dấu `;` cũng vậy.
-    let got = commands_on_screen("cd /tmp; bash ./run.sh", 3);
+    let got = commands_in_report("cd /tmp; bash ./run.sh", 3);
     assert_eq!(got.len(), 1, "{got:?}");
 
     // Hàng rào KHÔNG được nới: phần sau `&&` vẫn phải là một động từ đã biết.
     assert!(
-        commands_on_screen("cd ~/projects && rm -rf everything", 3).is_empty(),
+        commands_in_report("cd ~/projects && rm -rf everything", 3).is_empty(),
         "nới hàng rào: {:?}",
-        commands_on_screen("cd ~/projects && rm -rf everything", 3)
+        commands_in_report("cd ~/projects && rm -rf everything", 3)
     );
     // `cd` một mình không chạy gì cả.
-    assert!(commands_on_screen("cd ~/projects/AI/hub", 3).is_empty());
+    assert!(commands_in_report("cd ~/projects/AI/hub", 3).is_empty());
     // Và câu văn có chữ "cd" ở đầu vẫn là câu văn.
-    assert!(commands_on_screen("cd vào thư mục ấy rồi chạy thử; xong báo tôi", 3).is_empty());
+    assert!(commands_in_report("cd vào thư mục ấy rồi chạy thử; xong báo tôi", 3).is_empty());
 }
 
 /// Nút phải nhớ PHIÊN đã sinh ra nó, không phải phiên đang được chọn lúc bấm.
@@ -1409,7 +1409,7 @@ fn a_button_remembers_which_session_made_it() {
 /// bằng dấu chấm giữa `·`, và lọt sạch mọi cửa.
 #[test]
 fn a_sentence_from_a_report_is_not_a_command() {
-    use hub::keys::commands_on_screen;
+    use hub::keys::commands_in_report;
 
     for prose in [
         "cargo test 258 · clippy 0 warning",
@@ -1419,9 +1419,9 @@ fn a_sentence_from_a_report_is_not_a_command() {
         "cargo test 258",
     ] {
         assert!(
-            commands_on_screen(prose, 3).is_empty(),
+            commands_in_report(prose, 3).is_empty(),
             "đọc câu văn thành lệnh: {prose:?} → {:?}",
-            commands_on_screen(prose, 3)
+            commands_in_report(prose, 3)
         );
     }
 
@@ -1432,7 +1432,7 @@ fn a_sentence_from_a_report_is_not_a_command() {
         "bash scripts/verify-acl-2026-08-13.sh",
         "cd ~/projects/hub && git push",
     ] {
-        assert_eq!(commands_on_screen(cmd, 3).len(), 1, "mất nút thật: {cmd:?}");
+        assert_eq!(commands_in_report(cmd, 3).len(), 1, "mất nút thật: {cmd:?}");
     }
 }
 
@@ -1750,12 +1750,10 @@ fn a_report_is_not_a_screen_so_its_lines_are_never_half_a_command() {
             deploy.to_string(),
         ]
     );
-    // MÀN: dòng dài vẫn bị từ chối — lý do của trần 60 không đổi ở đó.
-    assert_eq!(
-        hub::keys::commands_on_screen(&report, 3),
-        vec!["git -C /Users/hanguyen/projects/AI/tfl5 push origin main".to_string()],
-        "trên màn, một dòng 80 ký tự có thể là mẩu cụt của một lệnh dài hơn"
-    );
+    // 🔴 Ở đây từng có một khẳng định thứ hai: *"MÀN: dòng dài vẫn bị từ chối"*.
+    // Nó đi cùng nguồn màn ngày 2026-08-15 — không còn hai trần thì cũng không
+    // còn hai câu trả lời để mà so.
+    //
     // Nới trần KHÔNG được biến thành mở cửa: cả một KHỐI lệnh vẫn không ra nút
     // (Hà cùng ngày: *"Cả 1 khối lệnh dài này thì không được tạo nút"*).
     let block = format!(
@@ -1769,44 +1767,24 @@ fn a_report_is_not_a_screen_so_its_lines_are_never_half_a_command() {
     assert!(hub::keys::commands_in_report(&block, 3).is_empty());
 }
 
-/// Một lệnh CỤT là một lệnh KHÁC — và cụt thì thường NGẮN, nên trần độ dài
-/// không bắt được nó.
-///
-/// 🔴 Màn THẬT của `[tfl5]` trong câu trả lời `/shot` lúc 2026-08-14 08:59,
-/// chép nguyên văn từ log (`channel_command_handled`, kind Shot). Cửa sổ rộng
-/// 80 — ba dòng đạt đúng 80 — và dòng lệnh bị bẻ theo TỪ nên nó chỉ dài 57:
-///   [11] 57  "  bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh"
-///   [12] 27  "  static-cache-refresh-0814"
-/// 55 ký tự sau trim ⟹ LỌT trần 60 ⟹ ra một cái nút, và sổ `quick:cmds` ghi
-/// đúng bản cụt ấy. Bấm vào là chạy một lệnh triển khai THIẾU tên bản, trên dự
-/// án thật.
-///
-/// Phép đo phải là DẤU HIỆU WORD-WRAP, không phải độ dài: từ
-/// `static-cache-refresh-0814` (25 ký tự) không lọt vào 23 chỗ trống còn lại,
-/// nên nó bị đẩy xuống. Bản đầu của phép đo này hỏi "dòng có chạm mép không"
-/// và trượt, vì một dòng bị bẻ theo từ thì KHÔNG chạm mép.
-#[test]
-fn a_command_cut_at_the_window_edge_is_rejoined_or_dropped() {
-    let screen = "uc_site_e2e 1/1 · clippy -D warnings 0. \n  Hai điều tôi nói rõ để không ai đọc quá lời:\n  1. Chưa xác nhận cpanel/codetrail thật sự chạy nhánh STATIC trên prod — ssh\n  vps-a bị chặn trong phiên này nên tôi không đọc được cấu hình service. Nếu hoá\n  ra nó chạy chế độ full thì bản vá này vẫn đúng và vẫn cần, nhưng nguyên nhân\n  ca của codetrail sẽ là chuyện khác và tôi phải đo tiếp.\n  2. Bản vá chưa lên prod. Ba commit đang chờ ở local: sổ sách, vá hạn mức fd,\n  và cái này.\n  git -C /Users/hanguyen/projects/AI/tfl5 push origin main\n  bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh\n  static-cache-refresh-0814\n✻ Cooked for 13m 15s\n";
-    let got = hub::keys::commands_on_screen(screen, 4);
-    assert!(
-        got.iter().any(|c| c
-            == "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814"),
-        "đuôi bị bẻ phải được nối lại: {got:?}"
-    );
-    assert!(
-        !got.iter().any(|c| c.ends_with("deploy.sh")),
-        "không được còn bản cụt nào: {got:?}"
-    );
-    // Dòng `git …` (58, đứng trước một dòng bắt đầu bằng "bash") KHÔNG bị nối:
-    // từ "bash" lọt thoải mái vào 22 chỗ trống, tức nó xuống dòng vì người viết
-    // muốn thế, không phải vì cửa sổ.
-    assert!(
-        got.iter()
-            .any(|c| c == "git -C /Users/hanguyen/projects/AI/tfl5 push origin main"),
-        "{got:?}"
-    );
-}
+// 🔴 XOÁ 2026-08-15 — `a_command_cut_at_the_window_edge_is_rejoined_or_dropped`,
+// và ghi lại vì sao chứ không xoá lặng.
+//
+// Nó chép nguyên một màn THẬT của `[tfl5]` (`/shot` 08-14 08:59, cửa sổ rộng 80)
+// nơi một lệnh triển khai bị bẻ theo TỪ thành hai dòng:
+//   [11] 57  "  bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh"
+//   [12] 27  "  static-cache-refresh-0814"
+// Nửa đầu dài 55 sau trim ⟹ lọt trần 60 ⟹ ra một cái nút chạy lệnh THIẾU tên
+// bản, trên một dự án thật. Test ghim bộ máy nối lại hai nửa ấy.
+//
+// Bộ máy ấy chạy ĐÚNG, và vẫn đi, vì nó chữa hậu quả của việc đọc nhầm nguồn:
+// không phép đo nào dựng lại được thứ cửa sổ đã cắt. Nay lệnh lấy nguyên văn từ
+// nhật ký (`sessions::commands_in_last_turn`), nên **màn không còn là nguồn của
+// một dòng lệnh nào** — không còn dòng cụt để mà nối.
+//
+// Thứ THAY nó không phải là không có gì: `tests/sessions.rs` ghim ĐÚNG cái lệnh
+// tfl5 ấy đi qua nguồn mới và ra NGUYÊN VẸN, và ghim luôn nhánh chưa từng có
+// người canh — lệnh bị cổng quyền từ chối.
 
 /// Icon phải bám được vào dòng mà CỬA SỔ đã bẻ làm đôi.
 ///
@@ -2123,13 +2101,114 @@ fn a_long_line_on_a_wide_window_is_whole_not_a_stub() {
          git -C /Users/hanguyen/projects/AI/tfl5 log --oneline pr/26..pr/32\n\
          Lệnh đầu in ra dòng chữ đó nếu #32 nằm trọn trong #26.\n{pad}\n"
     );
-    let got = hub::keys::commands_on_screen(&screen, 4);
+    let got = hub::keys::commands_in_report(&screen, 4);
     assert!(
         got.iter().any(|c| c.contains("log --oneline pr/26..pr/32")),
         "lệnh 68 ký tự trên màn rộng 173 phải ra nút: {got:?}"
     );
     assert!(
-        got.iter().any(|c| c.contains("merge-base --is-ancestor pr/32 pr/26")),
+        got.iter()
+            .any(|c| c.contains("merge-base --is-ancestor pr/32 pr/26")),
         "lệnh 122 ký tự cũng thế: {got:?}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hai lỗi Hà chụp màn gửi thẳng, 2026-08-15
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `/new acc3 dwork` — tên tài khoản gõ trần phải được đọc là TÀI KHOẢN.
+///
+/// 🔴 Hà: *"Rõ ràng mở phiên mới dwork là acc3 sau xem lại thành acc1 là sao"*.
+/// Nguyên văn trong `logs/hub.log` 02:14:29Z: `/new acc3 dwork` ⟹
+/// `new_window_opened task:"[] acc3 dwork"`, tài khoản mặc định. `acc3` rơi vào
+/// ĐỀ BÀI, nên phiên vừa mở nhầm tài khoản vừa nhận nhầm việc.
+#[test]
+fn a_bare_account_name_at_the_head_of_the_task_is_the_account() {
+    let known: Vec<String> = ["acc1", "acc2", "acc3"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(
+        hub::pipeline::lift_bare_account("acc3 dwork", &known),
+        Some(("acc3", "dwork"))
+    );
+    // `/new acc3` trần: mở cửa sổ rồi gõ sau — đúng thứ chủ máy làm ở máy.
+    assert_eq!(
+        hub::pipeline::lift_bare_account("acc3", &known),
+        Some(("acc3", ""))
+    );
+    // …nhưng CHỈ từ đầu. Ở giữa câu nó là chữ của đề bài, và nuốt nó đi là
+    // giao cho phiên một việc khác việc đã gõ.
+    assert_eq!(
+        hub::pipeline::lift_bare_account("xem log của acc3 hộ tôi", &known),
+        None
+    );
+    // Tên không có trong cấu hình thì KHÔNG đoán — đây là phép ĐO, không phải
+    // phép nhận dạng hình dạng "accN".
+    assert_eq!(hub::pipeline::lift_bare_account("acc9 dwork", &known), None);
+    assert_eq!(hub::pipeline::lift_bare_account("dwork acc3", &known), None);
+}
+
+/// hub KHÔNG được đo hộp chọn trên chữ do CHÍNH NÓ vừa viết ra.
+///
+/// 🔴 Hà 2026-08-15, ảnh chụp `/shot` của `[dwork]`: *"Có lựa chọn nhưng không
+/// thấy nút"*. Tin mở đầu bằng *"đang hỏi — bấm số ở hàng phím để chọn"* kèm đủ
+/// bốn dòng, mà nút thì không có — còn cái nút `⏎` (thứ phải BIẾN MẤT khi có
+/// hộp chọn) lại có.
+///
+/// Gốc đo được: chỗ gọi hỏi `parse_choices(&ack)`, mà `ack` chép lại nguyên hộp
+/// chọn lên đầu tin ⟹ dãy số thành `1,2,3,4,1,2,3,4` ⟹ luật "liên tiếp từ 1"
+/// (luật ĐÚNG, dựng để một đoạn văn có đánh số không bị đọc thành hộp chọn) trả
+/// về RỖNG. Một cửa an toàn MỞ đúng lúc nó phải đóng.
+///
+/// Test này ghim cả hai vế, vì vế thứ hai mới là bài học: phép đo trên màn GỐC
+/// đúng, và chính đầu ra của hub làm nó mù.
+#[test]
+fn hub_must_not_measure_a_choice_box_on_its_own_rendering() {
+    let screen = "  How would you describe the code you work on with Claude?\n\
+                  \x20 ❯ 1. Personal / hobby projects (looks like this one)\n\
+                  \x20   2. Open-source (public repos — pushes publish)\n\
+                  \x20   3. Work / enterprise (private repos, sensitive data)\n\
+                  \x20   4. Mixed — depends on the project\n\
+                  \x20 Question 1 of 3 · Enter to continue · Esc to cancel";
+    let on_screen = hub::keys::parse_choices(screen);
+    assert_eq!(on_screen.len(), 4, "màn GỐC đọc ra đủ: {on_screen:?}");
+    assert_eq!(
+        on_screen[0].1,
+        "Personal / hobby projects (looks like this one)"
+    );
+
+    // …và đây là hình dạng `ack` mà hub tự dựng từ chính bốn dòng ấy.
+    let ack = format!(
+        "📷 🟥 [dwork] đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{screen}",
+        on_screen
+            .iter()
+            .map(|(n, l)| format!("  {n}. {l}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert!(
+        hub::keys::parse_choices(&ack).is_empty(),
+        "ĐO TRÊN `ack` LÀ ĐO SAI CHỖ — và nó trả rỗng, tức mù chứ không kêu"
+    );
+}
+
+/// Nút số của hộp chọn phải nằm CHUNG MỘT HÀNG — "hàng phím" như tin đã hứa.
+#[test]
+fn choice_number_buttons_share_one_row() {
+    let btns: Vec<(String, String)> = (1..=4)
+        .map(|n| (n.to_string(), format!("key:abc123:{n}")))
+        .collect();
+    let rows = hub::telegram::Inbox::keyboard_rows(&btns);
+    assert_eq!(rows.len(), 1, "bốn cái nút số phải một hàng: {rows:?}");
+    assert_eq!(rows[0].len(), 4);
+    // Nút mang cả dòng lệnh thì vẫn đứng riêng — nhãn dài, xếp chung là chật.
+    let mixed: Vec<(String, String)> = vec![
+        ("1".into(), "key:abc123:1".into()),
+        ("▶".into(), "run:0".into()),
+        ("2".into(), "key:abc123:2".into()),
+    ];
+    let rows = hub::telegram::Inbox::keyboard_rows(&mixed);
+    assert_eq!(rows.len(), 3, "{rows:?}");
 }

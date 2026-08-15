@@ -71,6 +71,35 @@ pub fn split_flags(
     (flags, rest.join(" "))
 }
 
+/// Tên tài khoản gõ TRẦN ở đầu đề bài — `(tài khoản, phần còn lại)`.
+///
+/// 🔴 Hà 2026-08-15: *"Rõ ràng mở phiên mới dwork là acc3 sau xem lại thành acc1
+/// là sao"*. Đo nguyên văn trong `logs/hub.log` lúc 02:14:29Z: anh gõ
+/// `/new acc3 dwork`, và hub ghi `new_window_opened task:"[] acc3 dwork"` — tức
+/// `acc3` KHÔNG được đọc là tài khoản, nó thành một phần ĐỀ BÀI. Phiên mở trên
+/// tài khoản mặc định (acc1) và nhận đúng chuỗi chữ `acc3 dwork` để làm.
+///
+/// 📌 Danh sách phiên **không nói dối**: phiên ấy thật sự nằm ở acc1. Chỗ hỏng
+/// sớm hơn một bước, và đó là chỗ đáng nhớ — câu hỏi "sao xem lại thành acc1"
+/// dẫn thẳng tới cái loa, trong khi lỗi nằm ở cái miệng.
+///
+/// Đây KHÔNG phải nới một cửa đoán. `known` là danh sách hub tự đọc từ cấu hình,
+/// và phép so là so KHỚP CẢ CHUỖI — nên "token này có phải tên một tài khoản
+/// không" là một câu ĐO ĐƯỢC, không phải một câu đoán ý. Cùng lối nghĩ đã ghi ở
+/// `config::looks_like_project`: thay một cái tên viết sẵn bằng một câu hỏi trả
+/// lời được.
+///
+/// Hẹp có chủ ý — chỉ TỪ ĐẦU TIÊN: `acc3` nằm giữa câu là chữ trong đề bài, và
+/// nuốt nó đi là giao cho phiên một việc khác việc đã gõ (đúng luật đã viết cho
+/// cờ lạ ở điều 7).
+pub fn lift_bare_account<'a>(task: &'a str, known: &[String]) -> Option<(&'a str, &'a str)> {
+    let t = task.trim();
+    let (head, rest) = t.split_once(char::is_whitespace).unwrap_or((t, ""));
+    // Đề bài rỗng vẫn hợp lệ trên đường mở cửa sổ (`/new acc3` = mở một cửa sổ
+    // acc3 rồi gõ sau) — đúng thứ chủ máy làm khi ngồi ở máy.
+    (!head.is_empty() && known.iter().any(|a| a == head)).then_some((head, rest.trim_start()))
+}
+
 /// Folder names under `project_roots` — the set `/project <name>` accepts.
 ///
 /// Was `devlog::discover_projects` (folders holding a devlog). With the devlog
@@ -672,16 +701,29 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         let cmds = if matches!(c, crate::watch::Change::Ended { .. }) {
             Vec::new()
         } else {
-            // BÁO CÁO, không phải màn: `scan` là `long` — chữ đọc thẳng từ
-            // nhật ký phiên, chưa qua bề ngang cửa sổ nào. Xem
-            // `keys::BTN_CMD_REPORT_MAX`.
             // 🔴 HAI, không phải ba. Hà 2026-08-14, ảnh chụp một tin mang ba
             // nút lệnh: *"sao lắm nút lệnh thế"*. Một báo cáo dài nhắc tới
             // nhiều lệnh, nhưng thứ chủ máy cần bấm ngay thì gần như luôn là
             // câu chốt — những cái còn lại chỉ là chữ trong lời kể. Ba nút gần
             // giống nhau không cho thêm lựa chọn nào, chúng bắt người đọc dừng
             // lại đoán xem cái nào mới đúng.
-            crate::keys::commands_in_report(scan, 2)
+            //
+            // 🔴 2026-08-15 — MỘT nguồn cho cả hai đường. Trước đây đường này
+            // đọc `scan` (chữ báo cáo) còn `/shot` đọc màn; hai nguồn, hai bộ
+            // luật, và chúng lệch nhau đúng theo kiểu tệp này đã đặt tên nhiều
+            // lần. Nay cả hai hỏi `sessions::commands_of`, tức cùng nhật ký,
+            // cùng luật — và đường này được thêm nhánh **lệnh bị cổng quyền từ
+            // chối**, thứ `scan` không bao giờ nhìn thấy: phiên dừng lượt vì
+            // không được phép chạy, và đó đúng là lúc việc rơi sang chủ máy.
+            //
+            // Không thấy sổ ⟹ rơi về `scan`: chữ ấy CŨNG từ nhật ký (`long`),
+            // nên đây không phải rơi về màn.
+            let from_log = crate::sessions::commands_of(cfg, &id, 2);
+            if from_log.is_empty() {
+                crate::keys::commands_in_report(scan, 2)
+            } else {
+                from_log
+            }
         };
         let mut quick = remember_quick(db, &id, &cmds);
         // …và file được NHẮC TỚI thì phải MỞ ĐƯỢC. Một báo cáo nói "xem
@@ -3262,7 +3304,32 @@ const PICK_LINES: usize = 40;
 ///   KHÔNG đưa chữ ra.
 /// * Màn có **hộp chọn** thì nói thẳng từng lựa chọn: đó chính là thứ người ta
 ///   mở lên để xem, và số của nó là thứ gõ tiếp được.
-pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize) -> String {
+pub struct ScreenReport {
+    /// Chữ gửi lên điện thoại.
+    pub text: String,
+    /// Hộp chọn ĐO ĐƯỢC trên màn — đo một lần, dùng cho cả chữ lẫn nút.
+    ///
+    /// 🔴 Vì sao phải trả ra chứ không để chỗ gọi tự đo lại, 2026-08-15. Hà,
+    /// ảnh chụp một `/shot` của `[dwork]` đang mở hộp khảo sát 4 lựa chọn:
+    /// *"Có lựa chọn nhưng không thấy nút"*. Chữ thì ĐÚNG — tin mở bằng
+    /// *"đang hỏi — bấm số ở hàng phím để chọn"* kèm đủ 4 dòng — mà nút thì
+    /// không có, và cái nút `⏎` (thứ phải BIẾN MẤT khi có hộp chọn) lại có.
+    ///
+    /// Gốc: chỗ gọi hỏi `parse_choices(&ack)`, tức đo trên **chữ hub vừa
+    /// viết ra**, mà chữ ấy chép lại nguyên hộp chọn lên đầu tin. Màn thành
+    /// `1,2,3,4` rồi lại `1,2,3,4`, và luật "số phải liên tiếp từ 1" — luật
+    /// đúng, dựng để một đoạn văn có đánh số không bị đọc thành hộp chọn —
+    /// thấy `1` ở vị trí thứ 5 nên trả về RỖNG. hub tự làm mù phép đo của
+    /// chính nó bằng đầu ra của chính nó.
+    ///
+    /// Cùng một họ với `??` đọc thành cửa sổ và với `⏎ Gửi: # Lệnh thấy trên
+    /// màn…`: hub đọc lại lời của mình rồi tưởng là của người khác. Cách chữa
+    /// cũng cùng một kiểu — **một phép đo, một chỗ**, và chỗ ấy là nơi còn
+    /// cầm màn GỐC.
+    pub choices: Vec<(usize, String)>,
+}
+
+pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize) -> ScreenReport {
     // Tên để ĐỌC. 🔴 Hà 2026-08-13, ảnh chụp Telegram: nút và dòng "Đang theo
     // phiên" đã là `[AI/hub]` trong khi ngay dưới nó `/shot` còn in `📷 Màn của
     // projects-d2:` — cùng một phiên, hai cái tên, trong CÙNG một màn hình.
@@ -3330,7 +3397,7 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
             // Nút thì vẫn dựng — ở chỗ gọi, từ chính `ack` này
             // (`commands_on_screen`), nên không mất đường bấm nào.
             let quick_note = String::new();
-            if choices.is_empty() {
+            let text = if choices.is_empty() {
                 format!("📷 Màn của {what}:\n\n{body}{quick_note}")
             } else {
                 let list: Vec<String> =
@@ -3341,12 +3408,18 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
                     body,
                     quick_note
                 )
-            }
+            };
+            ScreenReport { text, choices }
         }
-        Err(e) => format!(
-            "⚠ không đọc được màn: {}",
-            crate::exec::truncate(&e.to_string(), 300)
-        ),
+        Err(e) => ScreenReport {
+            text: format!(
+                "⚠ không đọc được màn: {}",
+                crate::exec::truncate(&e.to_string(), 300)
+            ),
+            // Không đọc được màn ≠ màn không có hộp chọn. Để rỗng ở đây là
+            // đúng, và cửa dùng nó phải hiểu đúng như thế — xem chỗ gọi.
+            choices: Vec::new(),
+        },
     }
 }
 
@@ -3694,8 +3767,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 cfg,
                                 std::time::Duration::from_secs(20),
                             );
-                            let mut out =
-                                format!("🖥 {} cửa sổ Terminal đang mở:\n", tabs.len());
+                            let mut out = format!("🖥 {} cửa sổ Terminal đang mở:\n", tabs.len());
                             for tb in &tabs {
                                 let who = live
                                     .sessions
@@ -3724,53 +3796,53 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     reply_in_channel(db, cfg, adapter, cmd, &ack);
                     Some(ack)
                 } else {
-                // Cửa sổ THẬT, vì thứ thiếu là một cái tty — xem `CommandKind::Win`.
-                //
-                // 🔴 CHẠY ĐÚNG DÒNG ANH GÕ, không bọc thêm gì. Hà 2026-08-13:
-                // *"tại sao lệnh chỉ có 1 dòng mà chèn thêm text vào làm gì?"*.
-                // Bản đầu ghép `cd <gốc workspace>; <lệnh>` để cwd khớp `/cmd`
-                // — lý do nghe hợp lý, và cái giá là mọi cửa sổ mở ra đều bắt
-                // đầu bằng một dòng anh không gõ, dài hơn cả lệnh thật.
-                //
-                // Phép thử cầu nối trả lời gọn: ngồi trước máy anh mở cửa sổ
-                // rồi dán ĐÚNG dòng ấy, không ai tự thêm một `cd` vào trước.
-                // Cần thư mục thì gõ `cd` — như ở terminal. Đổi lại, câu trả
-                // lời phải NÓI RA cửa sổ mở ở đâu, vì đó là thứ vừa đổi.
-                let line = cmd.arg.trim().to_string();
-                let ack = if line.is_empty() {
-                    "⚠ /win cần một dòng lệnh. Ví dụ: /win sudo -v".to_string()
-                } else {
-                    match crate::keys::open_window(&line) {
-                        Ok((win, tty)) => {
-                            logging::info(
-                                "win_opened",
-                                json!({ "cmd": crate::exec::truncate(&line, 120),
+                    // Cửa sổ THẬT, vì thứ thiếu là một cái tty — xem `CommandKind::Win`.
+                    //
+                    // 🔴 CHẠY ĐÚNG DÒNG ANH GÕ, không bọc thêm gì. Hà 2026-08-13:
+                    // *"tại sao lệnh chỉ có 1 dòng mà chèn thêm text vào làm gì?"*.
+                    // Bản đầu ghép `cd <gốc workspace>; <lệnh>` để cwd khớp `/cmd`
+                    // — lý do nghe hợp lý, và cái giá là mọi cửa sổ mở ra đều bắt
+                    // đầu bằng một dòng anh không gõ, dài hơn cả lệnh thật.
+                    //
+                    // Phép thử cầu nối trả lời gọn: ngồi trước máy anh mở cửa sổ
+                    // rồi dán ĐÚNG dòng ấy, không ai tự thêm một `cd` vào trước.
+                    // Cần thư mục thì gõ `cd` — như ở terminal. Đổi lại, câu trả
+                    // lời phải NÓI RA cửa sổ mở ở đâu, vì đó là thứ vừa đổi.
+                    let line = cmd.arg.trim().to_string();
+                    let ack = if line.is_empty() {
+                        "⚠ /win cần một dòng lệnh. Ví dụ: /win sudo -v".to_string()
+                    } else {
+                        match crate::keys::open_window(&line) {
+                            Ok((win, tty)) => {
+                                logging::info(
+                                    "win_opened",
+                                    json!({ "cmd": crate::exec::truncate(&line, 120),
                                         "window": win, "tty": tty }),
-                            );
-                            format!(
+                                );
+                                format!(
                                 "🖥 Đã mở cửa sổ Terminal ({tty}) và chạy đúng dòng này:\n{line}\n\n\
                                  Cửa sổ mở ở thư mục mặc định của shell, không phải gốc workspace — \
                                  cần chỗ khác thì gõ cd. Kết quả nằm TRÊN cửa sổ ấy, không về đây: \
                                  đó là chỗ gõ mật khẩu."
                             )
+                            }
+                            // Không nuốt: mở cửa sổ hỏng thì người bấm phải biết,
+                            // không thì họ ngồi chờ một cái cửa sổ không tồn tại.
+                            Err(e) => {
+                                let msg = crate::logging::err_chain(&e);
+                                logging::error(
+                                    "win_open_failed",
+                                    json!({ "cmd": crate::exec::truncate(&line, 120), "err": msg }),
+                                );
+                                format!(
+                                    "⚠ chưa mở được cửa sổ: {}",
+                                    crate::exec::truncate(&msg, 200)
+                                )
+                            }
                         }
-                        // Không nuốt: mở cửa sổ hỏng thì người bấm phải biết,
-                        // không thì họ ngồi chờ một cái cửa sổ không tồn tại.
-                        Err(e) => {
-                            let msg = crate::logging::err_chain(&e);
-                            logging::error(
-                                "win_open_failed",
-                                json!({ "cmd": crate::exec::truncate(&line, 120), "err": msg }),
-                            );
-                            format!(
-                                "⚠ chưa mở được cửa sổ: {}",
-                                crate::exec::truncate(&msg, 200)
-                            )
-                        }
-                    }
-                };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
+                    };
+                    reply_in_channel(db, cfg, adapter, cmd, &ack);
+                    Some(ack)
                 }
             }
             CommandKind::Accounts => {
@@ -3911,6 +3983,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     None => (String::new(), rest.as_str()),
                 };
                 let name = name.as_str();
+                // Tài khoản lạ thì TỪ CHỐI, đừng lặng lẽ rơi về mặc định: mở
+                // phiên nhầm tài khoản là mở nhầm cả kho phiên.
+                let known_accounts: Vec<String> = cfg
+                    .claude_accounts_or_ambient()
+                    .iter()
+                    .map(|a| a.name.clone())
+                    .collect();
                 // `@tài-khoản` đứng ngay sau tên dự án: `/new hub @acc2 việc…`.
                 // Không có thì dùng tài khoản mặc định — giữ nguyên cách gõ cũ.
                 let (account, task) = match (flag_account, task.trim().strip_prefix('@')) {
@@ -3920,15 +3999,37 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
                         (Some(acc.trim().to_string()), rest)
                     }
-                    (None, None) => (None, task),
+                    // 🔴 TÊN TÀI KHOẢN GÕ TRẦN ở đầu dòng, 2026-08-15.
+                    //
+                    // Hà: *"Rõ ràng mở phiên mới dwork là acc3 sau xem lại thành
+                    // acc1 là sao"*. Đo nguyên văn trong log (02:14:29Z):
+                    // `/new acc3 dwork` ⟹ `new_window_opened task:"[] acc3
+                    // dwork"`, tài khoản mặc định. Tức `acc3` không được đọc là
+                    // tài khoản, nó thành ĐỀ BÀI — phiên mở trên acc1 và được
+                    // giao đúng chuỗi chữ `acc3 dwork` để làm.
+                    //
+                    // Danh sách phiên KHÔNG nói dối: phiên ấy thật sự nằm ở
+                    // acc1. Chỗ hỏng nằm ở đây, sớm hơn một bước.
+                    //
+                    // Đây KHÔNG phải nới cửa đoán: `known_accounts` là danh
+                    // sách hub tự đọc từ cấu hình, nên "token này có phải tên
+                    // một tài khoản không" là một phép ĐO, khớp chính xác cả
+                    // chuỗi. Cùng lối nghĩ đã ghi ở `looks_like_project`: thay
+                    // một cái tên viết sẵn bằng một câu hỏi trả lời được.
+                    //
+                    // Vẫn ghi log, vì đây là lượt hub SỬA chữ chủ máy gõ — và
+                    // luật của tệp này là mọi lượt như thế phải kiểm được.
+                    (None, None) => match lift_bare_account(task, &known_accounts) {
+                        Some((acc, rest)) => {
+                            logging::info(
+                                "new_bare_account_lifted",
+                                json!({ "account": acc, "task": rest }),
+                            );
+                            (Some(acc.to_string()), rest)
+                        }
+                        None => (None, task),
+                    },
                 };
-                // Tài khoản lạ thì TỪ CHỐI, đừng lặng lẽ rơi về mặc định: mở
-                // phiên nhầm tài khoản là mở nhầm cả kho phiên.
-                let known_accounts: Vec<String> = cfg
-                    .claude_accounts_or_ambient()
-                    .iter()
-                    .map(|a| a.name.clone())
-                    .collect();
                 let bad_account = account
                     .as_ref()
                     .filter(|a| !known_accounts.contains(a))
@@ -4284,6 +4385,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         .then(|| crate::sessions::asking_of(cfg, &shot_sid))
                         .flatten()
                 });
+                // Hộp chọn đọc từ MÀN GỐC, giữ lại để dựng nút. Đo ở đây, dùng
+                // ở dưới — chứ KHÔNG đo lại trên `ack`: `ack` có chữ của chính
+                // hub, và chính chỗ ấy đã làm hỏng phép đo (xem `ScreenReport`).
+                let mut shot_choices: Vec<(usize, String)> = Vec::new();
                 let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
@@ -4314,7 +4419,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     .trim()
                                     .parse::<usize>()
                                     .unwrap_or(SHOT_LINES);
-                                let mut out = screen_report(&s, w, n);
+                                let rep = screen_report(&s, w, n);
+                                shot_choices = rep.choices;
+                                let mut out = rep.text;
                                 // Phiên đang mở bảng hỏi ⟹ viết luôn từng lựa
                                 // chọn thành lệnh chạm-được, ngay dưới màn.
                                 if let Some(a) = shot_asking.as_ref() {
@@ -4630,7 +4737,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         ),
                     },
                 };
-                // `/shot` trên Telegram đi kèm NÚT cho từng lệnh thấy trên màn.
+                // `/shot` trên Telegram đi kèm NÚT cho từng lệnh của lượt cuối.
                 // Đường đi vẫn là một: nút gõ dòng lệnh vào phiên qua `/type`,
                 // tức cùng route, cùng sổ (xem `remember_quick`).
                 let mut quick = Vec::new();
@@ -4639,7 +4746,18 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // `say_with_command_icons`.
                 let mut cmd_lines: Vec<String> = Vec::new();
                 if matches!(cmd.kind, CommandKind::Shot) {
-                    let mut cmds = crate::keys::commands_on_screen(&ack, 4);
+                    // 🔴 2026-08-15 — NGUỒN đổi: sổ, không phải màn.
+                    //
+                    // `ack` ở đây là `contents of selected tab`, tức chữ đã đi
+                    // qua một cửa sổ: bẻ theo bề ngang, cắt bằng `…`. Đọc lệnh
+                    // từ đó là đoán, và mọi cái nút đã chạy sai đều sinh ra ở
+                    // đúng chỗ đoán ấy. Nay `ack` chỉ còn để NHÌN; lệnh lấy
+                    // nguyên văn từ nhật ký của chính phiên này.
+                    //
+                    // Không có sổ ⟹ 0 nút, KHÔNG rơi về màn: rơi về là giữ lại
+                    // đúng cái vừa gỡ, và giữ nó ở đúng lúc hub mù nhất.
+                    // `commands_of` ghi một dòng log cho ca ấy.
+                    let mut cmds = crate::sessions::commands_of(cfg, &shot_sid, 4);
                     let n_cmds = cmds.len();
                     cmd_lines = cmds[..n_cmds].to_vec();
                     // Câu đồng ý nằm CÙNG kho với lệnh (một chỗ nhớ, một chỉ
@@ -4730,9 +4848,39 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // bảng đọc từ nhật ký (đúng cho cả phiên hub không đọc được
                     // màn).
                     let running = ack.contains("esc to interrupt");
-                    let has_choices = !crate::keys::parse_choices(&ack).is_empty()
+                    // 🔴 `shot_choices` — phép đo trên MÀN GỐC — chứ KHÔNG
+                    // `parse_choices(&ack)`, 2026-08-15. Xem `ScreenReport`:
+                    // `ack` chép lại hộp chọn lên đầu tin, nên đo trên nó ra
+                    // `1,2,3,4,1,2,3,4` và luật "liên tiếp từ 1" trả về rỗng.
+                    // Cửa an toàn này khi ấy MỞ, đúng lúc nó phải đóng — và
+                    // đó chính là cái nút `⏎` Hà chụp được lần thứ hai.
+                    let has_choices = !shot_choices.is_empty()
                         || crate::keys::ask_table(&ack).is_some()
                         || shot_asking.is_some();
+                    // Hộp chọn trên màn ⟹ MỖI LỰA CHỌN MỘT CÁI NÚT.
+                    //
+                    // 🔴 Hà 2026-08-15, ảnh chụp `/shot` của `[dwork]` đang mở
+                    // hộp khảo sát bốn lựa chọn: *"Có lựa chọn nhưng không thấy
+                    // nút"*. Tin ấy mở đầu bằng đúng câu *"đang hỏi — bấm số ở
+                    // hàng phím để chọn"* và liệt kê đủ bốn dòng — tức hub NHÌN
+                    // THẤY hộp chọn, viết ra một lời hứa, rồi không giữ: cả
+                    // route `/shot` chưa bao giờ dựng nút số. Đường duy nhất có
+                    // nút là bảng `AskUserQuestion` đọc từ nhật ký
+                    // (`ask_command_lines`), mà hộp này không phải bảng ấy —
+                    // nó là hộp khảo sát của chính CLI, không có trong sổ.
+                    //
+                    // Đi đúng route sẵn có `/key <id> <số>`, không đẻ lối
+                    // riêng: đó chính là đường CLAUDE.md ghi cho hộp MỘT CÂU,
+                    // và hộp này một câu ("Question 1 of 3" là ba hộp nối
+                    // tiếp, không phải một bảng ba cột).
+                    //
+                    // Nhãn chỉ mang SỐ: bốn dòng chữ đã nằm ngay trên đầu nút,
+                    // nguyên văn — nhắc lại trong nhãn vừa thừa vừa bị cắt.
+                    if shot_asking.is_none() && !shot_sid.is_empty() {
+                        for (n, _) in shot_choices.iter().take(9) {
+                            quick.push((n.to_string(), format!("key:{shot_sid}:{n}")));
+                        }
+                    }
                     // 🔴 Hà 2026-08-14: *"Sao ô nhắc trống, cũng không có gợi ý
                     // mờ mà vẫn có nút enter"*. Vì điều kiện trên KHÔNG hỏi
                     // trong ô có gì — chú thích cũ tự bào chữa rằng nút này là

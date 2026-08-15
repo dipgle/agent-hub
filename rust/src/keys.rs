@@ -741,7 +741,17 @@ end tell"#
     osascript(&script)
 }
 
-/// Những DÒNG LỆNH đang hiện trên màn — thứ bấm một cái là chạy được.
+/// Trần độ dài một dòng lệnh đáng dựng nút.
+///
+/// Nguồn của hàm này là chữ phiên VIẾT RA, đọc thẳng từ nhật ký `.jsonl` —
+/// nguyên văn, không đi qua bề ngang cửa sổ nào — nên ở đây một dòng dài là
+/// một dòng dài THẬT, không phải một mẩu cụt. Vẫn có trần, không bỏ hẳn: bài
+/// học 2026-08-14 (*"Cả 1 khối lệnh dài này thì không được tạo nút"*) là về
+/// một khối 380 ký tự. 200 nhận trọn một lệnh triển khai có đường dẫn tuyệt
+/// đối, và vẫn chặn cả khối.
+pub const BTN_CMD_REPORT_MAX: usize = 200;
+
+/// Những DÒNG LỆNH nằm trong chữ phiên viết ra — thứ bấm một cái là chạy được.
 ///
 /// Hà 2026-08-12: *"phiên hiện ra rõ ràng có lệnh để chạy trên terminal … nếu có
 /// lệnh như vậy thì hiển thị luôn lệnh gửi nhanh"*. Phiên `claude` thường kết
@@ -753,46 +763,19 @@ end tell"#
 /// hẹp — đoán rộng ở đây nghĩa là đưa lên màn một cái nút chạy nhầm thứ.
 ///
 /// Giữ tối đa `max` dòng CUỐI (mới nhất), bỏ trùng.
-/// Dài hơn chừng này thì KHÔNG dựng nút — trên màn nó đã bị bẻ dòng, và hub
-/// đang cầm một mẩu chứ không phải cả lệnh. Xem chỗ dùng trong
-/// [`commands_on_screen`].
-pub const BTN_CMD_MAX: usize = 60;
-
-/// Trần cho nguồn KHÔNG bị bẻ dòng — chữ của một BÁO CÁO, đọc từ nhật ký.
 ///
-/// 🔴 Hà 2026-08-14, ảnh chụp một bản đầy đủ của `[tfl5]` có hai dòng lệnh mà
-/// chỉ dòng ngắn có nút: *"Có lệnh bash sao lại ko có nút bấm chạy cho nó"*.
-/// Đo đúng hai dòng ấy:
-///   `git -C /Users/hanguyen/projects/AI/tfl5 push origin main`            = 56
-///   `bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-…`    = 80
-/// Trần 60 đứng đúng giữa hai dòng đó. Mà lý do của trần 60 — *"trên màn nó đã
-/// bị bẻ dòng, hub đang cầm một mẩu chứ không phải cả lệnh"* — chỉ đúng cho
-/// nguồn MÀN. Chữ của một báo cáo đến từ nhật ký `.jsonl`, nguyên văn model
-/// viết ra, không đi qua bề ngang cửa sổ nào cả: ở đó một dòng dài là một dòng
-/// dài THẬT, và từ chối nó là từ chối đúng những lệnh đáng bấm nhất (đường dẫn
-/// tuyệt đối + tham số là hình dạng chuẩn của một lệnh triển khai).
-///
-/// Vẫn có trần, không bỏ hẳn: bài học sáng cùng ngày (*"Cả 1 khối lệnh dài này
-/// thì không được tạo nút"*) là về một khối 380 ký tự. 200 nhận trọn một lệnh
-/// deploy có đường dẫn tuyệt đối, và vẫn chặn cả khối.
-pub const BTN_CMD_REPORT_MAX: usize = 200;
-
-/// Lệnh trên MÀN — chữ đã qua bề ngang cửa sổ, nên trần ngắn (`BTN_CMD_MAX`).
-pub fn commands_on_screen(text: &str, max: usize) -> Vec<String> {
-    commands_in(text, max, BTN_CMD_MAX)
-}
-
-/// Lệnh trong một BÁO CÁO (chữ lấy từ nhật ký, không bị bẻ dòng).
-///
-/// Cùng một bộ luật với [`commands_on_screen`] — cùng hàng rào `KNOWN`, cùng
-/// `looks_like_prose`, cùng `forbids` — khác đúng MỘT cửa: trần độ dài. Khác
-/// nhau ở đâu thì phải nói ra ở đó, chứ không đẻ ra bộ luật thứ hai để rồi hai
-/// bên lệch nhau lúc nào không biết.
+/// 🔴 **Nguồn MÀN đã đi hẳn, 2026-08-15.** Hàm này từng có một người anh em
+/// (`commands_on_screen`) đọc `contents of selected tab`, và một nửa tệp này
+/// từng là bộ máy vá cho đúng một sự thật: **chữ trên màn là chữ đã đi qua một
+/// cửa sổ** — bẻ theo bề ngang, cắt bằng `…`, trộn với khung vẽ của TUI. Nó
+/// gồm một trần ngắn (60), một phép đo bề ngang, một phép đoán "dòng sau có bị
+/// đẩy xuống không", và một hàm nối đuôi. Mỗi ca sai vá thêm một luật, nên luật
+/// càng nhiều thì ca sai càng nhiều — và những cái nút chạy SAI đều đến từ đó:
+/// `bash …/deploy.sh` thiếu tham số (mẩu cụt lọt trần 60), `git for-each-ref …
+/// | xargs` (mẩu của một khối 380 ký tự). Nay lệnh lấy từ SỔ
+/// (`sessions::commands_of`), màn chỉ còn để nhìn.
 pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
-    commands_in(text, max, BTN_CMD_REPORT_MAX)
-}
-
-fn commands_in(text: &str, max: usize, max_len: usize) -> Vec<String> {
+    let max_len = BTN_CMD_REPORT_MAX;
     let screen = text;
     // `gh` vào danh sách 2026-08-13, vì đó là cái tên trong câu Hà hỏi: màn nói
     // *"Next action is yours: merge PR #54"* và không có nút nào. `gh` là công
@@ -809,28 +792,6 @@ fn commands_in(text: &str, max: usize, max_len: usize) -> Vec<String> {
     /// gì, mà thêm nó là mở cửa cho mọi dòng bắt đầu bằng `cd`. Thay vào đó, nhận
     /// đúng HÌNH DẠNG: `cd <gì đó> &&|; <phần còn lại>` thì đem **phần còn lại** đi
     /// hỏi cùng cái hàng rào ấy. Hàng rào không đổi, chỉ hỏi đúng chỗ.
-    /// Đuôi của một dòng lệnh vừa bị cửa sổ bẻ — hoặc `None` nếu không chắc.
-    ///
-    /// Cố ý HẸP, vì nối nhầm là dựng ra một lệnh chưa ai viết: đuôi phải là một
-    /// mẩu liền (không dấu cách) hoặc một tham số `-x`/`--x`. Một câu văn ở dòng
-    /// dưới thì không phải đuôi, và lúc ấy chỗ gọi bỏ luôn cái nút.
-    fn wrap_tail(next: Option<&str>) -> Option<String> {
-        let t = next?.trim();
-        if t.is_empty() || t.len() > 60 {
-            return None;
-        }
-        // Dấu nhắc / gạch đầu dòng = một dòng MỚI, không phải phần tiếp. `-` KHÔNG
-        // nằm đây: một tham số `-v` hay `--expect-symbol` bắt đầu đúng như thế.
-        for p in ["$", "❯", ">", "⏵", "%", "•", "!", "#", "⎿", "│"] {
-            if t.starts_with(p) {
-                return None;
-            }
-        }
-        let one_token = !t.contains(char::is_whitespace);
-        let a_flag = t.starts_with('-');
-        (one_token || a_flag).then(|| t.to_string())
-    }
-
     fn after_cd(line: &str) -> Option<&str> {
         let rest = line.strip_prefix("cd ")?;
         let (_dir, tail) = rest.split_once("&&").or_else(|| rest.split_once(';'))?;
@@ -875,122 +836,26 @@ fn commands_in(text: &str, max: usize, max_len: usize) -> Vec<String> {
     ];
     let mut out: Vec<String> = Vec::new();
     let rows: Vec<&str> = screen.lines().collect();
-    // Bề ngang cửa sổ, đo từ chính màn: dòng dài nhất. Chỉ có nghĩa khi nguồn
-    // là MÀN — chữ báo cáo không bị bẻ, nên `wrapped` tắt luật này đi.
-    //
-    // Bề ngang chỉ ĐO ĐƯỢC khi có đủ dòng để đo: trên một mẩu chữ ba dòng, dòng
-    // dài nhất chính là dòng đang xét, và "chỗ trống còn lại" ra 0 cho mọi
-    // dòng — phép đo tự khẳng định điều nó định kiểm. Một màn Terminal thật
-    // luôn dày hơn thế.
-    const MIN_ROWS_FOR_WIDTH: usize = 6;
-    let wrapped = max_len == BTN_CMD_MAX && rows.len() >= MIN_ROWS_FOR_WIDTH;
-    let width = rows.iter().map(|l| l.chars().count()).max().unwrap_or(0);
-    for (li, raw) in rows.iter().enumerate() {
+    for raw in rows.iter() {
         let raw = *raw;
         // Câu đang CẤM một lệnh thì không phải câu mời chạy nó.
         if forbids(raw) {
             continue;
         }
-        // 🔴 MỘT LỆNH CỤT LÀ MỘT LỆNH KHÁC. Đo được 2026-08-14 trên màn thật
-        // của `[tfl5]`, ba dòng liền nhau trong câu trả lời `/shot`:
-        //     [10] len=58  "  git -C /Users/hanguyen/projects/AI/tfl5 push origin main"
-        //     [11] len=57  "  bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh"
-        //     [12] len=27  "  static-cache-refresh-0814"
-        // Cửa sổ rộng ~58, nên dòng 11 là NỬA ĐẦU của một lệnh bị bẻ — mà nửa
-        // ấy dài 55 sau khi trim, tức LỌT trần 60 và ra một cái nút. Sổ ghi lại
-        // đúng như thế: `bash …/scripts/deploy.sh`, không có tên bản. Bấm vào
-        // là chạy một lệnh triển khai THIẾU tham số, trên một dự án thật.
+        // 🔴 Ở ĐÂY TỪNG CÓ BỘ MÁY NỐI DÒNG BỊ BẺ — gỡ 2026-08-15.
         //
-        // Trần `BTN_CMD_MAX` sinh ra để chặn chuyện này nhưng chỉ chặn được mẩu
-        // DÀI; mẩu cụt lại thường NGẮN, nên nó lọt qua đúng cái cửa dựng ra để
-        // giữ nó. Phép đo đúng không phải độ dài, mà là **dòng có chạm mép cửa
-        // sổ không**.
+        // Nó dựng lên vì một sự thật đo được trên màn thật của `[tfl5]`
+        // (08-14): ba dòng liền nhau `git … push origin main` / `bash
+        // …/scripts/deploy.sh` / `static-cache-refresh-0814`, tức dòng giữa là
+        // NỬA ĐẦU của một lệnh bị cửa sổ bẻ. Bấm vào nửa ấy là chạy một lệnh
+        // triển khai THIẾU tham số, trên một dự án thật.
         //
-        // Và phép đo phải trỏ đúng chỗ: dòng bị bẻ KHÔNG dài bằng mép. TUI bẻ
-        // theo TỪ, nên nó dừng ở khoảng trắng cuối cùng lọt vào bề ngang —
-        // dòng 11 dài 57 trên một cửa sổ rộng 80. Đo "chạm mép" bằng độ dài là
-        // đo trượt; tôi đã viết bản ấy trước, và chính phân bố độ dài của màn
-        // thật (max 80, ba dòng đạt 80) bác bỏ nó.
-        //
-        // Dấu hiệu ĐÚNG của word-wrap: **từ đầu tiên của dòng sau không vừa
-        // vào chỗ trống còn lại** — 25 ký tự `static-cache-refresh-0814` không
-        // lọt vào 23 chỗ trống, nên nó bị đẩy xuống. Một câu văn đi sau một
-        // dòng lệnh thì ngược lại: từ đầu của nó thường vừa, tức nó xuống dòng
-        // vì người viết muốn thế.
-        //
-        // Nối lại bằng MỘT dấu cách (word-wrap nuốt đúng một cái). Có dấu hiệu
-        // bẻ mà đuôi không nhận ra được ⟹ **THÔI, không dựng nút**: thà thiếu
-        // một cái nút còn hơn một cái nút chạy lệnh khác lệnh in ra.
-        //
-        // Nối LẶP, vì một lệnh dài bị bẻ hai lần vẫn là một lệnh — nhưng có
-        // trần: bẻ quá ba lần thì đây là một đoạn văn, không phải một dòng.
-        let mut joined = String::new();
-        let mut cap = max_len;
-        let mut cur = raw;
-        let mut k = li;
-        if wrapped && width > 0 {
-            for _ in 0..3 {
-                // Chỗ trống đo trên DÒNG MÀN cuối cùng đã gộp (`rows[k]`),
-                // không trên chuỗi đã nối: chuỗi nối dài hơn bề ngang cửa sổ
-                // theo đúng định nghĩa, nên đo trên nó thì "chỗ trống" luôn
-                // bằng 0 và mọi dòng kế tiếp đều trông như bị đẩy xuống.
-                let space_left = width.saturating_sub(rows[k].chars().count());
-                let pushed = rows
-                    .get(k + 1)
-                    .and_then(|n| n.split_whitespace().next())
-                    .is_some_and(|w| w.chars().count() + 1 > space_left);
-                if !pushed {
-                    // 🔴 KHÔNG BỊ ĐẨY ⟹ KHÔNG BỊ BẺ ⟹ dòng này TRỌN VẸN, nên
-                    // cái trần "sợ mẩu cụt" không có việc gì ở đây.
-                    //
-                    // Hà 2026-08-14, ảnh chụp `/shot` của [AI/tfl5]: *"Rõ ràng
-                    // có lệnh ở tfl5 mà không thấy chèn nút chạy"*. Đọc đúng
-                    // màn ấy ra khỏi log:
-                    //   bề ngang cửa sổ .......... 173 cột
-                    //   [10] 122 ký tự  git -C …/tfl5 merge-base --is-ancestor …
-                    //   [11]  68 ký tự  git -C …/tfl5 log --oneline pr/26..pr/32
-                    // Hai lệnh TRỌN VẸN, không một chỗ bẻ nào — chỉ vượt trần
-                    // 60. Mà trần 60 sinh ra để chống MẨU CỤT, thứ chỉ tồn tại
-                    // khi cửa sổ bẻ dòng. Áp nó lên một dòng không hề bị bẻ là
-                    // áp một cái thuốc lên một bệnh không có.
-                    //
-                    // Phép đo đã nằm sẵn ngay trên: `pushed`. Nó trả lời đúng
-                    // câu "dòng này có bị bẻ không" bằng chính bề ngang đo được
-                    // từ màn, thay vì bằng một con số tròn đoán trước.
-                    if joined.is_empty() {
-                        cap = BTN_CMD_REPORT_MAX;
-                    }
-                    break;
-                }
-                match wrap_tail(rows.get(k + 1).copied()) {
-                    Some(tail) => {
-                        joined = format!("{} {}", cur.trim_end(), tail);
-                        // Đã nối xong thì đây là dòng TRỌN VẸN, không còn là
-                        // mẩu — nên trần "sợ mẩu cụt" thôi áp: một lệnh
-                        // triển khai có đường dẫn tuyệt đối vượt 60 là chuyện
-                        // thường, và đúng nó là thứ đáng bấm.
-                        cap = BTN_CMD_REPORT_MAX;
-                        cur = joined.as_str();
-                        k += 1;
-                    }
-                    // Có dấu hiệu bẻ mà đuôi không nhận ra được ⟹ THÔI —
-                    // nhưng chỉ khi CHƯA nối được lần nào. Đã nối xong một
-                    // lần thì dòng đang cầm là trọn vẹn, và cái đứng sau nó
-                    // chỉ là dòng kế tiếp của màn.
-                    None => {
-                        if joined.is_empty() {
-                            cur = "";
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        if cur.is_empty() {
-            continue;
-        }
-        let max_len = cap;
-        let raw = cur;
+        // Bộ máy ấy ĐÚNG, và vẫn là câu trả lời sai: nó đi chữa hậu quả của
+        // việc đọc nhầm nguồn. Chữ trên màn là chữ đã đi qua một cửa sổ; không
+        // phép đo nào dựng lại được thứ cửa sổ đã cắt. Nay nguồn đổi — lệnh lấy
+        // nguyên văn từ nhật ký (`sessions::commands_of`) — nên cả cái bệnh lẫn
+        // thuốc cùng đi: trần 60, phép đo bề ngang, phép đoán "dòng sau có bị
+        // đẩy xuống không", và hàm nối đuôi.
         let mut line = raw.trim();
         // Dấu nhắc và dấu trang trí của TUI đứng trước lệnh.
         //
@@ -1039,16 +904,9 @@ fn commands_in(text: &str, max: usize, max_len: usize) -> Vec<String> {
         // thấy nó hợp lệ. Nó chạy thật, và lần ấy vô hại chỉ vì `refs/original`
         // chưa tồn tại.
         //
-        // Nguồn của hàm này là MÀN — chữ đã bị TUI bẻ theo bề ngang cửa sổ —
-        // nên với một lệnh dài, hub không có cách nào biết mình đang cầm cả
-        // dòng hay một mẩu. Không đoán: dài quá thì THÔI, và nói ra ở chỗ gọi.
-        // Một lệnh dán tay là phiền; một cái nút chạy lệnh khác lệnh in ra là
-        // chuyện không lùi lại được.
-        //
-        // 60 đo từ chỗ thật: lệnh quen nhất ở đây (`cd ~/projects/hub && ./hub
-        // self-install` = 40, `launchctl kickstart -k gui/501/com.dipgle.hubd`
-        // = 44) đều lọt, còn bề ngang một dòng terminal thì bắt đầu bẻ quanh
-        // 72–80 kể cả thụt lề.
+        // Từ 08-15 nguồn không còn bị bẻ, nên trần này thôi làm cái việc "sợ
+        // mẩu cụt" và chỉ còn làm đúng một việc: một KHỐI không phải một lệnh.
+        // 200 nhận trọn lệnh triển khai có đường dẫn tuyệt đối, chặn cả khối.
         if line.len() > max_len {
             continue;
         }
@@ -1395,10 +1253,19 @@ fn forbids(context: &str) -> bool {
 /// *"chính lệnh này có phá gì không"*, đọc thẳng từ động từ. Một trong hai
 /// trượt thì cái kia vẫn giữ.
 ///
-/// Muốn chạy thật thì vẫn còn đường: gõ thẳng nó vào phiên, hoặc `/win` mở một
-/// cửa sổ có tty. Thứ bị bỏ ở đây chỉ là cái nút bấm-một-phát.
-fn destructive(cmd: &str) -> bool {
-    let c = cmd.trim().to_lowercase();
+/// Muốn chạy thật thì vẫn còn đường: gõ thẳng nó vào phiên, hoặc `/terminal` mở
+/// một cửa sổ có tty. Thứ bị bỏ ở đây chỉ là cái nút bấm-một-phát.
+///
+/// 🔴 **Không chỉ ĐẦU DÒNG, 2026-08-15.** Bản cũ hỏi `starts_with`, và phép đo
+/// đầu tiên của nguồn mới trên nhật ký thật lôi ra ngay một ca lọt:
+/// `grep foo; rm -rf ~` — mở đầu bằng `grep` nên mọi cửa đều thấy hiền, còn vế
+/// sau dấu `;` thì xoá sạch thư mục nhà. Một dòng shell có thể mang nhiều lệnh,
+/// nên hỏi ở mỗi VẾ chứ không hỏi ở đầu dòng. Chia theo `;` `&&` `||` `|`.
+///
+/// Đúng loại lỗi tệp này đã đặt tên nhiều lần: một cửa đo SAI CHỖ đọc lên y hệt
+/// một cửa đang gác. Và nó chỉ lộ ra khi đem mã chạy trên dữ liệu thật — bộ test
+/// thuần thì tôi tự dựng đầu vào, nên nó chỉ hỏi đúng những gì tôi đã nghĩ ra.
+pub(crate) fn destructive(cmd: &str) -> bool {
     const HEADS: &[&str] = &[
         "rm ",
         "rmdir ",
@@ -1416,7 +1283,10 @@ fn destructive(cmd: &str) -> bool {
         "killall ",
         "launchctl bootout",
     ];
-    HEADS.iter().any(|h| c.starts_with(h) || c == h.trim())
+    let c = cmd.trim().to_lowercase();
+    c.split([';', '|', '&'])
+        .map(str::trim)
+        .any(|seg| HEADS.iter().any(|h| seg.starts_with(h) || seg == h.trim()))
 }
 
 /// Nối lại một lệnh bị MÀN HÌNH bẻ dòng — hoặc từ chối, nếu không chắc.

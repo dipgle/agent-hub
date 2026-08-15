@@ -1719,12 +1719,17 @@ impl Inbox {
                         // (kết bằng một dòng lệnh) chứ không theo số ký tự, nên
                         // một cái đánh số đo bằng độ dài chỉ nói sai.
                         //
-                        // 🔴 `commands_in_report`, KHÔNG phải
-                        // `commands_on_screen`: chữ này lấy từ nhật ký phiên,
-                        // không đi qua bề ngang cửa sổ nào — xem
-                        // `keys::BTN_CMD_REPORT_MAX` (chính cái trần 60 đã chặn
-                        // dòng `bash …/deploy.sh …` dài 80 ký tự trong ảnh Hà
-                        // gửi).
+                        // Chữ này lấy từ nhật ký phiên, không đi qua bề ngang
+                        // cửa sổ nào — xem `keys::BTN_CMD_REPORT_MAX`. (Từ
+                        // 2026-08-15 đó là nguồn DUY NHẤT: `commands_on_screen`
+                        // và cả bộ máy nối dòng bị bẻ đã đi cùng nguồn màn.)
+                        //
+                        // Đường này giữ nguyên `commands_in_report` chứ không
+                        // gọi `sessions::commands_of`: nó đang cầm sẵn ĐÚNG
+                        // đoạn chữ chủ máy vừa xin đọc, còn `commands_of` sẽ đi
+                        // đọc lại lượt MỚI NHẤT của phiên — hai thứ khác nhau
+                        // khi phiên đã chạy tiếp kể từ lúc tin ấy gửi đi, và ở
+                        // đây thứ đúng là đoạn chữ đang hiện dưới mắt anh.
                         let body = format!("{text}{tail}");
                         let cmds = crate::keys::commands_in_report(&text, 3);
                         let mut btns = db
@@ -1999,19 +2004,34 @@ impl Inbox {
     /// dấu hiệu của thứ đang xếp, không phải một quy ước đếm-thứ-tự mà chỗ gọi
     /// phải nhớ giữ đúng. Ba nút một hàng — bốn thì nhãn bắt đầu bị cắt trên 390px.
     pub fn keyboard_rows(buttons: &[(String, String)]) -> Vec<Vec<Value>> {
+        /// Nút được xếp CHUNG HÀNG với nút cùng loại — và tối đa mấy cái.
+        ///
+        /// Chỉ nhóm thứ có nhãn NGẮN: một hàng ba cái nút tên tệp đã chật, còn
+        /// một nút mang cả dòng lệnh thì đứng riêng mới đọc được. Nút số của
+        /// hộp chọn (`key:`) là ngắn nhất trong tất cả — bốn cái nằm một hàng
+        /// đúng như "hàng phím" mà tin nhắn hứa (2026-08-15).
+        fn group_of(data: &str) -> Option<(&'static str, usize)> {
+            if data.starts_with("file:") {
+                Some(("file:", 3))
+            } else if data.starts_with("key:") {
+                Some(("key:", 5))
+            } else {
+                None
+            }
+        }
         let mut rows: Vec<Vec<Value>> = Vec::new();
         for (label, data) in buttons {
             let cell = json!({ "text": label, "callback_data": data });
-            let joinable = data.starts_with("file:");
+            let group = group_of(data);
             match rows.last_mut() {
                 Some(last)
-                    if joinable
-                        && last.len() < 3
+                    if group.is_some_and(|(_, max)| last.len() < max)
                         && last
                             .first()
                             .and_then(|c| c.get("callback_data"))
                             .and_then(Value::as_str)
-                            .is_some_and(|d| d.starts_with("file:")) =>
+                            .and_then(group_of)
+                            == group =>
                 {
                     last.push(cell);
                 }

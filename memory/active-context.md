@@ -1,5 +1,95 @@
 # active context — hub
 
+## 🎯 2026-08-15 — MÀN THÔI LÀM NGUỒN CỦA LỆNH, và ba lỗi Hà bắt được trong lúc làm
+
+279 test (từ 269) · clippy 0 · fmt sạch, exit đọc trực tiếp.
+⏳ **CHƯA CÀI** — `deploy/install.sh` bị chặn quyền 2 lần, Hà phải gõ tay. Bản
+release đã build sẵn (exit 0) nên lượt cài sẽ nhanh.
+
+### Việc chính: lệnh lấy từ SỔ, không đoán trên MÀN
+
+Nợ để lại từ phiên trước: bảy cửa dựng nút lệnh, **sáu là phép đoán trên chữ màn
+hình**. Mỗi ca sai vá thêm một luật, luật càng nhiều ca sai càng nhiều — và ba
+cái nút đã chạy SAI đều sinh ra ở đó (`bash …/deploy.sh` thiếu tham số,
+`git for-each-ref … | xargs` cắt từ một khối 380 ký tự, `cargo test 258 · clippy
+0 warning` — một câu tổng kết đội lốt lệnh).
+
+Gốc của cả sáu là một: **chữ trên màn là chữ đã đi qua một cửa sổ** — bẻ theo bề
+ngang, cắt bằng `…`, trộn khung vẽ TUI. Không phép đo nào dựng lại được thứ cửa
+sổ đã cắt. Nên đổi NGUỒN chứ không vá tiếp:
+
+| | trước | nay |
+|---|---|---|
+| `/shot` | `keys::commands_on_screen(&ack)` | `sessions::commands_of(cfg, sid)` |
+| tin tự phát | `commands_in_report(scan)` | `commands_of`, rơi về `scan` nếu không thấy sổ |
+| "Xem đầy đủ" | `commands_in_report(&text)` | giữ nguyên — nó cầm ĐÚNG đoạn chữ Hà vừa xin đọc |
+
+**Gỡ hẳn:** `commands_on_screen`, trần 60 (`BTN_CMD_MAX`), `MIN_ROWS_FOR_WIDTH`,
+phép đo bề ngang, phép đoán "dòng sau có bị đẩy xuống không", `wrap_tail`.
+
+**Nhánh chưa từng có — lệnh bị cổng quyền TỪ CHỐI** (`tool_use` Bash +
+`tool_result` mang `has been denied`). Đây là nhánh KHÔNG cần một cửa đoán nào:
+chính CLI đã đọc chuỗi ấy như một lệnh, nên "việc tiếp theo là của chủ máy" là
+một sự kiện ĐO ĐƯỢC. Đo trên nhật ký thật (3.523 tệp, 5 ngày): **571 lượt**,
+median 136 ký tự, 70 lượt là khối nhiều dòng.
+
+Còn **bốn** cửa, và cả bốn là CHÍNH SÁCH chứ không phải đoán: một dòng · ≤200 ký
+tự · không phá · không mang bí mật. Cả sáu đột biến đều **đỏ được** (bỏ chữ ký
+từ-chối, bỏ cửa phá, bỏ cửa bí mật, bỏ cửa nhiều dòng, coi mọi `user` là người,
+trả trần về 60).
+
+📌 Ranh giới lượt phải đọc đúng: **`user` KHÔNG phải lúc nào cũng là người** —
+kết quả công cụ cũng về dưới vai ấy (`blocks=['tool_result']`, xen giữa mỗi cặp
+gọi/trả). Lấy nhầm nó làm ranh giới thì "lượt cuối" rút còn một lời gọi công cụ.
+
+### 🔴 Và phép đo THẬT lôi ra một lỗ mà bộ test thuần không thấy
+
+Chạy nguồn mới trên nhật ký thật (`tests/commands_from_log_live.rs`, `#[ignore]`):
+24 phiên có lệnh, và một phiên trả về `grep foo; <lệnh xoá thư mục nhà>`.
+`destructive` hỏi bằng `starts_with` nên nó thấy `grep` và cho qua. Nay hỏi ở
+**mọi vế** (`;` `|` `&`). Bài học là cách TÌM RA: bộ test thuần không bắt được,
+đơn giản vì đầu vào của nó do chính tôi nghĩ ra.
+
+### Ba lỗi Hà chụp màn gửi thẳng
+
+**1. `/new acc3 dwork` mở nhầm tài khoản.** Nguyên văn log 02:14:29Z:
+`new_window_opened task:"[] acc3 dwork"` — `acc3` rơi vào ĐỀ BÀI, phiên mở trên
+acc1 và nhận đúng chuỗi chữ ấy làm việc. 📌 **Danh sách phiên không nói dối**:
+phiên ấy thật sự ở acc1; câu hỏi "sao xem lại thành acc1" dẫn thẳng tới cái loa
+trong khi lỗi ở cái miệng. Nay `pipeline::lift_bare_account` — và đây không phải
+nới cửa đoán: `known_accounts` là danh sách hub tự đọc từ cấu hình, so khớp cả
+chuỗi, chỉ ở TỪ ĐẦU TIÊN.
+
+**2. "Có lựa chọn nhưng không thấy nút".** Hai lỗi chồng nhau, một gốc:
+- `/shot` **chưa bao giờ** dựng nút số. Nó viết ra câu *"bấm số ở hàng phím để
+  chọn"* rồi không giữ lời — đường duy nhất có nút là bảng `AskUserQuestion` đọc
+  từ nhật ký, mà hộp khảo sát của CLI thì không nằm trong sổ.
+- Cửa chặn nút `⏎` hỏi `parse_choices(&ack)` — tức **đo trên chữ hub vừa viết
+  ra**, mà chữ ấy chép lại nguyên hộp chọn lên đầu tin ⟹ `1,2,3,4,1,2,3,4` ⟹
+  luật "liên tiếp từ 1" trả RỖNG ⟹ cửa an toàn MỞ đúng lúc phải đóng. hub tự làm
+  mù phép đo của chính nó bằng đầu ra của chính nó — cùng họ với `??` đọc thành
+  cửa sổ và `⏎ Gửi: # Lệnh thấy trên màn…`.
+
+Vá: `screen_report` trả luôn `ScreenReport { text, choices }` — một phép đo, một
+chỗ, đo trên màn GỐC. Nút số đi route `/key <id> <số>` sẵn có; `keyboard_rows`
+xếp chúng chung một hàng (tối đa 5).
+
+**Đo trên màn THẬT lúc 09:2x** (osascript, chỉ đọc): WIN 61223 (dwork) → 4 lựa
+chọn, parse OK — tức phép đo trên màn gốc vẫn đúng, đúng như chẩn đoán.
+⚠ Đo ra thêm: **WIN 61217 đứng ở hộp tin-thư-mục** (`1. Yes, I trust this
+folder`) từ 02:12 — cửa sổ `/terminal claude3 "tiếp dwork"` chưa ai bấm.
+
+### Còn dở — ghi đúng như vậy
+
+- **Chưa cài, nên chưa nghiệm thu gì cả.** Ba bản vá trên đều nằm ở chỗ NỐI
+  (màn thật · cửa sổ Terminal · nút Telegram) — đúng chỗ mà 279 test xanh không
+  nói được điều gì. Bar thật: một cú `/shot` gõ trên Telegram và nhìn cái nút.
+- Phần **wiring** `screen_report → nút số` không có test thuần nào phủ được (đòi
+  một cửa sổ Terminal thật). Test chỉ ghim được PHÉP ĐO (`parse_choices` trên
+  màn gốc = 4, trên `ack` = 0), không ghim được đường dây.
+- 19 tệp `.mjs` + `fe/` + `ui-shots/` + `rust/src/{live,portal}.rs` vẫn trên đĩa
+  và trong chỉ mục git — `git rm` bị chặn, Hà gõ tay.
+
 ## 📋 2026-08-14 (tối) — gỡ nốt dấu vết tfl5 khỏi cấu hình, cổng người và sổ sách
 
 Nối tiếp `cf20874` (cắt kênh + trang). Lượt này gỡ những thứ chỉ lộ ra **sau khi**

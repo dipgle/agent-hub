@@ -1498,6 +1498,215 @@ fn strip_tool_marks(text: &str) -> String {
     out.trim().to_string()
 }
 
+/// Những DÒNG LỆNH của lượt cuối một phiên — lấy NGUYÊN VĂN từ nhật ký.
+///
+/// 🔴 2026-08-15, và đây là một lượt đổi NGUỒN chứ không phải một bản vá.
+///
+/// Cho tới hôm nay hub dựng nút lệnh bằng cách **soi chữ trên màn**: bóc dấu
+/// nhắc, đối chiếu một danh sách động từ quen, đo bề ngang cửa sổ rồi đoán xem
+/// dòng có bị bẻ đôi không để nối lại. Bảy cửa, và sáu trong bảy là phép đoán
+/// trên một tấm chữ ĐÃ ĐI QUA một cái cửa sổ — bẻ theo bề ngang, cắt bằng `…`,
+/// trộn với khung vẽ của TUI. Mỗi ca sai vá thêm một luật, nên luật càng nhiều
+/// thì ca sai càng nhiều; ba cái nút đã chạy SAI đều đến từ đúng chỗ ấy
+/// (`bash …/deploy.sh` thiếu tham số, `git for-each-ref … | xargs` cắt từ một
+/// khối 380 ký tự, `cargo test 258 · clippy 0 warning` — một câu tổng kết đội
+/// lốt lệnh).
+///
+/// **Màn để nhìn, lệnh lấy từ sổ.** Nhật ký `.jsonl` giữ chữ GỐC: không bề
+/// ngang nào, không dấu `…`, không khung vẽ.
+///
+/// Hai nguồn, và chúng khác hẳn nhau về mức chắc chắn — nói rõ ra vì đúng chỗ
+/// khác nhau ấy quyết định còn phải giữ mấy cái cửa:
+///
+/// | nguồn | chắc tới đâu | còn phải đoán gì |
+/// |---|---|---|
+/// | `tool_use` Bash **bị từ chối** | tuyệt đối — chính CLI đã đọc chuỗi ấy như một lệnh | KHÔNG |
+/// | chữ phiên viết ra | phải nhận ra lệnh nằm giữa câu văn | [`crate::keys::commands_in_report`] |
+///
+/// Nhánh **bị từ chối** là nhánh đáng giá nhất và nó không cần một cửa đoán
+/// nào: phiên đã ĐỊNH chạy, cổng quyền chặn lại, nên "việc tiếp theo là của chủ
+/// máy" ở đây là một sự kiện ĐO ĐƯỢC, không phải một câu đoán ý. Đo trên nhật
+/// ký thật (3.523 tệp, 5 ngày): **571** lượt Bash bị từ chối, nguyên văn
+/// `Permission to use Bash with command <lệnh> has been denied.`
+///
+/// Chỉ đọc LƯỢT CUỐI — từ câu chủ máy gõ gần nhất trở đi. Một lệnh phiên nhắc
+/// ba lượt trước vẫn còn trên màn, nhưng nó không còn là việc tiếp theo.
+pub fn commands_of(cfg: &Config, session_id: &str, max: usize) -> Vec<String> {
+    if session_id.is_empty() {
+        return Vec::new();
+    }
+    let Some(path) = find_transcript(&cfg.claude_transcript_root(), session_id) else {
+        // KHÔNG rơi về màn: màn là thứ vừa bị thay. Nhưng cũng không im — "0
+        // nút vì phiên chưa nói gì" và "0 nút vì hub không tìm ra sổ" đọc lên y
+        // hệt nhau nếu chỗ này không ghi một dòng (luật 3).
+        logging::info("cmd_source_no_transcript", json!({ "session": session_id }));
+        return Vec::new();
+    };
+    match read_tail(&path) {
+        Ok(tail) => commands_in_last_turn(&tail, max),
+        Err(e) => {
+            logging::error(
+                "cmd_source_read_failed",
+                json!({ "session": session_id, "err": e.to_string() }),
+            );
+            Vec::new()
+        }
+    }
+}
+
+/// Bản ghi `user` MANG CHỮ — tức chủ máy vừa gõ, tức ranh giới của một lượt.
+///
+/// Không phải mọi `user` đều là người: kết quả công cụ cũng về dưới vai `user`
+/// (đo trên nhật ký thật — `type=user · blocks=['tool_result']`, xen giữa mỗi
+/// cặp gọi/trả). Lấy nhầm nó làm ranh giới thì "lượt cuối" rút lại còn đúng một
+/// lời gọi công cụ, và nhánh bị-từ-chối không bao giờ lọt vào tầm nhìn.
+fn is_owner_turn(record: &Value) -> bool {
+    if record.get("type").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    match record.get("message").and_then(|m| m.get("content")) {
+        Some(Value::String(s)) => !s.trim().is_empty(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .any(|b| b.get("type").and_then(Value::as_str) != Some("tool_result")),
+        _ => false,
+    }
+}
+
+/// Kết quả nói "cổng quyền đã chặn".
+///
+/// Nguyên văn CLI trả về: `Permission to use Bash with command <lệnh> has been
+/// denied.` Bắt cái ĐUÔI chứ không cả câu — phần giữa là lệnh của người dùng
+/// nên câu nào cũng khác, còn đuôi thì cố định. Đi kèm `is_error` ở chỗ gọi:
+/// một dòng chữ ấy nằm trong stdout của một lệnh đã CHẠY XONG là chuyện khác
+/// hẳn.
+fn result_says_denied(block: &Value) -> bool {
+    let text = match block.get("content") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|i| i.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    };
+    let t = text.to_lowercase();
+    t.contains("has been denied") || t.contains("permission to use")
+}
+
+/// BỐN cửa còn lại, và cả bốn là CHÍNH SÁCH chứ không phải phép đoán.
+///
+/// Nguồn `tool_use` không phải hỏi *"đây có phải một lệnh không"* — chính CLI
+/// đã trả lời rồi. Còn lại đúng những câu hub phải tự trả lời dù nguồn chắc tới
+/// đâu:
+///   1. **một dòng** — nút này gõ vào một TUI, mà một khối nhiều dòng gõ vào đó
+///      là một cú dán, không phải một lệnh (đo: 70/571 lệnh bị từ chối là khối
+///      nhiều dòng);
+///   2. **đủ ngắn** để đọc trên nhãn nút và gõ lại được (đo: dài nhất 2.593);
+///   3. **không phá** — luật của hub, không phải của nguồn. Và nó cắn đúng ở
+///      đây: phiên hub mở chạy sau `DENIED_TOOLS`, nên `rm`/`git reset --hard`
+///      bị chặn là chuyện THƯỜNG, tức nhánh bị-từ-chối là nơi lệnh phá xuất
+///      hiện nhiều nhất chứ không phải ít nhất;
+///   4. **không mang bí mật ra khỏi máy** (luật 5) — dòng lệnh đi thẳng lên
+///      Telegram, mà `curl -H "Authorization: Bearer …"` là một dòng lệnh.
+fn usable_command(cmd: &str) -> bool {
+    let c = cmd.trim();
+    !c.contains('\n')
+        && c.chars().count() >= 4
+        && c.chars().count() <= crate::keys::BTN_CMD_REPORT_MAX
+        && !crate::keys::destructive(c)
+        && preview_risk(c).is_empty()
+}
+
+/// Lệnh của lượt cuối, đọc từ đuôi nhật ký đã nạp sẵn (tách ra để kiểm được).
+pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<String> {
+    let records: Vec<Value> = tail
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect();
+    // Không tìm thấy ranh giới nào ⟹ cả cửa sổ đuôi này là một lượt. Đúng cho
+    // một phiên vừa nhận đúng một mệnh lệnh dài, và cũng là phía an toàn: đọc
+    // rộng hơn thì cùng lắm thừa một cái nút, đọc hụt thì mất đúng cái cần.
+    let start = records
+        .iter()
+        .rposition(is_owner_turn)
+        .map(|i| i + 1)
+        .unwrap_or(0);
+
+    let mut ran: HashMap<String, String> = HashMap::new();
+    let mut denied: Vec<String> = Vec::new();
+    let mut prose = String::new();
+
+    for record in &records[start..] {
+        let assistant = record.get("type").and_then(Value::as_str) == Some("assistant");
+        let Some(Value::Array(blocks)) = record.get("message").and_then(|m| m.get("content"))
+        else {
+            continue;
+        };
+        for b in blocks {
+            match b.get("type").and_then(Value::as_str) {
+                Some("text") if assistant => {
+                    if let Some(t) = b.get("text").and_then(Value::as_str) {
+                        prose.push_str(t);
+                        prose.push('\n');
+                    }
+                }
+                Some("tool_use") if b.get("name").and_then(Value::as_str) == Some("Bash") => {
+                    if let (Some(id), Some(cmd)) = (
+                        b.get("id").and_then(Value::as_str),
+                        b.get("input")
+                            .and_then(|i| i.get("command"))
+                            .and_then(Value::as_str),
+                    ) {
+                        ran.insert(id.to_string(), cmd.to_string());
+                    }
+                }
+                Some("tool_result") if b.get("is_error").and_then(Value::as_bool) == Some(true) => {
+                    let Some(id) = b.get("tool_use_id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    let Some(cmd) = ran.get(id) else {
+                        continue;
+                    };
+                    if result_says_denied(b) && !denied.iter().any(|c| c == cmd) {
+                        denied.push(cmd.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Luật 5, cùng cách `last_prose` gác: chữ có dấu hiệu bí mật thì BỎ CẢ
+    // LƯỢT, không đi lùi tìm một lượt sạch hơn — một lệnh cũ đọc lên như thể là
+    // việc tiếp theo, mà đó là một câu SAI.
+    let risk = preview_risk(&prose);
+    let said = if risk.is_empty() {
+        crate::keys::commands_in_report(&prose, max)
+    } else {
+        logging::info("cmd_source_prose_withheld", json!({ "why": risk }));
+        Vec::new()
+    };
+
+    let mut out: Vec<String> = Vec::new();
+    // Bị từ chối đứng TRƯỚC vì trần `max` giữ phần CUỐI: khi có quá nhiều thì
+    // thứ ở lại là câu chốt phiên vừa viết ra. Cùng lý do đã ghi ở `pipeline`
+    // — một báo cáo dài nhắc nhiều lệnh, nhưng thứ đáng bấm ngay là câu chốt.
+    for cmd in denied.into_iter().chain(said) {
+        if !usable_command(&cmd) {
+            continue;
+        }
+        let cmd = cmd.trim().to_string();
+        if !out.iter().any(|c| c == &cmd) {
+            out.push(cmd);
+        }
+    }
+    if out.len() > max {
+        out.drain(..out.len() - max);
+    }
+    out
+}
+
 /// Một câu hỏi đang chờ chủ máy trả lời.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Asking {

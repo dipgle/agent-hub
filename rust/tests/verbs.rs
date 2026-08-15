@@ -242,7 +242,6 @@ fn the_cycle_verbs_take_no_id_and_ingest_is_no_longer_one_of_them() {
     }
 }
 
-
 /// 🔴 Mệnh lệnh đụng vào một phiên sống thì phải TỰ NÓI nó đụng vào phiên nào.
 ///
 /// Đo 2026-08-11, lỗi nặng nhất trong ngày: `/ask`, `/tell`, `/type`, `/key`
@@ -302,8 +301,6 @@ fn the_accounts_verb_answers_to_three_spellings() {
         assert!(arg.is_empty(), "{text} không nhận tham số: {arg}");
     }
 }
-
-
 
 /// `/close` là một động từ RIÊNG, không phải `/stop` đội tên khác.
 ///

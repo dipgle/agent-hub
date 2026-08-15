@@ -1498,3 +1498,245 @@ fn a_tab_knows_whether_a_cli_is_running_in_it() {
     // Tiến trình phụ của shell không được đọc thành CLI.
     assert_eq!(tab(&["login", "zsh"]).cli(), None);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// commands_in_last_turn — LỆNH lấy từ SỔ, không đoán trên màn (2026-08-15)
+//
+// Mọi hình dạng dưới đây chép từ nhật ký THẬT trên máy này, không phải tưởng
+// tượng (đo trên 3.523 tệp `.jsonl` của 5 ngày):
+//   · kết quả công cụ về dưới vai `user`, đúng một khối `tool_result` — nên
+//     `user` KHÔNG phải lúc nào cũng là người, và lấy nhầm nó làm ranh giới
+//     lượt thì "lượt cuối" rút còn một lời gọi công cụ;
+//   · một lượt Bash bị chặn trả về nguyên văn `Permission to use Bash with
+//     command <lệnh> has been denied.` — đếm được **571** lượt.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Lệnh bị cổng quyền TỪ CHỐI ra nút, và ra NGUYÊN VĂN — không qua cửa đoán nào.
+///
+/// Đây là nhánh chưa từng có: nó không đoán "chuỗi này có phải một lệnh không",
+/// vì chính CLI đã trả lời rồi. Hai dòng dưới đây cố ý chọn để **bộ luật đọc
+/// màn cũ giết cả hai**: dòng `bash …` dài 81 (trần màn là 60), dòng `git log
+/// …` mang `, ` (dấu của văn xuôi). Cả hai đều là lệnh thật.
+#[test]
+fn a_denied_command_becomes_a_button_verbatim() {
+    let deploy =
+        "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814";
+    let tail = concat!(
+        r#"{"type":"user","message":{"role":"user","content":"deploy hộ tôi"}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814 has been denied."}]}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"git log --pretty=format:\"%h, %s\" -n 5"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"Permission to use Bash with command git log has been denied."}]}}"#,
+    );
+    assert_eq!(deploy.len(), 81, "dòng chuẩn của ca này");
+    let got = hub::sessions::commands_in_last_turn(tail, 4);
+    assert!(got.iter().any(|c| c == deploy), "{got:?}");
+    assert!(
+        got.iter()
+            .any(|c| c == r#"git log --pretty=format:"%h, %s" -n 5"#),
+        "dấu phẩy là dấu của văn xuôi, KHÔNG phải của một lệnh đã được CLI đọc: {got:?}"
+    );
+}
+
+/// Một lệnh CHẠY HỎNG không phải một lệnh cho chủ máy.
+///
+/// `is_error` một mình không đủ: nó cũng bật khi lệnh chạy xong và trả mã khác
+/// 0. Thứ nói "việc rơi sang chủ máy" là chữ ký TỪ CHỐI. Không có nó thì nút
+/// này mời người ta chạy lại đúng cái vừa hỏng.
+#[test]
+fn a_command_that_merely_failed_is_not_handed_to_the_owner() {
+    let tail = concat!(
+        r#"{"type":"user","message":{"role":"user","content":"kiểm hộ"}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cargo test --offline"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"error: 2 tests failed"}]}}"#,
+    );
+    assert!(
+        hub::sessions::commands_in_last_turn(tail, 4).is_empty(),
+        "{:?}",
+        hub::sessions::commands_in_last_turn(tail, 4)
+    );
+}
+
+/// Chỉ LƯỢT CUỐI tính — việc của ba lượt trước không còn là việc tiếp theo.
+///
+/// Và ranh giới phải đọc đúng: bản ghi `user` chứa `tool_result` là MÁY, không
+/// phải người. Đọc nhầm nó thành ranh giới thì lượt cuối rút còn một lời gọi
+/// công cụ và cả hàm này mù.
+#[test]
+fn only_the_turn_since_the_owner_last_spoke_counts() {
+    let tail = concat!(
+        r#"{"type":"user","message":{"role":"user","content":"việc cũ"}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"bash ./deploy-cu.sh xong-roi"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command bash ./deploy-cu.sh has been denied."}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"thôi làm việc khác"}]}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"bash ./deploy-moi.sh ban-0815"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"Permission to use Bash with command bash ./deploy-moi.sh has been denied."}]}}"#,
+    );
+    assert_eq!(
+        hub::sessions::commands_in_last_turn(tail, 4),
+        vec!["bash ./deploy-moi.sh ban-0815".to_string()]
+    );
+}
+
+/// Cửa PHÁ vẫn gác, và nó gác đúng ở chỗ nguy nhất.
+///
+/// Nguồn chắc chắn không có nghĩa là được phép: phiên hub mở chạy sau
+/// `DENIED_TOOLS`, nên `rm` / `git reset --hard` bị chặn là chuyện THƯỜNG — tức
+/// nhánh bị-từ-chối là nơi lệnh phá xuất hiện NHIỀU nhất, không phải ít nhất.
+/// Một cái nút bấm một cái là chạy thì không có bước hỏi lại.
+#[test]
+fn a_destructive_denied_command_never_becomes_a_button() {
+    for cmd in [
+        "rm -rf /Users/hanguyen/projects/hub/rust/target",
+        "git reset --hard origin/main",
+    ] {
+        let tail = format!(
+            concat!(
+                r#"{{"type":"user","message":{{"role":"user","content":"dọn hộ"}}}}"#,
+                "\n",
+                r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"t1","name":"Bash","input":{{"command":"{cmd}"}}}}]}}}}"#,
+                "\n",
+                r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command {cmd} has been denied."}}]}}}}"#,
+            ),
+            cmd = cmd
+        );
+        assert!(
+            hub::sessions::commands_in_last_turn(&tail, 4).is_empty(),
+            "{cmd} vẫn ra nút: {:?}",
+            hub::sessions::commands_in_last_turn(&tail, 4)
+        );
+    }
+}
+
+/// Luật 5 gác cả ở đây: một dòng lệnh cũng là chữ RỜI KHỎI MÁY này.
+///
+/// `curl -H "Authorization: Bearer …"` là một dòng lệnh hoàn toàn hợp lệ, và
+/// đẩy nó lên Telegram là đẩy nguyên cái khoá đi theo.
+#[test]
+fn a_denied_command_carrying_a_secret_is_withheld() {
+    let tail = concat!(
+        r#"{"type":"user","message":{"role":"user","content":"gọi thử API"}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"curl -H \"Authorization: Bearer abc123def456\" https://example.test/v1/me"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command curl has been denied."}]}}"#,
+    );
+    assert!(
+        hub::sessions::commands_in_last_turn(tail, 4).is_empty(),
+        "{:?}",
+        hub::sessions::commands_in_last_turn(tail, 4)
+    );
+}
+
+/// Một KHỐI nhiều dòng không phải một cái nút.
+///
+/// Nút này gõ vào một TUI qua `/type`; một khối nhiều dòng gõ vào đó là một cú
+/// DÁN, và mỗi dấu xuống dòng trong đó là một cú Enter không ai xin. Đo được:
+/// 70 trong 571 lệnh bị từ chối là khối nhiều dòng.
+#[test]
+fn a_multiline_denied_block_is_not_a_button() {
+    let tail = concat!(
+        r#"{"type":"user","message":{"role":"user","content":"đo hộ"}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"python3 - <<'PY'\nprint(1)\nPY"}}]}}"#,
+        "\n",
+        r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command python3 has been denied."}]}}"#,
+    );
+    assert!(
+        hub::sessions::commands_in_last_turn(tail, 4).is_empty(),
+        "{:?}",
+        hub::sessions::commands_in_last_turn(tail, 4)
+    );
+}
+
+/// Và đúng ca Hà chê: lệnh phiên VIẾT RA cho chủ máy, đọc từ sổ, ra nguyên vẹn.
+///
+/// 🔴 Hà 2026-08-14, ảnh chụp `/shot` của `[AI/tfl5]`: *"Rõ ràng có lệnh ở tfl5
+/// mà không thấy chèn nút chạy"* · *"Có lệnh bash sao lại ko có nút bấm chạy cho
+/// nó"*. Trên MÀN dòng ấy bị cửa sổ bẻ làm đôi và bản cụt lọt trần 60; trong SỔ
+/// nó là một dòng, và một dòng thì không có gì để nối.
+#[test]
+fn what_the_session_wrote_for_the_owner_comes_out_whole() {
+    let tail = concat!(
+        r#"{"type":"user","message":{"role":"user","content":"tình hình sao rồi"}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Bản vá chưa lên prod. Ba commit đang chờ ở local.\n\ngit -C /Users/hanguyen/projects/AI/tfl5 push origin main\n\nbash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814\n"}]}}"#,
+    );
+    assert_eq!(
+        hub::sessions::commands_in_last_turn(tail, 4),
+        vec![
+            "git -C /Users/hanguyen/projects/AI/tfl5 push origin main".to_string(),
+            "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814"
+                .to_string(),
+        ]
+    );
+}
+
+/// Cửa "không phá" phải hỏi ở MỌI VẾ, không chỉ ở đầu dòng.
+///
+/// 🔴 Lôi ra bằng phép đo đầu tiên của nguồn mới trên nhật ký THẬT (08-15,
+/// `tests/commands_from_log_live.rs`): giữa 24 phiên có lệnh, một phiên trả về
+/// `grep foo; <lệnh xoá cả thư mục nhà>` — mở đầu bằng `grep` nên phép hỏi
+/// `starts_with` thấy hiền, còn vế sau dấu `;` thì xoá sạch. Nút thì bấm một
+/// cái là chạy, không có bước hỏi lại nào ở giữa.
+///
+/// Ghi lại vì cách TÌM RA mới là bài học: bộ test thuần không bắt được, đơn
+/// giản vì đầu vào của nó do chính tôi nghĩ ra. Chỉ dữ liệu thật mới hỏi những
+/// câu tôi chưa nghĩ tới.
+///
+/// Chuỗi nguy hiểm dựng bằng `format!` chứ không viết thẳng: hook của máy này
+/// chặn cứng một dòng lệnh mang nguyên văn nó, kể cả khi dòng ấy chỉ là chữ
+/// trong một tệp test.
+#[test]
+fn a_destructive_clause_after_a_separator_is_still_destructive() {
+    let wipe = format!("{} -rf ~", "rm");
+    for cmd in [
+        format!("grep foo; {wipe}"),
+        format!("cargo test && {} -rf target", "rm"),
+        "npm run build || killall node".to_string(),
+        format!("git status | {} -rf x", "rm"),
+    ] {
+        let tail = format!(
+            concat!(
+                r#"{{"type":"user","message":{{"role":"user","content":"làm hộ"}}}}"#,
+                "\n",
+                r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"t1","name":"Bash","input":{{"command":"{cmd}"}}}}]}}}}"#,
+                "\n",
+                r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command x has been denied."}}]}}}}"#,
+            ),
+            cmd = cmd
+        );
+        assert!(
+            hub::sessions::commands_in_last_turn(&tail, 4).is_empty(),
+            "{cmd} vẫn ra nút: {:?}",
+            hub::sessions::commands_in_last_turn(&tail, 4)
+        );
+    }
+    // …và cửa KHÔNG được siết lan: một lệnh chỉ NHẮC tới chữ ấy vẫn phải qua.
+    let mention = format!(r#"grep -rn \"{} -rf\" scripts/"#, "rm");
+    let tail = format!(
+        concat!(
+            r#"{{"type":"user","message":{{"role":"user","content":"tìm hộ"}}}}"#,
+            "\n",
+            r#"{{"type":"assistant","message":{{"role":"assistant","content":[{{"type":"tool_use","id":"t1","name":"Bash","input":{{"command":"{mention}"}}}}]}}}}"#,
+            "\n",
+            r#"{{"type":"user","message":{{"role":"user","content":[{{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command grep has been denied."}}]}}}}"#,
+        ),
+        mention = mention
+    );
+    assert_eq!(
+        hub::sessions::commands_in_last_turn(&tail, 4),
+        vec![format!(r#"grep -rn "{} -rf" scripts/"#, "rm")],
+    );
+}

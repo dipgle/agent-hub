@@ -242,19 +242,6 @@ fn the_cycle_verbs_take_no_id_and_ingest_is_no_longer_one_of_them() {
     }
 }
 
-#[test]
-fn project_pin_reads_shows_and_clears() {
-    let (kind, _, arg) = parse_command("/project dwork").expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Project);
-    assert_eq!(arg, "dwork");
-    // No name = "what is pinned right now?"
-    let (kind, _, arg) = parse_command("/project").expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Project);
-    assert_eq!(arg, "");
-    // "-" clears it.
-    let (_, _, arg) = parse_command("/project -").expect("parsed");
-    assert_eq!(arg, "-");
-}
 
 /// 🔴 Mệnh lệnh đụng vào một phiên sống thì phải TỰ NÓI nó đụng vào phiên nào.
 ///
@@ -316,24 +303,7 @@ fn the_accounts_verb_answers_to_three_spellings() {
     }
 }
 
-/// `/cmd <dòng lệnh>` — Hà 2026-08-12: *"thêm một cổng chạy lệnh nữa… chạy 1
-/// command xong trả về kết quả rồi nó đóng luôn"*, gõ từ Telegram.
-///
-/// Phần sau động từ phải giữ NGUYÊN VĂN: một dòng shell có `|`, `&&`, dấu nháy.
-#[test]
-fn the_cmd_verb_keeps_the_whole_line_verbatim() {
-    let (kind, id, arg) = parse_command("/cmd git -C ~/x status | head -3").expect("parse");
-    assert_eq!(kind, hub::adapters::CommandKind::Cmd);
-    assert_eq!(id, 0);
-    assert_eq!(arg, "git -C ~/x status | head -3", "dòng lệnh bị cắt xén");
-}
 
-#[test]
-fn the_cmd_verb_without_a_line_still_parses_so_the_reply_can_teach() {
-    let (kind, _, arg) = parse_command("/cmd").expect("parse");
-    assert_eq!(kind, hub::adapters::CommandKind::Cmd);
-    assert!(arg.is_empty(), "không có lệnh thì arg phải rỗng: {arg}");
-}
 
 /// `/close` là một động từ RIÊNG, không phải `/stop` đội tên khác.
 ///
@@ -360,13 +330,6 @@ fn close_is_its_own_verb_and_takes_an_optional_id() {
         parse_command("/stop"),
         Some((CommandKind::Stop, 0, String::new()))
     );
-
-    // `/win` cần một dòng lệnh — trống thì không phải lệnh, đừng mở cửa sổ rỗng.
-    assert_eq!(
-        parse_command("/win sudo -v"),
-        Some((CommandKind::Win, 0, "sudo -v".to_string()))
-    );
-    assert_eq!(parse_command("/win"), None);
 }
 
 /// `/runin <id> <lệnh>` — máy chạy, phiên đọc.

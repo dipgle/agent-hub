@@ -238,9 +238,13 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    not public endpoints.
 
    Routes: session · new · ask · tell · stop · close · handover · type · key ·
-   **pick** · shot · cmd · runin · win · project · run · doctor · set · upgrade ·
-   help · **accounts**. (`ingest`/`poll` died 2026-08-14 with the poll stage —
-   it read the chat room, and Telegram pushes.)
+   **pick** · shot · runin · run · doctor · set · upgrade · help · **accounts**.
+   (`ingest`/`poll` died 2026-08-14 with the poll stage — it read the chat room,
+   and Telegram pushes. `cmd`/`win`/`project` died 2026-08-15: đo trên toàn bộ
+   log thì `win` và `project` chưa chạy lần nào từ 26/07, `cmd` đúng một lần và
+   lần ấy là chạm menu nên chẳng thực thi gì. Hà chốt *"Bỏ cả 3"*, và về `cmd`:
+   *"Không cần cmd vì có terminal là dán vào được"* — ngồi ở máy thì dán thẳng,
+   đúng phép thử cầu nối.)
 
    **`/pick` vs `/key`, và vì sao phải là hai** (2026-08-13). `AskUserQuestion`
    có thể mang **nhiều câu** trong một bảng, vẽ thành một thanh tab

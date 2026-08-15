@@ -145,9 +145,7 @@ route — nên nó không biết và không cần biết lệnh tới từ kênh
 | Lệnh | Việc |
 |---|---|
 | `/accounts` | ba tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, `/new` mặc định vào tài khoản nào |
-| `/cmd <dòng lệnh>` | chạy một lệnh trên máy rồi trả kết quả (chạy xong là hết) |
 | `/upgrade` | hub tự dựng lại chính nó từ mã hiện tại rồi khởi động lại |
-| `/project [tên]` | xem/ghim dự án cho buồng chat (`/project -` để bỏ ghim) |
 | `/run` · `/doctor` | chạy một vòng ngay · kiểm tra thật |
 | `/set <khoá> <giá trị>` | sửa một trường cấu hình (validate + backup + ghi nguyên tử) |
 | `/help` | bảng này, đọc thẳng từ mã |

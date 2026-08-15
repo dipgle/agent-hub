@@ -131,15 +131,6 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
         // `/accounts` — cũng là một verb không mang id. `acc` để gõ nhanh trên
         // điện thoại, `taikhoan` cho lối gõ không dấu quen thuộc của phòng này.
         "accounts" | "acc" | "taikhoan" => Some((CommandKind::Accounts, 0, String::new())),
-        // `/cmd <dòng lệnh>` — phần sau động từ là NGUYÊN VĂN dòng lệnh, nên
-        // cắt lại từ chuỗi thô: `id` của bộ phân tích chung sẽ nuốt mất chữ đầu.
-        "cmd" | "sh" => {
-            let rest = t[1..]
-                .split_once(char::is_whitespace)
-                .map(|(_, r)| r.trim().to_string())
-                .unwrap_or_default();
-            Some((CommandKind::Cmd, 0, rest))
-        }
         // `/runin <id> <lệnh>` — id đi TRƯỚC, phần còn lại là nguyên văn dòng
         // lệnh. Không có id thì không nhận: cái nút luôn mang id, và một
         // `/runin` gõ tay không id sẽ chạy vào phiên đang theo — đúng con
@@ -164,15 +155,6 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
                 .unwrap_or_default();
             Some((CommandKind::Close, 0, want))
         }
-        // `/win <dòng lệnh>` — cùng cách cắt với `/cmd`, khác chỗ CHẠY: một cửa
-        // sổ Terminal thật, vì thứ nó thiếu là một cái tty.
-        "win" | "cuaso" => {
-            let rest = t[1..]
-                .split_once(char::is_whitespace)
-                .map(|(_, r)| r.trim().to_string())
-                .unwrap_or_default();
-            (!rest.is_empty()).then_some((CommandKind::Win, 0, rest))
-        }
         // `/set <khoá> <giá trị>` — ô id ở đây giữ KHOÁ, nên cắt lại từ chuỗi
         // thô thay vì dùng id đã phân tích.
         "set" | "cauhinh" => {
@@ -188,14 +170,15 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
                 rest,
             ))
         }
-        // `/project` nhận một TÊN, nên cắt lại: ô id vô nghĩa ở đây.
-        "project" | "duan" => {
-            let name = t[1..]
-                .split_once(char::is_whitespace)
-                .map(|(_, r)| r.trim().to_string())
-                .unwrap_or_default();
-            Some((CommandKind::Project, 0, name))
-        }
+        // 🔴 `/cmd` · `/win` · `/project` đã gỡ ngày 2026-08-15 (Hà: *"Bỏ cả
+        // 3"*, và về `/cmd`: *"Không cần cmd vì có terminal là dán vào được"*).
+        // Đo trên toàn bộ log: `/win` và `/project` chưa chạy lần nào từ 26/07;
+        // `/cmd` đúng một lần, và lần ấy là chạm menu ☰ nên ack là "cần một
+        // dòng lệnh" — chưa có dòng shell nào thật sự chạy qua nó.
+        //
+        // Ba nhánh `match` của chúng vốn đã CHẾT trước cả khi bị gỡ: bảng lệnh
+        // ở trên trả lời trước và `return` ngay với `Arg::Rest`, nên chúng
+        // không bao giờ tới lượt.
         // `/session <uuid>` — ô id chỉ đọc được số nguyên, mà id phiên là uuid,
         // nên cắt lại như `/project`.
         //

@@ -1377,9 +1377,10 @@ fn stopped_session(db: &Db, want: &str) -> Option<crate::sessions::LiveSession> 
     }
 }
 
-pub fn project_pin_key(thread_key: &str) -> String {
-    format!("pin:project:{thread_key}")
-}
+// 🔴 ĐÃ XOÁ `project_pin_key` (2026-08-15) cùng route `/project`. Cái ghim ấy
+// ghi vào một cuốn sổ mà CHỈ CHÍNH NÓ đọc lại: `/new` không hề tra ghim, nó lấy
+// dự án từ cờ `-s`. Nên `/project dwork` chỉ làm được một việc — để `/project`
+// trơn in lại chữ "dwork".
 
 /// Dòng "lỗi gần đây" của `/doctor`, đọc từ bảng `runs`.
 ///
@@ -3578,120 +3579,6 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }
-            CommandKind::Win => {
-                // Cửa sổ THẬT, vì thứ thiếu là một cái tty — xem `CommandKind::Win`.
-                //
-                // 🔴 CHẠY ĐÚNG DÒNG ANH GÕ, không bọc thêm gì. Hà 2026-08-13:
-                // *"tại sao lệnh chỉ có 1 dòng mà chèn thêm text vào làm gì?"*.
-                // Bản đầu ghép `cd <gốc workspace>; <lệnh>` để cwd khớp `/cmd`
-                // — lý do nghe hợp lý, và cái giá là mọi cửa sổ mở ra đều bắt
-                // đầu bằng một dòng anh không gõ, dài hơn cả lệnh thật.
-                //
-                // Phép thử cầu nối trả lời gọn: ngồi trước máy anh mở cửa sổ
-                // rồi dán ĐÚNG dòng ấy, không ai tự thêm một `cd` vào trước.
-                // Cần thư mục thì gõ `cd` — như ở terminal. Đổi lại, câu trả
-                // lời phải NÓI RA cửa sổ mở ở đâu, vì đó là thứ vừa đổi.
-                let line = cmd.arg.trim().to_string();
-                let ack = if line.is_empty() {
-                    "⚠ /win cần một dòng lệnh. Ví dụ: /win sudo -v".to_string()
-                } else {
-                    match crate::keys::open_window(&line) {
-                        Ok((win, tty)) => {
-                            logging::info(
-                                "win_opened",
-                                json!({ "cmd": crate::exec::truncate(&line, 120),
-                                        "window": win, "tty": tty }),
-                            );
-                            format!(
-                                "🖥 Đã mở cửa sổ Terminal ({tty}) và chạy đúng dòng này:\n{line}\n\n\
-                                 Cửa sổ mở ở thư mục mặc định của shell, không phải gốc workspace — \
-                                 cần chỗ khác thì gõ cd. Kết quả nằm TRÊN cửa sổ ấy, không về đây: \
-                                 đó là chỗ gõ mật khẩu."
-                            )
-                        }
-                        // Không nuốt: mở cửa sổ hỏng thì người bấm phải biết,
-                        // không thì họ ngồi chờ một cái cửa sổ không tồn tại.
-                        Err(e) => {
-                            let msg = crate::logging::err_chain(&e);
-                            logging::error(
-                                "win_open_failed",
-                                json!({ "cmd": crate::exec::truncate(&line, 120), "err": msg }),
-                            );
-                            format!(
-                                "⚠ chưa mở được cửa sổ: {}",
-                                crate::exec::truncate(&msg, 200)
-                            )
-                        }
-                    }
-                };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
-            }
-            CommandKind::Cmd => {
-                // Chạy đúng MỘT lệnh rồi thôi (Hà 2026-08-12: *"chạy 1 command
-                // xong trả về kết quả rồi nó đóng luôn"*).
-                //
-                // Đi qua shell đăng nhập của chủ máy (`zsh -lc`) chứ không tự
-                // tách tham số: người gõ trên điện thoại gõ đúng cái họ gõ ở
-                // terminal — có `|`, có `&&`, có `~`. Tự tách là dựng một thứ
-                // ngôn ngữ thứ hai gần giống shell, và mọi khác biệt của nó sẽ
-                // là một lần "sao ở đây chạy mà ở kia không".
-                //
-                // Thư mục làm việc là GỐC WORKSPACE — cùng chỗ mọi phiên mở ra,
-                // nên đường dẫn tương đối trong đầu người gõ khớp với thực tế.
-                let line = cmd.arg.trim().to_string();
-                let ack = if line.is_empty() {
-                    "⚠ /cmd cần một dòng lệnh. Ví dụ: /cmd git -C ~/projects/AI/hub status --short"
-                        .to_string()
-                } else {
-                    let out = crate::exec::run(
-                        "/bin/zsh",
-                        &["-lc", &line],
-                        crate::exec::RunOpts {
-                            cwd: Some(cfg.workspace_root.as_path()),
-                            timeout: Some(std::time::Duration::from_secs(
-                                cfg.call.timeout_sec.min(120),
-                            )),
-                            ..Default::default()
-                        },
-                    );
-                    match out {
-                        Ok(r) => {
-                            logging::info(
-                                "cmd_run",
-                                json!({ "cmd": crate::exec::truncate(&line, 120),
-                                        "code": r.code, "timed_out": r.timed_out, "ms": r.ms }),
-                            );
-                            let report =
-                                cmd_report(r.code, r.timed_out, &r.stdout, &r.stderr, r.ms);
-                            // Kết quả RỜI KHỎI MÁY (đi vào một phòng chat trên
-                            // server, và sang Telegram) nên nó phải qua đúng cổng
-                            // quét rò như mọi thứ khác — luật 5.
-                            let risk = crate::sessions::preview_risk(&report);
-                            if risk.is_empty() {
-                                report
-                            } else {
-                                format!(
-                                    "🔒 lệnh chạy xong nhưng hub GIỮ LẠI kết quả: có dấu hiệu bí mật ({}). Xem trên máy.",
-                                    risk.join(", ")
-                                )
-                            }
-                        }
-                        Err(e) => {
-                            logging::error(
-                                "cmd_failed",
-                                json!({ "cmd": crate::exec::truncate(&line, 120), "err": e.to_string() }),
-                            );
-                            format!(
-                                "⚠ không chạy được: {}",
-                                crate::exec::truncate(&e.to_string(), 200)
-                            )
-                        }
-                    }
-                };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
-            }
             CommandKind::Accounts => {
                 // Một ảnh chụp thật, không phải con số nhớ từ lượt trước: câu
                 // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì
@@ -4999,55 +4886,6 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     reply_in_channel(db, cfg, adapter, cmd, &ack);
                     Some(ack)
                 }
-            }
-            CommandKind::Project => {
-                // The pin belongs to the conversation, so it is keyed on the
-                // same thread the messages use.
-                //
-                // 🔴 Khoá cũ là `tfl5:<app_tid>:<room>` — tên phòng chat, gỡ
-                // 2026-08-14. Nay là buồng Telegram, thứ duy nhất còn nói
-                // chuyện với hub. Hàng cũ trong `cursors` **không được chuyển
-                // sang**: đã đọc trước khi đổi, giá trị của nó là chuỗi RỖNG
-                // (ghim đã gỡ từ trước), nên chuyển hay không cũng cùng một kết
-                // quả — và một phép chuyển dữ liệu chạy vì "cho chắc" là phép
-                // chuyển không ai kiểm được.
-                let thread = format!("telegram:{}", cmd.chat_id);
-                let key = project_pin_key(&thread);
-                let want = cmd.arg.trim();
-                let known = known_projects(cfg);
-                let ack = if want.is_empty() {
-                    match db.get_cursor(&key) {
-                        Ok(Some(p)) => format!("📌 Đang ghim dự án: {p}"),
-                        // There used to be a fallback here: "no pin, but the
-                        // last message on this thread mentioned <project>". It
-                        // read the stored messages, and messages are no longer
-                        // stored — a guess drawn from an empty table would be a
-                        // confident answer with nothing behind it.
-                        Ok(None) => {
-                            "Chưa ghim dự án cho phòng này. Đặt bằng: /project <tên>".to_string()
-                        }
-                        Err(e) => format!("⚠ không đọc được ghim: {e}"),
-                    }
-                } else if want == "-" || want.eq_ignore_ascii_case("off") {
-                    match db.set_cursor(&key, "") {
-                        Ok(()) => "📌 Đã bỏ ghim dự án cho phòng này.".to_string(),
-                        Err(e) => format!("⚠ không bỏ ghim được: {e}"),
-                    }
-                } else if !known.iter().any(|k| k == want) && !cfg.projects.contains_key(want) {
-                    // Refuse unknown names: a pin nobody can satisfy would
-                    // route every later question at a folder that is not there.
-                    format!("⚠ không có dự án '{want}'. Đang biết: {}", known.join(", "))
-                } else {
-                    match db.set_cursor(&key, want) {
-                        Ok(()) => format!(
-                            "📌 Từ giờ các câu trong phòng này mặc định thuộc dự án {want} \
-                             (bỏ ghim: /project -)"
-                        ),
-                        Err(e) => format!("⚠ không ghim được: {e}"),
-                    }
-                };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
             }
             CommandKind::SetConfig => {
                 let (key, value) = cmd

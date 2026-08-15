@@ -30,9 +30,6 @@ pub enum CommandKind {
     Doctor,
     /// Set ONE config field: `arg` is "<dotted.key> <value>".
     SetConfig,
-    /// Pin / show / clear the project this conversation is about. `arg` is the
-    /// project name, "-" to clear, or empty to report the current one.
-    Project,
     /// Focus one Claude CLI session so the next snapshot carries its full
     /// stream. `arg` is the session id, or "-" to stop following.
     ///
@@ -99,19 +96,6 @@ pub enum CommandKind {
     /// looking at one session's stream, and asking a person to retype a uuid
     /// there is asking them not to use the feature.
     Ask,
-    /// `/cmd <dòng lệnh>` — chạy ĐÚNG MỘT lệnh trên máy rồi trả kết quả về.
-    ///
-    /// Hà 2026-08-12: *"thêm một cổng chạy lệnh nữa… `/cmd lệnh`: ví dụ bash …
-    /// chạy 1 command xong trả về kết quả rồi nó đóng luôn"*, gõ **từ Telegram**.
-    ///
-    /// Đây KHÔNG phải một quyền mới: `/type` đã gõ thẳng phím vào cửa sổ terminal
-    /// từ 2026-08-09 và **bỏ qua `DENIED_TOOLS`** — nghĩa là từ điện thoại vẫn
-    /// chạy được bất cứ thứ gì, chỉ là phải có một phiên đang mở và phải gõ mò.
-    /// `/cmd` chỉ làm con đường ấy THẲNG và có kết quả trả về. Cổng gác vẫn là
-    /// một: chỉ tid/chat_id của chủ máy mới ra lệnh được.
-    ///
-    /// Một lệnh, một lượt, không phiên nào ở lại — đúng chữ *"đóng luôn"*.
-    Cmd,
     /// `/runin <id> <lệnh>` — hub chạy lệnh, rồi DÁN KẾT QUẢ vào phiên.
     ///
     /// 🔴 Hà 2026-08-13, sau khi biết dấu `!` chưa bao giờ bật chế độ bash:
@@ -153,30 +137,6 @@ pub enum CommandKind {
     /// hết lượt đang xếp hàng, còn bận thì TỪ CHỐI đóng — đóng lúc ấy bật hộp
     /// thoại "terminate running processes", thứ khoá mồm mọi lệnh sau nó.
     Close,
-    /// `/win <lệnh>` — chạy trong một **cửa sổ Terminal thật**, không phải nền.
-    ///
-    /// 🔴 Hà 2026-08-13, gửi ảnh chụp lời một phiên khác: *"`!` trong Claude
-    /// Code không cấp tty, nên `ssh -t` không xin được — không phải lỗi sudo
-    /// hay script. Cần một cửa sổ terminal thật, dán đúng dòng này rồi gõ mật
-    /// khẩu"*, rồi chốt: *"với lệnh này chỉ chạy được trong terminal không chạy
-    /// được trong cli nên cần thêm cách tạo nút"*.
-    ///
-    /// `/cmd` sinh tiến trình con KHÔNG có tty, nên mọi thứ đòi bàn phím —
-    /// `sudo`, `ssh -t`, `passwd`, một `read -s` — chết ngay ở dòng hỏi, và
-    /// chết theo kiểu khó đọc (*"a terminal is required"*), chứ không phải kiểu
-    /// "lệnh sai". Đây không phải lỗi vá được trong `/cmd`: **cái thiếu là một
-    /// cái tty**, mà tty thì chỉ cửa sổ mới có.
-    ///
-    /// Nên đúng như luật cầu nối: ngồi ở máy anh sẽ mở một cửa sổ rồi dán vào
-    /// đó. `/win` làm đúng thế — `keys::open_window`, cùng đường `/new` đã đi.
-    /// Cửa sổ **ở lại** sau khi lệnh chạy xong: đó là chỗ gõ mật khẩu, và cũng
-    /// là chỗ đọc kết quả.
-    ///
-    /// Hai đường này KHÔNG thay nhau: `/cmd` trả kết quả về điện thoại (đọc
-    /// được từ xa, không cần đứng dậy), `/win` cần người ngồi trước máy. Nút
-    /// `🖥` chỉ mọc kèm KẾT QUẢ của `/cmd`, tức đúng lúc đã biết đường kia
-    /// không đi được.
-    Win,
     /// `/accounts` — ba tài khoản `claude` trên máy này: phiên nào đang chạy
     /// bằng tài khoản nào, còn bao nhiêu hạn mức, và **`/new` không nói `@acc`
     /// thì rơi vào tài khoản nào**.

@@ -1485,38 +1485,10 @@ impl Inbox {
                 }
                 return;
             }
-            // `win:<n>` — cùng cuốn sổ lệnh gợi ý với `run:<n>`, khác chỗ
-            // CHẠY: một cửa sổ Terminal thật, vì `!` của TUI không cấp tty
-            // (xem `CommandKind::Win`). Một sổ, hai đường ra — không đẻ thêm
-            // danh sách lệnh thứ hai để rồi lệch nhau.
-            if let Some(n) = data
-                .strip_prefix("win:")
-                .and_then(|n| n.parse::<usize>().ok())
-            {
-                match crate::db::Db::open(&self.cfg.db)
-                    .ok()
-                    .and_then(|db| crate::pipeline::quick_cmd(&db, n))
-                {
-                    Some((_sid, line)) => {
-                        // `/win` mở một cửa sổ MỚI nên không nhắm vào phiên nào
-                        // cả — id ở đây chỉ để log truy được nút từ đâu ra.
-                        logging::info(
-                            "telegram_quick_cmd_window",
-                            json!({ "n": n, "from_session": _sid,
-                                    "cmd": crate::exec::truncate(&line, 120) }),
-                        );
-                        self.push_text(&format!("/win {line}"));
-                    }
-                    None => {
-                        if let Err(e) = self
-                            .send_text("⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.")
-                        {
-                            logging::error("telegram_ack_failed", json!({ "err": e }));
-                        }
-                    }
-                }
-                return;
-            }
+            // 🔴 ĐÃ XOÁ nhánh nút `win:<n>` (2026-08-15) cùng route `/win`. Nó
+            // đã MỒ CÔI từ trước đó: `remember_quick` nay chỉ phát `run:` hoặc
+            // `upgrade`, mỗi lệnh đúng một nút — có test khoá đúng chuyện ấy —
+            // nên không còn chỗ nào phát ra loại nút này để mà bấm.
             if let Some(n) = data
                 .strip_prefix("run:")
                 .and_then(|n| n.parse::<usize>().ok())

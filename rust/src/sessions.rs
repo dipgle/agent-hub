@@ -1947,6 +1947,25 @@ pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<Cmd> {
         }
     }
     if out.len() > max {
+        // 🔴 TRẦN NÀY TỪNG CẮT IM LẶNG — Hà 2026-08-16, ảnh chụp `/shot` của
+        // `[AI/mailler]`: *"rõ ràng có 4 dòng lệnh, nhưng chỉ có 4 nút chạy"*
+        // (đếm trong ảnh: ba icon, và cái thiếu là dòng lệnh ĐẦU TIÊN).
+        //
+        // Đúng hình dạng của `drain(..len-max)`: nó giữ phần CUỐI, nên khi có
+        // dư thì thứ rơi là dòng đầu — mà từ điện thoại thì "một cái nút không
+        // có ở đó" trông y hệt "dòng ấy không phải lệnh". Giữ nguyên luật giữ
+        // phần cuối (câu chốt phiên vừa viết mới là thứ đáng bấm ngay), nhưng
+        // NÓI RA cái đã rơi: một cái trần không kêu thì lần sau lại mất một
+        // buổi đi tìm (`OPERATING-CHARTER.md`: cấm trần im lặng).
+        let dropped: Vec<String> = out[..out.len() - max]
+            .iter()
+            .map(|c| crate::exec::truncate(&c.line, 80))
+            .collect();
+        logging::warn(
+            "cmds_truncated",
+            json!({ "max": max, "dropped": dropped,
+                    "why": "quá trần nên giữ phần CUỐI — dòng lệnh đầu không có nút" }),
+        );
         out.drain(..out.len() - max);
     }
     out
@@ -2568,6 +2587,70 @@ pub fn refresh_activity(rows: &mut [LiveSession]) -> bool {
     changed
 }
 
+/// Đóng cái này có cần hỏi lại chủ máy không?
+///
+/// 🔴 Hà 2026-08-16: *"danh sách terminal thêm nút close để đóng nhanh"*. Câu
+/// xác nhận sinh ra để chặn một việc KHÔNG LÙI ĐƯỢC — đóng cửa sổ đang có việc
+/// chạy dở là mất việc ấy. Một cửa sổ trần đứng ở dấu nhắc trống thì không có
+/// gì để mất, và hỏi ở đó là dựng rào lên tay chủ máy. Anh vừa trả giá sáu lần
+/// liên tiếp lúc 12:25–12:29 để dọn sáu cửa sổ rỗng.
+///
+/// Luật nằm ở ĐÂY, một chỗ, chứ không chìm trong nhánh `/close`: nó là thứ
+/// quyết định một thao tác không lùi được có được chạy thẳng hay không, nên nó
+/// phải đo được từ ngoài.
+///
+/// Gác bằng `working` — đúng trường vẽ ra dấu 🟢/⚪ trong `/terminal` — nên cái
+/// mắt thấy và cái tay chạm là một. Phiên CLI thì LUÔN hỏi, kể cả lúc rảnh: nó
+/// giữ cả một hội thoại, và cái đó mất là mất thật.
+pub fn closing_needs_confirm(s: &LiveSession) -> bool {
+    let bare_window = s.kind == "shell" && s.account.trim().is_empty();
+    !bare_window || s.working
+}
+
+/// Mốc lần dò Terminal gần nhất CÒN TRẢ LỜI ĐƯỢC.
+///
+/// Dùng để trả lời đúng một câu khi lượt dò hỏng: *"Terminal câm từ bao giờ"*.
+/// Một lượt hỏng lẻ giữa những lượt tốt, và một quãng câm dài mười phút, trông
+/// giống hệt nhau trong log cũ — mà cách gỡ thì khác hẳn.
+static PROBE_OK_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+fn note_probe_ok() {
+    if let Ok(mut g) = PROBE_OK_AT.lock() {
+        *g = Some(std::time::Instant::now());
+    }
+}
+
+/// `None` = chưa từng dò tốt lần nào trong đời tiến trình này (vừa khởi động
+/// xong đã hỏng) — khác hẳn "vừa tốt xong đã hỏng", nên không gộp thành `0`.
+fn since_probe_ok_sec() -> Option<u64> {
+    PROBE_OK_AT
+        .lock()
+        .ok()
+        .and_then(|g| *g)
+        .map(|t| t.elapsed().as_secs())
+}
+
+/// Terminal.app còn chạy không — hỏi bằng `pgrep`, KHÔNG bằng AppleEvent.
+///
+/// Đây là chỗ mấu chốt: hỏi bằng osascript thì câu hỏi này ngã cùng lý do với
+/// cái nó đang điều tra, và trả về một dấu hỏi thứ hai thay vì một dữ kiện.
+/// `None` = không chạy nổi `pgrep`, và KHÔNG được đọc thành "đã chết".
+fn terminal_process_alive() -> Option<bool> {
+    let out = crate::exec::run(
+        "pgrep",
+        &["-x", "Terminal"],
+        crate::exec::RunOpts {
+            timeout: Some(std::time::Duration::from_secs(3)),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    if out.timed_out {
+        return None;
+    }
+    Some(!out.stdout.trim().is_empty())
+}
+
 /// Cửa sổ Terminal ĐANG MỞ mà không chạy CLI nào — cũng là một phiên.
 ///
 /// 🔴 Hà 2026-08-13: *"có lẽ cần thay đổi lại cách định nghĩa phiên cho tường
@@ -2828,14 +2911,30 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     // khoảnh khắc cách nhau một giây.
     let probe_started = std::time::Instant::now();
     let tabs = match crate::keys::terminal_screens() {
-        Ok(t) => t,
+        Ok(t) => {
+            note_probe_ok();
+            t
+        }
         Err(e) => {
             // Không đoán bù, và nói ĐỦ ba hậu quả: một lượt dò hỏng nay kéo
             // theo cả ba chỗ dùng, nên log phải kể hết — không thì màn thiếu ba
             // thứ mà log chỉ giải thích một.
+            //
+            // 🔴 Và nói thêm HAI dữ kiện, vì lượt truy 16/08 tắc đúng ở chỗ
+            // thiếu chúng. Đã loại được ba nghi phạm bằng đo thật
+            // (`tests/probe_timing_live.rs`): đọc `contents` chỉ tốn ~50 ms;
+            // bốn cú dò song song xong trong 597 ms nên hub KHÔNG tự giành với
+            // chính nó; và số cửa sổ không giải thích được (9 hàng: 183 lượt,
+            // 0 lần hết giờ · 8 hàng: 111 lượt, 16 lần). Còn lại giả thuyết
+            // "Terminal không trả lời trong một QUÃNG", mà quãng thì phải đo
+            // mới biết — nên ghi lần dò tốt gần nhất cách đây bao lâu, và hỏi
+            // `pgrep` xem Terminal có còn sống không (không tốn AppleEvent nào,
+            // nên nó trả lời được kể cả lúc Terminal đang câm).
             logging::warn(
                 "terminal_probe_failed",
                 json!({ "err": e.to_string(),
+                        "since_ok_sec": since_probe_ok_sec(),
+                        "terminal_alive": terminal_process_alive(),
                         "effect": "cửa sổ rảnh không lên danh sách · mọi phiên tạm coi là không gõ vào được · không đọc được dòng đang-làm-gì" }),
             );
             Vec::new()

@@ -36,7 +36,7 @@ enum Command {
     ///
     /// Hà 2026-08-13: *"tại sao không phải là luồng chạy độc lập trên rust, tức
     /// là mọi lệnh và luồng xử lý phải nằm trong binary"*. Đây là bản Rust của
-    /// `deploy/install.sh`, giữ nguyên hai bước không được bỏ (ký bằng chứng
+    /// `install_update.sh`, giữ nguyên hai bước không được bỏ (ký bằng chứng
     /// chỉ, cài ra đường riêng ngoài tầm với của cargo) — xem
     /// `runtime::self_install`.
     SelfInstall {

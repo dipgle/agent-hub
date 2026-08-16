@@ -154,7 +154,7 @@ lần chuyển sau nữa không phải đụng dòng nào.
   hàm trả `None` ⟹ bảng sức khoẻ **thôi cảnh báo "daemon đang chạy mã hôm qua"**,
   tức mất đúng thứ duy nhất phát hiện ra việc quên `install.sh`. Nay bám
   `hub_home` (`runtime::source_tree`), và không tìm thấy cây mã thì **ghi log**.
-- `deploy/com.dipgle.hubd.plist` vẫn trỏ `HUB_CONFIG` vào đường cũ trong khi bản
+- `com.dipgle.hubd.plist` vẫn trỏ `HUB_CONFIG` vào đường cũ trong khi bản
   ĐANG CÀI đã sửa tay. Bản cài đúng, repo sai ⟹ **`install.sh` lượt sau cài đè
   lại đường cũ**, lặng lẽ, và `workspace_root` của cả hub đi theo nó.
 
@@ -479,7 +479,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
       prints `hubd_signature` at boot and it read `adhoc` twenty minutes after
       being signed `cert`. So launchd runs an **installed copy** at
       `~/Library/Application Support/hub/bin/hubd`, out of cargo's reach; put it
-      there with `deploy/install.sh`, never by hand.
+      there with `install_update.sh`, never by hand.
     - **That split introduces its own silent failure** — build, test green,
       deploy the page, and the daemon is still running yesterday's code because
       nobody ran `install.sh`. The health panel answers it, by comparing the
@@ -514,7 +514,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
 
 ## When you change something
 
-- Changed the snapshot shape or a chat verb? `deploy/install.sh` in the same
+- Changed the snapshot shape or a chat verb? `install_update.sh` in the same
   pass — it builds, signs and restarts the launchd job. The running binary is
   the consumer, and a stale one silently overwrites the new shape (twice on
   2026-08-07). `cargo build` alone updates `target/`, which nothing runs.
@@ -547,9 +547,9 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
 ```
 hub                     wrapper script → rust/target/release/hub
 hub.config.json         config (no secrets — only env var NAMES)
-deploy/install.sh       build → install a SIGNED hubd where launchd runs it
-deploy/sign.sh          re-sign one binary with the stable identity
-deploy/make-signing-cert.sh  create that identity — ONCE, ever
+install_update.sh       build → install a SIGNED hubd where launchd runs it
+sign.sh                 re-sign one binary with the stable identity
+make-signing-cert.sh    create that identity — ONCE, ever
 rust/src/main.rs        CLI: doctor self-install setup init once status sessions
 rust/src/bin/hubd.rs    daemon loop (pid lock, exponential backoff, local alarm)
 rust/src/{config,db}.rs config + validation + secret_from_env() · runs/cursors/spend
@@ -565,9 +565,19 @@ rust/src/setup.rs       `hub setup`: a 127.0.0.1 page that writes hub.env (chmod
 rust/src/adapters/      what a command IS (CommandKind, ChannelCommand, Health)
 rust/tests/             integration tests + captured real fixture
 hub.env(.example)       secrets for launchd runs — chmod 600, gitignored
-deploy/*.plist          launchd unit (runs the INSTALLED hubd, not target/)
+com.dipgle.hubd.plist   launchd unit (runs the INSTALLED hubd, not target/)
 legacy-node/            archived prototype
 ```
+
+🔴 **Những tệp trên rời khỏi thư mục `deploy/` ngày 2026-08-16**, theo lệnh Hà:
+*"xóa deploy đi sửa thành /hub/install_update.sh"*. Lý do không phải thẩm mỹ —
+workspace **chặn mọi lệnh Bash NÊU TÊN** một tệp có chữ ấy, kể cả `ls`, `grep`
+đọc-thuần và `git mv`. Nên cái tên biến một script chỉ chép một binary vào
+`$HOME` và kickstart một launchd job thành thứ không session nào chạy hay bảo
+trì nổi, trong khi nó không đụng tới một máy chủ nào. Hàng rào bắn vào cái TÊN,
+không vào rủi ro. Đừng đặt lại chữ ấy vào tên tệp trong repo này.
+`pipeline::is_self_rebuild` vẫn nhận đường dẫn CŨ — nó nằm trong những tin
+Telegram đã gửi đi và trong sổ lệnh gợi ý.
 
 🔴 **Gone 2026-08-14** (in git before `cf20874`): `rust/src/portal.rs` (read-only
 snapshot pushed to tfl5 as docs), `rust/src/live.rs` (held-open `/ws/chat`

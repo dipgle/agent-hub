@@ -169,12 +169,12 @@ fn config_mtime(path: &std::path::Path) -> Option<(i64, u32)> {
 ///
 /// - `cert` — designated requirement neo theo *danh tính* (`identifier … and
 ///   certificate root = H"…"`). Build lại bao nhiêu lần cũng vẫn là một chương
-///   trình, quyền còn nguyên. Đây là thứ `deploy/sign.sh` tạo ra.
+///   trình, quyền còn nguyên. Đây là thứ `sign.sh` tạo ra.
 /// - `adhoc` — `cargo` ký ad-hoc, requirement là `cdhash H"…"` tức vân tay của
 ///   ĐÚNG dãy byte ấy. Lần build tới macOS coi là chương trình khác và bản chạy
 ///   dưới launchd mất sạch Full Disk Access lẫn Automation. Thấy dòng này ở bản
 ///   launchd nghĩa là ai đó trỏ nó vào `target/release/` thay vì bản đã cài —
-///   **chạy `deploy/install.sh`**.
+///   **chạy `install_update.sh`**.
 ///   (Bản chạy TAY trong terminal in `adhoc` là chuyện bình thường: nó mượn
 ///   quyền của terminal, không cần danh tính riêng.)
 /// - `unreadable` — không đọc nổi chữ ký của chính mình trong 3 giây. Với binary

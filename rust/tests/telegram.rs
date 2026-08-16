@@ -797,11 +797,11 @@ fn prose_is_not_mistaken_for_a_command() {
 fn prompts_are_stripped_and_bare_verbs_ignored() {
     // `cargo` trần: đủ dài để qua cửa độ dài, nên nó ghim ĐÚNG luật "phải có
     // tham số" chứ không ăn theo một luật khác.
-    let screen = "$ cargo test --offline\n❯ cargo\n  ./deploy/install.sh --no-build";
+    let screen = "$ cargo test --offline\n❯ cargo\n  ./install_update.sh --no-build";
     let got = hub::keys::commands_in_report(screen, 4);
     assert!(got.contains(&"cargo test --offline".to_string()), "{got:?}");
     assert!(
-        got.contains(&"./deploy/install.sh --no-build".to_string()),
+        got.contains(&"./install_update.sh --no-build".to_string()),
         "{got:?}"
     );
     assert!(
@@ -1651,7 +1651,7 @@ fn the_rebuild_command_gets_a_button_that_goes_through_upgrade() {
     for cmd in [
         "cd ~/projects/hub && ./hub self-install",
         "./hub self-install",
-        "bash deploy/install.sh",
+        "bash install_update.sh",
     ] {
         assert!(hub::pipeline::is_self_rebuild(cmd), "phải nhận ra: {cmd}");
     }
@@ -1698,13 +1698,20 @@ fn each_command_line_carries_its_run_link_in_one_message() {
 
     assert_eq!(linked, 2, "{html}");
     assert!(unlinked.is_empty());
-    // Liên kết nằm NGAY SAU dòng lệnh, không phải dưới đáy tin.
+    // Liên kết nằm NGAY SAU dòng lệnh, không phải dưới đáy tin — và dòng lệnh
+    // nằm trong `<code>`, thêm 2026-08-16 (Hà: *"không biết lệnh đó ăn 1 dòng
+    // hay cả 2?"*). Cái khung ấy vẽ ra ranh giới cho mắt, và chặn Telegram tự
+    // biến `deploy.sh`/`update.sh` thành liên kết web (`.sh` là TLD có thật).
     assert!(
-        html.contains("./hub self-install <a href=\"https://t.me/bot?start=run_0\">▶️</a>\n"),
+        html.contains(
+            "./hub self-install</code> <a href=\"https://t.me/bot?start=run_0\">▶️</a>\n"
+        ),
         "{html}"
     );
     assert!(
-        html.contains("bash ./run.sh <a href=\"https://t.me/bot?start=run_1\">▶️</a>\n"),
+        html.contains(
+            "<code>bash ./run.sh</code> <a href=\"https://t.me/bot?start=run_1\">▶️</a>\n"
+        ),
         "{html}"
     );
     // …và cả tin vẫn là MỘT chuỗi, chữ giữ nguyên thứ tự, không mẩu nào rơi ra.

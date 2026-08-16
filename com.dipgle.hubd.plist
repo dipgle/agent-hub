@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent: starts hubd at login and keeps it alive. hubd is the whole
+  daemon — the poll loop, the held-open chat socket and the snapshot push — so
+  this is the only unit there is. (There is no local web console any more; the
+  phone page on tfl5 is the only UI.)
+
+  ⚠ ĐÂY LÀ BẢN MẪU — chưa chạy được cho tới khi thay ba chỗ.
+
+  launchd KHÔNG hiểu `~` hay `$HOME`: mọi đường dẫn phải là đường TUYỆT ĐỐI của
+  máy đang cài. Mà một repo công khai thì không được mang đường dẫn của máy ai
+  cả (Hà 2026-08-13: *"mọi đường dẫn file khi public phải là đường dẫn động vì
+  nó là ứng dụng công khai"*). Nên chỗ nào phải cứng thì để DẤU CHỖ, và người
+  cài thay bằng đường của chính mình:
+
+    __HOME__         → $HOME của bạn            (vd /Users/an)
+    __INSTALL_DIR__  → $HOME/Library/Application Support/hub
+    __HUB_CONFIG__   → <thư mục hub>/hub.config.json
+
+  Một dòng làm hết:
+    sed -e "s|__HOME__|$HOME|g" \
+        -e "s|__INSTALL_DIR__|$HOME/Library/Application Support/hub|g" \
+        -e "s|__HUB_CONFIG__|$PWD/hub.config.json|g" \
+        com.dipgle.hubd.plist > ~/Library/LaunchAgents/com.dipgle.hubd.plist
+
+  Install:
+    ./hub self-install                      (build, ký, cài bản SIGNED)
+    # rồi dòng sed ở trên, rồi:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist
+  Status / logs:
+    launchctl print gui/$(id -u)/com.dipgle.hubd | head -20
+    tail -f ~/Library/Logs/hubd.err
+  Stop / uninstall:
+    launchctl bootout gui/$(id -u)/com.dipgle.hubd
+    rm ~/Library/LaunchAgents/com.dipgle.hubd.plist
+
+  SECRETS: launchd does not read your shell profile. Put tokens in
+  <hub>/hub.env (chmod 600) — hubd loads it at startup and logs only the KEY
+  NAMES. Do not paste tokens into this file; it gets copied and backed up.
+
+  MONEY: none. hub spends nothing on its own — a cycle costs zero, and the only
+  calls to `claude` come from a person pressing a button on the phone.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.dipgle.hubd</string>
+
+  <!-- Bản ĐÃ CÀI, không phải bản cargo vừa build. Đo 2026-08-10: ký chứng chỉ
+       thẳng vào `target/release/hubd` chỉ sống được tới lệnh cargo kế tiếp —
+       `cargo test –release` và `cargo clippy all-targets` LINK LẠI binary rồi
+       ký đè ad-hoc, im lặng, và chỉ lộ ở lần khởi động máy sau. Bản cài nằm
+       ngoài tầm với của cargo; đổi nó phải cố ý chạy `install_update.sh`. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__INSTALL_DIR__/bin/hubd</string>
+  </array>
+
+  <!-- Thư mục làm việc phải nằm NGOÀI ~/Documents. Đo 2026-08-10: để nó ở
+       trong, tiến trình do launchd sinh ra treo cứng ngay tại `getcwd()` —
+       `open$NOCANCEL` chờ một hộp thoại TCC không bao giờ hiện lên cho tiến
+       trình nền. Không có log, không có mã lỗi, chỉ là một pid nằm im. -->
+  <key>WorkingDirectory</key>
+  <string>__INSTALL_DIR__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- gh, claude, git and sqlite3 live outside launchd's default PATH.
+         `~/.cargo/bin` thêm 2026-08-14: route `/upgrade` dựng lại hub bằng
+         `cargo build –release`, và thiếu nó thì lệnh ấy chết ngay câu đầu —
+         *"spawn cargo failed: No such file or directory"* — trong khi chạy tay
+         ở Terminal vẫn chạy, vì shell đăng nhập có PATH khác hẳn. Một cây cầu
+         gãy đúng nhịp cuối, và chỉ gãy cho người đứng ở đầu bên kia. -->
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:__HOME__/.cargo/bin:__HOME__/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Thư mục làm việc không còn nằm trong repo, nên hub không thể tìm
+         `hub.config.json` bằng cách đi ngược lên từ cwd nữa. Chỉ thẳng đường:
+         thiếu dòng này, hub rơi về cấu hình mặc định và ghi
+         `adapter_skipped reason=disabled` — chạy, nhưng không nối với phòng
+         chat nào cả (đo 2026-08-10).
+         Gốc workspace đổi sang `~/projects` ngày 2026-08-12 (`~/Documents/...`
+         nay chỉ là symlink; TCC gác Documents nên đường cũ mất quyền đọc từng
+         lúc). Đường này còn quyết cả `hub_home` ⟹ `workspace_root`, tức danh
+         sách dự án và mọi phiên `/new`. Bản ĐANG CÀI đã sửa tay lúc 22:13; nếu
+         dòng dưới quay về `Documents` thì `install.sh` kế tiếp cài đè lại đường
+         cũ mà không ai thấy. -->
+    <key>HUB_CONFIG</key>
+    <string>__HUB_CONFIG__</string>
+
+    <key>HUB_LOG_LEVEL</key>
+    <string>info</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <!-- 🔴 ĐÂY LÀ MỘT DÒNG CỦA SẢN PHẨM ĐÃ CHẾT, và nó làm nghẽn cả cây cầu.
+
+       Dòng cũ ghi "Do not fight the user for CPU; triage is a background
+       chore" — đúng cho cái inbox có bộ phân loại chạy nền, thứ đã bị xoá
+       ngày 2026-08-08. hub hôm nay KHÔNG phải việc vặt chạy nền: mỗi lượt của
+       nó là một người đang cầm điện thoại chờ.
+
+       `ProcessType Background` đặt tiến trình vào QoS nền, và trên máy Apple
+       Silicon nghĩa là bị ghim vào lõi tiết kiệm điện — MỌI tiến trình con
+       thừa hưởng theo. Đo 2026-08-14, cùng một lệnh:
+         `claude agents json` gõ tay ............ 0,3s mỗi tài khoản
+         cùng lệnh ấy, gọi từ hubd ................ 12,4s cho ba tài khoản
+       Hà hỏi đúng câu dẫn tới đây: *"máy khỏe, chỉ phục vụ 1 kênh chat, vài
+       lệnh không liên tục, vậy tại sao lại nghẽn"*. Không phải vì tải — vì
+       hub tự xếp mình xuống hạng chót rồi ngồi chờ chính mình.
+
+       `Interactive`: có người đang chờ ở đầu bên kia. `LowPriorityIO` đi theo
+       cùng lý do — đọc nhật ký phiên là việc người ta đang đợi. -->
+  <key>ProcessType</key>
+  <string>Interactive</string>
+
+  <!--
+    Log NGOÀI ~/Documents.
+
+    Đo 2026-08-09: bootstrap xong, `launchctl list` báo `- 78 com.dipgle.hubd`,
+    `runs = 105`, và KHÔNG có một dòng nào của bản launchd trong log — tức
+    launchd chưa spawn nổi chứ không phải hubd thoát (hubd chỉ trả 70/3/1).
+    Mọi thứ khác đều đúng: plist hợp lệ, binary có quyền chạy, không đăng ký cũ
+    kẹt, và bỏ khoá pid 70 giây vẫn không dựng lên.
+
+    Thứ còn lại là TCC: `~/Documents` là thư mục macOS bảo vệ, và launchd phải
+    MỞ ĐƯỢC StandardOutPath trước khi chạy chương trình. Không mở được thì hỏng
+    ở đúng bước dựng stdio, và đó là `EX_CONFIG` (78). `~/Library/Logs` không bị
+    bảo vệ, nên log ra đó.
+
+    Đo lại 2026-08-10 (sau khi ký chứng chỉ): bản launchd ĐỌC ĐƯỢC `~/Documents`
+    — nó nạp `hub.env` và khoá pid trong đó, có dòng `hub_env_loaded` làm chứng.
+    Nên phần "TCC chặn Documents" ở trên chỉ đúng cho `StandardOutPath`, thứ
+    launchd tự mở TRƯỚC khi chạy chương trình, chứ không đúng cho hubd.
+
+    Nếu một ngày nó đọc không nổi: cấp Full Disk Access cho
+    ~/Library/Application Support/hub/bin/hubd. Nay việc đó chỉ phải làm MỘT
+    lần, vì bản cài mang chữ ký cố định — trước đây mỗi lần build là mất quyền.
+  -->
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/hubd.out</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/hubd.err</string>
+</dict>
+</plist>

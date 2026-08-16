@@ -581,7 +581,7 @@ fn auth_block(cfg: &Config) -> Value {
 
 /// Will hub come back by itself after a reboot?
 ///
-/// Measured 2026-08-09: the answer was NO — `deploy/com.dipgle.hubd.plist` sat
+/// Measured 2026-08-09: the answer was NO — `com.dipgle.hubd.plist` sat
 /// in the repo, never installed, and the daemon was alive only because someone
 /// had started it by hand. That is exactly the kind of fact that is invisible
 /// until the day it matters, so it belongs on the screen.
@@ -620,11 +620,15 @@ fn autostart_state(cfg: &Config) -> Value {
         // Câu hướng dẫn phải trỏ vào cây mã ĐANG chạy, không phải một đường dẫn
         // gõ cứng: gốc workspace đã đổi một lần (2026-08-12), và một dòng hướng
         // dẫn cũ thì bảo chủ máy cài đè plist của thư mục cũ.
+        // 🔴 Tên đổi 2026-08-16 (Hà: *"xóa deploy đi sửa thành
+        // /hub/install_update.sh"*): workspace CHẶN mọi lệnh Bash nêu một tệp
+        // có chữ ấy trong tên, nên dòng hướng dẫn cũ là một dòng không ai gõ
+        // được — kể cả chủ máy dán lại nó vào phiên.
         "how_to_install": format!(
-            "deploy/install.sh && \
-             cp {}/deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/ && \
+            "{home}/install_update.sh && \
+             cp {home}/com.dipgle.hubd.plist ~/Library/LaunchAgents/ && \
              launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist",
-            cfg.hub_home.display()
+            home = cfg.hub_home.display()
         ),
     })
 }
@@ -638,8 +642,8 @@ fn autostart_state(cfg: &Config) -> Value {
 /// của cây cầu: **hub không tự cài được chính nó**, nên mỗi bản vá đều phải có
 /// người ngồi ở máy gõ một dòng — đúng thứ mà cả dự án này sinh ra để bỏ đi.
 ///
-/// Ba bước dưới đây chép nguyên `deploy/install.sh`, và giữ nguyên hai lý do
-/// tồn tại của nó (đo 2026-08-10, xem `deploy/sign.sh`):
+/// Ba bước dưới đây chép nguyên `install_update.sh`, và giữ nguyên hai lý do
+/// tồn tại của nó (đo 2026-08-10, xem `sign.sh`):
 /// - **ký bằng chứng chỉ**, vì `cargo` ad-hoc-ký lại mỗi lần link và TCC gắn
 ///   quyền theo *danh tính chữ ký* — mất chữ ký là mất quyền, im lặng, chỉ lộ
 ///   ở lần khởi động máy sau;
@@ -923,7 +927,7 @@ const INSTALLED_HUBD: &str = "~/Library/Application Support/hub/bin/hubd";
 ///    động lại máy, rồi im.
 /// 2. **Bản cài có cũ hơn bản vừa build không**? Đây là cái giá của việc tách
 ///    hai file: sửa mã, `cargo build`, test xanh, deploy trang — và daemon vẫn
-///    đang chạy mã của hôm qua vì không ai chạy `deploy/install.sh`. Không có
+///    đang chạy mã của hôm qua vì không ai chạy `install_update.sh`. Không có
 ///    dòng này thì không gì phát hiện ra.
 ///
 /// Trả `None` cho câu nào không hỏi được, không đoán bừa (`unknown` ≠ `sai`).

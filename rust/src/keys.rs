@@ -1327,6 +1327,20 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
             continue;
         }
         if destructive(line) {
+            // 🔴 KHÔNG dựng nút — nhưng cũng KHÔNG im. Hà 2026-08-16, ảnh chụp
+            // tin của `[tcc/amm]` có ba dòng `rm ~/…/.tmp-*.mjs`: *"có lệnh
+            // nhưng không có nút bấm"*.
+            //
+            // Việc không dựng nút là ĐÚNG và cố ý (`destructive`): một cú chạm
+            // nhầm trên điện thoại không được xoá file. Cái sai là hub làm việc
+            // ấy trong im lặng, nên từ điện thoại nó trông y hệt "hub không
+            // nhận ra đây là lệnh" — hai chuyện khác hẳn nhau, mà chỉ một
+            // trong hai đáng đi báo.
+            logging::info(
+                "cmd_no_button_destructive",
+                json!({ "cmd": crate::exec::truncate(line, 80),
+                        "why": "lệnh xoá/ghi đè — hub cố ý không dựng nút, chủ máy tự gõ ở máy" }),
+            );
             continue;
         }
         if !out.iter().any(|x| x == line) {
@@ -1662,6 +1676,20 @@ fn forbids(context: &str) -> bool {
 /// Đúng loại lỗi tệp này đã đặt tên nhiều lần: một cửa đo SAI CHỖ đọc lên y hệt
 /// một cửa đang gác. Và nó chỉ lộ ra khi đem mã chạy trên dữ liệu thật — bộ test
 /// thuần thì tôi tự dựng đầu vào, nên nó chỉ hỏi đúng những gì tôi đã nghĩ ra.
+/// Những dòng trông như lệnh nhưng bị GIỮ LẠI vì phá hoại — để tin nói ra được.
+///
+/// 🔴 Hà 2026-08-16: *"có lệnh nhưng không có nút bấm"*. Không dựng nút cho
+/// `rm` là đúng; im lặng về việc ấy thì không. Hàm này chỉ đọc, và nó đọc bằng
+/// cùng hàng rào đã quyết định bỏ chúng (`destructive`), nên câu hub nói ra
+/// không bao giờ lệch với việc hub đã làm.
+pub fn destructive_in(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| destructive(l))
+        .map(|l| crate::exec::truncate(l, 120))
+        .collect()
+}
+
 pub(crate) fn destructive(cmd: &str) -> bool {
     const HEADS: &[&str] = &[
         "rm ",
@@ -1829,9 +1857,32 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
 /// danh sách, và không đoạn văn nào có nó. Khớp lỏng theo TỪNG mảnh để không
 /// gãy khi CLI đổi dấu phân cách hay thêm phím tắt.
 pub fn has_chooser_footer(screen: &str) -> bool {
-    let s = screen.to_lowercase();
-    (s.contains("to select") || s.contains("để chọn"))
-        && (s.contains("to navigate") || s.contains("to cancel") || s.contains("để huỷ"))
+    // 🔴 CLI có ÍT NHẤT HAI kiểu dòng chân, và bản cũ chỉ biết một — Hà
+    // 2026-08-16, ảnh chụp `[dwork]` kẹt hơn ba tiếng ở hộp *"Set up auto mode
+    // for your environment?"*. Hai bản đo được trên chính máy này:
+    //
+    //   Enter to select · ↑/↓ to navigate · Esc to cancel   (hộp khảo sát)
+    //   Enter to confirm · Esc to cancel                    (hộp bật auto mode)
+    //
+    // Bản cũ đòi có chữ *"to select"*, nên với hộp thứ hai nó trả `false` —
+    // trong khi `parse_choices` NGAY TRÊN CÙNG MÀN ẤY đọc ra đủ ba lựa chọn.
+    // Hai câu trả lời khác nhau cho cùng một câu hỏi, trên cùng một màn: đó là
+    // chỗ hỏng, không phải cái footer.
+    //
+    // Và hậu quả không nhẹ. `prompt_line_text` dùng hàm này làm cổng; cổng mở
+    // ⟹ nó quét ngược tìm dòng `❯`, mà lúc ô nhập trống thì dòng `❯` duy nhất
+    // là **con trỏ đang trỏ vào một lựa chọn** (`❯ 1. Set it up`). hub đọc đó
+    // thành "chữ trong ô nhập", dựng nút `⏎ Gửi`, và một cú Enter lúc màn đang
+    // mở hộp chọn thì **XÁC NHẬN lựa chọn số 1** chứ không gửi gì (luật 13).
+    // Tức cái nút ấy mời chủ máy bật auto mode mà tưởng mình đang gửi một câu.
+    //
+    // Đo TỪNG DÒNG chứ không đo cả màn: dòng chân thật là MỘT dòng, còn hai
+    // mảnh rời nằm cách nhau hai mươi dòng văn xuôi thì chỉ là trùng chữ.
+    screen.lines().any(|line| {
+        let l = line.to_lowercase();
+        (l.contains("to select") || l.contains("to confirm") || l.contains("để chọn"))
+            && (l.contains("to navigate") || l.contains("to cancel") || l.contains("để huỷ"))
+    })
 }
 
 /// Thanh tab của một bảng hỏi nhiều câu, đọc từ màn.

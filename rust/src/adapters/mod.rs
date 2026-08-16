@@ -20,7 +20,7 @@ pub enum CommandKind {
     ///
     /// 🔴 Hà 2026-08-13: *"tại sao không phải là luồng chạy độc lập trên rust,
     /// tức là mọi lệnh và luồng xử lý phải nằm trong binary"*. Trước route này,
-    /// mỗi bản vá của hub đều đòi một người ngồi ở máy gõ `deploy/install.sh` —
+    /// mỗi bản vá của hub đều đòi một người ngồi ở máy gõ `install_update.sh` —
     /// tức cây cầu tự nó có một đoạn chỉ đi được khi chủ máy đang ở nhà.
     Upgrade,
     /// Run a full cycle now (the console's "Chạy 1 vòng").

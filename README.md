@@ -89,14 +89,14 @@ Dựng chỗ làm việc từ đầu (thư mục, gốc workspace, ba câu hay h
 sed -e "s|__HOME__|$HOME|g" \
     -e "s|__INSTALL_DIR__|$HOME/Library/Application Support/hub|g" \
     -e "s|__HUB_CONFIG__|$PWD/hub.config.json|g" \
-    deploy/com.dipgle.hubd.plist > ~/Library/LaunchAgents/com.dipgle.hubd.plist
+    com.dipgle.hubd.plist > ~/Library/LaunchAgents/com.dipgle.hubd.plist
 
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist
 launchctl list | grep hubd
 tail -f ~/Library/Logs/hubd.err
 ```
 
-`./hub self-install` làm đúng ba bước của `deploy/install.sh` (build → ký bằng
+`./hub self-install` làm đúng ba bước của `install_update.sh` (build → ký bằng
 chứng chỉ → cài ra đường riêng), **viết lại trong Rust** chứ không gọi script:
 hub phải tự cài được chính nó, không thì mỗi bản vá lại cần một người ngồi ở
 máy gõ một dòng — đúng thứ dự án này sinh ra để bỏ đi. Từ điện thoại: `/upgrade`.
@@ -106,7 +106,7 @@ launchd chạy **bản đã cài** `~/Library/Application Support/hub/bin/hubd`,
 phải bản `cargo` trong `target/`. Lý do nằm ở `CLAUDE.md` §12, tóm tắt: macOS
 neo quyền theo chữ ký, `cargo` ký ad-hoc lại sau **mỗi** lệnh build/test, nên
 bản trong `target/` đổi danh tính liên tục và mất quyền ngay lần bật máy sau.
-Sửa mã xong mà quên `deploy/install.sh` thì daemon vẫn chạy mã cũ — tab **Sức
+Sửa mã xong mà quên `install_update.sh` thì daemon vẫn chạy mã cũ — tab **Sức
 khoẻ** có một hàng nói thẳng điều đó.
 
 `hubd` giữ một pid-lock (`data/hubd.lock`) nên hai daemon không cùng chạy; lỗi

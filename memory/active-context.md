@@ -1,5 +1,112 @@
 # active context — hub
 
+## 🔴 2026-08-16 (chiều) — bốn lỗi Hà bắt trong lúc dùng, và một cuộc truy KHÔNG ra thủ phạm
+
+⏳ **CHƯA CÀI** bản này. Bản 12:49 (mục dưới) thì Hà **đã cài lúc 15:22** và
+`telegram_poll_rejected` **không xuất hiện lần nào** kể từ đó — nhưng chưa có
+câu hỏi xác nhận nào chạy qua, nên `telegram_confirm_delivered` vẫn chưa được
+nhìn thấy một lần. Chưa gọi là nghiệm thu.
+
+### 1. `has_chooser_footer` MÙ với một kiểu dòng chân — và cửa nó mở ra rất xấu
+
+Hà: *"kiểm tra lại màn phiên dwork đi … ko biết thao tác kiểu gì"*. `[dwork]`
+(`ttys000`) kẹt **hơn ba tiếng** ở hộp *"Set up auto mode for your
+environment?"*. Đọc màn thật bằng chính `keys::screen_of`: `parse_choices` ra
+đủ **3 lựa chọn**, mà `has_chooser_footer` trả **false** trên cùng cái màn ấy —
+vì hộp này dùng `Enter to confirm · Esc to cancel`, còn hàm chỉ biết
+`Enter to select · ↑/↓ to navigate · Esc to cancel`.
+
+Hai câu trả lời khác nhau cho cùng một câu hỏi, trên cùng một màn. Cửa nó mở:
+`prompt_line_text` lấy hàm ấy làm cổng; cổng mù ⟹ nó quét ngược tìm dòng `❯`,
+và khi ô nhập trống thì dòng `❯` duy nhất là **con trỏ hộp chọn**
+(`❯ 1. Set it up`). hub đọc thành "chữ trong ô nhập", dựng nút `⏎ Gửi`, và
+Enter lúc có hộp chọn thì **XÁC NHẬN lựa chọn 1** (luật 13) — mời chủ máy bật
+auto mode trong khi anh tưởng mình đang gửi một câu.
+
+Vá hai lớp, cố ý hỏng độc lập: ① dòng chân nhận cả `to confirm`, và đo **từng
+dòng** thay vì cả màn (hai mảnh chữ rời nhau không phải một dòng chân);
+② `prompt_line_text` thêm cổng riêng — dòng `❯` trùng đúng một lựa chọn vừa đọc
+thì không phải ô nhập. Bản chụp màn thật lưu ở
+`rust/tests/fixtures/screen-dwork-automode-2026-08-16.txt`, 6 test trong
+`tests/chooser_footer.rs`.
+
+### 2. Gợi ý mờ: `→` NHẬN gợi ý, không GỬI — mà hub khai "✓ đã gửi"
+
+Hà: *"ô nhập đang là gợi ý mờ, bấm nút enter nó hiện thành text xong phải bấm
+lại nút enter lần nữa nó mới gửi vào hàng đợi"*.
+
+Mã cũ có nguyên một chú thích khẳng định `press` kèm sẵn CR nên `→` *"vừa NHẬN
+gợi ý vừa gửi"*. Sai, và **luật 13 đã ghi đúng lý do từ 12/08**: chữ + dấu xuống
+dòng vào TUI trong cùng một lượt ghi thì `claude` đọc cả cụm như một cú DÁN. Rồi
+hub chấm kết quả bằng *"màn có đổi không"* — đổi thật (chữ mờ thành chữ tỏ) —
+nên nó báo `✓ đã gửi` cho một câu còn nằm nguyên trong ô.
+
+Nay sau `→` thì đọc lại **ô nhập** (`input_box_text`), còn chữ thì bấm một Enter
+RỜI, rồi chấm bằng `still_in_box` chứ không bằng "màn có đổi". Và nhịp giữa có
+tên riêng: *"⚠ CHƯA gửi — gợi ý đã vào ô, Enter rời chưa đưa nó đi"*.
+
+### 3. Hai chỗ hub in ra một dữ kiện nó biết là không có
+
+- `/new` không khai dự án ⟹ *"Đã mở ⌨ cửa sổ Terminal cho ."* (ảnh 15:34).
+- `/close` cửa sổ trần ⟹ *"Đóng hẳn phiên ⬜ cửa sổ ttys005 ()?"* (đọc 6 lần).
+
+Cùng một họ, vá cùng ngày: không có thì không in chỗ trống.
+
+Kèm theo, Hà: *"khi tạo phiên mới sao chèn thêm câu 'nó chạy không hỏi ai' vào
+làm gì?"* — **bỏ**. Nó đúng sự thật nhưng sai chỗ đứng: một tính chất CỐ ĐỊNH
+của mọi phiên hub mở, lặp nguyên văn mỗi lần, nói cho đúng người đã dựng ra nó.
+Cùng lý do luật 11 cấm nói TRẠNG THÁI trong một vòng lặp. Rào thật là
+`DENIED_TOOLS`, không phải dòng chữ.
+
+### 4. `/terminal`: nút ⏹, trạng thái thật, và câu hỏi xác nhận lui về đúng chỗ
+
+Hà: *"danh sách terminal thêm nút close để đóng nhanh, trạng thái có đang chạy
+giở gì không"*. Trước đó đóng một cửa sổ là ba nhịp, và anh vừa đi trọn chuỗi ấy
+**sáu lần liên tiếp** (12:25–12:29, `confirm_asked` × 6, tất cả `Confirmed`).
+
+- Mỗi hàng thêm nút `⏹ <tty>` → route `/close <id>` sẵn có, không đẻ nhánh mới.
+- Hàng thôi in *"dấu nhắc trống"* cho mọi cửa sổ: "trần" chỉ nghĩa là không chạy
+  CLI trợ lý, nên một cửa sổ đang `tail -f`/build vẫn nằm đây. Nay đọc `procs`
+  (đã có sẵn trong cùng lượt dò, không tốn thêm osascript nào).
+- **Bỏ câu xác nhận khi cửa sổ trần đang ở dấu nhắc trống**: câu ấy sinh ra để
+  chặn việc không lùi được, mà ở đó không có gì để mất. Gác bằng `working` —
+  đúng trường vẽ ra dấu 🟢/⚪ — nên cái mắt thấy và cái tay chạm là một. Phiên
+  CLI thì vẫn luôn hỏi.
+
+### 5. `terminal_probe_failed`: ba nghi phạm bị loại, thủ phạm CHƯA tìm ra
+
+19 lượt, **toàn bộ trong ngày 16/08**, 0 lượt mọi ngày trước. Phân bố **nhị
+phân**: trung vị 500–820 ms rồi nhảy thẳng lên 20.4xx ms — đụng trần
+`OSA_TIMEOUT`, không bò tới đó. Đo thật (`tests/probe_timing_live.rs`):
+
+| nghi phạm | phép đo | kết luận |
+|---|---|---|
+| đọc `contents` của mọi tab tốn kém | 6 lượt: 431–539 ms không-màn vs 479–533 ms có-màn | **loại** — `contents` ≈ 50 ms |
+| hub tự giành với chính nó (không có khoá nào tuần tự hoá osascript) | 4 cú dò SONG SONG: cả bốn xong trong **597 ms** | **loại** — Terminal trả lời song song |
+| nhiều cửa sổ thì chậm | 9 hàng: 183 lượt / **0** lần hết giờ · 8 hàng: 111 lượt / 16 lần | **loại** — kích thước không giải thích |
+
+Còn lại: *"Terminal không trả lời trong một QUÃNG"*. Một lượt hỏng lúc 05:45:59Z
+có **0 sự kiện hub nào trong 60 giây trước** — nên không phải hub gây ra. 7/19
+lượt có `trust_tick_probe_failed` đứng cạnh (hai cú dò cùng ngã), 5/19 ngay sau
+một lượt cài lại.
+
+**Chưa vá vì chưa biết vá gì** — thay vào đó, dòng log hỏng nay mang thêm hai dữ
+kiện để lần sau nó tự khai: `since_ok_sec` (Terminal câm từ bao giờ) và
+`terminal_alive` (hỏi bằng `pgrep`, KHÔNG bằng AppleEvent — hỏi bằng
+AppleEvent thì câu hỏi ngã cùng lý do với cái nó đang điều tra).
+
+### Còn dở
+
+- **Chưa cài** ⟹ cả 4 mục trên chưa nghiệm thu trên Telegram thật.
+- `[dwork]` vẫn đang đứng ở hộp auto mode, và câu Hà gõ
+  (*"làm việc 1, deploy dev rồi nghiệm thu UI"*) vẫn nằm trong ô nhập chưa gửi.
+  hub KHÔNG tự bấm hộ — chỉ hộp tin-thư-mục mới được, luật cũ giữ nguyên.
+- Chỗ cất tệp nhận từ Telegram: `<gốc workspace>/.inbox/<mã phiên>/` (Hà chốt
+  13/08, lúc gốc còn là `~/Documents/projects` và hub còn nằm trong `AI/`). Hà
+  16/08 nói đường dẫn ấy **sai** — chưa rõ ý là chuyển vào `~/projects/hub/`
+  hay chuyện khác, **đã hỏi lại, chưa sửa**. Chú thích tả sai chỗ cất thì đã sửa.
+- `rust/~/` vẫn còn (rm bị hook chặn).
+
 ## 🔴 2026-08-16 (trưa) — hai vòng đọc Telegram giành nhau, và một phép đo mù
 
 ⏳ **CHƯA CÀI** (Claude bị chặn `deploy/install.sh`). Cổng máy móc xanh trên cây

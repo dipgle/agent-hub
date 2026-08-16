@@ -78,7 +78,7 @@ HUB_CONFIG (biến môi trường)
 
 Kịch bản `.mjs` tự định vị bằng `import.meta.url`, không hỏi `$HOME`.
 
-**Một ngoại lệ bắt buộc, và cách xử lý nó:** `deploy/com.dipgle.hubd.plist`.
+**Một ngoại lệ bắt buộc, và cách xử lý nó:** `com.dipgle.hubd.plist`.
 launchd không hiểu `~` cũng không hiểu `$HOME` — plist **phải** mang đường tuyệt
 đối. Nên tệp trong repo là **bản mẫu có dấu chỗ** (`__HOME__`,
 `__INSTALL_DIR__`, `__HUB_CONFIG__`), và bạn sinh bản thật lúc cài bằng dòng

@@ -534,6 +534,21 @@ pub fn callback_to_command(data: &str) -> Option<String> {
         }
         return Some(format!("/session {sid}"));
     }
+    // `close:<id>` — nút ⏹ ngay trên hàng của cửa sổ trong `/terminal`.
+    //
+    // 🔴 Hà 2026-08-16: *"danh sách terminal thêm nút close để đóng nhanh"*.
+    // Trước đó đóng một cửa sổ là ba nhịp: bấm cửa sổ (chuyển con trỏ) → gõ
+    // `/close` → xác nhận. Anh vừa làm đúng chuỗi ấy SÁU LẦN liên tiếp lúc
+    // 12:25–12:29 để dọn mấy cửa sổ trần.
+    //
+    // Vẫn đi đúng route `/close <id>` sẵn có, không đẻ nhánh xử lý riêng —
+    // cùng lý do `sess:` ở trên: thêm một chỗ BẤM, không thêm một đường ĐI.
+    if let Some(sid) = data.strip_prefix("close:") {
+        if sid.is_empty() {
+            return None;
+        }
+        return Some(format!("/close {sid}"));
+    }
     None
 }
 
@@ -1145,16 +1160,41 @@ impl Inbox {
         let body = std::fs::read_to_string(&real).map_err(|_| {
             "không phải file chữ (cổng quét rò không đọc được) nên hub không gửi".to_string()
         })?;
-        // Cân riêng cho TỆP — xem `redaction::file_risk` để biết vì sao không
-        // dùng lại cân của phần xem trước.
+        // 🔴 CỔNG NÀY THÔI CHẶN — nó BÁO. Hà 2026-08-16, ảnh chụp đúng lúc bấm
+        // nút 📎: *"cái gì giữ lại vậy, hub là tôi yêu cầu bạn viết để tôi gửi
+        // các lệnh và thực hiện mà?"*. Tệp bị giữ là
+        // `~/projects/AI/tcc/danh-gia-tccbrowser.html` — một bản báo cáo, dính
+        // `secret_assignment` vì trong đó có một dòng trông như gán mật khẩu.
+        //
+        // Đây là LẦN THỨ HAI cùng một câu, cùng một người. Lần đầu 14/08, cổng
+        // quét rò trên `/shot`: *"Tại sao lại bị chặn, hub là cổng làm việc của
+        // tôi mà"* → *"Trong tele có thiết lập tự xoá lịch sử tin rồi nên hub
+        // không cần tính năng này nữa"*. Cổng ấy đã gỡ hôm đó, và lý do gỡ áp
+        // nguyên vào đây: đích đến là buồng chat RIÊNG của chủ máy, có tự xoá;
+        // hàng rào ở tầng dưới do chính anh dựng.
+        //
+        // Cái giá của việc chặn thì đo được và nó lệch hẳn: một phép đoán theo
+        // mẫu chữ, chặn đúng cái tệp người ta vừa chỉ tay vào, và người ta
+        // không có đường nào khác để lấy nó về điện thoại. Còn cái nó bảo vệ
+        // thì chủ máy đã tự cân — anh biết mình đang gửi tệp gì.
+        //
+        // Giữ lại đúng phần CÓ ÍCH: nói ra là đã thấy dấu hiệu gì, và ghi log.
+        // Một cảnh báo đọc được thì có ích; một hàng rào chặn tay chủ máy thì
+        // không. (`sessions.rs` dùng `file_risk` cho việc KHÁC — chấm một dòng
+        // lệnh trước khi chạy — và chỗ ấy không đổi.)
         let risk = crate::redaction::file_risk(&body);
         if !risk.is_empty() {
             logging::warn(
-                "telegram_document_withheld",
-                json!({ "path": real.display().to_string(), "risk": risk }),
+                "telegram_document_risky_but_sent",
+                json!({ "path": real.display().to_string(), "risk": risk,
+                        "why": "chủ máy tự bấm gửi vào buồng chat riêng của mình (Hà 2026-08-16)" }),
             );
-            return Err(format!("giữ lại: có dấu hiệu bí mật ({})", risk.join(", ")));
         }
+        let risk_note = if risk.is_empty() {
+            String::new()
+        } else {
+            format!("\n⚠ trong tệp có dấu hiệu bí mật ({})", risk.join(", "))
+        };
 
         let name = real
             .file_name()
@@ -1170,10 +1210,10 @@ impl Inbox {
             .text("chat_id", self.chat_id.clone())
             .text(
                 "caption",
-                real.strip_prefix(&root_real)
-                    .unwrap_or(&real)
-                    .display()
-                    .to_string(),
+                format!(
+                    "{}{risk_note}",
+                    real.strip_prefix(&root_real).unwrap_or(&real).display()
+                ),
             )
             .part("document", part);
         let r = client
@@ -1995,9 +2035,14 @@ impl Inbox {
         // nhận đính kèm file vào tin nhắn"*).
         //
         // Cùng cổng với chữ: chỉ nhận từ đúng `chat_id` của chủ máy. Tệp về
-        // `<thư mục dự án của phiên đang theo>/.inbox/`, rồi hub gõ MỘT DÒNG
+        // `<gốc workspace>/.inbox/<mã phiên đang theo>/`, rồi hub gõ MỘT DÒNG
         // vào phiên nói đường dẫn — tức đi đúng con đường chữ thường đã có,
         // không đẻ lối riêng cho phiên phải học.
+        //
+        // ⚠ Câu trên vừa được SỬA CHO ĐÚNG MÃ (2026-08-16): nó vẫn ghi
+        // *"thư mục dự án của phiên đang theo"* trong khi `take_file` đã đổi
+        // sang gốc workspace từ 13/08. Một chú thích tả sai chỗ cất tệp là thứ
+        // khiến lượt truy sau đi tìm nhầm thư mục.
         if from == self.chat_id {
             if let Some((file_id, name)) = attachment_of(msg) {
                 self.take_file(

@@ -1,0 +1,18 @@
+├────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────┤
+  │ vitest 1496 xanh (exit đọc trực tiếp) · 70/70 cổng · đối chứng cấy │ Toàn bộ phần nhìn thấy được: cột Đang giữ chỗ (M6 web/mobile), đơn vị phép, ô  │
+  │  lỗi ĐỎ đúng chỗ                                                   │ chọn lọc inactive                                                              │
+  └────────────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────┘
+  🔴 Phiên trước chưa deploy dev, chưa mở màn thật — lệnh @deploy-be bị từ chối ⇒ theo DoD §2/§5 thì chưa được nói "xong", mới là mã + cổng xanh.
+  Ba việc đang treo
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Set up auto mode for your environment?
+  Auto mode lets Claude act without asking first. Telling it which repos you trust and what data is sensitive makes that safer. Claude will explore your
+  repo and recent sessions, then check its draft with you — takes a few minutes, and you can keep working in another terminal while it runs.
+  ❯ 1. Set it up
+    2. Not now
+    3. Don't show again
+  Enter to confirm · Esc to cancel
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ làm việc 1, deploy dev rồi nghiệm thu UI
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

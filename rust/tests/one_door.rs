@@ -10,8 +10,58 @@
 //! hỏi "hàm có trả đúng danh sách không" vẫn xanh nguyên khi cái tin gửi đi đã
 //! mọc thêm một khu chữ không ai hỏi.
 
-use hub::pipeline::{cmds_present_in, render_session_data, tail_after_command, SessionData};
+use hub::pipeline::{
+    cmds_present_in, needs_formatting, paths_not_in_commands, render_session_data,
+    tail_after_command, SessionData,
+};
 use hub::sessions::Cmd;
+
+/// Cửa hỏi *"tin này có mang chữ của phiên không"*, KHÔNG hỏi *"có nút không"*.
+///
+/// 🔴 Hai hồi quy liền trong một buổi, cùng một gốc — điều kiện "đi cửa nào"
+/// nằm rải trong thân hàm nên mỗi bản vá lại đổi một mảnh: gỡ hai nút trống thì
+/// mất liên kết `⏎` giữa chữ (*"Lại mất nút gửi nhanh gợi ý mờ rồi"*); bắt mọi
+/// tin đi qua cửa thì ack `✓ vào hàng chờ` thôi thả emoji (*"Chỉnh thành phản
+/// hồi bằng emoji rồi cơ mà"*). Nay một hàm, và đây là bài kiểm của nó.
+#[test]
+fn a_bare_acknowledgement_stays_an_emoji_and_never_goes_through_the_door() {
+    for ack in [
+        "✓ vào hàng chờ · 🟪 [hub]",
+        "✓ đã gửi · 🟪 [hub]",
+        "👁 Đang theo phiên [tfl5]",
+        "⏹ đã tắt",
+    ] {
+        assert!(
+            !needs_formatting(ack),
+            "câu xác nhận trơn phải đi bằng một dấu, không chiếm dòng chữ: {ack}"
+        );
+    }
+    for real in [
+        "📷 Màn của 🟪 [hub]:\n\n❯ làm gì đó",
+        "📋 Đã đóng sổ phiên [tfl5]. Tiếp tục bằng:\ncd /x && claude --resume 1",
+    ] {
+        assert!(
+            needs_formatting(real),
+            "chữ của phiên phải qua cửa định dạng: {real}"
+        );
+    }
+}
+
+/// 📎 không mọc trên một đường dẫn NẰM TRONG dòng lệnh.
+///
+/// 🔴 Hà 2026-08-16, đọc chính tin tôi gửi: *"Mà dòng lệnh lại gắn nút tải file
+/// là sao"* — dòng `rm ~/…/probe_prompt_anchor.rs` kèm một nút 📎 mời tải đúng
+/// cái tệp mà dòng ấy bảo xoá.
+#[test]
+fn a_path_inside_a_command_line_gets_no_download_link() {
+    let cmds = vec![cmd("rm ~/projects/hub/rust/tests/probe_prompt_anchor.rs")];
+    let seen = vec![
+        "~/projects/hub/rust/tests/probe_prompt_anchor.rs".to_string(),
+        "docs/flow-boc-tach-lenh.md".to_string(),
+    ];
+    let kept = paths_not_in_commands(&seen, &cmds);
+    assert_eq!(kept, vec!["docs/flow-boc-tach-lenh.md".to_string()]);
+}
 
 fn cmd(line: &str) -> Cmd {
     Cmd {

@@ -3672,13 +3672,11 @@ pub fn say_from_session(
     extra: &[(String, String)],
     log_key: &str,
 ) {
-    // Lệnh lấy từ NHẬT KÝ phiên (`tool_use`), không đoán từ chữ — cùng nguồn
-    // với `/shot`, nên hai tin nói về cùng một lượt cho ra cùng một bộ nút.
-    let cmds = cmds_present_in(text, crate::sessions::commands_of(cfg, sid, CMD_LINES_MAX));
+    let cmds = cmds_of_text(cfg, sid, text);
     let mut buttons = remember_quick(db, sid, &cmds);
     // Tệp NHẮC TỚI trong chính câu này phải mở được ngay tại tên nó — cùng luật
     // với `/shot`, vì "lúc được lúc không" là thứ người đọc không đoán nổi.
-    let seen_paths = crate::keys::paths_on_screen(text, 4);
+    let seen_paths = paths_not_in_commands(&crate::keys::paths_on_screen(text, 4), &cmds);
     let files = file_anchors(db, cfg, sid, &seen_paths);
     if !files.is_empty() {
         // Sổ tệp phải được ghi thì cú bấm sau mới tra ra đường dẫn; nút ở đáy
@@ -3711,12 +3709,72 @@ pub fn cmds_present_in(text: &str, cmds: Vec<crate::sessions::Cmd>) -> Vec<crate
         .collect()
 }
 
+/// MỘT nguồn lệnh cho mọi tin mang chữ phiên — nhật ký **và** chính chữ ấy.
+///
+/// 🔴 Hà 2026-08-16, ảnh chụp một bản *"Xem đầy đủ"*: *"Bấm xem đầy đủ sao lại
+/// khác lệnh shot, chưa gắn được nút chạy lệnh"*. Đúng, và lý do là hai đường
+/// hỏi hai nguồn khác nhau: `/shot` đọc NHẬT KÝ (`commands_of` — lệnh phiên
+/// THẬT SỰ đã chạy, kèm thư mục), còn bản đầy đủ đọc CHỮ
+/// (`keys::commands_in_report` — lệnh phiên mới chỉ VIẾT RA, `cwd` rỗng), lại
+/// còn kèm trần 3. Cùng một màn, hai bộ nút khác nhau.
+///
+/// Hai nguồn ấy KHÔNG thay được cho nhau, nên gộp chứ không chọn: nhật ký biết
+/// thư mục nhưng mù với lệnh phiên chỉ đề xuất; chữ thì ngược lại. Nhật ký đi
+/// trước để `cwd` của nó thắng khi cùng một dòng xuất hiện ở cả hai.
+pub fn cmds_of_text(cfg: &Config, sid: &str, text: &str) -> Vec<crate::sessions::Cmd> {
+    let mut out = cmds_present_in(text, crate::sessions::commands_of(cfg, sid, CMD_LINES_MAX));
+    for line in crate::keys::commands_in_report(text, CMD_LINES_MAX) {
+        if !out.iter().any(|c| c.line == line) {
+            out.push(crate::sessions::Cmd {
+                line,
+                cwd: String::new(),
+            });
+        }
+    }
+    out
+}
+
+/// Bỏ những đường dẫn NẰM TRONG một dòng lệnh — chúng đã có đích chạm riêng.
+///
+/// 🔴 Hà 2026-08-16, đọc chính tin tôi vừa gửi (`rm ~/…/probe_prompt_anchor.rs`
+/// kèm một nút 📎 `probe_prompt_anchor.rs`): *"Mà dòng lệnh lại gắn nút tải file
+/// là sao"*. Vì `paths_on_screen` quét cả dòng lệnh, thấy một đường dẫn hợp lệ
+/// và dựng nút tải — trên đúng cái tệp mà dòng lệnh ấy bảo XOÁ.
+///
+/// Một dòng, một ý định: dòng lệnh thì đích chạm là ▶️/🖥, còn 📎 dành cho tệp
+/// được nhắc tới như một tệp để đọc.
+pub fn paths_not_in_commands(paths: &[String], cmds: &[crate::sessions::Cmd]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|p| !cmds.iter().any(|c| c.line.contains(p.as_str())))
+        .cloned()
+        .collect()
+}
+
+/// Tin này có NỘI DUNG để định dạng không — MỘT câu hỏi, MỘT chỗ trả lời.
+///
+/// 🔴 Hai lượt liền tôi sửa một chỗ rồi làm hỏng chỗ bên cạnh, và cả hai lần
+/// đều vì điều kiện "đi cửa nào" nằm rải trong thân hàm, mỗi lần sửa lại đổi
+/// một mảnh:
+/// · điều kiện `!quick.is_empty()` ⟹ gỡ hai nút trống là mất luôn liên kết `⏎`
+///   giữa chữ (*"Lại mất nút gửi nhanh gợi ý mờ rồi"*);
+/// · rồi "luôn đi qua cửa" ⟹ ack `✓ vào hàng chờ` thôi thả emoji, quay lại
+///   chiếm một dòng chữ (*"Chỉnh thành phản hồi bằng emoji rồi cơ mà"*).
+///
+/// Câu hỏi đúng không phải *"có nút không"* mà *"tin này có mang chữ của phiên
+/// không"*. Câu xác nhận trơn (`ack_as_emoji` nhận ra được) thì không: nó chỉ
+/// nói "đã nhận", và một dấu thả lên tin gốc nói đúng chừng ấy mà không chiếm
+/// dòng nào (Hà 2026-08-14: *"Vì nó đơn giản là xác nhận thôi không cần thông
+/// tin"*).
+pub fn needs_formatting(ack: &str) -> bool {
+    ack_as_emoji(ack).is_none()
+}
+
 /// Trả lời một cú bấm/lệnh mà nội dung là CHỮ CỦA PHIÊN — qua đúng cửa trên.
 ///
 /// Rơi về `reply_in_channel` khi không có phiên nào để gắn (`sid` rỗng), khi
-/// kênh không phải Telegram, hoặc khi câu ấy ngắn tới mức hub trả lời bằng một
-/// emoji thả lên tin gốc (`ack_as_emoji`) — ba ca không có nội dung phiên nào
-/// để định dạng.
+/// kênh không phải Telegram, hoặc khi câu ấy chỉ là một xác nhận trơn
+/// (`needs_formatting`) — ba ca không có nội dung phiên nào để định dạng.
 fn reply_from_session(
     db: &Db,
     cfg: &Config,
@@ -3725,7 +3783,7 @@ fn reply_from_session(
     sid: &str,
     text: &str,
 ) {
-    if adapter == crate::telegram::NAME && !sid.is_empty() && ack_as_emoji(text).is_none() {
+    if adapter == crate::telegram::NAME && !sid.is_empty() && needs_formatting(text) {
         if let Some(tg) = crate::telegram::inbox() {
             say_from_session(db, cfg, tg, sid, text, &[], "session_ack_failed");
             return;
@@ -6452,7 +6510,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // hub — mà nút của hub lúc ấy chỉ gắn ở tin TỰ PHÁT, còn
                     // `/shot` thì không. Cùng một màn, hai luật khác nhau là
                     // thứ người dùng đọc thành "lúc được lúc không".
-                    let seen_paths = crate::keys::paths_on_screen(&ack, 4);
+                    // Đường dẫn nằm TRONG một dòng lệnh thì thôi — dòng ấy đã có
+                    // ▶️/🖥 của nó (xem `paths_not_in_commands`).
+                    let seen_paths = paths_not_in_commands(
+                        &crate::keys::paths_on_screen(&ack, 4),
+                        &cmds_of_text(cfg, &want, &ack),
+                    );
                     quick.extend(remember_files(db, cfg, &want, &seen_paths));
                     // …và ĐÍCH CHẠM NẰM NGAY TẠI TÊN TỆP trong chữ, không chỉ ở
                     // đáy tin (Hà 2026-08-16: *"chưa chèn link tải file xuất
@@ -6623,8 +6686,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 //
                 // Cửa hỏi đúng một câu: *đây có phải chữ của phiên đi ra
                 // Telegram không*. Có nút hay không là chuyện của bên trong.
+                // 🔴 …NHƯNG câu XÁC NHẬN TRƠN vẫn đi bằng emoji — Hà 2026-08-16,
+                // ngay sau bản trên: *"Chỉnh thành phản hồi bằng emoji rồi cơ
+                // mà"*. Đúng: `✓ vào hàng chờ · [hub]` là ack của `/type`, và
+                // từ 14/08 nó được thả thành một dấu lên chính tin chủ máy vừa
+                // gõ (*"Vì nó đơn giản là xác nhận thôi không cần thông tin"*).
+                // Bản vá "luôn đi qua cửa định dạng" ở trên nuốt mất nhánh ấy —
+                // hai lượt liền tôi sửa một chỗ và làm hỏng chỗ bên cạnh, vì
+                // đều quên hỏi *tin này có nội dung để định dạng không*.
+                //
+                // Cửa định dạng dành cho tin MANG CHỮ CỦA PHIÊN. Một câu chỉ
+                // nói "đã nhận" thì không có gì để gắn action, và rút nó thành
+                // một dấu là đúng ý nó.
                 match crate::telegram::inbox() {
-                    Some(tg) if adapter == crate::telegram::NAME => {
+                    Some(tg) if adapter == crate::telegram::NAME && needs_formatting(&ack) => {
                         // 🔴 Hà 2026-08-14, ảnh chụp câu trả lời `/shot`: *"Vẫn
                         // thấy hiện nút kiểu cũ là sao"*. Vì đây là đường THỨ BA
                         // dùng cùng cuốn sổ nút, và nó chưa được nối vào máy móc

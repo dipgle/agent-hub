@@ -1965,37 +1965,40 @@ impl Inbox {
                         // khi phiên đã chạy tiếp kể từ lúc tin ấy gửi đi, và ở
                         // đây thứ đúng là đoạn chữ đang hiện dưới mắt anh.
                         let body = format!("{text}{tail}");
-                        // Chữ trên MÀN không mang thư mục nào — nút dựng từ đây
-                        // để `cwd` rỗng và `root_for_command` rơi về gốc dự án.
-                        let cmds: Vec<crate::sessions::Cmd> =
-                            crate::keys::commands_in_report(&text, 3)
-                                .into_iter()
-                                .map(|line| crate::sessions::Cmd {
-                                    line,
-                                    cwd: String::new(),
-                                })
-                                .collect();
-                        let mut btns = db
-                            .as_ref()
-                            .map(|db| {
-                                let mut b = crate::pipeline::remember_quick(db, &sid, &cmds);
-                                b.extend(crate::pipeline::remember_files(
-                                    db,
-                                    &self.cfg,
-                                    &sid,
-                                    &crate::keys::paths_on_screen(&text, 4),
-                                ));
-                                b
-                            })
-                            .unwrap_or_default();
-                        btns.truncate(8);
-                        crate::pipeline::say_with_command_icons(
-                            self,
-                            &body,
-                            &crate::sessions::lines_of(&cmds),
-                            &btns,
-                            "telegram_ack_failed",
-                        );
+                        // 🔴 CÙNG MỘT CỬA VỚI `/shot` — Hà 2026-08-16: *"Bấm xem
+                        // đầy đủ sao lại khác lệnh shot, chưa gắn được nút chạy
+                        // lệnh"*.
+                        //
+                        // Bản cũ dựng nút TẠI ĐÂY bằng nguồn riêng
+                        // (`commands_in_report`, trần 3, không đọc nhật ký) nên
+                        // cùng một màn cho ra hai bộ nút khác nhau tuỳ người ta
+                        // xem bằng đường nào. Nay đi qua `say_from_session`: một
+                        // nguồn lệnh (nhật ký + chữ), một phép lọc tệp, một cách
+                        // hiện.
+                        match db.as_ref() {
+                            Some(db) => crate::pipeline::say_from_session(
+                                db,
+                                &self.cfg,
+                                self,
+                                &sid,
+                                &body,
+                                &[],
+                                "telegram_ack_failed",
+                            ),
+                            // Không mở được sổ thì vẫn phải GỬI, chỉ là không có
+                            // nút nào — im lặng ở đây là nuốt mất bản đầy đủ
+                            // người ta vừa bấm xin.
+                            None => {
+                                logging::warn(
+                                    "full_report_no_db",
+                                    json!({ "session": sid,
+                                            "why": "gửi chữ trần, không dựng được nút" }),
+                                );
+                                if let Err(e) = self.send_text(&body) {
+                                    logging::error("telegram_ack_failed", json!({ "err": e }));
+                                }
+                            }
+                        }
                     }
                     None => {
                         if let Err(e) = self

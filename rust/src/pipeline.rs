@@ -5412,9 +5412,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // ở dưới — chứ KHÔNG đo lại trên `ack`: `ack` có chữ của chính
                 // hub, và chính chỗ ấy đã làm hỏng phép đo (xem `ScreenReport`).
                 let mut shot_choices: Vec<(usize, String)> = Vec::new();
-                // `mut`: nhánh `/shot` nối thêm một dòng khi có lệnh bị giữ lại
-                // vì phá hoại (xem `keys::destructive_in` phía dưới).
-                let mut ack = match target {
+                let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
                     }
@@ -6124,21 +6122,24 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             format!("say:{}", quick_token(&shot_sid, "làm đi")),
                         ));
                     }
-                    // 🔴 LỆNH BỊ GIỮ LẠI PHẢI ĐƯỢC NÓI RA — Hà 2026-08-16, ảnh
-                    // chụp tin `[tcc/amm]` có ba dòng `rm ~/…/.tmp-*.mjs`: *"có
-                    // lệnh nhưng không có nút bấm"*.
+                    // 🪦 Dòng "⛔ N dòng lệnh xoá/ghi đè — hub cố ý KHÔNG dựng
+                    // nút" sống đúng nửa tiếng (16/08, 16:45→17:15). Hà đọc nó
+                    // trên điện thoại: *"cái này thằng nào tạo ra, thằng nào
+                    // chặn thế, tôi có yêu cầu vậy à"*. Không ai yêu cầu — tôi
+                    // viết nó ra để giải thích một cái chặn mà chính hub tự
+                    // dựng, thay vì hỏi xem cái chặn ấy có nên tồn tại không.
                     //
-                    // Không dựng nút cho lệnh xoá là cố ý và giữ nguyên. Cái
-                    // phải sửa là sự IM LẶNG: thiếu một cái nút, từ điện thoại
-                    // nhìn ra y hệt "hub không nhận ra đây là lệnh". Nói ra thì
-                    // hai chuyện ấy tách hẳn nhau, và chủ máy biết phải tự gõ.
-                    let held = crate::keys::destructive_in(&ack);
-                    if !held.is_empty() {
-                        ack.push_str(&format!(
-                            "\n\n⛔ {} dòng lệnh xoá/ghi đè — hub cố ý KHÔNG dựng nút, anh gõ ở máy.",
-                            held.len()
-                        ));
-                    }
+                    // Nay lệnh xoá CÓ nút (xem `keys::destructive`), nên không
+                    // còn gì để giải thích.
+                    //
+                    // 📌 Và nó kịp gây một lỗi trong nửa tiếng ấy, đáng ghi:
+                    // nối chữ của hub vào `ack` làm hỏng phép đo NGAY DƯỚI —
+                    // `input_box_text(&ack)` đọc dòng vừa nối thành "chữ đang
+                    // nằm trong ô nhập", nên hai nút ⏎/⌫ mọc ra ở đáy một tin
+                    // có ô nhập rỗng (*"lại chèn 2 cái nút ở cuối, làm quanh
+                    // làm quẩn mãi"*). Đúng cái bẫy đã ghi ngay tại
+                    // `prompt_line_text`: `ack` không phải một MÀN, nó là cả
+                    // TIN — và mấy dòng cuối của tin là chữ hub tự viết.
                     // …và TỆP thấy trên màn cũng phải mở được ngay tại đây.
                     //
                     // 🔴 Hà 2026-08-13: *"trong nội dung có khá nhiều file

@@ -2162,16 +2162,22 @@ fn a_warning_about_a_command_is_not_an_invitation_to_run_it() {
         "không được dựng nút nào từ một lời cấm: {got:?}"
     );
 
-    // …và ngay cả khi câu văn quanh nó hoàn toàn trung tính, lệnh phá huỷ vẫn
-    // không thành nút.
+    // 🔴 ĐẢO CHIỀU 2026-08-16: câu văn TRUNG TÍNH quanh một lệnh xoá thì lệnh
+    // ấy PHẢI thành nút. Hà: *"đã qua hub thì đừng có chặn gì cả"*.
+    //
+    // Hai cửa từng đứng cạnh nhau ở đây, nay chỉ còn một — và đúng cái còn lại
+    // mới là cái đọc ĐÚNG câu hỏi: `forbids` hỏi *"câu văn quanh nó có phải
+    // một lời cấm không"*, tức nó phân biệt được "hook vừa chặn lệnh này" với
+    // "đây là lệnh anh cần gõ". Cửa kia (`destructive`) chỉ nhìn động từ, nên
+    // nó chặt luôn cả những dòng chủ máy đang chờ để bấm.
     let neutral = "Bước tiếp theo trong quy trình dọn dẹp kho mã của dự án:\n\
                    git rm rust/src/live.rs\n\
                    Sau đó chạy lại toàn bộ bài kiểm để chắc chắn mọi thứ ổn.\n";
     assert!(
-        !hub::keys::commands_in_report(neutral, 4)
+        hub::keys::commands_in_report(neutral, 4)
             .iter()
             .any(|c| c.contains("git rm")),
-        "lệnh xoá không bao giờ là một cái nút"
+        "lệnh xoá trong một câu trung tính phải CÓ nút — cổng cũ đã gỡ"
     );
     // Lệnh lành thì vẫn ra nút như thường — cửa không được ăn lan.
     let ok = "Chạy lại bộ kiểm tra cho chắc trước khi đóng sổ nhé bạn:\n\

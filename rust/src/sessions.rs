@@ -1760,19 +1760,29 @@ fn result_says_denied(block: &Value) -> bool {
 ///      là một cú dán, không phải một lệnh (đo: 70/571 lệnh bị từ chối là khối
 ///      nhiều dòng);
 ///   2. **đủ ngắn** để đọc trên nhãn nút và gõ lại được (đo: dài nhất 2.593);
-///   3. **không phá** — luật của hub, không phải của nguồn. Và nó cắn đúng ở
-///      đây: phiên hub mở chạy sau `DENIED_TOOLS`, nên `rm`/`git reset --hard`
-///      bị chặn là chuyện THƯỜNG, tức nhánh bị-từ-chối là nơi lệnh phá xuất
-///      hiện nhiều nhất chứ không phải ít nhất;
-///   4. **không mang bí mật ra khỏi máy** (luật 5) — dòng lệnh đi thẳng lên
-///      Telegram, mà `curl -H "Authorization: Bearer …"` là một dòng lệnh.
+///   3. ~~**không phá**~~ và 4. ~~**không mang bí mật**~~ — **GỠ 2026-08-16**.
+///      Hai điều kiện ấy là CHÍNH SÁCH, không phải nhận dạng, và không ai yêu
+///      cầu chúng. Xem ghi chú ngay dưới.
+///
+/// 🔴 Hà 2026-08-16: *"đã qua hub thì đừng có chặn gì cả, các chỗ chặn bỏ hết
+/// cho tôi"* · *"tôi ở tele là phải gọi lệnh thao tác như ngồi máy thì chặn
+/// khác gì chặt tay, cần kênh tele để làm gì?"*.
+///
+/// Hai điều kiện vừa gỡ là hai điều kiện về CHÍNH SÁCH, không phải về nhận
+/// dạng: `destructive` (rm, git reset --hard, kill…) và `preview_risk` (dòng
+/// trông như mang bí mật). Chúng đứng đây từ trước và chưa bao giờ do chủ máy
+/// yêu cầu; hậu quả đo được là những dòng lệnh hiện ra trên điện thoại mà
+/// không có đường bấm, và hub thì im — nhìn y hệt "hub không nhận ra đây là
+/// lệnh". Hôm nay anh hỏi thẳng: *"cái này thằng nào tạo ra, thằng nào chặn
+/// thế, tôi có yêu cầu vậy à"*.
+///
+/// Cái còn lại đều là câu hỏi về HÌNH DẠNG: một dòng, đủ dài để có nghĩa, đủ
+/// ngắn để là một lệnh chứ không phải cả một khối.
 fn usable_command(cmd: &str) -> bool {
     let c = cmd.trim();
     !c.contains('\n')
         && c.chars().count() >= 4
         && c.chars().count() <= crate::keys::BTN_CMD_REPORT_MAX
-        && !crate::keys::destructive(c)
-        && preview_risk(c).is_empty()
 }
 
 /// Lệnh của lượt cuối, đọc từ đuôi nhật ký đã nạp sẵn (tách ra để kiểm được).
@@ -1929,14 +1939,22 @@ pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<Cmd> {
         // "dùng sai cái cân" mà `redaction::file_risk` sinh ra để tránh. Ở đây
         // chỉ cần hỏi một câu hẹp: dòng này có mang GIÁ TRỊ bí mật không
         // (`PGPASSWORD=hunter2`, `sk-…`, khối khoá riêng).
+        // 🔴 GHI, KHÔNG CHẶN — Hà 2026-08-16: *"tôi ở tele là phải gọi lệnh
+        // thao tác như ngồi máy thì chặn khác gì chặt tay, cần kênh tele để làm
+        // gì?"*. Đó là phép thử cầu nối, phát biểu ngược lại: hub tồn tại để
+        // mang bàn tay chủ máy tới cái máy này, nên mỗi thứ hub từ chối làm mà
+        // ngồi ở máy làm được là một ngón tay bị chặt.
+        //
+        // Cân này vẫn có ích như một DẤU HIỆU (một dòng `PGPASSWORD=… psql …`
+        // đi ra Telegram là bí mật đi ra kèm cách dùng), nên nó ở lại trong
+        // log. Nó thôi làm cánh cửa.
         let risk = crate::redaction::file_risk(&cmd.line);
         if !risk.is_empty() {
             logging::info(
-                "cmd_withheld",
+                "cmd_risk_noted",
                 json!({ "why": risk,
-                        "effect": "dòng lệnh có dấu hiệu bí mật — không dựng nút cho nó" }),
+                        "effect": "dòng lệnh có dấu hiệu bí mật — vẫn dựng nút, chủ máy tự cân" }),
             );
-            continue;
         }
         let cmd = Cmd {
             line: cmd.line.trim().to_string(),

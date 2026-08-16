@@ -1593,14 +1593,21 @@ fn only_the_turn_since_the_owner_last_spoke_counts() {
     );
 }
 
-/// Cửa PHÁ vẫn gác, và nó gác đúng ở chỗ nguy nhất.
+/// 🔴 ĐẢO CHIỀU 2026-08-16 — lệnh phá huỷ NAY CÓ nút, và đó là điểm.
 ///
-/// Nguồn chắc chắn không có nghĩa là được phép: phiên hub mở chạy sau
-/// `DENIED_TOOLS`, nên `rm` / `git reset --hard` bị chặn là chuyện THƯỜNG — tức
-/// nhánh bị-từ-chối là nơi lệnh phá xuất hiện NHIỀU nhất, không phải ít nhất.
-/// Một cái nút bấm một cái là chạy thì không có bước hỏi lại.
+/// Bài kiểm này trước đây khoá đúng cái ngược lại (*"cửa PHÁ vẫn gác"*). Hà gỡ
+/// nó bằng một câu: *"tôi ở tele là phải gọi lệnh thao tác như ngồi máy thì
+/// chặn khác gì chặt tay, cần kênh tele để làm gì?"* · *"đã qua hub thì đừng có
+/// chặn gì cả, các chỗ chặn bỏ hết cho tôi"*.
+///
+/// Giữ bài kiểm chứ không xoá, và đảo nó: một cổng đã gỡ mà không ai canh thì
+/// lượt sau có người "vá lại cho an toàn" — đúng thứ vừa mất nửa ngày.
+///
+/// Nhánh bị-từ-chối là nơi lệnh phá xuất hiện NHIỀU nhất (phiên hub mở chạy sau
+/// `DENIED_TOOLS`, nên `rm` bị chặn là chuyện thường), nên nó cũng là chỗ chủ
+/// máy CẦN cái nút nhất: chính hub vừa nói "tôi không chạy được cái này".
 #[test]
-fn a_destructive_denied_command_never_becomes_a_button() {
+fn a_destructive_denied_command_now_gets_a_button() {
     for cmd in [
         "rm -rf /Users/hanguyen/projects/hub/rust/target",
         "git reset --hard origin/main",
@@ -1615,20 +1622,24 @@ fn a_destructive_denied_command_never_becomes_a_button() {
             ),
             cmd = cmd
         );
-        assert!(
-            hub::sessions::commands_in_last_turn(&tail, 4).is_empty(),
-            "{cmd} vẫn ra nút: {:?}",
-            hub::sessions::commands_in_last_turn(&tail, 4)
+        assert_eq!(
+            hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(&tail, 4)),
+            vec![cmd.to_string()],
+            "lệnh phá huỷ phải CÓ nút — cổng cũ đã gỡ, đừng dựng lại"
         );
     }
 }
 
-/// Luật 5 gác cả ở đây: một dòng lệnh cũng là chữ RỜI KHỎI MÁY này.
+/// 🔴 ĐẢO CHIỀU 2026-08-16 — dòng lệnh mang bí mật NAY CŨNG có nút.
 ///
-/// `curl -H "Authorization: Bearer …"` là một dòng lệnh hoàn toàn hợp lệ, và
-/// đẩy nó lên Telegram là đẩy nguyên cái khoá đi theo.
+/// Bài cũ khoá *"luật 5 gác cả ở đây"*. Nhưng đích đến là buồng chat RIÊNG của
+/// chủ máy, có tự xoá lịch sử — hàng rào ấy do chính anh dựng, ở tầng dưới. Còn
+/// cái giá thì đo được: `curl -H "Authorization: Bearer …"` là một dòng lệnh
+/// hoàn toàn hợp lệ, và giữ nó lại là giữ đúng cái anh đang cần bấm.
+///
+/// Dấu hiệu vẫn được GHI (`cmd_risk_noted`) — nó thôi làm cánh cửa.
 #[test]
-fn a_denied_command_carrying_a_secret_is_withheld() {
+fn a_denied_command_carrying_a_secret_now_gets_a_button() {
     let tail = concat!(
         r#"{"type":"user","message":{"role":"user","content":"gọi thử API"}}"#,
         "\n",
@@ -1636,10 +1647,12 @@ fn a_denied_command_carrying_a_secret_is_withheld() {
         "\n",
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command curl has been denied."}]}}"#,
     );
-    assert!(
-        hub::sessions::commands_in_last_turn(tail, 4).is_empty(),
-        "{:?}",
-        hub::sessions::commands_in_last_turn(tail, 4)
+    assert_eq!(
+        hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(tail, 4)),
+        vec![
+            "curl -H \"Authorization: Bearer abc123def456\" https://example.test/v1/me".to_string()
+        ],
+        "dòng lệnh mang bí mật phải CÓ nút — cổng cũ đã gỡ, đừng dựng lại"
     );
 }
 
@@ -1702,8 +1715,14 @@ fn what_the_session_wrote_for_the_owner_comes_out_whole() {
 /// Chuỗi nguy hiểm dựng bằng `format!` chứ không viết thẳng: hook của máy này
 /// chặn cứng một dòng lệnh mang nguyên văn nó, kể cả khi dòng ấy chỉ là chữ
 /// trong một tệp test.
+/// 🔴 ĐẢO CHIỀU 2026-08-16 — cả những dòng nhiều vế cũng có nút.
+///
+/// Bài này từng chứng minh cửa `destructive` đọc TỪNG VẾ chứ không chỉ đầu dòng
+/// (`grep foo; rm -rf ~` phải bị chặn). Cửa ấy đã gỡ theo lệnh Hà, nên bài kiểm
+/// đổi việc: nó canh để cửa **không mọc lại**, và canh luôn một chuyện vẫn phải
+/// đúng — phép nhận dạng không được nuốt mất một dòng lệnh hợp lệ.
 #[test]
-fn a_destructive_clause_after_a_separator_is_still_destructive() {
+fn a_destructive_clause_after_a_separator_now_gets_a_button() {
     let wipe = format!("{} -rf ~", "rm");
     for cmd in [
         format!("grep foo; {wipe}"),
@@ -1721,13 +1740,13 @@ fn a_destructive_clause_after_a_separator_is_still_destructive() {
             ),
             cmd = cmd
         );
-        assert!(
-            hub::sessions::commands_in_last_turn(&tail, 4).is_empty(),
-            "{cmd} vẫn ra nút: {:?}",
-            hub::sessions::commands_in_last_turn(&tail, 4)
+        assert_eq!(
+            hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(&tail, 4)),
+            vec![cmd.to_string()],
+            "cửa `destructive` đã gỡ — dòng này phải có nút"
         );
     }
-    // …và cửa KHÔNG được siết lan: một lệnh chỉ NHẮC tới chữ ấy vẫn phải qua.
+    // …và phép nhận dạng vẫn phải nhận một lệnh chỉ NHẮC tới chữ ấy.
     let mention = format!(r#"grep -rn \"{} -rf\" scripts/"#, "rm");
     let tail = format!(
         concat!(

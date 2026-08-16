@@ -1326,23 +1326,19 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
         if network_without_target(verb, line) {
             continue;
         }
-        if destructive(line) {
-            // 🔴 KHÔNG dựng nút — nhưng cũng KHÔNG im. Hà 2026-08-16, ảnh chụp
-            // tin của `[tcc/amm]` có ba dòng `rm ~/…/.tmp-*.mjs`: *"có lệnh
-            // nhưng không có nút bấm"*.
-            //
-            // Việc không dựng nút là ĐÚNG và cố ý (`destructive`): một cú chạm
-            // nhầm trên điện thoại không được xoá file. Cái sai là hub làm việc
-            // ấy trong im lặng, nên từ điện thoại nó trông y hệt "hub không
-            // nhận ra đây là lệnh" — hai chuyện khác hẳn nhau, mà chỉ một
-            // trong hai đáng đi báo.
-            logging::info(
-                "cmd_no_button_destructive",
-                json!({ "cmd": crate::exec::truncate(line, 80),
-                        "why": "lệnh xoá/ghi đè — hub cố ý không dựng nút, chủ máy tự gõ ở máy" }),
-            );
-            continue;
-        }
+        // 🪦 CỔNG `destructive` GỠ 2026-08-16 — Hà: *"đã qua hub thì đừng có
+        // chặn gì cả, các chỗ chặn bỏ hết cho tôi"* · *"tôi ở tele là phải gọi
+        // lệnh thao tác như ngồi máy thì chặn khác gì chặt tay, cần kênh tele
+        // để làm gì?"*.
+        //
+        // Nó từng bỏ mọi dòng `rm`, `git reset --hard`, `kill`… nên chúng hiện
+        // ra trên điện thoại mà không có đường bấm, IM LẶNG. Hôm nay tôi vá cái
+        // im lặng ấy bằng một dòng giải thích, và anh hỏi đúng câu phải hỏi:
+        // *"thằng nào chặn thế, tôi có yêu cầu vậy à"*. Không ai yêu cầu.
+        //
+        // Cái rào thật của dự án này vẫn nguyên và nó nằm ở chỗ khác:
+        // `sessions::DENIED_TOOLS` gác thứ một PHIÊN TỰ CHẠY được phép làm —
+        // đó là gác một cỗ máy, không phải gác bàn tay chủ máy.
         if !out.iter().any(|x| x == line) {
             out.push(line.to_string());
         }
@@ -1392,9 +1388,7 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
         if cmd.split_whitespace().count() < 2 {
             continue;
         }
-        if destructive(cmd) {
-            continue;
-        }
+        // 🪦 `destructive` gỡ 2026-08-16 — xem chỗ gọi trên và `usable_command`.
         if !out.iter().any(|x| x == cmd) {
             out.push(cmd.to_string());
         }
@@ -1652,67 +1646,28 @@ fn forbids(context: &str) -> bool {
     MARKS.iter().any(|m| c.contains(m))
 }
 
-/// Lệnh PHÁ HUỶ thì không bao giờ được thành một cái nút.
-///
-/// 🔴 Hà 2026-08-14: *"Nút lệnh chạy ko đúng"* — và cái nút ấy mời chạy một
-/// lệnh xoá. Bấm một cái là chạy, không có bước xác nhận nào ở giữa; nên một
-/// cái nút mời làm việc không lùi lại được là một cái bẫy, kể cả khi lệnh viết
-/// đúng cú pháp.
-///
-/// Cửa này ĐỘC LẬP với `forbids`, và cố ý thế: `forbids` hỏi *"câu văn quanh nó
-/// có phải lời cấm không"* — một phép đoán trên chữ của người khác; còn đây hỏi
-/// *"chính lệnh này có phá gì không"*, đọc thẳng từ động từ. Một trong hai
-/// trượt thì cái kia vẫn giữ.
-///
-/// Muốn chạy thật thì vẫn còn đường: gõ thẳng nó vào phiên, hoặc `/terminal` mở
-/// một cửa sổ có tty. Thứ bị bỏ ở đây chỉ là cái nút bấm-một-phát.
-///
-/// 🔴 **Không chỉ ĐẦU DÒNG, 2026-08-15.** Bản cũ hỏi `starts_with`, và phép đo
-/// đầu tiên của nguồn mới trên nhật ký thật lôi ra ngay một ca lọt:
-/// `grep foo; rm -rf ~` — mở đầu bằng `grep` nên mọi cửa đều thấy hiền, còn vế
-/// sau dấu `;` thì xoá sạch thư mục nhà. Một dòng shell có thể mang nhiều lệnh,
-/// nên hỏi ở mỗi VẾ chứ không hỏi ở đầu dòng. Chia theo `;` `&&` `||` `|`.
-///
-/// Đúng loại lỗi tệp này đã đặt tên nhiều lần: một cửa đo SAI CHỖ đọc lên y hệt
-/// một cửa đang gác. Và nó chỉ lộ ra khi đem mã chạy trên dữ liệu thật — bộ test
-/// thuần thì tôi tự dựng đầu vào, nên nó chỉ hỏi đúng những gì tôi đã nghĩ ra.
-/// Những dòng trông như lệnh nhưng bị GIỮ LẠI vì phá hoại — để tin nói ra được.
-///
-/// 🔴 Hà 2026-08-16: *"có lệnh nhưng không có nút bấm"*. Không dựng nút cho
-/// `rm` là đúng; im lặng về việc ấy thì không. Hàm này chỉ đọc, và nó đọc bằng
-/// cùng hàng rào đã quyết định bỏ chúng (`destructive`), nên câu hub nói ra
-/// không bao giờ lệch với việc hub đã làm.
-pub fn destructive_in(text: &str) -> Vec<String> {
-    text.lines()
-        .map(str::trim)
-        .filter(|l| destructive(l))
-        .map(|l| crate::exec::truncate(l, 120))
-        .collect()
-}
-
-pub(crate) fn destructive(cmd: &str) -> bool {
-    const HEADS: &[&str] = &[
-        "rm ",
-        "rmdir ",
-        "git rm",
-        "git reset --hard",
-        "git clean",
-        "git push --force",
-        "git push -f",
-        "shred ",
-        "truncate ",
-        "drop table",
-        "drop database",
-        "kill ",
-        "pkill ",
-        "killall ",
-        "launchctl bootout",
-    ];
-    let c = cmd.trim().to_lowercase();
-    c.split([';', '|', '&'])
-        .map(str::trim)
-        .any(|seg| HEADS.iter().any(|h| seg.starts_with(h) || seg == h.trim()))
-}
+// 🪦 `destructive(cmd)` — GỠ HẲN 2026-08-16.
+//
+// Nó giữ một danh sách `rm`, `git reset --hard`, `git clean`, `kill`,
+// `drop table`, `launchctl bootout`… và MỌI dòng khớp danh sách ấy đều không
+// được dựng nút. Lý do viết ra hồi 14/08 nghe rất hợp lý: *"một cái nút mời
+// làm việc không lùi lại được là một cái bẫy"*.
+//
+// Hà gỡ nó bằng một câu ngắn hơn cả cái lý do ấy — 2026-08-16:
+//
+//   *"tôi ở tele là phải gọi lệnh thao tác như ngồi máy thì chặn khác gì chặt
+//   tay, cần kênh tele để làm gì?"*
+//
+// Đó chính là phép thử của cả dự án, phát biểu ngược lại. `CLAUDE.md` viết:
+// *"Anything he can do at the terminal but not from the phone is a gap."*
+// Ngồi ở máy anh gõ `rm` không ai hỏi câu nào; hub từ chối dựng nút cho đúng
+// dòng ấy nên nó tự tay tạo ra một khoảng cách — rồi im lặng về việc đó, nên
+// từ điện thoại nhìn ra y hệt "hub không đọc được lệnh".
+//
+// Cái rào THẬT của dự án không nằm ở đây và không đổi:
+// `sessions::DENIED_TOOLS` gác thứ một PHIÊN TỰ CHẠY được phép làm (luật 1).
+// Gác một cỗ máy chạy không người trông là một chuyện; gác bàn tay chủ máy là
+// một chuyện khác, và tệp này đã lẫn hai chuyện ấy suốt hai ngày.
 
 /// Nối lại một lệnh bị MÀN HÌNH bẻ dòng — hoặc từ chối, nếu không chắc.
 ///

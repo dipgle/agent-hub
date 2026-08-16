@@ -1027,8 +1027,13 @@ fn a_file_path_on_screen_becomes_something_you_can_open() {
         hub::keys::paths_on_screen("sửa ở src/main.rs rồi", 4),
         vec!["src/main.rs".to_string()]
     );
-    // …nhưng phải CÓ thư mục: `Node.js` giữa câu không phải một tệp.
-    assert!(hub::keys::paths_on_screen("Node.js chạy được", 4).is_empty());
+    // 🔴 Và từ 2026-08-17, TÊN TRẦN cũng là ứng viên (Hà: *"phải tìm được file
+    // ở đĩa"*) — `TODO.md` trên màn phải bấm được. Cái giá đi kèm: `Node.js`
+    // cũng lọt tới bước sau, và chết ở đó vì đĩa không có tệp nào tên vậy.
+    assert_eq!(
+        hub::keys::paths_on_screen("Node.js chạy được, xem TODO.md", 4),
+        vec!["Node.js".to_string(), "TODO.md".to_string()]
+    );
 
     // File NHỊ PHÂN không gửi: cổng quét rò chỉ đọc được chữ, mà một ảnh chụp
     // màn hình có thể mang nguyên một mật khẩu.

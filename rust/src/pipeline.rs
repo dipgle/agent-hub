@@ -2511,12 +2511,96 @@ pub fn sendable_file(
         None => std::path::PathBuf::from(p),
     };
     let full = if expanded.is_absolute() {
-        expanded
+        expanded.clone()
     } else {
         root.join(&expanded)
     };
     let inside = full.starts_with(root) || full.starts_with(workspace);
-    (full.is_file() && inside).then_some(full)
+    if full.is_file() && inside {
+        return Some(full);
+    }
+    // 🔴 KHÔNG THẤY Ở CHỖ ĐOÁN THÌ ĐI TÌM — Hà 2026-08-17: *"phải tìm được file
+    // ở đĩa"*.
+    //
+    // Ba hình dạng đều có thật trên một màn `/shot`, và cả ba đều trượt phép
+    // `root.join(...)`: tên trần (`TODO.md`), đường dẫn bị cửa sổ **bẻ đôi**
+    // (`docs/` ở cuối dòng, tên tệp ở dòng sau), và đường tính từ một thư mục
+    // con chứ không từ gốc dự án. Phiên thì biết rõ nó làm ở đâu, nên câu hỏi
+    // *"tệp này nằm chỗ nào trong cây ấy"* trả lời được bằng một lượt quét.
+    if expanded.is_absolute() {
+        return None;
+    }
+    let name = expanded.file_name()?.to_str()?;
+    find_one_in_tree(root, name)
+}
+
+/// Bỏ qua khi quét: nặng, và không chứa thứ ai đó nhắc tới trong một báo cáo.
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "target",
+    "node_modules",
+    ".tmp",
+    "dist",
+    "build",
+    ".cargo",
+    ".next",
+    "vendor",
+];
+
+/// Tìm **đúng một** tệp tên `name` trong cây `root`. Nhiều khớp ⟹ `None`.
+///
+/// Nhiều khớp là ca phải TỪ CHỐI chứ không phải chọn bừa: `docs/README.md` và
+/// `web/README.md` là hai tệp khác nhau, và gửi nhầm cái thứ hai thì người đọc
+/// không có cách nào biết mình đang đọc sai tệp. Không có nút thì còn thấy được
+/// là không có; một nút gửi sai tệp thì im lặng và trông y như đúng.
+///
+/// Trần độ sâu và trần số mục là hàng rào thời gian: hàm này chạy trong lượt trả
+/// lời một cú bấm, nên nó phải kết thúc kể cả khi ai đó trỏ vào một cây khổng lồ.
+fn find_one_in_tree(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    const MAX_DEPTH: usize = 6;
+    const MAX_ENTRIES: usize = 20_000;
+    let mut seen = 0usize;
+    let mut hit: Option<std::path::PathBuf> = None;
+    let mut queue = std::collections::VecDeque::from([(root.to_path_buf(), 0usize)]);
+    while let Some((dir, depth)) = queue.pop_front() {
+        if depth > MAX_DEPTH || seen > MAX_ENTRIES {
+            break;
+        }
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            seen += 1;
+            if seen > MAX_ENTRIES {
+                logging::info(
+                    "file_search_capped",
+                    json!({ "root": root.display().to_string(), "name": name,
+                            "why": "cây quá lớn — dừng quét, không dựng nút" }),
+                );
+                return None;
+            }
+            let p = e.path();
+            let Some(base) = p.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if p.is_dir() {
+                if !base.starts_with('.') && !SKIP_DIRS.contains(&base) {
+                    queue.push_back((p, depth + 1));
+                }
+            } else if base == name {
+                if hit.is_some() {
+                    // Hai tệp cùng tên: không đoán.
+                    logging::info(
+                        "file_search_ambiguous",
+                        json!({ "name": name, "root": root.display().to_string() }),
+                    );
+                    return None;
+                }
+                hit = Some(p);
+            }
+        }
+    }
+    hit
 }
 
 pub fn session_root(db: &Db, cfg: &Config, session_id: &str) -> Option<std::path::PathBuf> {

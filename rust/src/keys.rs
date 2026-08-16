@@ -1577,16 +1577,23 @@ pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
             if UNSENDABLE_EXT.contains(&ext.as_str()) {
                 continue;
             }
-            // Đường TƯƠNG ĐỐI phải có **thư mục** và mang đuôi văn bản đã biết.
+            // Đường TƯƠNG ĐỐI (kể cả TÊN TỆP TRẦN) chỉ cần mang đuôi văn bản
+            // đã biết — câu hỏi "có thật không" để ĐĨA trả lời.
             //
-            // Hai điều kiện, và cái thứ nhất là thứ đo được trên chính câu văn:
-            // `Node.js` mang đuôi `js` hợp lệ và vẫn không phải một tệp — đo
-            // được ngay lượt đầu (`tests/probe_paths.rs`). Có `/` thì nó là một
-            // đường dẫn ai đó cố ý viết ra, không phải một cái tên giữa câu.
-            // Cái giá: `README.md` viết trần không thành nút; đổi lại không câu
-            // văn nào đẻ ra nút hỏng. Rồi vẫn phải qua cửa "có thật và nằm trong
-            // cây phiên" (`pipeline::sendable_file`).
-            if !absolute && !(t.contains('/') && TEXT_FILE_EXT.contains(&ext.as_str())) {
+            // 🔴 Hà 2026-08-17, ảnh `/shot` phiên `[dwork]`: *"Trong nội dung có
+            // file *.md chưa chèn link tải, phải tìm được file ở đĩa"*. Màn ấy
+            // có `TODO.md`, `active-context.md` viết trần, và
+            // `docs/chuyen-doi-thiet-ke-2026-08-16h.md` bị cửa sổ **bẻ đôi** —
+            // `docs/` nằm cuối một dòng, tên tệp nằm ở dòng sau. Đòi token phải
+            // chứa `/` là loại sạch cả ba, mà cả ba đều là tệp có thật.
+            //
+            // Hàng rào không nằm ở hình dạng nữa mà ở `pipeline::sendable_file`:
+            // giải theo cây của đúng phiên, và không thấy thì ĐI TÌM trong cây
+            // ấy — khớp đúng một tệp mới dựng nút, nhiều khớp thì thôi (đoán
+            // giữa hai tệp cùng tên là gửi nhầm). `Node.js` vẫn không thành nút,
+            // chỉ khác là nay nó chết vì không có tệp nào tên vậy, chứ không
+            // phải vì thiếu dấu gạch chéo.
+            if !absolute && !TEXT_FILE_EXT.contains(&ext.as_str()) {
                 continue;
             }
             if !out.iter().any(|x| x == t) {

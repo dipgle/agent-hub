@@ -463,17 +463,11 @@ pub fn strip_markdown(text: &str) -> String {
     out
 }
 
-/// `~/x` → `/Users/…/x`. Chữ trên màn hay viết gọn bằng dấu ngã, mà
-/// `Path::canonicalize` không hiểu dấu ấy — nó sẽ đi tìm một thư mục tên `~`.
-fn shellexpand_home(p: &str) -> String {
-    match p.strip_prefix("~/") {
-        Some(rest) => match std::env::var("HOME") {
-            Ok(h) => format!("{h}/{rest}"),
-            Err(_) => p.to_string(),
-        },
-        None => p.to_string(),
-    }
-}
+// 🪦 `shellexpand_home` — gỡ 2026-08-17. Nó nở dấu ngã cho ĐÚNG MỘT chỗ gọi:
+// nút 📎 mở tệp. Nay chỗ ấy đi qua `pipeline::sendable_file`, hàm vốn đã nở dấu
+// ngã VÀ giải đường tương đối theo cây phiên VÀ tìm trên đĩa khi không thấy —
+// nên giữ lại một phép nở-dấu-ngã riêng ở đây là để sẵn hai luật cho cùng một
+// câu hỏi, đúng cái đã làm nút mọc ra rồi bấm vào báo "không mở được".
 
 /// Ai gửi cái update này — đọc theo ĐÚNG hình dạng của nó.
 ///
@@ -2106,10 +2100,25 @@ impl Inbox {
                     .and_then(|db| crate::pipeline::session_root(db, &self.cfg, &sid))
                 {
                     Some(root) => {
-                        let expanded = shellexpand_home(&p);
-                        match self.send_document(std::path::Path::new(&expanded), &root) {
-                            Ok(()) => None,
-                            Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
+                        // 🔴 GIẢI ĐƯỜNG DẪN BẰNG ĐÚNG HÀM ĐÃ DỰNG NÊN CÁI NÚT.
+                        //
+                        // Sổ giữ chuỗi ĐÚNG NHƯ NÓ HIỆN TRONG CHỮ (`TODO.md`,
+                        // `docs/x.md`) để còn bám được vào dòng của nó; chuỗi ấy
+                        // không phải một đường dẫn mở được. `sendable_file` là
+                        // chỗ biết cách giải — theo cây phiên, và tìm trên đĩa
+                        // khi cần (Hà 2026-08-17: *"phải tìm được file ở đĩa"*).
+                        // Trước lượt này chỗ đây tự `shellexpand_home` rồi mở
+                        // thẳng, tức hai đầu dùng hai luật khác nhau: nút mọc ra
+                        // được mà bấm vào thì "không mở được".
+                        match crate::pipeline::sendable_file(&p, &root, &self.cfg.workspace_root) {
+                            Some(real) => match self.send_document(&real, &root) {
+                                Ok(()) => None,
+                                Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
+                            },
+                            None => Some(format!(
+                                "⚠ chưa gửi được {p} — không tìm thấy tệp ấy trong cây làm việc \
+                                 của phiên (hoặc có hai tệp trùng tên, hub không đoán)."
+                            )),
                         }
                     }
                     None => Some(format!(

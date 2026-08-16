@@ -215,12 +215,14 @@ fn one_shared_probe_reads_the_same_screens_as_asking_each_window_alone() {
         let chung = hub::keys::look_from_screen(tab.screen.as_deref().unwrap(), 6);
         let riêng = hub::keys::look(&tab.tty, 6);
 
-        let verb = |l: &hub::keys::Look| match l {
-            hub::keys::Look::Saw { body, .. } => {
-                (Some(hub::keys::activity(body).map(|a| a.verb)), None)
+        let verb = |l: &hub::keys::Look| -> (Option<Option<String>>, Option<usize>) {
+            match l {
+                hub::keys::Look::Saw { body, .. } => {
+                    (Some(hub::keys::activity(body).map(|a| a.verb)), None)
+                }
+                // 🪦 Nhánh `Withheld` gỡ 2026-08-16 — xem bia mộ `keys::Look`.
+                hub::keys::Look::Blind { .. } => (None, None),
             }
-            hub::keys::Look::Withheld { choices, .. } => (None, Some(*choices)),
-            hub::keys::Look::Blind { .. } => (None, None),
         };
         let (a, b) = (verb(&chung), verb(&riêng));
         if a != b {

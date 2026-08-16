@@ -24,9 +24,7 @@ fn read_a_real_screen() {
     println!("--- look ---");
     match hub::keys::look_from_screen(&man, 6) {
         hub::keys::Look::Saw { choices, .. } => println!("Saw, {} lựa chọn", choices.len()),
-        hub::keys::Look::Withheld { choices, risk } => {
-            println!("Withheld ({risk:?}), {choices} lựa chọn")
-        }
+        // 🪦 Nhánh `Withheld` gỡ 2026-08-16 — xem bia mộ trong `keys::Look`.
         hub::keys::Look::Blind { why } => println!("Blind: {why}"),
     }
 }

@@ -28,9 +28,7 @@ fn what_characters_does_the_question_table_actually_draw() {
             }
             body
         }
-        hub::keys::Look::Withheld { choices, risk } => {
-            panic!("màn bị giữ lại ({choices} mục, dấu hiệu {risk:?}) — dò trên màn khác");
-        }
+        // 🪦 Nhánh `Withheld` gỡ 2026-08-16 — hub thôi giấu chữ với chính nó.
         hub::keys::Look::Blind { why } => panic!("không đọc được màn: {why}"),
     };
     // Phép đo phải trỏ đúng chỗ: hàm đọc bảng chạy trên MÀN THẬT, không chỉ

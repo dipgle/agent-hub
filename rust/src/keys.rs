@@ -2094,16 +2094,19 @@ pub enum Look {
         body: String,
         choices: Vec<(usize, String)>,
     },
-    /// Màn có dấu hiệu chứa bí mật ⟹ chữ bị giữ lại (điều 5 trong CLAUDE.md).
-    ///
-    /// Nhưng **vẫn biết chắc có mấy lựa chọn**: đó là một con số đếm được từ
-    /// hình dạng, không mang chữ nào ra khỏi máy. Giữ được con số ấy nghĩa là
-    /// chốt an toàn không phải mù chỉ vì màn đang hiện một mật khẩu — đúng cái
-    /// tình huống mà mù là tệ nhất.
-    Withheld { choices: usize, risk: Vec<String> },
     /// Không nhìn được: phiên không có cửa sổ, hoặc Terminal/osascript không
     /// trả lời. Đây KHÔNG phải "không có hộp chọn".
     Blind { why: String },
+    // 🪦 `Withheld { choices, risk }` — gỡ 2026-08-16 cùng lượt với cổng sinh
+    // ra nó. Nó nghĩa là *"màn có dấu hiệu bí mật nên hub giữ chữ lại, chỉ giữ
+    // con số lựa chọn"*, và lý lẽ ấy đúng hồi `/shot` cũng quét rò. Nay `/shot`
+    // gửi nguyên màn lên Telegram (gỡ 14/08), nên nhánh này giấu với hub đúng
+    // thứ hub vừa công bố — và cái giá là `/pick` từ chối một cú bấm hợp lệ
+    // bằng câu *"không đọc được chữ"* về một màn chủ máy đang nhìn tận mắt.
+    //
+    // Để lại một nhánh không ai sinh ra được thì tệ hơn xoá: người đọc sau sẽ
+    // tin rằng hub còn xử lý riêng màn có bí mật. Cùng bài học `portal.rs` để
+    // lại ba cỗ máy chết câm (`tests/cycle_wiring.rs`).
 }
 
 /// Nhìn màn phiên, nói thật là nhìn được tới đâu.
@@ -2149,12 +2152,30 @@ pub fn look(tty: &str, lines: usize) -> Look {
 /// thứ quyết định hub có dám gõ hay không, nên hai bản chép là hai bản sẽ lệch.
 pub fn look_from_screen(screen: &str, lines: usize) -> Look {
     let choices = parse_choices(screen);
+    // 🔴 THÔI GIỮ CHỮ LẠI VỚI CHÍNH MÌNH — 2026-08-16.
+    //
+    // Hà, phân biệt hai loại việc: *"lệnh ở đây là lệnh bash chứ không phải
+    // route của hub, route get file là yc hub gửi file lên tele thì không liên
+    // quan gì tới cli cả"*. Cùng ý ấy soi vào đây thì lộ ra một chỗ vô lý:
+    //
+    // `/shot` gửi NGUYÊN màn ấy lên Telegram, không quét gì cả (cổng quét rò gỡ
+    // ngày 14/08, cùng câu *"hub là cổng làm việc của tôi mà"*). Còn hàm này
+    // vẫn giấu ĐÚNG CÁI MÀN ẤY với chính hub, nên `/pick` trả lời *"màn có dấu
+    // hiệu bí mật nên hub không đọc được chữ"* về một màn chủ máy vừa nhìn tận
+    // mắt trên điện thoại. Giấu một thứ đã công bố thì không bảo vệ được gì —
+    // nó chỉ làm hub mù đúng lúc cần thấy nhất, rồi từ chối một cú bấm hợp lệ.
+    //
+    // Dấu hiệu vẫn được GHI, vì nó là một dữ kiện đáng biết; nó thôi làm một
+    // cánh cửa. (`sessions::preview_risk` giữ nguyên chỗ dùng THẬT của nó: phần
+    // xem trước nằm lại trong một tài liệu trên server, chỗ mà thiết lập tự xoá
+    // của Telegram không với tới.)
     let risk = crate::sessions::preview_risk(screen);
     if !risk.is_empty() {
-        return Look::Withheld {
-            choices: choices.len(),
-            risk,
-        };
+        logging::info(
+            "screen_risk_noted",
+            json!({ "risk": risk,
+                    "why": "màn có dấu hiệu bí mật — GHI LẠI, không giữ chữ: /shot đã gửi chính màn này" }),
+        );
     }
     let tail: Vec<&str> = screen
         .lines()
@@ -2185,9 +2206,6 @@ pub fn arrow_verdict(look: &Look) -> Arrow {
     match look {
         Look::Saw { choices, .. } if choices.is_empty() => Arrow::Send,
         Look::Saw { .. } => Arrow::RefuseDialog,
-        // Chữ bị giữ lại nhưng con số thì chắc chắn — vẫn quyết được.
-        Look::Withheld { choices: 0, .. } => Arrow::Send,
-        Look::Withheld { .. } => Arrow::RefuseDialog,
         Look::Blind { why } => Arrow::RefuseBlind(why.clone()),
     }
 }
@@ -2316,16 +2334,13 @@ mod tests {
         };
         assert_eq!(arrow_verdict(&asking), Arrow::RefuseDialog);
 
-        // Màn có bí mật: CHỮ bị giữ lại, nhưng con số lựa chọn vẫn chắc chắn —
-        // nên chốt không bị mù chỉ vì màn đang hiện một mật khẩu.
-        let secret_quiet = Look::Withheld {
-            choices: 0,
-            risk: vec!["credential_word_vi".into()],
-        };
-        assert_eq!(arrow_verdict(&secret_quiet), Arrow::Send);
-        let secret_asking = Look::Withheld {
-            choices: 2,
-            risk: vec!["credential_word_vi".into()],
+        // Màn có dấu hiệu bí mật nay đi đúng nhánh `Saw` như mọi màn khác —
+        // chữ không còn bị giữ lại với chính hub (xem bia mộ `Look::Withheld`).
+        // Cái phải giữ nguyên: luật quyết vẫn đọc SỐ LỰA CHỌN, nên một màn có
+        // mật khẩu mà đang mở hộp chọn thì vẫn không được gửi mũi tên.
+        let secret_asking = Look::Saw {
+            body: "mật khẩu: hunter2\nChọn đi?".into(),
+            choices: vec![(1, "một".into()), (2, "hai".into())],
         };
         assert_eq!(arrow_verdict(&secret_asking), Arrow::RefuseDialog);
 

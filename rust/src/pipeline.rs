@@ -603,15 +603,6 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                         }
                     }
                     crate::keys::Look::Saw { .. } => crate::watch::Idle::Prompt,
-                    crate::keys::Look::Withheld { choices, .. } if choices > 0 => {
-                        // Chỉ con số — con số không mang chữ nào ra khỏi máy.
-                        crate::watch::Idle::Asking {
-                            n: choices,
-                            options: vec![],
-                            multi: false,
-                        }
-                    }
-                    crate::keys::Look::Withheld { .. } => crate::watch::Idle::Prompt,
                     crate::keys::Look::Blind { .. } => crate::watch::Idle::Unknown,
                 }
             }
@@ -3576,16 +3567,37 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
 
     // `run:<i>` → payload `run_<i>`; nút cài lại hub → `upgrade`. Cùng bộ ký tự
     // mà tên lệnh cho phép, nên payload đi thẳng, không mã hoá gì thêm.
-    let link_of = |i: usize| {
-        cmd_btns.get(i).and_then(|(_, data)| {
-            let payload = if data == "upgrade" {
-                "upgrade".to_string()
-            } else {
-                data.replace("run:", "run_")
-            };
-            let icon = if data == "upgrade" { "🔧" } else { "▶️" };
-            crate::telegram::deep_link(&payload).map(|href| (href, icon.to_string()))
-        })
+    // 🔴 HAI ĐÍCH CHẠM CHO MỘT DÒNG LỆNH — Hà 2026-08-16: *"kiếm 1 cái icon
+    // terminal để biết nó là bấm chạy terminal riêng chứ không phải chạy xong
+    // rồi gửi ngược vào phiên, nên tách thành 2 nút này để người dùng chủ động
+    // chọn"*.
+    //
+    // `▶️` = hub chạy bằng `/bin/zsh -lc`, chờ xong, dán bản tóm tắt vào phiên.
+    // `🖥` = mở một cửa sổ Terminal và gõ lệnh vào đó, rồi chuyển con trỏ sang.
+    // Hai thứ khác nhau ở CÁI CÒN LẠI sau khi chạy, nên chúng phải là hai đích
+    // chạm chứ không phải một mặc định hub tự chọn hộ.
+    //
+    // ⚠ Nút cài lại hub (`upgrade`) chỉ có MỘT đường: nó khởi động lại chính
+    // hubd, và làm việc ấy trong một cửa sổ rời thì cái mồm báo tin chết giữa
+    // câu — đúng con bug đã trả giá ngày 16/08 (xem `quick_buttons`).
+    let link_of = |i: usize| -> Vec<(String, String)> {
+        let Some((_, data)) = cmd_btns.get(i) else {
+            return Vec::new();
+        };
+        if data == "upgrade" {
+            return crate::telegram::deep_link("upgrade")
+                .map(|href| (href, "🔧".to_string()))
+                .into_iter()
+                .collect();
+        }
+        let tok = data.trim_start_matches("run:");
+        [("run_", "▶️"), ("term_", "🖥")]
+            .iter()
+            .filter_map(|(p, icon)| {
+                crate::telegram::deep_link(&format!("{p}{tok}"))
+                    .map(|href| (href, icon.to_string()))
+            })
+            .collect()
     };
     // 🔴 Ô NHẬP CŨNG LÀ MỘT NEO — Hà 2026-08-16: *"chèn vào đúng chỗ gõ lệnh đó
     // nếu có text 2 nút là được"* · *"1 nút enter 1 nút xóa"* · *"còn lăn tăn nó
@@ -3601,7 +3613,7 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     let mut anchors: Vec<(String, Vec<(String, String)>)> = cmds
         .iter()
         .enumerate()
-        .map(|(i, c)| (c.clone(), link_of(i).into_iter().collect()))
+        .map(|(i, c)| (c.clone(), link_of(i)))
         .collect();
     let key_sid = if data.sid.is_empty() {
         buttons.iter().find_map(|(_, d)| {
@@ -3964,17 +3976,9 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
 
     let body = match crate::keys::look(&s.tty, PICK_LINES) {
         crate::keys::Look::Saw { body, .. } => body,
-        crate::keys::Look::Withheld { risk, .. } => {
-            logging::info(
-                "pick_refused_withheld",
-                json!({ "session": s.session_id, "risk": risk }),
-            );
-            return format!(
-                "⚠ Màn của {name} có dấu hiệu bí mật nên hub không đọc được chữ — mà không đọc \
-                 được thì KHÔNG biết đang đứng ở câu nào, và bấm bừa là chốt hộ Hà một lựa chọn \
-                 không lùi lại được. Trả lời trên máy, hoặc `/shot` để tự nhìn."
-            );
-        }
+        // 🪦 Nhánh `Withheld` gỡ 2026-08-16: nó từ chối cú bấm bằng câu *"màn có
+        // dấu hiệu bí mật nên hub không đọc được chữ"* — về đúng cái màn mà
+        // `/shot` vừa gửi nguyên lên điện thoại. Xem bia mộ trong `keys::Look`.
         crate::keys::Look::Blind { why } => {
             logging::warn(
                 "pick_refused_blind",
@@ -4378,6 +4382,72 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         "⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.".to_string(),
                     ),
                 }
+            }
+            CommandKind::RunInTerminal => {
+                // 🖥 CÙNG dòng lệnh của `RunQuick`, khác chỗ CHẠY. Xem
+                // `adapters::CommandKind::RunInTerminal` để biết vì sao hai kiểu.
+                let n = cmd.arg.trim();
+                let ack = match quick_cmd(db, n).map(|(sid, c)| (sid, c.line, c.cwd)) {
+                    None => "⚠ lệnh gợi ý ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.".to_string(),
+                    Some((sid, line, cwd)) => {
+                        // Mở cửa sổ ở ĐÚNG thư mục sổ đã ghi cho dòng lệnh này.
+                        // Một lệnh tương đối (`bash ./gate.sh`) chạy ở thư mục
+                        // khác là chạy một thứ khác — hoặc không chạy gì.
+                        match crate::sessions::open_bare_terminal() {
+                            Err(e) => {
+                                let why = crate::logging::err_chain(&e);
+                                logging::error("term_run_open_failed", json!({ "err": why }));
+                                format!("⚠ chưa mở được cửa sổ: {why}")
+                            }
+                            Ok((w, tty)) => {
+                                let full = if cwd.trim().is_empty() {
+                                    line.clone()
+                                } else {
+                                    format!(
+                                        "cd {} && {line}",
+                                        crate::sessions::shell_quote(cwd.trim())
+                                    )
+                                };
+                                logging::info(
+                                    "term_run",
+                                    json!({ "n": n, "session": sid, "tty": tty,
+                                            "cmd": crate::exec::truncate(&full, 120) }),
+                                );
+                                // Chuyển con trỏ sang cửa sổ ấy — cùng luật với
+                                // `/new` trần: mở xong thì tay người ta phải ở
+                                // đó, không phải ở phiên cũ.
+                                let id = format!("{}{tty}", crate::sessions::SHELL_ID_PREFIX);
+                                if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, &id) {
+                                    logging::error(
+                                        "focus_after_term_run_failed",
+                                        json!({ "err": e.to_string(), "id": id }),
+                                    );
+                                }
+                                match crate::keys::type_and_send(w, &full) {
+                                    Ok(()) => format!(
+                                        "🖥 Đang chạy trong cửa sổ riêng ({tty}) — đang theo nó.\n\
+                                         /shot để nhìn màn."
+                                    ),
+                                    // `open` xong mà gõ hỏng thì cửa sổ vẫn ở
+                                    // đó và TRỐNG: nói đúng như vậy, đừng khai
+                                    // là đã chạy.
+                                    Err(e) => {
+                                        let why = crate::logging::err_chain(&e);
+                                        logging::error(
+                                            "term_run_type_failed",
+                                            json!({ "tty": tty, "err": why }),
+                                        );
+                                        format!(
+                                            "⚠ Đã mở cửa sổ ({tty}) nhưng CHƯA gõ được lệnh vào: {why}"
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
             }
             CommandKind::Help => {
                 // Chữ này SINH TỪ BẢNG (`commands::help_text`), không gõ tay:
@@ -6006,13 +6076,24 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // Không có sổ ⟹ 0 nút, KHÔNG rơi về màn: rơi về là giữ lại
                     // đúng cái vừa gỡ, và giữ nó ở đúng lúc hub mù nhất.
                     // `commands_of` ghi một dòng log cho ca ấy.
-                    // Trần 4 → 6 (2026-08-16). Một lượt bàn giao thật vừa liệt
-                    // kê ĐÚNG BỐN dòng lệnh, và cùng lượt ấy có thêm một lệnh
-                    // bị cổng quyền từ chối — tổng 5, tức trần cắt mất dòng đầu
-                    // (xem `sessions::commands_of`, nay có log `cmds_truncated`).
-                    // 6 ôm được một lượt bàn giao đầy đủ mà vẫn không biến tin
-                    // thành một bảng nút.
-                    let mut cmds = crate::sessions::commands_of(cfg, &shot_sid, 6);
+                    // 🔴 TRẦN 4 → 12, và lý do nới là lý do CŨ ĐÃ HẾT HIỆU LỰC.
+                    //
+                    // Hà 2026-08-16, ảnh chụp `/shot` của `[dwork]` có BẢY dòng
+                    // lệnh và đúng BA icon: *"phân tích mãi không được nội dung
+                    // để bóc tách lệnh như này, thiếu quá nhiều"*. Trước đó là
+                    // ảnh `[mailler]`: bốn dòng, ba icon. Cùng một thủ phạm —
+                    // `commands_of` giữ phần CUỐI rồi cắt phần đầu, im lặng
+                    // (nay có `cmds_truncated`).
+                    //
+                    // Trần nhỏ sinh ra hồi mỗi lệnh là một cái NÚT ở đáy tin:
+                    // mười nút thì bàn phím Telegram thành một bức tường, và
+                    // nhãn nút bị cắt ở 52 ký tự nên không đọc được mình sắp
+                    // chạy gì. Từ khi icon nằm GIỮA CHỮ (`html_with_links`),
+                    // mỗi lệnh mang icon của nó ngay trên dòng của nó — thêm
+                    // một lệnh là thêm một icon ở một dòng vốn đã có, không
+                    // chiếm thêm chỗ nào. Cái giá đã biến mất; cái trần thì ở
+                    // lại. 12 là chặn-chuyện-vô-lý, không phải chắt lọc.
+                    let mut cmds = crate::sessions::commands_of(cfg, &shot_sid, 12);
                     let n_cmds = cmds.len();
                     cmd_lines = crate::sessions::lines_of(&cmds[..n_cmds]);
                     // Câu đồng ý nằm CÙNG kho với lệnh (một chỗ nhớ, một chỉ

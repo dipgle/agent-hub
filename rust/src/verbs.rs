@@ -142,6 +142,23 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
             return Some((CommandKind::RunQuick, 0, n.to_string()));
         }
     }
+    // `term_<mã>` — CÙNG dòng lệnh ấy, nhưng mở một CỬA SỔ Terminal riêng và gõ
+    // nó vào đó, thay vì hub chạy rồi dán kết quả ngược vào phiên.
+    //
+    // 🔴 Hà 2026-08-16: *"kiếm 1 cái icon terminal để biết nó là bấm chạy
+    // terminal riêng chứ không phải chạy xong rồi gửi ngược vào phiên, nên tách
+    // thành 2 nút này để người dùng chủ động chọn"*.
+    //
+    // Hai cách chạy KHÁC NHAU THẬT, và trước lượt này chỉ có một: `▶️` chạy
+    // bằng `/bin/zsh -lc` của hub, chờ tới khi xong, rồi dán bản tóm tắt vào
+    // phiên. Cách ấy đúng cho một lệnh ngắn có kết quả đáng đọc, và SAI cho một
+    // lệnh dài, một lệnh hỏi lại, hay một lệnh chủ máy muốn ngồi nhìn — những
+    // thứ mà ngồi ở máy thì người ta mở một cửa sổ. Đúng phép thử cầu nối.
+    if let Some(n) = verb.strip_prefix("term_") {
+        if !n.is_empty() && n.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some((CommandKind::RunInTerminal, 0, n.to_string()));
+        }
+    }
     // `/type <nút> [id phiên]` — Hà 2026-08-16: *"cấu trúc lại lệnh type thành
     // `/type <nút> [id phiên]`, ko có id phiên thì vào phiên đang trỏ tới"*.
     //

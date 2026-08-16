@@ -3879,8 +3879,6 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
                     "session": session.session_id,
                     "why": match &other {
                         crate::keys::Look::Blind { why } => why.clone(),
-                        crate::keys::Look::Withheld { risk, .. } =>
-                            format!("màn có dấu hiệu bí mật: {}", risk.join(",")),
                         crate::keys::Look::Saw { .. } => unreachable!("nhánh Saw đã bắt ở trên"),
                     },
                     "fallback": "fork",
@@ -4496,18 +4494,10 @@ pub fn answer_trust_dialog(tty: &str) -> Option<usize> {
     let looked = crate::keys::look(tty, 24);
     let choices = match looked {
         crate::keys::Look::Saw { choices, .. } => choices,
-        // Màn bị giữ lại thì chỉ còn một CON SỐ lựa chọn, không có chữ — mà
-        // luật nhận hộp này đọc CHỮ ("trust" + "folder"). Không đọc được chữ
-        // thì KHÔNG bấm: bấm một con số vào một hộp chưa nhận diện được là trả
-        // lời thay chủ máy về một câu hub không biết nội dung.
-        crate::keys::Look::Withheld { choices, risk } => {
-            logging::info(
-                "trust_dialog_screen_withheld",
-                json!({ "tty": tty, "choices": choices, "risk": risk,
-                        "why": "màn có dấu hiệu bí mật nên chữ bị giữ — không nhận diện được hộp, KHÔNG bấm" }),
-            );
-            return None;
-        }
+        // 🪦 Nhánh `Withheld` gỡ 2026-08-16 — xem bia mộ trong `keys::Look`.
+        // Chốt an toàn THẬT của chỗ này không đổi và nằm ngay dưới: luật nhận
+        // hộp đọc CHỮ ("trust" + "folder"), nên một màn không khớp chữ thì
+        // vẫn KHÔNG bấm. Cái mất đi chỉ là một nhánh từ chối vì lý do khác.
         crate::keys::Look::Blind { why } => {
             logging::warn(
                 "trust_dialog_screen_blind",
@@ -4912,7 +4902,7 @@ pub fn terminal_command_resuming(
 }
 
 /// Bọc một chuỗi cho shell — chỉ dùng cho lệnh hub tự dựng, không cho chữ ngoài.
-fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 

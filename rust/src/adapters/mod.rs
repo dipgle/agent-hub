@@ -88,6 +88,15 @@ pub enum CommandKind {
     /// lệnh thật nằm trong sổ (`pipeline::quick_cmd`), nên nó KHÔNG thể bị cắt
     /// cụt như một cái nhãn nút.
     RunQuick,
+    /// `term_<mã>` — CÙNG dòng lệnh của `RunQuick`, chạy ở một CỬA SỔ riêng.
+    ///
+    /// 🔴 Hà 2026-08-16: *"tách thành 2 nút này để người dùng chủ động chọn"*.
+    /// Hai kiểu chạy khác nhau ở thứ chúng để lại: `▶️` (RunQuick) chờ lệnh
+    /// xong rồi dán bản tóm tắt vào phiên — tốt cho một lệnh ngắn có kết quả
+    /// đáng đọc; `🖥` mở một cửa sổ Terminal và gõ lệnh vào đó — tốt cho lệnh
+    /// dài, lệnh hỏi lại, hay lệnh chủ máy muốn ngồi nhìn. Ngồi ở máy thì hai
+    /// việc ấy cũng là hai việc, nên cây cầu phải mang sang đủ cả hai.
+    RunInTerminal,
     /// Ask the focused session a question WITHOUT interrupting it. `arg` is the
     /// question; the target is whatever `/session` is following.
     ///

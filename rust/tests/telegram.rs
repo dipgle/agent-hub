@@ -388,6 +388,32 @@ fn a_line_echoed_in_the_transcript_is_not_a_line_still_in_the_box() {
     );
 }
 
+/// KHỐI DÁN nhiều dòng: TUI thay nó bằng `[Pasted text #N]`, và phép đo phải
+/// đọc được cái nhãn ấy.
+///
+/// 🔴 Hà 2026-08-16, ảnh chụp phiên `[mailler]`: *"Chạy lệnh xong dán vào ô chat
+/// không gửi đi"* · *"Thiếu enter"*. Kết quả một lệnh chạy 53 giây nằm nguyên
+/// trong ô nhập. Vì `claude` rút gọn mọi khối dán nhiều dòng, nên cả 16 ký tự
+/// đầu lẫn 16 ký tự cuối của khối đều KHÔNG có trên màn để mà tìm — phép đo đọc
+/// ra "chữ đã rời ô", không ai bấm Enter, và không một dòng nào nói ra.
+#[test]
+fn a_pasted_block_collapsed_by_the_tui_still_counts_as_sitting_in_the_box() {
+    let block = "[hub chạy hộ]\n$ cd ~/projects/AI/mailler && ./upgrade.sh --upgrade vps-a\n\
+                 ✅ xong (53.0s)\nbuilding x86_64-unknown-linux-musl with cargo-zigbuild…";
+    let screen = "╭──────────────╮\n\
+                  │ ❯ [Pasted text #4 +3 lines][Pasted text #5] │\n\
+                  ╰──────────────╯";
+    assert!(
+        hub::keys::still_in_box(screen, block),
+        "khối dán bị rút gọn thì vẫn là chữ CHƯA gửi"
+    );
+    // Ô trống thì thôi — cái nhãn ấy không được tự sinh ra từ hư không.
+    let after = "╭──────────────╮\n│ ❯                    │\n╰──────────────╯";
+    assert!(!hub::keys::still_in_box(after, block));
+    // Và một câu MỘT DÒNG không được ăn nhầm cái nhãn của lượt dán trước.
+    assert!(!hub::keys::still_in_box(screen, "một câu bình thường"));
+}
+
 /// Chữ QUÁ NGẮN không đủ đặc trưng — thà bỏ sót một Enter còn hơn bắn nhầm.
 ///
 /// "2" hay "ok" nằm sẵn trong gần như mọi màn hình; nhận nhầm thành "còn trong
@@ -989,9 +1015,20 @@ fn a_file_path_on_screen_becomes_something_you_can_open() {
     let dot = hub::keys::paths_on_screen("xem /tmp/bao-cao.md.", 4);
     assert_eq!(dot, vec!["/tmp/bao-cao.md".to_string()]);
 
-    // Đường TƯƠNG ĐỐI bỏ qua: `src/main.rs` không nói được nó thuộc dự án nào,
-    // mà đoán sai ở đây là gửi nhầm file của dự án khác.
-    assert!(hub::keys::paths_on_screen("sửa ở src/main.rs rồi", 4).is_empty());
+    // 🔴 ĐẢO CHIỀU 2026-08-16. Hà, đọc một bản "Xem đầy đủ" nhắc
+    // `docs/flow-boc-tach-lenh.md`: *"nhận được tin có file nhưng chưa có nút
+    // tải hay xem"* · *"Có file .md đấy"*.
+    //
+    // Luật cũ bỏ đường TƯƠNG ĐỐI vì *"không nói được nó thuộc dự án nào"* — lo
+    // đúng, chỗ sai: câu ấy đo bằng HÌNH DẠNG một thứ chỉ trả lời được bằng
+    // ĐĨA. Hub biết thư mục từng phiên, nên đường tương đối được giải theo cây
+    // của đúng phiên ấy và `pipeline::sendable_file` vứt cái không có thật.
+    assert_eq!(
+        hub::keys::paths_on_screen("sửa ở src/main.rs rồi", 4),
+        vec!["src/main.rs".to_string()]
+    );
+    // …nhưng phải CÓ thư mục: `Node.js` giữa câu không phải một tệp.
+    assert!(hub::keys::paths_on_screen("Node.js chạy được", 4).is_empty());
 
     // File NHỊ PHÂN không gửi: cổng quét rò chỉ đọc được chữ, mà một ảnh chụp
     // màn hình có thể mang nguyên một mật khẩu.

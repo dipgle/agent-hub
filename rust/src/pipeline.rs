@@ -2350,7 +2350,15 @@ fn kept_paths(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<
             }
             kept
         }
-        None => paths.to_vec(),
+        // 🔴 Không tra được thư mục phiên thì CHỈ giữ đường tuyệt đối. Đường
+        // tương đối lúc ấy không giải được — giữ nó lại là dựng một cái nút mà
+        // cú bấm chắc chắn trả "không biết phiên ấy làm ở thư mục nào", tức một
+        // lời hứa suông (cùng bài học với `📎 com.dipgle.hubd.plist` 14/08).
+        None => paths
+            .iter()
+            .filter(|p| p.starts_with('/') || p.starts_with("~/"))
+            .cloned()
+            .collect(),
     }
 }
 

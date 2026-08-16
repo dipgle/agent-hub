@@ -272,6 +272,21 @@ pub fn still_in_box(screen: &str, typed: &str) -> bool {
     let tail: String = t.chars().skip(n.saturating_sub(16)).collect();
     let head: String = t.chars().take(16).collect();
     let seen = squash(&screen);
+    // 🔴 KHỐI DÁN KHÔNG CÒN LÀ CHỮ CỦA CHÍNH NÓ — 2026-08-16. Hà, ảnh chụp phiên
+    // `[mailler]`: *"Chạy lệnh xong dán vào ô chat không gửi đi"* · *"Thiếu
+    // enter"*. Trên màn, ô nhập hiện `[Pasted text #4 +3 lines][Pasted text #5]`
+    // — TUI của `claude` RÚT GỌN mọi khối dán nhiều dòng thành một cái nhãn, nên
+    // cả 16 ký tự đầu lẫn 16 ký tự cuối của khối đều không có mặt để mà tìm.
+    //
+    // Phép đo vì thế đọc ra "chữ đã rời ô", `type_and_send` không bấm Enter
+    // rời, và cả kết quả lệnh nằm lại trong ô — im lặng, đúng cái hình dạng bản
+    // vá "hai đầu" ở trên vừa mới sửa cho một ca khác cùng ngày.
+    //
+    // Chỉ áp cho khối NHIỀU DÒNG: đó đúng là thứ TUI rút gọn, và giới hạn ấy
+    // giữ cho một câu một dòng không bao giờ ăn nhầm cái nhãn của lượt trước.
+    if typed.contains('\n') && seen.contains("[Pastedtext") {
+        return true;
+    }
     seen.contains(&tail) || seen.contains(&head)
 }
 
@@ -1444,6 +1459,52 @@ fn dedupe_same_script(out: &mut Vec<String>) {
 ///
 /// Luật gốc không đổi (luật 5): thứ gì rời khỏi máy này phải soi được. Một ảnh
 /// chụp màn hình mang nguyên mật khẩu mà mọi phép quét chuỗi đều nói "sạch".
+/// Đuôi tệp VĂN BẢN đủ quen để một đường TƯƠNG ĐỐI trên màn được coi là tệp.
+///
+/// Danh sách trắng, cố ý hẹp: đường tương đối không có `/` đầu để phân biệt với
+/// câu văn, nên thứ duy nhất còn phân biệt được là cái đuôi. Rộng tay ở đây thì
+/// mỗi dấu chấm giữa câu thành một cái nút; thiếu một đuôi thì cùng lắm là một
+/// tệp không có nút, và đường tuyệt đối vẫn chạy như cũ.
+pub const TEXT_FILE_EXT: &[&str] = &[
+    "md",
+    "txt",
+    "rs",
+    "toml",
+    "json",
+    "hjson",
+    "yaml",
+    "yml",
+    "sh",
+    "zsh",
+    "bash",
+    "mjs",
+    "cjs",
+    "js",
+    "ts",
+    "tsx",
+    "jsx",
+    "css",
+    "scss",
+    "html",
+    "htm",
+    "py",
+    "rb",
+    "go",
+    "java",
+    "kt",
+    "sql",
+    "plist",
+    "lock",
+    "log",
+    "conf",
+    "ini",
+    "xml",
+    "csv",
+    "env",
+    "gitignore",
+    "service",
+];
+
 pub const UNSENDABLE_EXT: &[&str] = &[
     "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "ico", "tiff", "pdf", "zip", "gz", "tgz",
     "bz2", "xz", "7z", "rar", "dmg", "pkg", "app", "sqlite", "db", "bin", "exe", "dylib", "so",
@@ -1459,10 +1520,24 @@ pub const UNSENDABLE_EXT: &[&str] = &[
 /// được cái nào — nên một báo cáo nhắc tới `ARCHITECTURE.md` là nhắc tới thứ
 /// người đọc trên điện thoại không mở nổi.
 ///
-/// Nhận theo HÌNH DẠNG như `commands_on_screen`, và hẹp y như thế: phải là
-/// đường TUYỆT ĐỐI (`/…` hoặc `~/…`), và không mang đuôi nhị phân đã biết.
-/// Đường tương đối thì cố ý bỏ qua — `src/main.rs` trên màn không nói được nó
-/// nằm trong dự án nào, mà đoán sai ở đây là gửi nhầm file của dự án khác.
+/// Nhận theo HÌNH DẠNG như `commands_on_screen`: đường TUYỆT ĐỐI (`/…`, `~/…`)
+/// mang tên tệp, **hoặc** đường TƯƠNG ĐỐI có đuôi văn bản đã biết
+/// (`TEXT_FILE_EXT`). Không nhận đuôi nhị phân.
+///
+/// 🔴 Đường tương đối được nhận từ 2026-08-16. Hà, đọc một bản *"Xem đầy đủ"*
+/// có nhắc `docs/flow-boc-tach-lenh.md`: *"nhận được tin có file nhưng chưa có
+/// nút tải hay xem"* · *"Có file .md đấy"*.
+///
+/// Luật cũ bỏ qua chúng vì *"`src/main.rs` trên màn không nói được nó nằm trong
+/// dự án nào, đoán sai là gửi nhầm file của dự án khác"* — lo đúng, chỗ sai:
+/// câu ấy đo bằng HÌNH DẠNG một thứ chỉ trả lời được bằng ĐĨA. Nay hub biết thư
+/// mục của từng phiên (`pipeline::session_root`), nên đường tương đối được giải
+/// theo đúng cây của phiên đã nhắc tới nó, và `sendable_file` vứt bỏ những gì
+/// không phải tệp thật nằm trong cây ấy. Không tồn tại thì không có nút — chứ
+/// không phải đoán rồi gửi nhầm.
+///
+/// Đổi lại, đuôi phải nằm trong danh sách trắng: một câu văn đầy dấu chấm và
+/// dấu gạch chéo (`12/08`, `v.v.`) thì không được thành một cái nút.
 ///
 /// Phần "có đọc được không" KHÔNG hỏi ở đây: hàm này thuần, không chạm đĩa. Nó
 /// được hỏi đúng một lần, đúng lúc gửi — xem `UNSENDABLE_EXT`.
@@ -1489,16 +1564,29 @@ pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
             if tok.contains('…') || tok.contains("...") {
                 continue;
             }
-            let t = tok.trim_end_matches(['.', ':', '?', '!']);
-            if !(t.starts_with('/') || t.starts_with("~/")) || t.len() < 4 {
+            let t = tok.trim_end_matches(['.', ':', '?', '!', ',']);
+            if t.len() < 4 {
                 continue;
             }
+            let absolute = t.starts_with('/') || t.starts_with("~/");
             // Phải có TÊN FILE, không phải một thư mục: đoạn cuối có dấu chấm.
             let Some(last) = t.rsplit('/').next().filter(|l| l.contains('.')) else {
                 continue;
             };
             let ext = last.rsplit('.').next().unwrap_or_default().to_lowercase();
             if UNSENDABLE_EXT.contains(&ext.as_str()) {
+                continue;
+            }
+            // Đường TƯƠNG ĐỐI phải có **thư mục** và mang đuôi văn bản đã biết.
+            //
+            // Hai điều kiện, và cái thứ nhất là thứ đo được trên chính câu văn:
+            // `Node.js` mang đuôi `js` hợp lệ và vẫn không phải một tệp — đo
+            // được ngay lượt đầu (`tests/probe_paths.rs`). Có `/` thì nó là một
+            // đường dẫn ai đó cố ý viết ra, không phải một cái tên giữa câu.
+            // Cái giá: `README.md` viết trần không thành nút; đổi lại không câu
+            // văn nào đẻ ra nút hỏng. Rồi vẫn phải qua cửa "có thật và nằm trong
+            // cây phiên" (`pipeline::sendable_file`).
+            if !absolute && !(t.contains('/') && TEXT_FILE_EXT.contains(&ext.as_str())) {
                 continue;
             }
             if !out.iter().any(|x| x == t) {

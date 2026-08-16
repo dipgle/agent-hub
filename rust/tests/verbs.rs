@@ -138,14 +138,24 @@ fn stop_defaults_to_the_session_being_read() {
     assert_eq!(arg, "a3a24ccd-6ad8");
 }
 
+/// 🔴 `/tell` GỠ 2026-08-15 — và test cũ đổi vai, không xoá lặng.
+///
+/// Hà: *"lệnh tell là không cần thiết?"* · *"vì trên tele tôi chỉ gõ text bình
+/// thường thôi"*. Đo cả cuốn log: **0 lượt dùng** — nhưng con số ấy một mình đã
+/// lừa một lần rồi (`/win`, `listed:false`, đo SỰ VÔ HÌNH), nên bằng chứng thật
+/// nằm trong mã: `sessions::tell` mở đầu bằng
+/// `if session.kind != "background" { bail!(…) }`, mà hạng phiên nền nay chỉ
+/// còn sinh ra khi MỞ CỬA SỔ THẤT BẠI.
+///
+/// Nay `/tell` phải đọc thành CHỮ, y như mọi câu khác — vì đó chính là cách chủ
+/// máy nói với phiên: gõ thẳng. Một động từ đã gỡ mà vẫn còn phân tích được là
+/// đúng con bug `CLAUDE.md` gọi tên (*"a verb whose handler has nothing left to
+/// DO is the same bug wearing a uniform"*), chỉ khác chiều.
 #[test]
-fn telling_a_session_keeps_the_whole_sentence() {
-    let (kind, id, arg) =
-        parse_command("/tell chạy lại test rồi báo kết quả, đừng commit").expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Tell);
-    assert_eq!(id, 0);
-    assert_eq!(arg, "chạy lại test rồi báo kết quả, đừng commit");
+fn tell_is_gone_and_reads_as_ordinary_text() {
+    assert!(parse_command("/tell chạy lại test rồi báo kết quả").is_none());
     assert!(parse_command("/tell").is_none());
+    assert!(parse_command("/noi gì đó").is_none());
 }
 
 #[test]
@@ -185,12 +195,7 @@ fn help_needs_no_decision_id() {
 /// command is; this pins the shared predicate they now both use.
 #[test]
 fn the_live_path_and_the_poller_agree_on_what_counts_as_a_command() {
-    for text in [
-        "/session 1a2b3c4d",
-        "/stop",
-        "/handover",
-        "/tell chạy nốt test đi",
-    ] {
+    for text in ["/session 1a2b3c4d", "/stop", "/handover"] {
         assert!(
             parse_command(text).is_some(),
             "cả hai đường phải coi đây là LỆNH, không phải tin nhắn: {text}"
@@ -362,21 +367,96 @@ fn runin_needs_both_a_session_and_a_command() {
 /// đầu (*"sao không dùng Deep Links"*) và tôi đã đi vòng mất mấy lượt.
 #[test]
 fn a_deep_link_payload_round_trips_back_into_the_same_command() {
-    // Bấm icon ⟹ Telegram gửi `/start <payload>` ⟹ phải ra ĐÚNG lệnh gõ tay.
+    // 🔴 MÃ LẤY TỪ CHÍNH BÊN SINH RA NÓ, không gõ tay một hình dạng cho dễ.
+    //
+    // Bản trước bài kiểm này tự chọn `run_0`, và nó xanh suốt trong khi đường
+    // thật đã gãy: `quick_token` sinh **8 ký tự hex** (`d1704560`) còn bên đọc
+    // vẫn đòi chữ số. Hà bấm icon, hub đáp *"Chưa hiểu lệnh này"* — và không
+    // bài kiểm nào đỏ, vì cả hai đầu đều đúng với hình dạng **tôi tưởng tượng**.
+    // Gọi thẳng `quick_token` thì hình dạng ấy không còn là chuyện tưởng tượng.
+    let token = hub::pipeline::quick_token("4963b95c-1111-2222-3333-444455556666", "cargo test");
+    assert_eq!(token.len(), 8, "mã nút là 8 ký tự hex: {token}");
+    // …và bài kiểm phải CÓ RĂNG: mã toàn chữ số thì nó xanh cả với bản cũ
+    // (`is_ascii_digit`), tức lại là một phép đo không bao giờ đỏ. Chốt luôn ở
+    // đây thay vì tin vào may rủi của một hàm băm.
+    assert!(
+        token.chars().any(|c| c.is_ascii_alphabetic()),
+        "mã {token} toàn chữ số — đổi đầu vào, không thì bài kiểm này không bắt được lỗi nó sinh ra để bắt"
+    );
     for (payload, typed) in [
-        ("run_0", "/run_0"),
-        ("pick_4963b95c_2_1", "/pick_4963b95c_2_1"),
-        ("send_4963b95c", "/send_4963b95c"),
-        ("upgrade", "/upgrade"),
+        (format!("run_{token}"), format!("/run_{token}")),
+        // …và mã toàn chữ số vẫn phải chạy: nó là một mã hex hợp lệ, không phải
+        // một hình dạng khác.
+        ("run_12345678".to_string(), "/run_12345678".to_string()),
+        (
+            "pick_4963b95c_2_1".to_string(),
+            "/pick_4963b95c_2_1".to_string(),
+        ),
+        ("send_4963b95c".to_string(), "/send_4963b95c".to_string()),
+        ("upgrade".to_string(), "/upgrade".to_string()),
     ] {
         assert_eq!(
             parse_command(&format!("/start {payload}")),
-            parse_command(typed),
+            parse_command(&typed),
             "payload {payload} phải cởi ra đúng như gõ tay"
+        );
+        assert!(
+            parse_command(&format!("/start {payload}")).is_some(),
+            "payload {payload} rơi vào nhánh 'không phải lệnh' ⟹ hub sẽ đáp 'Chưa hiểu lệnh này'"
         );
     }
     // `/start` trống thì không phải lệnh gì cả — đừng đoán hộ.
     assert!(parse_command("/start").is_none());
+}
+
+/// `/type <nút> [id phiên]` — nút trước, id sau và tuỳ chọn.
+///
+/// 🔴 Hà 2026-08-16: *"cấu trúc lại lệnh type thành `/type <nút> [id phiên]`, ko
+/// có id phiên thì vào phiên đang trỏ tới"* — sau khi gõ `/type esc` và nhận về
+/// một dòng chữ "esc" gõ thẳng vào phiên.
+#[test]
+fn a_button_typed_as_type_goes_to_the_focused_session_by_default() {
+    use hub::adapters::CommandKind;
+    // Không id ⟹ phiên đang trỏ tới (arg chỉ mang tên phím).
+    for k in ["enter", "esc", "up", "down", "tab", "2", "clear"] {
+        assert_eq!(
+            parse_command(&format!("/type {k}")),
+            Some((CommandKind::Key, 0, k.to_string())),
+            "/type {k} phải là một NÚT, không phải chữ gõ vào phiên"
+        );
+    }
+    // Có id ⟹ đúng phiên ấy, và id đứng SAU.
+    assert_eq!(
+        parse_command("/type enter bab47095"),
+        Some((CommandKind::Key, 0, "bab47095 enter".to_string()))
+    );
+    // …còn một CÂU thì vẫn là chữ, không được nuốt thành nút.
+    assert!(matches!(
+        parse_command("/type enter vào phiên đi"),
+        Some((CommandKind::Type, _, _))
+    ));
+    assert!(matches!(
+        parse_command("/type chạy test đi"),
+        Some((CommandKind::Type, _, _))
+    ));
+}
+
+/// Nút ⏎ và ⌫ trong tin mang MÃ PHIÊN trong chính liên kết.
+///
+/// 🔴 Hà 2026-08-16: *"khi chèn 1 nút hay 1 link đã phải có đủ mã phiên và nội
+/// dung gửi đi chứ"*. Bấm lại một tin cũ phải chạm đúng phiên của tin ấy, không
+/// phải phiên con trỏ đang trỏ tới lúc bấm.
+#[test]
+fn the_enter_and_clear_links_carry_their_own_session() {
+    use hub::adapters::CommandKind;
+    assert_eq!(
+        parse_command("/start send_bab47095"),
+        Some((CommandKind::Key, 0, "bab47095 enter".to_string()))
+    );
+    assert_eq!(
+        parse_command("/start clr_bab47095"),
+        Some((CommandKind::Key, 0, "bab47095 clear".to_string()))
+    );
 }
 
 /// `/terminal <lệnh>` — cửa sổ Terminal THẬT, và cái tên phải tự nói ra điều đó.

@@ -178,10 +178,17 @@ fn acc_cfg() -> hub::config::Config {
         hub::config::ClaudeAccountCfg {
             name: "acc1".into(),
             config_dir: None,
+            launch: Some("claude".into()),
         },
         hub::config::ClaudeAccountCfg {
             name: "acc2".into(),
             config_dir: Some("~/.claude-acc2".into()),
+            launch: Some("claude2".into()),
+        },
+        hub::config::ClaudeAccountCfg {
+            name: "acc3".into(),
+            config_dir: Some("~/.claude-acc3".into()),
+            launch: Some("claude3".into()),
         },
     ];
     c
@@ -339,48 +346,87 @@ fn the_old_positional_form_is_untouched() {
     assert_eq!(rest, "dwork @acc2 sửa lịch");
 }
 
-/// Cửa sổ mở KHÔNG đề bài thì lệnh không được mang một tham số rỗng.
+/// `/new` mở cửa sổ bằng ĐÚNG TỪ chủ máy gõ, và **không nhét đề bài vào argv**.
 ///
-/// `claude ''` là "một đề bài rỗng", khác hẳn `claude` là "chưa có đề bài".
+/// 🔴 Hà 2026-08-15 chốt năm bước: *"mở terminal mới → chèn vào lệnh `claude3`
+/// → kiểm tra xem có vướng gì không … để vào được chỗ chờ gõ text → chuyển chế
+/// độ auto mode on → gõ vào chuỗi `tiếp dwork`"*, và *"tôi có 3 tài khoản và
+/// trên terminal tôi gõ `claude` `claude2` `claude3`"*.
+///
+/// Cái giá của lối cũ đo được cùng ngày: `/new acc3 dwork` ra
+/// `claude --permission-mode auto '[] acc3 dwork' …` — mọi thứ đứng sai chỗ
+/// đều hoá thành **một phần đề bài**, im lặng, tới tận argv.
 #[test]
-fn an_empty_task_opens_a_plain_session_with_no_positional_argument() {
+fn a_new_window_opens_with_the_word_the_owner_would_type_and_no_task_in_argv() {
+    let cfg = acc_cfg();
+    assert_eq!(hub::sessions::account_launch(&cfg, Some("acc3")), "claude3");
+    assert_eq!(hub::sessions::account_launch(&cfg, Some("acc1")), "claude");
+
     let cmd = hub::sessions::terminal_command(
-        "claude",
+        &hub::sessions::account_launch(&cfg, Some("acc3")),
         std::path::Path::new("/Users/x/projects"),
-        "",
         None,
     );
+    assert!(cmd.contains("&& claude3 --permission-mode auto"), "{cmd}");
+    // Đề bài KHÔNG có mặt — cả dạng rỗng lẫn dạng chữ. `claude ''` là "một đề
+    // bài rỗng", khác hẳn `claude` là "chưa có đề bài".
     assert!(
-        !cmd.contains("'' --disallowedTools"),
+        !cmd.contains("''"),
         "đề bài rỗng vẫn được truyền vào: {cmd}"
     );
     assert!(
         cmd.contains("--permission-mode auto --disallowedTools"),
-        "{cmd}"
+        "giữa hai cờ không được còn gì: {cmd}"
     );
-    // Phiên mở từ điện thoại phải ở CHẾ ĐỘ AUTO (Hà 2026-08-12: *"mở được phiên
-    // rồi nhưng chưa chuyển tự động sang auto mode on"*) — hộp thoại xin phép
-    // hiện trên một màn hình không ai đang nhìn thì phiên đứng im vô hạn.
-    // Nhưng rào thì KHÔNG được nới: `auto` bỏ bước HỎI, `--disallowedTools` bỏ
-    // bước LÀM, và vế sau mới là hàng rào (điều 1).
-    assert!(
-        cmd.contains("--permission-mode auto"),
-        "thiếu auto mode: {cmd}"
-    );
+    // Rào KHÔNG nới: `auto` bỏ bước HỎI, `--disallowedTools` bỏ bước LÀM, và vế
+    // sau mới là hàng rào (điều 1). `claude3` TRẦN thì không có rào nào.
     for guard in ["Bash(git push:*)", "Bash(sudo:*)", "Bash(rm:*)"] {
-        assert!(
-            cmd.contains(guard),
-            "rào '{guard}' biến mất khỏi lệnh: {cmd}"
-        );
+        assert!(cmd.contains(guard), "rào '{guard}' biến mất: {cmd}");
     }
-    // …và có đề bài thì nó vẫn phải đứng TRƯỚC `--disallowedTools` (cờ variadic).
+}
+
+/// Không khai `launch` thì rơi về cách cũ — cùng kết quả, KHÔNG đoán tên alias.
+#[test]
+fn an_account_without_a_declared_launch_word_falls_back_not_guesses() {
+    let mut cfg = hub::config::Config::default();
+    cfg.claude_accounts = vec![hub::config::ClaudeAccountCfg {
+        name: "accX".into(),
+        config_dir: Some("~/.claude-accX".into()),
+        launch: None,
+    }];
+    let got = hub::sessions::account_launch(&cfg, Some("accX"));
+    assert!(got.starts_with("CLAUDE_CONFIG_DIR="), "{got}");
+    assert!(got.contains(".claude-accX"), "{got}");
+    // KHÔNG được bịa ra `claudeX` từ tên tài khoản.
+    assert!(!got.contains("claudeX"), "đoán tên alias: {got}");
+}
+
+/// Tên tài khoản LẠ không được lặng lẽ hoá thành tài khoản mặc định.
+///
+/// Nó vẫn phải trả về một chuỗi (hàm này không từ chối được), nhưng lượt rơi ấy
+/// là một sự kiện phải ghi log — luật 3. `/new` đã chặn tên lạ ở tầng trên, nên
+/// tới được đây nghĩa là có một chỗ gọi mới quên.
+#[test]
+fn an_unknown_account_name_does_not_silently_become_the_default() {
+    let cfg = acc_cfg();
+    let got = hub::sessions::account_launch(&cfg, Some("acc9"));
+    // Rơi về mặc định là hành vi đúng; ĐIỀU KIỆN là nó có kêu. Ở đây chốt phần
+    // đo được của mã: nó KHÔNG được trả về từ của một tài khoản có thật khác.
+    assert!(
+        !got.contains("claude2") && !got.contains("claude3"),
+        "tên lạ vớ phải tài khoản khác: {got}"
+    );
+}
+
+/// Ngoại lệ DUY NHẤT còn đi bằng argv: bản bàn giao ~2 KB do hub tự soạn.
+#[test]
+fn only_the_handover_payload_still_travels_as_argv() {
     let with = hub::sessions::terminal_command(
         "claude",
         std::path::Path::new("/Users/x/projects"),
-        "[dwork] sửa lịch",
-        None,
+        Some("BÀN GIAO: …"),
     );
-    let p = with.find("[dwork]").expect("thiếu đề bài");
+    let p = with.find("BÀN GIAO").expect("thiếu đề bài");
     let d = with.find("--disallowedTools").expect("thiếu rào");
     assert!(p < d, "đề bài phải đứng trước --disallowedTools: {with}");
 }
@@ -480,4 +526,249 @@ fn a_truncated_output_says_how_much_is_missing() {
         "{}",
         &out[out.len().saturating_sub(120)..]
     );
+}
+
+/// Cửa sổ TRẦN mở ở `~`; phiên CLI mở ở GỐC WORKSPACE. Hai chỗ, hai lý do.
+///
+/// 🔴 Hà 2026-08-15: *"nếu lệnh `/new` trống thì mặc định mở terminal ở `~`"* ·
+/// *"còn có tham số, tức là vào cli thì vào đúng workspace"*.
+///
+/// Chỗ khác nhau ấy không phải sở thích: `~/projects` là thư mục duy nhất cả ba
+/// tài khoản đã duyệt (`hasTrustDialogAccepted`), nên nó là điều kiện của một
+/// **phiên CLI** — không phải của một cái cửa sổ. Mở cửa sổ trần ở đó là mang
+/// một ràng buộc sang chỗ không có ràng buộc ấy.
+#[test]
+fn a_bare_window_opens_at_home_and_a_cli_session_at_the_workspace_root() {
+    // Phiên CLI: `cd <gốc workspace>` rồi mới tới từ mở.
+    let cli =
+        hub::sessions::terminal_command("claude3", std::path::Path::new("/Users/x/projects"), None);
+    assert!(
+        cli.starts_with("cd '/Users/x/projects' && claude3 "),
+        "{cli}"
+    );
+
+    // Cửa sổ trần: đọc CHÍNH hằng số mã dùng, không phải một chuỗi chép lại vào
+    // test — chép lại thì bài kiểm tự khẳng định điều nó định kiểm.
+    let bare = hub::sessions::BARE_TERMINAL_CMD;
+    assert_eq!(bare, "cd ~/");
+    // Dấu ngã KHÔNG được bọc nháy: trong shell `'~'` là một thư mục TÊN dấu
+    // ngã, không phải nhà. Lỗi này IM LẶNG — cửa sổ vẫn mở, chỉ là mở nhầm chỗ.
+    assert!(
+        !bare.contains('\''),
+        "dấu ngã bị bọc nháy ⟹ không nở ra nhà: {bare}"
+    );
+    assert!(
+        !bare.contains("projects"),
+        "cửa sổ trần không được mở ở gốc workspace: {bare}"
+    );
+}
+
+/// Cửa sổ trần là một MỤC TIÊU bấm được — cùng route, cùng sổ với phiên CLI.
+///
+/// 🔴 Hà 2026-08-15: *"`/terminal` luôn liệt kê terminal trống → bấm chọn thì
+/// làm việc được với nó (giống như session)"* · *"lúc này lệnh shot sẽ làm được
+/// cho cả 2"*.
+///
+/// "Giống như session" đọc theo nghĩa đen, và đó là chỗ tiết kiệm được cả một
+/// nhánh: nút gửi `sess:<id>`, tức ĐÚNG callback của `/session`. Thêm một hạng
+/// mục tiêu mà KHÔNG thêm một đường đi — đúng câu Hà chê sáng nay (*"chưa kế
+/// thừa được các lệnh"*).
+#[test]
+fn a_bare_window_is_a_target_on_the_same_route_as_a_session() {
+    // Nút của `/terminal` phải đi đúng route `/session`, không đẻ callback mới.
+    let id = format!("{}ttys006", hub::sessions::SHELL_ID_PREFIX);
+    assert_eq!(
+        hub::telegram::callback_to_command(&format!("sess:{id}")).as_deref(),
+        Some("/session win-ttys006")
+    );
+    // Và `same_session` phải nhận nguyên id ấy — nó không phải uuid 8 ký tự.
+    assert!(hub::pipeline::same_session(&id, &id));
+    assert!(!hub::pipeline::same_session("win-ttys007", &id));
+
+    // Phân hạng đọc từ MỘT chỗ, không mỗi nơi tự so chuỗi.
+    assert!(hub::sessions::is_shell_id(&id));
+    assert!(!hub::sessions::is_shell_id(
+        "dda2aa85-0000-0000-0000-000000000000"
+    ));
+}
+
+/// Cửa sổ TRẦN cũng là một mục tiêu mà câu lệnh tự nói ra được.
+///
+/// 🔴 Hà 2026-08-15: bấm cửa sổ `ttys002` rồi gõ `ls`, và cái shell nhận nguyên
+/// `win-ttys002 Ls` → `zsh: command not found: win-ttys002`. Đo trong log:
+/// `telegram_text_as_typing len=2` mà `keys_typed` **len=14** — id bị dán vào
+/// ĐẦU chữ. Đường gõ dựng `/type <id> <chữ>` rồi `split_target` tách lại; nó chỉ
+/// biết hình dạng uuid, nên `win-ttys002` không phải id ⟹ cả chuỗi thành chữ.
+///
+/// Đúng con bệnh của cả ngày: `is_shell_id` vừa dựng xong ở `sessions`, mà chỗ
+/// này chưa ai bảo.
+#[test]
+fn a_bare_window_id_is_recognised_as_a_target_not_typed_as_text() {
+    assert_eq!(
+        hub::pipeline::split_target("win-ttys002 ls -la"),
+        Some(("win-ttys002".to_string(), "ls -la".to_string()))
+    );
+    // Trơn thì KHÔNG phải mệnh lệnh nhắm vào cửa sổ — cùng luật với id ngắn:
+    // `/type win-ttys002` là chữ gõ vào phiên đang theo.
+    assert_eq!(hub::pipeline::split_target("win-ttys002"), None);
+    // Và một câu văn mở đầu bằng chữ `win-` thì không được nuốt mất từ đầu.
+    assert_eq!(hub::pipeline::split_target("win-win thế nào rồi"), None);
+    // uuid + id ngắn vẫn nguyên.
+    assert_eq!(
+        hub::pipeline::split_target("dda2aa85 chạy test đi"),
+        Some(("dda2aa85".to_string(), "chạy test đi".to_string()))
+    );
+}
+
+/// Danh sách cửa sổ Terminal — bản chụp THẬT, và cái bẫy "rỗng nghĩa là gì".
+///
+/// 🔴 Hà 2026-08-15: *"lệnh terminal chưa đúng"* · *"đang có 2 cửa sổ không chạy
+/// gì"*. Đo tay đúng lúc ấy: 6 tab, 2 trần (`ttys000`, `ttys002`) — còn
+/// `keys::terminal_tabs()` trả `Ok(vec![])`, không một tiếng nào.
+///
+/// Hai lỗi nằm gọn trong bốn dòng AppleScript, và **không bài kiểm nào chạm tới
+/// chúng** vì cả hàm đòi một Terminal thật:
+/// 1. `tab` bên trong `tell application "Terminal"` là TÊN LỚP của Terminal,
+///    không phải ký tự tab ⟹ nối vào chuỗi là ném lỗi;
+/// 2. `(p as string)` trên một phần tử `processes` cũng ném lỗi.
+///
+/// Và thứ biến hai lỗi ấy thành hai ngày im lặng là một `try` không có
+/// `on error`: nó dựng lên đúng lý do (có một "cửa sổ" không phải cửa sổ thật,
+/// `-1728`), nhưng vì lỗi xảy ra với MỌI cửa sổ, nó nuốt sạch — và *"không có
+/// cửa sổ nào"* là một câu trả lời nghe hoàn toàn hợp lý.
+#[test]
+fn an_empty_tab_list_must_be_distinguishable_from_a_blind_one() {
+    // Bản chép NGUYÊN VĂN kết quả AppleScript trên máy này, 2026-08-15 — kèm
+    // cột thứ tư (số dòng màn) mà khuôn bản tin thêm vào 2026-08-16; lượt dò
+    // không xin chữ thì cột ấy là 0 ở mọi hàng.
+    let real = "/dev/ttys004\ttrue\tlogin|-zsh|claude|project-agent|node|caffeinate\t0\n\
+                /dev/ttys002\tfalse\tlogin|-zsh\t0\n\
+                /dev/ttys003\ttrue\tlogin|-zsh|claude|project-agent|node|caffeinate\t0\n\
+                /dev/ttys000\tfalse\tlogin|-zsh\t0\n\
+                /dev/ttys001\ttrue\tlogin|-zsh|claude|project-agent|node\t0\n\
+                /dev/ttys005\ttrue\tlogin|-zsh|claude|project-agent|node|caffeinate\t0\n\
+                #skipped\t1\n";
+    let (tabs, skipped) = hub::keys::parse_tabs(real, false);
+    assert_eq!(tabs.len(), 6, "{tabs:?}");
+    assert_eq!(
+        skipped, 1,
+        "một cửa sổ không phải cửa sổ thật — chuyện thường"
+    );
+    assert_eq!(tabs[0].tty, "ttys004", "phải bỏ tiền tố /dev/");
+    assert!(
+        tabs.iter().all(|t| t.screen.is_none()),
+        "lượt dò không xin chữ ⟹ `None`, KHÔNG phải `Some(\"\")` — hai chuyện khác nhau"
+    );
+
+    // Và ĐÚNG hai cái trần — con số Hà đọc bằng mắt.
+    let bare: Vec<&str> = tabs
+        .iter()
+        .filter(|t| t.cli().is_none())
+        .map(|t| t.tty.as_str())
+        .collect();
+    assert_eq!(bare, vec!["ttys002", "ttys000"], "{tabs:?}");
+
+    // 🔴 Chốt của cả bài: MÙ khác RỖNG. Mọi cửa sổ đều ném lỗi thì `tabs` rỗng
+    // *và* `skipped` > 0 — chỗ gọi phải phân biệt được, không thì nó lại báo
+    // "máy không có cửa sổ nào" trên một cái máy đang mở sáu cửa sổ.
+    let (blind, blind_skipped) = hub::keys::parse_tabs("#skipped\t6\n", false);
+    assert!(blind.is_empty());
+    assert_eq!(blind_skipped, 6);
+
+    // …còn máy KHÔNG có cửa sổ nào thật thì cả hai bằng 0.
+    let (none, none_skipped) = hub::keys::parse_tabs("#skipped\t0\n", false);
+    assert!(none.is_empty());
+    assert_eq!(none_skipped, 0);
+}
+
+/// Chữ trên màn về cùng danh sách tab — và KHUNG phải chịu được chữ của người khác.
+///
+/// Vì sao đếm dòng chứ không cắt theo dấu phân cách: chữ trên màn là chữ hub
+/// không viết. Bất cứ dấu nào chọn làm ranh giới cũng có ngày nằm sẵn trên một
+/// màn nào đó — và hôm ấy phép đọc lệch mà không ai biết, vì một danh sách tab
+/// lệch vẫn trông hoàn toàn hợp lý. Bài này cố tình đặt một dòng **giống hệt
+/// dòng đầu bản tin** vào giữa màn: khung đếm dòng thì không thấy nó, khung cắt
+/// theo dấu thì gãy ngay tại đó.
+///
+/// Số dòng và tên tiến trình lấy từ bản chụp thật trên máy này (2026-08-16,
+/// 11 tab / 304 dòng); chữ MÀN thì viết tay — màn thật của phiên người khác
+/// không được nằm trong repo (điều 5).
+#[test]
+fn screens_are_framed_by_line_count_so_screen_text_cannot_break_the_frame() {
+    let real = "/dev/ttys002\tfalse\tlogin|-zsh\t3\n\
+                ❯ ls\n\
+                /dev/ttys999\ttrue\tlogin|-zsh|claude\t99\n\
+                ❯ \n\
+                /dev/ttys001\ttrue\tlogin|-zsh|claude|project-agent|node\t2\n\
+                ✻ Đang nghĩ… (2m 14s · 1.2k tokens)\n\
+                ╭─────────────╮\n\
+                #skipped\t1\n";
+    let (tabs, skipped) = hub::keys::parse_tabs(real, true);
+
+    assert_eq!(skipped, 1);
+    assert_eq!(
+        tabs.len(),
+        2,
+        "dòng giữa màn ttys002 TRÔNG như một dòng đầu bản tin — nó không được thành một tab: {tabs:?}"
+    );
+    assert_eq!(tabs[0].tty, "ttys002");
+    assert_eq!(
+        tabs[0].screen.as_deref(),
+        Some("❯ ls\n/dev/ttys999\ttrue\tlogin|-zsh|claude\t99\n❯ "),
+        "ba dòng, nguyên văn, kể cả dòng trông giống bản tin"
+    );
+    assert_eq!(tabs[1].tty, "ttys001");
+    assert!(tabs[1].screen.as_deref().unwrap().contains("2m 14s"));
+
+    // Và dòng "đang làm gì" đọc được từ đúng chữ ấy, không hỏi Terminal lần nào.
+    let seen = hub::keys::alive_tab(&tabs, "/dev/ttys001").expect("tab còn tiến trình");
+    let hub::keys::Look::Saw { body, .. } =
+        hub::keys::look_from_screen(seen.screen.as_deref().unwrap(), 6)
+    else {
+        panic!("màn không có bí mật ⟹ phải nhìn rõ");
+    };
+    assert_eq!(
+        hub::keys::activity(&body).map(|a| a.verb),
+        Some("Đang nghĩ".to_string())
+    );
+
+    // Bản tin CỤT (osascript bị cắt, Terminal chết giữa chừng) không được đọc
+    // thành "màn trống": đọc thiếu bao nhiêu dòng thì trả bấy nhiêu, và chỗ dò
+    // đã ghi log — nhưng tuyệt đối không dựng thêm tab từ phần thiếu.
+    let cut = "/dev/ttys001\ttrue\tlogin|-zsh|claude\t5\nmột dòng\n";
+    let (short, _) = hub::keys::parse_tabs(cut, true);
+    assert_eq!(short.len(), 1);
+    assert_eq!(short[0].screen.as_deref(), Some("một dòng"));
+}
+
+/// Một tty có thể ứng với NHIỀU tab, và chỉ một trong số đó là phiên thật.
+///
+/// Cùng luật với `window_script` (đo 2026-08-11: ba cửa sổ cùng khai
+/// `/dev/ttys005`, hai là xác). Đây là bản tra-trong-tập của nó, nên nó phải
+/// gãy ở đúng chỗ AppleScript đã gãy — không thì phép tra rẻ hơn mà sai hơn.
+#[test]
+fn a_recycled_tty_must_resolve_to_the_live_tab_not_a_corpse() {
+    let real = "/dev/ttys005\tfalse\t\t1\n\
+                [Process completed]\n\
+                /dev/ttys005\tfalse\tlogin|-zsh\t1\n\
+                ❯ \n\
+                /dev/ttys005\ttrue\tlogin|-zsh|claude\t1\n\
+                ✻ Đang chạy… (0m 3s)\n\
+                #skipped\t0\n";
+    let (tabs, _) = hub::keys::parse_tabs(real, true);
+    assert_eq!(tabs.len(), 3);
+
+    let got = hub::keys::alive_tab(&tabs, "ttys005").expect("có tab sống");
+    assert!(
+        got.busy && got.screen.as_deref().unwrap().contains("Đang chạy"),
+        "phải chọn tab ĐANG CHẠY, không phải cái xác đứng đầu danh sách: {got:?}"
+    );
+    // Chấp cả hai cách gọi tên — `ps` trả `/dev/ttysNNN`, Terminal trả `ttysNNN`.
+    assert_eq!(hub::keys::alive_tab(&tabs, "/dev/ttys005"), Some(got));
+    // Không có tab nào mang tty ấy ⟹ hub KHÔNG có tay nào chạm tới.
+    assert!(hub::keys::alive_tab(&tabs, "ttys042").is_none());
+    // Chỉ còn cái xác (không tiến trình nào) thì cũng vậy: một tab đã chết
+    // không phải một cửa sổ gõ vào được.
+    let (dead, _) = hub::keys::parse_tabs("/dev/ttys005\tfalse\t\t0\n#skipped\t0\n", true);
+    assert!(hub::keys::alive_tab(&dead, "ttys005").is_none());
 }

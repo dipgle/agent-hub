@@ -15,7 +15,7 @@
 //! Một câu về cách đọc: `cost_usd` **vẫn được ghi** (sổ `spend`, luật 8 — để câu
 //! hỏi ấy TRẢ LỜI ĐƯỢC nếu có ai hỏi). Thứ bị cấm là nó **đi ra ngoài**.
 
-use hub::sessions::{Aside, Handover, LiveSession, SessionsSnapshot, Told};
+use hub::sessions::{Aside, Handover, LiveSession, SessionsSnapshot};
 
 /// Con số phải KHÁC THƯỜNG: `0.5` hay `1.0` có thể trùng một trường khác rồi
 /// làm phép đo báo đỏ oan; chuỗi này thì không thể xuất hiện vì lý do nào khác.
@@ -91,18 +91,13 @@ fn the_three_structs_that_know_a_price_never_publish_it() {
     assert!(json.contains("question"), "bản JSON này rỗng?\n{json}");
     assert_no_price("Aside", &json);
 
-    let t = Told {
-        session_id: "4963b95c".into(),
-        source_name: "projects-ff".into(),
-        text: "chạy lại test đi".into(),
-        answer: "263 xanh".into(),
-        cost_usd: PRICE,
-        ts: "2026-08-14T15:48:17Z".into(),
-    };
-    assert_eq!(t.cost_usd, PRICE);
-    let json = serde_json::to_string(&t).expect("told serialises");
-    assert!(json.contains("answer"), "bản JSON này rỗng?\n{json}");
-    assert_no_price("Told", &json);
+    // 🔴 `Told` GỠ 2026-08-15 cùng động từ `/tell` — ghi lại vì điều 9 gọi tên
+    // ĐÚNG BA cấu trúc, nên bớt một là phải nói ra ở chỗ đang canh chúng.
+    //
+    // Không phải nới luật: cấu trúc ấy không còn tồn tại, nên nó không rò được
+    // nữa. Khả năng nó phục vụ (nói tiếp vào một phiên đã tắt) nay đi bằng
+    // `/new <id>` — mở một cửa sổ thật chạy `claude --resume`, và đường ấy
+    // KHÔNG dựng struct nào mang `cost_usd` để mà lọt lên màn.
 }
 
 /// Và bản chụp phiên — thứ đi xa nhất khỏi máy này.

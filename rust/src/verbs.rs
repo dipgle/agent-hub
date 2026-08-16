@@ -89,9 +89,85 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
             return Some((CommandKind::Key, 0, format!("{sid} enter")));
         }
     }
+    // `k_<8 ký tự đầu id>_<số>` — bấm một LỰA CHỌN của đúng phiên ấy.
+    //
+    // 🔴 Hà 2026-08-16: *"nút chọn phải chèn ngay tại các dòng chọn tại chính
+    // chỗ option chứ không phải ném thêm xuống cuối"*. Một cái nút chỉ đặt được
+    // dưới đáy tin; thứ đặt được ngay sau dòng "1. …" là một LIÊN KẾT, và liên
+    // kết thì phải tự mang đủ phiên + số.
+    if let Some(rest) = verb.strip_prefix("k_") {
+        if let Some((sid, n)) = rest.split_once('_') {
+            let ok_sid = !sid.is_empty() && sid.chars().all(|c| c.is_ascii_hexdigit());
+            let ok_n = n.len() == 1 && n.chars().all(|c| c.is_ascii_digit()) && n != "0";
+            if ok_sid && ok_n {
+                return Some((CommandKind::Key, 0, format!("{sid} {n}")));
+            }
+        }
+    }
+    // `clr_<8 ký tự đầu id>` — XOÁ ô nhập của đúng phiên ấy.
+    //
+    // 🔴 Hà 2026-08-16: *"còn lăn tăn nó là text mờ hay tỏ thì thêm 1 nút xóa
+    // bên cạnh nữa để tự thao tác"*. Đúng chỗ tôi bí: đọc màn về thì chữ mất
+    // màu, nên hub không phân biệt được **chữ chủ máy gõ** với **gợi ý mờ** TUI
+    // tự bày. Tôi đã lấy đó làm lý do để KHÔNG làm gì — mà người ngồi trước máy
+    // thì nhìn một cái là biết. Vậy đừng bắt hub đoán: đưa cả hai đường ra, ai
+    // nhìn thấy thì người ấy quyết.
+    //
+    // Mã phiên nằm TRONG chính cái liên kết (`clr_<sid>`), không lấy theo con
+    // trỏ: một tin cũ bấm lại vẫn phải chạm đúng phiên của nó — cùng bài học
+    // với `quick_token`.
+    if let Some(sid) = verb.strip_prefix("clr_") {
+        if !sid.is_empty() && sid.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some((CommandKind::Key, 0, format!("{sid} clear")));
+        }
+    }
+    // `run_<mã>` — bấm icon ▶️ trong chữ. Mã là thứ `pipeline::quick_token` sinh
+    // ra: **8 ký tự HEX** (`format!("{h:08x}")`), không phải một số thứ tự.
+    //
+    // 🔴 Hà 2026-08-16: *"Có mỗi vấn đề nút lệnh này làm mãi không xong"*, kèm
+    // ảnh hub đáp *"Chưa hiểu lệnh này"* cho chính cái icon nó vừa gửi. Log nói
+    // đúng thủ phạm trong một dòng: `telegram_not_a_command {"head":"/start
+    // run_d1704560"}` — nhánh này đòi `is_ascii_digit`, mà `d1704560` có chữ
+    // `d`. Nên **gần như MỌI** mã đều rớt: 8 chữ số hex mà không dính lấy một
+    // chữ cái a–f là chuyện hiếm (~1/2000).
+    //
+    // Nó lệch từ lượt đổi nút-theo-chỉ-số sang nút-mang-mã-riêng (`quick_token`,
+    // 2026-08-15, để nút của tin cũ không chạy việc của tin mới): một đầu đổi
+    // sang hex, đầu đọc ở lại với chữ số, và **bài kiểm round-trip vẫn xanh vì
+    // nó tự chọn `run_0`** — một hình dạng không còn ai sinh ra. Nay bài kiểm ấy
+    // lấy mã từ chính `quick_token`, nên hai đầu không lệch được nữa mà không ai
+    // biết.
     if let Some(n) = verb.strip_prefix("run_") {
-        if n.chars().all(|c| c.is_ascii_digit()) && !n.is_empty() {
+        if !n.is_empty() && n.chars().all(|c| c.is_ascii_hexdigit()) {
             return Some((CommandKind::RunQuick, 0, n.to_string()));
+        }
+    }
+    // `/type <nút> [id phiên]` — Hà 2026-08-16: *"cấu trúc lại lệnh type thành
+    // `/type <nút> [id phiên]`, ko có id phiên thì vào phiên đang trỏ tới"*.
+    //
+    // Vì sao nó đúng hơn `/key <id> <phím>`: id đứng TRƯỚC bắt người gõ phải
+    // biết id trước khi biết mình muốn bấm gì, mà chín trên mười lượt là bấm
+    // vào đúng phiên đang theo — nên thứ bắt buộc lại là thứ gần như luôn thừa.
+    // Chữ thường thì đã không cần động từ nào cả (gõ thẳng là vào phiên đang
+    // theo), nên `/type` còn đúng một việc đáng làm: gửi một NÚT.
+    //
+    // Hẹp có chủ ý, để không nuốt mất một câu chữ: chỉ nhận khi từ đầu là TÊN
+    // PHÍM thật (hỏi `keys::is_key_name`, không chép danh sách) và cả tham số
+    // chỉ có 1–2 từ. `/type enter vào phiên đi` vẫn là một dòng chữ.
+    if matches!(verb.as_str(), "type" | "go") {
+        let rest = t[1..]
+            .split_once(char::is_whitespace)
+            .map(|(_, r)| r.trim())
+            .unwrap_or_default();
+        let mut it = rest.split_whitespace();
+        if let (Some(key), id, None) = (it.next(), it.next(), it.next()) {
+            if crate::keys::is_key_name(key) {
+                let arg = match id {
+                    Some(id) => format!("{id} {key}"),
+                    None => key.to_string(),
+                };
+                return Some((CommandKind::Key, 0, arg));
+            }
         }
     }
     // BẢNG LỆNH trả lời trước, cho mọi route có cách đọc tham số CHUẨN — xem
@@ -234,14 +310,19 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
                 .unwrap_or_default();
             Some((CommandKind::Stop, 0, want))
         }
-        // `/tell <nội dung>` — lượt tiếp theo của phiên đang theo.
-        "tell" | "noi" => {
-            let what = t[1..]
-                .split_once(char::is_whitespace)
-                .map(|(_, r)| r.trim().to_string())
-                .unwrap_or_default();
-            (!what.is_empty()).then_some((CommandKind::Tell, 0, what))
-        }
+        // 🔴 `/tell` gỡ 2026-08-15. Hà: *"lệnh tell là không cần thiết?"* ·
+        // *"vì trên tele tôi chỉ gõ text bình thường thôi"*.
+        //
+        // Và bằng chứng mạnh hơn con số 0 lượt dùng (con số ấy một mình đã lừa
+        // một lần rồi — `/win`, `listed:false`, đo SỰ VÔ HÌNH): `sessions::tell`
+        // mở đầu bằng `if session.kind != "background" { bail!(…) }`, mà hạng
+        // phiên nền nay chỉ còn sinh ra khi MỞ CỬA SỔ THẤT BẠI. Nó không phải
+        // chưa ai gõ — nó gần như không còn mục tiêu để nhắm vào.
+        //
+        // Khả năng thật của nó (nói tiếp vào một phiên đã tắt) KHÔNG mất: nó về
+        // `/new <id>`, mở một cửa sổ chạy `claude --resume <id>` — đúng thứ chủ
+        // máy làm khi ngồi ở máy, thay vì một lượt `-p` không cửa sổ và có tiêu
+        // hạn mức.
         // `/type <chữ>` — gõ thẳng vào cửa sổ của phiên đang theo.
         "type" | "go" => {
             let what = t[1..]

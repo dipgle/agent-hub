@@ -142,3 +142,77 @@ fn doctor_says_what_it_found_and_what_it_looked_at() {
         "có lỗi mà vẫn in câu xanh là đúng cái phép đo mù đang chữa: {dirty}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "Đã cài xong chưa" phải có người TRẢ LỜI — 2026-08-15.
+//
+// 🔴 Hà: *"Cài lại báo đang restart rồi đứng im, không có cơ chế xác thực cài
+// lại xong chưa"*. `/upgrade` cố ý báo TRƯỚC khi restart (tiến trình bị thay
+// giữa câu — bài học 13/08, ba lần bấm nút vì lời báo bị giết giữa chừng),
+// nhưng nửa sau thì chưa ai làm. Nhìn từ điện thoại, "đang restart" rồi im lặng
+// đọc y hệt một lần cài chết giữa đường.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chữ dán NGƯỢC vào phiên là chữ TIÊU NGỮ CẢNH của phiên ấy — 2026-08-16.
+//
+// 🔴 Hà, ảnh chụp đúng khối này: *"tại sao lại có một mớ text không cần thiết
+// này"* · *"quá tốn context"*. Khác mọi câu ack khác ở một điểm quyết định:
+// khối này **nằm lại trong nhật ký phiên vĩnh viễn**, nên mỗi ký tự thừa bị trả
+// giá ở MỌI lượt sau của phiên, không phải một lần.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn the_block_pasted_back_into_a_session_says_only_what_it_must() {
+    use hub::pipeline::runin_block;
+
+    let ok = runin_block(
+        "git -C ~/projects/dwork/dev push origin main",
+        "✅ xong (1.4s)\n(không in ra gì)",
+        false,
+    );
+    // Hai thứ phải còn: ai chạy, và chạy cái gì.
+    assert!(ok.starts_with("[hub chạy hộ]"), "{ok}");
+    assert!(
+        ok.contains("$ git -C ~/projects/dwork/dev push origin main"),
+        "{ok}"
+    );
+    // …và ruột hub thì không.
+    for thua in [
+        "cwd",
+        "trên máy",
+        "KHÔNG có tty",
+        "/Users/hanguyen/projects/dwork,",
+    ] {
+        assert!(!ok.contains(thua), "còn kể ruột hub ({thua}): {ok}");
+    }
+    assert!(
+        ok.lines().next().is_some_and(|l| l.chars().count() <= 20),
+        "dòng mở đầu phải ngắn — bản cũ dài 90 ký tự: {ok}"
+    );
+
+    // Hỏng thì "không qua tty" là một LÝ DO, nên nói.
+    let bad = runin_block(
+        "sudo launchctl kickstart -k system/x",
+        "❌ exit 1 (0.2s)",
+        true,
+    );
+    assert!(bad.contains("không qua tty"), "{bad}");
+}
+
+#[test]
+fn a_restart_on_the_same_binary_is_not_news() {
+    use hub::runtime::boot_is_news;
+    let v = "/Users/hanguyen/Library/Application Support/hub/bin/hubd@2026-08-15T16:33:59Z";
+
+    // Chưa từng ghi ⟹ NÓI: lượt đầu sau khi dựng cơ chế này chính là một lần cài.
+    assert!(boot_is_news(None, v));
+    // Đổi bản ⟹ NÓI.
+    assert!(boot_is_news(
+        Some("/Users/hanguyen/Library/Application Support/hub/bin/hubd@2026-08-15T15:32:13Z"),
+        v
+    ));
+    // Lên lại ĐÚNG bản ấy ⟹ IM. hubd còn lên lại vì crash và vì `KeepAlive`;
+    // một cái chuông ở đó là chuông kêu lúc không có tin (luật 11).
+    assert!(!boot_is_news(Some(v), v));
+}

@@ -752,11 +752,12 @@ mod cua_so_moi {
     /// đầu tiên (`CLAUDE.md` §10). Test đọc VỊ TRÍ, không đọc câu chữ.
     #[test]
     fn de_bai_dung_truoc_co_variadic() {
+        // Từ 2026-08-15 chỉ còn BẢN BÀN GIAO đi bằng argv; `/new` gõ đề bài
+        // vào ô nhập. Luật thứ tự vẫn phải đúng cho ngoại lệ ấy.
         let cmd = terminal_command(
             "claude",
             Path::new("/Users/x/projects"),
-            "[hub] dọn nợ",
-            None,
+            Some("[hub] dọn nợ"),
         );
         let de_bai = cmd.find("dọn nợ").expect("đề bài phải có trong lệnh");
         let co = cmd.find("--disallowedTools").expect("phải có rào công cụ");
@@ -781,8 +782,7 @@ mod cua_so_moi {
         let cmd = terminal_command(
             "claude",
             Path::new("/Users/x/projects"),
-            "đừng 'rm -rf /' nhé",
-            None,
+            Some("đừng 'rm -rf /' nhé"),
         );
         // Sau khi bọc, mọi nháy đơn của người dùng phải nằm trong dạng '\''.
         let tho = cmd.replace(r"'\''", "");
@@ -797,14 +797,17 @@ mod cua_so_moi {
         );
     }
 
-    /// Chạy đúng tài khoản: `CLAUDE_CONFIG_DIR` phải đứng trước lệnh `claude`.
+    /// Tài khoản đi vào cửa sổ bằng TỪ MỞ, không phải bằng một tham số riêng.
+    ///
+    /// 🔴 Đổi 2026-08-15: `account_launch` quyết từ ấy (`claude3`, hoặc bản dựng
+    /// lại `CLAUDE_CONFIG_DIR=… claude` khi chủ máy chưa khai), còn hàm này chỉ
+    /// đặt nó vào đúng chỗ. Một chỗ trả lời câu "tài khoản nào".
     #[test]
     fn tai_khoan_duoc_cam_theo_vao_cua_so() {
         let cmd = terminal_command(
-            "claude",
+            "CLAUDE_CONFIG_DIR='/Users/x/.claude-acc2' 'claude'",
             Path::new("/Users/x/projects"),
-            "việc",
-            Some("/Users/x/.claude-acc2"),
+            None,
         );
         let env = cmd
             .find("CLAUDE_CONFIG_DIR")
@@ -812,8 +815,8 @@ mod cua_so_moi {
         let cli = cmd.find("'claude'").expect("phải gọi claude");
         assert!(env < cli, "biến môi trường phải đứng trước lệnh: {cmd}");
         assert!(cmd.contains("/Users/x/.claude-acc2"), "{cmd}");
-        // Không có tài khoản thì KHÔNG cắm biến rỗng.
-        let khong = terminal_command("claude", Path::new("/Users/x/projects"), "việc", None);
+        // Không nêu tài khoản thì KHÔNG cắm biến rỗng.
+        let khong = terminal_command("claude", Path::new("/Users/x/projects"), None);
         assert!(!khong.contains("CLAUDE_CONFIG_DIR"), "{khong}");
     }
 
@@ -824,7 +827,7 @@ mod cua_so_moi {
     /// tại. Nhánh `--bg` không dính bẫy này vì nó truyền argv thẳng.
     #[test]
     fn rao_cong_cu_song_sot_qua_shell() {
-        let cmd = terminal_command("claude", Path::new("/Users/x/projects"), "việc", None);
+        let cmd = terminal_command("claude", Path::new("/Users/x/projects"), None);
         let (_, rao) = cmd.split_once("--disallowedTools").expect("phải có rào");
         assert!(rao.contains("'Bash(git push:*)'"), "mẫu để trần: {rao}");
         // Không một dấu ngoặc nào được đứng ngoài chuỗi.
@@ -839,7 +842,7 @@ mod cua_so_moi {
     /// Cửa sổ mở ở GỐC WORKSPACE — thư mục duy nhất cả ba tài khoản đã duyệt.
     #[test]
     fn mo_o_goc_workspace() {
-        let cmd = terminal_command("claude", Path::new("/Users/x/projects"), "việc", None);
+        let cmd = terminal_command("claude", Path::new("/Users/x/projects"), None);
         assert!(cmd.starts_with("cd '/Users/x/projects' &&"), "{cmd}");
     }
 }
@@ -1483,6 +1486,7 @@ fn a_tab_knows_whether_a_cli_is_running_in_it() {
         tty: "ttys004".to_string(),
         busy: true,
         procs: procs.iter().map(|p| p.to_string()).collect(),
+        screen: None,
     };
 
     // Đo thật trên máy lúc dựng: `login`, `-zsh`, rồi CLI.
@@ -1533,7 +1537,7 @@ fn a_denied_command_becomes_a_button_verbatim() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"Permission to use Bash with command git log has been denied."}]}}"#,
     );
     assert_eq!(deploy.len(), 81, "dòng chuẩn của ca này");
-    let got = hub::sessions::commands_in_last_turn(tail, 4);
+    let got = hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(tail, 4));
     assert!(got.iter().any(|c| c == deploy), "{got:?}");
     assert!(
         got.iter()
@@ -1584,7 +1588,7 @@ fn only_the_turn_since_the_owner_last_spoke_counts() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"Permission to use Bash with command bash ./deploy-moi.sh has been denied."}]}}"#,
     );
     assert_eq!(
-        hub::sessions::commands_in_last_turn(tail, 4),
+        hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(tail, 4)),
         vec!["bash ./deploy-moi.sh ban-0815".to_string()]
     );
 }
@@ -1674,7 +1678,7 @@ fn what_the_session_wrote_for_the_owner_comes_out_whole() {
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Bản vá chưa lên prod. Ba commit đang chờ ở local.\n\ngit -C /Users/hanguyen/projects/AI/tfl5 push origin main\n\nbash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814\n"}]}}"#,
     );
     assert_eq!(
-        hub::sessions::commands_in_last_turn(tail, 4),
+        hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(tail, 4)),
         vec![
             "git -C /Users/hanguyen/projects/AI/tfl5 push origin main".to_string(),
             "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814"
@@ -1736,7 +1740,141 @@ fn a_destructive_clause_after_a_separator_is_still_destructive() {
         mention = mention
     );
     assert_eq!(
-        hub::sessions::commands_in_last_turn(&tail, 4),
+        hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(&tail, 4)),
         vec![format!(r#"grep -rn "{} -rf" scripts/"#, "rm")],
     );
+}
+
+/// Một tham số đã bỏ không được cắn vào đề bài của chủ máy.
+///
+/// 🔴 Hà 2026-08-15: *"tại sao tôi gửi lệnh `/new acc3 dwork` mà phiên lại nhận
+/// được tin thành `[] acc3 dwork`"*. Nhãn dự án đóng vô điều kiện, mà `-s` thôi
+/// bắt buộc từ 08-13 — nên đường THƯỜNG của `/new` dán một cặp ngoặc rỗng lên
+/// câu chủ máy gõ. Đo lại trên `ps` cùng ngày: `claude --permission-mode auto
+/// "[] acc3 dwork" --disallowedTools …`, tức nó đi tới tận argv.
+#[test]
+fn a_dropped_parameter_must_not_bite_into_the_task() {
+    assert_eq!(hub::sessions::task_for_new("", "dwork"), "dwork");
+    // …nhưng CÓ `-s` thì nhãn vẫn cần: phiên mở ở gốc workspace, nên câu duy
+    // nhất nói nó thuộc dự án nào là đề bài.
+    assert_eq!(
+        hub::sessions::task_for_new("dwork", "sửa lịch"),
+        "[dwork] sửa lịch"
+    );
+    // Đề bài rỗng vẫn hợp lệ trên đường mở cửa sổ — và KHÔNG được biến thành
+    // một cái nhãn trần, vì lúc ấy phiên nhận đúng chữ `[dwork]` làm việc.
+    assert_eq!(hub::sessions::task_for_new("dwork", ""), "");
+    assert_eq!(hub::sessions::task_for_new("", ""), "");
+    assert_eq!(hub::sessions::task_for_new("   ", "dwork"), "dwork");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lệnh đi kèm THƯ MỤC của chính nó — 2026-08-15.
+//
+// 🔴 Hà, ảnh chụp hai nút `▶ git add …` vừa bấm: *"Như này có đúng không"*.
+// Không đúng: `runin_ran code=128`, *"fatal: not a git repository"*. Đo ra:
+// nhãn `[dwork]` dựng đường `<workspace>/dwork`, mà repo thật là
+// `<workspace>/dwork/dev` — lệch một bậc.
+//
+// Rồi anh chặn đúng lúc tôi sắp vá bằng phép DÒ thư mục: *"Có vẻ chưa đúng ngữ
+// cảnh thật"* · *"nhật ký là sao, sao không đọc trực tiếp trong phiên?"*. Con
+// số thật nằm ngay trong bản ghi mang dòng lệnh ấy: `cwd`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `ps` CĂN PHẢI cột số — và một dòng đọc hụt ở đây đọc ra thành một CÁI CHẾT.
+//
+// 🔴 Hà 2026-08-15: *"tại sao vừa tạo phiên social mới đã báo như thế này"* —
+// hub trả lời *"ĐÃ TẮT: chỉ còn /handover"* về một phiên sống được vài giây,
+// rồi *"cũng không nhìn thấy cửa sổ đâu"*. Đo cùng lúc: `pid 5047` (`ttys010`)
+// CÓ trong `ps`, `argv[0] = claude`, mà hub khai *"không còn tiến trình"*.
+//
+// Gốc: bản đầu tách bằng `splitn(4, char::is_whitespace)` — cắt theo TỪNG ký tự
+// trắng, nên dấu cách đệm của cột căn phải sinh ra trường rỗng, `parse` hỏng,
+// cả dòng bị bỏ. Nó chỉ cắn pid NGẮN HƠN pid dài nhất đang chạy, nên im lặng
+// phần lớn thời gian rồi cắn đúng phiên vừa mở.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_padded_ps_column_must_not_read_as_a_dead_session() {
+    // Nguyên văn hình dạng `ps -eo pid=,ppid=,tty=,command=` trên máy này khi
+    // pid dài nhất có 5 chữ số: pid 4 chữ số được đệm thêm một dấu cách.
+    let (pid, ppid, tty, cmd) =
+        hub::sessions::parse_ps_line(" 5047  4998 ttys010  claude --permission-mode auto")
+            .expect("dòng ps có đệm vẫn phải đọc được");
+    assert_eq!(pid, 5047);
+    assert_eq!(ppid, 4998);
+    assert_eq!(tty, "ttys010");
+    assert_eq!(cmd, "claude --permission-mode auto");
+
+    // …và dòng KHÔNG đệm vẫn như cũ.
+    let (pid, ppid, tty, cmd) =
+        hub::sessions::parse_ps_line("85605 85592 ttys005 claude").expect("dòng thường");
+    assert_eq!(
+        (pid, ppid, tty.as_str(), cmd.as_str()),
+        (85605, 85592, "ttys005", "claude")
+    );
+
+    // Tiến trình không có cửa sổ: `ps` in `??`, và đó KHÔNG phải một cửa sổ
+    // (`is_real_tty` — luật 11b).
+    let (_, _, tty, _) = hub::sessions::parse_ps_line("  123     1 ??       /usr/sbin/cupsd -l")
+        .expect("dòng không tty");
+    assert_eq!(tty, "??");
+    assert!(!hub::sessions::is_real_tty(&tty));
+
+    // Dòng cụt thì trả `None` — và chỗ gọi ĐẾM rồi ghi log, không nuốt.
+    assert!(hub::sessions::parse_ps_line("").is_none());
+    assert!(hub::sessions::parse_ps_line("5047").is_none());
+    assert!(hub::sessions::parse_ps_line("5047 4998").is_none());
+}
+
+#[test]
+fn a_command_carries_the_folder_its_own_record_recorded() {
+    // Hình dạng lấy từ nhật ký THẬT: bản ghi mang `cwd` ở tầng ngoài cùng, và
+    // `cwd` ĐỔI trong một phiên (đo được `/Users/hanguyen/projects/dwork/dev`
+    // trong khi phiên mở ở `/Users/hanguyen/projects`).
+    let tail = concat!(
+        r#"{"type":"user","cwd":"/Users/hanguyen/projects","message":{"role":"user","content":"làm tiếp đi"}}"#,
+        "\n",
+        r#"{"type":"assistant","cwd":"/Users/hanguyen/projects/dwork/dev","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"git add scripts/dci-build-deploy-web.sh"}}]}}"#,
+        "\n",
+        r#"{"type":"user","cwd":"/Users/hanguyen/projects/dwork/dev","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command git add has been denied."}]}}"#,
+    );
+    let got = hub::sessions::commands_in_last_turn(tail, 4);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].line, "git add scripts/dci-build-deploy-web.sh");
+    assert_eq!(
+        got[0].cwd, "/Users/hanguyen/projects/dwork/dev",
+        "lệnh bị chặn phải mang thư mục CỦA CHÍNH BẢN GHI ấy — đây là chỗ `git` \
+         trả 128 khi hub chạy nó ở `<workspace>/dwork`"
+    );
+}
+
+#[test]
+fn a_command_only_mentioned_in_prose_takes_where_the_session_stands() {
+    // Lệnh chỉ được NHẮC trong lời thì chưa chạy bao giờ, nên không có bản ghi
+    // riêng. Chỗ đúng nhất đo được là chỗ phiên đang đứng — bản ghi mới nhất.
+    let tail = concat!(
+        r#"{"type":"user","cwd":"/Users/hanguyen/projects","message":{"role":"user","content":"tình hình sao rồi"}}"#,
+        "\n",
+        r#"{"type":"assistant","cwd":"/Users/hanguyen/projects/games","message":{"role":"assistant","content":[{"type":"text","text":"Còn một bước:\n\nbash tools/post-deploy-check.sh\n"}]}}"#,
+    );
+    let got = hub::sessions::commands_in_last_turn(tail, 4);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].line, "bash tools/post-deploy-check.sh");
+    assert_eq!(got[0].cwd, "/Users/hanguyen/projects/games");
+}
+
+#[test]
+fn a_transcript_without_cwd_leaves_the_folder_empty_not_guessed() {
+    // Nhật ký cũ không có trường `cwd`. Bịa một thư mục ở đây là dựng lại đúng
+    // con bug vừa vá — để TRỐNG, và chỗ gọi rơi về gốc dự án như đường cũ.
+    let tail = concat!(
+        r#"{"type":"user","message":{"role":"user","content":"chạy đi"}}"#,
+        "\n",
+        r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Chạy:\n\nbash ./deploy.sh ban-moi\n"}]}}"#,
+    );
+    let got = hub::sessions::commands_in_last_turn(tail, 4);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert_eq!(got[0].cwd, "", "không biết thì để trống, đừng đoán");
 }

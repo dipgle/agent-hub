@@ -71,6 +71,32 @@ pub fn split_flags(
     (flags, rest.join(" "))
 }
 
+/// `/new <id> [chữ]` — từ đầu là ID MỘT PHIÊN thì đây là lượt MỞ LẠI phiên ấy.
+///
+/// Trả `(id đầy đủ, tài khoản, phần chữ còn lại)`; `None` nếu từ đầu không phải
+/// id, hoặc là id mà hub không biết nó thuộc tài khoản nào.
+///
+/// 🔴 Thay `/tell`, 2026-08-15. Nhận theo HÌNH DẠNG rồi ĐỐI CHIẾU sổ — không
+/// chỉ hình dạng: một chuỗi 8 ký tự hex là hình dạng id, nhưng nếu hub không
+/// biết phiên ấy thì nó cũng không biết mở bằng tài khoản nào, mà `--resume`
+/// chạy nhầm tài khoản là mở nhầm cả kho phiên. Không biết thì TỪ CHỐI, đừng
+/// lặng lẽ rơi về tài khoản mặc định.
+fn resume_target(rest: &str, db: &Db) -> Option<(String, String, String)> {
+    let (head, tail) = split_target(rest)?;
+    if crate::sessions::is_shell_id(&head) {
+        return None; // cửa sổ trần không có phiên nào để nối tiếp
+    }
+    let book = db
+        .cursor_or_log(WATCH_KEY)
+        .and_then(|v| session_name_from_book(&v, &head));
+    if let Some((_, account)) = book.filter(|(_, a)| !a.trim().is_empty()) {
+        return Some((head, account, tail));
+    }
+    let stopped = stopped_session(db, &head).filter(|s| !s.account.trim().is_empty())?;
+    let (id, account) = (stopped.session_id.clone(), stopped.account.clone());
+    Some((id, account, tail))
+}
+
 /// Tên tài khoản gõ TRẦN ở đầu đề bài — `(tài khoản, phần còn lại)`.
 ///
 /// 🔴 Hà 2026-08-15: *"Rõ ràng mở phiên mới dwork là acc3 sau xem lại thành acc1
@@ -205,7 +231,34 @@ pub fn split_target(arg: &str) -> Option<(String, String)> {
     // phiên, không phải một lệnh nhắm vào phiên `deadbeef`.
     let short_id =
         head.len() == 8 && head.chars().all(|c| c.is_ascii_hexdigit()) && !rest.is_empty();
-    (full_uuid || short_id).then(|| (head.to_string(), rest.to_string()))
+    // 🔴 CỬA SỔ TRẦN cũng là một mục tiêu, 2026-08-15.
+    //
+    // Hà bấm cửa sổ `ttys002` rồi gõ `ls`, và cái shell nhận được nguyên
+    // `win-ttys002 Ls` — `zsh: command not found: win-ttys002`. Đo trong log:
+    // `telegram_text_as_typing len=2` mà `keys_typed **len=14**`, tức id bị dán
+    // vào ĐẦU chữ. Vì đường gõ dựng `/type <id> <chữ>` rồi hàm này tách lại —
+    // và nó chỉ biết hình dạng uuid, nên `win-ttys002` không phải id ⟹ cả chuỗi
+    // thành chữ để gõ.
+    //
+    // Đúng con bệnh của cả ngày hôm nay: `is_shell_id` vừa dựng xong ở
+    // `sessions`, mà chỗ này thì chưa ai bảo. Nên hỏi CHUNG một chỗ thay vì so
+    // chuỗi lần nữa.
+    //
+    // Đòi `rest` không rỗng, cùng luật với id ngắn: `/type win-ttys002` trơn
+    // vẫn là chữ gõ vào phiên đang theo, không phải một lệnh nhắm vào cửa sổ ấy.
+    //
+    // Đòi ĐÚNG hình dạng một tên tty (`ttys000`), không phải "chữ gì cũng được
+    // sau `win-`". Bản đầu của tôi nới tới mức ấy và bài kiểm bắt ngay: câu
+    // *"win-win thế nào rồi"* bị nuốt mất từ đầu — đúng cái bẫy chú thích trên
+    // đã ghi (*"bắt nhầm thì chữ đầu của câu người ta gõ bị nuốt mất"*).
+    let shell_id = crate::sessions::is_shell_id(head)
+        && {
+            let tail = &head[crate::sessions::SHELL_ID_PREFIX.len()..];
+            tail.strip_prefix("tty")
+                .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric()))
+        }
+        && !rest.is_empty();
+    (full_uuid || short_id || shell_id).then(|| (head.to_string(), rest.to_string()))
 }
 
 /// Hai chuỗi này có chỉ vào CÙNG một phiên không?
@@ -275,10 +328,10 @@ pub fn enter_button(
 /// 🔴 Hà 2026-08-12: *"bấm vào phiên vẫn phản hồi rất chậm, sao không chỉnh để
 /// nhận được luôn"*. Đo cú bấm ấy: `command_done kind=Session` **ms=48407**.
 /// Hàng chờ không liên quan (đã vá 18:29); 48 giây nằm gọn trong chính lệnh, và
-/// nó đi vào đúng một dòng: `snapshot_cached(20s)` — dựng lại ảnh chụp phiên
-/// **chỉ để lấy `s.name` và `s.account`** cho câu chào. Đệm 20 giây từng đủ khi
-/// một lượt dựng mất ~10 giây; tối nay `sessions_snapshot_ms` đo được **18–92
-/// giây** mỗi vòng, nên gần như cú bấm nào cũng rơi đúng vào lượt dựng lại.
+/// nó đi vào đúng một dòng: dựng lại ảnh chụp phiên **chỉ để lấy `s.name` và
+/// `s.account`** cho câu chào. (Bản vá hôm ấy là một cái đệm 20 giây; nó đã bị
+/// gỡ 2026-08-15 cùng lúc ảnh chụp thôi spawn `claude` — xem bia mộ
+/// `snapshot_cached` trong `sessions.rs`.)
 ///
 /// Mà hai thứ ấy hub đã nhớ sẵn: `Mark::n` (tên) và `Mark::a` (tài khoản), ghi
 /// mỗi vòng chính vì lúc phiên biến mất thì không còn chỗ nào hỏi nữa. Đọc sổ
@@ -287,6 +340,33 @@ pub fn enter_button(
 /// Cái giá phải nói thẳng: sổ cũ hơn ảnh chụp đúng **một vòng**. Với câu "đang
 /// theo phiên nào" thì đó là cái giá đúng — một cái tên trễ một vòng vẫn là cái
 /// tên ấy, còn 48 giây im lặng thì người ta bấm lần hai.
+/// Câu chào của đường CHẬM — nhánh chạy khi sổ chưa biết phiên này.
+///
+/// 🔴 Tách thành hàm riêng 2026-08-15, và lý do tách chính là con bug: Hà bấm
+/// đúng cái nút `🟪 [hub]` và nhận về *"👁 Đang theo phiên projects-67 (acc1)"*
+/// — *"rõ ràng vào hub mà chỉ báo thế này"*. Câu chào ấy có HAI đường; đường
+/// nhanh (`session_name_from_book`) trả nhãn đúng từ 08-12, còn đường này in
+/// `s.name` THÔ. Cả máy mở phiên ở gốc workspace nên `claude` đặt tên phiên nào
+/// cũng `projects-xx` — đúng cái tên phân biệt được ÍT NHẤT trong mọi cái tên
+/// có ở đây, và nó là thứ duy nhất câu này in ra.
+///
+/// Bản chép tay THỨ TƯ của cùng một luật (ba bản trước ở `screen_report`, vá
+/// 08-13). Nằm trong một `format!` giữa một `match` sáu tầng thì không cửa nào
+/// bắt được nó — nên nay nó là một hàm, và có một bài kiểm ĐỎ ĐƯỢC đứng canh.
+///
+/// 📌 Và đây là nhánh hay chạy nhất ngay sau một lượt `hubd` khởi động lại (sổ
+/// còn rỗng), tức lỗi hiện ra đúng lúc chủ máy hay bấm nút nhất.
+pub fn follow_ack_head(s: &crate::sessions::LiveSession, how: &str) -> String {
+    // Cửa sổ trần không có tài khoản — in `()` rỗng là một cặp ngoặc nói rằng
+    // hub biết một điều gì đó rồi bỏ trống. Không biết thì đừng mở ngoặc.
+    let who = if s.account.trim().is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", s.account)
+    };
+    format!("👁 Đang theo {}{}{}", crate::sessions::shown(s), who, how)
+}
+
 pub fn session_name_from_book(book_json: &str, id: &str) -> Option<(String, String)> {
     let book: BTreeMap<String, crate::watch::Mark> = serde_json::from_str(book_json).ok()?;
     let mark = book.get(id)?;
@@ -341,12 +421,73 @@ fn clean_inbox(cfg: &Config, session_id: &str, folder: &str) {
     }
 }
 
+/// Cất sổ theo dõi. `false` = KHÔNG cất được, và chỗ gọi phải im luôn lượt ấy.
+fn save_watch_book(db: &Db, next: &BTreeMap<String, crate::watch::Mark>) -> bool {
+    match serde_json::to_string(next) {
+        Ok(v) => match db.set_cursor(WATCH_KEY, &v) {
+            Ok(()) => true,
+            Err(e) => {
+                logging::error("watch_state_save_failed", json!({ "err": e.to_string() }));
+                false
+            }
+        },
+        Err(e) => {
+            logging::error("watch_state_encode_failed", json!({ "err": e.to_string() }));
+            false
+        }
+    }
+}
+
+/// Sổ cũ hơn mốc này ⟹ hub đã KHÔNG nhìn trong lúc ấy, nên không được nói "vừa".
+///
+/// Đặt bằng 10 phút: vòng chạy ~2 phút, nên một sổ quá năm vòng nghĩa là hub
+/// vắng mặt chứ không phải thế giới đứng im.
+const WATCH_BOOK_STALE_SEC: i64 = 600;
+
+/// Sổ lượt trước có ĐỦ TƯƠI để kết luận "vừa xong / vừa tắt" không.
+///
+/// Tách thành hàm thuần vì đây là một QUYẾT ĐỊNH, không phải một phép đo: nó
+/// nói *hub có tư cách để tuyên bố gì không*. Ba ca, ba lý do khác nhau:
+/// sổ rỗng thì cứ đi đường thường (`watch::changes` vốn đã im ở lượt đầu);
+/// đọc được mốc và còn mới thì nói; **không đọc được mốc thì IM** — không biết
+/// mình đã nhìn hay chưa là chưa đủ tư cách để báo một cái chết.
+pub fn watch_book_usable(prev_len: usize, age_sec: Option<i64>) -> bool {
+    prev_len == 0 || age_sec.is_some_and(|a| a <= WATCH_BOOK_STALE_SEC)
+}
+
 pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsSnapshot) {
     let live = &snap.sessions;
     let prev: BTreeMap<String, crate::watch::Mark> = db
         .cursor_or_log(WATCH_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
+
+    // 🔴 SỔ QUÁ CŨ = CHƯA TỪNG NHÌN, không phải "mọi thứ vừa đổi".
+    //
+    // Luật 11 đã có sẵn một nửa của câu này: *nói KHÔNG gì cả ở lượt đầu sau khi
+    // khởi động lại* — nhưng nó đo bằng "sổ rỗng", mà sổ có thể **đầy và ôi**.
+    // Đúng ca đang có trên máy lúc viết dòng này: `watch:sessions` ghi lần cuối
+    // 14/08 13:11:24 (đúng phút cái loa mất chỗ gọi), giữ hai phiên chết từ hôm
+    // kia. Lượt so đầu tiên sau bản vá sẽ thấy hai phiên ấy vắng mặt và bắn hai
+    // tin *"⏹ đã tắt"* về hai cái chết đã cũ hơn một ngày.
+    //
+    // Cùng một họ với ba tin sai ngày 12/08 (`blind`): hub chỉ được kết luận
+    // "vừa tắt" khi nó THẬT SỰ đang nhìn ở lượt trước. Nên: nạp lại sổ, im
+    // lặng, và NÓI RA trong log rằng lượt này cố ý không có tin.
+    let age = db
+        .cursor_written_at(WATCH_KEY)
+        .map(|t| chrono::Utc::now().timestamp() - t);
+    if !watch_book_usable(prev.len(), age) {
+        let (_, next) =
+            crate::watch::changes(&prev, live, chrono::Utc::now().timestamp(), &snap.blind);
+        save_watch_book(db, &next);
+        logging::warn(
+            "watch_book_stale_muted",
+            json!({ "age_sec": age, "was": prev.len(), "now": live.len(),
+                    "why": "sổ cũ hơn 10 phút ⟹ hub đã không nhìn trong khoảng ấy; nạp lại và KHÔNG nói gì (luật 11)" }),
+        );
+        return;
+    }
     // Tài khoản nào KHÔNG liệt kê được phiên ở lượt này đi thẳng vào phép so:
     // vắng mặt trong một danh sách hỏng không phải là một cái chết. Trước
     // 2026-08-12 hàm này chỉ nhận `sessions`, nên `notes` — chỗ duy nhất ghi
@@ -389,19 +530,10 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         .map(|m| m.keys().cloned().collect())
         .unwrap_or_default();
 
-    match serde_json::to_string(&next) {
-        // Ghi sổ TRƯỚC khi nói: nói xong mới ghi mà sập giữa chừng thì lượt sau
-        // nói lại y hệt. Thà lỡ một lời báo còn hơn một cái loa lặp.
-        Ok(v) => {
-            if let Err(e) = db.set_cursor(WATCH_KEY, &v) {
-                logging::error("watch_state_save_failed", json!({ "err": e.to_string() }));
-                return;
-            }
-        }
-        Err(e) => {
-            logging::error("watch_state_encode_failed", json!({ "err": e.to_string() }));
-            return;
-        }
+    // Ghi sổ TRƯỚC khi nói: nói xong mới ghi mà sập giữa chừng thì lượt sau nói
+    // lại y hệt. Thà lỡ một lời báo còn hơn một cái loa lặp.
+    if !save_watch_book(db, &next) {
+        return;
     }
 
     for c in changes {
@@ -720,7 +852,16 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             // nên đây không phải rơi về màn.
             let from_log = crate::sessions::commands_of(cfg, &id, 2);
             if from_log.is_empty() {
+                // Rơi về `scan` thì KHÔNG có thư mục nào đo được — để trống, và
+                // `root_for_command` sẽ rơi tiếp về gốc dự án. Bịa một thư mục ở
+                // đây là dựng lại đúng con bug vừa vá.
                 crate::keys::commands_in_report(scan, 2)
+                    .into_iter()
+                    .map(|line| crate::sessions::Cmd {
+                        line,
+                        cwd: String::new(),
+                    })
+                    .collect()
             } else {
                 from_log
             }
@@ -771,7 +912,13 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 let mut b: Vec<(String, String)> = Vec::new();
                 b.extend(enter);
                 b.extend(quick.clone());
-                say_with_command_icons(tg, &text, &cmds, &b, "session_change_telegram_failed");
+                say_with_command_icons(
+                    tg,
+                    &text,
+                    &crate::sessions::lines_of(&cmds),
+                    &b,
+                    "session_change_telegram_failed",
+                );
             }
             _ => {
                 if let Err(e) = crate::confirm::tell(cfg, &text) {
@@ -785,6 +932,32 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
 /// Trần cho phần chữ một lệnh trả về. Telegram cắt tin ở 4096 ký tự, và một tin
 /// bị Telegram cắt là một tin mất đúng phần cuối — thường là phần kết luận.
 pub const CMD_OUT_MAX: usize = 3000;
+
+/// Khối dán NGƯỢC vào phiên sau khi hub chạy hộ một lệnh — ngắn nhất có thể.
+///
+/// 🔴 Hà 2026-08-16, ảnh chụp đúng khối này: *"tại sao lại có một mớ text không
+/// cần thiết này"* · *"quá tốn context"*. Bản cũ mở đầu bằng một câu **90 ký
+/// tự** kể ruột hub — *"hub đã chạy hộ lệnh này trên máy — cwd
+/// /Users/hanguyen/projects/dwork, KHÔNG có tty"* — và khối này **nằm lại trong
+/// nhật ký phiên vĩnh viễn**, tức nó ngốn ngữ cảnh của chính phiên ấy ở mọi
+/// lượt về sau. Phiên cần đúng hai điều: lệnh nào, và ra gì.
+///
+/// Hai thứ KHÔNG cắt, vì cả hai đều load-bearing:
+/// * `[hub chạy hộ]` — thiếu nó thì phiên đọc khối này như thể CHÍNH NÓ vừa
+///   chạy lệnh, rồi kể lại như việc mình đã làm.
+/// * `$ <lệnh>` — một báo cáo thường nhắc vài lệnh; không có dòng này thì kết
+///   quả không biết thuộc về lệnh nào.
+///
+/// Còn "không qua tty" chỉ nói khi lệnh HỎNG: lúc ấy nó là một lý do (`sudo`,
+/// `ssh -t`, `passwd` chết ở dòng hỏi mật khẩu), lúc thành công thì nó là một
+/// mẩu tin không ai dùng.
+pub fn runin_block(line: &str, report: &str, failed: bool) -> String {
+    if failed {
+        format!("[hub chạy hộ · không qua tty]\n$ {line}\n{report}")
+    } else {
+        format!("[hub chạy hộ]\n$ {line}\n{report}")
+    }
+}
 
 /// Dựng câu trả lời cho `/cmd` — hàm THUẦN, kiểm được không cần chạy lệnh nào.
 ///
@@ -932,12 +1105,10 @@ pub const STOPPED_KEY: &str = "stopped:session";
 /// muộn. Nhưng nó chỉ ra tay khi CHẮC CHẮN phiên đang rảnh; mọi lý do giữ lại
 /// đều được ghi log, vì một cơ chế tự chạy mà im lặng là một cơ chế không ai
 /// dám tin.
-fn auto_handover(db: &Db, cfg: &Config) {
+fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot) {
     if !cfg.auto_handover.enabled {
         return;
     }
-    let mut live = crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
-    mark_started_by_hub(db, &mut live);
     let done: Vec<String> = db
         .cursor_or_log(AUTO_DONE_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
@@ -2188,27 +2359,14 @@ pub fn remember_files(
         Some(root) => {
             let kept: Vec<String> = paths
                 .iter()
-                .filter(|p| {
-                    let expanded = match p.strip_prefix("~/") {
-                        Some(rest) => std::env::var("HOME")
-                            .map(|h| std::path::PathBuf::from(h).join(rest))
-                            .unwrap_or_else(|_| std::path::PathBuf::from(p.as_str())),
-                        None => std::path::PathBuf::from(p.as_str()),
-                    };
-                    let full = if expanded.is_absolute() {
-                        expanded
-                    } else {
-                        root.join(&expanded)
-                    };
-                    full.is_file() && full.starts_with(&root)
-                })
+                .filter(|p| sendable_file(p, &root, &cfg.workspace_root).is_some())
                 .cloned()
                 .collect();
             if kept.len() < paths.len() {
                 logging::info(
                     "quick_files_filtered",
                     json!({ "kept": kept.len(), "seen": paths.len(),
-                            "why": "tên nhắc trong câu văn, không phải tệp nằm trong thư mục phiên" }),
+                            "why": "không phải tệp có thật, hoặc nằm ngoài workspace" }),
                 );
             }
             kept
@@ -2295,6 +2453,44 @@ pub fn quick_file(db: &Db, n: usize) -> Option<(String, String)> {
 /// Không tìm thấy phiên trong sổ ⟹ trả `None`, và chỗ gọi phải TỪ CHỐI. Rơi về
 /// gốc workspace ở đây là biến "không biết phiên nào" thành "cho phép tất cả",
 /// đúng kiểu hỏng-mở-toang mà `keys::look` đã trả giá một lần.
+/// Đường dẫn này có phải một TỆP hub được phép gửi đi không — và ở đâu.
+///
+/// 🔴 Hà 2026-08-16: *"Rõ ràng trong nội dung có file .html nhưng lại không có
+/// nút để tải được về"*. Tệp hôm ấy là
+/// `~/projects/AI/tcc/danh-gia-tccbrowser.html` — CÓ THẬT, 28 KB — và chính
+/// phiên đã nói vì sao nó nằm ở `tcc/` chứ không trong `tcc/browser/`: *"để
+/// không làm bẩn cây git của kho công khai"*. Đặt tệp ra ngoài thư mục phiên là
+/// một việc ĐÚNG và thường xuyên; cửa cũ (`starts_with(thư mục phiên)`) đọc nó
+/// thành *"một cái tên nhắc trong câu văn"* rồi im lặng bỏ mất cái nút.
+///
+/// Hàng rào không mất, chỉ lùi ra một tầng — `workspace_root`. Gửi tệp là đưa
+/// nội dung RỜI KHỎI MÁY (luật 5), nên `~/.ssh`, `~/Library`, `/etc` vẫn nằm
+/// ngoài. Và cửa `is_file` vẫn chặn ca gốc: `com.dipgle.hubd.plist` nhắc giữa
+/// câu văn thì không có tệp nào để mà gửi.
+///
+/// Tách thuần để KIỂM ĐƯỢC, và để hai chỗ dùng chung MỘT luật: lúc dựng nút
+/// (`remember_files`) và lúc bấm (`telegram::send_document`). Hai cửa lệch nhau
+/// thì nút mọc ra rồi bấm vào báo "nằm ngoài cây làm việc".
+pub fn sendable_file(
+    p: &str,
+    root: &std::path::Path,
+    workspace: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    let expanded = match p.strip_prefix("~/") {
+        Some(rest) => std::env::var("HOME")
+            .map(|h| std::path::PathBuf::from(h).join(rest))
+            .unwrap_or_else(|_| std::path::PathBuf::from(p)),
+        None => std::path::PathBuf::from(p),
+    };
+    let full = if expanded.is_absolute() {
+        expanded
+    } else {
+        root.join(&expanded)
+    };
+    let inside = full.starts_with(root) || full.starts_with(workspace);
+    (full.is_file() && inside).then_some(full)
+}
+
 pub fn session_root(db: &Db, cfg: &Config, session_id: &str) -> Option<std::path::PathBuf> {
     let book = db.cursor_or_log(WATCH_KEY)?;
     let marks: std::collections::BTreeMap<String, crate::watch::Mark> =
@@ -2306,7 +2502,127 @@ pub fn session_root(db: &Db, cfg: &Config, session_id: &str) -> Option<std::path
     Some(cfg.workspace_root.join(folder.trim_matches('/')))
 }
 
-pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String, String)> {
+/// Thư mục mà sổ nút đã ghi cho ĐÚNG dòng lệnh này của ĐÚNG phiên này.
+///
+/// Tra theo nội dung chứ không theo chỉ số, vì đường đi từ cú bấm tới đây là
+/// một chuỗi chữ (`/runin <id> <lệnh>`) và thêm một tham số nữa vào đó là đổi
+/// hình dạng một mệnh lệnh đang chạy tốt. Sổ chỉ giữ tối đa 4 dòng cho một
+/// phiên nên tra theo nội dung là chính xác, không phải xấp xỉ.
+pub fn quick_cwd(db: &Db, session_id: &str, line: &str) -> String {
+    let Some(v) = db.cursor_or_log(QUICK_KEY) else {
+        return String::new();
+    };
+    let Ok(st) = serde_json::from_str::<serde_json::Value>(&v) else {
+        return String::new();
+    };
+    if st.get("s").and_then(|s| s.as_str()) != Some(session_id) {
+        return String::new();
+    }
+    st.get("c")
+        .and_then(|c| c.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|r| serde_json::from_value::<crate::sessions::Cmd>(r.clone()).ok())
+                .find(|c| c.line.trim() == line.trim())
+                .map(|c| c.cwd)
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+}
+
+/// Thư mục để CHẠY một lệnh lấy từ phiên — thứ nhật ký đã ghi, không phải nhãn.
+///
+/// 🔴 Hà 2026-08-15, ảnh chụp hai nút `▶ git add …`: *"Như này có đúng không"*.
+/// Không đúng — `runin_ran code=128`, *"fatal: not a git repository"*. Và khi
+/// tôi định vá bằng cách **dò thư mục** (thử gốc dự án, không thấy thì tụt
+/// xuống tìm thư mục con nào chứa những đường tương đối), anh chặn đúng lúc:
+/// *"Có vẻ chưa đúng ngữ cảnh thật"* · *"nhật ký là sao, sao không đọc trực
+/// tiếp trong phiên?"*.
+///
+/// Anh đúng cả hai vế. Con số thật nằm sẵn trong chính bản ghi mà dòng lệnh
+/// được đọc ra: `cwd = "/Users/hanguyen/projects/dwork/dev"` — trong khi
+/// `session_root` dựng từ NHÃN (`Mark::d = "dwork"`) chỉ ra `<workspace>/dwork`.
+/// Lệch đúng một bậc, và một bậc là đủ để `git` trả 128 — hoặc tệ hơn: một lệnh
+/// khác CHẠY THẬT trên những tệp không ai hỏi (bài học `scripts/` 13/08).
+///
+/// Nên thứ tự là: **thư mục của chính lệnh ấy** → nhãn dự án (đường cũ, cho nút
+/// sinh ra trước bản vá) → từ chối. Không có bậc nào là phép đoán.
+fn root_for_command(
+    db: &Db,
+    cfg: &Config,
+    session_id: &str,
+    cmd_cwd: &str,
+) -> Option<std::path::PathBuf> {
+    let from_log = std::path::Path::new(cmd_cwd.trim());
+    if !cmd_cwd.trim().is_empty() && from_log.is_dir() {
+        return Some(from_log.to_path_buf());
+    }
+    if !cmd_cwd.trim().is_empty() {
+        logging::warn(
+            "runin_logged_cwd_gone",
+            json!({ "session": session_id, "cwd": cmd_cwd,
+                    "why": "nhật ký khai thư mục ấy nhưng nay không còn — rơi về gốc dự án" }),
+        );
+    }
+    session_root(db, cfg, session_id)
+}
+
+/// Bao nhiêu nút được nhớ. 40 ≈ vài chục tin gần nhất — đủ để một cái nút nằm
+/// trên màn hình cả buổi vẫn tra ra đúng việc của nó, mà sổ không phình.
+const QUICK_KEEP: usize = 40;
+
+/// Mã của một nút: sinh từ CHÍNH `(phiên, dòng lệnh)`, không từ thứ tự.
+///
+/// Thứ tự là thứ đổi theo tin mới; cặp `(phiên, lệnh)` thì không. Cùng một lệnh
+/// của cùng một phiên luôn ra cùng một mã, nên bấm lại một nút cũ là chạy lại
+/// đúng việc ấy chứ không phải một việc khác trùng chỗ.
+///
+/// FNV-1a 32-bit, in ra 8 chữ số hex: đủ ngắn cho `callback_data` (Telegram cho
+/// 64 byte) và đủ thưa cho 40 mục. Đây KHÔNG phải hàm băm bảo mật và không cần
+/// là: giá trị nó khoá đã nằm trong sổ của chính hub, mã chỉ để tra.
+pub fn quick_token(session_id: &str, line: &str) -> String {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in session_id
+        .as_bytes()
+        .iter()
+        .chain(b"\n")
+        .chain(line.as_bytes())
+    {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    format!("{h:08x}")
+}
+
+/// Sổ nút hiện tại, đọc được cả hình dạng cũ lẫn mới.
+fn quick_book(db: &Db) -> serde_json::Map<String, Value> {
+    db.cursor_or_log(QUICK_KEY)
+        .and_then(|v| serde_json::from_str::<Value>(&v).ok())
+        .and_then(|st| st.get("e").and_then(|e| e.as_object()).cloned())
+        .unwrap_or_default()
+}
+
+/// Giữ `QUICK_KEEP` mục, và LUÔN giữ những mã vừa ghi.
+///
+/// Không có thứ tự thời gian trong một `Map`, nên khi phải cắt thì cắt những mã
+/// KHÔNG thuộc lượt này — thà bỏ nút cũ còn hơn bỏ nút vừa gửi đi.
+fn trim_quick_book(book: &mut serde_json::Map<String, Value>, keep: &[String]) {
+    if book.len() <= QUICK_KEEP {
+        return;
+    }
+    let mut drop: Vec<String> = book.keys().filter(|k| !keep.contains(k)).cloned().collect();
+    let excess = book.len() - QUICK_KEEP;
+    drop.truncate(excess);
+    for k in drop {
+        book.remove(&k);
+    }
+}
+
+pub fn remember_quick(
+    db: &Db,
+    session_id: &str,
+    cmds: &[crate::sessions::Cmd],
+) -> Vec<(String, String)> {
     if cmds.is_empty() {
         return Vec::new();
     }
@@ -2327,8 +2643,35 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
     // Con trỏ ĐỔI ĐƯỢC giữa lúc nút sinh ra và lúc nút được bấm: bấm "Xem đầy
     // đủ" là đổi, bấm một phiên khác là đổi. Nên buộc theo phiên đã SINH ra
     // nút, y như 📎.
-    let payload = json!({ "s": session_id, "c": cmds });
-    if let Ok(v) = serde_json::to_string(&payload) {
+    // 🔴 …và MỖI NÚT phải tự nhận ra mình. Hà 2026-08-16, ảnh chụp tin của
+    // `[social]`: *"bấm các nút lệnh này lại nhảy thành nút lệnh chạy của phiên
+    // games phía sau"* · *"nó lại nhận cái cuối cùng trong phiên chat"*.
+    //
+    // Anh tả đúng cơ chế. Nút chỉ mang **số thứ tự** (`run:0`, `run:1`), mà sổ
+    // này có **đúng một ô**: mỗi tin mới ghi đè cả ô. Nên `run:0` không nghĩa là
+    // "lệnh đầu của tin ấy" mà là "lệnh đầu của tin GẦN NHẤT" — một cái nút cũ
+    // nằm trên màn hình vẫn bấm được, và nó chạy việc của phiên khác.
+    //
+    // Bản vá 13/08 (nhớ `s` = phiên nào) chữa nửa vấn đề: nó chặn được cảnh gõ
+    // vào phiên đang-theo, nhưng `s` cũng chỉ có một ô, nên nút cũ vẫn mượn
+    // luôn cả phiên của tin mới. *Một khoá dùng chung thì mọi bản vá đứng trên
+    // nó đều chỉ đúng cho hàng cuối cùng.*
+    //
+    // Nay mỗi lệnh mang một MÃ riêng (`run:<mã>`), sinh từ chính `(phiên,
+    // lệnh)`; sổ giữ 40 mã gần nhất. Nút cũ hoặc tra ra đúng việc của nó, hoặc
+    // tra không thấy và hub nói thẳng — không còn cửa nào để nó chạy nhầm việc.
+    let mut book = quick_book(db);
+    let mut tokens: Vec<String> = Vec::new();
+    for c in cmds {
+        let tok = quick_token(session_id, &c.line);
+        book.insert(
+            tok.clone(),
+            json!({ "s": session_id, "l": c.line, "d": c.cwd }),
+        );
+        tokens.push(tok);
+    }
+    trim_quick_book(&mut book, &tokens);
+    if let Ok(v) = serde_json::to_string(&json!({ "v": 2, "e": book })) {
         if let Err(e) = db.set_cursor(QUICK_KEY, &v) {
             logging::error("quick_cmds_not_saved", json!({ "err": e.to_string() }));
             return Vec::new();
@@ -2354,9 +2697,9 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
     // chờ một lệnh đã chết): bày cả hai, chọn là việc của người bấm. Cắt còn 3
     // lệnh vì mỗi nút một hàng — 4 lệnh × 2 là tám hàng, dài hơn cả cái tin.
     cmds.iter()
-        .enumerate()
+        .zip(tokens)
         .take(3)
-        .flat_map(|(i, c)| {
+        .flat_map(|(c, tok)| {
             // MỘT lệnh, MỘT nút, và nhãn đúng là lệnh ấy.
             //
             // 🔴 Hà 2026-08-13, ảnh chụp sáu nút dưới một tin: *"sao vẫn ra một
@@ -2384,35 +2727,20 @@ pub fn remember_quick(db: &Db, session_id: &str, cmds: &[String]) -> Vec<(String
             // Đường đúng đã có sẵn: route `/upgrade` báo TRƯỚC rồi mới restart
             // (`CommandKind::Upgrade`). Nên nút phải trỏ vào đó — đúng nghĩa
             // "chèn vào đúng chỗ của nó".
-            if is_self_rebuild(c) {
+            if is_self_rebuild(&c.line) {
                 return [(
-                    format!("🔧 {}", crate::exec::truncate(c, 52)),
+                    format!("🔧 {}", crate::exec::truncate(&c.line, 52)),
                     "upgrade".to_string(),
                 )];
             }
             [(
-                format!("▶ {}", crate::exec::truncate(c, 52)),
-                format!("run:{i}"),
+                format!("▶ {}", crate::exec::truncate(&c.line, 52)),
+                format!("run:{tok}"),
             )]
         })
         .collect()
 }
 
-/// Cắt tin thành từng mẩu, mỗi mẩu kết thúc NGAY SAU dòng lệnh của nó.
-///
-/// 🔴 Hà 2026-08-14: *"nút chạy lệnh chỉ cần 1 icon là đủ chèn ngay sau câu
-/// lệnh"*. Telegram không đặt nút giữa chữ được — `inline_keyboard` luôn treo
-/// dưới đáy MỘT tin (xem `telegram::keyboard_rows`). Nhưng "dưới đáy một tin"
-/// là thứ điều khiển được: cắt tin ngay sau dòng lệnh thì cái nút rơi đúng chỗ
-/// Hà muốn, và lúc ấy nhãn không cần nhắc lại dòng lệnh nữa — dòng lệnh đang
-/// nằm ngay trên đầu nó, nguyên văn, không bị cắt còn 52 ký tự.
-///
-/// `Some(i)` = mẩu này kết bằng lệnh thứ `i`; `None` = mẩu đuôi, mang nốt các
-/// nút khác (vào phiên, mở tệp, xem đầy đủ).
-///
-/// Mỗi lệnh khớp ĐÚNG MỘT LẦN, ở dòng đầu tiên chứa nó: một báo cáo hay nhắc
-/// lại cùng một lệnh ở phần tóm tắt, và hai cái nút giống hệt nhau cho cùng
-/// một việc là mời người ta bấm hai lần.
 /// Dòng này có mang lệnh ấy không — kể cả khi cửa sổ đã bẻ nó làm đôi.
 ///
 /// 🔴 Hà 2026-08-14: *"Rõ ràng là 1 dòng sao lại biến thành 2"*. Đúng, và đó là
@@ -2436,36 +2764,133 @@ fn line_carries(line: &str, cmd: &str) -> bool {
     head.chars().count() >= 12 && line.contains(&head)
 }
 
-pub fn command_slices(text: &str, cmds: &[String]) -> Vec<(String, Option<usize>)> {
-    let mut out: Vec<(String, Option<usize>)> = Vec::new();
-    let mut buf: Vec<&str> = Vec::new();
-    let mut used = vec![false; cmds.len()];
-    for line in text.lines() {
-        buf.push(line);
-        let hit = cmds
+/// Chèn liên kết chạy vào NGAY SAU dòng lệnh, rồi ghép cả tin thành một chuỗi
+/// HTML. Trả `(html, số liên kết đã chèn, chỉ số những lệnh không có liên kết)`.
+///
+/// 🔴 Hà 2026-08-16, sau khi tôi cãi rằng icon phải nằm cuối một mẩu: *"cái tele
+/// nhận được là text dù trước đó là gì thì bạn vẫn phải đọc từng phần, vậy
+/// trước khi gửi đã biết từng phần rồi đương nhiên biết luôn khối lệnh nên chèn
+/// luôn link vào khối lệnh rồi mới ghép tất cả gửi đi"*.
+///
+/// 🪦 `command_slices` — bản trước CẮT tin thành nhiều mẩu, mỗi mẩu kết thúc
+/// ngay sau một dòng lệnh, để cái icon "rơi đúng chỗ". Nó ra đời hồi icon còn
+/// là một NÚT (`inline_keyboard` luôn treo dưới đáy một tin, nên muốn nút nằm
+/// giữa chữ thì phải cắt chữ thành nhiều tin) — và nó sống sót qua cả lượt đổi
+/// nút thành LIÊN KẾT, dù liên kết thì đặt được vào bất cứ đâu trong chuỗi. Cái
+/// giá của việc sống sót ấy: một câu trả lời có 3 lệnh nổ thành 4-5 tin, mẩu
+/// chỉ chứa rào ``` gửi ra tin rỗng (`message text is empty`, đo 08-14), và bộ
+/// nút phải đi thêm một tin nữa mang mỗi chữ "⤵".
+///
+/// Nay: một lượt duyệt dòng, dòng nào mang lệnh thì dán liên kết vào cuối chính
+/// nó, ghép lại — MỘT tin. Chữ vào đây phải là chữ ĐÃ GỘT markdown, tức đúng
+/// chữ Telegram sẽ hiển thị, vì phép định vị dòng lệnh chỉ đúng trên chữ ấy.
+///
+/// Mỗi lệnh khớp ĐÚNG MỘT LẦN, ở dòng đầu tiên chứa nó: một báo cáo hay nhắc
+/// lại cùng một lệnh ở phần tóm tắt, và hai cái icon giống hệt nhau cho cùng
+/// một việc là mời người ta bấm hai lần.
+pub fn html_with_command_links(
+    shown: &str,
+    cmds: &[String],
+    link_of: &dyn Fn(usize) -> Option<(String, String)>,
+) -> (String, usize, Vec<usize>) {
+    let anchors: Vec<(String, Vec<(String, String)>)> = cmds
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.clone(), link_of(i).into_iter().collect()))
+        .collect();
+    html_with_links(shown, &anchors)
+}
+
+/// Chữ đang nằm trên DÒNG DẤU NHẮC của ảnh màn — neo cho hai nút ⏎/⌫.
+///
+/// 🔴 Hà 2026-08-16, ảnh chụp lúc 08:01: *"sao lại chèn 2 nút vào cuối thế này,
+/// ko hiểu nổi bạn đang làm cái trò gì nữa"* — hai nút dán vào dòng *"Lệnh phiên
+/// chạy không được (cổng quyền chặn):"* thay vì dòng `❯ chạy deploy đi`.
+///
+/// Vì bản đầu hỏi `keys::input_box_text`, mà hàm ấy đọc MỘT MÀN: không thấy
+/// khung `╭` thì nó lùi về "4 dòng không rỗng cuối". Ở đây thứ nó nhận không
+/// phải một màn — nó là cả TIN, và bốn dòng cuối của tin là chữ hub tự viết
+/// thêm. Một hàm đúng, hỏi ở sai chỗ, vẫn ra một câu trả lời sai.
+///
+/// Nên hỏi bằng dấu hiệu có thật trên ảnh màn: dòng dấu nhắc CUỐI CÙNG còn mang
+/// chữ. Khung của `claude` vẽ bằng `───` nên `╭` không có ở đây, nhưng `❯` thì
+/// luôn có.
+fn prompt_line_text(shown: &str) -> Option<String> {
+    // 🔴 `❯` MANG HAI NGHĨA — Hà 2026-08-16, ảnh 11:31: hai nút ⏎/⌫ dán vào dòng
+    // *"1. Đổi tên file ở gốc repo"*, rồi `/type clear` trả *"đã bấm 'clear'
+    // nhưng màn KHÔNG đổi"*.
+    //
+    // Cả hai là một lỗi: khi màn đang mở HỘP CHỌN, `❯` là con trỏ đang trỏ vào
+    // một lựa chọn, KHÔNG phải dấu nhắc ô nhập — và ô nhập lúc ấy trống, nên
+    // chẳng có gì để gửi hay xoá. Đây đúng thứ Hà gọi tên: *"mọi dữ liệu từ
+    // phiên phải được định nghĩa"* — cùng một ký tự, hai nghĩa, và phải phân
+    // biệt bằng ngữ cảnh chứ không bằng hình dạng.
+    if crate::keys::has_chooser_footer(shown) {
+        return None;
+    }
+    shown.lines().rev().find_map(|l| {
+        let t = l.trim();
+        let rest = t.strip_prefix('❯').or_else(|| t.strip_prefix('>'))?.trim();
+        // Đủ dài để `line_carries` bám được, và để không khớp nhầm một dấu
+        // nhắc trống có một ký tự trang trí.
+        (rest.chars().count() >= 4).then(|| rest.to_string())
+    })
+}
+
+/// Bản tổng quát: mỗi NEO là một chuỗi cần bám, kèm các liên kết dán sau dòng
+/// chứa nó. Một dòng có thể mang NHIỀU nút.
+///
+/// 🔴 Hà 2026-08-16: *"chèn vào đúng chỗ gõ lệnh đó nếu có text 2 nút là được"*
+/// · *"1 nút enter 1 nút xóa"*. Ô nhập của phiên hiện ra trong tin `/shot` như
+/// một dòng chữ; nút gửi/xoá phải nằm NGAY TẠI dòng ấy, chỗ mắt đang nhìn —
+/// không phải dưới đáy tin, nơi không có gì nói chúng thuộc về cái gì.
+///
+/// Trả `(html, số liên kết đã chèn, chỉ số neo không chèn được)`.
+pub fn html_with_links(
+    shown: &str,
+    anchors: &[(String, Vec<(String, String)>)],
+) -> (String, usize, Vec<usize>) {
+    let mut used = vec![false; anchors.len()];
+    let mut html = String::new();
+    let mut linked = 0usize;
+    let mut unlinked: Vec<usize> = Vec::new();
+    for line in shown.lines() {
+        html.push_str(&crate::telegram::html_escape(line));
+        let hit = anchors
             .iter()
             .enumerate()
-            .find(|(i, c)| !used[*i] && !c.trim().is_empty() && line_carries(line, c));
-        if let Some((i, _)) = hit {
+            .find(|(i, (a, _))| !used[*i] && !a.trim().is_empty() && line_carries(line, a));
+        if let Some((i, (_, links))) = hit {
             used[i] = true;
-            out.push((buf.join("\n"), Some(i)));
-            buf.clear();
-        }
-    }
-    if !buf.is_empty() {
-        let tail = buf.join("\n");
-        // Đuôi chỉ toàn dòng trống thì không đáng một tin riêng — dán vào mẩu
-        // trước, không thì điện thoại kêu thêm một tiếng cho một tin rỗng.
-        if tail.trim().is_empty() {
-            if let Some(last) = out.last_mut() {
-                last.0.push('\n');
-                last.0.push_str(&tail);
-                return out;
+            if links.is_empty() {
+                // Không dựng được liên kết (chưa biết tên bot) ⟹ neo ấy phải
+                // rơi xuống một cái nút ở đáy. Nói ra, đừng đánh rơi im lặng:
+                // một dòng lệnh không có đường bấm là một cây cầu hụt nhịp.
+                unlinked.push(i);
+            }
+            for (href, icon) in links {
+                // Nhãn mở đầu bằng xuống dòng ⟹ nút ấy xuống HẲN một dòng.
+                //
+                // 🔴 Hà 2026-08-16: *"2 nút enter và clear gần nhau quá dễ bấm
+                // nhầm"*. Trên màn điện thoại hai icon cách nhau một dấu cách là
+                // hai đích chạm chồng lên nhau — mà một bên GỬI còn bên kia
+                // XOÁ, tức bấm nhầm là mất chữ vừa gõ hoặc gửi thứ chưa định
+                // gửi. Cả hai đều không lùi lại được.
+                let (sep, label) = match icon.strip_prefix('\n') {
+                    Some(rest) => ("\n", rest),
+                    None => (" ", icon.as_str()),
+                };
+                html.push_str(&format!(
+                    "{sep}<a href=\"{}\">{}</a>",
+                    crate::telegram::html_escape(href),
+                    label
+                ));
+                linked += 1;
             }
         }
-        out.push((tail, None));
+        html.push('\n');
     }
-    out
+    (html, linked, unlinked)
 }
 
 /// Trần chữ cho MỘT tin Telegram. Luật của Telegram là 4096; chừa lại chỗ cho
@@ -2672,12 +3097,25 @@ fn watch_long_job(
                                 "cmd": crate::exec::truncate(&line, 120) }),
                     );
                     let report = cmd_report(r.code, r.timed_out, &r.stdout, &r.stderr, r.ms);
-                    let block = format!(
-                        "[hub đã chạy hộ lệnh này trên máy — cwd {}, KHÔNG có tty]\n$ {}\n{}",
-                        root.display(),
-                        line,
-                        report
-                    );
+                    // 🔴 Khối dán vào phiên phải NGẮN NHẤT có thể — Hà
+                    // 2026-08-16: *"tại sao lại có một mớ text không cần thiết
+                    // này"* · *"quá tốn context"*.
+                    //
+                    // Bản cũ mở đầu bằng một câu **90 ký tự** kể ruột hub
+                    // (*"hub đã chạy hộ lệnh này trên máy — cwd …, KHÔNG có
+                    // tty"*), và nó nằm lại trong nhật ký phiên VĨNH VIỄN, tức
+                    // ngốn ngữ cảnh của chính phiên ấy ở mọi lượt sau. Phiên
+                    // cần đúng hai điều: **lệnh nào** và **ra gì**.
+                    //
+                    // Ba chữ `[hub chạy hộ]` vẫn phải giữ, và đây là phần
+                    // load-bearing chứ không phải lịch sự: thiếu nó thì phiên
+                    // đọc khối này như thể CHÍNH NÓ vừa chạy lệnh — rồi kể lại
+                    // như việc mình đã làm.
+                    //
+                    // Còn "không có tty" chỉ nói khi lệnh HỎNG: lúc ấy nó là
+                    // một lý do (sudo/ssh chết ở dòng hỏi mật khẩu); lúc thành
+                    // công thì nó là một mẩu tin không ai dùng.
+                    let block = runin_block(&line, &report, r.timed_out || r.code != Some(0));
                     // Đầu ra nằm lại trong NHẬT KÝ phiên, tức trên đĩa mãi mãi —
                     // gác giá trị bí mật trước khi nó vào đó.
                     let risk = crate::redaction::file_risk(&block);
@@ -2688,14 +3126,13 @@ fn watch_long_job(
                         )
                     } else {
                         match crate::keys::window_of(&s.tty) {
-                            Ok(Some(w)) => match crate::keys::type_into(w, &block, true) {
+                            // Cú Enter rời nay nằm ở MỘT chỗ (`keys::type_and_send`).
+                            // Bản cũ chép tay vòng lặp ấy vào đây và nuốt lỗi
+                            // bằng `let _ = press(…)` — tức nếu Enter không gửi
+                            // được thì hub vẫn in "✅ đã chạy", không một dòng
+                            // log nào. Đúng hình dạng luật 3 cấm.
+                            Ok(Some(w)) => match crate::keys::type_and_send(w, &block) {
                                 Ok(()) => {
-                                    for wait_ms in [400u64, 1000] {
-                                        std::thread::sleep(std::time::Duration::from_millis(
-                                            wait_ms,
-                                        ));
-                                        let _ = crate::keys::press(w, "enter");
-                                    }
                                     format!(
                                         "✅ Đã chạy trên máy rồi dán kết quả vào {}:\n$ {}\n{}",
                                         crate::sessions::shown(&s),
@@ -2755,22 +3192,49 @@ fn watch_long_job(
 ///
 /// Hai tin, vì có hai sự kiện thật: "đã bấm mở" và "phiên đã sống". Con trỏ
 /// theo dõi chỉ chuyển ở tin thứ hai — lúc ấy mới có id để mà chuyển.
-fn watch_new_session(
-    cfg: Config,
-    name: String,
-    dir: std::path::PathBuf,
-    task: String,
-    account: Option<String>,
-    adapter: String,
-    chat_id: String,
-) {
+/// Đề bài của MỘT lượt mở phiên — gom lại thay vì tám tham số rời.
+///
+/// Tám thứ đi cùng nhau qua ba tầng hàm thì thứ tự của chúng là một cái bẫy: đổi
+/// chỗ `task` với `account` là trình dịch vẫn nhận (cùng kiểu `String`), và phiên
+/// mở ra chạy nhầm tài khoản với một đề bài là tên tài khoản. Cùng họ với con bug
+/// `[] acc3 dwork` sáng nay.
+pub struct NewSession {
+    pub cfg: Config,
+    pub name: String,
+    pub dir: std::path::PathBuf,
+    pub task: String,
+    pub account: Option<String>,
+    /// `Some(id)` ⟹ MỞ LẠI phiên ấy (`claude --resume`), không mở phiên mới.
+    pub resume: Option<String>,
+    pub adapter: String,
+    pub chat_id: String,
+}
+
+fn watch_new_session(job: NewSession) {
+    let NewSession {
+        cfg,
+        name,
+        dir,
+        task,
+        account,
+        resume,
+        adapter,
+        chat_id,
+    } = job;
     let (fb_cfg, fb_adapter, fb_chat) = (cfg.clone(), adapter.clone(), chat_id.clone());
     let spawned = std::thread::Builder::new()
         .name("new-session".into())
         .spawn(move || {
             let _lane = crate::exec::urgent();
             let started =
-                crate::sessions::start_background(&cfg, &name, &dir, &task, account.as_deref());
+                crate::sessions::start_background(
+                    &cfg,
+                    &name,
+                    &dir,
+                    &task,
+                    account.as_deref(),
+                    resume.as_deref(),
+                );
             let ack = match started {
                 Ok(s) => {
                     // Sổ sách trước, câu chào sau: một câu nói "đang theo phiên
@@ -2864,6 +3328,32 @@ fn say_back(_cfg: &Config, adapter: &str, _chat_id: &str, text: &str) {
 /// đáy tin. Thứ đặt được vào giữa chữ là một LIÊN KẾT: deep link về chính bot
 /// (`t.me/<bot>?start=run_0`). Chưa biết tên bot ⟹ rơi về nút, vì một liên kết
 /// không bấm được thì tệ hơn một cái nút.
+/// Mọi thứ từ phiên đi ra Telegram đều phải được ĐỊNH NGHĨA rồi mới gắn action.
+///
+/// 🔴 Hà 2026-08-16: *"Mọi dữ liệu từ phiên trước khi gửi lên tele đều phải được
+/// định nghĩa, chèn action phù hợp"* — sau một buổi tôi vá từng ca lẻ (dòng
+/// lệnh, ô nhập, lựa chọn, tệp) ở bốn chỗ khác nhau, và ca thứ năm lại hỏng.
+///
+/// Đây là bảng ấy: mỗi loại dữ liệu → neo (chuỗi có thật trong tin) → action.
+/// Thêm một loại mới thì thêm một dòng ở đây, không đi sửa bốn chỗ.
+#[derive(Debug, Clone, Default)]
+pub struct SessionData {
+    /// Mã phiên — mọi action phải tự mang nó (bấm lại tin cũ vẫn đúng phiên).
+    pub sid: String,
+    /// Dòng lệnh phiên nhắc tới → ▶️ chạy.
+    pub cmds: Vec<String>,
+    /// Lựa chọn đang hiện trên màn → ☑ bấm chọn, NGAY TẠI dòng của nó.
+    pub choices: Vec<(usize, String)>,
+    /// Chữ đang nằm trong ô nhập → ⏎ gửi · ⌫ xoá.
+    pub box_text: Option<String>,
+}
+
+impl SessionData {
+    fn short(&self) -> String {
+        self.sid.chars().take(8).collect()
+    }
+}
+
 pub fn say_with_command_icons(
     tg: &crate::telegram::Inbox,
     text: &str,
@@ -2871,23 +3361,230 @@ pub fn say_with_command_icons(
     buttons: &[(String, String)],
     log_key: &str,
 ) {
-    let slices = command_slices(text, cmds);
+    say_session_data(
+        tg,
+        text,
+        buttons,
+        log_key,
+        &SessionData {
+            cmds: cmds.to_vec(),
+            ..Default::default()
+        },
+    )
+}
+
+/// Dựng HTML từ bảng dữ liệu — phần thuần của [`say_session_data`], kiểm được.
+///
+/// 🔴 Câu trên đã SAI trong đúng một ngày, và cái sai ấy là loại nguy hiểm nhất:
+/// hàm này từng là một **bản chép tay** của khúc dựng neo trong `say_session_data`
+/// — chỉ có nhánh lựa chọn, không có cổng `key_sid`, không có ô nhập, không có
+/// dòng lệnh. Nên `tests/choice_links_live.rs` — bài kiểm gửi tin THẬT để chứng
+/// minh nút ☑ nằm đúng dòng option — đo bản chép, và sẽ vẫn xanh sau khi ai đó
+/// làm hỏng đường thật. Một phép đo không thể đỏ vì sản phẩm hỏng là một phép đo
+/// mù (`OPERATING-CHARTER.md` §2d).
+///
+/// Nay cả hai đi qua [`session_layout`]. Muốn thấy nó đỏ được: bỏ nhánh lựa chọn
+/// trong `session_layout` là bài kiểm live đỏ ngay.
+pub fn render_session_data(text: &str, data: &SessionData) -> String {
+    let l = session_layout(text, data, &[]);
+    html_with_links(&l.shown, &l.anchors).0
+}
+
+/// Chữ Telegram sẽ hiển thị, kèm bảng neo của nó.
+///
+/// Đây là chỗ DUY NHẤT quyết định "loại dữ liệu nào của phiên được gắn action
+/// vào đâu" — bảng trong [`SessionData`] đọc thành mã ở đây, một lần.
+struct Layout {
+    /// Đã gột markdown, đã nối thêm khu "lệnh chạy không được" nếu có.
+    shown: String,
+    /// `(chuỗi neo, [(đường dẫn, biểu tượng)])` — neo phải có thật trong `shown`.
+    anchors: Vec<(String, Vec<(String, String)>)>,
+    /// Nút lệnh, cùng thứ tự với `data.cmds` — chỗ gọi cần để dựng đường lùi.
+    cmd_btns: Vec<(String, String)>,
+    /// Nút còn lại, đã trừ ⏎/⌫ nếu hai cái ấy đã vào được giữa chữ.
+    rest_btns: Vec<(String, String)>,
+}
+
+fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) -> Layout {
+    let cmds = &data.cmds[..];
+    // 🔴 HAI KHU VỰC, và ranh giới nằm ngay trong hàm này — Hà 2026-08-16:
+    // *"không phân biệt được khu vực à"*.
+    //
+    // `text` vào đây là ẢNH MÀN của phiên. Vài dòng nữa hàm tự NỐI THÊM một khu
+    // thứ hai ("Lệnh phiên chạy không được…"). Neo cho hai nút ⏎/⌫ phải đo trên
+    // khu THỨ NHẤT, và phải đo TRƯỚC khi trộn — bản 08:01 đi tìm lại dấu nhắc
+    // sau khi đã trộn, nên nó bám vào dòng chữ hub tự viết. Không cần quét
+    // ngược: chỗ này biết ranh giới, vì chính nó vẽ ra ranh giới ấy.
+    let box_anchor = prompt_line_text(&crate::telegram::strip_markdown(text));
+    let missing: Vec<&String> = cmds.iter().filter(|c| !text.contains(c.as_str())).collect();
+    let text = if missing.is_empty() {
+        text.to_string()
+    } else {
+        let mut t = text.trim_end().to_string();
+        t.push_str("\n\nLệnh phiên chạy không được (cổng quyền chặn):\n");
+        for c in &missing {
+            t.push_str(c);
+            t.push('\n');
+        }
+        t
+    };
+    let text = text.as_str();
+
     let is_cmd_btn = |d: &str| d.starts_with("run:") || d == "upgrade";
     let cmd_btns: Vec<(String, String)> = buttons
         .iter()
         .filter(|(_, d)| is_cmd_btn(d))
         .cloned()
         .collect();
-    let rest_btns: Vec<(String, String)> = buttons
+    let mut rest_btns: Vec<(String, String)> = buttons
         .iter()
         .filter(|(_, d)| !is_cmd_btn(d))
         .cloned()
         .collect();
-    let inline = slices.iter().any(|(_, i)| i.is_some());
-    if !inline {
-        // Không có lệnh nào trong chữ: một tin, nút như cũ — nhưng vẫn phải
-        // chia nếu quá dài, vì Telegram từ chối cả tin chứ không cắt hộ.
-        let parts = split_for_telegram(text);
+    // 🔴 Gột markdown TRƯỚC, rồi mới định vị dòng lệnh. Đây là chữ Telegram sẽ
+    // hiển thị, nên nó là chữ duy nhất phép định vị được phép đọc: bản trước
+    // cắt trên chữ CHƯA gột rồi mới gột từng mẩu, và một mẩu chỉ chứa dòng rào
+    // ``` gột xong là RỖNG — Telegram trả `message text is empty` (đo thật
+    // 2026-08-14 08:58:32). Đo ở đúng chỗ Telegram đo thì ca ấy không dựng lên
+    // được nữa.
+    let shown = crate::telegram::strip_markdown(text);
+
+    // `run:<i>` → payload `run_<i>`; nút cài lại hub → `upgrade`. Cùng bộ ký tự
+    // mà tên lệnh cho phép, nên payload đi thẳng, không mã hoá gì thêm.
+    let link_of = |i: usize| {
+        cmd_btns.get(i).and_then(|(_, data)| {
+            let payload = if data == "upgrade" {
+                "upgrade".to_string()
+            } else {
+                data.replace("run:", "run_")
+            };
+            let icon = if data == "upgrade" { "🔧" } else { "▶️" };
+            crate::telegram::deep_link(&payload).map(|href| (href, icon.to_string()))
+        })
+    };
+    // 🔴 Ô NHẬP CŨNG LÀ MỘT NEO — Hà 2026-08-16: *"chèn vào đúng chỗ gõ lệnh đó
+    // nếu có text 2 nút là được"* · *"1 nút enter 1 nút xóa"* · *"còn lăn tăn nó
+    // là text mờ hay tỏ thì thêm 1 nút xóa bên cạnh nữa để tự thao tác"*.
+    //
+    // Chữ đang nằm trong ô nhập hiện ra trong tin như một dòng bình thường; hai
+    // nút của nó phải nằm NGAY TẠI dòng ấy. Và vì hub không phân biệt được chữ
+    // thật với gợi ý mờ (đọc màn về là chữ mất màu), nó KHÔNG đoán: đưa cả hai
+    // đường ra cạnh nhau, người đang nhìn màn hình quyết.
+    //
+    // Mã phiên nằm trong chính liên kết (`send_<sid>` / `clr_<sid>`), không lấy
+    // theo con trỏ — bấm lại một tin cũ vẫn chạm đúng phiên của nó.
+    let mut anchors: Vec<(String, Vec<(String, String)>)> = cmds
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.clone(), link_of(i).into_iter().collect()))
+        .collect();
+    let key_sid = if data.sid.is_empty() {
+        buttons.iter().find_map(|(_, d)| {
+            d.strip_prefix("key:")
+                .and_then(|r| r.split_once(':'))
+                .map(|(sid, _)| sid.to_string())
+        })
+    } else {
+        Some(data.sid.clone())
+    };
+    // 🔴 LỰA CHỌN → ☑ NGAY TẠI DÒNG CỦA CHÍNH NÓ. Hà 2026-08-16: *"nút chọn phải
+    // chèn ngay tại các dòng chọn tại chính chỗ option chứ không phải ném thêm
+    // xuống cuối"*. Neo là NHÃN lựa chọn — chuỗi đang hiện ngay trên màn.
+    if key_sid.is_some() {
+        let short = data.short();
+        for (n, label) in &data.choices {
+            if let Some(href) = crate::telegram::deep_link(&format!("k_{short}_{n}")) {
+                anchors.push((label.clone(), vec![(href, "☑".to_string())]));
+            }
+        }
+    }
+    if let (Some(sid), Some(box_text)) = (&key_sid, box_anchor) {
+        let short: String = sid.chars().take(8).collect();
+        // ⏎ bám ngay sau chữ trong ô (chỗ mắt đang nhìn); ⌫ xuống DÒNG RIÊNG,
+        // mang thêm chữ — hai đích chạm không được nằm cạnh nhau khi một bên
+        // gửi còn một bên xoá.
+        let links: Vec<(String, String)> = [("send_", "⏎"), ("clr_", "\n⌫ xoá ô nhập")]
+            .iter()
+            .filter_map(|(p, icon)| {
+                crate::telegram::deep_link(&format!("{p}{short}"))
+                    .map(|href| (href, icon.to_string()))
+            })
+            .collect();
+        if links.len() == 2 && !box_text.trim().is_empty() {
+            anchors.push((box_text.trim().to_string(), links));
+            // …và bỏ cái nút ⏎/⌫ trơn ở đáy: hai đường cho cùng một việc, mà
+            // cái ở đáy là cái không nói được nó thuộc về dòng nào.
+            //
+            // 🔴 CHỈ hai cái ấy. Bản đầu viết `!d.starts_with("key:")` và nó
+            // quét sạch **nút số 1–9** — chúng cũng đi bằng `key:<id>:<n>`. Đo
+            // được ngay lượt `/shot` thật đầu tiên sau khi cài: tin ra
+            // `text_links=3, buttons=0`, tức hộp chọn 5 lựa chọn mà không một
+            // nút nào. Hà: *"Sao lại đẩy mớ option vào ô nhập chát thế này?"* —
+            // đúng, cả mớ option thành chữ vì cái lọc này ăn mất nút của chúng.
+            rest_btns.retain(|(_, d)| !d.ends_with(":enter") && !d.ends_with(":clear"));
+        }
+    }
+    Layout {
+        shown,
+        anchors,
+        cmd_btns,
+        rest_btns,
+    }
+}
+
+/// Như trên, nhưng chỗ gọi khai RÕ từng loại dữ liệu của phiên.
+pub fn say_session_data(
+    tg: &crate::telegram::Inbox,
+    text: &str,
+    buttons: &[(String, String)],
+    log_key: &str,
+    data: &SessionData,
+) {
+    // 🔴 MỘT KIỂU THÔI — Hà 2026-08-16: *"tại sao hub chèn lệnh này mà ở các
+    // phiên khác lại chèn kiểu button? sao không dùng giống link này?"*
+    //
+    // Hai kiểu ấy không phải hai lựa chọn thiết kế, chúng là **một kiểu và một
+    // đường lùi**: icon `▶️` gắn được vào chữ chỉ khi hub TÌM THẤY dòng lệnh
+    // trong tin (`command_slices` cắt tin ngay sau dòng ấy để icon rơi đúng
+    // chỗ). Lệnh nào không nằm trong chữ thì không có gì để gắn vào, nên nó rơi
+    // xuống một hàng nút ở đáy — đúng cảnh trong ảnh của `[social]`.
+    //
+    // Và lệnh KHÔNG nằm trong chữ là chuyện thường, không phải ngoại lệ: nhánh
+    // *lệnh bị cổng quyền từ chối* đọc lệnh từ NHẬT KÝ, còn phiên thì không hề
+    // viết nó ra lời. Nút ở đáy khi ấy vừa lạc chỗ vừa **cắt cụt nhãn ở 52 ký
+    // tự**, tức người bấm không đọc được thứ mình sắp chạy.
+    //
+    // Nên: lệnh nào chưa có trong chữ thì hub **viết thêm nó vào cuối tin**, rồi
+    // gắn icon như mọi lệnh khác. Một kiểu duy nhất, và nguyên văn dòng lệnh
+    // luôn hiện ra.
+    //
+    // Toàn bộ khúc dựng neo nằm ở [`session_layout`] — DÙNG CHUNG với
+    // `render_session_data`, để bài kiểm gửi tin thật đo đúng đường này.
+    let Layout {
+        shown,
+        anchors,
+        cmd_btns,
+        rest_btns,
+    } = session_layout(text, data, buttons);
+    let (html, linked, unlinked) = html_with_links(&shown, &anchors);
+
+    // Lệnh nào không dựng được liên kết thì rơi về NÚT ở đáy — đường lùi cũ,
+    // giữ nguyên: một liên kết không bấm được thì tệ hơn một cái nút.
+    let mut row: Vec<(String, String)> = unlinked
+        .iter()
+        .filter_map(|i| cmd_btns.get(*i))
+        .map(|(_, data)| {
+            let icon = if data == "upgrade" { "🔧" } else { "▶" };
+            (icon.to_string(), data.clone())
+        })
+        .collect();
+    row.extend(rest_btns.clone());
+
+    if linked == 0 {
+        // Không chèn được liên kết nào: chữ thuần + nút như cũ. Không đi đường
+        // HTML ở đây — chữ này chưa qua tay ai, và bật `parse_mode` cho một
+        // chuỗi không cố ý mang thẻ là mời Telegram từ chối cả tin.
+        let parts = split_for_telegram(&shown);
         let last = parts.len().saturating_sub(1);
         for (n, p) in parts.into_iter().enumerate() {
             let sent = if n == last && !buttons.is_empty() {
@@ -2901,82 +3598,22 @@ pub fn say_with_command_icons(
         }
         return;
     }
-    let last = slices.len().saturating_sub(1);
-    for (n, (part, idx)) in slices.into_iter().enumerate() {
-        let mut row: Vec<(String, String)> = Vec::new();
-        // ICON TRONG CHỮ: dựng liên kết cho lệnh của mẩu này. `run:<i>` →
-        // payload `run_<i>`; nút cài lại hub → `upgrade`. Cùng bộ ký tự mà tên
-        // lệnh cho phép, nên payload đi thẳng, không mã hoá gì thêm.
-        let inline_icon = idx.and_then(|i| cmd_btns.get(i)).and_then(|(_, data)| {
-            let payload = if data == "upgrade" {
-                "upgrade".to_string()
-            } else {
-                data.replace("run:", "run_")
-            };
-            let icon = if data == "upgrade" { "🔧" } else { "▶️" };
-            crate::telegram::deep_link(&payload).map(|href| (href, icon, data.clone()))
-        });
-        if n == last {
-            row.extend(rest_btns.clone());
+
+    // MỘT tin — trừ khi dài quá trần Telegram, và lúc ấy cắt theo DÒNG nên
+    // không thẻ nào bị đứt đôi (liên kết luôn nằm gọn trong dòng lệnh của nó).
+    // Bàn phím đi cùng tin CUỐI, trong cùng một lời gọi.
+    let mut chunks = split_for_telegram(&html);
+    let tail = chunks.pop().unwrap_or_default();
+    for (k, head) in chunks.into_iter().enumerate() {
+        if let Err(e) = tg.send_html(&head) {
+            logging::error(log_key, json!({ "err": e, "chunk": k }));
         }
-        if inline_icon.is_none() {
-            if let Some((_, data)) = idx.and_then(|i| cmd_btns.get(i)) {
-                let icon = if data == "upgrade" { "🔧" } else { "▶" };
-                row.insert(0, (icon.to_string(), data.clone()));
-            }
-        }
-        // 🔴 Đo phép đo Ở ĐÚNG CHỖ TELEGRAM ĐO: `strip_markdown` bỏ hẳn dòng
-        // rào ```, nên một mẩu chỉ chứa rào (chuyện thường khi cắt ngay sau một
-        // dòng lệnh nằm trong khối code) trông đầy chữ ở đây mà tới Telegram là
-        // RỖNG. Đo được ngay lượt chạy thật đầu tiên, 2026-08-14 08:58:32:
-        // `telegram_ack_failed {"err":"Bad Request: message text is empty",
-        // "slice":1}`. Kiểm `part.trim()` là kiểm chữ hub cầm, không phải chữ
-        // Telegram nhận.
-        let shown = crate::telegram::strip_markdown(&part);
-        if shown.trim().is_empty() && inline_icon.is_none() {
-            // Không còn chữ nào, nhưng nút thì vẫn phải giao — bỏ luôn cả nút
-            // là đánh rơi đường bấm, đúng loại hỏng im lặng luật 3 cấm.
-            if row.is_empty() {
-                continue;
-            }
-            if let Err(e) = tg.send_buttons("⤵", &row) {
-                logging::error(log_key, json!({ "err": e, "slice": n }));
-            }
-            continue;
-        }
-        // Một mẩu dài hơn trần thì đi làm nhiều tin, và **icon bám mẩu CUỐI** —
-        // đó là mẩu chứa dòng lệnh (xem `command_slices`). Gắn vào mẩu đầu là
-        // đặt cái icon cách dòng lệnh của nó vài màn hình.
-        let mut chunks = split_for_telegram(&shown);
-        let tail = chunks.pop().unwrap_or_default();
-        for (k, head) in chunks.into_iter().enumerate() {
-            if let Err(e) = tg.send_text(&head) {
-                logging::error(log_key, json!({ "err": e, "slice": n, "chunk": k }));
-            }
-        }
-        let sent = match &inline_icon {
-            Some((href, icon, _)) => {
-                let html = format!(
-                    "{} <a href=\"{}\">{}</a>",
-                    crate::telegram::html_escape(&tail),
-                    crate::telegram::html_escape(href),
-                    icon
-                );
-                if row.is_empty() {
-                    tg.send_html(&html)
-                } else {
-                    // Mẩu cuối vẫn còn nút khác (vào phiên, mở tệp): gửi
-                    // chữ+icon trước, nút theo sau.
-                    let r = tg.send_html(&html);
-                    let _ = tg.send_buttons("⤵", &row);
-                    r
-                }
-            }
-            None => tg.send_buttons(&tail, &row),
-        };
-        if let Err(e) = sent {
-            logging::error(log_key, json!({ "err": e, "slice": n }));
-        }
+    }
+    if let Err(e) = tg.send_html_buttons(&tail, &row) {
+        logging::error(
+            log_key,
+            json!({ "err": e, "chunk": "tail", "linked": linked }),
+        );
     }
 }
 
@@ -3085,11 +3722,45 @@ pub fn is_self_rebuild(cmd: &str) -> bool {
 ///
 /// Trả `None` khi sổ cũ (dạng mảng trần, chưa có tên phiên): thà bắt bấm lại
 /// `/shot` còn hơn gõ một dòng lệnh vào một phiên đoán bừa.
-pub fn quick_cmd(db: &Db, n: usize) -> Option<(String, String)> {
+pub fn quick_cmd(db: &Db, key: &str) -> Option<(String, crate::sessions::Cmd)> {
     let v = db.cursor_or_log(QUICK_KEY)?;
     let st: serde_json::Value = serde_json::from_str(&v).ok()?;
+
+    // Sổ MỚI: tra bằng mã, và mã mang theo cả phiên lẫn thư mục của nó.
+    if let Some(e) = st.get("e").and_then(|e| e.as_object()) {
+        let row = e.get(key)?;
+        return Some((
+            row.get("s")?.as_str()?.to_string(),
+            crate::sessions::Cmd {
+                line: row.get("l")?.as_str()?.to_string(),
+                cwd: row
+                    .get("d")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+        ));
+    }
+
+    // Sổ CŨ (một ô, tra bằng số thứ tự) — chỉ còn để những cái nút đã gửi đi
+    // trước bản vá không chết câm. Nó mang đúng khuyết tật Hà bắt được
+    // (`run:0` = "lệnh đầu của tin GẦN NHẤT"), nên nó sẽ tự hết khi 40 mã mới
+    // đẩy hết chỗ; không nới thêm đường nào cho nó.
+    let n: usize = key.parse().ok()?;
     let sid = st.get("s")?.as_str()?.to_string();
-    let cmd = st.get("c")?.as_array()?.get(n)?.as_str()?.to_string();
+    let raw = st.get("c")?.as_array()?.get(n)?;
+    let cmd = match raw {
+        serde_json::Value::String(s) => crate::sessions::Cmd {
+            line: s.clone(),
+            cwd: String::new(),
+        },
+        v => serde_json::from_value(v.clone()).ok()?,
+    };
+    logging::warn(
+        "quick_cmd_legacy_index",
+        json!({ "n": n, "session": sid,
+                "why": "nút cũ tra bằng số thứ tự — trỏ vào tin GẦN NHẤT, không phải tin sinh ra nó" }),
+    );
     Some((sid, cmd))
 }
 
@@ -3555,8 +4226,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             // lệnh nằm trong sổ chứ không nằm trong nhãn, nên nó không thể bị
             // cắt cụt (xem `keys::BTN_CMD_MAX`). Chạm chữ tô sáng là chạy.
             CommandKind::RunQuick => {
-                let n = cmd.arg.trim().parse::<usize>().unwrap_or(usize::MAX);
-                match quick_cmd(db, n) {
+                let n = cmd.arg.trim();
+                match quick_cmd(db, n).map(|(sid, c)| (sid, c.line)) {
                     Some((sid, line)) => {
                         logging::info(
                             "run_quick",
@@ -3604,8 +4275,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // CỦA TFL5 (đăng nhập được không, đẩy doc được không). Kênh ấy
                 // đã gỡ ngày 2026-08-14, nên câu hỏi đổi: thứ đáng dò bây giờ
                 // là cái máy này và những phiên đang chạy trên nó.
-                let live =
-                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                let live = crate::sessions::snapshot(cfg);
                 let jobs = jobs_line().unwrap_or_else(|| "  (không có)".to_string());
                 let probe = format!(
                     "🩺 {} phiên đang sống{}\n⚡ lệnh chạy nền:\n{}\n📟 hubd: {}\n{}",
@@ -3662,8 +4332,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     }
                     continue;
                 }
-                let live =
-                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                let live = crate::sessions::snapshot(cfg);
                 let ack = match live
                     .sessions
                     .iter()
@@ -3689,7 +4358,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         // `session_root` đọc dự án từ SỔ và trả `None` khi
                         // không biết — chỗ này TỪ CHỐI thay vì rơi về gốc, vì
                         // rơi về gốc chính là con bug trên.
-                        let root = match session_root(db, cfg, &s.session_id) {
+                        // Thư mục ĐÚNG là thư mục nhật ký đã ghi cho chính dòng
+                        // lệnh này — xem `root_for_command`. Nhãn dự án chỉ là
+                        // đường lùi cho nút sinh ra trước bản vá 15/08.
+                        let logged = quick_cwd(db, &s.session_id, &line);
+                        let root = match root_for_command(db, cfg, &s.session_id, &logged) {
                             Some(r) => r,
                             None => {
                                 logging::warn(
@@ -3729,8 +4402,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             adapter.to_string(),
                             cmd.chat_id.clone(),
                         );
+                        // 🔴 Câu này KHÔNG kể ruột hub — Hà 2026-08-16: *"Tại
+                        // sao để báo trần 120s làm gì"*. Bản cũ khoe *"không
+                        // còn trần 120 giây"*: một cái trần **đã bị gỡ**, tức
+                        // hub đang khoe với người đọc rằng nó vừa sửa một chỗ
+                        // hỏng của chính nó. Cùng lỗi đã sửa 12/08 cho `/type`
+                        // (*"chỉ cần báo đã gõ được thôi cần gì báo đã gửi
+                        // enter rời"*): người đọc hỏi *việc chạy chưa*, không
+                        // hỏi hub xoay xở thế nào.
                         format!(
-                            "▶ đang chạy — {}\ntrong {} · hub báo lại khi xong, không còn trần 120 giây.",
+                            "▶ đang chạy — {}\ntrong {} · báo lại khi xong.",
                             crate::exec::truncate(&line, 120),
                             crate::sessions::shown(s),
                         )
@@ -3754,93 +4435,123 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // `claude` — vì "cửa sổ này là phiên [tfl5]" mới là câu trả lời
                 // người ta cần, không phải "ttys007".
                 if cmd.arg.trim().is_empty() {
-                    let ack = match crate::keys::terminal_tabs() {
-                        Err(e) => format!(
-                            "⚠ không hỏi được Terminal: {}",
-                            crate::exec::truncate(&e.to_string(), 200)
+                    // 🔴 CHỈ cửa sổ TRẦN, và MỖI CÁI MỘT NÚT. Hà 2026-08-15:
+                    // *"`/terminal` luôn liệt kê terminal trống → bấm chọn thì
+                    // làm việc được với nó (giống như session)"*.
+                    //
+                    // "Giống như session" đọc theo nghĩa đen, và đó là chỗ tiết
+                    // kiệm được cả một nhánh: nút gửi `sess:<id>` — ĐÚNG callback
+                    // của `/session` — vì cửa sổ trần đã có id sẵn (`win-<tty>`,
+                    // `sessions::add_shell_windows`, có từ trước). Nên con trỏ,
+                    // câu chào, `/type`, `/shot` chạy y hệt phiên CLI, không một
+                    // dòng xử lý riêng nào.
+                    //
+                    // Đó cũng là câu trả lời cho *"chưa kế thừa được các lệnh"*:
+                    // thêm một hạng mục tiêu mà KHÔNG thêm một đường đi.
+                    let (ack, buttons) = match crate::keys::terminal_tabs() {
+                        Err(e) => (
+                            format!(
+                                "⚠ không hỏi được Terminal: {}",
+                                crate::exec::truncate(&e.to_string(), 200)
+                            ),
+                            Vec::new(),
                         ),
-                        Ok(tabs) if tabs.is_empty() => {
-                            "Không có cửa sổ Terminal nào đang mở.".to_string()
-                        }
                         Ok(tabs) => {
-                            let live = crate::sessions::snapshot_cached(
-                                cfg,
-                                std::time::Duration::from_secs(20),
-                            );
-                            let mut out = format!("🖥 {} cửa sổ Terminal đang mở:\n", tabs.len());
-                            for tb in &tabs {
-                                let who = live
-                                    .sessions
-                                    .iter()
-                                    .find(|s| s.tty == tb.tty)
-                                    .map(|s| format!(" · {}", crate::sessions::shown(s)));
-                                let doing = match tb.cli() {
-                                    Some(p) => p.to_string(),
-                                    None => "dấu nhắc trống".to_string(),
+                            // Có CLI chạy ⟹ KHÔNG phải cửa sổ trần. Gõ lệnh
+                            // shell vào giữa một chương trình đang chạy là thứ
+                            // không lùi lại được — cùng luật với
+                            // `add_shell_windows`, và cố ý đọc từ cùng một chỗ
+                            // (`tab.cli()`) để hai danh sách không bao giờ lệch.
+                            let bare: Vec<_> = tabs.iter().filter(|t| t.cli().is_none()).collect();
+                            if bare.is_empty() {
+                                // 🔴 Đếm ĐÚNG thứ đang nói tới. Bản đầu in
+                                // `tabs.len()` kèm chữ "đang chạy CLI" — mà đó
+                                // là TỔNG số tab, nên khi phép đo hỏng và trả
+                                // rỗng, câu trả lời thành *"0 cửa sổ đang chạy
+                                // CLI"* trên một cái máy đang mở sáu cửa sổ.
+                                // Một con số dán nhầm nhãn còn tệ hơn không có
+                                // số: nó nghe như một phép đo.
+                                let msg = if tabs.is_empty() {
+                                    "Không có cửa sổ Terminal nào đang mở.\nMở một cái: /new"
+                                        .to_string()
+                                } else {
+                                    format!(
+                                        "Không có cửa sổ Terminal trần nào — cả {} cửa sổ đều đang chạy CLI (xem /session).\n\
+                                         Mở một cái: /new",
+                                        tabs.len()
+                                    )
                                 };
-                                out.push_str(&format!(
-                                    "\n{} {}{}\n    {}",
-                                    if tb.busy { "🟢" } else { "⚪" },
-                                    tb.tty,
-                                    who.unwrap_or_default(),
-                                    doing
-                                ));
+                                (msg, Vec::new())
+                            } else {
+                                let mut out = format!("🖥 {} cửa sổ Terminal trần:\n", bare.len());
+                                let mut btns: Vec<(String, String)> = Vec::new();
+                                for tb in &bare {
+                                    out.push_str(&format!(
+                                        "\n{} {}\n    dấu nhắc trống",
+                                        if tb.busy { "🟢" } else { "⚪" },
+                                        tb.tty
+                                    ));
+                                    btns.push((
+                                        format!("🖥 {}", tb.tty),
+                                        format!(
+                                            "sess:{}{}",
+                                            crate::sessions::SHELL_ID_PREFIX,
+                                            tb.tty
+                                        ),
+                                    ));
+                                }
+                                out.push_str(
+                                    "\n\nBấm một cửa sổ để làm việc với nó · /new mở cửa sổ mới",
+                                );
+                                (out, btns)
                             }
-                            out.push_str(
-                                "\n\n🟢 = đang chạy gì đó · ⚪ = rảnh\n\
-                                 /terminal <lệnh> để mở một cửa sổ mới có tty.",
-                            );
-                            out
                         }
                     };
-                    reply_in_channel(db, cfg, adapter, cmd, &ack);
+                    // Gửi ngay tại đây khi có nút — để `reply_in_channel` gửi
+                    // thêm lần nữa là chủ máy nhận hai tin cùng nội dung, một
+                    // cái bấm được một cái không. Cùng hình dạng với `/session`.
+                    let mut sent = false;
+                    if adapter == crate::telegram::NAME && !buttons.is_empty() {
+                        if let Some(tg) = crate::telegram::inbox() {
+                            match tg.send_buttons(&ack, &buttons) {
+                                Ok(()) => sent = true,
+                                // Hỏng thì rơi về đường chữ thường, đừng nuốt:
+                                // thà một tin không nút còn hơn im.
+                                Err(e) => logging::error(
+                                    "telegram_ack_failed",
+                                    json!({ "err": e, "what": "terminal_buttons" }),
+                                ),
+                            }
+                        }
+                    }
+                    if !sent {
+                        reply_in_channel(db, cfg, adapter, cmd, &ack);
+                    }
                     Some(ack)
                 } else {
-                    // Cửa sổ THẬT, vì thứ thiếu là một cái tty — xem `CommandKind::Win`.
+                    // 🔴 `/terminal <lệnh>` ĐÃ BỎ, 2026-08-15. Hà chốt lại vai
+                    // của ba động từ, và nó gọn hơn hẳn bản cũ:
                     //
-                    // 🔴 CHẠY ĐÚNG DÒNG ANH GÕ, không bọc thêm gì. Hà 2026-08-13:
-                    // *"tại sao lệnh chỉ có 1 dòng mà chèn thêm text vào làm gì?"*.
-                    // Bản đầu ghép `cd <gốc workspace>; <lệnh>` để cwd khớp `/cmd`
-                    // — lý do nghe hợp lý, và cái giá là mọi cửa sổ mở ra đều bắt
-                    // đầu bằng một dòng anh không gõ, dài hơn cả lệnh thật.
+                    //   /new        → động từ MỞ duy nhất (trần → +CLI → +chữ)
+                    //   /terminal   → liệt kê cửa sổ TRẦN, không chạy gì
+                    //   /session    → liệt kê cửa sổ đang chạy CLI
                     //
-                    // Phép thử cầu nối trả lời gọn: ngồi trước máy anh mở cửa sổ
-                    // rồi dán ĐÚNG dòng ấy, không ai tự thêm một `cd` vào trước.
-                    // Cần thư mục thì gõ `cd` — như ở terminal. Đổi lại, câu trả
-                    // lời phải NÓI RA cửa sổ mở ở đâu, vì đó là thứ vừa đổi.
-                    let line = cmd.arg.trim().to_string();
-                    let ack = if line.is_empty() {
-                        "⚠ /win cần một dòng lệnh. Ví dụ: /win sudo -v".to_string()
-                    } else {
-                        match crate::keys::open_window(&line) {
-                            Ok((win, tty)) => {
-                                logging::info(
-                                    "win_opened",
-                                    json!({ "cmd": crate::exec::truncate(&line, 120),
-                                        "window": win, "tty": tty }),
-                                );
-                                format!(
-                                "🖥 Đã mở cửa sổ Terminal ({tty}) và chạy đúng dòng này:\n{line}\n\n\
-                                 Cửa sổ mở ở thư mục mặc định của shell, không phải gốc workspace — \
-                                 cần chỗ khác thì gõ cd. Kết quả nằm TRÊN cửa sổ ấy, không về đây: \
-                                 đó là chỗ gõ mật khẩu."
-                            )
-                            }
-                            // Không nuốt: mở cửa sổ hỏng thì người bấm phải biết,
-                            // không thì họ ngồi chờ một cái cửa sổ không tồn tại.
-                            Err(e) => {
-                                let msg = crate::logging::err_chain(&e);
-                                logging::error(
-                                    "win_open_failed",
-                                    json!({ "cmd": crate::exec::truncate(&line, 120), "err": msg }),
-                                );
-                                format!(
-                                    "⚠ chưa mở được cửa sổ: {}",
-                                    crate::exec::truncate(&msg, 200)
-                                )
-                            }
-                        }
-                    };
+                    // Bản cũ để `/terminal` vừa LIỆT KÊ vừa MỞ, tuỳ có tham số
+                    // hay không — hai việc khác hẳn nhau đội chung một tên, và
+                    // `/new` thì mở một kiểu khác nữa. Ba đường mở, ba chỗ
+                    // chép tay cùng một chặng.
+                    //
+                    // Lối thoát hiểm (sudo/ssh/passwd cần tty thật) KHÔNG mất,
+                    // và còn khá hơn: `/new` trần cho một cửa sổ, cửa sổ ấy lên
+                    // danh sách `/terminal` dưới id `win-<tty>`, rồi `/type` gõ
+                    // vào nó và `/shot` đọc lại. Bản cũ chạy được một dòng rồi
+                    // câm — chính câu trả lời của nó thừa nhận: *"kết quả nằm
+                    // TRÊN cửa sổ ấy, không về đây"*.
+                    let ack = format!(
+                        "⚠ `/terminal` nay chỉ LIỆT KÊ cửa sổ trần.\n\
+                         Mở cửa sổ mới: `/new`  ·  rồi gõ vào nó: `/type <win-ttysNNN> {}`",
+                        crate::exec::truncate(cmd.arg.trim(), 60)
+                    );
                     reply_in_channel(db, cfg, adapter, cmd, &ack);
                     Some(ack)
                 }
@@ -3850,8 +4561,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì
                 // hiện tại. Hạn mức thì lấy bản đã đo sẵn (5 phút một lượt),
                 // nên lệnh này không đẻ thêm tiến trình `claude` nào.
-                let live =
-                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                let live = crate::sessions::snapshot(cfg);
                 let ack =
                     crate::runtime::accounts_say(cfg, &live, chrono::Utc::now().timestamp_millis());
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
@@ -3867,8 +4577,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 } else {
                     want
                 };
-                let live =
-                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                let live = crate::sessions::snapshot(cfg);
                 // Đóng sổ một phiên VỪA TẮT cũng chạy được — bản bàn giao dựng
                 // từ nhật ký, không cần tiến trình (cùng lối với `/ask`).
                 let target = live
@@ -4034,9 +4743,60 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     .as_ref()
                     .filter(|a| !known_accounts.contains(a))
                     .cloned();
+                // 🔴 `/new <id>` = MỞ LẠI một phiên đã tắt — thay cho `/tell`.
+                //
+                // Hà 2026-08-15: *"lệnh tell là không cần thiết?"* · *"vì trên
+                // tele tôi chỉ gõ text bình thường thôi"*. Đúng, và đường cũ
+                // sai sâu hơn một động từ thừa: `sessions::tell` chạy
+                // `claude -p --resume`, tức MỘT LƯỢT rồi thôi, không cửa sổ, có
+                // tiêu hạn mức — thứ chủ máy không bao giờ tự làm khi ngồi ở
+                // máy. Nay nó về đúng động từ MỞ, và mở ra một phiên SỐNG: gõ
+                // tiếp được, `/shot` nhìn được, miễn phí.
+                //
+                // Tài khoản KHÔNG đoán: `--resume` chạy nhầm tài khoản là mở
+                // nhầm cả kho phiên. Hỏi sổ (`Mark::a`) rồi tới phiên vừa dừng;
+                // không nơi nào biết thì TỪ CHỐI và nói ra, thay vì im lặng rơi
+                // về mặc định.
+                let resume = resume_target(&rest, db);
                 let known = known_projects(cfg);
                 let dir = crate::config::project_dir(cfg, name);
-                let ack = if let Some(a) = bad_account {
+                // 🔴 `/new` TRẦN = một cửa sổ Terminal trần, không dựng CLI.
+                //
+                // Hà 2026-08-15: *"nếu `/new` để trống thì nó sẽ chỉ khởi tạo
+                // terminal, như vậy không cần lệnh terminal nữa"*. Một động từ
+                // MỞ, ba mức — mỗi tham số thêm một bước:
+                //   /new              → cửa sổ trần
+                //   /new acc3         → + dựng CLI đúng tài khoản
+                //   /new acc3 <chữ>   → + gõ đề bài ⟹ đã khởi tạo xong một phiên
+                //
+                // Cửa sổ trần KHÔNG mất tăm: nó lên danh sách `/terminal` dưới
+                // id `win-<tty>` (`sessions::add_shell_windows`, có sẵn từ
+                // trước), nên `/type` gõ được và `/shot` đọc lại được — tức lối
+                // thoát hiểm cho sudo/ssh/passwd còn nguyên, và còn hai chiều
+                // chứ không một chiều như `/terminal <lệnh>` cũ.
+                let ack = if account.is_none() && name.is_empty() && task.trim().is_empty() {
+                    match crate::sessions::open_bare_terminal() {
+                        // Cửa sổ trần mở ở `~`; phiên CLI mới mở ở gốc
+                        // workspace. Hai chỗ khác nhau, và câu trả lời phải nói
+                        // ra — đó là thứ vừa đổi so với một cửa sổ chủ máy tự mở.
+                        Ok((_w, tty)) => format!(
+                            "🖥 Đã mở cửa sổ Terminal trần ({tty}) ở ~\n\
+                             Gõ vào nó: `/type win-{tty} <lệnh>` · nhìn lại: `/shot win-{tty}`\n\
+                             Muốn một phiên CLI (mở ở {}) thì thêm tài khoản: `/new acc3`",
+                            cfg.workspace_root.display()
+                        ),
+                        // Không nuốt: mở cửa sổ hỏng thì người bấm phải biết,
+                        // không thì họ ngồi chờ một cái cửa sổ không tồn tại.
+                        Err(e) => {
+                            let msg = crate::logging::err_chain(&e);
+                            logging::error("bare_terminal_open_failed", json!({ "err": msg }));
+                            format!(
+                                "⚠ chưa mở được cửa sổ: {}",
+                                crate::exec::truncate(&msg, 200)
+                            )
+                        }
+                    }
+                } else if let Some(a) = bad_account {
                     format!(
                         "⚠ không biết tài khoản '{}'. Đang có: {}",
                         crate::exec::truncate(&a, 24),
@@ -4076,22 +4836,36 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // nói thẳng điều đó, không thì chữ gõ ngay sau khi bấm
                             // sẽ rơi vào phiên cũ mà không ai biết vì sao.
                             {
-                                watch_new_session(
-                                    cfg.clone(),
-                                    name.to_string(),
-                                    d.clone(),
-                                    task.to_string(),
-                                    account.clone(),
-                                    adapter.to_string(),
-                                    cmd.chat_id.clone(),
-                                );
-                                format!(
+                                // `/new <id>` ⟹ nối tiếp phiên ấy, và tài khoản
+                                // do CHÍNH PHIÊN quyết, không phải cờ `-a`.
+                                let (resume_id, acc, task) = match resume.clone() {
+                                    Some((id, acc, tail)) => (Some(id), Some(acc), tail),
+                                    None => (None, account.clone(), task.to_string()),
+                                };
+                                watch_new_session(NewSession {
+                                    cfg: cfg.clone(),
+                                    name: name.to_string(),
+                                    dir: d.clone(),
+                                    task,
+                                    account: acc.clone(),
+                                    resume: resume_id.clone(),
+                                    adapter: adapter.to_string(),
+                                    chat_id: cmd.chat_id.clone(),
+                                });
+                                match resume_id {
+                                    Some(id) => format!(
+                                        "⌨ Đang MỞ LẠI phiên {} bằng {}…\nCửa sổ Terminal thật, hội thoại cũ nối tiếp — gõ được, /shot nhìn được.\n⚠ Con trỏ CHƯA chuyển — gõ chữ lúc này vẫn vào phiên đang theo.",
+                                        &id[..8.min(id.len())],
+                                        acc.as_deref().unwrap_or("tài khoản mặc định")
+                                    ),
+                                    None => format!(
                                 "⌨ Đang mở cửa sổ Terminal{}…\nhub báo lại khi phiên chào đời (thường 15–60 giây, vì nó chờ nhật ký phiên sinh ra để biết id).\n⚠ Con trỏ CHƯA chuyển — gõ chữ lúc này vẫn vào phiên đang theo.",
                                 account
                                     .as_deref()
                                     .map(|a| format!(" bằng {a}"))
                                     .unwrap_or_else(|| " bằng tài khoản mặc định".to_string()),
-                            )
+                            ),
+                                }
                             }
                         }
                         _ => format!(
@@ -4120,8 +4894,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // được: hub mở được cửa sổ rồi từ chối đóng chính nó, với câu
                 // *"chỉ dừng được phiên do hub mở"*. Nhánh phiên nền không lộ
                 // vì nó xét `kind`, không xét quyền sở hữu.
-                let mut live =
-                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                let mut live = crate::sessions::snapshot(cfg);
                 mark_started_by_hub(db, &mut live);
                 let ack = match live
                     .sessions
@@ -4156,8 +4929,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // quyết định người ta làm gì tiếp.
                                     if s.kind == "background" {
                                         format!(
-                                            "⏹ Đã dừng phiên {}. Hội thoại vẫn còn — nói tiếp bằng /tell hoặc mở lại trên máy.",
-                                            s.name
+                                            "⏹ Đã dừng phiên {}. Hội thoại vẫn còn — mở lại bằng `/new {}` để nói tiếp.",
+                                            crate::sessions::shown(s),
+                                            &s.session_id[..8.min(s.session_id.len())]
                                         )
                                     } else {
                                         format!(
@@ -4187,8 +4961,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 } else {
                     want
                 };
-                let mut live =
-                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                let mut live = crate::sessions::snapshot(cfg);
                 mark_started_by_hub(db, &mut live);
                 let ack = match live
                     .sessions
@@ -4204,11 +4977,22 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         crate::exec::truncate(&want, 40)
                     ),
                     Some(s) => {
-                        let what = format!(
-                            "Đóng hẳn phiên {} ({})?",
-                            crate::sessions::shown(s),
-                            s.account
-                        );
+                        // Cửa sổ TRẦN không thuộc tài khoản nào, nên `s.account`
+                        // rỗng — và bản cũ vẫn in cặp ngoặc, ra
+                        // *"Đóng hẳn phiên ⬜ cửa sổ ttys005 ()?"*. Hà đọc câu ấy
+                        // sáu lần liên tiếp lúc 12:25–12:29 ngày 16/08 khi dọn
+                        // mấy cửa sổ trần. Ngoặc rỗng không phải lỗi chính tả:
+                        // nó là chỗ hub khai một dữ kiện mà chính nó biết là
+                        // không có.
+                        let what = if s.account.trim().is_empty() {
+                            format!("Đóng hẳn {}?", crate::sessions::shown(s))
+                        } else {
+                            format!(
+                                "Đóng hẳn phiên {} ({})?",
+                                crate::sessions::shown(s),
+                                s.account
+                            )
+                        };
                         if let Some(refusal) =
                             ask_owner(db, cfg, adapter, cmd, &what, "đóng phiên nào")
                         {
@@ -4259,60 +5043,6 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }
-            CommandKind::Tell => {
-                // Id đi CÙNG mệnh lệnh — xem `target_and_rest`.
-                let (want, said) = target_and_rest(db, &cmd.arg);
-                let live =
-                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
-                // Đã dừng KHÔNG phải là đã mất: `--resume` nối vào nhật ký, nó
-                // không cần tiến trình nào đang sống. Và dừng-rồi-nói-tiếp
-                // chính là đường DUY NHẤT — claude từ chối resume một phiên nền
-                // đang chạy (đo 2026-08-08).
-                let target = live
-                    .sessions
-                    .iter()
-                    .find(|s| same_session(&s.session_id, &want))
-                    .cloned()
-                    .or_else(|| stopped_session(db, &want));
-                let ack = match target.as_ref() {
-                    None if want.is_empty() => {
-                        "⚠ chưa mở phiên nào. Chạm một phiên rồi nói tiếp.".to_string()
-                    }
-                    None => format!(
-                        "⚠ không thấy phiên '{}' đang chạy nữa",
-                        crate::exec::truncate(&want, 40)
-                    ),
-                    Some(s) => match crate::sessions::tell(cfg, s, &said) {
-                        Ok(t) => {
-                            if let Err(e) = db.record_spend(
-                                "tell",
-                                &t.session_id,
-                                t.cost_usd,
-                                &crate::exec::truncate(&t.text, 80),
-                            ) {
-                                logging::error(
-                                    "spend_record_failed",
-                                    json!({ "kind": "tell", "err": e.to_string() }),
-                                );
-                            }
-                            logging::info(
-                                "tell_done",
-                                json!({ "session": t.session_id, "cost_usd": t.cost_usd }),
-                            );
-                            format!(
-                                "➡️ Đã nói tiếp vào phiên {}:\n\n{}",
-                                t.source_name, t.answer
-                            )
-                        }
-                        Err(e) => format!(
-                            "⚠ không nói tiếp được: {}",
-                            crate::exec::truncate(&e.to_string(), 300)
-                        ),
-                    },
-                };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
-            }
             // Hub tự dựng lại chính nó. Trả lời TRƯỚC, khởi động lại SAU —
             // bước cuối giết chính tiến trình đang gõ câu trả lời này.
             CommandKind::Upgrade => {
@@ -4351,10 +5081,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Chỉ trả tiền ảnh chụp khi sổ KHÔNG trả lời được.
                 let live = match &booked {
                     Some(_) => None,
-                    None => Some(crate::sessions::snapshot_cached(
-                        cfg,
-                        std::time::Duration::from_secs(20),
-                    )),
+                    None => Some(crate::sessions::snapshot(cfg)),
                 };
                 let target = booked.or_else(|| {
                     live.as_ref().and_then(|l| {
@@ -4530,9 +5257,24 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 None
                             };
                             let res = if is_key {
-                                crate::keys::press(w, typed.trim())
+                                // `clear` không phải một PHÍM — nó là "xoá đúng
+                                // bấy nhiêu ký tự đang có", nên nó phải đọc màn
+                                // trước. Xem `keys::clear_box`.
+                                if typed.trim() == "clear" {
+                                    crate::keys::clear_box(w).map(|sạch| {
+                                        if !sạch {
+                                            logging::warn(
+                                                "keys_clear_incomplete",
+                                                json!({ "session": s.session_id,
+                                                        "effect": "ô nhập vẫn còn chữ sau khi xoá — không khai là đã sạch" }),
+                                            );
+                                        }
+                                    })
+                                } else {
+                                    crate::keys::press(w, typed.trim())
+                                }
                             } else {
-                                crate::keys::type_into(w, &typed, true)
+                                crate::keys::type_into(w, &typed)
                             };
                             match res {
                                 Ok(()) => {
@@ -4599,53 +5341,37 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // `claude` không làm gì — nên hỏng về phía
                                     // an toàn. Thấy hộp chọn thì DỪNG ngay:
                                     // ở đó Enter là chốt.
+                                    // 🔴 THÔI ĐẶT CƯỢC TRƯỚC BAO NHIÊU CÚ ENTER.
+                                    //
+                                    // Hà 2026-08-15, nhìn cửa sổ shell sau một
+                                    // lệnh: *"sao có tới 5 cái enter?"*. Đếm ra
+                                    // đúng phép tính chứ không phải ngẫu nhiên:
+                                    // `press(enter)` gửi một ký tự **và `do
+                                    // script` tự chèn thêm một dấu nữa** (luật
+                                    // 13: cái đó không tắt được). Nên MỖI cú
+                                    // Enter đáng hai. Một lệnh + hai cú cố định
+                                    // = 1+2+2 = năm dấu nhắc.
+                                    //
+                                    // (Ký tự ấy là CR từ 2026-08-16; trước đó
+                                    // là LF, và LF chính là thứ chèn dòng trống
+                                    // vào ô nhập của `claude` thay vì gửi —
+                                    // xem `keys::key_payload`.)
+                                    //
+                                    // Vòng `[400ms, 1000ms]` cũ bấm hai lần VÔ
+                                    // ĐIỀU KIỆN, vì hồi 12-08 chưa ai đọc lại
+                                    // màn nên phải bấm thừa cho chắc. Nay có
+                                    // phép đo (`Landed::InBox`), nên bấm THEO
+                                    // NHU CẦU: gõ xong, nhìn, còn chữ thì mới
+                                    // bấm. Ca thường của một shell là **không
+                                    // cú nào** — dấu xuống dòng của `do script`
+                                    // đã đủ gửi.
+                                    //
+                                    // Đây cũng là cách duy nhất đúng cho CẢ HAI
+                                    // hạng cửa sổ: shell nuốt một dòng trống
+                                    // thành một dấu nhắc (nhìn thấy được), còn
+                                    // TUI của `claude` thì bỏ qua nó. Một hằng
+                                    // số không thể đúng cho cả hai.
                                     let mut sent_enter = false;
-                                    if !is_key {
-                                        // GÕ RỒI BẤM ENTER. Hết.
-                                        //
-                                        // 🔴 Hà 2026-08-12, sau khi tôi dựng
-                                        // tới bản thứ tư có soi màn: *"không
-                                        // hiểu soi kiểu gì, nhận lệnh từ tele
-                                        // thì làm luôn 2 việc là nhập nội dung
-                                        // và bấm enter, việc gì phải soi"*.
-                                        // Đúng — và mọi bản trước đều hỏng vì
-                                        // cùng một lý do: chúng treo một QUYẾT
-                                        // ĐỊNH vào một tấm ảnh chụp, trên một
-                                        // cái máy đang swap nên tấm ảnh ấy tới
-                                        // muộn hơn sự thật.
-                                        //
-                                        // Bấm HAI lần, giãn nhau, và không hỏi
-                                        // gì cả. Vì sao hai: `do script` đẩy
-                                        // chữ + xuống dòng trong CÙNG một lượt
-                                        // ghi nên TUI đọc như cú DÁN và nuốt
-                                        // dấu xuống dòng — chữ ký của nó là câu
-                                        // Hà tả: *"gửi lần nữa lại gộp thành 1
-                                        // tin rồi enter"*. Cú Enter thứ hai vào
-                                        // ô TRỐNG thì `claude` không làm gì,
-                                        // nên lặp lại là an toàn theo đúng
-                                        // nghĩa idempotent.
-                                        for wait_ms in [400u64, 1000] {
-                                            std::thread::sleep(std::time::Duration::from_millis(
-                                                wait_ms,
-                                            ));
-                                            match crate::keys::press(w, "enter") {
-                                                Ok(()) => sent_enter = true,
-                                                Err(e) => {
-                                                    logging::warn(
-                                                        "keys_enter_failed",
-                                                        json!({ "session": s.session_id,
-                                                                "err": e.to_string() }),
-                                                    );
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        logging::info(
-                                            "keys_enter_sent",
-                                            json!({ "session": s.session_id,
-                                                    "why": "gõ xong là bấm Enter — không soi, không đoán" }),
-                                        );
-                                    }
                                     let waited = std::time::Instant::now();
                                     // Không đọc lại được màn thì nói là KHÔNG
                                     // BIẾT. Bản trước rơi về `Landed::Idle`, tức
@@ -4659,15 +5385,82 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         }
                                         _ => None,
                                     };
-                                    // Soi màn CHỈ để báo cáo — không còn
-                                    // quyết định nào treo vào nó nữa.
+                                    // Soi màn để BÁO CÁO — và, nếu chữ còn nằm
+                                    // trong ô, để BẤM LẠI.
+                                    //
+                                    // 🔴 Hà 2026-08-15, ảnh chụp ô nhập mang hai
+                                    // tin dính liền: *"sao nội dung lại bị lặp
+                                    // thế này"*. Hai Enter cố định (400ms +
+                                    // 1000ms) là một CON SỐ ĐẶT CƯỢC, và chú
+                                    // thích ngay trên đã nói đúng từ 12-08:
+                                    // *"400ms là đủ ở máy rảnh và KHÔNG đủ ở máy
+                                    // đang swap — một hằng số thời gian bao giờ
+                                    // cũng sai với một cái máy đang đổi tốc độ …
+                                    // đừng đặt cược vào một con số: bấm, NHÌN,
+                                    // còn chữ thì bấm nữa"*. Chú thích tả đúng
+                                    // thiết kế; **mã thì chưa bao giờ làm phần
+                                    // "NHÌN"**. Nay làm.
+                                    //
+                                    // Không mâu thuẫn với *"việc gì phải soi"*
+                                    // của Hà: anh cấm soi TRƯỚC KHI gõ (một cửa
+                                    // chặn), còn đây là đọc lại SAU khi gõ để
+                                    // nói cho đúng — và Enter vào ô TRỐNG thì
+                                    // `claude` không làm gì, nên bấm thừa là an
+                                    // toàn theo đúng nghĩa idempotent.
                                     let mut view = None;
-                                    for _ in 0..6 {
-                                        std::thread::sleep(std::time::Duration::from_millis(500));
-                                        view = seen(&s.tty);
-                                        if view.is_some() {
+                                    let mut extra_enter = 0u32;
+                                    for round in 0..3 {
+                                        for _ in 0..6 {
+                                            std::thread::sleep(
+                                                std::time::Duration::from_millis(500),
+                                            );
+                                            view = seen(&s.tty);
+                                            if view.is_some() {
+                                                break;
+                                            }
+                                        }
+                                        if is_key {
                                             break;
                                         }
+                                        let stuck = view.as_ref().is_some_and(|(body, _)| {
+                                            crate::keys::still_in_box(body, &typed)
+                                        });
+                                        if !stuck || round == 2 {
+                                            break;
+                                        }
+                                        // Có hộp chọn thì DỪNG: ở đó Enter là
+                                        // CHỐT một lựa chọn, không phải gửi một
+                                        // câu — thứ không lùi lại được.
+                                        if view.as_ref().is_some_and(|(_, ch)| !ch.is_empty()) {
+                                            logging::warn(
+                                                "keys_enter_retry_stopped",
+                                                json!({ "session": s.session_id,
+                                                        "why": "màn có hộp chọn — Enter ở đó là CHỐT" }),
+                                            );
+                                            break;
+                                        }
+                                        if let Err(e) = crate::keys::press(w, "enter") {
+                                            logging::warn(
+                                                "keys_enter_failed",
+                                                json!({ "session": s.session_id,
+                                                        "round": round, "err": e.to_string() }),
+                                            );
+                                            break;
+                                        }
+                                        extra_enter += 1;
+                                        sent_enter = true;
+                                        logging::info(
+                                            "keys_enter_again",
+                                            json!({ "session": s.session_id, "round": round,
+                                                    "why": "chữ vẫn nằm trong ô nhập" }),
+                                        );
+                                        view = None;
+                                    }
+                                    if extra_enter > 0 {
+                                        logging::info(
+                                            "keys_enter_extra",
+                                            json!({ "session": s.session_id, "count": extra_enter }),
+                                        );
                                     }
                                     logging::info(
                                         "keys_screen_waited",
@@ -4688,14 +5481,101 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // đúng chỗ của một dòng log.
                                     let what = view
                                         .as_ref()
-                                        .map(|(body, _)| crate::keys::landed(body));
+                                        .map(|(body, _)| crate::keys::landed(body, &typed));
                                     let name = crate::sessions::shown(&s);
                                     if is_key {
                                         let unchanged = match (&before, &view) {
                                             (Some(a), Some((b, _))) => a == b,
                                             _ => false,
                                         };
-                                        if unchanged {
+                                        // 🔴 MỘT TRẠNG THÁI ĐÃ GỌI ĐƯỢC TÊN THÌ
+                                        // PHẢI CÓ HÀNH ĐỘNG ĐI KÈM.
+                                        //
+                                        // Hà 2026-08-16, ảnh chụp 11:54: *"Bấm
+                                        // nút enter không nhận, chỗ ô chat có
+                                        // gợi ý, phải bấm nút right trước thì nó
+                                        // mới điền text theo gợi ý"*. Câu trả
+                                        // lời cũ ngay dưới đây chẩn ĐÚNG bệnh
+                                        // rồi trả việc lại cho chủ máy ("gõ
+                                        // thẳng nó ở đây") — tức cây cầu dừng
+                                        // đúng chỗ nó vừa chỉ ra vấn đề.
+                                        //
+                                        // Thứ tự Enter-TRƯỚC-rồi-`→` là bằng
+                                        // chứng chứ không phải thói quen: xem
+                                        // `keys::ghost_verdict`.
+                                        let mut ghost = false;
+                                        // Đã THẬT SỰ bấm `→` hay chưa — câu báo
+                                        // phải nói đúng cái đã làm, không nói
+                                        // cái lẽ ra làm.
+                                        let mut tried_right = false;
+                                        if let Some(v) = crate::keys::ghost_verdict(
+                                            &typed,
+                                            unchanged,
+                                            &crate::keys::look(&s.tty, 24),
+                                        ) {
+                                            match v {
+                                                crate::keys::Arrow::Send => {
+                                                    match crate::keys::press(w, "right") {
+                                                        Ok(()) => {
+                                                            tried_right = true;
+                                                            // `press` kèm sẵn một
+                                                            // CR của `do script`,
+                                                            // nên `→` vừa NHẬN gợi
+                                                            // ý vừa gửi — một lượt
+                                                            // ghi, đúng thứ tự.
+                                                            let mut after = None;
+                                                            for _ in 0..6 {
+                                                                std::thread::sleep(
+                                                                    std::time::Duration::from_millis(500),
+                                                                );
+                                                                after = seen(&s.tty);
+                                                                if after.is_some() {
+                                                                    break;
+                                                                }
+                                                            }
+                                                            // Vẫn phải NHÌN mới
+                                                            // được khai: `press`
+                                                            // trả Ok chỉ chứng minh
+                                                            // byte vào tab.
+                                                            ghost = match (&before, &after) {
+                                                                (Some(a), Some((b, _))) => a != b,
+                                                                _ => false,
+                                                            };
+                                                            logging::info(
+                                                                "keys_ghost_accepted",
+                                                                json!({ "session": s.session_id,
+                                                                        "worked": ghost,
+                                                                        "saw_after": after.is_some() }),
+                                                            );
+                                                        }
+                                                        Err(e) => logging::warn(
+                                                            "keys_ghost_right_failed",
+                                                            json!({ "session": s.session_id,
+                                                                    "err": e.to_string() }),
+                                                        ),
+                                                    }
+                                                }
+                                                crate::keys::Arrow::RefuseDialog => logging::info(
+                                                    "keys_ghost_refused",
+                                                    json!({ "session": s.session_id,
+                                                            "why": "màn có hộp chọn — → ở đó là CHỐT" }),
+                                                ),
+                                                crate::keys::Arrow::RefuseBlind(why) => {
+                                                    logging::warn(
+                                                        "keys_ghost_refused",
+                                                        json!({ "session": s.session_id,
+                                                                "why": "blind", "detail": why }),
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if ghost {
+                                            format!(
+                                                "✓ đã gửi · {name}\n\
+                                                 Ô nhập đang là GỢI Ý MỜ nên Enter trơn không ăn — \
+                                                 tôi bấm → để nhận gợi ý rồi gửi."
+                                            )
+                                        } else if unchanged {
                                             logging::info(
                                                 "keys_press_no_effect",
                                                 json!({ "session": s.session_id,
@@ -4703,16 +5583,48 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                         "why": "màn không đổi sau khi bấm" }),
                                             );
                                             format!(
-                                                "⚠ đã bấm '{}' nhưng màn KHÔNG đổi · {name}\n                                                 Chữ trong ô nhập nhiều khả năng là GỢI Ý MỜ của TUI \
+                                                "⚠ đã bấm '{}'{} nhưng màn KHÔNG đổi · {name}\n                                                 Chữ trong ô nhập nhiều khả năng là GỢI Ý MỜ của TUI \
                                                  (hub đọc màn không thấy màu nên không phân biệt được \
                                                  với chữ đã gõ). Muốn gửi câu ấy thì gõ thẳng nó ở đây.",
-                                                typed.trim()
+                                                typed.trim(),
+                                                if tried_right { " rồi bấm → để nhận gợi ý" } else { "" }
                                             )
                                         } else {
                                         format!("✓ đã bấm '{}' · {name}", typed.trim())
                                         }
                                     } else if what == Some(crate::keys::Landed::Queued) {
                                         format!("✓ vào hàng chờ · {name}")
+                                    } else if what == Some(crate::keys::Landed::InBox) {
+                                        // 🔴 NÓI THẬT. Đây là ca đã gửi cho Hà
+                                        // một câu `✓ đã gửi` sai (08-15), và
+                                        // cái giá không dừng ở một dòng chữ:
+                                        // anh gõ tin tiếp theo, nó nối đuôi vào
+                                        // đúng ô ấy, rồi cả hai đi làm MỘT tin.
+                                        // Một lời khen sai đắt hơn một lời báo
+                                        // lỗi, vì người đọc dựa vào nó để làm
+                                        // việc tiếp theo.
+                                        logging::warn(
+                                            "keys_text_stuck_in_box",
+                                            json!({ "session": s.session_id,
+                                                    "why": "gõ xong, bấm Enter nhiều lượt, chữ vẫn nằm trong ô" }),
+                                        );
+                                        format!(
+                                            "⚠ chữ VẪN NẰM trong ô nhập · {name}\n\
+                                             Đã bấm Enter nhiều lượt mà nó chưa đi. ĐỪNG gõ tiếp — \
+                                             tin sau sẽ nối vào đuôi tin này rồi đi làm một tin. \
+                                             Bấm gửi: /key {} enter",
+                                            s.session_id
+                                        )
+                                    } else if what.is_none() {
+                                        // Không đọc được màn ⟹ KHÔNG BIẾT. Bản
+                                        // cũ gộp ca này vào "✓ đã gửi", tức
+                                        // khẳng định một chuyện chưa hề nhìn
+                                        // thấy — cùng họ với `keys::look` trả
+                                        // `Blind` thay vì `None`.
+                                        format!(
+                                            "✓ đã gõ · {name}\n\
+                                             (chưa đọc lại được màn nên chưa xác nhận nó ĐÃ ĐI — /shot để nhìn)"
+                                        )
                                     } else {
                                         format!("✓ đã gửi · {name}")
                                     }
@@ -4759,18 +5671,28 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // `commands_of` ghi một dòng log cho ca ấy.
                     let mut cmds = crate::sessions::commands_of(cfg, &shot_sid, 4);
                     let n_cmds = cmds.len();
-                    cmd_lines = cmds[..n_cmds].to_vec();
+                    cmd_lines = crate::sessions::lines_of(&cmds[..n_cmds]);
                     // Câu đồng ý nằm CÙNG kho với lệnh (một chỗ nhớ, một chỉ
                     // số), nhưng đi bằng callback KHÁC: `run:` gõ một DÒNG
                     // LỆNH, còn đây là một câu chữ thường.
                     let go = crate::keys::asks_for_go_ahead(&ack);
                     if go {
-                        cmds.push("làm đi".to_string());
+                        // Một câu chữ thường, không phải lệnh — nên không có
+                        // thư mục nào để khai, và nó cũng không chạy ở đâu cả.
+                        cmds.push(crate::sessions::Cmd {
+                            line: "làm đi".to_string(),
+                            cwd: String::new(),
+                        });
                     }
                     let stored = remember_quick(db, &shot_sid, &cmds);
                     quick.extend(stored.into_iter().take(n_cmds));
                     if go {
-                        quick.push(("✅ Làm đi".to_string(), format!("say:{n_cmds}")));
+                        // Cùng mã với lệnh vừa cất, không phải một số thứ tự —
+                        // xem `quick_token`.
+                        quick.push((
+                            "✅ Làm đi".to_string(),
+                            format!("say:{}", quick_token(&shot_sid, "làm đi")),
+                        ));
                     }
                     // …và TỆP thấy trên màn cũng phải mở được ngay tại đây.
                     //
@@ -4876,7 +5798,25 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     //
                     // Nhãn chỉ mang SỐ: bốn dòng chữ đã nằm ngay trên đầu nút,
                     // nguyên văn — nhắc lại trong nhãn vừa thừa vừa bị cắt.
-                    if shot_asking.is_none() && !shot_sid.is_empty() {
+                    // 🔴 CỔNG NÀY TẮT NHẦM CẢ HỘP MỘT CÂU — Hà 2026-08-16:
+                    // *"Màn có option nhưng không có bảng chọn"* · *"Option để
+                    // chọn không chọn được"* · *"Màn option của mailler đã được
+                    // đâu"*.
+                    //
+                    // Đo trên chính lượt `/shot` sau bản cài 10:44: tin mở đầu
+                    // bằng *"đang hỏi — bấm số ở hàng phím để chọn"* rồi liệt kê
+                    // đủ 5 dòng, mà log cùng lúc ghi `telegram_buttons_sent
+                    // count=1` — tức hub VIẾT RA lời hứa rồi không giữ, đúng
+                    // hình dạng đã bắt được ngày 08-15 và vá ở chỗ khác.
+                    //
+                    // Gốc là `shot_asking.is_none()`: đọc được bảng hỏi từ nhật
+                    // ký thì tắt hẳn nhánh nút số, để dành đường `/pick`. Nhưng
+                    // `/pick` chỉ CẦN cho bảng NHIỀU CÂU (xem CLAUDE.md §7:
+                    // `/key <số>` là ngõ cụt ở đó vì các câu sau nằm sau một
+                    // phím mũi tên). Bảng MỘT câu thì `/key` đủ, và tắt nó đi là
+                    // đổi một đường đi được lấy một đường không có.
+                    let nhieu_cau = shot_asking.as_ref().is_some_and(|a| !a.rest.is_empty());
+                    if !nhieu_cau && !shot_sid.is_empty() {
                         for (n, _) in shot_choices.iter().take(9) {
                             quick.push((n.to_string(), format!("key:{shot_sid}:{n}")));
                         }
@@ -4894,10 +5834,22 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // (không phân biệt được "gợi ý mờ" với "chữ đã gõ" vì màn
                     // đọc về mất màu). Có chữ hay không thì đọc được; chữ ấy
                     // của ai thì không, và ở đây không cần biết.
-                    let box_has_text =
-                        crate::keys::input_box_text(&ack).is_some_and(|t| !t.trim().is_empty());
+                    // Hộp chọn đang mở ⟹ ô nhập TRỐNG, thứ `❯` trỏ vào là một
+                    // lựa chọn. Dựng nút ⏎/⌫ ở đây là mời bấm vào chỗ không có
+                    // gì (đo được: `/type clear` trả "màn KHÔNG đổi").
+                    let box_has_text = !crate::keys::has_chooser_footer(&ack)
+                        && crate::keys::input_box_text(&ack).is_some_and(|t| !t.trim().is_empty());
                     if !running && !has_choices && box_has_text && !shot_sid.is_empty() {
                         quick.push(("⏎".to_string(), format!("key:{shot_sid}:enter")));
+                        // 🔴 Hà 2026-08-16: *"còn lăn tăn nó là text mờ hay tỏ
+                        // thì thêm 1 nút xóa bên cạnh nữa để tự thao tác"*.
+                        // hub không phân biệt được chữ chủ máy gõ với gợi ý mờ
+                        // (đọc màn về là chữ mất màu) — nên đừng đoán, đưa cả
+                        // hai đường ra. Người đang nhìn màn hình thì biết ngay.
+                        //
+                        // Chỉ khi phiên KHÔNG chạy: Ctrl+C lúc đang chạy là
+                        // NGẮT lượt, không phải xoá ô (xem `keys::key_payload`).
+                        quick.push(("⌫".to_string(), format!("key:{shot_sid}:clear")));
                     }
                     // text đó tới phiên"*) — nhưng nó đứng trên một phép đo hub
                     // KHÔNG làm được.
@@ -4922,13 +5874,31 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         // đủ). Đúng cái hình dạng đã lặp ba lần trong tệp này:
                         // vá một chỗ, quên chỗ bên cạnh, vì không ai bắt ba chỗ
                         // phải giống nhau. Nay CHÚNG GỌI CHUNG MỘT HÀM.
-                        say_with_command_icons(
-                            tg,
-                            &ack,
-                            &cmd_lines,
-                            &quick,
-                            "quick_buttons_failed",
-                        );
+                        // Khai RÕ từng loại dữ liệu của phiên, rồi để một chỗ
+                        // duy nhất gắn action — xem `SessionData`.
+                        let data = SessionData {
+                            sid: shot_sid.clone(),
+                            cmds: cmd_lines.clone(),
+                            choices: shot_choices.clone(),
+                            box_text: None,
+                        };
+                        // Lựa chọn nào đã thành ☑ trong chữ thì thôi nằm ở đáy:
+                        // hai đường cho một việc, và cái ở đáy chỉ mang con số
+                        // trần, không nói nó chọn cái gì.
+                        let quick: Vec<(String, String)> = if data.choices.is_empty() {
+                            quick.clone()
+                        } else {
+                            quick
+                                .iter()
+                                .filter(|(_, d)| {
+                                    !d.starts_with("key:")
+                                        || d.ends_with(":enter")
+                                        || d.ends_with(":clear")
+                                })
+                                .cloned()
+                                .collect()
+                        };
+                        say_session_data(tg, &ack, &quick, "quick_buttons_failed", &data);
                     }
                     _ => reply_in_channel(db, cfg, adapter, cmd, &ack),
                 }
@@ -4943,8 +5913,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Asking with nothing open is a mistake worth naming, not a
                 // silent no-op.
                 let (want, asked) = target_and_rest(db, &cmd.arg);
-                let live =
-                    crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                let live = crate::sessions::snapshot(cfg);
                 // Phiên VỪA TẮT vẫn hỏi được: `--resume` chạy trên nhật ký, không
                 // cần tiến trình. Đây đúng là ca Hà gặp 16:37 — con trỏ trỏ vào
                 // phiên vừa tắt và hub trả lời bằng một ngõ cụt. Xem `ENDED_KEY`.
@@ -5059,9 +6028,28 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Phiên.") đẩy người hỏi sang một màn khác — dùng được khi lệnh
                 // này chỉ chạy từ chính màn ấy, vô dụng khi nó tới từ Telegram.
                 if want.is_empty() {
-                    let live =
-                        crate::sessions::snapshot_cached(cfg, std::time::Duration::from_secs(20));
+                    let live = crate::sessions::snapshot(cfg);
                     let focus = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+                    // 🔴 CHỈ cửa sổ đang chạy CLI — Hà 2026-08-15: *"lệnh session
+                    // liệt kê cửa sổ đang chạy cli"*, và `/terminal` nhận phần
+                    // còn lại (*"liệt kê terminal thuần không chạy gì"*).
+                    //
+                    // Trước lượt này ảnh chụp trộn cả hai vào MỘT danh sách
+                    // (`sessions::add_shell_windows`), nên `/session` trả về hai
+                    // hạng vật khác hẳn nhau — một cái gõ chữ vào là nói với một
+                    // phiên `claude`, một cái gõ vào là chạy lệnh shell. Cùng
+                    // một danh sách, hai nghĩa của cú bấm: đó đúng là chỗ sinh
+                    // ra cảm giác rối.
+                    let cli_rows: Vec<crate::sessions::LiveSession> = live
+                        .sessions
+                        .iter()
+                        .filter(|s| s.host != "shell")
+                        .cloned()
+                        .collect();
+                    let live = crate::sessions::SessionsSnapshot {
+                        sessions: cli_rows,
+                        ..live
+                    };
                     let mut ack = session_list_text(
                         &live.sessions,
                         &focus,
@@ -5151,10 +6139,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         // Sổ không biết id này: phiên vừa tắt, id gõ tay, hoặc trang
                         // cũ. Lúc ấy mới đáng trả tiền một lượt ảnh chụp — vừa để
                         // xác nhận, vừa để câu từ chối nói được "đang có N phiên".
-                        let live = crate::sessions::snapshot_cached(
-                            cfg,
-                            std::time::Duration::from_secs(20),
-                        );
+                        let live = crate::sessions::snapshot(cfg);
                         // Phiên VỪA DỪNG vẫn phải theo được: màn chi tiết đang mở
                         // chính nó, và `/tell` sau đó cần đúng con trỏ này. Không có
                         // vế dưới thì bấm Dừng xong là màn tự đá mình ra — đo được
@@ -5180,17 +6165,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // "gõ tiếp được", vì đó là thứ mọi phiên khác
                                     // cho phép.
                                     let how = match (s.pid == 0, s.host.as_str()) {
+                                    // 🔴 Cửa sổ TRẦN không phải một phiên đã
+                                    // dừng. Bản cũ rơi vào nhánh `pid == 0` và
+                                    // trả lời *"đã dừng, /tell nói tiếp được"* —
+                                    // mà `/tell` chỉ nói được với một phiên
+                                    // `claude`. Một câu mời đi vào ngõ cụt.
+                                    (_, "shell") => " — dấu nhắc trống: gõ chữ ở đây là chạy lệnh shell",
                                     (_, "dead") => {
                                         " — ĐÃ TẮT: chỉ còn /handover lấy bản bàn giao; gõ thẳng thì không. \
                                          Dọn khỏi danh sách bằng /stop"
                                     }
-                                    (true, _) => " — đã dừng, /tell nói tiếp được",
+                                    (true, _) => " — đã dừng; /new <id> mở lại nó trong một cửa sổ",
                                     _ => "",
                                 };
-                                    let head = format!(
-                                        "👁 Đang theo phiên {} ({}){}",
-                                        s.name, s.account, how
-                                    );
+                                    let head = follow_ack_head(&s, how);
                                     // KHÔNG chụp lại màn ở đây (Hà 2026-08-12).
                                     //
                                     // Từ 08-11 câu ack này kèm luôn màn, vì *"bấm
@@ -5865,7 +6853,44 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     // Dọn tin Telegram quá hạn (Hà 2026-08-12: *"tự xóa tin nhắn cũ hơn 1.5
     // ngày"*). Rẻ khi không có gì tới hạn: một phép so trên một danh sách số.
     crate::telegram::prune_sent(cfg, db);
-    auto_handover(db, cfg);
+    // 🔴 BA VIỆC MỖI VÒNG, và cả ba đã CHẾT CÂM từ 2026-08-14 — đây là bản vá.
+    //
+    // Chúng từng được gọi từ `portal::build_inner`, tệp đẩy ảnh chụp lên trang
+    // tfl5. Trang chết ngày 14/08 (`cf20874`), `lib.rs` bỏ `mod portal`, và ba
+    // cỗ máy này mất chỗ gọi DUY NHẤT của chúng — không một cảnh báo nào, vì
+    // `pub fn` trong `pub mod` thì trình dịch không kêu "không ai gọi".
+    //
+    // Đo trên `logs/hub.log` (không phải suy luận): `session_change` 439 lượt,
+    // **lần cuối 14/08 13:10:40**; `close_still_busy`/`close_done` lần cuối
+    // 14/08 11:17–11:20; `trust_dialog_answered` lần cuối 14/08 07:58. Sau đó
+    // đúng 0 lượt trong hơn một ngày. Hậu quả nhìn thấy được: luật 11 (*"hub
+    // chỉ nói khi có THAY ĐỔI"*) không nói được câu nào nữa, và sổ
+    // `closing:windows` ngồi trong DB với **hai** hàng `c: 0` — tức chưa từng
+    // được ngó lại một lần — trong khi Hà nhìn thấy cửa sổ phiên cũ còn nguyên
+    // và hỏi *"tại sao chuyển phiên mới rồi mà phiên cũ vẫn còn cửa sổ chưa
+    // đóng?"*.
+    //
+    // 📌 Đây là bản LẶP LẠI của con bug đã ghi trong `CLAUDE.md` (`errors_block`
+    // sống trong `runtime::snapshot`, chỗ gọi duy nhất là `portal.rs`) — cùng
+    // một commit, cùng một hình dạng, ba lần nữa. Bài học không phải "nhớ kiểm
+    // chỗ gọi": mà là **gỡ một tệp thì phải đi hỏi từng hàm nó gọi xem còn ai
+    // gọi không** — `grep -L` chứ không phải trí nhớ.
+    //
+    // MỘT ảnh chụp cho cả vòng: bốn việc dưới đây hỏi cùng một câu ("máy đang
+    // chạy gì"), dựng hai lần là hai câu trả lời lệch nhau — mà cái loa thì so
+    // hai lượt ảnh chụp để quyết định có nói hay không.
+    let mut live = crate::sessions::snapshot(cfg);
+    mark_started_by_hub(db, &mut live);
+    announce_changes(db, cfg, &live);
+    let now_sec = chrono::Utc::now().timestamp();
+    // Cửa sổ đang chờ đóng: ngó lại một lượt (rẻ — một câu AppleScript mỗi cửa
+    // sổ, và chỉ khi đã qua 30 giây). Phải bám VÒNG CHẠY chứ không đứng chờ
+    // trong lượt lệnh: chờ tại chỗ là giữ `CMD_LOCK` (xem `CLOSING_KEY`).
+    close_pending_tick(db, cfg, now_sec);
+    // Cửa sổ kẹt ở hộp tin-thư-mục: chưa có id phiên nên không route nào với
+    // tới — phải có người ngó lại mỗi vòng (xem `trust_dialog_tick`).
+    trust_dialog_tick(now_sec);
+    auto_handover(db, cfg, &live);
     // No triage, and nothing to flush. hub used to spend money on its own here:
     // every line typed in the room went through a `claude -p` call to be sorted
     // into an inbox, and a daily ceiling existed to stop that from running away.

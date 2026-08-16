@@ -1,5 +1,405 @@
 # active context — hub
 
+## 🔴 2026-08-16 (trưa) — hai vòng đọc Telegram giành nhau, và một phép đo mù
+
+⏳ **CHƯA CÀI** (Claude bị chặn `deploy/install.sh`). Cổng máy móc xanh trên cây
+mã này; hành vi trên Telegram thì **chưa quan sát lần nào sau khi vá** — bar thật
+theo `CLAUDE.md` là chạy trong buồng chat thật rồi nhìn câu trả lời.
+
+### 1. Luật "đúng MỘT nơi đọc `getUpdates`" bị phá bởi chính đoạn giữ nó
+
+Luật 1 của `telegram.rs` viết từ 11/08. `confirm::ask` vẫn mở vòng đọc THỨ HAI,
+và chặn vòng chính bằng cờ `busy` qua `Inbox::hold()`. Cờ ấy **không chặn được
+gì**: `hold()` bật cờ trong khi vòng chính đang nằm giữa một long-poll 20 giây,
+mà không có cách nào gọi một long-poll về. Trong tối đa 20 giây, hai vòng cùng
+hỏi ⟹ Telegram từ chối một bên.
+
+📐 Đo trên `logs/hub.log` ngày 16/08, trước khi vá: **11 lượt**
+`telegram_poll_rejected` (*"Conflict: terminated by other getUpdates request"*),
+5 lượt nằm gọn trong 10 phút Hà đóng mấy cửa sổ trần (12:25–12:29). Mỗi lượt kèm
+một giấc ngủ phạt **30 giây** của vòng đọc chính — tức 30 giây hub điếc ngay sau
+mỗi câu hỏi xác nhận. Đó là cái Hà cảm thấy là "hub chậm".
+
+Và cửa nguy hiểm hơn vẫn mở: cú bấm ✅ rơi vào vòng đọc lệnh thì `handle_update`
+trả lời *"câu hỏi đã đóng sổ"* trong khi `confirm` vẫn đang chờ, rồi `confirm`
+hết hạn và hub **không làm gì**. Chưa xảy ra lần nào
+(`telegram_confirm_button_late` = 0 trên cả cuốn log) — nhưng chưa xảy ra vì
+may, không vì có gì cản.
+
+**Vá:** chỉ vòng chính đọc. `confirm::ask` đăng ký `nonce`
+(`Inbox::expect_confirm`) rồi ngồi chờ ở một `mpsc`; vòng đọc nhận
+`callback_query`, thấy khớp thì **giao tận tay** (`deliver_confirm`) trước khi
+đem đi xử lý như nút thường. Gỡ hẳn `busy` + `hold()` + `Hold`. Cổng "ai bấm"
+(`callback_query.from.id`, luật 7) vẫn đứng nguyên chỗ cũ, TRƯỚC sổ chờ.
+
+⚠ Đường lùi (`confirm_poll`, chỉ chạy khi KHÔNG có hòm thư — CLI một lượt) mang
+theo một lỗi im lặng riêng, nay đã vá: nó đọc thẳng `result` nên một lời từ chối
+của Telegram ra đúng hình dạng *"không có update nào"* ⟹ ngồi hết 90 giây rồi
+kết luận **"không ai bấm"**. Nay đọc `poll_rejected` và trả `Unavailable`.
+
+### 2. Bài kiểm "nút ☑ nằm đúng dòng option" đang đo một BẢN CHÉP
+
+`pipeline::render_session_data` tự khai là *"phần thuần của `say_session_data`"*.
+Nó không phải: nó là bản chép tay chỉ có nhánh lựa chọn — không cổng `key_sid`,
+không ô nhập, không dòng lệnh. Nên `tests/choice_links_live.rs` (gửi tin THẬT để
+chứng minh nút ☑ nằm đúng dòng option) đo bản chép, và sẽ **vẫn xanh** sau khi ai
+đó làm hỏng đường thật. Phép đo không thể đỏ vì sản phẩm hỏng = phép đo mù.
+
+**Vá:** tách `session_layout` — chỗ DUY NHẤT dựng bảng neo — và cho cả hai đi
+qua nó.
+
+### 3. Ngoặc rỗng trên câu hỏi đóng cửa sổ trần
+
+*"Đóng hẳn phiên ⬜ cửa sổ ttys005 ()?"* — `s.account` rỗng vì cửa sổ trần không
+thuộc tài khoản nào, mà câu vẫn in cặp ngoặc. Hà đọc đúng câu ấy **sáu lần liên
+tiếp** lúc 12:25–12:29. Nay không có tài khoản thì không có ngoặc.
+
+### Cổng đã chạy trên máy này
+
+`cargo fmt` 0 · `clippy --all-targets -D warnings` 0 · **332 test** xanh (từ
+324), 13 `#[ignore]`, exit đọc trực tiếp. Trong đó mới: 4 test đơn vị cho sổ chờ xác
+nhận (`src/telegram.rs`) + `tests/one_reader.rs` khoá luật 1 bằng cách soi mã
+nguồn — cùng lối `cycle_wiring.rs`, vì hành vi "hai vòng giành một long-poll"
+không dựng lại được trong bài kiểm không mạng.
+
+⚠ `one_reader.rs` **đỏ ngay lần đầu vì PHÉP ĐO**, không vì sản phẩm: nó tìm
+`telegram_confirm_button_late` trên cả tệp và bắt trúng dòng chú thích tôi vừa
+viết ở đầu tệp. Đo lại bên trong `handle_update` thì xanh. Đúng bài "assert đỏ
+thì kiểm phép đo trước khi sửa mã".
+
+### Còn dở — ghi đúng như vậy
+
+- **Chưa cài ⟹ chưa nghiệm thu.** Sau khi cài, bằng chứng cần nhìn:
+  `telegram_poll_rejected` **thôi xuất hiện**, `telegram_confirm_delivered` hiện
+  ra mỗi lần bấm ✅, và một câu hỏi `/close` được trả lời trong vài giây mà
+  không kéo theo 30 giây im.
+- `rust/tests/telegram_live.rs`, `shot_live.rs`, `choice_links_live.rs`
+  (`#[ignore]`) **chưa chạy lần nào** — chúng gửi tin thật vào buồng chat. Đó
+  mới là bằng chứng nút ☑ nằm đúng dòng.
+- `rust/~/` (16 KB, hai thư mục cấu hình rỗng do bài kiểm 15/08 không nở dấu
+  ngã) vẫn nằm đó — `rm` bị hook chặn, Hà gõ tay.
+- **`terminal_probe_failed` 6 lượt hôm nay** (osascript quá 20s, 11:58–12:02 và
+  12:10). Mỗi lượt: cửa sổ rảnh rơi khỏi danh sách, mọi phiên tạm coi là không
+  gõ vào được. Chưa truy — chỉ ghi lại là nó có thật và không hiếm.
+
+## ⚡ 2026-08-15 (khuya) — REALTIME: ảnh chụp thôi spawn `claude`, và ba cỗ máy chết câm từ 14/08
+
+✅ **ĐÃ CÀI 16/08 12:09 và ĐÃ NGHIỆM THU** (dòng "CHƯA CÀI" bên dưới là trạng
+thái lúc viết, giữ nguyên làm hồ sơ). Bằng chứng đọc từ `logs/hub.log`:
+`session_change` sống lại (lượt cuối 16/08 05:06:36Z, tổng 499); sổ đóng cửa sổ
+đã được ngó lại — `close_gave_up` cho `3f7d44dc` sau 5.176s và `close_done` cho
+`beabb22b` sau 57.226s, đúng hai hàng treo đã báo trước; `ms_ask_accounts` tụt
+còn **10–32 ms** (bản cũ 861–1.343 ms), ảnh chụp đầy đủ ~750–810 ms.
+
+⏳ **CHƯA CÀI** — `deploy/install.sh` Claude bị chặn quyền, Hà phải gõ tay. Mọi
+điều dưới đây mới là *đã chạy trên máy dev*, chưa phải nghiệm thu.
+
+### 1. Đổi nguồn danh sách phiên — và nó rẻ hơn cả hướng Hà chốt
+
+Hướng đã chốt là `ps -Ewwo` + quét nhật ký (~130 ms). Đo thật thì lộ ra một
+nguồn **chính xác hơn**: CLI **tự ghi sổ của nó ra tệp**.
+
+| nguồn | thời gian | nội dung |
+|---|---|---|
+| `<config>/sessions/<pid>.json` | ~10 ms **cả 3 tài khoản** | `sessionId` `cwd` `name` `kind` `pid` `status` `startedAt` — khớp `claude agents` **5/5 hàng, từng chữ** |
+| `<config>/jobs/<id>/state.json` | cùng lượt | hàng phiên NỀN |
+| `claude agents --json` | 292 ms lúc máy rảnh · **p50 3,1 s** (2.891 lượt) | (không hơn hai dòng trên chữ nào) |
+
+📌 `ps -Ewwo` vẫn dùng, nhưng cho việc khác và **một lượt duy nhất cho cả ảnh
+chụp** (`Procs::read`, 49 ms): còn sống không · ngồi cửa sổ nào · con của ai.
+Trước đó là `ps -p <pid>` **mỗi hàng** cộng thêm một lượt `ps -eo` cho cây cha
+con — bảy lần dựng tiến trình để hỏi cùng một bảng đang động.
+
+⚠ Điều `ps` **không** có, và đã đo để khỏi phải đoán lần nữa: tiến trình `claude`
+KHÔNG mang `CLAUDE_CODE_SESSION_ID` trong môi trường của chính nó — chỉ **tiến
+trình con** (MCP) mang, ghép ngược bằng `ppid`. Đường ấy phụ thuộc việc phiên có
+bật MCP hay không, nên **đừng dựng lại**; sổ `sessions/<pid>.json` là chỗ ghép
+thẳng, không cần cầu.
+
+Cửa mới kèm theo: **pid được dùng lại**. Sổ chỉ biến mất khi CLI thoát tử tế; bị
+`kill -9` thì tệp ở lại, macOS cấp pid ấy cho tiến trình khác ⟹ hàng đọc ra "còn
+sống" kèm **tty của người lạ**, mà `/type` gõ theo tty. `is_claude_process` hỏi
+thêm một câu rẻ trước khi tin (cùng họ `is_real_tty`).
+
+**Gỡ `snapshot_cached(20s)`** (11 chỗ gọi) — để lại bia mộ trong `sessions.rs`
+ghi vì sao nó từng đúng. Cái đệm không sai; nó là câu trả lời cho một câu hỏi
+sai (*"làm sao chịu được 10 giây"* thay vì *"vì sao hỏi cái máy này lại tốn 10
+giây"*).
+
+🔴 **Và bản đầu của tôi SAI, chạy thật mới lòi ra:** `BG_ENDED` chỉ có
+`done`+`stopped`, nên acc2 mọc một hàng nền `3e97ab14` (`state: failed`, từ
+11/08) trong khi `claude agents` của acc2 trả `[]`. Bài học không phải "thêm
+`failed`" — **một danh sách tên trạng thái thì không bao giờ đủ** (y hệt
+`folder_from_tail` gõ cứng tên ngăn kéo `AI`). Nên lưới đỡ thật là MỐC THỜI
+GIAN: hàng nền mang `updatedAt` của sổ, `drop_stale_dead` chấm theo tuổi.
+
+### 2. 🔴 Ba cỗ máy chạy-mỗi-vòng đã CHẾT CÂM hơn một ngày
+
+Hà hỏi: *"tại sao chuyển phiên mới rồi mà phiên cũ vẫn còn cửa sổ chưa đóng?"*
+Truy ra một lỗi lớn hơn nhiều câu hỏi.
+
+Ngày 14/08 gỡ trang tfl5 ⟹ `lib.rs` bỏ `mod portal` ⟹ **ba** hàm mất chỗ gọi
+DUY NHẤT của chúng. Không một cảnh báo: `pub fn` trong `pub mod` thì `dead_code`
+im, 263 test xanh, clippy 0.
+
+| hàm | mất gì | lần chạy cuối (log) |
+|---|---|---|
+| `announce_changes` | **luật 11** — "vừa xong"/"vừa tắt" không còn ai nói | `session_change` 439 lượt, **14/08 13:10:40** |
+| `close_pending_tick` | cửa sổ hụt đóng nằm lại sổ mãi mãi | `close_done` 14/08 11:20 |
+| `trust_dialog_tick` | cửa sổ kẹt hộp tin-thư-mục không ai bấm hộ | 14/08 07:58 |
+
+Chuỗi Hà nhìn thấy, đúng từng giây: `auto_handover_firing` 14:02:43 →
+`handover_window_opened ttys005` 14:03:17 → **`handover_old_window_not_closed`**
+14:05:57 (*"đã gõ /exit nhưng phiên vẫn đang chạy dở sau 30 giây"* — đóng lúc ấy
+là bật hộp "terminate running processes?" và khoá mọi lệnh sau nó, luật 13) →
+`handover_close_deferred` *"sổ đóng sẽ ngó lại"*. **Rồi không ai ngó lại.** Sổ
+`closing:windows` trong DB đang giữ **hai** hàng với `c: 0` — chưa từng được
+kiểm một lần nào.
+
+📌 Đây là **bản lặp lại** của con bug đã ghi trong `CLAUDE.md` (`errors_block`
+sống trong `runtime::snapshot`, chỗ gọi duy nhất là `portal.rs`). Cùng một
+commit, cùng hình dạng, ba lần nữa. Bài học đủ mạnh để thành luật: **gỡ một tệp
+thì phải đi hỏi từng hàm nó gọi xem còn ai gọi không.**
+
+Vá: cả ba vào `run_once`, dùng CHUNG một ảnh chụp. `tests/cycle_wiring.rs` soi
+**mã nguồn** (hành vi của hàm không ai gọi thì không quan sát được từ trong tiến
+trình — đó chính là chỗ chết) và nó **đỏ ngay lần đầu**, bắt đúng một lỗi tôi
+vừa gây: cú `prune_sent` rơi mất trong lượt sửa.
+
+### 3. Cửa mới: sổ QUÁ CŨ = chưa từng nhìn
+
+Sổ `watch:sessions` đứng im từ 14/08 13:11:24 với hai phiên chết từ hôm kia. Bật
+lại cái loa mà không có cửa này thì lượt so đầu tiên bắn hai tin *"⏹ đã tắt"* về
+hai cái chết cũ hơn 24 tiếng — **sai nghĩa, không phải sai giờ**. Luật 11 đã có
+nửa câu (*"sổ rỗng thì im"*), nhưng sổ có thể **đầy và ôi**.
+`pipeline::watch_book_usable` + `db::cursor_written_at`; không đọc được mốc cũng
+IM (cùng luật `blind`).
+
+### Đã chạy thật trên máy này (chưa phải nghiệm thu qua Telegram)
+
+`cargo fmt` 0 · `clippy --all-targets -D warnings` 0 · **301 test** (từ 289),
+0 fail, exit đọc trực tiếp.
+
+`session_books_live` (`--ignored`, chạy 22:2x) — so SỔ với `claude agents` từng
+trường trên cả ba tài khoản:
+
+| tài khoản | sổ | `claude agents` |
+|---|---|---|
+| acc1 | 6 hàng · **10 ms** | 6 hàng · 287 ms |
+| acc2 | 0 hàng · 1 ms | 0 hàng · 296 ms |
+| acc3 | 1 hàng · **0 ms** | 1 hàng · 258 ms |
+
+Ảnh chụp đầy đủ 3 lượt: **1833 · 995 · 1049 ms** cho 8 hàng — cùng buổi, bản
+ĐANG CÀI đo được 2935–3730 ms (`ms_ask_accounts` 861–1343). Phần còn lại giờ là
+đọc nhật ký + osascript, không phải chờ `claude`.
+
+📌 Và bài kiểm live ấy **đỏ ngay lần đầu**, tố nguồn mới "dựng hàng ma" cho acc3
+— hoá ra **lỗi ở phép đo**: bản đầu chuyền nguyên `~/.claude-acc3` sang biến môi
+trường, CLI không nở dấu ngã nên soi một thư mục tên `~` và trả `[]`.
+`list_account_cli` của hub thì nở đúng từ trước. Đúng cái bẫy "assert đỏ thì
+kiểm PHÉP ĐO trước khi sửa mã".
+
+### Còn dở — ghi đúng như vậy
+
+- **Chưa cài ⟹ chưa nghiệm thu gì.** Bar thật: cài xong, xem log có
+  `session_change` trở lại, `close_*` chạy trên hai hàng đang treo, và
+  `sessions_snapshot_ms` với `ms_ask_accounts` tụt về ~10 ms.
+- ⚠ **Ngay sau khi cài, hub sẽ xử lý hai hàng `closing:windows` đang treo** —
+  một trong hai là cửa sổ `ttys004` của phiên `3f7d44dc` (vẫn đang sống). Rảnh
+  thì nó đóng; bận thì nó bỏ cuộc và NÓI. Biết trước để khỏi giật mình.
+- `rust/tests/session_books_live.rs` (`#[ignore]`) so sổ với `claude agents`
+  từng trường — **chạy tay sau khi cài**, đó mới là bằng chứng nguồn mới đúng.
+- `portal.rs` + `live.rs` vẫn trên đĩa (`git rm` bị chặn). Chúng KHÔNG được
+  biên dịch, nhưng chính chúng là cái bẫy vừa nổ — `tests/cycle_wiring.rs` canh
+  không cho khai lại vào `lib.rs`.
+- Sửa kèm một chú thích **nói dối** có sẵn từ trước: doc của `mark_can_type`
+  dán nhầm lên `add_shell_windows`.
+
+## 🧹 2026-08-15 (tối) — bộ động từ rút còn đúng thứ dùng, và ba phép đo mù bị lôi ra
+
+289 test · clippy 0 · fmt 0. **CHƯA cài bản cuối** (Hà đã cài 2 lượt trong ngày:
+17:07 và 17:48 — bản 17:48 mới có `/terminal` liệt kê).
+
+### Bộ động từ sau lượt này
+
+```
+/new              → cửa sổ Terminal TRẦN, ở `~/`
+/new acc3         → + dựng CLI đúng tài khoản, ở `~/projects`
+/new acc3 <chữ>   → + gõ đề bài vào ô nhập ⟹ xong một phiên
+/new <id> [chữ]   → MỞ LẠI phiên đã tắt (`claude --resume`), thay cho /tell
+/terminal         → LIỆT KÊ cửa sổ trần, mỗi cái một NÚT bấm được
+/session          → LIỆT KÊ cửa sổ đang chạy CLI
+/shot             → chạy cho CẢ HAI hạng
+```
+
+**`/tell` gỡ hẳn** (Hà: *"lệnh tell là không cần thiết?"* · *"vì trên tele tôi
+chỉ gõ text bình thường thôi"*). Đo cả cuốn log: 0 lượt — nhưng con số ấy một
+mình đã lừa một lần rồi (`/win`, `listed:false`, đo SỰ VÔ HÌNH), nên bằng chứng
+thật lấy từ mã: `sessions::tell` mở đầu bằng
+`if session.kind != "background" { bail!(…) }`, mà hạng phiên nền nay **chỉ còn
+sinh ra khi mở cửa sổ thất bại**. Không phải chưa ai gõ — gần như không còn mục
+tiêu để nhắm vào.
+
+Khả năng thật của nó KHÔNG mất mà đi lên một bậc: `-p --resume` (một lượt rồi
+thôi, không cửa sổ, **có tiêu hạn mức**) → cửa sổ THẬT chạy `claude --resume`
+(sống, gõ tiếp được, `/shot` nhìn được, miễn phí). Tài khoản **không đoán**: hỏi
+sổ (`Mark::a`) rồi tới phiên vừa dừng; không nơi nào biết thì từ chối.
+
+📊 Bảng dùng thật (từ 11/08): session 261 · shot 213 · runin 31 · key 28 ·
+new 12 · type 10 · close 6 · terminal 3 · ask 2 · **tell 0** · handover 0.
+
+### Ba phép đo MÙ lôi ra trong một buổi, cùng một họ
+
+1. **`terminal_tabs()` trả `Ok(vec![])` suốt hai ngày.** Hai lỗi trong bốn dòng
+   AppleScript: `tab` bên trong `tell application "Terminal"` là **tên LỚP** của
+   Terminal chứ không phải ký tự tab; và `(p as string)` trên phần tử
+   `processes` cũng ném lỗi. Thứ biến chúng thành im lặng là một `try` **không
+   có `on error`** — nó dựng lên đúng lý do (có một "cửa sổ" không phải cửa sổ
+   thật, `-1728`), nhưng vì lỗi xảy ra với MỌI cửa sổ nên nuốt sạch. *"Không có
+   cửa sổ nào"* là một câu trả lời nghe hoàn toàn hợp lý — đó mới là chỗ chết.
+   Nay đếm `#skipped`, và rỗng-kèm-skipped>0 ghi log mức `error`.
+2. **`landed()` không có trạng thái "chữ vẫn trong ô".** Ba trạng thái *hàng chờ
+   · đang chạy · rảnh*, mà "rảnh" mang hai nghĩa NGƯỢC NHAU — đã gửi xong và
+   chưa gửi được. Nên hub **không thể** nói sai theo hướng nào khác ngoài
+   "thành công". Hà chụp được hậu quả: hai tin dính liền trong ô nhập
+   (*"sao nội dung lại bị lặp thế này"*), vì tin trước báo `✓ đã gửi` mà chưa
+   đi, tin sau nối đuôi, rồi cả hai đi làm MỘT tin. `still_in_box` đã có từ
+   12-08 và làm đúng việc — **nó chỉ không được ai hỏi**. *Một hàm đúng không
+   được gọi thì bằng không.*
+3. **Câu chào đi đường CHẬM in `s.name` thô** (`projects-67` thay vì `[hub]`) —
+   bản chép tay thứ TƯ của luật "tên để đọc".
+
+### Và một phép tính, không phải hằng số: "sao có tới 5 cái enter?"
+
+`press(enter)` gửi `(ASCII character 10)` **và** `do script` tự chèn thêm một
+dấu xuống dòng — không tắt được (luật 13). Nên mỗi cú Enter **đáng hai**. Một
+lệnh + hai cú cố định = 1+2+2 = **năm dấu nhắc** trên một shell.
+
+Vòng `[400ms, 1000ms]` bấm hai lần VÔ ĐIỀU KIỆN vì hồi 12-08 chưa ai đọc lại
+màn. Nay có `Landed::InBox` nên bấm **theo nhu cầu**: gõ → nhìn → còn chữ mới
+bấm (tối đa 3, dừng ngay nếu màn có hộp chọn vì ở đó Enter là CHỐT). Ca thường
+của shell: **không cú nào**. Một hằng số không thể đúng cho cả shell (nuốt dòng
+trống thành dấu nhắc nhìn thấy được) lẫn TUI (bỏ qua nó).
+
+📌 Chú thích ở chỗ ấy đã tả ĐÚNG thiết kế từ 12-08 (*"đừng đặt cược vào một con
+số: bấm, NHÌN, còn chữ thì bấm nữa"*) — **mã thì chưa bao giờ làm phần "NHÌN"**.
+
+### Bốn chỗ chép tay đã gộp về một
+
+`keys::type_and_send` (Enter rời, 3 bản) · `wait_for_new_session_id` (chờ phiên
+chào đời, 2 bản, lấy phần đúng của cả hai) · `is_shell_id`/`SHELL_ID_PREFIX`
+(hình dạng `win-<tty>`) · `NewSession` (gom 8 tham số rời — tám thứ cùng kiểu
+`String` đi qua ba tầng hàm thì thứ tự của chúng là một cái bẫy).
+
+Và trên đường gộp lôi ra một tham số **NÓI DỐI**: `type_into(w, text, enter: bool)`
+với dòng đầu thân hàm là `let _ = enter;`. Chính tôi đã đọc `type_into(w, task,
+true)` ở một chỗ gọi mới và tin là nó bấm Enter hộ. *Cái thiếu thì trình dịch
+kêu, cái nói dối thì không.*
+
+### Chưa làm — Hà đã chốt hướng
+
+**Realtime** (bỏ đệm 20s + sổ, đo bằng `ps` + nhật ký ~130 ms thay cho
+`claude agents` p50 3,1s). Xem mục 15/08 phía dưới để có số đo và thứ tự làm.
+
+⚠ Nghi vấn chưa điều tra: `/btw` chỉ gõ, không có cú Enter rời (viết 08-11,
+trước luật 13 ngày 08-12) — có thể đang hỏng câm.
+
+## 🏗 2026-08-15 (chiều) — Hà thiết kế lại: BA ĐỘNG TỪ, BA VAI, và luật kế thừa
+
+Hà đọc mã rồi nói thẳng: *"bạn đang chưa kế thừa được các lệnh, không biết bạn
+phân tích bài toán và code kiểu gì nữa, rối và lỗi cứ bị đi bị lại"*. Anh đúng,
+và đo được — cùng một chặng việc bị chép tay nhiều lần:
+
+| chặng | số bản chép trước lượt này |
+|---|---|
+| mở cửa sổ | 3 (`/terminal`, `/new`, bàn giao) |
+| chờ phiên chào đời | 2 |
+| bấm hộ hộp tin-thư-mục | 3, ba thứ tự khác nhau |
+| cú Enter rời | 3 — suýt thành 4 trong chính lượt sửa hôm nay |
+
+### Cấu trúc Hà chốt
+
+```
+/new              → cửa sổ Terminal TRẦN            (bước 1)
+/new acc3         → + dựng CLI đúng tài khoản        (bước 2)
+/new acc3 <chữ>   → + gõ đề bài vào ô nhập           (bước 3) ⟹ xong một phiên
+/terminal         → LIỆT KÊ cửa sổ trần (không chạy gì)
+/session          → LIỆT KÊ cửa sổ đang chạy CLI
+```
+
+Nguyên văn: *"lệnh `/new` sẽ phải kế thừa tức gọi lại lệnh `/terminal` sau đó
+làm các việc khác"* · *"nếu `/new` để trống thì … không cần lệnh terminal nữa"* ·
+*"lệnh terminal giờ sẽ liệt kê terminal thuần không chạy gì"* · *"lệnh session
+liệt kê cửa sổ đang chạy cli"*.
+
+📌 Điều làm cấu trúc này đúng chứ không chỉ gọn: **mỗi tham số thêm đúng một
+bước**, nên không còn chỗ cho hai đường mở song song lệch nhau. `/terminal <lệnh>`
+bỏ hẳn — nó vừa liệt kê vừa mở tuỳ có tham số, tức hai việc khác hẳn nhau đội
+chung một tên.
+
+Lối thoát hiểm (sudo/ssh/passwd cần tty thật) KHÔNG mất mà còn khá hơn: cửa sổ
+trần lên danh sách dưới id `win-<tty>` (`add_shell_windows`, đã có sẵn từ trước),
+nên `/type` gõ được và `/shot` đọc lại được — **hai chiều**. Bản `/terminal <lệnh>`
+cũ chạy được một dòng rồi câm, và chính câu trả lời của nó thừa nhận: *"kết quả
+nằm TRÊN cửa sổ ấy, không về đây"*.
+
+### `/new` viết lại theo đúng năm bước Hà mô tả
+
+Trước: `claude --permission-mode auto '<đề bài>' --disallowedTools …` — đề bài đi
+bằng **argv lúc khởi động**. Nay: mở `claude3 --permission-mode auto
+--disallowedTools …` (không đề bài) → chờ phiên chào đời (đó **là** bằng chứng đo
+được rằng ô nhập sẵn sàng: nhật ký chỉ sinh sau khi qua hết hộp chặn) → kiểm màn
+còn hộp chọn không → `type_and_send(đề bài)`.
+
+- **`launch` khai theo tài khoản** (`claude`/`claude2`/`claude3`, `hub.config.json`),
+  vì Hà gõ đúng ba từ ấy ở terminal. Không khai thì rơi về `CLAUDE_CONFIG_DIR=…
+  claude` — **không đoán** tên alias theo `accN`.
+- **Rào KHÔNG nới**: `claude3` trần không có rào nào (bài học 08-13). Nên hub gõ
+  `claude3` KÈM `--permission-mode auto --disallowedTools`.
+- Ngoại lệ duy nhất còn đi bằng argv: **bản bàn giao ~2 KB** — 2 KB đẩy qua
+  `do script` là một cú DÁN (luật 13), khác hẳn một câu ngắn.
+
+### Ba chỗ gộp lại làm một
+
+1. **`keys::type_and_send`** — cú Enter rời. Và trên đường gộp lôi ra một tham
+   số **NÓI DỐI**: `type_into(window, text, enter: bool)` với dòng đầu thân hàm
+   là `let _ = enter;`. Chính tôi đã đọc `type_into(w, task, true)` ở một chỗ
+   gọi mới và tin là nó bấm Enter hộ. *Một tham số nói dối nguy hơn một tham số
+   thiếu: cái thiếu thì trình dịch kêu, cái nói dối thì không.*
+2. **`wait_for_new_session_id`** — hai bản chép hợp nhất, lấy phần ĐÚNG của cả
+   hai: bấm hộ hộp tin-thư-mục **trước** (bài học bàn giao 08-13), loại id phiên
+   cũ (`exclude`), và lưới đỡ `claude agents` chỉ bật cho `/new` (`deep`).
+3. **`/runin`** thôi chép tay vòng Enter — vòng cũ nuốt lỗi bằng `let _ = press(…)`,
+   tức Enter hỏng mà vẫn in "✅ đã chạy".
+
+⚠ **Nghi vấn CHƯA điều tra:** `/btw` (`sessions.rs`) chỉ gõ, không có cú Enter
+rời — đường ấy viết 08-11, trước khi luật 13 được đo ra ngày 12-08. Có thể đang
+hỏng câm. Chưa sửa vì chưa chạy thật được lượt nào; đã ghi comment tại chỗ.
+
+### Hà chốt thêm một hướng lớn — CHƯA làm
+
+*"tôi muốn mọi thông tin khi đi qua hub phải là realtime chứ không phải đọc lịch
+sử"* · *"đây là kênh làm việc từ xa, mà bạn lại lấy cái cũ để gửi thì còn ý nghĩa
+gì nữa"*. Đo được cái giá và đường thoát:
+
+| nguồn | thời gian | cho ra |
+|---|---|---|
+| `ps -Ewwo` | **14–40 ms** | tiến trình sống · tty · pid · nguyên văn dòng lệnh · `CLAUDE_CONFIG_DIR` (= tài khoản) |
+| quét toàn bộ nhật ký | **85 ms** | đúng id đang sống + vừa ghi cách đây bao nhiêu giây |
+| `claude agents` ×3 | **p50 3 100 ms · p90 14 800 · max 120 000** (2891 lượt) | (thứ hai nguồn trên đã nói) |
+
+⟹ ~130 ms cho tất cả, nhanh hơn 25–100 lần, và **realtime hơn**: sổ hub đã ghi
+từ 12/08 rằng `claude agents` khai `status: idle` trong khi nhật ký vừa ghi 1
+giây trước. Chạy song song đã thử 12/08 và **chậm hơn 30%** — đừng thử lại.
+
+📌 Phải phân biệt: **sổ** (`watch:sessions` — ảnh chụp cũ hub tự cất, phải gỡ) và
+**nhật ký phiên** (`claude` đang ghi *ngay lúc này* — nguồn realtime nhất trên
+máy). Việc chính sáng nay là chuyển nút lệnh SANG nhật ký.
+
+Thứ tự: đổi nguồn `snapshot` sang `ps` + nhật ký → rồi mới gỡ `snapshot_cached`
+(20 giây, 11 chỗ gọi) và mọi chỗ trả lời bằng sổ. Gỡ đệm trước thì mỗi cú bấm
+tốn 3 giây.
+
 ## 🎯 2026-08-15 — MÀN THÔI LÀM NGUỒN CỦA LỆNH, và ba lỗi Hà bắt được trong lúc làm
 
 279 test (từ 269) · clippy 0 · fmt sạch, exit đọc trực tiếp.
@@ -50,7 +450,7 @@ Chạy nguồn mới trên nhật ký thật (`tests/commands_from_log_live.rs`,
 **mọi vế** (`;` `|` `&`). Bài học là cách TÌM RA: bộ test thuần không bắt được,
 đơn giản vì đầu vào của nó do chính tôi nghĩ ra.
 
-### Ba lỗi Hà chụp màn gửi thẳng
+### Bốn lỗi Hà chụp màn gửi thẳng
 
 **1. `/new acc3 dwork` mở nhầm tài khoản.** Nguyên văn log 02:14:29Z:
 `new_window_opened task:"[] acc3 dwork"` — `acc3` rơi vào ĐỀ BÀI, phiên mở trên
@@ -76,8 +476,27 @@ xếp chúng chung một hàng (tối đa 5).
 
 **Đo trên màn THẬT lúc 09:2x** (osascript, chỉ đọc): WIN 61223 (dwork) → 4 lựa
 chọn, parse OK — tức phép đo trên màn gốc vẫn đúng, đúng như chẩn đoán.
-⚠ Đo ra thêm: **WIN 61217 đứng ở hộp tin-thư-mục** (`1. Yes, I trust this
-folder`) từ 02:12 — cửa sổ `/terminal claude3 "tiếp dwork"` chưa ai bấm.
+(Đo ra thêm WIN 61217 đứng ở hộp tin-thư-mục từ 02:12; Hà đã tự tắt lúc 15:2x.)
+
+**3. Câu chào gọi tên thô: `👁 Đang theo phiên projects-67` khi bấm nút `[hub]`.**
+Bản chép tay THỨ TƯ của luật "tên để đọc" (ba bản trước ở `screen_report`, vá
+08-13). Câu chào có hai đường: đường NHANH đọc sổ (`session_name_from_book`, trả
+nhãn đúng từ 08-12) và đường CHẬM đọc ảnh chụp — đường chậm in `s.name` thô. Cả
+máy mở phiên ở gốc workspace nên `claude` đặt tên nào cũng `projects-xx`: đúng
+cái tên phân biệt được ÍT NHẤT trong mọi cái tên có ở đây.
+
+📌 Hai điều đáng nhớ hơn bản vá. Một: nó nằm trong một `format!` giữa một `match`
+sáu tầng, nên **không cửa nào bắt được** — nay là hàm `follow_ack_head` và có
+bài kiểm đỏ-được đứng canh. Hai: đường CHẬM là đường hay chạy nhất **ngay sau
+một lượt hubd khởi động lại** (sổ còn rỗng), tức lỗi hiện ra đúng lúc chủ máy
+hay bấm nút nhất.
+
+⚠ **Đo ra khi truy lỗi này, CHƯA điều tra:** `hubd` khởi động lại lúc 08:13:40Z
+kèm `stale_lock_removed` — tức bản trước chết mà không dọn khoá pid. Và sổ
+`watch:sessions` lúc 08:2xZ chỉ có 2 hàng (`4963b95c` tfl5, `d449b00c` hub),
+không có phiên nào trong ba phiên `/session` liệt kê lúc 02:14Z. Chưa biết là
+hậu quả của lượt khởi động lại hay là một chuyện khác. Cũng đo được:
+`telegram_poll_failed` ba lượt quanh 07:30–07:47Z.
 
 ### Còn dở — ghi đúng như vậy
 

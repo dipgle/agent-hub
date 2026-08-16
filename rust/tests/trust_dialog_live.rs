@@ -33,8 +33,9 @@ fn a_new_window_gets_past_the_trust_dialog_on_its_own() {
     let dir = cfg.workspace_root.clone();
     println!("mở phiên trống: account={account} dir={}", dir.display());
 
-    let started = hub::sessions::start_background(&cfg, "live-probe", &dir, "", Some(&account))
-        .expect("phiên mới phải chào đời — nếu hỏng ở đây, cửa sổ đang kẹt ở một hộp thoại");
+    let started =
+        hub::sessions::start_background(&cfg, "live-probe", &dir, "", Some(&account), None)
+            .expect("phiên mới phải chào đời — nếu hỏng ở đây, cửa sổ đang kẹt ở một hộp thoại");
 
     println!("id phiên mới = {}", started.session_id);
     assert!(

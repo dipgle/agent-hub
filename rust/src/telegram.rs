@@ -19,9 +19,27 @@
 //!    Hai vòng đọc song song thì chúng **ăn mất update của nhau**: một cú bấm
 //!    Xác nhận rơi vào vòng đọc lệnh sẽ biến mất, và `confirm::ask` ngồi chờ tới
 //!    hết giờ rồi kết luận "không ai bấm" — một câu sai, gửi cho đúng người vừa
-//!    bấm. Nên `Inbox` giữ `offset` và cả cờ `busy`; lúc `confirm` đang hỏi thì
-//!    vòng đọc **đứng im**, và chính `confirm` nhặt hộ tin chữ vào hàng đợi (bỏ
-//!    rơi một mệnh lệnh vì "đang bận hỏi" là một lỗi im lặng).
+//!    bấm.
+//!
+//!    🔴 **Luật này đã bị vi phạm suốt, bởi chính đoạn mã viết ra để giữ nó**
+//!    (2026-08-16). Bản cũ cho `confirm::ask` mở vòng đọc THỨ HAI và chặn vòng
+//!    này bằng cờ `busy`. Cờ ấy không chặn được gì: `hold()` bật cờ, nhưng vòng
+//!    đọc lúc ấy **đang nằm giữa một long-poll 20 giây** và không ai gọi nó về.
+//!    Nên trong tối đa 20 giây, hai vòng cùng hỏi — Telegram trả `Conflict:
+//!    terminated by other getUpdates request` cho một trong hai. Đo trên
+//!    `logs/hub.log` ngày 16/08: **11 lượt** `telegram_poll_rejected`, mỗi lượt
+//!    kèm một giấc ngủ 30 giây của vòng đọc, tức 30 giây hub điếc sau mỗi câu
+//!    hỏi xác nhận. Và cửa nguy hiểm hơn vẫn mở: cú bấm ✅ rơi vào vòng đọc lệnh
+//!    thì nó trả lời *"câu hỏi đã đóng sổ"* trong khi `confirm` vẫn đang chờ —
+//!    chưa xảy ra lần nào (`telegram_confirm_button_late` = 0), nhưng nó chưa
+//!    xảy ra vì may, không vì có gì cản.
+//!
+//!    Nay **chỉ vòng này đọc**. `confirm::ask` ĐĂNG KÝ một `nonce`
+//!    (`expect_confirm`) rồi ngồi chờ ở một cái ống; vòng đọc nhận cú bấm và
+//!    giao tận tay. Không còn cờ `busy`, không còn `hold()`, không còn chỗ thứ
+//!    hai nào gọi `getUpdates` — trừ đường lùi trong `confirm.rs` cho lúc KHÔNG
+//!    có hòm thư (CLI một lượt), và đường ấy nay tự đọc `poll_rejected` thay vì
+//!    coi một lời từ chối là "không ai bấm".
 //! 2. **Chỉ chủ máy ra lệnh được.** Cổng là `chat_id` trong `hub.env` — cùng
 //!    luật với `trust.tfl5_user_tids` của phòng chat: được ở trong phòng là
 //!    chuyện của Telegram, còn lái cái máy này là chuyện của chủ máy. Tin từ
@@ -70,14 +88,33 @@ pub struct Incoming {
 /// Hàng update chờ thợ, kèm mốc NHẬN của từng cái (để đo thời gian nằm chờ).
 type Inflight = (Mutex<VecDeque<(Value, std::time::Instant)>>, Condvar);
 
+/// Một câu hỏi xác nhận đang chờ cú bấm của chủ máy.
+struct Waiter {
+    /// Con dấu ghép câu trả lời với câu hỏi — `confirm.rs` dựng, gắn vào
+    /// `callback_data` của cả hai cái nút.
+    nonce: String,
+    /// Ống giao hàng. Gửi nguyên `callback_data` (`ok:<nonce>` / `no:<nonce>`)
+    /// chứ không phải một `bool`: chỗ hỏi mới là chỗ biết nghĩa của nó.
+    tx: std::sync::mpsc::Sender<String>,
+}
+
 /// Hòm thư Telegram dùng chung cho cả tiến trình.
 #[derive(Clone)]
 pub struct Inbox {
     queue: Arc<Mutex<VecDeque<Incoming>>>,
     /// `update_id` kế tiếp cần đọc. **Một** con dấu cho cả bot — xem luật 1.
     offset: Arc<Mutex<i64>>,
-    /// `confirm::ask` đang giữ đường đọc.
-    busy: Arc<AtomicBool>,
+    /// Những câu hỏi xác nhận đang chờ cú bấm: `nonce` → cái ống giao hàng.
+    ///
+    /// Đây là chỗ luật 1 được giữ THẬT. `confirm::ask` không mở vòng đọc riêng
+    /// nữa; nó để lại một `nonce` ở đây rồi ngồi chờ. Vòng đọc — nơi duy nhất
+    /// hỏi `getUpdates` — nhận `callback_query`, thấy `data` khớp một `nonce`
+    /// đang chờ thì giao thẳng, không đem đi xử lý như một cái nút thường.
+    ///
+    /// `Vec` chứ không phải một ô: hai câu hỏi chồng nhau thì một ô sẽ **ghi đè**
+    /// câu trước, và câu bị ghi đè im lặng ngồi tới hết hạn. Hiếm không phải là
+    /// không bao giờ, mà cái giá của `Vec` ở đây bằng không.
+    waiting: Arc<Mutex<Vec<Waiter>>>,
     /// Update đã NHẬN nhưng chưa xử lý: vòng đọc đẩy vào, luồng thợ lấy ra.
     ///
     /// Vì sao phải có, và vì sao đúng MỘT thợ (2026-08-14): đường đọc
@@ -540,6 +577,112 @@ pub fn deep_link(payload: &str) -> Option<String> {
     Some(format!("https://t.me/{bot}?start={payload}"))
 }
 
+/// Thứ Telegram nói nó VỪA HIỂN THỊ — bản dịch của chính nó cho chuỗi ta gửi.
+///
+/// Đây là câu trả lời cho *"cách bạn nhìn là gì"*: `sendMessage` trả về đối
+/// tượng Message, và trong đó `text` là chữ ĐÃ parse (không còn thẻ) còn
+/// `entities` là các định dạng Telegram đã dựng. Nên "link có nằm đúng sau dòng
+/// lệnh không" đo được bằng số, từ máy này, không cần ai cầm điện thoại.
+/// Một liên kết Telegram đã dựng, kèm CHỖ NÓ ĐỨNG.
+///
+/// 🔴 Chỗ đứng phải là một con số, không phải cái nhãn. Bản trước chỉ giữ
+/// `(nhãn, url)` và đi tìm lại vị trí bằng `text.find(nhãn)` — đúng chừng nào
+/// mọi nhãn khác nhau, và **sai câm** ngay khi hai nút dùng chung một icon: năm
+/// nút `☑` của một hộp chọn đều trả về vị trí của cái đầu tiên, nên phép đo
+/// tuyên bố cả năm nằm trên cùng một dòng. Mã sản phẩm chèn đúng, phép đo nói
+/// sai — và phép đo là thứ ta tin để nói "đã bám đúng dòng".
+///
+/// `at` là chỉ số bắt đầu trong `text`, đếm bằng **đơn vị mã UTF-16** — đúng
+/// đơn vị Telegram phát ra, giữ nguyên không quy đổi để không tự thêm một phép
+/// dịch có thể sai.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    /// Chữ hiển thị của liên kết.
+    pub label: String,
+    pub url: String,
+    /// Vị trí bắt đầu, tính bằng đơn vị mã UTF-16 của `Sent::text`.
+    pub at: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Sent {
+    pub message_id: i64,
+    /// Chữ như người đọc thấy — thẻ đã thành định dạng, không còn trong chữ.
+    pub text: String,
+    pub links: Vec<Link>,
+}
+
+impl Sent {
+    pub fn read(v: &Value) -> Sent {
+        let m = v.get("result").cloned().unwrap_or_else(|| json!({}));
+        let text = m
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        // ⚠ `offset`/`length` của Telegram đếm bằng **đơn vị mã UTF-16**, không
+        // phải ký tự và không phải byte (Bot API, mục MessageEntity). Cắt bằng
+        // `chars()` sẽ lệch ngay khi tin có emoji — mà tin nào của hub cũng có
+        // emoji. Nên cắt trên chính UTF-16 rồi dựng chuỗi lại.
+        let u: Vec<u16> = text.encode_utf16().collect();
+        let mut links = Vec::new();
+        for e in m
+            .get("entities")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            if e.get("type").and_then(Value::as_str) != Some("text_link") {
+                continue;
+            }
+            let (Some(off), Some(len), Some(url)) = (
+                e.get("offset").and_then(Value::as_u64),
+                e.get("length").and_then(Value::as_u64),
+                e.get("url").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            let (a, b) = (off as usize, (off + len) as usize);
+            if b > u.len() {
+                continue;
+            }
+            links.push(Link {
+                label: String::from_utf16_lossy(&u[a..b]),
+                url: url.to_string(),
+                at: a,
+            });
+        }
+        Sent {
+            message_id: m.get("message_id").and_then(Value::as_i64).unwrap_or(0),
+            text,
+            links,
+        }
+    }
+
+    /// Chữ đứng NGAY TRƯỚC liên kết thứ `i` — thứ trả lời "link bám vào đâu".
+    ///
+    /// Cắt bằng `Link::at`, KHÔNG bằng `text.find(nhãn)`: xem chú thích của
+    /// [`Link`]. Cắt lại trên UTF-16 vì đó là đơn vị của `at` — quy đổi sang chỉ
+    /// số byte là thêm một phép dịch nữa để sai.
+    pub fn before_link(&self, i: usize) -> String {
+        let Some(l) = self.links.get(i) else {
+            return String::new();
+        };
+        let u: Vec<u16> = self.text.encode_utf16().collect();
+        let at = l.at.min(u.len());
+        // `rsplit('\n')`, không phải `lines().next_back()`: cái sau nuốt dấu
+        // xuống dòng ở cuối, nên một liên kết ĐỨNG ĐẦU DÒNG lại khai là nó bám
+        // vào dòng TRƯỚC. Nút `⌫ xoá ô nhập` cố tình xuống hẳn một dòng, nên ca
+        // ấy có thật; câu trả lời đúng ở đó là "chẳng có chữ nào trước nó".
+        String::from_utf16_lossy(&u[..at])
+            .rsplit('\n')
+            .next()
+            .unwrap_or_default()
+            .trim_end()
+            .to_string()
+    }
+}
+
 /// Chữ thường → chữ an toàn cho `parse_mode=HTML`.
 ///
 /// Telegram chỉ đòi ba ký tự này (tài liệu Bot API, mục *HTML style*) — nhẹ hơn
@@ -586,7 +729,7 @@ impl Inbox {
         let inbox = Inbox {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             offset: Arc::new(Mutex::new(0)),
-            busy: Arc::new(AtomicBool::new(false)),
+            waiting: Arc::new(Mutex::new(Vec::new())),
             inflight: Arc::new((Mutex::new(VecDeque::new()), Condvar::new())),
             inline: Arc::new(AtomicBool::new(false)),
             token,
@@ -962,10 +1105,25 @@ impl Inbox {
             .canonicalize()
             .map_err(|e| format!("không mở được: {e}"))?;
         let root_real = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-        if !real.starts_with(&root_real) {
+        // 🔴 CÙNG MỘT LUẬT VỚI LÚC DỰNG NÚT (2026-08-16). Cửa này từng hẹp hơn —
+        // chỉ nhận tệp trong thư mục PHIÊN — trong khi cửa lúc dựng nút nay nhận
+        // cả workspace. Hai cửa lệch nhau thì cái nút mọc ra rồi bấm vào báo
+        // "nằm ngoài cây làm việc": đúng thứ chú thích ở `remember_files` gọi
+        // tên, chỉ là hỏng theo chiều ngược lại.
+        //
+        // Hàng rào vẫn thật: `~/.ssh`, `~/Library`, `/etc` nằm ngoài workspace
+        // nên vẫn bị chặn, và mọi cửa còn lại (quét rò, trần dung lượng, phải là
+        // file chữ) không đổi.
+        let ws = self
+            .cfg
+            .workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| self.cfg.workspace_root.clone());
+        if !real.starts_with(&root_real) && !real.starts_with(&ws) {
             return Err(format!(
-                "nằm ngoài cây làm việc ({}) — hub không gửi",
-                root_real.display()
+                "nằm ngoài chỗ làm việc ({} · {}) — hub không gửi",
+                root_real.display(),
+                ws.display()
             ));
         }
         let meta = std::fs::metadata(&real).map_err(|e| e.to_string())?;
@@ -1041,10 +1199,53 @@ impl Inbox {
         }
     }
 
-    /// `confirm::ask` mượn đường đọc: vòng nền đứng im cho tới khi trả.
-    pub fn hold(&self) -> Hold<'_> {
-        self.busy.store(true, Ordering::SeqCst);
-        Hold { inbox: self }
+    /// Đăng ký chờ cú bấm của MỘT câu hỏi xác nhận.
+    ///
+    /// Gọi TRƯỚC khi gửi câu hỏi đi, không phải sau: khoảng giữa "đã gửi" và
+    /// "bắt đầu chờ" là một cửa sổ mất cú bấm, và trên điện thoại thì cửa sổ ấy
+    /// không hề hẹp — tin hiện ra là ngón tay đã ở đó.
+    pub fn expect_confirm(&self, nonce: &str) -> ConfirmWait<'_> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        {
+            let mut w = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
+            w.push(Waiter {
+                nonce: nonce.to_string(),
+                tx,
+            });
+        }
+        ConfirmWait {
+            inbox: self,
+            nonce: nonce.to_string(),
+            rx,
+        }
+    }
+
+    /// Giao một cú bấm cho câu hỏi đang chờ nó. `true` = đã có người nhận.
+    ///
+    /// Không tìm thấy ai chờ ⟹ `false`, và chỗ gọi nói thẳng "câu hỏi đã đóng
+    /// sổ". Đó là câu ĐÚNG khi tới muộn — nhưng chỉ đúng vì tới đây nghĩa là
+    /// thật sự không còn ai chờ, chứ không phải vì hai vòng đọc giành nhau.
+    fn deliver_confirm(&self, data: &str) -> bool {
+        let mut w = self.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(i) = w.iter().position(|x| data.ends_with(&x.nonce)) else {
+            return false;
+        };
+        // Ống đứt = chỗ hỏi đã bỏ đi (hết hạn). Vẫn tính là "đã có người nhận"
+        // thì sai — nói ra rồi để chỗ gọi trả lời "đã đóng sổ".
+        match w[i].tx.send(data.to_string()) {
+            Ok(()) => {
+                w.remove(i);
+                true
+            }
+            Err(_) => {
+                w.remove(i);
+                logging::warn(
+                    "telegram_confirm_waiter_gone",
+                    json!({ "why": "câu hỏi hết hạn ngay trước cú bấm" }),
+                );
+                false
+            }
+        }
     }
 
     pub fn offset_now(&self) -> i64 {
@@ -1187,10 +1388,11 @@ impl Inbox {
         // bấm tồn đọng thì cùng lắm rơi vào sổ đã đổi và tự trả lời "lệnh ấy đã
         // cũ".
         loop {
-            if self.busy.load(Ordering::SeqCst) {
-                std::thread::sleep(Duration::from_millis(400));
-                continue;
-            }
+            // 🔴 KHÔNG còn cửa "đứng im nhường `confirm`". Xem luật 1 ở đầu tệp:
+            // cờ ấy bật được nhưng không gọi về được một long-poll đang chạy dở,
+            // nên nó chỉ tạo ra cảm giác an toàn cộng 11 lượt `Conflict` một
+            // ngày. Vòng này đọc LIÊN TỤC, và cú bấm xác nhận được giao tận tay
+            // trong `handle_update` (`deliver_confirm`).
             let url = format!(
                 "{}?offset={}&timeout=20",
                 self.api("getUpdates"),
@@ -1401,15 +1603,22 @@ impl Inbox {
                 logging::warn("telegram_button_from_stranger", json!({ "data": data }));
                 return;
             }
+            // Cú bấm XÁC NHẬN đi trước mọi thứ khác: nó thuộc về một câu hỏi
+            // đang có người ngồi chờ, và người ấy đang đếm ngược. Giao được thì
+            // xong việc ở đây — không đẩy vào hàng lệnh, vì `ok:`/`no:` không
+            // phải một route (xem `callback_to_command`).
+            if (data.starts_with("ok:") || data.starts_with("no:")) && self.deliver_confirm(data) {
+                logging::info("telegram_confirm_delivered", json!({}));
+                return;
+            }
             // Nút = phím tắt của một route đã có (xem `callback_to_command`):
             // `key:` trả lời hộp chọn, `sess:` chọn phiên từ danh sách.
             if let Some(cmd) = callback_to_command(data) {
                 self.push_text(&cmd);
                 return;
             }
-            // Nút xác nhận (`ok:`/`no:`) chỉ có nghĩa khi `confirm::ask` đang
-            // chờ — mà lúc ấy vòng này đứng im. Tới được đây nghĩa là một cú bấm
-            // MUỘN, sau khi câu hỏi đã đóng sổ: nói thẳng, đừng im.
+            // Tới được đây với `ok:`/`no:` nghĩa là KHÔNG còn ai chờ nó: câu hỏi
+            // đã hết hạn hoặc đã trả lời. Nói thẳng, đừng im.
             if data.starts_with("ok:") || data.starts_with("no:") {
                 logging::info(
                     "telegram_confirm_button_late",
@@ -1489,13 +1698,13 @@ impl Inbox {
             // đã MỒ CÔI từ trước đó: `remember_quick` nay chỉ phát `run:` hoặc
             // `upgrade`, mỗi lệnh đúng một nút — có test khoá đúng chuyện ấy —
             // nên không còn chỗ nào phát ra loại nút này để mà bấm.
-            if let Some(n) = data
-                .strip_prefix("run:")
-                .and_then(|n| n.parse::<usize>().ok())
-            {
+            // Mã của nút, KHÔNG phải số thứ tự — xem `pipeline::quick_token`.
+            // Hà 2026-08-16: *"nó lại nhận cái cuối cùng trong phiên chat"*.
+            if let Some(n) = data.strip_prefix("run:") {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
+                    .map(|(sid, c)| (sid, c.line))
                 {
                     Some((sid, line)) => {
                         logging::info(
@@ -1576,13 +1785,13 @@ impl Inbox {
             // biệt được "gợi ý mờ" (ô rỗng thật) với "chữ đã gõ" (ô có chữ) —
             // màn đọc về không mang màu. Không xoá thì ca thứ hai thành
             // `pushpush`.
-            if let Some(n) = data
-                .strip_prefix("box:")
-                .and_then(|n| n.parse::<usize>().ok())
-            {
+            // Mã của nút, KHÔNG phải số thứ tự — xem `pipeline::quick_token`.
+            // Hà 2026-08-16: *"nó lại nhận cái cuối cùng trong phiên chat"*.
+            if let Some(n) = data.strip_prefix("box:") {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
+                    .map(|(sid, c)| (sid, c.line))
                 {
                     Some((sid, line)) => {
                         logging::info(
@@ -1613,13 +1822,13 @@ impl Inbox {
             // dòng lệnh cho phiên chạy; `say:` gõ nguyên câu như
             // chủ máy tự gõ. Dùng cho nút "✅ Làm đi" khi phiên đang mời một
             // tiếng "ừ" (Hà 2026-08-13).
-            if let Some(n) = data
-                .strip_prefix("say:")
-                .and_then(|n| n.parse::<usize>().ok())
-            {
+            // Mã của nút, KHÔNG phải số thứ tự — xem `pipeline::quick_token`.
+            // Hà 2026-08-16: *"nó lại nhận cái cuối cùng trong phiên chat"*.
+            if let Some(n) = data.strip_prefix("say:") {
                 match crate::db::Db::open(&self.cfg.db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
+                    .map(|(sid, c)| (sid, c.line))
                 {
                     Some((sid, line)) => {
                         logging::info(
@@ -1731,7 +1940,16 @@ impl Inbox {
                         // khi phiên đã chạy tiếp kể từ lúc tin ấy gửi đi, và ở
                         // đây thứ đúng là đoạn chữ đang hiện dưới mắt anh.
                         let body = format!("{text}{tail}");
-                        let cmds = crate::keys::commands_in_report(&text, 3);
+                        // Chữ trên MÀN không mang thư mục nào — nút dựng từ đây
+                        // để `cwd` rỗng và `root_for_command` rơi về gốc dự án.
+                        let cmds: Vec<crate::sessions::Cmd> =
+                            crate::keys::commands_in_report(&text, 3)
+                                .into_iter()
+                                .map(|line| crate::sessions::Cmd {
+                                    line,
+                                    cwd: String::new(),
+                                })
+                                .collect();
                         let mut btns = db
                             .as_ref()
                             .map(|db| {
@@ -1749,7 +1967,7 @@ impl Inbox {
                         crate::pipeline::say_with_command_icons(
                             self,
                             &body,
-                            &cmds,
+                            &crate::sessions::lines_of(&cmds),
                             &btns,
                             "telegram_ack_failed",
                         );
@@ -1856,24 +2074,73 @@ impl Inbox {
     /// thẻ mình cố ý — ở đây là `<a href="…">▶️</a>` và `<code>`. Không gột
     /// Markdown: chữ đã qua tay chỗ gọi rồi, gột thêm là sửa cái mình vừa dựng.
     pub fn send_html(&self, html: &str) -> Result<(), String> {
+        self.send_html_buttons(html, &[])
+    }
+
+    /// Như [`send_html`], và **bàn phím đi cùng MỘT tin**.
+    ///
+    /// 🔴 Hà 2026-08-16: *"trước khi gửi đã biết từng phần rồi đương nhiên biết
+    /// luôn khối lệnh nên chèn luôn link vào khối lệnh rồi mới ghép tất cả gửi
+    /// đi"*. Bản trước gửi chữ+icon một tin, rồi bộ nút một tin nữa mang mỗi
+    /// chữ "⤵" — hai tiếng chuông cho một câu trả lời, và cái tin thứ hai thì
+    /// không nói gì cả. Telegram nhận `parse_mode` và `reply_markup` trong CÙNG
+    /// một lời gọi; không có lý do kỹ thuật nào để tách, chỉ là chưa ai ghép.
+    pub fn send_html_buttons(
+        &self,
+        html: &str,
+        buttons: &[(String, String)],
+    ) -> Result<(), String> {
+        self.send_html_report(html, buttons).map(|_| ())
+    }
+
+    /// Như [`send_html_buttons`], và TRẢ VỀ thứ Telegram nói nó vừa hiển thị.
+    ///
+    /// 🔴 Hà 2026-08-16: *"Ko nhìn thấy sao gửi tele tôi lại thấy, cách bạn nhìn
+    /// là gì"* — hỏi sau khi tôi khai một tính năng là "chưa nghiệm thu được vì
+    /// phải xem trên điện thoại".
+    ///
+    /// Câu ấy đúng, và đây là cách nhìn: `sendMessage` **trả về đối tượng
+    /// Message**, trong đó `entities` là bản dịch của Telegram cho chuỗi HTML
+    /// vừa gửi — mỗi liên kết một mục `text_link` kèm `offset`/`length`/`url`,
+    /// tính trên chữ ĐÃ parse. Nên "cái link có nằm đúng sau dòng lệnh không"
+    /// là một câu hỏi ĐO ĐƯỢC từ máy này, chặt hơn nhìn bằng mắt: mắt thấy màu
+    /// xanh, `entities` nói đúng ký tự thứ mấy.
+    ///
+    /// Và nó ghi log, không chỉ trả về: "gửi được tin" với "tin ấy có link" là
+    /// hai chuyện khác nhau — đúng lý do `telegram_buttons_sent` đã có cho nút.
+    pub fn send_html_report(
+        &self,
+        html: &str,
+        buttons: &[(String, String)],
+    ) -> Result<Sent, String> {
         let client = self.client().ok_or("không dựng được HTTP client")?;
+        let mut body = json!({
+            "chat_id": self.chat_id,
+            "text": html,
+            "parse_mode": "HTML",
+            // Xem trước liên kết sẽ nở một khung to đùng dưới mỗi tin có
+            // icon — đúng thứ không ai muốn khi cái link ấy chỉ là một nút
+            // trá hình.
+            "link_preview_options": { "is_disabled": true },
+        });
+        if !buttons.is_empty() {
+            body["reply_markup"] = json!({ "inline_keyboard": Self::keyboard_rows(buttons) });
+        }
         let r = client
             .post(self.api("sendMessage"))
-            .json(&json!({
-                "chat_id": self.chat_id,
-                "text": html,
-                "parse_mode": "HTML",
-                // Xem trước liên kết sẽ nở một khung to đùng dưới mỗi tin có
-                // icon — đúng thứ không ai muốn khi cái link ấy chỉ là một nút
-                // trá hình.
-                "link_preview_options": { "is_disabled": true },
-            }))
+            .json(&body)
             .send()
             .map_err(|e| e.to_string())?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg, &v);
-            Ok(())
+            let sent = Sent::read(&v);
+            logging::info(
+                "telegram_html_sent",
+                json!({ "message_id": sent.message_id, "text_links": sent.links.len(),
+                        "buttons": buttons.len(), "chars": sent.text.chars().count() }),
+            );
+            Ok(sent)
         } else {
             Err(v
                 .get("description")
@@ -2096,14 +2363,37 @@ pub fn text_sent_at(u: &Value) -> Option<i64> {
         .and_then(Value::as_i64)
 }
 
-/// Quyền đọc đang được `confirm::ask` mượn; trả lại khi rời tầm.
-pub struct Hold<'a> {
+/// Chỗ ngồi chờ một cú bấm xác nhận. Rời tầm là tự rút tên khỏi sổ chờ.
+pub struct ConfirmWait<'a> {
     inbox: &'a Inbox,
+    nonce: String,
+    rx: std::sync::mpsc::Receiver<String>,
 }
 
-impl Drop for Hold<'_> {
+impl ConfirmWait<'_> {
+    /// Chờ tới hạn. `None` = hết giờ, KHÔNG phải "đã bấm Huỷ" — hai thứ ấy khác
+    /// nhau ở chỗ gọi (`Verdict::TimedOut` vs `Verdict::Declined`).
+    pub fn wait(&self, upto: Duration) -> Option<String> {
+        match self.rx.recv_timeout(upto) {
+            Ok(data) => Some(data),
+            // Ống đứt trước hạn chỉ xảy ra khi vòng đọc chết. Không nuốt: từ
+            // điện thoại nhìn ra, "kênh chết" và "không ai bấm" giống hệt nhau.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                logging::error(
+                    "telegram_confirm_channel_dead",
+                    json!({ "why": "vòng đọc Telegram không còn giao được cú bấm" }),
+                );
+                None
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+        }
+    }
+}
+
+impl Drop for ConfirmWait<'_> {
     fn drop(&mut self) {
-        self.inbox.busy.store(false, Ordering::SeqCst);
+        let mut w = self.inbox.waiting.lock().unwrap_or_else(|e| e.into_inner());
+        w.retain(|x| x.nonce != self.nonce);
     }
 }
 
@@ -2141,4 +2431,69 @@ fn attachment_of(msg: &Value) -> Option<(String, String)> {
         }
     }
     None
+}
+
+/// Sổ chờ xác nhận — kiểm ở đây chứ không ở `tests/`, vì nó đọc ruột của
+/// `Inbox` (trường riêng), và chính cái ruột ấy là thứ luật 1 dựa vào.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Inbox` trần, không luồng nào chạy: đủ để hỏi sổ chờ trả lời thế nào.
+    fn bare() -> Inbox {
+        Inbox {
+            queue: Arc::new(Mutex::new(VecDeque::new())),
+            offset: Arc::new(Mutex::new(0)),
+            waiting: Arc::new(Mutex::new(Vec::new())),
+            inflight: Arc::new((Mutex::new(VecDeque::new()), Condvar::new())),
+            inline: Arc::new(AtomicBool::new(false)),
+            token: "x".into(),
+            chat_id: "1".into(),
+            cfg: Arc::new(Config::default()),
+            waker: None,
+        }
+    }
+
+    #[test]
+    fn a_press_reaches_the_question_that_is_waiting_for_it() {
+        let i = bare();
+        let w = i.expect_confirm("777");
+        assert!(i.deliver_confirm("ok:777"), "phải giao được cho người chờ");
+        assert_eq!(w.wait(Duration::from_secs(1)).as_deref(), Some("ok:777"));
+    }
+
+    /// Cú bấm của một câu hỏi KHÁC không được đánh thức câu này — đây là chỗ
+    /// `nonce` làm việc, và là lý do sổ chờ là `Vec` chứ không phải một ô.
+    #[test]
+    fn a_press_for_another_question_is_not_delivered_here() {
+        let i = bare();
+        let _a = i.expect_confirm("111");
+        let b = i.expect_confirm("222");
+        assert!(i.deliver_confirm("no:222"));
+        assert_eq!(b.wait(Duration::from_secs(1)).as_deref(), Some("no:222"));
+        // Câu 111 vẫn đang chờ, không bị cú bấm kia đóng sổ hộ.
+        assert!(i.deliver_confirm("ok:111"));
+    }
+
+    /// Hết hạn rồi thì cú bấm KHÔNG có ai nhận — và `handle_update` phải nghe ra
+    /// điều đó để nói "câu hỏi đã đóng sổ" thay vì im lặng nuốt.
+    #[test]
+    fn after_the_question_closes_a_press_finds_nobody() {
+        let i = bare();
+        {
+            let _w = i.expect_confirm("999");
+        }
+        assert!(
+            !i.deliver_confirm("ok:999"),
+            "rời tầm là phải tự rút khỏi sổ chờ"
+        );
+    }
+
+    /// Hết giờ trả `None`, và `None` KHÔNG được lẫn với "đã bấm Huỷ".
+    #[test]
+    fn waiting_out_the_clock_is_not_a_no() {
+        let i = bare();
+        let w = i.expect_confirm("555");
+        assert_eq!(w.wait(Duration::from_millis(30)), None);
+    }
 }

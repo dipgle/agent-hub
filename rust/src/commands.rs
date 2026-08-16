@@ -61,7 +61,7 @@ pub const ROUTES: &[Route] = &[
         kind: CommandKind::Session,
         arg: Arg::Rest,
         usage: "[id]",
-        help: "Trống = danh sách phiên; kèm id để theo; '-' để thôi theo",
+        help: "Trống = cửa sổ đang chạy CLI; kèm id để theo; '-' để thôi theo",
         listed: true,
     },
     // 🔴 Hà 2026-08-14: *"trong ds lệnh bỏ sessions đi vì lệnh session trống
@@ -104,18 +104,12 @@ pub const ROUTES: &[Route] = &[
         // dòng này trong menu Telegram chỉ gửi đúng `/new`, nên một lệnh
         // `listed: true` mà đòi tham số là một lệnh không bấm được.
         arg: Arg::Rest,
-        usage: "[-a acc] [-s dự án] [việc]",
-        help: "Mở cửa sổ Terminal mới (kèm việc, hoặc để trống rồi nói sau)",
+        // 🔴 Hà 2026-08-15: *"lệnh sẽ như thế này `/new [acc] [text]`"*. Mỗi
+        // tham số thêm một BƯỚC, và đó là cả cấu trúc: trống = cửa sổ trần ·
+        // kèm tài khoản = dựng CLI · kèm chữ = gõ đề bài vào.
+        usage: "[acc] [việc]",
+        help: "Trống = cửa sổ trần · +acc = dựng CLI · +việc = gõ luôn đề bài",
         listed: true,
-    },
-    Route {
-        name: "tell",
-        aliases: &["noi"],
-        kind: CommandKind::Tell,
-        arg: Arg::Custom,
-        usage: "<nội dung>",
-        help: "Nói tiếp vào phiên nền đã dừng",
-        listed: false,
     },
     Route {
         name: "type",
@@ -197,8 +191,8 @@ pub const ROUTES: &[Route] = &[
         // 2026-08-15). `RestRequired` trả `None` cho `/terminal` trơn — tức gõ
         // đúng tên một route rồi nhận lại sự im lặng.
         arg: Arg::Rest,
-        usage: "[dòng lệnh]",
-        help: "Xem cửa sổ Terminal đang mở · kèm lệnh thì mở cửa sổ mới (có tty)",
+        usage: "",
+        help: "Liệt kê cửa sổ Terminal trần (không chạy gì). Mở mới: /new",
         listed: true,
     },
     Route {

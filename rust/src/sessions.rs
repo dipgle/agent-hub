@@ -578,11 +578,16 @@ pub fn project_dot(folder: &str) -> &'static str {
 /// 🔴 Hà 2026-08-12: *"tất cả các lệnh từ tele sao không xử lý luôn lại phải
 /// chờ, rất lâu mới có phản hồi"* và *"chát từ tele toàn báo không thấy phiên"*.
 /// Đo: `/type` **134 giây** rồi trả *"⚠ không thấy phiên"* — về đúng cái phiên
-/// đang gõ dòng này. Cả hai là MỘT nguyên nhân: `/type`·`/key`·`/shot` đều gọi
-/// `snapshot_cached`, mà một lượt dựng ảnh chụp là ba lần spawn `claude` (279
-/// MB), và máy đang **swap 12,2/13,3 GB** ⟹ 15–92 giây một lượt, hết giờ thì
-/// danh sách về THIẾU và "không có trong danh sách" bị đọc thành "không tồn
-/// tại" (đúng lỗi `Look::Blind` ở một chỗ mới).
+/// đang gõ dòng này. Cả hai là MỘT nguyên nhân: `/type`·`/key`·`/shot` đều dựng
+/// lại ảnh chụp, mà hồi ấy một lượt dựng là ba lần spawn `claude` (279 MB), và
+/// máy đang **swap 12,2/13,3 GB** ⟹ 15–92 giây một lượt, hết giờ thì danh sách
+/// về THIẾU và "không có trong danh sách" bị đọc thành "không tồn tại" (đúng
+/// lỗi `Look::Blind` ở một chỗ mới).
+///
+/// ⚠ Cái GIÁ ấy đã đi (2026-08-15, `list_account_books` đọc tệp thay vì spawn),
+/// nhưng đường đi này thì GIỮ, và không phải vì tiếc mã: nó trả lời bằng **sổ +
+/// `ps`**, tức không phụ thuộc vào việc CLI có kịp ghi sổ hay không, và nó là
+/// đường duy nhất còn đứng khi ảnh chụp về thiếu.
 ///
 /// Vì sao sổ là đủ, mà trước đó tôi nói là KHÔNG đủ: một `tty` nhớ sẵn thì
 /// không đủ (tty được dùng lại — cửa sổ ấy có thể đã là của phiên khác), nhưng
@@ -780,41 +785,195 @@ pub const DENIED_TOOLS: [&str; 17] = [
 /// `(host, tty)` — tty đi kèm vì đó là chìa ghép phiên với cửa sổ Terminal
 /// (`keys::window_of`). Tính rồi vứt đi thì mỗi lần cần lại phải gọi `ps` lần
 /// nữa, trên đúng con số vừa đọc xong.
-fn host_of(pid: i64, kind: &str) -> (String, String) {
-    if pid <= 0 {
-        // Background rows come back with pid 0 once stopped; `claude agents`
-        // keeps listing them. Both dead rows seen on 2026-08-09 were exactly
-        // this — stopped on 08-07, still on the list two days later.
-        return ("dead".into(), String::new());
-    }
-    let out = run(
-        "ps",
-        &["-p", &pid.to_string(), "-o", "tty=,command="],
-        RunOpts {
-            timeout: Some(Duration::from_secs(5)),
-            ..Default::default()
-        },
-    );
-    let cmd = match out {
-        Ok(r) if r.code == Some(0) => r.stdout,
-        // `ps` exits non-zero when the pid is gone — that is the answer, not a
-        // failure. A spawn error is different: say "unknown" rather than
-        // claiming a session is dead on the strength of a broken probe.
-        Ok(_) => return ("dead".into(), String::new()),
-        Err(e) => {
+#[derive(Debug, Clone, Default)]
+struct Proc {
+    ppid: i64,
+    tty: String,
+    command: String,
+}
+
+/// Mọi tiến trình trên máy, đọc MỘT LẦN cho cả ảnh chụp.
+///
+/// Trước lượt 2026-08-15 đây là hai phép đo tách rời và cả hai đều tính theo
+/// hàng: `host_of` gọi `ps -p <pid>` **một lần cho mỗi phiên**, `parent_map`
+/// gọi thêm một lượt `ps -eo pid=,ppid=` nữa. Sáu phiên ⟹ bảy lần dựng tiến
+/// trình để hỏi cùng một bảng. Đo trên máy này: một lượt `ps -eo` **49 ms**,
+/// đọc cả bảng — nên gọi một lần rồi tra là rẻ hơn, và quan trọng hơn: **cả
+/// ảnh chụp đọc CÙNG một khoảnh khắc**. Bảy lượt hỏi rải ra là bảy sự thật
+/// khác nhau về một cái cây đang động, và pid thì được dùng lại.
+#[derive(Debug, Default)]
+struct Procs {
+    by_pid: HashMap<i64, Proc>,
+    /// `false` = **chưa hỏi được**, khác hẳn "không có tiến trình nào".
+    /// Cùng một luật với `SessionsSnapshot::blind` (luật 11b): một phép đo hỏng
+    /// không phải một sự thật về thế giới, nên nó không được đọc thành "đã chết".
+    ok: bool,
+}
+
+impl Procs {
+    fn read() -> Procs {
+        let out = run(
+            "ps",
+            &["-eo", "pid=,ppid=,tty=,command="],
+            RunOpts {
+                timeout: Some(Duration::from_secs(10)),
+                ..Default::default()
+            },
+        );
+        let stdout = match out {
+            Ok(r) if r.code == Some(0) => r.stdout,
+            Ok(r) => {
+                logging::warn("ps_table_failed", json!({ "code": r.code }));
+                return Procs::default();
+            }
+            Err(e) => {
+                logging::warn("ps_table_failed", json!({ "err": e.to_string() }));
+                return Procs::default();
+            }
+        };
+        let mut by_pid = HashMap::new();
+        let mut unparsed = 0usize;
+        for line in stdout.lines() {
+            match parse_ps_row(line) {
+                Some((pid, p)) => {
+                    by_pid.insert(pid, p);
+                }
+                None if line.trim().is_empty() => {}
+                None => unparsed += 1,
+            }
+        }
+        if unparsed > 0 {
+            // Đọc hụt một dòng `ps` nghĩa là một phiên sống bị đọc thành đã
+            // chết — không được im (luật 3).
             logging::warn(
-                "session_host_probe_failed",
-                json!({ "pid": pid, "err": e.to_string() }),
+                "ps_row_unparsed",
+                json!({ "count": unparsed, "read": by_pid.len(),
+                        "why": "dòng `ps` không tách được — phiên mang pid ấy sẽ đọc ra 'đã tắt'" }),
             );
+        }
+        Procs { by_pid, ok: true }
+    }
+
+    /// Phiên này có đang chạy một lệnh shell KHÔNG — hỏi cây tiến trình.
+    ///
+    /// 🔴 Hà 2026-08-16, ảnh chụp `/shot` của `[AI/tfl5]`: *"Rõ ràng dưới cùng
+    /// có shell đang chạy, nhưng ở danh sách phiên lại báo đã dừng"*. Trên màn:
+    /// `✳ Churned for 12m 0s · 1 shell still running`.
+    ///
+    /// Vì sao phép đo cũ đọc sai, và nó sai một cách có hệ thống: "đang làm
+    /// việc" suy từ **nhật ký vừa lớn lên chưa** — mà một phiên đang chờ một
+    /// lệnh 12 phút thì **không ghi một dòng nào** trong suốt 12 phút ấy. Nó
+    /// càng bận thì trông càng rảnh. Và cửa đọc-màn (`activity_cached`) thì đặt
+    /// SAU `row.working`, nên nó không bao giờ tới lượt: hub không hỏi màn vì
+    /// nó đã tự kết luận là phiên rảnh.
+    ///
+    /// Dấu hiệu đo được, miễn phí (bảng `ps` đã đọc sẵn): công cụ Bash của
+    /// `claude` chạy lệnh bằng một tiến trình con
+    /// `/bin/zsh -c source …/shell-snapshots/snapshot-zsh-*.sh`. Đo đúng lúc Hà
+    /// hỏi: `pid 68832, ppid 10716` — 10716 chính là phiên tfl5. Con MCP
+    /// (`project-agent`, `node`) sống suốt phiên nên không dùng được; con
+    /// shell-snapshot thì CHỈ tồn tại trong lúc một lệnh đang chạy.
+    fn running_shell(&self, pid: i64) -> bool {
+        if pid <= 0 || !self.ok {
+            return false;
+        }
+        self.by_pid
+            .values()
+            .any(|p| p.ppid == pid && p.command.contains("shell-snapshots"))
+    }
+
+    /// Where a live session is hosted, decided by the process behind its pid.
+    fn host_of(&self, pid: i64, kind: &str) -> (String, String) {
+        if pid <= 0 {
+            // Background rows come back with pid 0 once stopped; the CLI's books
+            // keep listing them. Both dead rows seen on 2026-08-09 were exactly
+            // this — stopped on 08-07, still on the list two days later.
+            return ("dead".into(), String::new());
+        }
+        if !self.ok {
+            // Say "unknown" rather than claiming a session is dead on the
+            // strength of a probe that never ran.
             return ("unknown".into(), String::new());
         }
-    };
-    // `ps -o tty=,command=` in ra tty rồi mới tới dòng lệnh; tty là từ đầu tiên.
-    let (tty, cmd) = match cmd.trim_start().split_once(char::is_whitespace) {
-        Some((t, rest)) => (t, rest),
-        None => ("??", cmd.as_str()),
-    };
-    (classify_host(cmd, kind, tty).to_string(), tty.to_string())
+        let Some(p) = self.by_pid.get(&pid) else {
+            // A pid that answers nothing at all is a row the books still list
+            // for a process that is gone.
+            return ("dead".into(), String::new());
+        };
+        // 🔴 **pid được DÙNG LẠI** — cùng một họ với `is_real_tty` (luật 11b).
+        // Sổ `sessions/<pid>.json` chỉ biến mất khi CLI thoát tử tế; một phiên
+        // bị `kill -9` để lại tệp, macOS cấp lại con số ấy cho tiến trình khác,
+        // và hàng ấy đọc ra "còn sống" kèm **tty của người khác** — mà `/type`
+        // thì gõ theo tty. Nên hỏi thêm một câu rẻ: tiến trình đang giữ pid này
+        // có phải chính CLI không.
+        if !is_claude_process(&p.command) {
+            logging::warn(
+                "session_pid_reused",
+                json!({ "pid": pid, "cmd": truncate(&p.command, 120),
+                        "why": "sổ phiên trỏ vào một pid nay thuộc tiến trình khác — coi như đã tắt, KHÔNG mượn tty của nó" }),
+            );
+            return ("dead".into(), String::new());
+        }
+        (
+            classify_host(&p.command, kind, &p.tty).to_string(),
+            p.tty.to_string(),
+        )
+    }
+}
+
+/// Một dòng `ps -eo pid=,ppid=,tty=,command=` → `(pid, Proc)`.
+///
+/// 🔴 Hà 2026-08-15, ảnh chụp phiên `social` vừa mở: *"tại sao vừa tạo phiên
+/// social mới đã báo như thế này"* — hub trả lời *"ĐÃ TẮT: chỉ còn /handover"*
+/// về một phiên sống được vài giây, và `/shot` cũng *"không nhìn thấy cửa sổ
+/// đâu"*.
+///
+/// Lỗi ở ĐÂY, và nó là của bản vá cùng ngày: bản đầu tách bằng
+/// `splitn(4, char::is_whitespace)`. `ps` **căn phải** cột số, nên pid 4 chữ số
+/// nằm cạnh pid 5 chữ số thì cột ấy được đệm thêm dấu cách — và `splitn` cắt
+/// theo TỪNG ký tự trắng, nên dấu cách thừa sinh ra một trường RỖNG, `parse`
+/// hỏng, cả dòng bị bỏ. Đo đúng lúc Hà hỏi: `pid 5047` (`ttys010`) có trong
+/// `ps`, `argv[0] = claude`, mà hub khai *"không còn tiến trình"* — trong khi
+/// những phiên pid 5 chữ số cùng lượt thì đọc bình thường.
+///
+/// Hai điều đáng nhớ hơn bản vá. Một: **một phép đo hụt ở đây đọc ra thành một
+/// cái chết** — hub không mất thông tin, nó bịa ra một sự kiện. Hai: nó chỉ cắn
+/// những pid ngắn hơn pid dài nhất trên máy, nên nó **im lặng phần lớn thời
+/// gian** rồi cắn đúng phiên vừa mở.
+pub fn parse_ps_line(line: &str) -> Option<(i64, i64, String, String)> {
+    let rest = line.trim_start();
+    let (pid, rest) = rest.split_once(char::is_whitespace)?;
+    let (ppid, rest) = rest.trim_start().split_once(char::is_whitespace)?;
+    let (tty, cmd) = rest.trim_start().split_once(char::is_whitespace)?;
+    Some((
+        pid.parse().ok()?,
+        ppid.parse().ok()?,
+        tty.to_string(),
+        cmd.trim_start().to_string(),
+    ))
+}
+
+fn parse_ps_row(line: &str) -> Option<(i64, Proc)> {
+    let (pid, ppid, tty, command) = parse_ps_line(line)?;
+    Some((pid, Proc { ppid, tty, command }))
+}
+
+/// Dòng lệnh này có phải chính CLI `claude` không.
+///
+/// Rộng có chủ ý: bản của extension nằm dưới `~/.vscode/…/claude`, bản cài bằng
+/// npm chạy qua `node …/@anthropic-ai/claude-code/cli.js`, còn cửa sổ Terminal
+/// thì đúng một từ `claude`. Việc của phép kiểm này KHÔNG phải phân loại (đó là
+/// `classify_host`) mà là **loại một pid đã thuộc về tiến trình khác hẳn**, nên
+/// nó chỉ cần đủ chặt để một con pid ngẫu nhiên không lọt.
+pub fn is_claude_process(cmd: &str) -> bool {
+    if cmd.contains("claude-code") {
+        return true;
+    }
+    cmd.split_whitespace().any(|tok| {
+        tok.rsplit('/')
+            .next()
+            .is_some_and(|base| base.starts_with("claude"))
+    })
 }
 
 /// The half of `host_of` that is a decision rather than a probe.
@@ -1236,60 +1395,28 @@ fn stopped_background_calls(tail: &str) -> HashSet<String> {
     out
 }
 
-/// Đọc dòng "đang làm gì", có nhớ tạm — và ĐỒNG HỒ VẪN ĐÚNG.
+/// Dòng "đang làm gì" của một phiên, đọc từ CHỮ ĐÃ CÓ của lượt dò chung.
 ///
-/// Vì sao cần nhớ tạm: `snapshot()` chạy nhiều lần trong một vòng (tự đóng sổ,
-/// đẩy ảnh chụp, mỗi lệnh từ phòng chat), còn vòng bám phiên thì đẩy mỗi 4
-/// giây. Đọc màn ở mỗi lần gọi đã đẩy **trung vị một vòng từ 10.7s lên 16.8s**
-/// (đo 2026-08-10 trên 504 vòng cũ / 19 vòng mới) — mà mỗi vòng là một nhịp hub
-/// đọc lệnh từ điện thoại, nên cái giá không phải "số liệu chậm" mà là "lệnh
-/// của chủ máy nằm chờ lâu hơn". Đúng bài học đã ghi hồi phép dò hạn mức.
+/// 🪦 Trước 2026-08-16 đây là `activity_cached`: mỗi phiên bận một lần
+/// `keys::look`, tức **hai** lượt `osascript` (`window_of` rồi `screen_text`),
+/// và một bộ nhớ tạm 10 giây để đỡ đòn — cache giữ động từ + số giây lúc đọc
+/// rồi cộng thêm tuổi bản cache khi trả về, nên đồng hồ vẫn chạy đúng dù chữ đã
+/// cũ. Nó ra đời vì đọc màn ở mỗi lần gọi từng đẩy trung vị một vòng từ 10,7s
+/// lên 16,8s (đo 2026-08-10).
 ///
-/// Vì sao nhớ tạm mà đồng hồ không sai: cache giữ **động từ + số giây lúc đọc**,
-/// rồi khi trả về thì cộng thêm tuổi của bản cache. Động từ đổi chậm (vài chục
-/// giây), còn đồng hồ thì là phép cộng — không cần hỏi Terminal để biết thêm 3
-/// giây đã trôi qua.
-fn activity_cached(tty: &str) -> Option<String> {
-    use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
-    use std::time::Instant;
-
-    /// Đọc lúc nào, và đọc ra gì (`None` = màn không có dòng trạng thái nào).
-    type Seen = (Instant, Option<crate::keys::Activity>);
-
-    const TTL: Duration = Duration::from_secs(10);
-    static CACHE: OnceLock<Mutex<HashMap<String, Seen>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-
-    // Khoá hỏng (một luồng panic khi đang giữ) thì đọc thẳng, đừng kéo cả tiến
-    // trình xuống theo — nhưng phải nói ra.
-    let mut map = match cache.lock() {
-        Ok(m) => m,
-        Err(e) => {
-            logging::warn("activity_cache_poisoned", json!({ "err": e.to_string() }));
-            return read_activity(tty).map(|a| a.label());
-        }
-    };
-    if let Some((at, act)) = map.get(tty) {
-        if at.elapsed() < TTL {
-            return act.as_ref().map(|a| {
-                crate::keys::Activity {
-                    verb: a.verb.clone(),
-                    elapsed_sec: a.elapsed_sec + at.elapsed().as_secs(),
-                }
-                .label()
-            });
-        }
-    }
-    let fresh = read_activity(tty);
-    map.insert(tty.to_string(), (Instant::now(), fresh.clone()));
-    fresh.map(|a| a.label())
-}
-
-fn read_activity(tty: &str) -> Option<crate::keys::Activity> {
-    match crate::keys::look(tty, 6) {
-        crate::keys::Look::Saw { body, .. } => crate::keys::activity(&body),
-        // Màn có bí mật hoặc không đọc được ⟹ không đoán, và không đưa chữ nào ra.
+/// Cả hai lý do biến mất cùng lúc: chữ của MỌI tab nay về trong đúng một lượt
+/// dò mà ảnh chụp vốn đã phải trả (`keys::terminal_screens`), nên giá cận biên
+/// của dòng này bằng KHÔNG. Và bỏ cache là bỏ luôn một chỗ hub kể chuyện cũ —
+/// đúng câu Hà chốt 2026-08-15: *"mọi thông tin khi đi qua hub phải là
+/// realtime"*. Cái đệm không sai; nó chỉ đắt hơn thứ nó đệm, sau khi nguồn đổi.
+fn tab_activity(tabs: &[crate::keys::Tab], tty: &str) -> Option<String> {
+    let tab = crate::keys::alive_tab(tabs, tty)?;
+    // `None` = lượt dò không xin chữ; không có chữ thì không đoán, không phải
+    // "màn trống" (xem `keys::Tab::screen`).
+    let screen = tab.screen.as_deref()?;
+    match crate::keys::look_from_screen(screen, 6) {
+        crate::keys::Look::Saw { body, .. } => crate::keys::activity(&body).map(|a| a.label()),
+        // Màn có bí mật ⟹ không đoán, và không đưa chữ nào ra.
         _ => None,
     }
 }
@@ -1498,6 +1625,32 @@ fn strip_tool_marks(text: &str) -> String {
     out.trim().to_string()
 }
 
+/// Đề bài thật sự gõ vào phiên mới — nhãn dự án chỉ đóng khi CÓ dự án.
+///
+/// 🔴 Hà 2026-08-15: *"tại sao tôi gửi lệnh `/new acc3 dwork` mà phiên lại nhận
+/// được tin thành `[] acc3 dwork`"*. Vì chỗ này đóng nhãn VÔ ĐIỀU KIỆN, và
+/// `project` rỗng khi không nêu `-s` — mà không nêu `-s` mới là đường THƯỜNG kể
+/// từ 08-13, khi `/new` bỏ tham số dự án bắt buộc (Hà: *"lệnh new chỉ cần tham
+/// số sử dụng acc nào và text gửi đi là gì"*).
+///
+/// 📌 Hình dạng đáng nhớ hơn cái dấu ngoặc: **một tham số đã bỏ vẫn còn cắn vào
+/// đề bài**. Quyết định 08-13 gỡ được chỗ ĐỌC (`-s` thôi bắt buộc) nhưng bỏ sót
+/// chỗ GHI, nên thứ duy nhất còn sót lại của một tham số đã chết là một cặp
+/// ngoặc rỗng dán lên câu chủ máy gõ. Cùng họ với luật ở `CLAUDE.md`: *một verb
+/// mà handler không còn việc gì để làm là cùng con bug mặc đồng phục*.
+///
+/// Nhãn vẫn cần khi CÓ `-s`: phiên mở ở GỐC workspace (chỗ duy nhất cả ba tài
+/// khoản đã duyệt), nên câu duy nhất nói nó thuộc dự án nào là đề bài.
+pub fn task_for_new(project: &str, task: &str) -> String {
+    match (task.trim().is_empty(), project.trim().is_empty()) {
+        // Đề bài rỗng là hợp lệ trên đường mở cửa sổ: mở ra rồi gõ sau, đúng
+        // thứ chủ máy làm khi ngồi ở máy. Không truyền tham số vị trí nào cả.
+        (true, _) => String::new(),
+        (false, true) => task.to_string(),
+        (false, false) => format!("[{project}] {task}"),
+    }
+}
+
 /// Những DÒNG LỆNH của lượt cuối một phiên — lấy NGUYÊN VĂN từ nhật ký.
 ///
 /// 🔴 2026-08-15, và đây là một lượt đổi NGUỒN chứ không phải một bản vá.
@@ -1531,8 +1684,12 @@ fn strip_tool_marks(text: &str) -> String {
 ///
 /// Chỉ đọc LƯỢT CUỐI — từ câu chủ máy gõ gần nhất trở đi. Một lệnh phiên nhắc
 /// ba lượt trước vẫn còn trên màn, nhưng nó không còn là việc tiếp theo.
-pub fn commands_of(cfg: &Config, session_id: &str, max: usize) -> Vec<String> {
-    if session_id.is_empty() {
+pub fn commands_of(cfg: &Config, session_id: &str, max: usize) -> Vec<Cmd> {
+    // Cửa sổ TRẦN không có nhật ký, và đó là định nghĩa của nó chứ không phải
+    // một trục trặc. Kêu "không tìm thấy nhật ký" ở đây là một cảnh báo SAI, mà
+    // một cảnh báo sai dạy người ta bỏ qua cảnh báo — cùng bài học đã trả giá
+    // với `⚠ sau 3s màn KHÔNG thấy chữ ấy` (12-08).
+    if session_id.is_empty() || is_shell_id(session_id) {
         return Vec::new();
     }
     let Some(path) = find_transcript(&cfg.claude_transcript_root(), session_id) else {
@@ -1619,7 +1776,39 @@ fn usable_command(cmd: &str) -> bool {
 }
 
 /// Lệnh của lượt cuối, đọc từ đuôi nhật ký đã nạp sẵn (tách ra để kiểm được).
-pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<String> {
+/// Một lệnh phiên đã chạy, KÈM thư mục nó đã chạy trong đó.
+///
+/// 🔴 Hà 2026-08-15, ảnh chụp hai nút `▶ git add …` vừa bấm: *"Như này có đúng
+/// không"*. Không đúng — `runin_ran code=128`,
+/// *"fatal: not a git repository"*. Rồi anh chặn đúng chỗ tôi sắp đoán bừa:
+/// *"Có vẻ chưa đúng ngữ cảnh thật"*.
+///
+/// Anh đúng. Bản vá đầu của tôi định **dò thư mục** (thử gốc dự án, không thấy
+/// thì tụt xuống một bậc tìm thư mục nào chứa những đường tương đối trong lệnh)
+/// — một phép đoán khéo, và là đúng thứ tệp này cấm. Vì con số thật đã nằm sẵn
+/// trong nhật ký: bản ghi mang chính lượt gọi ấy có trường `cwd`, đo được
+/// nguyên văn `"/Users/hanguyen/projects/dwork/dev"`, trong khi nhãn `[dwork]`
+/// chỉ dựng ra `<workspace>/dwork` — **lệch đúng một bậc, và một bậc là đủ để
+/// `git` trả 128**, hoặc tệ hơn: một lệnh khác chạy THẬT trên những tệp không
+/// ai hỏi (bài học `scripts/` ngày 13/08).
+///
+/// Nên lệnh và thư mục đi thành MỘT cặp từ đây tới lúc bấm nút. Tách chúng ra
+/// là để lại đúng khoảng trống mà một phép đoán sẽ lấp vào.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Cmd {
+    /// Nguyên văn dòng lệnh, như phiên đã chạy.
+    pub line: String,
+    /// `cwd` của chính bản ghi ấy — rỗng nếu nhật ký không khai.
+    #[serde(default)]
+    pub cwd: String,
+}
+
+/// Chỉ phần chữ — cho chỗ chỉ hiển thị, không chạy.
+pub fn lines_of(cmds: &[Cmd]) -> Vec<String> {
+    cmds.iter().map(|c| c.line.clone()).collect()
+}
+
+pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<Cmd> {
     let records: Vec<Value> = tail
         .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
@@ -1633,11 +1822,23 @@ pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<String> {
         .map(|i| i + 1)
         .unwrap_or(0);
 
-    let mut ran: HashMap<String, String> = HashMap::new();
-    let mut denied: Vec<String> = Vec::new();
+    let mut ran: HashMap<String, Cmd> = HashMap::new();
+    let mut denied: Vec<Cmd> = Vec::new();
     let mut prose = String::new();
+    // Thư mục phiên đang đứng, đọc từ bản ghi MỚI NHẤT khai nó. `claude` ghi
+    // `cwd` vào từng bản ghi và nó ĐỔI theo phiên (đo trên nhật ký thật
+    // 2026-08-15: `/Users/hanguyen/projects/dwork/dev`, không phải chỗ phiên
+    // được mở). Đây là câu trả lời cho những lệnh chỉ được NHẮC TỚI trong lời
+    // — chúng chưa chạy nên không có bản ghi riêng, mà bấm nút thì phải chạy ở
+    // đâu đó, và "đâu đó" duy nhất đo được là chỗ phiên đang đứng.
+    let mut here = String::new();
 
     for record in &records[start..] {
+        if let Some(c) = record.get("cwd").and_then(Value::as_str) {
+            if !c.trim().is_empty() {
+                here = c.to_string();
+            }
+        }
         let assistant = record.get("type").and_then(Value::as_str) == Some("assistant");
         let Some(Value::Array(blocks)) = record.get("message").and_then(|m| m.get("content"))
         else {
@@ -1658,7 +1859,15 @@ pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<String> {
                             .and_then(|i| i.get("command"))
                             .and_then(Value::as_str),
                     ) {
-                        ran.insert(id.to_string(), cmd.to_string());
+                        // Thư mục CỦA CHÍNH BẢN GHI NÀY, không phải thư mục lúc
+                        // đọc: một lượt dài có thể `cd` giữa chừng.
+                        ran.insert(
+                            id.to_string(),
+                            Cmd {
+                                line: cmd.to_string(),
+                                cwd: here.clone(),
+                            },
+                        );
                     }
                 }
                 Some("tool_result") if b.get("is_error").and_then(Value::as_bool) == Some(true) => {
@@ -1668,7 +1877,7 @@ pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<String> {
                     let Some(cmd) = ran.get(id) else {
                         continue;
                     };
-                    if result_says_denied(b) && !denied.iter().any(|c| c == cmd) {
+                    if result_says_denied(b) && !denied.iter().any(|c| c.line == cmd.line) {
                         denied.push(cmd.clone());
                     }
                 }
@@ -1677,27 +1886,63 @@ pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<String> {
         }
     }
 
-    // Luật 5, cùng cách `last_prose` gác: chữ có dấu hiệu bí mật thì BỎ CẢ
-    // LƯỢT, không đi lùi tìm một lượt sạch hơn — một lệnh cũ đọc lên như thể là
-    // việc tiếp theo, mà đó là một câu SAI.
-    let risk = preview_risk(&prose);
-    let said = if risk.is_empty() {
-        crate::keys::commands_in_report(&prose, max)
-    } else {
-        logging::info("cmd_source_prose_withheld", json!({ "why": risk }));
-        Vec::new()
-    };
+    // 🔴 CỬA ĐẶT TRÊN TỪNG DÒNG LỆNH, KHÔNG TRÊN CẢ LƯỢT — 2026-08-16.
+    //
+    // Hà, ảnh chụp tin `[AI/mailler]`: *"Tin nhắn này có 2 lệnh nhưng chưa thấy
+    // bắt được"*. Log kể đúng thủ phạm: `cmd_source_prose_withheld
+    // {"why":["credential_word"]}`. Cả lượt bị bỏ vì trong báo cáo có cụm
+    // *"2FA cho IMAP/POP3/SMTP — cần app-password"* — một câu BÀN VỀ tính năng,
+    // không mang bí mật nào.
+    //
+    // Và đây là chỗ cửa cũ tự bác mình: chữ ấy **vẫn ra Telegram** qua `/shot`
+    // (đọc được nguyên văn trong chính ảnh Hà gửi). Nên nó không giữ được gì
+    // lại trong máy; nó chỉ bỏ mất mấy cái nút. Trả giá mà không mua được gì.
+    //
+    // Thứ luật 5 thật sự phải gác là DÒNG LỆNH sắp thành một cái nút: một nút
+    // mang `PGPASSWORD=… psql …` mới là bí mật đi ra và đi ra kèm cả cách dùng.
+    // Nên quét ở đó — hẹp hơn, đúng chỗ hơn, và không câm: mỗi dòng bị bỏ có
+    // một dòng log mang tên phiên.
+    let said = crate::keys::commands_in_report(&prose, max);
 
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<Cmd> = Vec::new();
     // Bị từ chối đứng TRƯỚC vì trần `max` giữ phần CUỐI: khi có quá nhiều thì
     // thứ ở lại là câu chốt phiên vừa viết ra. Cùng lý do đã ghi ở `pipeline`
     // — một báo cáo dài nhắc nhiều lệnh, nhưng thứ đáng bấm ngay là câu chốt.
+    //
+    // Hai nguồn, hai loại thư mục, và sự khác nhau ấy là THẬT: lệnh bị chặn đã
+    // CHẠY nên nó có thư mục của chính nó; lệnh chỉ được nhắc trong lời thì
+    // chưa chạy bao giờ, nên chỗ đúng nhất đo được là chỗ phiên đang đứng.
+    let said = said.into_iter().map(|line| Cmd {
+        line,
+        cwd: here.clone(),
+    });
     for cmd in denied.into_iter().chain(said) {
-        if !usable_command(&cmd) {
+        if !usable_command(&cmd.line) {
             continue;
         }
-        let cmd = cmd.trim().to_string();
-        if !out.iter().any(|c| c == &cmd) {
+        // Luật 5, đặt trên đúng thứ sắp rời khỏi máy: CHÍNH dòng lệnh — và cân
+        // bằng cái cân HẸP.
+        //
+        // `preview_risk` là cân của phần XEM TRƯỚC: nó ngờ cả những chữ chỉ
+        // *gợi ý* có bí mật, trong đó có `/Users/…`. Đem nó áp cho một dòng lệnh
+        // thì gần như mọi lệnh có đường dẫn tuyệt đối đều mất nút — đúng cái bẫy
+        // "dùng sai cái cân" mà `redaction::file_risk` sinh ra để tránh. Ở đây
+        // chỉ cần hỏi một câu hẹp: dòng này có mang GIÁ TRỊ bí mật không
+        // (`PGPASSWORD=hunter2`, `sk-…`, khối khoá riêng).
+        let risk = crate::redaction::file_risk(&cmd.line);
+        if !risk.is_empty() {
+            logging::info(
+                "cmd_withheld",
+                json!({ "why": risk,
+                        "effect": "dòng lệnh có dấu hiệu bí mật — không dựng nút cho nó" }),
+            );
+            continue;
+        }
+        let cmd = Cmd {
+            line: cmd.line.trim().to_string(),
+            cwd: cmd.cwd,
+        };
+        if !out.iter().any(|c| c.line == cmd.line) {
             out.push(cmd);
         }
     }
@@ -2027,8 +2272,211 @@ fn mtime_rfc3339(path: &Path) -> Option<String> {
     Some(ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
 }
 
-/// Ask one account's CLI what it has running.
+/// Mốc `updatedAt` của một hàng sổ, đọc được cả hai hình dạng CLI đang dùng.
+///
+/// `sessions/<pid>.json` ghi số mili-giây, `jobs/<id>/state.json` ghi chuỗi
+/// RFC 3339. Nhận cả hai ở MỘT chỗ, vì chỗ gọi chỉ hỏi *"phiên này động lần
+/// cuối lúc nào"* — nó không cần biết CLI chọn kiểu ghi nào ở thư mục nào.
+pub fn book_updated_at(row: &Value) -> Option<String> {
+    match row.get("updatedAt")? {
+        Value::Number(ms) => chrono::DateTime::from_timestamp_millis(ms.as_i64()?)
+            .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+        Value::String(s) => chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| {
+            t.to_utc()
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        }),
+        _ => None,
+    }
+}
+
+/// Thư mục cấu hình của một tài khoản — nơi CLI để sổ sách của chính nó.
+///
+/// Khai `config_dir` thì dùng đúng đường ấy; không khai là tài khoản MẶC ĐỊNH,
+/// và khi ấy thư mục là `$CLAUDE_CONFIG_DIR` (nếu môi trường đang đặt) rồi mới
+/// tới `~/.claude`. Lưu ý sự bất đối xứng đã ghi ở đầu tệp: lúc **gọi** CLI thì
+/// tài khoản mặc định phải XOÁ biến ấy, còn lúc **đọc tệp** thì vẫn cần biết
+/// thư mục — hai câu hỏi khác nhau về cùng một tài khoản.
+fn account_book_dir(account: &ClaudeAccountCfg) -> PathBuf {
+    if let Some(d) = account.config_dir.as_deref().filter(|d| !d.is_empty()) {
+        return crate::config::expand_home(Path::new(d));
+    }
+    if let Some(d) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(d);
+    }
+    match std::env::var_os("HOME") {
+        Some(home) => PathBuf::from(home).join(".claude"),
+        None => PathBuf::from(".claude"),
+    }
+}
+
+/// Trạng thái của một phiên nền đã KẾT THÚC — hàng ấy không còn là việc đang chạy.
+///
+/// Đo trên máy này 2026-08-15: `~/.claude/jobs/` có **60** thư mục (40 `done`,
+/// 19 `stopped`, 1 `blocked`), mà `claude agents` khai đúng **một** hàng nền —
+/// cái `blocked`. Nên đây không phải luật tôi nghĩ ra, nó là luật đọc ngược ra
+/// từ chính câu trả lời của CLI.
+///
+/// 🔴 Và danh sách này **đã thiếu một lần rồi**, ngay trong lượt viết nó: bản
+/// đầu có `done` + `stopped`, chạy thật thì acc2 đẻ ra một hàng nền
+/// (`3e97ab14`, `state: failed`, từ 11/08) mà `claude agents --json` của chính
+/// acc2 trả về `[]`. Bài học không phải "thêm `failed` vào là xong" — mà là
+/// **một danh sách tên trạng thái thì không bao giờ đủ**, y hệt `folder_from_tail`
+/// gõ cứng tên ngăn kéo `AI`. Nên nó chỉ là đường LỌC NHANH; lưới đỡ thật là
+/// mốc thời gian: hàng nền mang theo `updatedAt` của chính sổ, và
+/// `drop_stale_dead` bỏ hàng chết đã nguội theo TUỔI, không theo tên trạng thái.
+const BG_ENDED: [&str; 3] = ["done", "stopped", "failed"];
+
+/// Phiên đang sống của một tài khoản, đọc từ SỔ SÁCH CỦA CHÍNH CLI.
+///
+/// 🔴 Hà 2026-08-15: *"tôi muốn mọi thông tin khi đi qua hub phải là realtime
+/// chứ không phải đọc lịch sử"*. Đường cũ là `claude agents --json` — một lượt
+/// dựng binary **279 MB** cho MỖI tài khoản, đo trên 2.891 lượt thật:
+/// **p50 3,1 giây · p90 14,8 · max 120**. Ba tài khoản ⟹ gần như mọi cú bấm
+/// trên điện thoại phải trả cái giá ấy trước khi nói được câu đầu tiên.
+///
+/// Điều đo ra 2026-08-15 và làm cả việc này thành một phép đọc tệp: **`claude
+/// agents` không biết gì mà sổ của nó không nói**. CLI tự ghi
+/// `<config>/sessions/<pid>.json` cho mỗi phiên tương tác và
+/// `<config>/jobs/<id ngắn>/state.json` cho mỗi phiên nền. So từng trường trên
+/// máy này — `sessionId` · `cwd` · `name` · `kind` · `status` · `startedAt` —
+/// **5/5 hàng tương tác KHỚP TỪNG CHỮ**, và hàng nền duy nhất `claude agents`
+/// khai đúng là hàng `jobs` chưa kết thúc. Giá: **~10 ms cho cả ba tài khoản**,
+/// so với 292 ms cho MỘT tài khoản lúc máy rảnh.
+///
+/// Đây KHÔNG phải "đọc lịch sử": mấy tệp này là thứ CLI đang ghi *ngay lúc
+/// này* (`updatedAt` nhích theo từng lượt), cùng họ với nhật ký phiên — chứ
+/// không phải ảnh chụp hub tự cất như sổ `watch:sessions`.
+///
+/// Hình dạng trả về giữ nguyên như `claude agents --json` để chỗ đọc
+/// (`snapshot`) không phải biết nguồn nào; `host_of` vẫn là chỗ duy nhất quyết
+/// định "còn sống không", vì một tệp còn nằm đó không chứng minh tiến trình còn
+/// chạy.
+pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
+    let mut out = Vec::new();
+
+    let sessions = dir.join("sessions");
+    let entries = std::fs::read_dir(&sessions)
+        .map_err(|e| anyhow::anyhow!("không đọc được {}: {e}", sessions.display()))?;
+    for entry in entries {
+        let path = match entry {
+            Ok(e) => e.path(),
+            // Một mục hỏng không được làm hỏng cả tài khoản — nhưng cũng không
+            // được đi qua trong im lặng (luật 3).
+            Err(e) => {
+                logging::warn(
+                    "session_book_entry_failed",
+                    json!({ "dir": sessions.display().to_string(), "err": e.to_string() }),
+                );
+                continue;
+            }
+        };
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        match std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|s| serde_json::from_str::<Value>(&s).map_err(|e| e.to_string()))
+        {
+            Ok(v)
+                if v.get("sessionId")
+                    .and_then(|s| s.as_str())
+                    .is_some_and(|s| !s.is_empty()) =>
+            {
+                out.push(v)
+            }
+            Ok(v) => logging::warn(
+                "session_book_unusable",
+                json!({ "path": path.display().to_string(),
+                        "why": "tệp sổ phiên không mang sessionId",
+                        "keys": v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>()) }),
+            ),
+            Err(e) => logging::warn(
+                "session_book_unreadable",
+                json!({ "path": path.display().to_string(), "err": truncate(&e, 200) }),
+            ),
+        }
+    }
+
+    // Phiên nền: một thư mục mỗi việc, `state.json` là hàng.
+    let jobs = dir.join("jobs");
+    if jobs.is_dir() {
+        let entries = std::fs::read_dir(&jobs)
+            .map_err(|e| anyhow::anyhow!("không đọc được {}: {e}", jobs.display()))?;
+        for entry in entries.flatten() {
+            let path = entry.path().join("state.json");
+            if !path.is_file() {
+                continue;
+            }
+            let raw = match std::fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(e) => {
+                    logging::warn(
+                        "job_book_unreadable",
+                        json!({ "path": path.display().to_string(), "err": e.to_string() }),
+                    );
+                    continue;
+                }
+            };
+            let v: Value = match serde_json::from_str(&raw) {
+                Ok(v) => v,
+                Err(e) => {
+                    logging::warn(
+                        "job_book_unparseable",
+                        json!({ "path": path.display().to_string(), "err": e.to_string() }),
+                    );
+                    continue;
+                }
+            };
+            let state = v.get("state").and_then(|s| s.as_str()).unwrap_or_default();
+            if BG_ENDED.contains(&state) {
+                continue;
+            }
+            let Some(session_id) = v.get("sessionId").and_then(|s| s.as_str()) else {
+                continue;
+            };
+            out.push(json!({
+                "sessionId": session_id,
+                "name": v.get("name").and_then(|s| s.as_str()).unwrap_or("(không tên)"),
+                "cwd": v.get("cwd").and_then(|s| s.as_str()).unwrap_or_default(),
+                "kind": "background",
+                "state": state,
+                // Phiên nền không có pid trong sổ — `claude agents` cũng vậy.
+                // `host_of` đọc `pid = 0` thành "dead", đúng như trước.
+                "pid": 0,
+                "startedAt": v.get("createdAt").and_then(|s| s.as_str())
+                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                    .map(|t| t.timestamp_millis())
+                    .unwrap_or(0),
+                // Mốc để `drop_stale_dead` chấm tuổi khi phiên nền KHÔNG có
+                // nhật ký để đọc — xem `BG_ENDED`.
+                "updatedAt": v.get("updatedAt").cloned().unwrap_or(Value::Null),
+            }));
+        }
+    }
+
+    Ok(out)
+}
+
+/// Phiên đang sống của một tài khoản — sổ của CLI trước, hỏi CLI sau.
+///
+/// Đường hỏi CLI còn lại đúng một lý do: bản CLI cũ chưa ghi `sessions/`. Nó
+/// **ghi log khi chạy**, vì rơi về đường 3 giây mà không ai biết là đúng kiểu
+/// hỏng câm mà tệp CLAUDE.md của hub liệt ra.
 fn list_account(account: &ClaudeAccountCfg, cli: &str) -> Result<Vec<Value>> {
+    let dir = account_book_dir(account);
+    if dir.join("sessions").is_dir() {
+        return list_account_books(&dir);
+    }
+    logging::warn(
+        "claude_books_missing",
+        json!({ "account": account.name, "dir": dir.display().to_string(),
+                "why": "không thấy <config>/sessions — rơi về `claude agents --json` (chậm hơn ~30 lần)" }),
+    );
+    list_account_cli(account, cli)
+}
+
+/// Ask one account's CLI what it has running.
+fn list_account_cli(account: &ClaudeAccountCfg, cli: &str) -> Result<Vec<Value>> {
     // Absent variable = default account. Setting it to ~/.claude reports "not
     // logged in", so the default account MUST clear it, not point at it.
     let env = vec![(
@@ -2073,39 +2521,6 @@ fn list_account(account: &ClaudeAccountCfg, cli: &str) -> Result<Vec<Value>> {
         anyhow::anyhow!("unparseable JSON: {e}; head={}", truncate(&out.stdout, 200))
     })?;
     Ok(value.as_array().cloned().unwrap_or_default())
-}
-
-/// Every process on the machine as `pid -> ppid`, in one `ps` call.
-///
-/// One call, not one per session: walking a parent chain with a `ps` per hop
-/// costs a process spawn per hop and — worse — reads a tree that is moving
-/// while it is read, so a chain could point at a pid that has already been
-/// recycled.
-fn parent_map() -> std::collections::HashMap<i64, i64> {
-    let mut map = std::collections::HashMap::new();
-    let out = run(
-        "ps",
-        &["-eo", "pid=,ppid="],
-        RunOpts {
-            timeout: Some(Duration::from_secs(10)),
-            ..Default::default()
-        },
-    );
-    match out {
-        Ok(r) if r.code == Some(0) => {
-            for line in r.stdout.lines() {
-                let mut it = line.split_whitespace();
-                if let (Some(pid), Some(ppid)) = (it.next(), it.next()) {
-                    if let (Ok(pid), Ok(ppid)) = (pid.parse::<i64>(), ppid.parse::<i64>()) {
-                        map.insert(pid, ppid);
-                    }
-                }
-            }
-        }
-        Ok(r) => logging::warn("ps_tree_failed", json!({ "code": r.code })),
-        Err(e) => logging::warn("ps_tree_failed", json!({ "err": e.to_string() })),
-    }
-    map
 }
 
 /// Làm mới RIÊNG "phiên đang làm gì", không dựng lại cả ảnh chụp.
@@ -2153,10 +2568,6 @@ pub fn refresh_activity(rows: &mut [LiveSession]) -> bool {
     changed
 }
 
-/// Đánh dấu những phiên hub THẬT SỰ gõ vào được — xem `LiveSession::can_type`.
-///
-/// Một lời gọi AppleScript cho cả vòng, và chỉ khi có ít nhất một phiên gắn
-/// tty; máy không mở Terminal.app nào thì không tốn gì cả.
 /// Cửa sổ Terminal ĐANG MỞ mà không chạy CLI nào — cũng là một phiên.
 ///
 /// 🔴 Hà 2026-08-13: *"có lẽ cần thay đổi lại cách định nghĩa phiên cho tường
@@ -2183,20 +2594,7 @@ pub fn refresh_activity(rows: &mut [LiveSession]) -> bool {
 ///   sổ thành "phiên đã tắt", và để màn hình nói đúng nó là cái gì.
 /// * **không tài khoản, không nhật ký**: không có `claude` thì không có hai thứ
 ///   ấy. Khai bừa một tài khoản là bịa.
-fn add_shell_windows(rows: &mut Vec<LiveSession>) {
-    let tabs = match crate::keys::terminal_tabs() {
-        Ok(t) => t,
-        Err(e) => {
-            // Không đoán bù: dò hỏng thì danh sách thiếu đúng phần này, và lý
-            // do phải nằm trong log — không thì cửa sổ rảnh biến mất khỏi màn
-            // mà không ai biết vì sao.
-            logging::warn(
-                "terminal_tabs_probe_failed",
-                json!({ "err": e.to_string(), "effect": "cửa sổ rảnh không lên danh sách lượt này" }),
-            );
-            return;
-        }
-    };
+fn add_shell_windows(rows: &mut Vec<LiveSession>, tabs: &[crate::keys::Tab]) {
     let taken: std::collections::HashSet<String> = rows
         .iter()
         .map(|r| r.tty.trim_start_matches("/dev/").to_string())
@@ -2220,7 +2618,7 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>) {
             continue;
         }
         rows.push(LiveSession {
-            session_id: format!("win-{}", tab.tty),
+            session_id: format!("{SHELL_ID_PREFIX}{}", tab.tty),
             name: format!("cửa sổ {}", tab.tty),
             label: String::new(),
             host: "shell".to_string(),
@@ -2233,6 +2631,45 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>) {
     }
     if added > 0 {
         logging::info("shell_windows_listed", json!({ "count": added }));
+    }
+}
+
+/// CLI đang chạy trong một cửa sổ thật mà KHÔNG có hàng nào trong danh sách.
+///
+/// Đây là câu trả lời đo được cho *"máy đang chạy N phiên sao màn liệt kê M?"*,
+/// và nó có một nguyên nhân đã biết chứ không phải giả thuyết: một phiên đứng ở
+/// hộp **"Do you trust this folder"** thì CHƯA có `sessionId`, nên chưa có sổ
+/// nào để đọc — đo lúc 12:0x ngày 2026-08-13, `claude` sống ở `ttys002` mà
+/// `hub sessions` khai 3 phiên, không có nó.
+///
+/// Chỉ GHI LOG, không dựng hàng: một hàng không có id thì `/type` `/shot`
+/// `/stop` đều không địa chỉ hoá được — dựng nó lên là dựng đúng thứ luật 14
+/// gọi tên. Cửa sổ ấy vẫn tới được màn hình bằng đường khác
+/// (`add_shell_windows` ⟹ `win-<tty>`), và dòng log này là chỗ duy nhất nói
+/// được *vì sao* con số lệch.
+fn unlisted_claude_processes(rows: &[LiveSession], procs: &Procs) {
+    if !procs.ok {
+        return;
+    }
+    let listed: HashSet<i64> = rows.iter().map(|r| r.pid).filter(|p| *p > 0).collect();
+    let mut missing: Vec<Value> = Vec::new();
+    for (pid, p) in &procs.by_pid {
+        if listed.contains(pid) || !is_real_tty(&p.tty) || !is_claude_process(&p.command) {
+            continue;
+        }
+        // Phiên của editor cố ý không lên danh sách (luật riêng, đếm ở
+        // `hidden_editor`) — kể nó ở đây là dựng một cảnh báo luôn luôn kêu.
+        if classify_host(&p.command, "interactive", &p.tty) == "editor" {
+            continue;
+        }
+        missing.push(json!({ "pid": pid, "tty": p.tty }));
+    }
+    if !missing.is_empty() {
+        logging::info(
+            "claude_process_unlisted",
+            json!({ "count": missing.len(), "procs": missing,
+                    "why": "tiến trình `claude` có cửa sổ thật nhưng chưa có sổ phiên — thường là đang đứng ở hộp tin-thư-mục, chưa sinh sessionId" }),
+        );
     }
 }
 
@@ -2284,28 +2721,21 @@ fn drop_stale_dead(rows: &mut Vec<LiveSession>) -> usize {
     dropped
 }
 
-fn mark_can_type(rows: &mut [LiveSession]) {
-    if !rows
-        .iter()
-        .any(|r| r.host == "terminal" && !r.tty.is_empty())
-    {
-        return;
-    }
-    let owned = match crate::keys::terminal_ttys() {
-        Ok(set) => set,
-        Err(e) => {
-            // Không đoán bù: dò hỏng thì mọi phiên ở lại `can_type = false`, và
-            // lý do phải nằm trong log — nếu không, nút gõ biến mất khỏi trang
-            // mà không ai biết vì sao.
-            logging::warn(
-                "terminal_tty_probe_failed",
-                json!({ "err": e.to_string(), "effect": "mọi phiên tạm coi là không gõ vào được" }),
-            );
-            return;
-        }
-    };
+/// Đánh dấu những phiên hub THẬT SỰ gõ vào được — xem `LiveSession::can_type`.
+///
+/// Không hỏi Terminal lần nào: tra trong danh sách tab mà cả ảnh chụp dùng
+/// chung (`keys::alive_tab`). Trước 2026-08-16 hàm này tự đi hỏi lấy một lượt
+/// `osascript` riêng, hỏi lại đúng cái tập vừa có — xem 🪦 ở `keys::alive_tab`.
+///
+/// Danh sách RỖNG (dò hỏng) ⟹ mọi phiên ở lại `can_type = false`: không đoán
+/// bù, và lý do đã nằm trong log ở chỗ dò.
+///
+/// (Ba dòng đầu nằm lạc chỗ từ trước: chúng đứng ngay trên `add_shell_windows`,
+/// tức mô tả hàm A mà dán vào hàm B — một chú thích nói dối, đúng thứ tệp này
+/// ghét nhất. Trả về đúng chỗ 2026-08-15.)
+fn mark_can_type(rows: &mut [LiveSession], tabs: &[crate::keys::Tab]) {
     for r in rows.iter_mut() {
-        r.can_type = !r.tty.is_empty() && owned.contains(r.tty.trim_start_matches("/dev/"));
+        r.can_type = !r.tty.is_empty() && crate::keys::alive_tab(tabs, &r.tty).is_some();
     }
 }
 
@@ -2314,14 +2744,13 @@ fn mark_can_type(rows: &mut [LiveSession]) {
 /// Only rows with no window need this — a terminal session's origin is the
 /// window it sits in. Depth is capped: a cycle in the table (or a pid recycled
 /// between the two reads) must not spin forever.
-fn link_parents(rows: &mut [LiveSession]) {
+fn link_parents(rows: &mut [LiveSession], procs: &Procs) {
     let needs = rows
         .iter()
         .any(|r| matches!(r.host.as_str(), "background" | "detached"));
     if !needs {
         return;
     }
-    let tree = parent_map();
     let by_pid: std::collections::HashMap<i64, (String, String)> = rows
         .iter()
         .filter(|r| r.pid > 0)
@@ -2334,7 +2763,9 @@ fn link_parents(rows: &mut [LiveSession]) {
         }
         let mut pid = row.pid;
         for _ in 0..12 {
-            let Some(&ppid) = tree.get(&pid) else { break };
+            let Some(ppid) = procs.by_pid.get(&pid).map(|p| p.ppid) else {
+                break;
+            };
             if ppid <= 1 {
                 break;
             }
@@ -2350,36 +2781,32 @@ fn link_parents(rows: &mut [LiveSession]) {
     }
 }
 
-/// Every live session across every configured account, newest activity first.
-/// Ảnh chụp gần nhất, cho những lệnh chỉ cần TRA CỨU chứ không cần tươi.
-///
-/// 🔴 Hà 2026-08-12: *"bấm vào phiên trên tele vẫn đang phải đợi rất lâu"*. Đo
-/// từng khúc: hàng chờ đã hết (queued và run cùng một giây), ack 1,5 giây — còn
-/// **10 giây** là dựng lại ảnh chụp, thứ gần như route nào cũng làm trước khi
-/// trả lời. Mà `/session`, `/shot`, `/type` chỉ cần biết *phiên này có thật
-/// không, cửa sổ nào* — một câu trả lời 20 giây tuổi vẫn đúng, trong khi 10
-/// giây chờ thì cảm nhận được ngay.
-///
-/// Vòng chạy KHÔNG dùng đệm: cái loa so hai lượt ảnh chụp, mà so một tấm cũ với
-/// chính nó thì không có sự kiện nào hiện ra.
-static SNAP_CACHE: std::sync::OnceLock<
-    std::sync::Mutex<Option<(std::time::Instant, SessionsSnapshot)>>,
-> = std::sync::OnceLock::new();
-
-/// Ảnh chụp còn dùng được nếu chưa quá `max_age`, không thì dựng mới.
-pub fn snapshot_cached(cfg: &Config, max_age: std::time::Duration) -> SessionsSnapshot {
-    let cell = SNAP_CACHE.get_or_init(|| std::sync::Mutex::new(None));
-    if let Some((at, snap)) = cell.lock().ok().and_then(|g| g.clone()) {
-        if at.elapsed() <= max_age {
-            logging::info(
-                "sessions_snapshot_reused",
-                json!({ "age_ms": at.elapsed().as_millis(), "sessions": snap.sessions.len() }),
-            );
-            return snap;
-        }
-    }
-    snapshot(cfg)
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// 🪦 `snapshot_cached(20s)` — dựng 2026-08-12, gỡ 2026-08-15. Đọc trước khi
+// dựng lại một cái đệm nữa, vì nó đúng ở đúng cái ngày nó ra đời.
+//
+// Nó sinh ra từ một câu đúng: *"bấm vào phiên trên tele vẫn đang phải đợi rất
+// lâu"* — 10 trong 11,6 giây của một cú `/session` là dựng lại ảnh chụp, mà
+// `/session`·`/shot`·`/type` chỉ cần biết *phiên này có thật không, cửa sổ nào*.
+// Đệm 20 giây kéo cú bấm ấy về **1,5s**, đo ngay hôm đó.
+//
+// 🔴 Hà 2026-08-15 gỡ nó bằng một câu ở tầng cao hơn: *"tôi muốn mọi thông tin
+// khi đi qua hub phải là realtime chứ không phải đọc lịch sử"* · *"đây là kênh
+// làm việc từ xa, mà bạn lại lấy cái cũ để gửi thì còn ý nghĩa gì nữa"*.
+//
+// Và đây là chỗ đáng nhớ: **cái đệm không sai, nó chỉ là câu trả lời cho một
+// câu hỏi sai.** Câu hỏi đúng là *"vì sao một phép đo về cái máy này lại tốn 10
+// giây"*, và câu trả lời hoá ra là hub đang hỏi bằng cách **dựng lại một binary
+// 279 MB ba lần** (`claude agents`) để đọc thứ mà CLI đã ghi sẵn ra tệp. Đổi
+// nguồn (xem `list_account_books`) thì cái giá biến mất, nên cái đệm mất luôn
+// lý do tồn tại — chứ không phải hub chấp nhận chậm để đổi lấy tươi.
+//
+// 📌 Nó cũng đã HỎNG CÂM một lần và đó là bài học kèm theo: khi máy swap, một
+// lượt dựng ảnh chụp lên 15–92 giây, tức **lâu hơn chính cái đệm**, nên đệm
+// không còn đệm được gì — mà con số "1,5s" đo hôm đầu vẫn đúng ở chỗ nó được
+// đo. Một cái đệm chỉ đúng trong khoảng nó được đo, và nó không tự báo khi ra
+// khỏi khoảng ấy.
+// ─────────────────────────────────────────────────────────────────────────────
 
 pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     let snap_started = std::time::Instant::now();
@@ -2387,20 +2814,48 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     let root = cfg.claude_transcript_root();
     let mut hidden_editor = 0usize;
 
-    // Ba tài khoản, hỏi NỐI ĐUÔI — và đây là một kết quả ĐO ĐƯỢC, không phải
-    // lười tối ưu.
+    // Một lượt `ps` cho CẢ ảnh chụp: ai còn sống, ngồi ở cửa sổ nào, con của ai.
+    // Đọc trước vòng lặp vì mọi hàng phải được chấm trên CÙNG một khoảnh khắc.
+    let procs = Procs::read();
+
+    // Và một lượt hỏi Terminal cho CẢ ảnh chụp: mọi tab, kèm chữ đang hiện trên
+    // màn từng tab. Ba chỗ dùng chung nó — dòng "đang làm gì" của phiên bận,
+    // danh sách cửa sổ rảnh, và cờ "gõ vào được không" — mà trước 2026-08-16 là
+    // ba đường hỏi riêng: 2 lượt `osascript` cho MỖI phiên bận, cộng 2 lượt nữa
+    // cho cả vòng. Đo trên máy này (11 phiên): 7–14 giây ⟹ **1,3 giây**.
+    // Cùng lý do với `ps` ở trên, và nó là lý do mạnh hơn cả tốc độ: mọi hàng
+    // phải được chấm trên CÙNG một khoảnh khắc, chứ không phải mỗi hàng một
+    // khoảnh khắc cách nhau một giây.
+    let probe_started = std::time::Instant::now();
+    let tabs = match crate::keys::terminal_screens() {
+        Ok(t) => t,
+        Err(e) => {
+            // Không đoán bù, và nói ĐỦ ba hậu quả: một lượt dò hỏng nay kéo
+            // theo cả ba chỗ dùng, nên log phải kể hết — không thì màn thiếu ba
+            // thứ mà log chỉ giải thích một.
+            logging::warn(
+                "terminal_probe_failed",
+                json!({ "err": e.to_string(),
+                        "effect": "cửa sổ rảnh không lên danh sách · mọi phiên tạm coi là không gõ vào được · không đọc được dòng đang-làm-gì" }),
+            );
+            Vec::new()
+        }
+    };
+    let ms_probe = probe_started.elapsed().as_millis();
+
+    // Ba tài khoản, hỏi NỐI ĐUÔI.
     //
     // 🔴 Đo 2026-08-12: một ảnh chụp tốn ~10 giây cho 4 phiên, gần hết là ba lần
     // spawn `claude agents` (binary `claude` nay 279 MB — riêng việc dựng nó lên
     // đã vài giây). Tôi đã thử `thread::scope` chạy cả ba cùng lúc, rồi đo lại:
     // **trung vị 10,1s → 13,0s**, tức CHẬM HƠN 30%. Ba tiến trình khổng lồ dựng
     // cùng lúc thì giẫm chân nhau ở CPU và đĩa; cái giá ấy không chia được.
+    // Đừng thử lại đường song song mà không đo trước.
     //
-    // Thứ THẬT SỰ chữa được độ trễ bấm nút là `snapshot_cached` — đo cùng ngày:
-    // một lệnh `/session` 11,6s → **1,5s**. Đừng thử lại đường song song mà
-    // không đo trước.
-    // Thời gian NGỒI CHỜ `claude agents` cộng dồn, tách khỏi thời gian đọc nhật
-    // ký — hai khúc này chữa bằng hai cách khác hẳn nhau.
+    // 🔴 Và 2026-08-15 khúc ấy thôi tốn tiền: `list_account` nay ĐỌC TỆP sổ của
+    // chính CLI (~10 ms cho cả ba tài khoản) thay vì spawn nó. Nên con số đáng
+    // canh ở đây không còn là `ms_ask` mà là `ms_read_rows` — thời gian đọc
+    // nhật ký từng phiên.
     let mut ms_ask = 0u128;
     for account in &cfg.claude_accounts_or_ambient() {
         let ask_started = std::time::Instant::now();
@@ -2484,9 +2939,15 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 parent_name: None,
             };
 
-            let (host, tty) = host_of(row.pid, &row.kind);
+            let (host, tty) = procs.host_of(row.pid, &row.kind);
             row.host = host;
             row.tty = tty;
+            // Mốc hoạt động từ SỔ, đặt TRƯỚC mọi nhánh thoát sớm bên dưới: một
+            // hàng không có nhật ký (phiên nền, hoặc phiên vừa sinh) mà cũng
+            // không có mốc nào thì `drop_stale_dead` không chấm được tuổi, và
+            // luật của nó là "không biết thì đừng bỏ" ⟹ hàng chết nằm lại mãi.
+            // Nhật ký tươi hơn thì ghi đè ở dưới.
+            row.last_activity = book_updated_at(&s);
 
             // Phiên do extension VS Code/Cursor chạy KHÔNG lên màn.
             //
@@ -2547,7 +3008,11 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 out.sessions.push(row);
                 continue;
             }
-            row.last_activity = mtime_rfc3339(&path);
+            // Đọc được thì lấy; đọc không được thì GIỮ mốc của sổ, đừng xoá —
+            // một phép đo hỏng không phải một sự thật về thế giới (luật 11b).
+            if let Some(t) = mtime_rfc3339(&path) {
+                row.last_activity = Some(t);
+            }
             match read_tail(&path) {
                 Ok(tail) => {
                     // Dự án đang làm: đọc từ chính đoạn nhật ký vừa nạp, không
@@ -2592,18 +3057,30 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // "Đang làm việc" tính SAU khi đã có cả mốc hoạt động lẫn
                     // số subagent — hai thứ này mới nói được, `status` thì im
                     // với mọi phiên terminal.
-                    row.working = row.host != "dead"
-                        && is_working(
-                            row.status.as_deref(),
-                            row.pending_subagents,
-                            idle_seconds(row.last_activity.as_deref()),
+                    // Một lệnh shell ĐANG CHẠY là bằng chứng trực tiếp, và nó
+                    // đứng TRƯỚC mọi phép suy từ nhật ký — xem `running_shell`.
+                    let shell = procs.running_shell(row.pid);
+                    if shell {
+                        logging::info(
+                            "session_busy_by_shell",
+                            json!({ "session": row.session_id, "pid": row.pid,
+                                    "why": "có tiến trình con shell-snapshot ⟹ đang chạy một lệnh, dù nhật ký đứng im" }),
                         );
-                    // Đọc màn CHỈ cho phiên đang chạy: thường 1–3 phiên. Phiên
-                    // rảnh không có dòng trạng thái nào để đọc, nên hỏi nó là
-                    // trả cái giá đã biết (18s → 90s một vòng) để lấy về chuỗi
-                    // rỗng.
+                    }
+                    row.working = row.host != "dead"
+                        && (shell
+                            || is_working(
+                                row.status.as_deref(),
+                                row.pending_subagents,
+                                idle_seconds(row.last_activity.as_deref()),
+                            ));
+                    // Chỉ phiên ĐANG CHẠY mới có dòng trạng thái để đọc; phiên
+                    // rảnh thì đọc ra chuỗi rỗng. Cửa này từng còn để chặn giá
+                    // (mỗi lần đọc là 2 lượt `osascript`, 18s → 90s một vòng);
+                    // nay chữ đã nằm sẵn trong `tabs` nên nó chỉ còn nghĩa
+                    // đúng-sai, không còn nghĩa tiền bạc.
                     if row.working && !row.tty.is_empty() {
-                        row.activity = activity_cached(&row.tty);
+                        row.activity = tab_activity(&tabs, &row.tty);
                     }
                     row.context_tokens = parsed.context_tokens;
                     row.model = parsed.model.clone();
@@ -2650,10 +3127,11 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     // `hub sessions` 3,0s — trong khi daemon in 12–24s. Một con số tổng không
     // nói được khúc nào ăn mất mười mấy giây, nên nó không dẫn tới chỗ nào cả.
     let after_loop = snap_started.elapsed();
-    add_shell_windows(&mut out.sessions);
+    unlisted_claude_processes(&out.sessions, &procs);
+    add_shell_windows(&mut out.sessions, &tabs);
     out.hidden_dead = drop_stale_dead(&mut out.sessions);
-    mark_can_type(&mut out.sessions);
-    link_parents(&mut out.sessions);
+    mark_can_type(&mut out.sessions, &tabs);
+    link_parents(&mut out.sessions, &procs);
     // Nhãn tính SAU khi đã có đủ mọi hàng: "có trùng ai không" là một câu hỏi
     // về cả tập, không hàng nào tự trả lời được.
     label_sessions(&mut out.sessions, &cfg.workspace_root);
@@ -2674,27 +3152,19 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
             .then_with(|| b.started_at_ms.cmp(&a.started_at_ms))
     });
 
-    // 🔴 Cache phải chụp bản ĐÃ XONG. Trước đây ba dòng này đứng NGAY SAU
-    // `link_parents`, tức trước cả `hidden_editor` lẫn lượt sắp xếp — nên mọi
-    // lượt đọc từ cache (`snapshot_cached`, đường đi của gần như mọi route) nhận
-    // một ảnh chụp khai `hidden_editor = 0` và xếp sai thứ tự. Cùng một họ với
-    // `sessions_snapshot_ms` bên dưới in `out.hidden_editor` trước khi nó được
-    // gán: một phép đo trỏ vào ô chưa điền thì nó đo cái ô, không đo sự thật.
-    if let Ok(mut g) = SNAP_CACHE
-        .get_or_init(|| std::sync::Mutex::new(None))
-        .lock()
-    {
-        *g = Some((std::time::Instant::now(), out.clone()));
-    }
     let after_rows = snap_started.elapsed();
     logging::info(
         "sessions_snapshot_ms",
         json!({ "ms": snap_started.elapsed().as_millis(), "sessions": out.sessions.len(),
                 "hidden_editor": out.hidden_editor, "blind": out.blind.len(),
-                // Ba khúc, cộng lại đúng bằng tổng — nên khúc nào phình ra thì
-                // nhìn một cái là thấy, không phải suy.
+                // Bốn khúc, cộng lại đúng bằng tổng — nên khúc nào phình ra thì
+                // nhìn một cái là thấy, không phải suy. (Khúc `terminal_probe`
+                // tách ra 2026-08-16: nó nằm trong `read_rows` suốt thời gian
+                // đắt nhất của nó, tức đúng khúc ăn mười mấy giây lại là khúc
+                // không có tên riêng để mà đọc.)
                 "ms_ask_accounts": ms_ask,
-                "ms_read_rows": after_loop.as_millis().saturating_sub(ms_ask),
+                "ms_terminal_probe": ms_probe,
+                "ms_read_rows": after_loop.as_millis().saturating_sub(ms_ask).saturating_sub(ms_probe),
                 "ms_finish": after_rows.saturating_sub(after_loop).as_millis() }),
     );
     out
@@ -3320,7 +3790,13 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
             return None;
         }
     };
-    if let Err(e) = crate::keys::type_into(window, &format!("/btw {question}"), true) {
+    // ⚠ CHỈ GÕ, không có cú Enter rời — và đây là hiện trạng, không phải một
+    // quyết định. Đường này viết 2026-08-11, trước khi luật 13 ("`do script`
+    // đẩy chữ + xuống dòng trong CÙNG một lượt ghi ⟹ TUI đọc thành cú DÁN và
+    // nuốt dấu xuống dòng") được đo ra ngày 12-08. Nó CÓ THỂ đang hỏng câm y
+    // như `/type` từng hỏng. Chưa sửa vì chưa chạy thật được lượt nào để biết —
+    // ghi ra đây thay vì lặng lẽ đổi một route không kiểm được.
+    if let Err(e) = crate::keys::type_into(window, &format!("/btw {question}")) {
         logging::warn(
             "btw_type_failed",
             json!({ "session": session.session_id, "err": e.to_string() }),
@@ -3611,13 +4087,10 @@ fn start_in_terminal(
     dir: &Path,
     task: &str,
     account: Option<&str>,
+    resume: Option<&str>,
 ) -> Result<Started> {
-    let cmd = terminal_command(
-        &cfg.claude_cli,
-        root,
-        task,
-        account.and_then(|a| account_dir(cfg, a)).as_deref(),
-    );
+    // Mở cửa sổ TRỐNG — đề bài gõ vào sau, khi ô nhập đã sẵn sàng.
+    let cmd = terminal_command_resuming(&account_launch(cfg, account), root, None, resume);
     let (window, tty) = crate::keys::open_window(&cmd)?;
     let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
     logging::info(
@@ -3638,53 +4111,229 @@ fn start_in_terminal(
     // bắt đầu, nên id nằm sẵn trên đĩa — một lượt `read_dir`, vài mili giây.
     // Chỉ nhận tệp sinh SAU lúc mở cửa sổ, và lấy cái mới nhất.
     let opened_at = std::time::SystemTime::now();
-    let fast_deadline = std::time::Instant::now() + Duration::from_secs(20);
-    while std::time::Instant::now() < fast_deadline {
-        std::thread::sleep(Duration::from_millis(500));
-        if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), root, opened_at) {
-            logging::info(
-                "new_session_matched_by_transcript",
-                json!({ "session": id, "tty": tty_short }),
-            );
-            return Ok(Started {
-                session_id: id,
-                project: project.to_string(),
-                cwd: dir.to_string_lossy().to_string(),
-                task: task.to_string(),
-                ts: crate::logging::now_iso(),
-                window: true,
-            });
+    let id =
+        wait_for_new_session_id(cfg, root, opened_at, &tty_short, None, true).ok_or_else(|| {
+            anyhow::anyhow!(
+                "mở được cửa sổ ({tty_short}) nhưng không phiên nào chào đời trên đó sau ~64 giây"
+            )
+        })?;
+
+    // …rồi GÕ đề bài vào, y như ngón tay chủ máy. Bước 5 của Hà.
+    //
+    // Vì sao chỗ này là ĐÚNG chỗ để gõ, chứ không phải sớm hơn: nhật ký chỉ
+    // sinh ra khi phiên đã dựng xong và đi qua mọi hộp chặn (đo 08-13 trên một
+    // lượt thật — cửa sổ mở 05:21:32 · hộp tin-thư-mục chặn · bấm hộ 05:21:53 ·
+    // id xuất hiện 05:22:18). Nên "đã có id" **là** bằng chứng đo được rằng ô
+    // nhập đã sẵn sàng, không phải một phép đoán về thời gian.
+    if !task.trim().is_empty() {
+        match ready_to_type(window) {
+            Ready::Yes => match crate::keys::type_and_send(window, task) {
+                Ok(()) => logging::info(
+                    "new_task_typed",
+                    json!({ "session": id, "chars": task.chars().count() }),
+                ),
+                Err(e) => logging::error(
+                    "new_task_type_failed",
+                    json!({ "session": id, "err": e.to_string() }),
+                ),
+            },
+            // Màn còn vướng một hộp chọn KHÔNG phải hộp tin-thư-mục ⟹ KHÔNG
+            // gõ. Gõ chữ vào một hộp chọn là chốt hộ chủ máy một lựa chọn
+            // (luật 13), và đó là thứ không lùi lại được. Hỏng về phía im lặng,
+            // và nói ra ở log để còn biết vì sao đề bài chưa chạy.
+            Ready::Blocked(n) => logging::warn(
+                "new_task_not_typed",
+                json!({ "session": id, "why": "màn đang có hộp chọn", "options": n }),
+            ),
+            Ready::Blind(err) => logging::warn(
+                "new_task_not_typed",
+                json!({ "session": id, "why": "không đọc được màn", "err": err }),
+            ),
         }
     }
 
-    // Hết 20 giây mà chưa có nhật ký ⟹ phiên chưa chào đời, và nguyên nhân đã
-    // đo được là hộp tin-thư-mục (mỗi cặp tài khoản × thư mục hỏi đúng một
-    // lần). Bấm hộ rồi chờ thêm một lượt — cùng cách với lượt tự đóng sổ.
-    if answer_trust_dialog(&tty_short).is_some() {
-        let after = std::time::Instant::now() + Duration::from_secs(20);
-        while std::time::Instant::now() < after {
-            std::thread::sleep(Duration::from_millis(500));
-            if let Some(id) =
-                newest_transcript_since(&cfg.claude_transcript_root(), root, opened_at)
-            {
-                logging::info(
-                    "new_session_matched_by_transcript",
-                    json!({ "session": id, "tty": tty_short, "after": "trust_dialog" }),
-                );
-                return Ok(Started {
-                    session_id: id,
-                    project: project.to_string(),
-                    cwd: dir.to_string_lossy().to_string(),
-                    task: task.to_string(),
-                    ts: crate::logging::now_iso(),
-                    window: true,
-                });
+    Ok(Started {
+        session_id: id,
+        project: project.to_string(),
+        cwd: dir.to_string_lossy().to_string(),
+        task: task.to_string(),
+        ts: crate::logging::now_iso(),
+        window: true,
+    })
+}
+
+/// Ô nhập đã sẵn sàng nhận chữ chưa — ba kết cục, không gộp vào một `bool`.
+///
+/// Cùng luật với `keys::look`: *không đo được* phải là một kết cục RIÊNG, chứ
+/// không đọc thành "không có hộp chọn". Gộp lại là hỏng mở đúng lúc mù nhất.
+enum Ready {
+    Yes,
+    Blocked(usize),
+    Blind(String),
+}
+
+fn ready_to_type(window: i64) -> Ready {
+    match crate::keys::screen_text(window) {
+        Ok(screen) => {
+            let choices = crate::keys::parse_choices(&screen);
+            if choices.is_empty() {
+                Ready::Yes
+            } else {
+                Ready::Blocked(choices.len())
+            }
+        }
+        Err(e) => Ready::Blind(e.to_string()),
+    }
+}
+
+/// Phiên đang ngồi trong ĐÚNG cửa sổ này — `tty` → `pid` → sổ của CLI.
+///
+/// Không có bước đoán nào: `ps` nói pid nào giữ tty ấy, sổ `sessions/<pid>.json`
+/// nói pid ấy là phiên nào. Cửa duy nhất là `is_claude_process` (một cửa sổ có
+/// thể đang chạy thứ khác), và nó cũng là phép đo chứ không phải phép đoán.
+///
+/// Trả `None` khi cửa sổ chưa có phiên — đúng nghĩa: phiên còn đang dựng, hoặc
+/// đang kẹt ở hộp tin-thư-mục nên CHƯA có `sessionId` nào cả.
+pub fn session_on_tty(cfg: &Config, tty_short: &str) -> Option<String> {
+    let want = tty_short.trim_start_matches("/dev/");
+    if !is_real_tty(want) {
+        return None;
+    }
+    let procs = Procs::read();
+    if !procs.ok {
+        return None;
+    }
+    let pid = procs
+        .by_pid
+        .iter()
+        .find(|(_, p)| p.tty.trim_start_matches("/dev/") == want && is_claude_process(&p.command))
+        .map(|(pid, _)| *pid)?;
+    for account in &cfg.claude_accounts_or_ambient() {
+        let dir = account_book_dir(account);
+        let Ok(rows) = list_account_books(&dir) else {
+            continue;
+        };
+        for r in rows {
+            if r.get("pid").and_then(Value::as_i64) == Some(pid) {
+                if let Some(id) = r.get("sessionId").and_then(Value::as_str) {
+                    if !id.is_empty() {
+                        return Some(id.to_string());
+                    }
+                }
             }
         }
     }
+    None
+}
 
-    // Đường cũ, giữ làm lưới đỡ: nhật ký chưa kịp sinh (phiên kẹt ở hộp thoại
-    // duyệt MCP chẳng hạn) thì vẫn còn `claude agents` để hỏi.
+/// Chờ tới khi phiên vừa mở khai được id — MỘT chỗ cho cả `/new` lẫn bàn giao.
+///
+/// 🔴 Gộp 2026-08-15, sau khi Hà đọc mã và nói thẳng: *"bạn đang chưa kế thừa
+/// được các lệnh … rối và lỗi cứ bị đi bị lại"*. Đo lại thì đúng: chặng "chờ
+/// phiên chào đời" có **hai bản chép**, và bước "bấm hộ hộp tin-thư-mục" có
+/// **ba chỗ gọi**, mỗi chỗ một thứ tự khác nhau. Hai bản ấy KHÔNG giống nhau —
+/// và đúng chỗ chúng khác là chỗ một bên đã học được bài mà bên kia chưa:
+///
+/// | | `/new` (bản cũ) | bàn giao (bản cũ) |
+/// |---|---|---|
+/// | bấm hộ hộp tin-thư-mục | SAU 20 giây chờ | **TRƯỚC**, vô điều kiện |
+/// | loại id phiên cũ | không | **có** |
+/// | lưới đỡ `claude agents` | có (40 giây) | không |
+///
+/// Bản gộp lấy phần đúng của cả hai, và đây là lý do từng phần:
+/// * **Bấm hộ TRƯỚC** — `trust_dialog_choice` chỉ khớp đúng một hộp, không có
+///   hộp thì nó không bấm gì cả, nên gọi sớm không mất gì. Bài học trả giá
+///   2026-08-13 (Hà: *"lại kẹt khi chuyển phiên kìa"*): cửa cũ là
+///   `new_id.is_none()`, mà `new_id` vừa được điền bằng nhật ký của **phiên
+///   CŨ** ⟹ bước bấm hộ không bao giờ chạy tới.
+/// * **`exclude`** — "nhật ký nào vừa đổi" bao gồm cả phiên đang được đóng sổ,
+///   vì nó vẫn ghi tiếp. Một phép đo trả lời ĐÚNG câu nó được hỏi và SAI câu
+///   người ta cần.
+/// * **`deep`** — lưới đỡ `claude agents` tốn tới 40 giây và ba lượt spawn; chỉ
+///   `/new` trả giá ấy, vì ở đó không có id nghĩa là hỏng hẳn. Lượt bàn giao
+///   thì không có id nghĩa là **giữ nguyên cửa sổ cũ**, một kết cục an toàn.
+fn wait_for_new_session_id(
+    cfg: &Config,
+    root: &Path,
+    opened_at: std::time::SystemTime,
+    tty_short: &str,
+    exclude: Option<&str>,
+    deep: bool,
+) -> Option<String> {
+    // Nhật ký chưa sinh ⟹ id chưa tồn tại. Đường rẻ: id CHÍNH LÀ tên tệp.
+    //
+    // 🔴 Hà 2026-08-12, sau khi gõ `/new mailler` ba lần: `command_done New`
+    // **64,7 giây**, trong đó `new_window_opened` xảy ra ở giây thứ 7 — tức 57
+    // giây chỉ để chờ `claude agents` khai id. Cái giá thật không phải sự chậm:
+    // **anh tưởng hỏng nên gõ lại, và máy mở ra HAI phiên mailler**.
+    let look = |_: ()| -> Option<String> {
+        // 🔴 HỎI CỬA SỔ TRƯỚC, đoán theo mtime sau — Hà 2026-08-15: *"Tại sao
+        // danh sách có 2 phiên amm?"* và trước đó *"vừa tạo phiên social mới đã
+        // báo"* một id lạ.
+        //
+        // Đo trên log, ba lượt `/new` liên tiếp và **cả ba ghép nhầm sang phiên
+        // mở TRƯỚC đó**:
+        //   15:54:58 mở ttys000 → ghép `ac94ff19` (phiên hub, ttys005)
+        //   16:02:04 mở ttys008 → ghép `8291e5ac` (phiên ttys000)
+        //   16:05:17 mở ttys009 → ghép `724de1ff` (phiên ttys008)
+        //
+        // Vì `newest_transcript_since` chỉ hỏi *"tệp nào trong thư mục này vừa
+        // được ghi sau lúc mở cửa sổ"* — mà mọi phiên đều mở ở gốc workspace,
+        // nên chúng dùng CHUNG một thư mục nhật ký, và một phiên khác đang gõ
+        // dở luôn thắng cuộc đua ấy. Phiên MỚI thì 15–60 giây nữa mới có tệp.
+        //
+        // Câu hỏi đúng không phải "tệp nào mới nhất" mà **"ai đang ngồi trong
+        // cửa sổ tôi vừa mở"**, và từ 2026-08-15 nó trả lời được không cần đoán:
+        // `ps` cho tty → pid, sổ của CLI cho pid → `sessionId`. Không có cuộc
+        // đua nào để thua.
+        session_on_tty(cfg, tty_short)
+            .filter(|id| exclude.is_none_or(|old| id != old))
+            .inspect(|id| {
+                logging::info(
+                    "new_session_matched_by_tty",
+                    json!({ "session": id, "tty": tty_short }),
+                );
+            })
+            .or_else(|| {
+                newest_transcript_since(&cfg.claude_transcript_root(), root, opened_at)
+                    .filter(|id| exclude.is_none_or(|old| id != old))
+            })
+    };
+
+    if let Some(n) = answer_trust_dialog(tty_short) {
+        logging::info(
+            "trust_dialog_answered",
+            json!({ "tty": tty_short, "choice": n,
+                    "why": "cửa sổ vừa mở kẹt ở hộp tin-thư-mục — bấm trước khi chờ" }),
+        );
+    }
+
+    // Hai lượt chờ, và giữa hai lượt là một cú bấm hộ nữa: hộp có thể hiện
+    // MUỘN hơn lượt gọi ở trên (máy đang swap thì `claude` mất vài giây mới vẽ
+    // xong màn đầu tiên).
+    for round in 0..2 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(12);
+        while std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(500));
+            if let Some(id) = look(()) {
+                logging::info(
+                    "new_session_matched_by_transcript",
+                    json!({ "session": id, "tty": tty_short, "round": round }),
+                );
+                return Some(id);
+            }
+        }
+        if round == 0 {
+            answer_trust_dialog(tty_short);
+        }
+    }
+
+    if !deep {
+        return None;
+    }
+
+    // Lưới đỡ: nhật ký chưa kịp sinh (phiên kẹt ở một hộp thoại khác chẳng hạn)
+    // thì vẫn còn `claude agents` để hỏi.
     //
     // Đếm bằng ĐỒNG HỒ, không đếm bằng số vòng: mỗi vòng gọi `claude agents`
     // cho từng tài khoản, nên "30 vòng × 2 giây" trên thực tế là 90 giây chứ
@@ -3697,17 +4346,14 @@ fn start_in_terminal(
             .into_iter()
             .find(|s| !s.tty.is_empty() && s.tty == tty_short)
         {
-            return Ok(Started {
-                session_id: row.session_id,
-                project: project.to_string(),
-                cwd: dir.to_string_lossy().to_string(),
-                task: task.to_string(),
-                ts: crate::logging::now_iso(),
-                window: true,
-            });
+            logging::info(
+                "new_session_matched_by_agents",
+                json!({ "session": row.session_id, "tty": tty_short }),
+            );
+            return Some(row.session_id);
         }
     }
-    anyhow::bail!("mở được cửa sổ ({tty_short}) nhưng `claude agents` chưa khai phiên nào trên đó sau 60 giây")
+    None
 }
 
 /// Hộp *"tin thư mục này chứ?"* — và **chỉ** hộp ấy.
@@ -3895,70 +4541,29 @@ pub fn start_fresh_after_handover(
          BÀN GIAO:\n\n{checkpoint}\n\nĐọc xong thì làm tiếp việc kế tiếp trong bàn giao."
     );
     let cwd = Path::new(&session.cwd);
+    // Ngoại lệ đã nói ở `terminal_command`: bản bàn giao ~2 KB đi bằng argv.
     let cmd = terminal_command(
-        &cfg.claude_cli,
+        &account_launch(cfg, Some(&session.account)),
         cwd,
-        &task,
-        account_dir(cfg, &session.account).as_deref(),
+        Some(&task),
     );
     let opened_at = std::time::SystemTime::now();
     let (_window, tty) = crate::keys::open_window(&cmd)?;
     let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
-    // Ghép id qua TÊN TỆP nhật ký — cùng mẹo với `/new`, vài mili giây, không
-    // phải ba lần spawn `claude agents`.
-    // 🔴 BẤM HỘ TRƯỚC, đừng chờ tới khi kết luận "chưa chào đời".
-    //
-    // Hà 2026-08-13 21:5x: *"phiên dwork tự chuyển do ngữ cảnh đầy lại đang bị
-    // kẹt"* · *"lại kẹt khi chuyển phiên kìa"*. Đọc màn `ttys004` ra đúng thủ
-    // phạm — cửa sổ kế nhiệm ngồi nguyên trên hộp:
-    //
-    //     ❯ 1. Yes, I trust this folder
-    //       2. No, exit
-    //
-    // Mã ĐÃ có bước bấm hộ, và nó vẫn không chạy: cửa của nó là
-    // `new_id.is_none()`, mà `new_id` vừa được điền — bằng nhật ký của CHÍNH
-    // PHIÊN CŨ. Log làm chứng: `handover_window_opened session:0a109818…`, đúng
-    // id phiên đang được đóng sổ. `newest_transcript_since` chỉ hỏi "tệp nào
-    // mới đổi sau lúc mở cửa sổ", mà phiên cũ vẫn đang ghi tiếp vào nhật ký của
-    // nó. Tức một phép đo trả lời ĐÚNG câu nó được hỏi và SAI câu người ta cần.
-    //
-    // Hai vá, và cả hai đều thu hẹp chỗ đoán:
-    // * bấm hộ VÔ ĐIỀU KIỆN trước khi chờ — `trust_dialog_choice` chỉ khớp
-    //   đúng hộp ấy, không có hộp thì nó không bấm gì cả, nên gọi sớm không mất
-    //   gì mà cứu được đúng ca này;
-    // * và loại id phiên CŨ ra khỏi phép ghép, vì "nhật ký vừa đổi" bao gồm cả
-    //   nó — xem `newest_transcript_since`.
-    if let Some(n) = answer_trust_dialog(&tty_short) {
-        logging::info(
-            "handover_trust_dialog_answered",
-            json!({ "tty": tty_short, "choice": n,
-                    "why": "cửa sổ kế nhiệm kẹt ở hộp tin-thư-mục — bấm trước khi chờ" }),
-        );
-    }
-    let mut new_id = None;
-    for _ in 0..24 {
-        std::thread::sleep(Duration::from_millis(500));
-        if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), cwd, opened_at) {
-            if id != session.session_id {
-                new_id = Some(id);
-                break;
-            }
-        }
-    }
-    // Vẫn chưa có nhật ký ⟹ thử bấm hộ lần nữa: hộp có thể hiện MUỘN hơn lượt
-    // gọi ở trên (máy đang swap thì `claude` mất vài giây mới vẽ xong).
-    if new_id.is_none() && answer_trust_dialog(&tty_short).is_some() {
-        for _ in 0..24 {
-            std::thread::sleep(Duration::from_millis(500));
-            if let Some(id) = newest_transcript_since(&cfg.claude_transcript_root(), cwd, opened_at)
-            {
-                if id != session.session_id {
-                    new_id = Some(id);
-                    break;
-                }
-            }
-        }
-    }
+    // MỘT chỗ cho cả `/new` lẫn đường này — xem `wait_for_new_session_id`.
+    // `exclude` là phần riêng có thật của lượt bàn giao: phiên CŨ vẫn đang ghi
+    // tiếp nhật ký, nên "tệp nào vừa đổi" bao gồm cả nó, và bản cũ đã ghép
+    // trúng id phiên đang bị đóng sổ (`handover_window_opened session:0a109818…`).
+    // `deep = false`: ở đây không có id nghĩa là GIỮ NGUYÊN cửa sổ cũ — một kết
+    // cục an toàn, không đáng trả thêm 40 giây hỏi `claude agents`.
+    let new_id = wait_for_new_session_id(
+        cfg,
+        cwd,
+        opened_at,
+        &tty_short,
+        Some(&session.session_id),
+        false,
+    );
     logging::info(
         "handover_window_opened",
         json!({ "tty": tty_short, "session": new_id.clone().unwrap_or_default(), "fresh": true }),
@@ -4029,11 +4634,136 @@ pub fn start_fresh_after_handover(
     })
 }
 
-pub fn terminal_command(cli: &str, root: &Path, task: &str, config_dir: Option<&str>) -> String {
-    let env_prefix = match config_dir {
-        Some(dir) => format!("CLAUDE_CONFIG_DIR={} ", shell_quote(dir)),
-        None => String::new(),
-    };
+/// Bước MỘT của mọi thứ hub mở: một cửa sổ Terminal TRẦN, ở gốc workspace.
+///
+/// 🔴 Hà 2026-08-15: *"nếu `/new` để trống thì nó sẽ chỉ khởi tạo terminal, như
+/// vậy không cần lệnh terminal nữa"*. Đây là bước một; `/new <acc>` đi tiếp một
+/// bước (dựng CLI), `/new <acc> <chữ>` đi tiếp bước nữa (gõ đề bài). Một động
+/// từ, ba mức — thay vì hai động từ mở theo hai kiểu.
+///
+/// Mở ở **`~`** — Hà 2026-08-15: *"nếu lệnh `/new` trống thì mặc định mở
+/// terminal ở `~`"*. Đúng chỗ Terminal.app tự mở khi chủ máy bấm ⌘N, tức cửa sổ
+/// trần trông y như một cửa sổ trần.
+///
+/// Gốc workspace KHÔNG áp ở đây, và chỗ khác nhau ấy đáng nhớ: `~/projects` là
+/// thư mục duy nhất cả ba tài khoản đã duyệt, nên nó là điều kiện của một
+/// **phiên CLI** — không phải của một cái cửa sổ. Đem nó áp lên cửa sổ trần là
+/// mang một ràng buộc sang chỗ không có ràng buộc ấy.
+///
+/// `cd ~` **không bọc nháy**: `shell_quote("~")` ra `'~'`, và trong shell thì
+/// `'~'` là một thư mục tên dấu ngã, không phải nhà. Đây đúng loại lỗi im lặng
+/// mà một cái test không đọc kỹ sẽ bỏ qua — ghim bằng test riêng.
+pub const BARE_TERMINAL_CMD: &str = "cd ~/";
+
+/// Id ấy là một CỬA SỔ TRẦN, không phải một phiên `claude`.
+///
+/// Hình dạng `win-<tty>` dựng ở `add_shell_windows`; hằng số này để mọi chỗ hỏi
+/// "đây là cửa sổ hay là phiên" đọc chung một câu trả lời, thay vì mỗi chỗ tự
+/// so chuỗi — đúng con đường đã đẻ ra bốn bản chép của luật "tên để đọc".
+pub const SHELL_ID_PREFIX: &str = "win-";
+
+pub fn is_shell_id(id: &str) -> bool {
+    id.starts_with(SHELL_ID_PREFIX)
+}
+
+pub fn open_bare_terminal() -> Result<(i64, String)> {
+    let (window, tty) = crate::keys::open_window(BARE_TERMINAL_CMD)?;
+    let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
+    logging::info(
+        "bare_terminal_opened",
+        json!({ "window": window, "tty": tty_short }),
+    );
+    Ok((window, tty_short))
+}
+
+/// TỪ để gõ ở terminal cho ra đúng tài khoản ấy.
+///
+/// Ưu tiên thứ chủ máy khai (`launch`: `claude` · `claude2` · `claude3`); không
+/// khai thì dựng lại cách cũ từ `config_dir` — cùng kết quả, chỉ khác chỗ đọc.
+/// KHÔNG đoán tên alias theo `accN`.
+pub fn account_launch(cfg: &Config, account: Option<&str>) -> String {
+    let row = account.and_then(|a| {
+        let found = cfg
+            .claude_accounts_or_ambient()
+            .into_iter()
+            .find(|x| x.name == a);
+        if found.is_none() {
+            // 🔴 Tên lạ KHÔNG được lặng lẽ hoá thành tài khoản mặc định — mở
+            // phiên nhầm tài khoản là mở nhầm cả kho phiên, và hậu quả (tuần
+            // cạn hạn mức) chỉ lộ về sau. `/new` đã từ chối tên lạ ở tầng trên,
+            // nên tới được đây nghĩa là có chỗ gọi mới quên; hàm này không tự
+            // từ chối được (nó trả `String`), nhưng phải KÊU. Luật 3.
+            logging::warn(
+                "account_launch_unknown",
+                json!({ "account": a, "why": "rơi về tài khoản mặc định" }),
+            );
+        }
+        found
+    });
+    if let Some(l) = row.as_ref().and_then(|r| r.launch.as_ref()) {
+        let l = l.trim();
+        if !l.is_empty() {
+            return l.to_string();
+        }
+    }
+    match row
+        .and_then(|r| r.config_dir)
+        .map(|d| crate::config::expand_home(Path::new(&d)))
+    {
+        Some(dir) => format!(
+            "CLAUDE_CONFIG_DIR={} {}",
+            shell_quote(&dir.to_string_lossy()),
+            shell_quote(&cfg.claude_cli)
+        ),
+        None => shell_quote(&cfg.claude_cli),
+    }
+}
+
+/// Dòng lệnh mở một phiên mới trong cửa sổ Terminal.
+///
+/// 🔴 **Đề bài KHÔNG còn đi bằng argv, 2026-08-15.** Hà chốt đúng năm bước:
+/// *"mở terminal mới → chèn vào lệnh `claude3` → kiểm tra xem có vướng gì không
+/// … để vào được chỗ chờ gõ text → chuyển chế độ auto mode on → gõ vào chuỗi
+/// `tiếp dwork`"*.
+///
+/// Đây là phép thử CẦU NỐI đọc tới tận cùng: ngồi ở máy thì chủ máy **gõ** câu
+/// việc vào ô nhập, không nhét nó vào dòng lệnh. Và cái giá của lối cũ đã đo
+/// được ngay hôm nay — `/new acc3 dwork` biến thành
+/// `claude --permission-mode auto '[] acc3 dwork' …`: mọi thứ đứng sai chỗ đều
+/// hoá thành **một phần đề bài**, im lặng, tới tận argv. Gõ vào ô nhập thì
+/// không có chỗ nào để một cặp ngoặc rỗng bám vào.
+///
+/// ⚠ Rào KHÔNG nới, và đây là chỗ chọi phải nói rõ: `claude3` TRẦN không có rào
+/// nào (bài học 08-13, Hà: *"đâu có đúng?"*). Nên hub gõ `claude3` **kèm**
+/// `--permission-mode auto` + `--disallowedTools`: vẫn là từ chủ máy vẫn gõ,
+/// vẫn đủ rào, và bước "chuyển auto mode on" tự xong ngay lúc mở.
+///
+/// `prompt` gần như luôn là `None` — đó là đường của `/new`. Ngoại lệ DUY NHẤT
+/// là lượt tự bàn giao: bản bàn giao dài ~2 KB do chính hub soạn, và 2 KB đẩy
+/// qua `do script` thì TUI đọc thành một cú DÁN (luật 13), tức đúng chỗ hỏng đã
+/// trả giá cả một tối 12/08. Chỗ ấy không có chủ máy nào gõ nhầm để mà bảo vệ,
+/// nên nó giữ argv — và khác nhau ở đâu thì nói ra ở đó.
+pub fn terminal_command(launch: &str, root: &Path, prompt: Option<&str>) -> String {
+    terminal_command_resuming(launch, root, prompt, None)
+}
+
+/// Cùng dòng lệnh ấy, nhưng NỐI TIẾP một phiên đã có thay vì mở phiên mới.
+///
+/// 🔴 Thay `/tell`, 2026-08-15. Hà: *"lệnh tell là không cần thiết?"* — đúng, và
+/// đường cũ sai ở chỗ sâu hơn một động từ thừa: `sessions::tell` chạy
+/// `claude -p --resume <id>`, tức một lượt gọi **một phát rồi thôi**, KHÔNG có
+/// cửa sổ, và có tiêu hạn mức. Ngồi ở máy thì chủ máy mở một cửa sổ rồi gõ
+/// `claude --resume <id>` — phiên sống lại thật, gõ tiếp được, `/shot` nhìn
+/// được. Đúng phép thử cầu nối, và miễn phí.
+///
+/// Rào giữ nguyên: `--permission-mode auto` + `--disallowedTools`. Nối tiếp một
+/// việc KHÔNG được lặng lẽ trao cho nó quyền mà lượt đầu của nó không có.
+pub fn terminal_command_resuming(
+    launch: &str,
+    root: &Path,
+    prompt: Option<&str>,
+    resume: Option<&str>,
+) -> String {
     // MỌI mẫu công cụ phải được bọc. Chúng chứa `(`, `)`, `*`, `:` —
     // `Bash(git push:*)` để trần là LỖI CÚ PHÁP của shell, và cửa sổ sẽ mở ra
     // với một dòng đỏ thay vì một phiên. Nhánh `--bg` không dính vì nó truyền
@@ -4044,14 +4774,6 @@ pub fn terminal_command(cli: &str, root: &Path, task: &str, config_dir: Option<&
         .map(|t| shell_quote(t))
         .collect::<Vec<_>>()
         .join(" ");
-    // Đề bài rỗng ⟹ KHÔNG có tham số vị trí nào: cửa sổ mở ra một phiên
-    // `claude` trống, đúng như chủ máy tự gõ. Đưa `''` vào đó thì `claude` nhận
-    // một đề bài rỗng — khác hẳn với không có đề bài.
-    let prompt = if task.is_empty() {
-        String::new()
-    } else {
-        format!("{} ", shell_quote(task))
-    };
     // `--permission-mode auto` — đúng chế độ chủ máy vẫn ngồi làm việc.
     //
     // 🔴 Hà 2026-08-12: *"khi dùng lệnh new mở được phiên rồi nhưng chưa chuyển
@@ -4068,11 +4790,23 @@ pub fn terminal_command(cli: &str, root: &Path, task: &str, config_dir: Option<&
     // ⚠ KHÔNG nới điều 1: `--disallowedTools` vẫn nguyên vẹn và vẫn đứng cuối.
     // `auto` bỏ bước HỎI, `DENIED_TOOLS` bỏ bước LÀM — hai thứ khác nhau, và
     // cái rào thật nằm ở vế sau (không push/merge/reset, không ssh/sudo/rm…).
+    // Thứ tự vẫn là bẫy cũ: `--disallowedTools` VARIADIC nên đề bài (nếu có)
+    // phải đứng TRƯỚC nó.
+    let prompt = match prompt.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => format!("{} ", shell_quote(p)),
+        None => String::new(),
+    };
+    // `--resume <id>` đứng TRƯỚC đề bài, và đề bài trước `--disallowedTools`:
+    // cờ cuối là variadic, nuốt mọi thứ đứng sau nó (luật 10).
+    let resume = match resume.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(r) => format!("--resume {} ", shell_quote(r)),
+        None => String::new(),
+    };
     format!(
-        "cd {} && {}{} --permission-mode auto {}--disallowedTools {}",
+        "cd {} && {} --permission-mode auto {}{}--disallowedTools {}",
         shell_quote(&root.to_string_lossy()),
-        env_prefix,
-        shell_quote(cli),
+        launch,
+        resume,
         prompt,
         denied
     )
@@ -4089,6 +4823,7 @@ pub fn start_background(
     dir: &Path,
     task: &str,
     account: Option<&str>,
+    resume: Option<&str>,
 ) -> Result<Started> {
     let task = task.trim();
     // Đề bài RỖNG được phép — nhưng chỉ trên đường mở cửa sổ thật.
@@ -4122,11 +4857,7 @@ pub fn start_background(
     // chọn acc2. Việc thuộc dự án nào thì nói trong ĐỀ BÀI, chứ không cần đổi
     // thư mục làm việc: `claude` đọc `CLAUDE.md` của cả cây từ gốc.
     let root = cfg.workspace_root.clone();
-    let task_with_project = if task.is_empty() {
-        String::new()
-    } else {
-        format!("[{project}] {task}")
-    };
+    let task_with_project = task_for_new(project, task);
 
     // ĐƯỜNG CHÍNH: mở một cửa sổ Terminal thật, y như chủ máy tự mở.
     //
@@ -4141,7 +4872,15 @@ pub fn start_background(
     // vì nó sống độc lập với Terminal — đóng cửa sổ là mất phiên cửa sổ, còn
     // `--bg` thì không.
     if cfg.new_in_terminal {
-        match start_in_terminal(cfg, &root, project, dir, &task_with_project, account) {
+        match start_in_terminal(
+            cfg,
+            &root,
+            project,
+            dir,
+            &task_with_project,
+            account,
+            resume,
+        ) {
             Ok(started) => return Ok(started),
             Err(e) => logging::warn(
                 "new_in_terminal_failed",
@@ -4392,7 +5131,10 @@ pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Option<i64>>
     // rồi cửa sổ nằm nguyên đó — hub báo "đang đóng" cho một việc không bao
     // giờ xảy ra.
     if session.host == "shell" {
-        crate::keys::type_into(window, "exit", true)?;
+        // Đây là một dấu nhắc SHELL, không phải TUI — ở shell thì dấu
+        // xuống dòng `do script` tự kèm chính là cú Enter. Luật 13 chỉ
+        // nói về ô nhập của `claude`.
+        crate::keys::type_into(window, "exit")?;
     } else {
         crate::keys::send_exit(window)?;
     }
@@ -4430,116 +5172,22 @@ pub fn stop_background(cfg: &Config, session: &LiveSession) -> Result<()> {
     Ok(())
 }
 
-/// What one turn added to a session that was continued in place.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Told {
-    pub session_id: String,
-    pub source_name: String,
-    pub text: String,
-    pub answer: String,
-    /// See `Handover::cost_usd` — recorded, never published.
-    #[serde(default, skip_serializing)]
-    pub cost_usd: f64,
-    pub ts: String,
-}
-
-/// Continue a session IN PLACE — a real next turn, not an aside (UC-S05).
-///
-/// The wall here is the CLI's, not a policy hub invented: resuming a live
-/// background agent is refused outright —
-/// *"Session … is currently running as a background agent (bg). Use `claude
-/// agents` to find and attach to it, or add --fork-session to branch off a
-/// copy."* So "talk into a session while it works" has no path at all from a
-/// phone; `attach` needs a terminal on the machine, and forking is a different
-/// thing (UC-S05b level 2, which hub already offers).
-///
-/// What DOES work, measured 2026-08-08: stop the agent first, then resume. The
-/// session id stays the same and the transcript grows (8434 → 11529 bytes,
-/// 16 → 22 records) — a genuine next turn on the same thread.
-pub fn tell(cfg: &Config, session: &LiveSession, text: &str) -> Result<Told> {
-    let text = text.trim();
-    if text.is_empty() {
-        anyhow::bail!("chưa có nội dung");
-    }
-    if session.kind != "background" {
-        anyhow::bail!(
-            "chỉ nói tiếp được vào phiên do hub mở. Phiên này mở từ terminal/VS Code — dùng \"hỏi bên lề\" để hỏi mà không đụng vào nó."
-        );
-    }
-    if session.status.as_deref() == Some("busy") {
-        anyhow::bail!(
-            "phiên đang chạy dở nên claude không cho nối vào. Dừng nó trước (nút Dừng), hoặc dùng \"hỏi bên lề\" để hỏi mà không cắt việc."
-        );
-    }
-
-    let estimate = fork_cost_estimate(cfg, session);
-    let cap = (estimate * 2.0).max(cfg.call.max_budget_usd).to_string();
-    let cwd = crate::config::expand_home(Path::new(&session.cwd));
-    // Same denylist the session was started with: continuing a task must not
-    // quietly hand it powers its first turn did not have.
-    let mut args: Vec<&str> = vec!["-p", "--resume", &session.session_id, "--disallowedTools"];
-    args.extend_from_slice(&DENIED_TOOLS);
-    args.extend_from_slice(&["--max-budget-usd", &cap, "--output-format", "json"]);
-    let out = run(
-        &cfg.claude_cli,
-        &args,
-        RunOpts {
-            cwd: cwd.is_dir().then_some(cwd.as_path()),
-            input: Some(text.to_string()),
-            timeout: Some(Duration::from_secs(cfg.call.timeout_sec)),
-            env: vec![(
-                "CLAUDE_CONFIG_DIR".into(),
-                account_dir(cfg, &session.account),
-            )],
-            ..Default::default()
-        },
-    )?;
-    if out.timed_out {
-        anyhow::bail!("quá {}s", cfg.call.timeout_sec);
-    }
-    if out.code != Some(0) {
-        return Err(claude_failed(&session.session_id, &out));
-    }
-    let v: Value = serde_json::from_str(&out.stdout)
-        .map_err(|e| anyhow::anyhow!("kết quả không đọc được: {e}"))?;
-    let cost_usd = v
-        .get("total_cost_usd")
-        .and_then(|c| c.as_f64())
-        .unwrap_or(0.0);
-    if v.get("is_error").and_then(Value::as_bool) == Some(true) {
-        anyhow::bail!(
-            "claude báo lỗi (đã tính ${cost_usd:.4}): {}",
-            truncate(
-                v.get("result").and_then(|s| s.as_str()).unwrap_or("(rỗng)"),
-                200
-            )
-        );
-    }
-    let got = v
-        .get("session_id")
-        .and_then(|s| s.as_str())
-        .unwrap_or_default();
-    if got != session.session_id {
-        // A NEW id means the turn landed somewhere else — the opposite of what
-        // this verb promises. Say so instead of reporting a cheerful success on
-        // a thread the owner is not looking at.
-        anyhow::bail!("lượt này rơi vào phiên khác ({got}) chứ không nối vào phiên cũ");
-    }
-    Ok(Told {
-        session_id: session.session_id.clone(),
-        source_name: session.name.clone(),
-        text: text.to_string(),
-        answer: gate_preview(
-            v.get("result")
-                .and_then(|s| s.as_str())
-                .unwrap_or_default()
-                .trim(),
-            "[hub ẩn câu trả lời: có thể chứa bí mật — mở phiên trên máy để xem]",
-        ),
-        cost_usd,
-        ts: crate::logging::now_iso(),
-    })
-}
+// 🔴 `Told` + `sessions::tell` GỠ 2026-08-15, cùng động từ `/tell`.
+//
+// Hà: *"lệnh tell là không cần thiết?"* · *"vì trên tele tôi chỉ gõ text bình
+// thường thôi"*. Đo cả cuốn log: 0 lượt dùng — nhưng bằng chứng thật không phải
+// con số ấy (nó đã lừa một lần rồi: `/win`, `listed:false`, đo SỰ VÔ HÌNH), mà
+// là dòng đầu của chính hàm này: `if session.kind != "background" { bail!(…) }`.
+// Hạng phiên nền nay chỉ còn sinh ra khi MỞ CỬA SỔ THẤT BẠI, nên hàm này gần
+// như không còn mục tiêu nào để nhắm vào.
+//
+// Khả năng thật của nó — nói tiếp vào một phiên đã tắt — KHÔNG mất mà đi lên
+// một bậc: `/new <id>` mở một CỬA SỔ THẬT chạy `claude --resume <id>`
+// (`terminal_command_resuming`). Đường cũ là `-p --resume`, tức một lượt gọi
+// một phát rồi thôi, không cửa sổ, và có tiêu hạn mức; đường mới cho một phiên
+// SỐNG: gõ tiếp được, `/shot` nhìn được, miễn phí. Đúng phép thử cầu nối —
+// ngồi ở máy thì chủ máy mở cửa sổ rồi gõ `claude --resume`, không ai chạy một
+// lượt `-p` rồi đọc kết quả trong stdout.
 
 /// `CLAUDE_CONFIG_DIR` for an account label — `None` means the ambient account.
 fn account_dir(cfg: &Config, account: &str) -> Option<String> {

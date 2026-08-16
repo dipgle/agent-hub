@@ -675,6 +675,95 @@ fn cargo_bin() -> String {
     "cargo".to_string()
 }
 
+/// Mốc nhận diện BẢN ĐANG CHẠY: đường + mtime của chính binary này.
+pub const BOOT_BINARY_KEY: &str = "boot:binary";
+
+/// Lượt lên này có đáng NÓI không — tức bản có khác lần trước không.
+///
+/// Tách ra vì đây là một QUYẾT ĐỊNH về việc phát ngôn, cùng họ với
+/// `pipeline::watch_book_usable`: chưa từng ghi ⟹ nói (lần đầu sau khi dựng cơ
+/// chế này chính là một lần cài); khác bản ⟹ nói; **giống hệt ⟹ im**, vì hubd
+/// còn lên lại vì crash và vì `KeepAlive`, và một cái chuông kêu ở đó là chuông
+/// kêu lúc không có tin.
+pub fn boot_is_news(before: Option<&str>, now: &str) -> bool {
+    before.is_none_or(|b| b != now)
+}
+
+/// Nói MỘT câu ra Telegram khi hub vừa lên bằng một bản KHÁC bản lần trước.
+///
+/// 🔴 Hà 2026-08-15: *"Cài lại báo đang restart rồi đứng im, không có cơ chế
+/// xác thực cài lại xong chưa"*. Anh đúng, và đây là một lỗ hổng đúng hình dạng
+/// đã ghi trong `CLAUDE.md`: `/upgrade` cố ý báo **TRƯỚC** khi restart, vì tiến
+/// trình đang trả lời sẽ bị thay thế giữa câu (bài học 13/08 — ba lần bấm nút
+/// tự cài lại, lệnh chạy xong mà lời báo bị giết giữa chừng). Nhưng nửa còn lại
+/// thì chưa ai làm: **không có ai nói sau khi bản mới đã lên**. Nhìn từ điện
+/// thoại, "đang restart" rồi im lặng đọc y hệt một lần cài chết giữa đường.
+///
+/// Hai điều nó cố ý KHÔNG làm:
+/// - **Không nói khi bản không đổi.** hubd còn khởi động lại vì crash, vì
+///   `KeepAlive`, vì máy ngủ dậy. Nói mỗi lượt lên là dựng một cái chuông kêu
+///   đúng lúc không có tin gì — thứ luật 11 sinh ra để tránh. Đổi bản mới là
+///   tin; lên lại cùng bản chỉ là một dòng log.
+/// - **Không tự khẳng định "đã cài đúng thứ anh vừa build"**: câu nó nói là
+///   mtime + chữ ký của **binary đang chạy**, tức thứ đo được từ bên trong
+///   chính tiến trình ấy. So với cây mã là việc của bảng sức khoẻ.
+pub fn announce_boot(db: &crate::db::Db, cfg: &Config, signature: &str) {
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            crate::logging::warn(
+                "boot_binary_unknown",
+                json!({ "err": e.to_string(),
+                        "why": "không đọc được đường của chính binary — bỏ qua lời báo cài xong" }),
+            );
+            return;
+        }
+    };
+    let stamp = std::fs::metadata(&exe)
+        .and_then(|m| m.modified())
+        .map(|t| {
+            let ts: chrono::DateTime<chrono::Utc> = t.into();
+            ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        })
+        .unwrap_or_default();
+    let now = format!("{}@{stamp}", exe.display());
+    let before = db.cursor_or_log(BOOT_BINARY_KEY);
+
+    if let Err(e) = db.set_cursor(BOOT_BINARY_KEY, &now) {
+        // Ghi hỏng thì vẫn NÓI (lời báo là việc chính), nhưng phải nói ra rằng
+        // lượt sau có thể nói lại — thà lặp một lần còn hơn im.
+        crate::logging::error("boot_binary_not_saved", json!({ "err": e.to_string() }));
+    }
+    if !boot_is_news(before.as_deref(), &now) {
+        crate::logging::info(
+            "hubd_boot_same_binary",
+            json!({ "binary": now, "signature": signature,
+                    "why": "lên lại đúng bản cũ (crash/KeepAlive) — không phải tin, không nói" }),
+        );
+        return;
+    }
+    let text = format!(
+        "✅ hub đã cài lại xong và đang chạy.\nbản: {stamp} · chữ ký: {signature} · pid {}\n(bản trước: {})",
+        std::process::id(),
+        before
+            .as_deref()
+            .and_then(|b| b.split_once('@').map(|(_, t)| t.to_string()))
+            .unwrap_or_else(|| "chưa ghi".to_string())
+    );
+    match crate::confirm::tell(cfg, &text) {
+        Ok(()) => crate::logging::info(
+            "hubd_boot_announced",
+            json!({ "binary": now, "signature": signature }),
+        ),
+        // Không nói được thì phải để lại dấu: đây đúng là lúc chủ máy đang ngồi
+        // chờ một câu trả lời.
+        Err(e) => crate::logging::error(
+            "hubd_boot_announce_failed",
+            json!({ "err": e, "binary": now }),
+        ),
+    }
+}
+
 pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     let rust_dir = source_tree(cfg);
     if !rust_dir.is_dir() {

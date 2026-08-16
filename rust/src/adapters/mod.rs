@@ -47,7 +47,6 @@ pub enum CommandKind {
     Stop,
     /// Continue the focused background session IN PLACE — a real next turn on
     /// the same thread, unlike `Ask` which forks. `arg` is what to say.
-    Tell,
     /// `/type <chữ>` — gõ THẲNG vào cửa sổ terminal của phiên đang theo.
     ///
     /// Khác `Tell` ở chỗ căn bản: `Tell` chạy `claude --resume`, tức mở một

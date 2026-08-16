@@ -38,15 +38,18 @@
   "claude_cli": "claude",
   "claude_accounts": [
     {
-      "name": "acc1"
+      "name": "acc1",
+      "launch": "claude"
     },
     {
       "name": "acc2",
-      "config_dir": "~/.claude-acc2"
+      "config_dir": "~/.claude-acc2",
+      "launch": "claude2"
     },
     {
       "name": "acc3",
-      "config_dir": "~/.claude-acc3"
+      "config_dir": "~/.claude-acc3",
+      "launch": "claude3"
     }
   ]
 }

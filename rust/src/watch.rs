@@ -181,10 +181,12 @@ pub struct Mark {
     /// còn sống VÀ còn ngồi đúng tty ấy không — một lượt `ps`, vài mili giây,
     /// KHÔNG spawn `claude`. Chết rồi thì `ps` im, và hub từ chối.
     ///
-    /// 🔴 Vì sao cần (đo 2026-08-12): mọi lệnh gõ/nhìn đều đi qua
-    /// `snapshot_cached`, mà một lượt dựng ảnh chụp trên máy đang swap mất
-    /// 15–92 giây — `/type` **134 giây**, `/shot` **117 giây**, rồi trả về
-    /// *"không thấy phiên"* cho một phiên đang sống.
+    /// 🔴 Vì sao cần (đo 2026-08-12): mọi lệnh gõ/nhìn đều dựng lại ảnh chụp,
+    /// mà một lượt dựng trên máy đang swap mất 15–92 giây — `/type` **134
+    /// giây**, `/shot` **117 giây**, rồi trả về *"không thấy phiên"* cho một
+    /// phiên đang sống. (Cái giá ấy đã đi 2026-08-15 — ảnh chụp nay đọc tệp sổ
+    /// của CLI chứ không spawn nó — nhưng `tty`+`pid` vẫn là đường ngắn nhất và
+    /// là đường duy nhất không phụ thuộc ảnh chụp.)
     #[serde(default)]
     pub i: i64,
     /// `terminal` · `editor` · `background` — nhớ để câu TỪ CHỐI nói đúng lý do

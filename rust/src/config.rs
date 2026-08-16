@@ -500,6 +500,25 @@ pub struct ClaudeAccountCfg {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_dir: Option<String>,
+    /// TỪ chủ máy gõ ở terminal để vào tài khoản này — `claude`, `claude2`,
+    /// `claude3`.
+    ///
+    /// 🔴 Hà 2026-08-15: *"tôi có 3 tài khoản và trên terminal tôi gõ 'claude'
+    /// 'claude2' 'claude3' sẽ tương ứng dùng các tài khoản khác nhau"*. Đo trên
+    /// máy (`~/.zshrc:51-52`): `alias claude3='CLAUDE_CONFIG_DIR=$HOME/.claude-acc3
+    /// claude'` — tức alias giãn ra ĐÚNG thứ hub vẫn tự dựng lấy.
+    ///
+    /// Vậy vì sao vẫn khai? Vì phép thử CẦU NỐI: ngồi ở máy thì chủ máy gõ
+    /// `claude3`, nên cửa sổ hub mở phải mang đúng dòng ấy — anh nhìn vào là
+    /// đọc được, và **một nguồn duy nhất** quyết tài khoản. Hôm nay có hai bản
+    /// chép: alias trong `.zshrc` và `config_dir` trong `hub.config.json`; hai
+    /// bản y hệt nhau cho tới ngày một bên đổi.
+    ///
+    /// Không khai thì rơi về cách cũ (`CLAUDE_CONFIG_DIR=<dir> claude`) — cùng
+    /// kết quả, chỉ khác chỗ đọc. KHÔNG đoán tên alias theo `accN`: đoán tên
+    /// một lệnh sắp chạy trên máy người khác là đúng thứ tệp này cấm.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub launch: Option<String>,
 }
 
 impl Config {
@@ -510,6 +529,7 @@ impl Config {
             vec![ClaudeAccountCfg {
                 name: "mặc định".into(),
                 config_dir: None,
+                launch: None,
             }]
         } else {
             self.claude_accounts.clone()

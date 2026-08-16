@@ -953,3 +953,62 @@ fn a_session_that_refilled_after_a_handover_asks_again() {
         AutoWhy::Do
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sổ QUÁ CŨ = hub chưa từng nhìn, không phải "mọi thứ vừa đổi".
+//
+// Luật 11 đã có nửa câu này: *lượt đầu sau khi khởi động lại thì im*. Nhưng nó
+// đo bằng "sổ rỗng", mà sổ có thể ĐẦY và ÔI. Ca thật, đo trên máy 15/08: ba cỗ
+// máy chạy-mỗi-vòng mất chỗ gọi từ 14/08 13:11 (xem `tests/cycle_wiring.rs`),
+// nên `watch:sessions` đứng im hơn một ngày với hai phiên chết từ hôm kia.
+// Không có cửa này thì lượt so đầu tiên sau bản vá bắn hai tin "⏹ đã tắt" về
+// hai cái chết đã cũ hơn 24 tiếng — sai NGHĨA, không phải sai giờ.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn a_book_older_than_the_watch_window_must_not_speak() {
+    use hub::pipeline::watch_book_usable;
+
+    // Sổ rỗng: cứ đi đường thường — `changes` vốn đã im ở lượt đầu.
+    assert!(watch_book_usable(0, None));
+    assert!(watch_book_usable(0, Some(999_999)));
+
+    // Sổ đầy và mới: nói được.
+    assert!(watch_book_usable(2, Some(0)));
+    assert!(watch_book_usable(2, Some(120)));
+    assert!(
+        watch_book_usable(2, Some(600)),
+        "đúng mốc thì vẫn còn dùng được"
+    );
+
+    // Sổ đầy mà ôi: IM. 601 giây, và ca thật là hơn một ngày.
+    assert!(!watch_book_usable(2, Some(601)));
+    assert!(!watch_book_usable(2, Some(86_400)));
+
+    // Không đọc được mốc: cũng IM. "Không biết mình đã nhìn hay chưa" không đủ
+    // tư cách để tuyên bố một cái chết — cùng luật với `blind` (11b).
+    assert!(!watch_book_usable(2, None));
+}
+
+#[test]
+fn the_book_carries_the_time_it_was_written() {
+    // Phép đo đứng sau cửa trên. Sai chỗ này thì cửa kia luôn mở hoặc luôn đóng
+    // — cả hai đều là một cửa không đo gì cả.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let db = hub::db::Db::open(&dir.path().join("hub.sqlite")).expect("open db");
+
+    assert_eq!(
+        db.cursor_written_at("watch:sessions"),
+        None,
+        "chưa từng ghi thì không có mốc — và 'không có mốc' phải khác 'mốc = 0'"
+    );
+
+    db.set_cursor("watch:sessions", "{}").expect("ghi sổ");
+    let age = chrono::Utc::now().timestamp()
+        - db.cursor_written_at("watch:sessions")
+            .expect("vừa ghi xong thì phải có mốc");
+    assert!(
+        (0..5).contains(&age),
+        "mốc vừa ghi phải gần bây giờ, đo được {age}s"
+    );
+}

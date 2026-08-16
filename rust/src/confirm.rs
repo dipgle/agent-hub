@@ -160,29 +160,36 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
     };
     let api = |m: &str| format!("https://api.telegram.org/bot{token}/{m}");
 
-    // MƯỢN đường đọc của hòm thư, không mở đường thứ hai.
-    //
-    // Từ 2026-08-11 Telegram còn là kênh RA LỆNH (`telegram.rs`), tức đã có một
-    // vòng đọc `getUpdates` chạy nền. Telegram giao mỗi update cho người hỏi
-    // trước và `offset` là con dấu dùng chung, nên hai vòng đọc song song sẽ ăn
-    // mất update của nhau: cú bấm ✅ rơi vào vòng kia thì hàm này ngồi tới hết
-    // giờ rồi kết luận "không ai bấm" — sai, và gửi cho đúng người vừa bấm.
-    // `hold()` bắt vòng nền đứng im, và `offset` lấy từ chính hòm thư ấy.
-    let hold = crate::telegram::inbox().map(|i| i.hold());
-    let shared = crate::telegram::inbox();
-    let mut offset = match shared.map(|i| i.offset_now()) {
-        Some(o) if o > 0 => o,
-        // Không có hòm thư (kênh tắt / thiếu khoá) thì tự lấy mốc như cũ.
-        _ => match watermark(&client, &api("getUpdates")) {
-            Ok(o) => o,
-            Err(e) => return Verdict::Unavailable(format!("không đọc được getUpdates: {e}")),
-        },
-    };
-
     // Nonce chỉ để ghép câu trả lời với câu hỏi, không phải thứ để chống giả
     // mạo — cái chống giả mạo là `from.id`. Không kéo thêm crate ngẫu nhiên vào
     // chỉ vì việc này.
     let nonce = format!("{}", chrono::Utc::now().timestamp_millis());
+
+    // KHÔNG mở đường đọc thứ hai — ĐĂNG KÝ ở đường đã có.
+    //
+    // 🔴 2026-08-16. Bản cũ gọi `inbox.hold()` rồi tự chạy `getUpdates`, tin
+    // rằng cái cờ ấy làm vòng nền đứng im. Nó không: `hold()` bật cờ trong khi
+    // vòng nền đang nằm giữa một long-poll 20 giây, và không có cách nào gọi
+    // một long-poll về. Hai vòng cùng hỏi ⟹ Telegram từ chối một bên
+    // (`Conflict: terminated by other getUpdates request`) — 11 lượt trong
+    // `logs/hub.log` ngày 16/08, mỗi lượt kèm 30 giây vòng nền ngủ phạt, tức
+    // 30 giây hub điếc ngay sau mỗi câu hỏi xác nhận.
+    //
+    // Nay hàm này không hỏi Telegram câu nào: nó để lại `nonce` ở hòm thư và
+    // ngồi chờ. Đăng ký TRƯỚC `sendMessage`, vì khoảng giữa "tin hiện trên điện
+    // thoại" và "bắt đầu chờ" là một cửa sổ mất cú bấm.
+    let waiting = crate::telegram::inbox().map(|i| i.expect_confirm(&nonce));
+
+    // Đường lùi: KHÔNG có hòm thư (CLI một lượt, kênh tắt) thì tự đọc như cũ.
+    // Chỉ nhánh này còn dùng `offset`/`watermark`.
+    let mut offset = if waiting.is_some() {
+        0
+    } else {
+        match watermark(&client, &api("getUpdates")) {
+            Ok(o) => o,
+            Err(e) => return Verdict::Unavailable(format!("không đọc được getUpdates: {e}")),
+        }
+    };
     let body = json!({
         "chat_id": chat_id,
         "text": format!("🔒 hub xin xác nhận\n\n{what}\n\nKhông bấm gì trong {}s = không làm.", cfg.confirm.timeout_sec),
@@ -219,97 +226,17 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
     );
 
     let deadline = Instant::now() + Duration::from_secs(cfg.confirm.timeout_sec);
-    let verdict = loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            break Verdict::TimedOut;
+    let verdict = if let Some(w) = &waiting {
+        // Đường CHÍNH: vòng đọc của hòm thư giao cú bấm tận tay. Cổng "ai bấm"
+        // (`callback_query.from.id`) đã đứng ở đó, trước khi tới sổ chờ — xem
+        // `telegram::handle_update`, luật 7 của dự án.
+        match w.wait(deadline.saturating_duration_since(Instant::now())) {
+            Some(data) if data.starts_with("ok:") => Verdict::Confirmed,
+            Some(_) => Verdict::Declined,
+            None => Verdict::TimedOut,
         }
-        // Long-poll: đứng chờ ở phía Telegram thay vì hỏi lại liên tục. Trần 25s
-        // để vòng lặp còn nhìn lại hạn chót của chính nó.
-        let wait = left.as_secs().clamp(1, 25);
-        let url = format!("{}?offset={}&timeout={}", api("getUpdates"), offset, wait);
-        let resp = match client.get(&url).send().and_then(|r| r.json::<Value>()) {
-            Ok(v) => v,
-            Err(e) => {
-                // Một nhịp mạng hỏng KHÔNG phải là câu trả lời "không" — ghi lại
-                // rồi thử tiếp cho tới hạn.
-                logging::warn(
-                    "confirm_poll_failed",
-                    json!({ "err": crate::logging::redact(&e.to_string()) }),
-                );
-                std::thread::sleep(Duration::from_secs(2));
-                continue;
-            }
-        };
-        let empty = vec![];
-        let updates = resp
-            .get("result")
-            .and_then(Value::as_array)
-            .unwrap_or(&empty);
-        for u in updates {
-            if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
-                offset = offset.max(id + 1);
-                if let Some(i) = shared {
-                    i.set_offset(id + 1);
-                }
-            }
-            let Some(cb) = u.get("callback_query") else {
-                // Người ta gõ một mệnh lệnh trong lúc hub đang hỏi xác nhận.
-                // Vòng đọc lệnh đang đứng im vì mượn đường, nên bỏ qua ở đây là
-                // mệnh lệnh ấy BIẾN MẤT — đúng nghĩa lỗi im lặng. Nhặt hộ vào
-                // hàng đợi, vòng sau chạy.
-                if let (Some(i), Some(t)) =
-                    (shared, u.pointer("/message/text").and_then(Value::as_str))
-                {
-                    let from = u
-                        .pointer("/message/chat/id")
-                        .map(|v| v.to_string())
-                        .unwrap_or_default();
-                    if from == i.chat_id() {
-                        i.push_text(t);
-                    }
-                }
-                continue;
-            };
-            let data = cb.get("data").and_then(Value::as_str).unwrap_or("");
-            if !data.ends_with(&nonce) {
-                continue; // câu trả lời của một câu hỏi khác
-            }
-            let from = cb
-                .pointer("/from/id")
-                .map(|v| v.to_string())
-                .unwrap_or_default();
-            if from != chat_id {
-                // Người khác trong nhóm bấm nút thì đó chỉ là bấm nút.
-                logging::warn("confirm_from_stranger", json!({ "what": what }));
-                continue;
-            }
-            if let Some(cbid) = cb.get("id").and_then(Value::as_str) {
-                let _ = client
-                    .post(api("answerCallbackQuery"))
-                    .json(&json!({ "callback_query_id": cbid }))
-                    .send();
-            }
-            break;
-        }
-        if let Some(v) = updates.iter().find_map(|u| {
-            let cb = u.get("callback_query")?;
-            let data = cb.get("data").and_then(Value::as_str)?;
-            if !data.ends_with(&nonce) {
-                return None;
-            }
-            let from = cb.pointer("/from/id").map(|v| v.to_string())?;
-            if from != chat_id {
-                return None;
-            }
-            Some(if data.starts_with("ok:") {
-                Verdict::Confirmed
-            } else {
-                Verdict::Declined
-            })
-        }) {
-            break v;
-        }
+    } else {
+        confirm_poll(&client, &api, &nonce, &chat_id, what, &mut offset, deadline)
     };
 
     // Ghi kết cục ngay lên chính tin nhắn ấy: hòm Telegram phải đọc được là
@@ -334,8 +261,98 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
         "confirm_resolved",
         json!({ "what": what, "verdict": format!("{verdict:?}") }),
     );
-    drop(hold);
+    // Rút tên khỏi sổ chờ ngay tại đây, không để tới cuối tầm: một cú bấm tới
+    // sau lúc này phải nghe câu "đã đóng sổ", chứ không rơi vào một cái ống mà
+    // không ai còn đọc.
+    drop(waiting);
     verdict
+}
+
+/// Đường LÙI: tự đọc `getUpdates` khi tiến trình không có hòm thư nền.
+///
+/// Chỉ chạy khi `telegram::inbox()` là `None` — CLI một lượt, hoặc kênh tắt.
+/// Trong `hubd` thì hòm thư luôn có, nên nhánh này không bao giờ chạy song song
+/// với vòng đọc nào: luật 1 vẫn nguyên.
+#[allow(clippy::too_many_arguments)]
+fn confirm_poll(
+    client: &reqwest::blocking::Client,
+    api: &dyn Fn(&str) -> String,
+    nonce: &str,
+    chat_id: &str,
+    what: &str,
+    offset: &mut i64,
+    deadline: Instant,
+) -> Verdict {
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Verdict::TimedOut;
+        }
+        // Long-poll: đứng chờ ở phía Telegram thay vì hỏi lại liên tục. Trần 25s
+        // để vòng lặp còn nhìn lại hạn chót của chính nó.
+        let wait = left.as_secs().clamp(1, 25);
+        let url = format!("{}?offset={}&timeout={}", api("getUpdates"), offset, wait);
+        let resp = match client.get(&url).send().and_then(|r| r.json::<Value>()) {
+            Ok(v) => v,
+            Err(e) => {
+                // Một nhịp mạng hỏng KHÔNG phải là câu trả lời "không" — ghi lại
+                // rồi thử tiếp cho tới hạn.
+                logging::warn(
+                    "confirm_poll_failed",
+                    json!({ "err": crate::logging::redact(&e.to_string()) }),
+                );
+                std::thread::sleep(Duration::from_secs(2));
+                continue;
+            }
+        };
+        // 🔴 TRẢ LỜI ĐƯỢC ≠ TRẢ LỜI THUẬN. Bản cũ đọc thẳng `result` nên một lời
+        // từ chối của Telegram (`Conflict`, token sai) ra đúng hình dạng "không
+        // có update nào" — và hàm này ngồi hết 90 giây rồi kết luận *"không ai
+        // bấm"*. Một lỗi im lặng, đúng thứ luật 3 cấm, ở ngay cái hàm đang hỏi
+        // chủ máy có cho phép hay không. `telegram::poll_rejected` là cùng phép
+        // đọc mà vòng đọc chính đã dùng từ trước.
+        if let Some(why) = crate::telegram::poll_rejected(&resp) {
+            logging::error("confirm_poll_rejected", json!({ "why": why, "what": what }));
+            return Verdict::Unavailable(why);
+        }
+        let empty = vec![];
+        let updates = resp
+            .get("result")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        for u in updates {
+            if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
+                *offset = (*offset).max(id + 1);
+            }
+            let Some(cb) = u.get("callback_query") else {
+                continue;
+            };
+            let data = cb.get("data").and_then(Value::as_str).unwrap_or("");
+            if !data.ends_with(nonce) {
+                continue; // câu trả lời của một câu hỏi khác
+            }
+            let from = cb
+                .pointer("/from/id")
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            if from != chat_id {
+                // Người khác trong nhóm bấm nút thì đó chỉ là bấm nút.
+                logging::warn("confirm_from_stranger", json!({ "what": what }));
+                continue;
+            }
+            if let Some(cbid) = cb.get("id").and_then(Value::as_str) {
+                let _ = client
+                    .post(api("answerCallbackQuery"))
+                    .json(&json!({ "callback_query_id": cbid }))
+                    .send();
+            }
+            return if data.starts_with("ok:") {
+                Verdict::Confirmed
+            } else {
+                Verdict::Declined
+            };
+        }
+    }
 }
 
 /// `update_id` kế tiếp cần đọc, tính từ những gì Telegram còn đang giữ.

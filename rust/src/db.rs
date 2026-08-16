@@ -239,6 +239,48 @@ impl Db {
         }
     }
 
+    /// Mốc này được GHI lần cuối lúc nào (giây epoch) — `None` nếu chưa từng đặt.
+    ///
+    /// 🔴 Dựng 2026-08-15 cho một câu hỏi mà nội dung cuốn sổ không trả lời
+    /// được: *cuốn sổ này có còn theo kịp thế giới không*. Cái loa (luật 11) so
+    /// ảnh chụp lượt này với sổ lượt trước để nói "vừa xong" / "vừa tắt" — mà
+    /// chữ "vừa" chỉ đúng nếu hai lượt cách nhau một vòng. Sổ `watch:sessions`
+    /// đứng im từ 14/08 13:11 (ngày ba cỗ máy chạy-mỗi-vòng mất chỗ gọi), nên
+    /// lượt so đầu tiên sau khi vá sẽ thấy hai phiên chết từ hôm kia biến mất
+    /// và định gọi đó là tin. Đọc hỏng thì log rồi coi như KHÔNG BIẾT, và
+    /// "không biết" ở đây phải dẫn tới im lặng, không dẫn tới báo động.
+    pub fn cursor_written_at(&self, key: &str) -> Option<i64> {
+        let raw: Option<String> = match self
+            .conn
+            .query_row(
+                "SELECT updated_at FROM cursors WHERE k = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()
+        {
+            Ok(v) => v.flatten(),
+            Err(e) => {
+                crate::logging::error(
+                    "cursor_time_read_failed",
+                    serde_json::json!({ "key": key, "err": e.to_string() }),
+                );
+                return None;
+            }
+        };
+        raw.and_then(|t| {
+            chrono::DateTime::parse_from_rfc3339(&t)
+                .map(|d| d.timestamp())
+                .map_err(|e| {
+                    crate::logging::warn(
+                        "cursor_time_unparseable",
+                        serde_json::json!({ "key": key, "raw": t, "err": e.to_string() }),
+                    );
+                })
+                .ok()
+        })
+    }
+
     pub fn all_cursors(&self) -> Result<BTreeMap<String, String>> {
         let mut stmt = self.conn.prepare("SELECT k, v FROM cursors")?;
         let rows = stmt.query_map([], |r| {

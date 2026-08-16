@@ -346,6 +346,11 @@ fn real_main() -> Result<()> {
         }),
     );
 
+    // …và NÓI RA khi bản vừa đổi. `/upgrade` báo trước lúc restart vì tiến
+    // trình bị thay giữa câu; nửa còn lại — "bản mới đã lên" — là ở đây.
+    // Xem `runtime::announce_boot`.
+    hub::runtime::announce_boot(&db, &cfg, signature_kind());
+
     let mut cfg = cfg;
     let mut config_seen = config_mtime(&cfg.config_file);
     let mut consecutive_failures: u32 = 0;

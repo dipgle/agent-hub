@@ -529,7 +529,7 @@ fn a_live_session_still_gets_its_button() {
 //
 // Hà 2026-08-12: *"bấm vào phiên vẫn phản hồi rất chậm, sao không chỉnh để nhận
 // được luôn"*. Đo: `command_done kind=Session ms=48407` — 48 giây, nằm gọn
-// trong lệnh, và đi vào đúng một dòng `snapshot_cached(20s)` gọi CHỈ để lấy
+// trong lệnh, và đi vào đúng một dòng dựng lại ảnh chụp phiên, gọi CHỈ để lấy
 // hai chuỗi ký tự cho câu chào.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -694,6 +694,91 @@ fn a_command_on_screen_is_picked_up_with_its_arguments() {
                   Xong thì báo lại.";
     let got = hub::keys::commands_in_report(screen, 4);
     assert_eq!(got, vec!["git -C ~/projects/AI/tcc/amm push origin main"]);
+}
+
+/// `curl` NÓI TẮT trong câu văn không được thành một cái nút thứ hai.
+///
+/// 🔴 Hà 2026-08-16, ảnh chụp tin `[tfl5]` có hai icon liền nhau: *"Chỗ này là 1
+/// lệnh hay 2, tại sao bóc tách lệnh lại khó khăn thế"*. Sổ nút hôm ấy giữ cả
+/// hai: lệnh `curl` đầy đủ, **và** một mẩu `curl /healthz`. Chúng đứng cạnh nhau
+/// nên đọc ra hai việc, mà chỉ có một — và bấm mẩu thứ hai thì `curl` trả
+/// *"URL using bad/illegal format"*.
+#[test]
+fn a_curl_without_a_host_is_not_a_command() {
+    let screen = "Đã dựng xong. Kiểm tra bằng curl /healthz cho nhanh.\n\
+                  curl -s --max-time 15 \"https://cpanel.tafalo.com/healthz?include=version\"\n\
+                  Nếu 200 là được.";
+    let got = hub::keys::commands_in_report(screen, 4);
+    assert_eq!(
+        got,
+        vec!["curl -s --max-time 15 \"https://cpanel.tafalo.com/healthz?include=version\""],
+        "chỉ MỘT lệnh curl có đích được nhận"
+    );
+    // …và các dạng có đích thật thì vẫn phải qua, không thắt quá tay.
+    // (`wget` cố ý KHÔNG nằm trong hàng rào `KNOWN` — nó chưa từng được nhận,
+    //  và cửa mới này không phải cớ để nới hàng rào ra.)
+    for ok in [
+        "curl -sS localhost:8090/healthz",
+        "curl 127.0.0.1:3000/api/ping",
+        "curl -fsS https://example.com/x",
+    ] {
+        assert_eq!(
+            hub::keys::commands_in_report(ok, 4),
+            vec![ok.to_string()],
+            "{ok} phải được nhận"
+        );
+    }
+    // Không có đích ⟹ không nhận, dù trông rất giống một lệnh.
+    for junk in ["curl /healthz", "curl -s /api/v1/status"] {
+        assert!(
+            hub::keys::commands_in_report(junk, 4).is_empty(),
+            "{junk} không chạy được nên không đáng một cái nút"
+        );
+    }
+}
+
+/// Hai nút ⏎/⌫ phải bám DÒNG Ô NHẬP, không phải dòng chữ hub tự viết thêm.
+///
+/// 🔴 Hà 2026-08-16, ảnh chụp 08:01: *"sao lại chèn 2 nút vào cuối thế này, ko
+/// hiểu nổi bạn đang làm cái trò gì nữa"*. Chữ trong bài kiểm này chép đúng hình
+/// dạng tin hôm ấy: ảnh màn (khung `───`, dấu nhắc `❯`), rồi phần hub viết thêm
+/// ở cuối. Bản hỏng dán hai nút vào *"Lệnh phiên chạy không được…"* vì nó hỏi
+/// `input_box_text`, hàm đọc MỘT MÀN, trên một chuỗi không phải màn.
+#[test]
+fn the_two_keys_anchor_to_the_prompt_line_not_to_the_last_line() {
+    let tin = "📷 Màn của [tfl5]:\n\
+               ✻ Sautéed for 6m 36s\n\
+               ────────────────────────\n\
+               ❯ chạy deploy đi\n\
+               ────────────────────────\n\
+               ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent\n\
+               \n\
+               Lệnh phiên chạy không được (cổng quyền chặn):\n\
+               curl -s https://cpanel.tafalo.com/healthz";
+    let anchors = vec![(
+        "chạy deploy đi".to_string(),
+        vec![
+            ("https://t.me/b?start=send_bab47095".to_string(), "⏎".into()),
+            ("https://t.me/b?start=clr_bab47095".to_string(), "⌫".into()),
+        ],
+    )];
+    let (html, linked, _) = hub::pipeline::html_with_links(tin, &anchors);
+    assert_eq!(linked, 2, "{html}");
+
+    let dòng_có_nút = html
+        .lines()
+        .find(|l| l.contains("⏎"))
+        .expect("phải có dòng mang nút");
+    assert!(
+        dòng_có_nút.contains("chạy deploy đi"),
+        "nút bám nhầm dòng: {dòng_có_nút}"
+    );
+    assert!(
+        !html
+            .lines()
+            .any(|l| l.contains("cổng quyền chặn") && l.contains("⏎")),
+        "nút KHÔNG được dán vào dòng chữ hub tự viết thêm:\n{html}"
+    );
 }
 
 /// Câu văn không được thành nút.
@@ -1371,13 +1456,23 @@ fn a_button_remembers_which_session_made_it() {
     let db = Db::open(&dir.join("t.sqlite")).unwrap();
 
     let tfl5 = "4963b95c-0000-0000-0000-000000000000";
-    let cmds = vec!["bash scripts/verify-acl-2026-08-13.sh".to_string()];
+    let cmds = vec![hub::sessions::Cmd {
+        line: "bash scripts/verify-acl-2026-08-13.sh".to_string(),
+        cwd: String::new(),
+    }];
     // Hai nút một lệnh: ▶ (chạy trong phiên) và 🖥 (cửa sổ thật có tty).
     // MỘT lệnh, MỘT nút, nhãn đúng là lệnh ấy — Hà 2026-08-13: *"sao vẫn ra
     // một đống nút ở đây?"* · *"tôi chỉ cần biết nút đó chạy cái gì"*.
     let btns = remember_quick(&db, tfl5, &cmds);
     assert_eq!(btns.len(), 1, "{btns:?}");
-    assert_eq!(btns[0].1, "run:0");
+    assert_eq!(
+        btns[0].1,
+        format!(
+            "run:{}",
+            hub::pipeline::quick_token(tfl5, "bash scripts/verify-acl-2026-08-13.sh")
+        ),
+        "nút phải mang MÃ của chính lệnh ấy, không phải số thứ tự"
+    );
     assert!(
         btns[0].0.contains("verify-acl-2026-08-13.sh"),
         "nhãn phải là chính lệnh: {}",
@@ -1385,17 +1480,41 @@ fn a_button_remembers_which_session_made_it() {
     );
 
     // Con trỏ đã sang phiên khác — nút vẫn phải trỏ về phiên đã sinh ra nó.
-    let (sid, line) = quick_cmd(&db, 0).expect("sổ phải nhớ");
+    let tok = hub::pipeline::quick_token(tfl5, "bash scripts/verify-acl-2026-08-13.sh");
+    let (sid, cmd) = quick_cmd(&db, &tok).expect("sổ phải nhớ");
     assert_eq!(sid, tfl5, "nút quên mất phiên của mình");
-    assert_eq!(line, "bash scripts/verify-acl-2026-08-13.sh");
+    assert_eq!(cmd.line, "bash scripts/verify-acl-2026-08-13.sh");
 
     // Sổ CŨ (mảng trần, chưa có tên phiên) ⟹ None: thà bắt bấm lại /shot còn
     // hơn gõ một dòng lệnh vào một phiên đoán bừa.
     db.set_cursor("quick:cmds", r#"["git push"]"#).unwrap();
     assert!(
-        quick_cmd(&db, 0).is_none(),
+        quick_cmd(&db, "0").is_none(),
         "sổ cũ mà vẫn đoán ra một phiên"
     );
+
+    // 🔴 NÚT CŨ KHÔNG ĐƯỢC MƯỢN VIỆC CỦA TIN MỚI — Hà 2026-08-16: *"bấm các nút
+    // lệnh này lại nhảy thành nút lệnh chạy của phiên games phía sau"* · *"nó
+    // lại nhận cái cuối cùng trong phiên chat"*.
+    //
+    // Dựng đúng cảnh ấy: tin của phiên A có nút, rồi tin của phiên B ghi tiếp.
+    let games = "99999999-0000-0000-0000-000000000000";
+    let a = hub::sessions::Cmd {
+        line: "scp ~/projects/social/react/dist/index.html vps-b:/tmp/".to_string(),
+        cwd: "/Users/hanguyen/projects/social".to_string(),
+    };
+    let b = hub::sessions::Cmd {
+        line: "bash ~/projects/games/giu-bai/tools/post-deploy-check.sh".to_string(),
+        cwd: "/Users/hanguyen/projects/games".to_string(),
+    };
+    let btn_a = remember_quick(&db, tfl5, std::slice::from_ref(&a));
+    let _btn_b = remember_quick(&db, games, std::slice::from_ref(&b));
+
+    let tok_a = btn_a[0].1.strip_prefix("run:").expect("nút phải mang mã");
+    let (sid, got) = quick_cmd(&db, tok_a).expect("nút CŨ vẫn phải tra ra được");
+    assert_eq!(sid, tfl5, "nút cũ mượn phiên của tin mới");
+    assert_eq!(got.line, a.line, "nút cũ chạy lệnh của tin mới");
+    assert_eq!(got.cwd, a.cwd, "nút cũ mượn cả thư mục của tin mới");
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -1547,54 +1666,99 @@ fn the_rebuild_command_gets_a_button_that_goes_through_upgrade() {
     assert_eq!(callback_to_command("upgrade"), Some("/upgrade".to_string()));
 }
 
+/// Liên kết chạy nằm NGAY SAU dòng lệnh, trong CÙNG một tin.
+///
 /// 🔴 Hà 2026-08-14: *"nút chạy lệnh chỉ cần 1 icon là đủ chèn ngay sau câu
 /// lệnh"* · *"Chèn ngay sau câu lệnh chứ không phải 1 nút ở cuối"*.
+/// 🔴 Hà 2026-08-16, sau khi tôi cãi rằng icon phải nằm cuối một mẩu: *"cái tele
+/// nhận được là text … trước khi gửi đã biết từng phần rồi đương nhiên biết luôn
+/// khối lệnh nên chèn luôn link vào khối lệnh rồi mới ghép tất cả gửi đi"*.
 ///
-/// Telegram không đặt nút giữa chữ (bàn phím luôn treo dưới đáy MỘT tin), nên
-/// thứ điều khiển được là chỗ tin KẾT THÚC. Cắt ngay sau dòng lệnh thì cái nút
-/// rơi đúng chỗ ấy.
+/// Bản trước CẮT tin thành nhiều mẩu để cái icon "rơi đúng chỗ" — di sản từ hồi
+/// icon còn là một NÚT (bàn phím Telegram luôn treo dưới đáy một tin). Icon nay
+/// là một LIÊN KẾT, mà liên kết thì đặt được vào bất cứ đâu trong chuỗi. Nên
+/// bài kiểm này ghim đúng điều ấy: một tin, hai liên kết, mỗi cái ngay sau dòng
+/// lệnh của nó.
+fn fake_link(i: usize) -> Option<(String, String)> {
+    Some((format!("https://t.me/bot?start=run_{i}"), "▶️".to_string()))
+}
+
 #[test]
-fn a_message_is_cut_right_after_each_command_line() {
+fn each_command_line_carries_its_run_link_in_one_message() {
     let text = "Cài bản mới:\n\
                 cd ~/projects/hub && ./hub self-install\n\
                 Xong thì thử lại giúp tôi.\n\
-                bash ./deploy.sh\n\
+                bash ./run.sh\n\
                 Hết.";
     let cmds = vec![
         "cd ~/projects/hub && ./hub self-install".to_string(),
-        "bash ./deploy.sh".to_string(),
+        "bash ./run.sh".to_string(),
     ];
-    let s = hub::pipeline::command_slices(text, &cmds);
-    assert_eq!(s.len(), 3, "{s:#?}");
-    // Mẩu 1 KẾT THÚC bằng dòng lệnh — nút của nó nằm ngay dưới, không phải
-    // dưới đáy cả tin dài.
-    assert!(s[0].0.ends_with("./hub self-install"), "{:?}", s[0].0);
-    assert_eq!(s[0].1, Some(0));
-    assert!(s[1].0.ends_with("bash ./deploy.sh"), "{:?}", s[1].0);
-    assert_eq!(s[1].1, Some(1));
-    // Mẩu đuôi không mang lệnh nào; nó là chỗ đứng của các nút còn lại.
-    assert_eq!(s[2].1, None);
-    assert!(s[2].0.contains("Hết."));
+    let (html, linked, unlinked) = hub::pipeline::html_with_command_links(text, &cmds, &fake_link);
+
+    assert_eq!(linked, 2, "{html}");
+    assert!(unlinked.is_empty());
+    // Liên kết nằm NGAY SAU dòng lệnh, không phải dưới đáy tin.
+    assert!(
+        html.contains("./hub self-install <a href=\"https://t.me/bot?start=run_0\">▶️</a>\n"),
+        "{html}"
+    );
+    assert!(
+        html.contains("bash ./run.sh <a href=\"https://t.me/bot?start=run_1\">▶️</a>\n"),
+        "{html}"
+    );
+    // …và cả tin vẫn là MỘT chuỗi, chữ giữ nguyên thứ tự, không mẩu nào rơi ra.
+    assert!(html.starts_with("Cài bản mới:\n"), "{html}");
+    assert!(html.trim_end().ends_with("Hết."), "{html}");
+}
+
+/// Chữ của phiên phải được THOÁT, không thì một dấu `<` làm Telegram bỏ cả tin.
+#[test]
+fn text_is_escaped_but_the_link_tag_survives() {
+    let text = "so sánh a < b && c > d\n./hub doctor";
+    let (html, linked, _) =
+        hub::pipeline::html_with_command_links(text, &["./hub doctor".to_string()], &fake_link);
+    assert_eq!(linked, 1);
+    assert!(html.contains("a &lt; b &amp;&amp; c &gt; d"), "{html}");
+    assert!(html.contains("<a href=\""), "thẻ cố ý phải còn: {html}");
 }
 
 #[test]
-fn a_command_named_twice_gets_exactly_one_button() {
-    // Báo cáo hay nhắc lại lệnh ở phần tóm tắt. Hai nút giống hệt nhau cho
+fn a_command_named_twice_gets_exactly_one_link() {
+    // Báo cáo hay nhắc lại lệnh ở phần tóm tắt. Hai icon giống hệt nhau cho
     // cùng một việc là mời người ta bấm hai lần.
     let text = "chạy ./hub doctor đi\nnhắc lại: ./hub doctor";
-    let s = hub::pipeline::command_slices(text, &["./hub doctor".to_string()]);
-    assert_eq!(s.iter().filter(|(_, i)| i.is_some()).count(), 1, "{s:#?}");
+    let (html, linked, _) =
+        hub::pipeline::html_with_command_links(text, &["./hub doctor".to_string()], &fake_link);
+    assert_eq!(linked, 1, "{html}");
 }
 
 #[test]
-fn a_message_with_no_command_line_is_not_cut_at_all() {
+fn a_message_with_no_command_line_gets_no_link() {
     // Tin gửi đi là bản RÚT GỌN, lệnh có khi chỉ nằm trong bản dài. Lúc ấy
-    // không có chữ nào quanh cái nút nói nó sắp chạy gì ⟹ không tách, và nhãn
-    // nút vẫn phải mang nguyên dòng lệnh.
+    // không có chữ nào quanh cái icon nói nó sắp chạy gì ⟹ không chèn, và lệnh
+    // ấy phải rơi về một cái nút mang nguyên dòng lệnh.
     let text = "Phiên đã dừng, còn 12 dòng nữa.";
-    let s = hub::pipeline::command_slices(text, &["bash ./deploy.sh".to_string()]);
-    assert_eq!(s.len(), 1);
-    assert_eq!(s[0].1, None, "không tách khi lệnh không nằm trong tin");
+    let (html, linked, unlinked) =
+        hub::pipeline::html_with_command_links(text, &["bash ./run.sh".to_string()], &fake_link);
+    assert_eq!(linked, 0);
+    assert!(
+        unlinked.is_empty(),
+        "lệnh không có trong chữ thì không khớp"
+    );
+    assert!(!html.contains("<a href"), "{html}");
+}
+
+/// Chưa biết tên bot ⟹ không dựng được liên kết. Lệnh ấy phải rơi về NÚT, và
+/// phải nói ra là nó rơi — im lặng ở đây là một dòng lệnh không có đường bấm.
+#[test]
+fn a_command_without_a_link_falls_back_to_a_button_and_says_so() {
+    let text = "chạy giúp:\n./hub doctor";
+    let (html, linked, unlinked) =
+        hub::pipeline::html_with_command_links(text, &["./hub doctor".to_string()], &|_| None);
+    assert_eq!(linked, 0);
+    assert_eq!(unlinked, vec![0], "phải kể tên lệnh bị rớt: {html}");
+    assert!(!html.contains("<a href"), "{html}");
 }
 
 /// 🔴 Hà 2026-08-14: *"Sao không dùng Deep Links để định dạng bên trong nội
@@ -1798,18 +1962,14 @@ fn an_icon_still_finds_the_line_the_window_broke_in_two() {
 bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh\n  \
 static-cache-refresh-0814\n✻ Cooked for 13m 15s\n";
     let full = "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814";
-    let slices = hub::pipeline::command_slices(screen, &[full.to_string()]);
-    assert!(
-        slices.iter().any(|(_, i)| *i == Some(0)),
-        "phải cắt được một mẩu kết bằng dòng lệnh: {slices:?}"
-    );
+    let (html, linked, _) =
+        hub::pipeline::html_with_command_links(screen, &[full.to_string()], &fake_link);
+    assert_eq!(linked, 1, "phải bám được vào dòng đã bị bẻ đôi: {html}");
     // …và không nhầm sang một lệnh khác chỉ vì vài ký tự đầu giống nhau.
     let other = "bash /Users/hanguyen/projects/AI/OTHER/scripts/deploy.sh xyz";
-    let slices2 = hub::pipeline::command_slices(screen, &[other.to_string()]);
-    assert!(
-        slices2.iter().all(|(_, i)| i.is_none()),
-        "lệnh của dự án khác không được khớp: {slices2:?}"
-    );
+    let (html2, linked2, _) =
+        hub::pipeline::html_with_command_links(screen, &[other.to_string()], &fake_link);
+    assert_eq!(linked2, 0, "lệnh của dự án khác không được khớp: {html2}");
 }
 
 /// Chỉ câu XÁC NHẬN TRƠN mới rút thành emoji được.
@@ -2117,6 +2277,69 @@ fn a_long_line_on_a_wide_window_is_whole_not_a_stub() {
 // Hai lỗi Hà chụp màn gửi thẳng, 2026-08-15
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// "Ô nhập còn chữ" phải là một TRẠNG THÁI RIÊNG, không lẫn vào "rảnh".
+///
+/// 🔴 Hà 2026-08-15, ảnh chụp ô nhập của `[dwork]` mang hai tin dính liền: *"sao
+/// nội dung lại bị lặp thế này"*. Log cho thấy hub đã gõ, bắn hai Enter, đọc màn,
+/// rồi trả lời `✓ đã gửi` — trong khi chữ nằm nguyên trong ô. Tin sau gõ tiếp
+/// vào đúng ô ấy, nối đuôi, và cả hai đi **làm một tin**.
+///
+/// Gốc là một phép đo MÙ: `landed` chỉ biết *hàng chờ · đang chạy · rảnh*, mà
+/// "rảnh" mang hai nghĩa ngược nhau — **đã gửi xong** và **chưa gửi được**. Với
+/// ba trạng thái ấy hub không thể nói sai theo hướng nào khác ngoài "thành công".
+///
+/// `still_in_box` đã có từ 12-08 và làm đúng việc của nó; nó chỉ không được ai
+/// hỏi sau khi bấm Enter. *Một hàm đúng không được gọi thì bằng không.*
+#[test]
+fn text_left_sitting_in_the_input_box_must_not_read_as_sent() {
+    let typed = "kiểm tra lại api xem ảnh có tải được không";
+    // Ô nhập CÒN chữ — hình dạng ô nhập thật của `claude` (khung ╭─╯).
+    let stuck = format!(
+        "  ⎿  Read 1 file\n\
+         ╭──────────────────────────────────────────╮\n\
+         │ > {typed}                                │\n\
+         ╰──────────────────────────────────────────╯\n\
+         \x20 ⏵⏵ auto mode on (shift+tab to cycle)"
+    );
+    assert_eq!(
+        hub::keys::landed(&stuck, typed),
+        hub::keys::Landed::InBox,
+        "chữ còn trong ô mà đọc thành đã gửi ⟹ tin sau sẽ nối vào đuôi tin này"
+    );
+
+    // …và ô TRỐNG thì mới là đã đi. Bản chụp thật của cửa sổ dwork sau khi chữ
+    // đã được gửi (2026-08-15): ô nhập rỗng, chân màn là dòng auto mode.
+    let sent = "  ⎿  Read 1 file\n\
+                ╭──────────────────────────────────────────╮\n\
+                │ >                                        │\n\
+                ╰──────────────────────────────────────────╯\n\
+                \x20 ⏵⏵ auto mode on (shift+tab to cycle)";
+    assert_eq!(hub::keys::landed(sent, typed), hub::keys::Landed::Idle);
+
+    // 🔴 Thứ tự hỏi là cả bản vá: một phiên có thể VỪA bận VỪA còn chữ trong ô
+    // (nó đang chạy lượt trước, chữ mới chưa đi). Hỏi `is_busy` trước thì ca ấy
+    // đọc thành `Running` — nghe như "chữ đã khởi động một lượt", đúng câu SAI
+    // đã gửi cho Hà.
+    let busy_and_stuck = format!(
+        "  ✻ Brewed for 1m 42s (esc to interrupt)\n\
+         ╭──────────────────────────────────────────╮\n\
+         │ > {typed}                                │\n\
+         ╰──────────────────────────────────────────╯"
+    );
+    assert_eq!(
+        hub::keys::landed(&busy_and_stuck, typed),
+        hub::keys::Landed::InBox,
+        "bận KHÔNG có nghĩa là chữ đã đi"
+    );
+
+    // Hàng chờ vẫn thắng tất cả: `claude` tự khai bằng chữ của chính nó.
+    let queued = format!(
+        "  Press up to edit queued messages\n\
+         ╭────────────────────────────╮\n│ > {typed} │\n╰────────────────────────────╯"
+    );
+    assert_eq!(hub::keys::landed(&queued, typed), hub::keys::Landed::Queued);
+}
+
 /// `/new acc3 dwork` — tên tài khoản gõ trần phải được đọc là TÀI KHOẢN.
 ///
 /// 🔴 Hà: *"Rõ ràng mở phiên mới dwork là acc3 sau xem lại thành acc1 là sao"*.
@@ -2211,4 +2434,159 @@ fn choice_number_buttons_share_one_row() {
     ];
     let rows = hub::telegram::Inbox::keyboard_rows(&mixed);
     assert_eq!(rows.len(), 3, "{rows:?}");
+}
+
+/// HAI NHÁNH của một câu trả lời phải gọi phiên bằng CÙNG một cái tên.
+///
+/// 🔴 Hà 2026-08-15, ảnh chụp Telegram: bấm đúng cái nút `🟪 [hub]` và nhận về
+/// *"👁 Đang theo phiên projects-67 (acc1)"* — *"rõ ràng vào hub mà chỉ báo thế
+/// này"*. Câu chào ấy có hai đường: đường NHANH đọc sổ
+/// (`session_name_from_book`, đã trả nhãn đúng từ 08-12) và đường CHẬM đọc ảnh
+/// chụp — và đường chậm in `s.name` thô, tức cái tên `claude` tự đặt theo thư
+/// mục mở phiên. Cả máy mở ở gốc workspace nên phiên nào cũng `projects-xx`:
+/// đúng cái tên phân biệt được ÍT NHẤT trong mọi cái tên có ở đây.
+///
+/// Đường chậm là đường hay chạy nhất ngay sau một lượt hubd khởi động lại (sổ
+/// còn rỗng) — tức lỗi này hiện ra đúng lúc chủ máy hay bấm nhất.
+#[test]
+fn both_paths_of_the_follow_ack_name_the_session_the_same_way() {
+    let mut s = sess(
+        "dda2aa85-0000-0000-0000-000000000000",
+        "projects-67",
+        "acc1",
+        true,
+    );
+    s.folder = "hub".to_string();
+    // Đo trên CHÍNH câu chào, không trên hàm nó lẽ ra phải gọi: con bug nằm ở
+    // chỗ gọi, nên bài kiểm phải đứng ở chỗ gọi mới đỏ được.
+    let head = hub::pipeline::follow_ack_head(&s, "");
+    assert!(
+        head.contains("[hub]"),
+        "câu chào phải gọi tên dự án: {head}"
+    );
+    assert!(
+        !head.contains("projects-67"),
+        "tên `claude` tự đặt không được lọt ra: {head}"
+    );
+    assert!(head.contains("(acc1)"), "{head}");
+    let from_snapshot = hub::sessions::shown(&s);
+
+    // …và đường NHANH (sổ) phải ra ĐÚNG cái nhãn ấy, không phải một cái khác.
+    let book = format!(
+        r#"{{"{id}":{{"s":"idle","y":"ttys003","k":"interactive","p":"","f":0,"h":false,"n":"projects-67","d":"hub","l":"{lbl}","a":"acc1","c":"/Users/hanguyen/projects","i":1,"o":"terminal"}}}}"#,
+        id = s.session_id,
+        lbl = from_snapshot
+    );
+    assert_eq!(
+        hub::pipeline::session_name_from_book(&book, &s.session_id),
+        Some((from_snapshot, "acc1".to_string()))
+    );
+}
+
+/// Năm cái nút đội CHUNG một cái nhãn `☑` — và phép đo phải phân biệt được chúng.
+///
+/// 🔴 Đây là con bug làm `choice_links_live.rs` đỏ trong khi mã sản phẩm đúng:
+/// `before_link` đi tìm chỗ đứng bằng `text.find(nhãn)`, mà năm cái nhãn giống
+/// hệt nhau nên cả năm cùng trả về vị trí của cái ĐẦU TIÊN. Phép đo tuyên bố
+/// "cả năm nút nằm trên dòng 1" — một câu sai về một mã đúng, tức là kiểu hỏng
+/// đắt nhất: nó bắt người ta đi sửa thứ không hỏng.
+///
+/// Bài kiểm này thuần (không mạng): nó dựng đúng hình dạng Telegram trả về sau
+/// `sendMessage`. Hai điều nó cố ý làm — nhãn TRÙNG NHAU (chỗ `find` gãy) và
+/// một emoji đứng trước (`🔴` = **hai** đơn vị mã UTF-16, một ký tự, bốn byte:
+/// chỗ mọi cách đếm khác UTF-16 đều lệch).
+#[test]
+fn five_identical_ticks_each_report_the_line_they_stand_on() {
+    let text = "🔴 [mailler] đang hỏi — chọn một:\n\
+                1. Vá ACL cho phiếu chi\n\
+                2. Đăng nhập lại bằng acc2\n\
+                3. Bỏ qua bước duyệt\n\
+                4. Hỏi lại sau\n\
+                5. Dừng hẳn";
+    // Chèn `☑` vào cuối mỗi dòng lựa chọn, ĐÚNG như `html_with_links` làm.
+    let text: String = text
+        .lines()
+        .map(|l| {
+            if l.starts_with(|c: char| c.is_ascii_digit()) {
+                format!("{l} ☑\n")
+            } else {
+                format!("{l}\n")
+            }
+        })
+        .collect();
+    let text = text.trim_end().to_string();
+
+    // Offset dựng TỪ CHÍNH CHUỖI, đếm bằng đơn vị mã UTF-16 — đếm tay ở đây là
+    // tự tạo ra một phép đo thứ hai để sai.
+    let u: Vec<u16> = text.encode_utf16().collect();
+    let tick: Vec<u16> = "☑".encode_utf16().collect();
+    let at: Vec<usize> = u
+        .windows(tick.len())
+        .enumerate()
+        .filter(|(_, w)| *w == tick.as_slice())
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(at.len(), 5, "phải có 5 dấu ☑ trong chữ");
+
+    let entities: Vec<serde_json::Value> = at
+        .iter()
+        .enumerate()
+        .map(|(i, off)| {
+            serde_json::json!({
+                "type": "text_link",
+                "offset": off,
+                "length": tick.len(),
+                "url": format!("https://t.me/ai_angles_bot?start=k_f168de42_{}", i + 1),
+            })
+        })
+        .collect();
+    let sent = hub::telegram::Sent::read(&serde_json::json!({
+        "ok": true,
+        "result": { "message_id": 4242, "text": text, "entities": entities },
+    }));
+
+    assert_eq!(sent.links.len(), 5, "{:?}", sent.links);
+    for (i, l) in sent.links.iter().enumerate() {
+        let n = i + 1;
+        // Nhãn cắt đúng ⟹ phép cắt đang chạy trên UTF-16, không phải byte.
+        assert_eq!(l.label, "☑", "nhãn nút {n} cắt lệch: {:?}", l.label);
+        assert!(
+            l.url.ends_with(&format!("_{n}")),
+            "nút {n} trỏ sai: {}",
+            l.url
+        );
+        assert!(
+            sent.before_link(i).starts_with(&format!("{n}. ")),
+            "nút {n} khai sai dòng nó đứng: {:?}",
+            sent.before_link(i)
+        );
+    }
+}
+
+/// Một liên kết ĐỨNG ĐẦU DÒNG thì trước nó không có chữ nào — nói "dòng trên"
+/// là nói về một dòng khác.
+///
+/// Nút `⌫ xoá ô nhập` cố tình xuống hẳn một dòng (hai đích chạm không được nằm
+/// cạnh nhau khi một bên GỬI còn bên kia XOÁ), nên ca này có thật trong mọi tin
+/// `/shot` có ô nhập.
+#[test]
+fn a_link_that_opens_a_line_reports_no_text_before_it() {
+    let text = "❯ chạy deploy đi ⏎\n⌫ xoá ô nhập";
+    let u: Vec<u16> = text.encode_utf16().collect();
+    let at = u.len() - "⌫ xoá ô nhập".encode_utf16().count();
+    let sent = hub::telegram::Sent::read(&serde_json::json!({
+        "result": {
+            "message_id": 7,
+            "text": text,
+            "entities": [{
+                "type": "text_link",
+                "offset": at,
+                "length": "⌫ xoá ô nhập".encode_utf16().count(),
+                "url": "https://t.me/ai_angles_bot?start=clr_bab47095",
+            }],
+        },
+    }));
+    assert_eq!(sent.links.len(), 1, "{:?}", sent.links);
+    assert_eq!(sent.links[0].label, "⌫ xoá ô nhập");
+    assert_eq!(sent.before_link(0), "");
 }

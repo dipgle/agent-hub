@@ -172,29 +172,11 @@ fn box_region(screen: &str) -> String {
     tail.join("\n")
 }
 
-/// Màn có đang ĐỀ XUẤT một việc và chờ một tiếng "ừ" không?
-///
-/// 🔴 Hà 2026-08-13, gửi ảnh màn `dwork`: *"một gợi ý tương tự"*. Phiên viết
-/// *"Việc tiếp theo tôi làm được ngay mà không chờ ai: dựng phân hệ quota
-/// phép… Nói một tiếng nếu anh muốn tôi vào việc đó"* — và chính Hà đã trả lời
-/// nó bằng đúng hai chữ **"Làm đi"** (log 01:48:03). Tức việc thường xuyên nhất
-/// trên điện thoại là gõ lại một câu đồng ý.
-///
-/// Nhận theo CÂU CHỮ của lời mời, không đoán theo ngữ nghĩa: một cái nút gửi
-/// "làm đi" vào nhầm lúc là một mệnh lệnh không lùi được. Mẫu lấy từ màn thật.
-pub fn asks_for_go_ahead(screen: &str) -> bool {
-    const INVITES: &[&str] = &[
-        "nói một tiếng",
-        "muốn tôi",
-        "xin xác nhận",
-        "anh chốt",
-        "anh chọn",
-        "hay ưu tiên",
-        "có muốn",
-    ];
-    let low = screen.to_lowercase();
-    INVITES.iter().any(|m| low.contains(m))
-}
+// 🪦 `asks_for_go_ahead(screen)` — gỡ 2026-08-16 cùng cái nút nó nuôi
+// (`pipeline.rs`, bia mộ ở đó). Nó so màn với bảy cụm chữ mời (*"nói một
+// tiếng"*, *"có muốn"*…) để dựng nút gửi hai chữ "làm đi" vào phiên. Hà: *"1
+// xóa nút đó đi không cần nữa"*. Gỡ cả hàm chứ không để lại một phép đo không
+// ai đọc: một hàm còn đó là một lời mời dựng lại cái nút ấy ở chỗ khác.
 
 /// Chữ đang NẰM SẴN trong ô nhập, nếu có — thứ chỉ cần một Enter là gửi đi.
 ///

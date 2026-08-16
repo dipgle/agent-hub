@@ -2999,6 +2999,136 @@ const LONG_JOB_MAX_SEC: u64 = 3600;
 /// Bao lâu thì nhắc một lần rằng lệnh vẫn đang chạy.
 const LONG_JOB_TICK_SEC: u64 = 90;
 
+/// Nhịp hỏi Terminal xem cửa sổ ấy đã chạy xong chưa (nút 🖥).
+///
+/// Hỏi bằng `busy of tab` — chính Terminal trả lời về tab của nó — chứ không
+/// đoán bằng `ps` hay `sleep`: `ps` mất trước khi shell kịp in dấu nhắc, và một
+/// `sleep` cố định thì hoặc cắt ngang một lệnh dài, hoặc bắt chờ vô cớ.
+const TERM_JOB_POLL_SEC: u64 = 3;
+
+/// Bao nhiêu dòng cuối của cửa sổ được lấy làm "kết quả" gửi về Telegram.
+const TERM_JOB_TAIL_LINES: usize = 60;
+
+/// 🖥 Chạy trong CỬA SỔ TERMINAL riêng, rồi **kết quả về Telegram**.
+///
+/// 🔴 Hà 2026-08-16: *"lệnh chạy phải có 2 nút: 1 là chạy xong lấy kết quả đưa
+/// vào phiên, 1 nút là chạy terminal được kết quả gửi về tele"*. Hai nút ấy
+/// khác nhau ở ĐÍCH ĐẾN của kết quả, không phải ở chỗ chạy — và trước lượt này
+/// nút 🖥 làm đúng nửa việc: mở cửa sổ, gõ lệnh, rồi bỏ đó. Kết quả nằm lại
+/// trên một màn hình mà người đang cầm điện thoại không nhìn thấy, tức cái nút
+/// chỉ dùng được khi chủ máy đang ngồi trước máy — đúng lúc anh không cần hub.
+///
+/// Không giữ `Db` nên tin trả về đi qua cửa định dạng với bảng dữ liệu rỗng:
+/// chữ hiện GIỐNG mọi tin khác, chỉ không mang nút của phiên nào (cửa sổ trần
+/// không thuộc phiên nào — đó là định nghĩa của nó).
+fn watch_terminal_job(w: i64, tty: String, line: String) {
+    // Bản sao cho nhánh "không dựng được luồng": luồng nuốt bản gốc, mà đúng ca
+    // ấy mới cần tên cửa sổ để nói ra (cùng hình dạng với `watch_long_job`).
+    let fallback_tty = tty.clone();
+    let spawned = std::thread::Builder::new()
+        .name(format!("term-job-{tty}"))
+        .spawn(move || {
+            let _lane = crate::exec::urgent();
+            // Gõ xong, Terminal cần một nhịp mới báo `busy`. Hỏi ngay lập tức
+            // thì đọc được trạng thái TRƯỚC lệnh và kết luận "xong" cho một
+            // lệnh còn chưa bắt đầu.
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let started = std::time::Instant::now();
+            loop {
+                match crate::keys::tab_busy(w) {
+                    Ok(false) => break,
+                    Ok(true) => {}
+                    // Cửa sổ đã đóng (hoặc Terminal câm): NÓI RA, đừng im — im
+                    // ở đây là một cú bấm không bao giờ có câu trả lời.
+                    Err(e) => {
+                        let why = crate::logging::err_chain(&e);
+                        logging::warn(
+                            "term_job_watch_failed",
+                            json!({ "tty": tty, "err": why, "cmd": crate::exec::truncate(&line, 120) }),
+                        );
+                        say_term_result(&format!(
+                            "🖥 mất dấu cửa sổ {tty} khi đang chờ lệnh chạy xong ({why}).\n$ {line}"
+                        ));
+                        return;
+                    }
+                }
+                if started.elapsed().as_secs() >= LONG_JOB_MAX_SEC {
+                    logging::warn(
+                        "term_job_still_running",
+                        json!({ "tty": tty, "sec": started.elapsed().as_secs() }),
+                    );
+                    say_term_result(&format!(
+                        "🖥 vẫn đang chạy sau {} phút trong cửa sổ {tty} — hub thôi canh, cửa sổ vẫn còn đó.\n$ {line}",
+                        started.elapsed().as_secs() / 60
+                    ));
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(TERM_JOB_POLL_SEC));
+            }
+            // Đọc màn CỦA CHÍNH cửa sổ ấy, rồi cắt từ dòng lệnh trở xuống: phần
+            // trên nó là những gì có sẵn trước khi hub gõ vào, không phải kết
+            // quả của lệnh này.
+            let body = match crate::keys::screen_of(&tty, TERM_JOB_TAIL_LINES) {
+                Some((body, _)) => body,
+                None => {
+                    logging::warn("term_job_screen_unreadable", json!({ "tty": tty }));
+                    say_term_result(&format!(
+                        "🖥 lệnh chạy xong trong cửa sổ {tty} nhưng hub KHÔNG đọc được màn của nó.\n$ {line}"
+                    ));
+                    return;
+                }
+            };
+            let out = tail_after_command(&body, &line);
+            logging::info(
+                "term_job_done",
+                json!({ "tty": tty, "sec": started.elapsed().as_secs(),
+                        "cmd": crate::exec::truncate(&line, 120), "out_len": out.len() }),
+            );
+            say_term_result(&format!(
+                "🖥 xong trong cửa sổ {tty} ({} giây):\n$ {}\n{}",
+                started.elapsed().as_secs(),
+                line,
+                crate::exec::truncate(&out, CMD_OUT_MAX)
+            ));
+        });
+    if let Err(e) = spawned {
+        // Không dựng được luồng canh thì lệnh VẪN CHẠY trong cửa sổ — nói đúng
+        // như vậy, đừng để người ta ngồi chờ một tin không bao giờ tới.
+        logging::error("term_job_spawn_failed", json!({ "err": e.to_string() }));
+        say_term_result(&format!(
+            "⚠ lệnh đang chạy trong cửa sổ {fallback_tty} nhưng hub KHÔNG canh được để báo kết quả — xem trong cửa sổ ấy."
+        ));
+    }
+}
+
+/// Phần màn SAU dòng lệnh vừa gõ — tức kết quả của chính nó.
+///
+/// Không thấy dòng lệnh (màn đã cuộn qua, lệnh quá dài bị bẻ đôi) thì trả cả
+/// khúc đang có: thà thừa vài dòng ngữ cảnh còn hơn trả về chuỗi rỗng và để
+/// người đọc tưởng lệnh không in ra gì.
+fn tail_after_command(screen: &str, line: &str) -> String {
+    let needle = line.trim();
+    let mut lines: Vec<&str> = screen.lines().collect();
+    if let Some(i) = lines.iter().rposition(|l| l.contains(needle)) {
+        lines = lines.split_off(i + 1);
+    }
+    lines.join("\n").trim().to_string()
+}
+
+/// Tin của nút 🖥 — cùng cửa định dạng với mọi tin khác.
+fn say_term_result(text: &str) {
+    match crate::telegram::inbox() {
+        Some(tg) => say_session_data(
+            tg,
+            text,
+            &[],
+            "term_job_ack_failed",
+            &SessionData::default(),
+        ),
+        None => logging::info("term_job_ack_dropped", json!({ "ack": text })),
+    }
+}
+
 /// Việc đang chạy nền, để **theo dõi và dừng được** — thứ Hà đòi thay cho một
 /// con số timeout.
 #[derive(Debug, Clone)]
@@ -3207,15 +3337,14 @@ fn watch_long_job(
                     // một lý do (sudo/ssh chết ở dòng hỏi mật khẩu); lúc thành
                     // công thì nó là một mẩu tin không ai dùng.
                     let block = runin_block(&line, &report, r.timed_out || r.code != Some(0));
-                    // Đầu ra nằm lại trong NHẬT KÝ phiên, tức trên đĩa mãi mãi —
-                    // gác giá trị bí mật trước khi nó vào đó.
-                    let risk = crate::redaction::file_risk(&block);
-                    if !risk.is_empty() {
-                        format!(
-                            "🔒 Lệnh chạy xong nhưng hub GIỮ LẠI kết quả, không dán vào phiên: có dấu hiệu bí mật ({}). Xem trên máy.",
-                            risk.join(", ")
-                        )
-                    } else {
+                    // 🔴 GỠ 2026-08-16 cổng "kết quả có dấu hiệu bí mật thì
+                    // KHÔNG dán vào phiên". Nút ▶️ có đúng một việc: chạy rồi
+                    // đưa kết quả vào phiên (Hà 16/08: *"1 là chạy xong lấy kết
+                    // quả đưa vào phiên"*) — giữ kết quả lại là bỏ dở đúng cái
+                    // việc ấy, và bỏ dở im lặng ngay lúc lệnh vừa in ra thứ
+                    // đáng đọc nhất. Ghi dấu hiệu vào log, chữ đi tiếp.
+                    crate::sessions::note_preview_risk("runin_block", &block);
+                    {
                         match crate::keys::window_of(&s.tty) {
                             // Cú Enter rời nay nằm ở MỘT chỗ (`keys::type_and_send`).
                             // Bản cũ chép tay vòng lặp ấy vào đây và nuốt lỗi
@@ -3413,9 +3542,12 @@ fn watch_new_session(job: NewSession) {
 fn say_back(_cfg: &Config, adapter: &str, _chat_id: &str, text: &str) {
     if adapter == crate::telegram::NAME {
         if let Some(i) = crate::telegram::inbox() {
-            if let Err(e) = i.send_text(text) {
-                logging::error("telegram_ack_failed", json!({ "err": e }));
-            }
+            // Tin này mang KẾT QUẢ một lệnh của phiên (`$ …` + đầu ra), nên nó
+            // đi qua cùng bộ định dạng với `/shot` — không có phiên nào để gắn
+            // action ở luồng này (không cầm `Db`), nhưng chữ vẫn phải hiện
+            // GIỐNG mọi tin khác: cùng phép gột markdown, cùng cách cắt tin.
+            // Hà 2026-08-16: *"mọi thứ nhìn thấy ở tele phải đồng nhất"*.
+            say_session_data(i, text, &[], "telegram_ack_failed", &SessionData::default());
         }
         return;
     }
@@ -3468,6 +3600,80 @@ impl SessionData {
     fn short(&self) -> String {
         self.sid.chars().take(8).collect()
     }
+}
+
+/// Trần số dòng lệnh hub nhặt từ MỘT màn/lượt phiên (xem `commands_of`).
+pub const CMD_LINES_MAX: usize = 12;
+
+/// 🔴 MỘT CỬA cho mọi tin **mang nội dung phiên** ra Telegram.
+///
+/// Hà 2026-08-16: *"lệnh `/shot` hay phản hồi tự động gửi về tele đều phải qua
+/// định dạng trước khi gửi → cái nhận được ở tele phải thao tác được với các
+/// lệnh link của phiên đó"* · *"mọi thứ nhìn thấy ở tele phải đồng nhất"* ·
+/// *"dành cho nội dung lấy từ phiên thôi"*.
+///
+/// Đo được cái hỏng: chỉ `/shot` và tin tự phát đi qua bộ định dạng
+/// (`say_session_data`), còn ack của **mọi route khác** đi bằng `send_text`
+/// trần — nên cùng một câu của phiên, cùng một dòng lệnh trong đó, khi thì bấm
+/// được khi thì không, tuỳ nó ra bằng cửa nào. Người đọc không có cách nào biết
+/// trước, nên phải thử — và thử hụt thì tin ấy coi như chữ chết.
+///
+/// Cửa này chỉ dành cho chữ CỦA PHIÊN. Tin thuần của hub ("không mở được cửa
+/// sổ", `/help`, danh sách tài khoản) đi đường thường: không có phiên nào để
+/// gắn action, gắn bừa thì nút trỏ vào chỗ trống.
+pub fn say_from_session(
+    db: &Db,
+    cfg: &Config,
+    tg: &crate::telegram::Inbox,
+    sid: &str,
+    text: &str,
+    extra: &[(String, String)],
+    log_key: &str,
+) {
+    // Lệnh lấy từ NHẬT KÝ phiên (`tool_use`), không đoán từ chữ — cùng nguồn
+    // với `/shot`, nên hai tin nói về cùng một lượt cho ra cùng một bộ nút.
+    //
+    // 🔴 CHỈ giữ lệnh CÓ MẶT trong chính câu này. `session_layout` cố ý nối
+    // thêm khu *"Lệnh phiên chạy không được"* cho lệnh nó không tìm thấy trong
+    // chữ — đúng cho `/shot` (ảnh màn thiếu dòng bị cổng quyền chặn), sai cho
+    // mọi câu khác: một cái ack hai dòng sẽ mọc thêm cả một danh sách lệnh
+    // không ai hỏi, đúng thứ Hà đã chê hôm nay (*"một mớ text không cần
+    // thiết"*). Cửa này ĐỊNH DẠNG cái đang có, không thêm nội dung.
+    let cmds: Vec<crate::sessions::Cmd> = crate::sessions::commands_of(cfg, sid, CMD_LINES_MAX)
+        .into_iter()
+        .filter(|c| text.contains(c.line.as_str()))
+        .collect();
+    let mut buttons = remember_quick(db, sid, &cmds);
+    buttons.extend(extra.iter().cloned());
+    let data = SessionData {
+        sid: sid.to_string(),
+        cmds: crate::sessions::lines_of(&cmds),
+        ..Default::default()
+    };
+    say_session_data(tg, text, &buttons, log_key, &data);
+}
+
+/// Trả lời một cú bấm/lệnh mà nội dung là CHỮ CỦA PHIÊN — qua đúng cửa trên.
+///
+/// Rơi về `reply_in_channel` khi không có phiên nào để gắn (`sid` rỗng), khi
+/// kênh không phải Telegram, hoặc khi câu ấy ngắn tới mức hub trả lời bằng một
+/// emoji thả lên tin gốc (`ack_as_emoji`) — ba ca không có nội dung phiên nào
+/// để định dạng.
+fn reply_from_session(
+    db: &Db,
+    cfg: &Config,
+    adapter: &str,
+    cmd: &ChannelCommand,
+    sid: &str,
+    text: &str,
+) {
+    if adapter == crate::telegram::NAME && !sid.is_empty() && ack_as_emoji(text).is_none() {
+        if let Some(tg) = crate::telegram::inbox() {
+            say_from_session(db, cfg, tg, sid, text, &[], "session_ack_failed");
+            return;
+        }
+    }
+    reply_in_channel(db, cfg, adapter, cmd, text);
 }
 
 pub fn say_with_command_icons(
@@ -4372,7 +4578,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         );
                         // Cùng đường với cái nút: MÁY chạy, PHIÊN đọc.
                         let ack = format!("▶ chạy trong {sid}: {line}");
-                        reply_in_channel(db, cfg, adapter, cmd, &ack);
+                        reply_from_session(db, cfg, adapter, cmd, &sid, &ack);
                         if let Some(tg) = crate::telegram::inbox() {
                             tg.push_text(&format!("/runin {sid} {line}"));
                         }
@@ -4424,10 +4630,18 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     );
                                 }
                                 match crate::keys::type_and_send(w, &full) {
-                                    Ok(()) => format!(
-                                        "🖥 Đang chạy trong cửa sổ riêng ({tty}) — đang theo nó.\n\
-                                         /shot để nhìn màn."
-                                    ),
+                                    Ok(()) => {
+                                        // 🔴 ĐÍCH của nút này là TELEGRAM — Hà
+                                        // 2026-08-16: *"1 nút là chạy terminal
+                                        // được kết quả gửi về tele"*. Canh ở
+                                        // luồng riêng: chờ tại chỗ thì khoá cả
+                                        // vòng chạy (xem `watch_long_job`).
+                                        watch_terminal_job(w, tty.clone(), full.clone());
+                                        format!(
+                                            "🖥 Đang chạy trong cửa sổ riêng ({tty}) — báo lại khi xong.\n\
+                                             /shot để nhìn màn."
+                                        )
+                                    }
                                     // `open` xong mà gõ hỏng thì cửa sổ vẫn ở
                                     // đó và TRỐNG: nói đúng như vậy, đừng khai
                                     // là đã chạy.
@@ -4535,6 +4749,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     continue;
                 }
                 let live = crate::sessions::snapshot(cfg);
+                // Phiên mà câu trả lời này NÓI VỀ — cửa định dạng cần nó để gắn
+                // action vào đúng phiên (rỗng ⟹ không có phiên nào, đi đường
+                // thường).
+                let mut ack_sid = String::new();
                 let ack = match live
                     .sessions
                     .iter()
@@ -4604,6 +4822,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             adapter.to_string(),
                             cmd.chat_id.clone(),
                         );
+                        ack_sid = s.session_id.clone();
                         // 🔴 Câu này KHÔNG kể ruột hub — Hà 2026-08-16: *"Tại
                         // sao để báo trần 120s làm gì"*. Bản cũ khoe *"không
                         // còn trần 120 giây"*: một cái trần **đã bị gỡ**, tức
@@ -4619,7 +4838,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         )
                     }
                 };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                reply_from_session(db, cfg, adapter, cmd, &ack_sid, &ack);
                 Some(ack)
             }
             CommandKind::Win => {
@@ -4886,7 +5105,14 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         },
                     },
                 };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                // Bản bàn giao là CHỮ CỦA PHIÊN — đi qua cửa định dạng, nên
+                // lệnh `cd … && claude --resume …` trong đó bấm được như mọi
+                // dòng lệnh khác.
+                let ack_sid = target
+                    .as_ref()
+                    .map(|s| s.session_id.clone())
+                    .unwrap_or_default();
+                reply_from_session(db, cfg, adapter, cmd, &ack_sid, &ack);
                 Some(ack)
             }
             CommandKind::New => {
@@ -6091,37 +6317,22 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // một lệnh là thêm một icon ở một dòng vốn đã có, không
                     // chiếm thêm chỗ nào. Cái giá đã biến mất; cái trần thì ở
                     // lại. 12 là chặn-chuyện-vô-lý, không phải chắt lọc.
-                    let mut cmds = crate::sessions::commands_of(cfg, &shot_sid, 12);
+                    let cmds = crate::sessions::commands_of(cfg, &shot_sid, 12);
                     let n_cmds = cmds.len();
                     cmd_lines = crate::sessions::lines_of(&cmds[..n_cmds]);
-                    // Câu đồng ý nằm CÙNG kho với lệnh (một chỗ nhớ, một chỉ
-                    // số), nhưng đi bằng callback KHÁC: `run:` gõ một DÒNG
-                    // LỆNH, còn đây là một câu chữ thường.
-                    let go = crate::keys::asks_for_go_ahead(&ack);
-                    if go {
-                        // Một câu chữ thường, không phải lệnh — nên không có
-                        // thư mục nào để khai, và nó cũng không chạy ở đâu cả.
-                        cmds.push(crate::sessions::Cmd {
-                            line: "làm đi".to_string(),
-                            cwd: String::new(),
-                        });
-                    }
+                    // 🪦 Nút "✅ làm đi" — GỠ 2026-08-16, Hà: *"1 xóa nút đó đi
+                    // không cần nữa"*.
+                    //
+                    // Nó sinh ra từ chỗ hub ĐOÁN ý một màn: bảy cụm chữ
+                    // (*"nói một tiếng"*, *"có muốn"*…) đọc thành "phiên đang
+                    // mời", rồi dựng một nút gửi hai chữ đồng ý vào phiên. Một
+                    // mệnh lệnh không lùi được, dựng trên một phép so chuỗi —
+                    // và cùng tín hiệu ấy đã có lần dựng ra HAI nút một lúc
+                    // (*"Sao có 2 nút làm đi"*, 14/08). Câu trả lời vẫn đi được
+                    // bằng `/tell` hoặc `/type`, và khi tự gõ thì câu ấy nói
+                    // đúng thứ chủ máy muốn nói, không phải hai chữ hub đoán.
                     let stored = remember_quick(db, &shot_sid, &cmds);
                     quick.extend(stored.into_iter().take(n_cmds));
-                    if go {
-                        // Cùng mã với lệnh vừa cất, không phải một số thứ tự —
-                        // xem `quick_token`.
-                        // 🔴 NHÃN PHẢI NÓI NÓ LÀM GÌ — Hà 2026-08-16: *"sao lại
-                        // có nút 'làm đi' làm gì?"*. Cái nút đúng: phiên vừa
-                        // kết bằng một lời mời (*"nói một tiếng tôi làm"*), và
-                        // đây là câu trả lời cho lời mời ấy. Nhưng hai chữ trần
-                        // trên một hàng phím thì không nói được nó GỬI MỘT CÂU
-                        // vào phiên — nó nghe như hub sắp tự làm gì đó.
-                        quick.push((
-                            "✅ Trả lời: làm đi".to_string(),
-                            format!("say:{}", quick_token(&shot_sid, "làm đi")),
-                        ));
-                    }
                     // 🪦 Dòng "⛔ N dòng lệnh xoá/ghi đè — hub cố ý KHÔNG dựng
                     // nút" sống đúng nửa tiếng (16/08, 16:45→17:15). Hà đọc nó
                     // trên điện thoại: *"cái này thằng nào tạo ra, thằng nào
@@ -6164,11 +6375,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // 🔴 Hà 2026-08-14: *"Sao có 2 nút làm đi"*. Vì đúng hai
                     // khối cùng dựng nó: khối trên (`say:<n>`, cùng kho với
                     // lệnh) và khối này (`run:0`, một kho riêng). Cả hai đều
-                    // "đúng" một mình, cùng đọc một tín hiệu
-                    // (`asks_for_go_ahead`), cùng đổ vào một danh sách — và
-                    // chẳng chỗ nào hỏi "đã có ai dựng nút này chưa". Khối này
-                    // đi, khối trên ở lại: nó nằm cùng chỗ với các nút lệnh nên
-                    // thứ tự nút khớp thứ tự chữ trên màn.
+                    // "đúng" một mình, cùng đọc một tín hiệu đoán-chữ, cùng đổ
+                    // vào một danh sách — và chẳng chỗ nào hỏi "đã có ai dựng
+                    // nút này chưa". Khối này đi trước (14/08); khối trên đi
+                    // nốt 16/08 khi Hà bỏ hẳn cái nút.
                     //
                     // Bảng hỏi thì phải chọn được NGAY TẠI ĐÂY — cùng bộ nút
                     // với tin tự phát (`telegram::choice_buttons`), không đẻ
@@ -6374,6 +6584,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         .sessions
                         .iter()
                         .any(|s| same_session(&s.session_id, &want));
+                // Câu trả lời bên lề là chữ CỦA PHIÊN ấy — qua cửa định dạng.
+                let ack_sid = target
+                    .as_ref()
+                    .map(|s| s.session_id.clone())
+                    .unwrap_or_default();
                 let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên trên màn Phiên rồi hỏi lại."
@@ -6461,7 +6676,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         ),
                     },
                 };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                reply_from_session(db, cfg, adapter, cmd, &ack_sid, &ack);
                 Some(ack)
             }
             CommandKind::Session => {
@@ -6538,6 +6753,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     if !sent {
                         reply_in_channel(db, cfg, adapter, cmd, &ack);
                     }
+                    // 🔴 KHÔNG đi qua `reply_from_session` ở đây, và đó là chủ
+                    // ý: tin này nói về NHIỀU phiên: gắn action theo một sid là
+                    // gắn sai phiên cho phần lớn các dòng. Nút mỗi hàng
+                    // (`sess:<id>`) đã tự mang phiên của nó.
                     // Giá trị của NHÁNH này, không phải `return`: `return` ở đây
                     // sẽ bỏ luôn những lệnh còn lại trong cùng một lượt.
                     Some(ack)

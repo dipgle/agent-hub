@@ -1013,12 +1013,36 @@ pub fn classify_host(cmd: &str, kind: &str, tty: &str) -> &'static str {
     }
 }
 
-/// Hits that must suppress a preview, or empty if it is safe to carry.
+/// Dấu hiệu bí mật thấy trong một khúc chữ — **một dữ kiện, không phải cánh
+/// cửa** kể từ 2026-08-16.
 pub fn preview_risk(text: &str) -> Vec<String> {
     crate::redaction::leak_scan(text, &[])
         .into_iter()
         .filter(|l| SECRET_LABELS.contains(&l.as_str()))
         .collect()
+}
+
+/// Ghi dấu hiệu bí mật vào log rồi ĐI TIẾP — chữ vẫn đi về điện thoại.
+///
+/// 🔴 Hà 2026-08-16: *"hub là cổng để làm việc từ xa qua tele không cần giấu gì
+/// hết, giấu thì phải ngồi vào máy để làm vậy thì cần gì hub nữa"*. Trước đó
+/// sáu chỗ trong tệp này đọc `preview_risk` rồi **thay chữ bằng một câu xin
+/// lỗi** ("mở phiên trên máy để đọc") — mỗi chỗ là một lần hub bắt chủ máy đi
+/// bộ về chỗ cái máy, tức bắt anh làm đúng cái việc hub sinh ra để khỏi phải
+/// làm. Cái nó bảo vệ thì chính chủ máy đã tự cân: buồng chat riêng của anh,
+/// tự xoá, không ai khác đọc được (cùng lý do `/shot` gửi nguyên màn từ 14/08).
+///
+/// Một chỗ duy nhất, để lần sau không ai chép lại phép "quét rồi giấu": ai cần
+/// biết màn có gì đáng ngại thì ĐỌC LOG, không bịt mắt người dùng.
+pub fn note_preview_risk(place: &str, text: &str) {
+    let risk = preview_risk(text);
+    if !risk.is_empty() {
+        crate::logging::info(
+            "preview_risk_noted",
+            serde_json::json!({ "at": place, "risk": risk,
+                    "why": "ghi lại, KHÔNG giữ chữ (Hà 2026-08-16)" }),
+        );
+    }
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -1576,9 +1600,12 @@ pub fn last_say(cfg: &Config, session: &LiveSession, max_chars: usize) -> Option
 /// hoặc một dòng máy tự chèn (`[Request interrupted…]`) — đọc ngược nó về điện
 /// thoại của chính anh ấy thì không nói thêm điều gì.
 ///
-/// Điều 5 vẫn gác: chữ có dấu hiệu bí mật thì trả `None` — thà tin cụt còn hơn
-/// tin mang mật khẩu ra khỏi máy. **Không** đi lùi tìm một lượt sạch hơn: một
-/// lượt cũ hơn đọc lên như thể là lời mới nhất, mà đó là một câu SAI.
+/// 🔴 Cổng "có dấu hiệu bí mật thì trả `None`" **gỡ 2026-08-16**, Hà: *"hub là
+/// cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì phải ngồi
+/// vào máy để làm vậy thì cần gì hub nữa"*. Nó biến đúng những tin đáng đọc
+/// nhất thành tin cụt, ở đúng lúc chủ máy không ngồi trước máy. Dấu hiệu vẫn
+/// được GHI (`preview_risk_noted`) — một dữ kiện đáng biết thì nói ra, không
+/// dựng thành cánh cửa.
 pub fn last_prose(tail: &str, max_chars: usize) -> Option<String> {
     for line in tail.lines().rev() {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
@@ -1594,9 +1621,7 @@ pub fn last_prose(tail: &str, max_chars: usize) -> Option<String> {
         if prose.is_empty() {
             continue;
         }
-        if !preview_risk(&prose).is_empty() {
-            return None;
-        }
+        note_preview_risk("last_prose", &prose);
         return Some(truncate(&prose, max_chars));
     }
     None
@@ -2120,28 +2145,17 @@ pub fn pending_question(tail: &str) -> Option<Asking> {
         }
     }
     // Cái CUỐI còn treo: hỏi xong rồi hỏi tiếp thì câu sau mới là câu đang chờ.
-    let (_, mut asking) = asked
+    let (_, asking) = asked
         .into_iter()
         .rev()
         .find(|(id, _)| !answered.contains(id))?;
-    // Điều 5: chữ này rời khỏi máy (vào ảnh chụp, vào Telegram) nên phải qua
-    // cổng quét rò rỉ như mọi phần xem trước khác. Có dấu hiệu thì giữ lại chữ,
-    // KHÔNG giữ lại sự thật là phiên đang kẹt.
-    let risky = |t: &str| !preview_risk(t).is_empty();
-    if risky(&asking.question) || asking.options.iter().any(|o| risky(o)) {
-        asking.question = "(màn có dấu hiệu bí mật — mở phiên trên máy để đọc)".to_string();
-        asking.options = Vec::new();
-    }
-    // Cổng quét chạy trên TỪNG câu, không chỉ câu đầu: một bảng có thể hỏi
-    // chuyện vô hại ở tab 1 và dán nguyên một khoá ở tab 2, và chính tab 2 mới
-    // là thứ nút bấm sắp mang ra khỏi máy. Câu nào dính thì giữ chữ câu ấy —
-    // giấu cả bảng thì mất luôn sự thật là bảng có mấy câu.
-    for q in &mut asking.rest {
-        if risky(&q.question) || q.options.iter().any(|o| risky(o)) {
-            q.question = "(màn có dấu hiệu bí mật — mở phiên trên máy để đọc)".to_string();
-            q.options = Vec::new();
-        }
-    }
+    // 🔴 GỠ 2026-08-16 cổng "câu hỏi có dấu hiệu bí mật thì thay bằng một câu
+    // xin lỗi và XOÁ HẾT LỰA CHỌN". Đây là chỗ nó cắn đau nhất: mất lựa chọn
+    // thì `/pick` không còn gì để bấm, tức phiên đứng kẹt cho tới khi chủ máy
+    // về ngồi trước máy — đúng thứ hub sinh ra để khỏi phải làm. Hà: *"không
+    // cần giấu gì hết, giấu thì phải ngồi vào máy để làm vậy thì cần gì hub
+    // nữa"*. Dấu hiệu vẫn được ghi, chữ vẫn đi.
+    note_preview_risk("pending_question", &asking.question);
     Some(asking)
 }
 
@@ -3202,24 +3216,15 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     row.context_tokens = parsed.context_tokens;
                     row.model = parsed.model.clone();
                     row.last_role = parsed.last_role;
-                    // Suppressed HERE, at the source, so no downstream surface
-                    // can forget: the snapshot, the portal doc and the phone
-                    // all read this struct.
-                    row.last_text = match &parsed.last_text {
-                        Some(t) => {
-                            let risk = preview_risk(t);
-                            if risk.is_empty() {
-                                parsed.last_text.clone()
-                            } else {
-                                row.note = Some(format!(
-                                    "ẩn phần xem trước: có thể chứa bí mật ({}) — mở phiên trên máy để xem",
-                                    risk.join(", ")
-                                ));
-                                None
-                            }
-                        }
-                        None => None,
-                    };
+                    // 🔴 GỠ 2026-08-16: phần xem trước từng bị NUỐT ngay tại
+                    // đây khi có dấu hiệu bí mật, và vì nó bị nuốt "tại nguồn"
+                    // nên mọi màn phía sau đều mất chữ cùng lúc — danh sách
+                    // phiên đọc lên chỉ còn một dòng xin lỗi. Hà 2026-08-16:
+                    // *"không cần giấu gì hết"*. Ghi dấu hiệu, giữ chữ.
+                    if let Some(t) = &parsed.last_text {
+                        note_preview_risk("snapshot_last_text", t);
+                    }
+                    row.last_text = parsed.last_text.clone();
                 }
                 Err(e) => {
                     logging::warn(
@@ -3432,11 +3437,11 @@ pub fn parse_stream(tail: &str, limit: usize) -> SessionStream {
                 role: role.clone(),
                 ts: ts.clone(),
                 name,
-                text: if risk.is_empty() {
-                    truncate(raw, cap)
-                } else {
-                    format!("[hub ẩn: có thể chứa bí mật ({})]", risk.join(", "))
-                },
+                // 🔴 GỠ 2026-08-16: chữ đi nguyên vẹn kể cả khi có dấu hiệu bí
+                // mật (Hà: *"không cần giấu gì hết"*). `withheld` ở lại làm
+                // đúng một việc: NÓI RA là dòng này có dấu hiệu — một nhãn đọc
+                // được, không phải một cánh cửa.
+                text: truncate(raw, cap),
                 withheld: !risk.is_empty(),
             });
         }
@@ -3654,11 +3659,11 @@ fn claude_failed(session_id: &str, out: &crate::exec::RunOut) -> anyhow::Error {
                 .map(|s| s.to_string())
         })
         .unwrap_or_else(|| payload.to_string());
-    let safe = if preview_risk(&reason).is_empty() {
-        truncate(&reason, 200)
-    } else {
-        "[hub ẩn lý do: có thể chứa bí mật — xem log trên máy]".to_string()
-    };
+    // 🔴 GỠ 2026-08-16: LÝ DO một lệnh chết là thứ ít được phép giấu nhất —
+    // giấu nó thì tin báo lỗi không nói được gì, và người đọc phải về ngồi
+    // trước máy để biết vì sao. Ghi dấu hiệu, giữ chữ (Hà 16/08).
+    note_preview_risk("claude_error_reason", &reason);
+    let safe = truncate(&reason, 200);
     anyhow::anyhow!("claude exit {:?}: {}", out.code, safe)
 }
 
@@ -3766,12 +3771,13 @@ pub fn handover(cfg: &Config, session: &LiveSession) -> Result<Handover> {
         source_id: session.session_id.clone(),
         source_name: session.name.clone(),
         new_session_id: reply.new_session_id.clone(),
-        // The handover text is a session talking about its own work, so it can
-        // quote anything the session saw — same gate as every other preview.
-        checkpoint: gate_preview(
-            &reply.text,
-            "[hub ẩn bàn giao: có thể chứa bí mật — mở phiên trên máy để xem]",
-        ),
+        // Bản bàn giao là phiên kể lại việc của chính nó, nên nó trích được mọi
+        // thứ phiên từng thấy — và từ 16/08 nó đi NGUYÊN VẸN: một bản bàn giao
+        // bị thay bằng câu "mở phiên trên máy để xem" thì không bàn giao gì cả.
+        checkpoint: {
+            note_preview_risk("handover_checkpoint", &reply.text);
+            reply.text.clone()
+        },
         cost_usd: reply.cost_usd,
         ts: crate::logging::now_iso(),
         resume_command: format!(
@@ -4060,10 +4066,10 @@ pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<
             // Không có fork nào cả — câu trả lời nằm trong CHÍNH phiên ấy.
             new_session_id: session.session_id.clone(),
             question: question.to_string(),
-            answer: gate_preview(
-                &screen,
-                "[hub ẩn câu trả lời: màn có thể chứa bí mật — mở phiên trên máy để xem]",
-            ),
+            answer: {
+                note_preview_risk("aside_screen", &screen);
+                screen.clone()
+            },
             cost_usd: 0.0,
             ts: crate::logging::now_iso(),
         });
@@ -4107,24 +4113,19 @@ pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<
         source_name: session.name.clone(),
         new_session_id: reply.new_session_id,
         question: question.to_string(),
-        answer: gate_preview(
-            &reply.text,
-            "[hub ẩn câu trả lời: có thể chứa bí mật — mở phiên trên máy để xem]",
-        ),
+        answer: {
+            note_preview_risk("aside_answer", &reply.text);
+            reply.text.clone()
+        },
         cost_usd: reply.cost_usd,
         ts: crate::logging::now_iso(),
     })
 }
 
-/// Show the text, or say why it is hidden — never show it half-redacted and
-/// never blank it without a reason.
-fn gate_preview(text: &str, hidden: &str) -> String {
-    if preview_risk(text).is_empty() {
-        text.to_string()
-    } else {
-        hidden.to_string()
-    }
-}
+// 🪦 `gate_preview(text, hidden)` — gỡ 2026-08-16. Nó thay cả khúc chữ bằng
+// một câu xin lỗi khi thấy dấu hiệu bí mật, ở ba chỗ: bản bàn giao, câu trả lời
+// bên lề, và màn đọc lại. Hà: *"hub là cổng để làm việc từ xa qua tele không
+// cần giấu gì hết"*. Thay bằng `note_preview_risk` — ghi vào log, chữ đi tiếp.
 
 /// A session hub started, and how to find it again.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

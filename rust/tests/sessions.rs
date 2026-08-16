@@ -151,22 +151,27 @@ fn the_stream_carries_commands_and_their_output_not_just_talk() {
 }
 
 #[test]
-fn a_secret_in_command_output_is_withheld_not_printed() {
-    // The exact risk UC-S02 creates: showing `tool_result` means showing what
-    // commands print, which is where keys and env vars surface. Gating only the
-    // last turn (what the list screen does) would publish this.
+fn a_secret_in_command_output_is_flagged_but_still_shown() {
+    // 🔴 ĐẢO CHIỀU 2026-08-16 (bản cũ: `…_is_withheld_not_printed`). Hà: *"hub
+    // là cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì phải
+    // ngồi vào máy để làm vậy thì cần gì hub nữa"*.
+    //
+    // Giữ bài kiểm thay vì xoá, và giữ đúng cái nó canh — chỉ đảo kỳ vọng: đầu
+    // ra của lệnh vẫn tới nơi, và cờ `withheld` ở lại làm NHÃN ("dòng này có
+    // dấu hiệu"), không còn làm cửa. Xoá bài kiểm thì lượt sau có người "vá lại
+    // cho an toàn" mà không thấy đây là một quyết định đã có chủ.
     let tail = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"đăng nhập ok — mật khẩu là Abcd!2026"}]},"timestamp":"2026-08-08T01:00:00Z"}"#;
     let s = parse_stream(tail, 100);
     let e = &s.events[0];
-    assert!(e.withheld, "phải bị giữ lại");
+    assert!(e.withheld, "vẫn phải NHẬN RA dấu hiệu bí mật");
     assert!(
-        !e.text.contains("Abcd!2026"),
-        "giá trị không được lọt ra: {}",
+        e.text.contains("Abcd!2026"),
+        "chữ phải đi nguyên vẹn về điện thoại: {}",
         e.text
     );
     assert!(
-        e.text.contains("hub ẩn"),
-        "phải nói rõ vì sao trống: {}",
+        !e.text.contains("hub ẩn"),
+        "không còn câu xin lỗi thay cho nội dung: {}",
         e.text
     );
 }
@@ -1001,17 +1006,21 @@ fn a_question_that_was_answered_is_no_longer_pending() {
     assert_eq!(a.question, "q2");
 }
 
-/// Điều 5: câu hỏi cũng là chữ rời khỏi máy — có dấu hiệu bí mật thì giữ chữ
-/// lại, nhưng KHÔNG giữ lại sự thật là phiên đang kẹt.
+/// 🔴 ĐẢO CHIỀU 2026-08-16 (bản cũ:
+/// `a_question_that_smells_of_secrets_keeps_the_fact_but_not_the_words`).
+///
+/// Cổng cũ thay câu hỏi bằng *"(màn có dấu hiệu bí mật…)"* và **xoá hết lựa
+/// chọn**. Đó là chỗ nó cắn đau nhất: không còn lựa chọn thì `/pick` chẳng có
+/// gì để bấm, nên phiên đứng kẹt tới khi chủ máy về ngồi trước máy — đúng cái
+/// việc hub sinh ra để khỏi phải làm (Hà 16/08).
 #[test]
-fn a_question_that_smells_of_secrets_keeps_the_fact_but_not_the_words() {
+fn a_question_that_smells_of_secrets_still_reaches_the_phone() {
     let tail = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_9","name":"AskUserQuestion","input":{"questions":[{"header":"h","question":"mật khẩu tfl5 là Abcd1234! đúng không?","options":[{"label":"đúng"},{"label":"sai"}]}]}}]}}"#;
     let a = hub::sessions::pending_question(tail).expect("vẫn phải báo là đang kẹt");
-    assert!(a.options.is_empty(), "không đưa lựa chọn ra: {a:?}");
-    assert!(!a.question.contains("Abcd1234"), "lộ bí mật: {a:?}");
+    assert_eq!(a.options.len(), 2, "lựa chọn phải bấm được từ xa: {a:?}");
     assert!(
-        a.question.contains("bí mật"),
-        "phải nói vì sao trống: {a:?}"
+        a.question.contains("Abcd1234"),
+        "câu hỏi đi nguyên văn: {a:?}"
     );
 }
 
@@ -1075,14 +1084,24 @@ fn a_turn_that_speaks_while_calling_a_tool_keeps_the_speech() {
 ///
 /// Một lượt cũ hơn đọc lên như thể là lời mới nhất — đó là một câu SAI, còn im
 /// lặng chỉ là một câu thiếu.
+/// 🔴 ĐẢO CHIỀU 2026-08-16 (bản cũ: `…_is_withheld_not_swapped_for_an_older_one`).
+///
+/// Phần CÒN NGUYÊN giá trị của bài kiểm này là vế thứ hai, và nó không đổi: lời
+/// cuối phải là lời CUỐI. Cái đổi là vế thứ nhất — chữ không còn bị nuốt vì
+/// trông giống bí mật, nên tin báo thôi cụt ngay lúc đáng đọc nhất.
 #[test]
-fn a_secret_in_the_last_word_is_withheld_not_swapped_for_an_older_one() {
+fn the_last_word_goes_out_whole_and_is_never_an_older_one() {
     let tail = concat!(
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Câu này sạch, và nó CŨ."}]}}"#,
         "\n",
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Mật khẩu là Abcd!2026 nhé"}]}}"#,
     );
-    assert_eq!(hub::sessions::last_prose(tail, 2000), None);
+    let said = hub::sessions::last_prose(tail, 2000).expect("phải có lời cuối");
+    assert!(said.contains("Abcd!2026"), "chữ đi nguyên vẹn: {said}");
+    assert!(
+        !said.contains("và nó CŨ"),
+        "không được lùi về một lượt cũ hơn: {said}"
+    );
 }
 
 /// Không có lượt nào của phiên thì trả None, để chỗ gọi rơi về bản xem trước.

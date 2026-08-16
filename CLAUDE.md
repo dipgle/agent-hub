@@ -197,11 +197,32 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    through a run row, went with the poll stage on 2026-08-14; the rule did not.)
    Secrets for the daemon come from `hub.env` (chmod 600), never the plist,
    never the config. Log key NAMES only. The real environment always wins.
-5. **Nothing about a session leaves this Mac unscanned.** `sessions::preview_risk`
-   runs every transcript preview through `redaction::leak_scan` before it can
-   reach the snapshot — the first real run of `hub sessions` printed a session
-   whose latest turn stated a login password in plain text. The preview ends up
-   in a Telegram message on Telegram's servers; that is "leaving the machine".
+5. 🔴 **hub KHÔNG giấu chữ với chủ máy — quét thì ghi, không chặn** (2026-08-16).
+   Hà: *"hub là cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì
+   phải ngồi vào máy để làm vậy thì cần gì hub nữa"*.
+
+   Luật cũ đọc ngược lại (*"nothing about a session leaves this Mac
+   unscanned"*), và nó sinh ra từ một lần chạy thật: `hub sessions` in ra một
+   phiên có mật khẩu đăng nhập trong lượt cuối. Cái nó bỏ quên là ĐÍCH ĐẾN —
+   buồng chat riêng của chính chủ máy, đúng chỗ `/shot` đã gửi nguyên màn hình
+   từ 14/08. Nên nó không bảo vệ ai; nó chỉ bắt anh đi bộ về chỗ cái máy.
+
+   Cái giá đo được, **sáu cửa** trong `sessions.rs` cùng một hình dạng
+   "quét-rồi-thay-bằng-câu-xin-lỗi": lời cuối phiên (`last_prose` → `None`, tin
+   báo cụt), **câu hỏi đang chờ** (`pending_question` xoá sạch lựa chọn ⟹
+   `/pick` hết cái để bấm ⟹ phiên đứng kẹt), phần xem trước trong danh sách,
+   `/stream`, lý do một lệnh chết, bản bàn giao + câu trả lời `/ask`. Cộng một
+   cửa trong `pipeline.rs`: kết quả lệnh ▶️ **không được dán vào phiên**.
+
+   Nay tất cả đi qua **`sessions::note_preview_risk`** — ghi `preview_risk_noted`
+   vào log rồi ĐI TIẾP. Một chỗ duy nhất, để lần sau không ai chép lại phép
+   "quét rồi giấu". Ba bài kiểm khoá hành vi cũ được **đảo chiều**, không xoá
+   (`tests/sessions.rs`), nên "vá lại cho an toàn" là làm đỏ một bài kiểm có
+   chủ, không phải sửa một chỗ hở.
+
+   Cái KHÔNG đổi: luật 4 (bí mật của chính hub — token bot, `hub.env` — vẫn chỉ
+   log tên khoá, không log giá trị), và `redaction::file_risk` vẫn NÓI RA khi
+   một tệp gửi đi có dấu hiệu. Nói ≠ giấu.
 6. **Cursors advance only after the orders they cover have run.** A crash must
    re-read, never skip. 🔴 Reduced in scope 2026-08-14: the poll cursors went
    with the poll stage, and Telegram advances its own `offset` inside
@@ -511,6 +532,54 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     ended → **nothing**, unless another session took its window over, in which
     case the button points at *that* session and the label carries *its* name.
     A button that names the dead is a button that lies.
+
+## MỘT CỬA cho chữ của phiên đi ra Telegram (2026-08-16)
+
+Hà, ba câu trong một buổi: *"lệnh `/shot` hay phản hồi tự động gửi về tele đều
+phải qua định dạng trước khi gửi → cái nhận được ở tele phải thao tác được với
+các lệnh link của phiên đó"* · *"mọi thứ nhìn thấy ở tele phải đồng nhất"* ·
+*"dành cho nội dung lấy từ phiên thôi"*.
+
+Đo được cái hỏng: chỉ `/shot` và tin tự phát đi qua bộ định dạng
+(`pipeline::say_session_data` — bảng `SessionData`: lệnh → ▶️/🖥, lựa chọn →
+☑, ô nhập → ⏎). Ack của **mọi route khác** đi bằng `send_text` trần, nên cùng
+một câu của phiên, cùng một dòng lệnh trong đó, khi thì bấm được khi thì không
+— tuỳ nó ra bằng cửa nào, mà người đọc không có cách nào biết trước.
+
+**Cửa: `pipeline::say_from_session`** (và `reply_from_session` cho ack của một
+route). Đã nối: `/ask`, `/handover`, `/runin`, nút ▶️ (`RunQuick`), tin báo
+lệnh chạy xong (`say_back`). Hai thứ phải giữ khi nối thêm chỗ mới:
+
+- **CHỈ nội dung lấy từ phiên.** Tin thuần của hub (`/help`, danh sách tài
+  khoản, *"không mở được cửa sổ"*) không có phiên nào để gắn action; gắn bừa là
+  nút trỏ vào chỗ trống.
+- **Chỉ ĐỊNH DẠNG cái đang có, không thêm nội dung.** `say_from_session` lọc
+  `commands_of` theo `text.contains(...)` trước khi dựng nút, vì `session_layout`
+  cố ý nối thêm khu *"Lệnh phiên chạy không được"* cho lệnh nó không thấy trong
+  chữ — đúng cho `/shot` (ảnh màn thiếu dòng bị cổng quyền chặn), sai cho mọi
+  câu khác: một ack hai dòng sẽ mọc thêm cả danh sách lệnh không ai hỏi.
+- `/session` trơn KHÔNG đi qua cửa: tin ấy nói về NHIỀU phiên, gắn theo một
+  `sid` là gắn sai phiên cho phần lớn các dòng; nút mỗi hàng (`sess:<id>`) đã
+  tự mang phiên của nó.
+
+## Hai nút cho một dòng lệnh — khác nhau ở ĐÍCH của kết quả (2026-08-16)
+
+Hà: *"lệnh chạy phải có 2 nút: 1 là chạy xong lấy kết quả đưa vào phiên, 1 nút
+là chạy terminal được kết quả gửi về tele"*.
+
+- **▶️ `run_<mã>`** — hub chạy hộ (`zsh -lc`, thư mục của chính dòng lệnh ấy),
+  rồi **dán kết quả vào phiên** (`watch_long_job` → `type_and_send`). Phiên đọc
+  được nên nó đi tiếp được.
+- **🖥 `term_<mã>`** — mở một cửa sổ Terminal riêng, gõ lệnh vào đó, rồi
+  **kết quả về Telegram** (`watch_terminal_job`). Trước 16/08 nút này làm đúng
+  nửa việc: mở cửa sổ rồi bỏ đó, tức chỉ dùng được khi chủ máy đang ngồi trước
+  máy — đúng lúc anh không cần hub.
+
+`watch_terminal_job` hỏi `keys::tab_busy` mỗi 3 giây (chính Terminal trả lời về
+tab của nó; `ps` biến mất trước khi shell kịp in dấu nhắc), rồi đọc màn cửa sổ
+ấy và cắt **từ dòng lệnh trở xuống**. Ba ca hỏng đều NÓI RA, không im: mất dấu
+cửa sổ, không đọc được màn, và quá `LONG_JOB_MAX_SEC` (lúc ấy nói "hub thôi
+canh", vì cửa sổ vẫn còn đó — khác hẳn "lệnh chết").
 
 ## When you change something
 

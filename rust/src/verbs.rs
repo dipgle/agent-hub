@@ -159,6 +159,14 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
             return Some((CommandKind::RunInTerminal, 0, n.to_string()));
         }
     }
+    // `f_<n>` — 📎 tải về một TỆP phiên vừa nhắc tới, bấm ngay tại tên tệp trong
+    // chữ. Chỉ số thập phân, cùng sổ với cái nút `file:<n>` ở đáy tin (xem
+    // `CommandKind::SendFile`).
+    if let Some(n) = verb.strip_prefix("f_") {
+        if !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) {
+            return Some((CommandKind::SendFile, 0, n.to_string()));
+        }
+    }
     // `/type <nút> [id phiên]` — Hà 2026-08-16: *"cấu trúc lại lệnh type thành
     // `/type <nút> [id phiên]`, ko có id phiên thì vào phiên đang trỏ tới"*.
     //

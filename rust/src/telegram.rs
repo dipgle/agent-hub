@@ -579,6 +579,18 @@ static BOT_USERNAME: OnceLock<String> = OnceLock::new();
 /// Payload theo đúng luật Telegram: chỉ `A-Za-z0-9_-`, tối đa 64 ký tự. Trùng
 /// đúng bộ ký tự mà tên lệnh cho phép, nên `run_0` hay `pick_4963b95c_2_1` đi
 /// qua cả hai đường mà không phải mã hoá gì thêm.
+/// Khai tên bot MỘT LẦN — dành cho phép đo, vì mọi liên kết chèn giữa chữ đều
+/// đi qua `deep_link`, mà `deep_link` im lặng trả `None` khi chưa biết tên bot.
+///
+/// 🔴 Không có hàm này thì mọi bài kiểm về "chữ trong ô nhập có nút gửi không"
+/// đều xanh-giả hoặc đỏ-giả vì đúng một lý do môi trường, chứ không vì sản phẩm
+/// — đúng thứ đã để lọt lỗi *"lại mất nút gửi nhanh"* ngày 16/08. `OnceLock`
+/// nên gọi lần thứ hai không đổi được gì: bản chạy thật vẫn lấy tên từ
+/// `getMe`, và trả `false` khi đã có người khai trước.
+pub fn set_bot_username(name: &str) -> bool {
+    BOT_USERNAME.set(name.to_string()).is_ok()
+}
+
 pub fn deep_link(payload: &str) -> Option<String> {
     let bot = BOT_USERNAME.get()?;
     if payload.is_empty()
@@ -1700,34 +1712,7 @@ impl Inbox {
                 .strip_prefix("file:")
                 .and_then(|n| n.parse::<usize>().ok())
             {
-                let db = crate::db::Db::open(&self.cfg.db).ok();
-                let found = db
-                    .as_ref()
-                    .and_then(|db| crate::pipeline::quick_file(db, n));
-                let msg = match found {
-                    Some((sid, p)) => {
-                        // Cây thư mục của ĐÚNG phiên đã nhắc tới đường dẫn này.
-                        // Không tra ra được thì TỪ CHỐI — xem `session_root`.
-                        match db
-                            .as_ref()
-                            .and_then(|db| crate::pipeline::session_root(db, &self.cfg, &sid))
-                        {
-                            Some(root) => {
-                                let expanded = shellexpand_home(&p);
-                                match self.send_document(std::path::Path::new(&expanded), &root) {
-                                    Ok(()) => None,
-                                    Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
-                                }
-                            }
-                            None => Some(format!(
-                                "⚠ chưa gửi được {p} — không biết phiên ấy làm ở thư mục nào, \
-                                 mà hub chỉ gửi file NẰM TRONG thư mục của chính phiên đó."
-                            )),
-                        }
-                    }
-                    None => Some("⚠ đường dẫn ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.".into()),
-                };
-                if let Some(m) = msg {
+                if let Some(m) = self.send_quick_file(n) {
                     if let Err(e) = self.send_text(&m) {
                         logging::error("telegram_ack_failed", json!({ "err": e }));
                     }
@@ -2088,6 +2073,49 @@ impl Inbox {
                     );
                 }
             }
+        }
+    }
+
+    /// Gửi tệp thứ `n` trong sổ tệp vừa nhắc tới — `None` khi đã gửi xong.
+    ///
+    /// 🔴 Một chỗ, hai lối vào: cái NÚT `file:<n>` ở đáy tin, và **liên kết 📎
+    /// chèn ngay tại tên tệp trong chữ** (`f_<n>`, đi qua `/start`). Hà
+    /// 2026-08-16: *"chưa chèn link tải file xuất hiện trong nội dung phiên gửi
+    /// lên tele"* — cùng câu chuyện với dòng lệnh hồi 14/08 (*"Chèn ngay sau câu
+    /// lệnh chứ không phải 1 nút ở cuối"*): thứ đang nằm giữa chữ thì đích chạm
+    /// của nó cũng phải nằm giữa chữ, chỗ mắt đang nhìn.
+    ///
+    /// Trả về `Some(câu giải thích)` khi KHÔNG gửi được. Mọi cửa (tệp phải nằm
+    /// trong cây của đúng phiên đã nhắc tới nó, trần dung lượng) ở nguyên chỗ
+    /// cũ — `send_document` và `session_root` — nên thêm lối vào thứ hai không
+    /// mở thêm cửa nào.
+    pub fn send_quick_file(&self, n: usize) -> Option<String> {
+        let db = crate::db::Db::open(&self.cfg.db).ok();
+        let found = db
+            .as_ref()
+            .and_then(|db| crate::pipeline::quick_file(db, n));
+        match found {
+            Some((sid, p)) => {
+                // Cây thư mục của ĐÚNG phiên đã nhắc tới đường dẫn này.
+                // Không tra ra được thì TỪ CHỐI — xem `session_root`.
+                match db
+                    .as_ref()
+                    .and_then(|db| crate::pipeline::session_root(db, &self.cfg, &sid))
+                {
+                    Some(root) => {
+                        let expanded = shellexpand_home(&p);
+                        match self.send_document(std::path::Path::new(&expanded), &root) {
+                            Ok(()) => None,
+                            Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
+                        }
+                    }
+                    None => Some(format!(
+                        "⚠ chưa gửi được {p} — không biết phiên ấy làm ở thư mục nào, \
+                         mà hub chỉ gửi file NẰM TRONG thư mục của chính phiên đó."
+                    )),
+                }
+            }
+            None => Some("⚠ đường dẫn ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.".into()),
         }
     }
 

@@ -2327,6 +2327,33 @@ pub const FILES_KEY: &str = "quick:files";
 /// Buộc theo phiên ĐÃ SINH RA nút, không phải phiên đang theo lúc bấm: con trỏ
 /// đổi được giữa hai thời điểm ấy (bấm "Xem đầy đủ" là đổi), và lúc đó cái nút
 /// sẽ lặng lẽ đo bằng một cái thước khác.
+/// Những đường dẫn CÒN LẠI sau cửa "phải là tệp thật, nằm trong cây của phiên".
+///
+/// Tách ra vì hai chỗ cần ĐÚNG danh sách này theo ĐÚNG thứ tự ấy: cái nút ở đáy
+/// (`remember_files`) và liên kết 📎 giữa chữ (`file_anchors`). Hai phép lọc
+/// chép tay là hai chỉ số lệch nhau, và lệch chỉ số ở đây nghĩa là bấm 📎 trên
+/// tên tệp này lại tải về tệp khác.
+fn kept_paths(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<String> {
+    match session_root(db, cfg, session_id) {
+        Some(root) => {
+            let kept: Vec<String> = paths
+                .iter()
+                .filter(|p| sendable_file(p, &root, &cfg.workspace_root).is_some())
+                .cloned()
+                .collect();
+            if kept.len() < paths.len() {
+                logging::info(
+                    "quick_files_filtered",
+                    json!({ "kept": kept.len(), "seen": paths.len(),
+                            "why": "không phải tệp có thật, hoặc nằm ngoài workspace" }),
+                );
+            }
+            kept
+        }
+        None => paths.to_vec(),
+    }
+}
+
 pub fn remember_files(
     db: &Db,
     cfg: &Config,
@@ -2346,24 +2373,7 @@ pub fn remember_files(
     //
     // Không tra được thư mục phiên ⟹ giữ nguyên như cũ (dựng nút): thà một nút
     // có thể hỏng còn hơn im lặng nuốt mọi nút vì một cuốn sổ chưa kịp ghi.
-    let paths: Vec<String> = match session_root(db, cfg, session_id) {
-        Some(root) => {
-            let kept: Vec<String> = paths
-                .iter()
-                .filter(|p| sendable_file(p, &root, &cfg.workspace_root).is_some())
-                .cloned()
-                .collect();
-            if kept.len() < paths.len() {
-                logging::info(
-                    "quick_files_filtered",
-                    json!({ "kept": kept.len(), "seen": paths.len(),
-                            "why": "không phải tệp có thật, hoặc nằm ngoài workspace" }),
-                );
-            }
-            kept
-        }
-        None => paths.to_vec(),
-    };
+    let paths = kept_paths(db, cfg, session_id, paths);
     let paths = &paths[..];
     if paths.is_empty() {
         return Vec::new();
@@ -2418,6 +2428,25 @@ pub fn remember_files(
                 format!("file:{i}"),
             )
         })
+        .collect()
+}
+
+/// Neo 📎 cho chữ: `(đường dẫn ĐÚNG NHƯ NÓ HIỆN trong chữ, chỉ số trong sổ)`.
+///
+/// Cùng thứ tự, cùng phép lọc với [`remember_files`] — hai danh sách phải sinh
+/// ra từ MỘT lần gọi, nếu không chỉ số lệch và cái liên kết 📎 sẽ mở một tệp
+/// khác. Đó là lý do hàm này nhận lại `paths` đã lọc thay vì tự lọc lần nữa.
+pub fn file_anchors(
+    db: &Db,
+    cfg: &Config,
+    session_id: &str,
+    paths: &[String],
+) -> Vec<(String, usize)> {
+    kept_paths(db, cfg, session_id, paths)
+        .into_iter()
+        .take(4)
+        .enumerate()
+        .map(|(i, p)| (p, i))
         .collect()
 }
 
@@ -3594,6 +3623,12 @@ pub struct SessionData {
     pub choices: Vec<(usize, String)>,
     /// Chữ đang nằm trong ô nhập → ⏎ gửi · ⌫ xoá.
     pub box_text: Option<String>,
+    /// Tệp phiên nhắc tới → 📎 tải về, NGAY TẠI tên tệp trong chữ.
+    ///
+    /// `(chuỗi neo — đường dẫn đúng như nó hiện trong chữ, chỉ số trong sổ tệp)`.
+    /// Hà 2026-08-16: *"chưa chèn link tải file xuất hiện trong nội dung phiên
+    /// gửi lên tele"*.
+    pub files: Vec<(String, usize)>,
 }
 
 impl SessionData {
@@ -3602,8 +3637,15 @@ impl SessionData {
     }
 }
 
-/// Trần số dòng lệnh hub nhặt từ MỘT màn/lượt phiên (xem `commands_of`).
-pub const CMD_LINES_MAX: usize = 12;
+/// Số dòng lệnh hub nhặt từ MỘT lượt phiên — **không còn trần** (2026-08-16).
+///
+/// 🪦 Từng là 4, rồi 12, và Hà gỡ hẳn: *"Bỏ hẳn trần cắt lệnh đi"*. Nó sinh ra
+/// hồi mỗi lệnh là một cái NÚT ở đáy tin — mười nút thì bàn phím Telegram thành
+/// một bức tường và nhãn bị cắt ở 52 ký tự. Từ khi icon nằm GIỮA CHỮ, mỗi lệnh
+/// mang icon trên chính dòng của nó, không chiếm thêm chỗ nào: cái giá đã biến
+/// mất, chỉ còn cái trần ở lại, và nó cắt IM LẶNG từ đầu danh sách (đúng ảnh
+/// *"bảy dòng lệnh, ba icon"*).
+pub const CMD_LINES_MAX: usize = usize::MAX;
 
 /// 🔴 MỘT CỬA cho mọi tin **mang nội dung phiên** ra Telegram.
 ///
@@ -3634,10 +3676,21 @@ pub fn say_from_session(
     // với `/shot`, nên hai tin nói về cùng một lượt cho ra cùng một bộ nút.
     let cmds = cmds_present_in(text, crate::sessions::commands_of(cfg, sid, CMD_LINES_MAX));
     let mut buttons = remember_quick(db, sid, &cmds);
+    // Tệp NHẮC TỚI trong chính câu này phải mở được ngay tại tên nó — cùng luật
+    // với `/shot`, vì "lúc được lúc không" là thứ người đọc không đoán nổi.
+    let seen_paths = crate::keys::paths_on_screen(text, 4);
+    let files = file_anchors(db, cfg, sid, &seen_paths);
+    if !files.is_empty() {
+        // Sổ tệp phải được ghi thì cú bấm sau mới tra ra đường dẫn; nút ở đáy
+        // là tác dụng phụ đáng giữ (một liên kết không dựng được thì vẫn còn
+        // đường bấm).
+        buttons.extend(remember_files(db, cfg, sid, &seen_paths));
+    }
     buttons.extend(extra.iter().cloned());
     let data = SessionData {
         sid: sid.to_string(),
         cmds: crate::sessions::lines_of(&cmds),
+        files,
         ..Default::default()
     };
     say_session_data(tg, text, &buttons, log_key, &data);
@@ -3844,6 +3897,15 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
             if let Some(href) = crate::telegram::deep_link(&format!("k_{short}_{n}")) {
                 anchors.push((label.clone(), vec![(href, "☑".to_string())]));
             }
+        }
+    }
+    // 📎 NGAY TẠI TÊN TỆP. Neo là đường dẫn đúng như nó hiện trong chữ, nên chỗ
+    // gọi phải lấy nó từ chính chữ ấy (`keys::paths_on_screen`), không tự dựng
+    // lại từ đường dẫn tuyệt đối — dựng lại là neo không bám được và liên kết
+    // rơi xuống đáy tin, đúng chỗ nó vừa được gỡ khỏi.
+    for (path, n) in &data.files {
+        if let Some(href) = crate::telegram::deep_link(&format!("f_{n}")) {
+            anchors.push((path.clone(), vec![(href, "📎".to_string())]));
         }
     }
     if let (Some(sid), Some(box_text)) = (&key_sid, box_anchor) {
@@ -4664,6 +4726,29 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             }
                         }
                     }
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+            }
+            // 📎 Liên kết tải tệp nằm GIỮA CHỮ — cùng sổ, cùng cửa với cái nút
+            // `file:<n>` ở đáy tin (xem `telegram::Inbox::send_quick_file`).
+            CommandKind::SendFile => {
+                let n = cmd.arg.trim().parse::<usize>().ok();
+                let ack = match (n, crate::telegram::inbox()) {
+                    (Some(n), Some(tg)) => match tg.send_quick_file(n) {
+                        // Tệp đã đi rồi thì không nói thêm câu nào: chính cái
+                        // tệp hiện ra trong buồng chat là câu trả lời.
+                        None => {
+                            logging::info("quick_file_sent", json!({ "n": n, "via": "deep_link" }));
+                            continue;
+                        }
+                        Some(why) => why,
+                    },
+                    (None, _) => {
+                        logging::warn("quick_file_bad_index", json!({ "arg": cmd.arg }));
+                        "⚠ liên kết tệp ấy hỏng (không đọc được chỉ số).".to_string()
+                    }
+                    (_, None) => "⚠ chưa nối được Telegram để gửi tệp.".to_string(),
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
@@ -6293,6 +6378,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // trong chữ phải bám đúng dòng sinh ra nó — xem
                 // `say_with_command_icons`.
                 let mut cmd_lines: Vec<String> = Vec::new();
+                // Tệp thấy trong chữ → neo cho liên kết 📎 (xem `file_anchors`).
+                let mut shot_files: Vec<(String, usize)> = Vec::new();
                 if matches!(cmd.kind, CommandKind::Shot) {
                     // 🔴 2026-08-15 — NGUỒN đổi: sổ, không phải màn.
                     //
@@ -6322,7 +6409,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // một lệnh là thêm một icon ở một dòng vốn đã có, không
                     // chiếm thêm chỗ nào. Cái giá đã biến mất; cái trần thì ở
                     // lại. 12 là chặn-chuyện-vô-lý, không phải chắt lọc.
-                    let cmds = crate::sessions::commands_of(cfg, &shot_sid, 12);
+                    let cmds = crate::sessions::commands_of(cfg, &shot_sid, CMD_LINES_MAX);
                     let n_cmds = cmds.len();
                     cmd_lines = crate::sessions::lines_of(&cmds[..n_cmds]);
                     // 🪦 Nút "✅ làm đi" — GỠ 2026-08-16, Hà: *"1 xóa nút đó đi
@@ -6365,12 +6452,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // hub — mà nút của hub lúc ấy chỉ gắn ở tin TỰ PHÁT, còn
                     // `/shot` thì không. Cùng một màn, hai luật khác nhau là
                     // thứ người dùng đọc thành "lúc được lúc không".
-                    quick.extend(remember_files(
-                        db,
-                        cfg,
-                        &want,
-                        &crate::keys::paths_on_screen(&ack, 4),
-                    ));
+                    let seen_paths = crate::keys::paths_on_screen(&ack, 4);
+                    quick.extend(remember_files(db, cfg, &want, &seen_paths));
+                    // …và ĐÍCH CHẠM NẰM NGAY TẠI TÊN TỆP trong chữ, không chỉ ở
+                    // đáy tin (Hà 2026-08-16: *"chưa chèn link tải file xuất
+                    // hiện trong nội dung phiên gửi lên tele"*). Cùng một lần
+                    // lọc với cái nút ở trên, nên chỉ số không lệch được.
+                    shot_files = file_anchors(db, cfg, &want, &seen_paths);
                 }
                 // Ô nhập đang có sẵn chữ ⟹ một nút GỬI (Hà 2026-08-13: *"có gợi
                 // ý nội dung chat cần có cách bấm nhanh để gửi nó"*). Đi đúng
@@ -6522,8 +6610,21 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // lên trên chỗ trống. Muốn gửi chữ ấy thì gõ thẳng nó ở
                     // Telegram — đường ấy có sẵn và không phải đoán gì cả.
                 }
-                match (quick.is_empty(), crate::telegram::inbox()) {
-                    (false, Some(tg)) if adapter == crate::telegram::NAME => {
+                // 🔴 CỬA KHÔNG ĐƯỢC PHỤ THUỘC VÀO "CÓ NÚT HAY KHÔNG" — Hà
+                // 2026-08-16, ngay sau khi tôi gỡ hai nút ⏎/⌫ trống: *"Lại mất
+                // nút gửi nhanh gợi ý mờ rồi, làm cái nọ hỏng cái kia thế"*.
+                //
+                // Điều kiện cũ là `!quick.is_empty()`, và nó SAI từ trước — chỉ
+                // là hai cái nút trống luôn có mặt nên không ai thấy. Gỡ chúng
+                // đi thì `quick` rỗng, tin rơi xuống `reply_in_channel` (chữ
+                // trần), và mất luôn thứ KHÔNG phải nút: liên kết `⏎` chèn
+                // giữa chữ ngay tại dòng ô nhập. Đo được trong log 14:34:40Z —
+                // lượt `/shot` ấy không có một dòng `telegram_html_sent` nào.
+                //
+                // Cửa hỏi đúng một câu: *đây có phải chữ của phiên đi ra
+                // Telegram không*. Có nút hay không là chuyện của bên trong.
+                match crate::telegram::inbox() {
+                    Some(tg) if adapter == crate::telegram::NAME => {
                         // 🔴 Hà 2026-08-14, ảnh chụp câu trả lời `/shot`: *"Vẫn
                         // thấy hiện nút kiểu cũ là sao"*. Vì đây là đường THỨ BA
                         // dùng cùng cuốn sổ nút, và nó chưa được nối vào máy móc
@@ -6538,6 +6639,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             cmds: cmd_lines.clone(),
                             choices: shot_choices.clone(),
                             box_text: None,
+                            files: shot_files.clone(),
                         };
                         // Lựa chọn nào đã thành ☑ trong chữ thì thôi nằm ở đáy:
                         // hai đường cho một việc, và cái ở đáy chỉ mang con số

@@ -68,6 +68,37 @@ fn the_one_door_formats_what_is_there_and_adds_nothing() {
     );
 }
 
+/// Chữ trong ô nhập phải LUÔN có đường gửi nhanh — đây là bản chụp màn THẬT.
+///
+/// 🔴 Hà 2026-08-16, sau khi tôi gỡ hai nút ⏎/⌫ trống ở đáy: *"Lại mất nút gửi
+/// nhanh gợi ý mờ rồi, làm cái nọ hỏng cái kia thế"*. Đúng: tôi tin *"đường
+/// chèn giữa chữ vẫn còn"* mà không đo. Chuỗi dưới đây lấy nguyên văn từ
+/// `hubd.err` lượt 14:34:40Z — chú ý dấu cách sau `❯` là **U+00A0**, không phải
+/// dấu cách thường.
+#[test]
+fn text_in_the_input_box_always_gets_a_send_link() {
+    // Mọi liên kết giữa chữ đi qua `deep_link`, thứ trả `None` khi chưa biết
+    // tên bot — không khai thì bài kiểm này đỏ vì môi trường, không vì sản phẩm.
+    hub::telegram::set_bot_username("hub_test_bot");
+    let screen = "📷 Màn của 🟪 [hub]:\n\n\
+        ───────────────────────\n\
+        \u{276f}\u{a0}Bỏ hẳn trần cắt lệnh đi\n\
+        ───────────────────────\n\
+        \u{23f5}\u{23f5} auto mode on (shift+tab to cycle) · ← 1 agent";
+    let shown = render_session_data(
+        screen,
+        &SessionData {
+            sid: "abc12345".to_string(),
+            ..Default::default()
+        },
+    );
+    assert!(
+        shown.contains("⏎"),
+        "chữ trong ô nhập phải có đường gửi nhanh ngay tại dòng của nó: {shown}"
+    );
+    assert!(shown.contains("xoá ô nhập"), "…và một đường xoá ô: {shown}");
+}
+
 /// 🖥 trả về KẾT QUẢ của lệnh vừa gõ, không trả cả màn hình có sẵn từ trước.
 #[test]
 fn the_terminal_button_reports_only_what_the_command_printed() {

@@ -97,6 +97,19 @@ pub enum CommandKind {
     /// dài, lệnh hỏi lại, hay lệnh chủ máy muốn ngồi nhìn. Ngồi ở máy thì hai
     /// việc ấy cũng là hai việc, nên cây cầu phải mang sang đủ cả hai.
     RunInTerminal,
+    /// 📎 Gửi về Telegram một TỆP mà phiên vừa nhắc tới. `arg` là chỉ số trong
+    /// sổ tệp (`pipeline::remember_files`).
+    ///
+    /// 🔴 Hà 2026-08-16: *"chưa chèn link tải file xuất hiện trong nội dung
+    /// phiên gửi lên tele"*. Cái nút `file:<n>` ở đáy tin đã có từ 13/08; thứ
+    /// còn thiếu là ĐÍCH CHẠM NẰM GIỮA CHỮ, ngay tại tên tệp — cùng bài học với
+    /// dòng lệnh (*"Chèn ngay sau câu lệnh chứ không phải 1 nút ở cuối"*).
+    /// Telegram không đặt nút vào giữa chữ được, chỉ đặt được liên kết, và liên
+    /// kết ấy quay về bot bằng `/start f_<n>` — nên nó phải là một động từ.
+    ///
+    /// Không mở thêm cửa nào: cả hai lối vào cùng gọi
+    /// `telegram::Inbox::send_quick_file`.
+    SendFile,
     /// Ask the focused session a question WITHOUT interrupting it. `arg` is the
     /// question; the target is whatever `/session` is following.
     ///

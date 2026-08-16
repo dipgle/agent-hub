@@ -1,5 +1,57 @@
 # active context — hub
 
+## 🌉 2026-08-16 (tối) — hub thôi giấu, thôi chặn, và nói MỘT giọng
+
+Phiên trước đóng sổ với một câu hỏi treo: giữ hay trả lại năm thứ tôi tự quyết.
+Hà trả lời bằng cách gạch từng cái, và mỗi lần gạch lại lộ ra một luật rộng hơn
+cái được hỏi. Ba câu đáng chép nguyên văn, vì chúng là thước đo cho mọi lượt sau:
+
+1. *"hub là cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì phải
+   ngồi vào máy để làm vậy thì cần gì hub nữa"*
+2. *"lệnh /shot hay phản hồi tự động gửi về tele đều phải qua định dạng trước khi
+   gửi → cái nhận được ở tele phải thao tác được với các lệnh link của phiên đó"*
+   · *"mọi thứ nhìn thấy ở tele phải đồng nhất"* · *"dành cho nội dung lấy từ
+   phiên thôi"*
+3. *"lệnh chạy phải có 2 nút: 1 là chạy xong lấy kết quả đưa vào phiên, 1 nút là
+   chạy terminal được kết quả gửi về tele"*
+
+### Đã làm (commit `7209ac7` + một commit nữa đang tới)
+
+- **Xoá nút `✅ làm đi`** và cả `keys::asks_for_go_ahead` — Hà: *"1 xóa nút đó đi
+  không cần nữa"*. Nút ấy dựng một cú bấm không lùi được trên một phép so chuỗi.
+- **🖥 trả kết quả về Telegram** (`watch_terminal_job`): canh `tab_busy` mỗi 3
+  giây, xong thì đọc màn và cắt từ dòng lệnh trở xuống. Trước đó nút này mở cửa
+  sổ rồi bỏ đó — chỉ dùng được khi chủ máy đang ngồi trước máy.
+- **Bảy cổng giấu chữ, gỡ hết** → `sessions::note_preview_risk` (ghi log, chữ đi
+  tiếp). Chỗ đau nhất: `pending_question` xoá sạch lựa chọn ⟹ `/pick` hết cái để
+  bấm ⟹ phiên đứng kẹt tới khi về ngồi trước máy. Ba bài kiểm **đảo chiều**.
+- **Một cửa định dạng** cho chữ CỦA PHIÊN: `say_from_session` /
+  `reply_from_session`, đã nối `/ask`, `/handover`, `/runin`, nút ▶️, tin báo
+  lệnh chạy xong. Cửa chỉ định dạng cái đang có (`cmds_present_in` lọc theo
+  `text.contains`) — nếu không lọc, một ack hai dòng sẽ mọc thêm cả khu *"Lệnh
+  phiên chạy không được"*. `tests/one_door.rs` canh đúng chỗ ấy, và có một assert
+  chứng minh phép đo KHÔNG mù (bỏ lọc thì khu chữ thừa hiện ra).
+- **Hai nút ⏎/⌫ trống ở đáy tin: gỡ.** Hà gửi ảnh: *"2 cái nút ⏎ ⌫ trống ở cuối
+  vẫn còn kìa"* → *"Bỏ 2 nút trống đó đi"*. Chúng sống qua ba lượt vá vì mỗi lượt
+  chỉ siết thêm điều kiện, mà điều kiện cuối (`input_box_text`) đọc dấu nhắc
+  shell `hanguyen@… %` thành "chữ trong ô". Đường thật vẫn còn: `⏎` và `⌫ xoá ô
+  nhập` chèn NGAY TẠI dòng ô nhập, có nhãn, chỉ dựng khi định vị được dòng thật.
+
+`362 test · clippy 0 · fmt 0` · **đã cài** (pid 56186, binary `@11:36:11Z`,
+`cert`, 0 lỗi kể từ boot).
+
+### Còn treo
+
+- **Chưa có cú bấm thật nào trên Telegram** cho 🖥 mới, ▶️ mới, hay một câu hỏi
+  có chữ giống mật khẩu. Cài ≠ nghiệm thu.
+- **Chưa push**: `main` đứng trước `origin/main` **35 commit** (dipgle/agent-hub).
+- Bốn mục Hà chưa chốt: trần cắt lệnh (12 hay bỏ hẳn) · bọc `<code>` quanh dòng
+  lệnh · đóng cửa sổ trần có hỏi lại không · giữ `docs/flow-boc-tach-lenh.md`.
+- `terminal_probe_failed`: **0 lượt** kể từ bản cài 17:12 (19 lượt trước đó, lượt
+  cuối 05:45:59Z). Hai dữ kiện mới (`since_ok_sec`, `terminal_alive`) đã sẵn
+  trong dòng log hỏng nhưng CHƯA có lượt nào để đọc — chưa tái hiện được thì chưa
+  truy tiếp được.
+
 ## ✅ 2026-08-16 17:12 — ĐÃ CÀI (lần đầu Claude tự chạy được)
 
 `install_update.sh` chạy từ phiên, exit 0. Tên cũ `deploy/install.sh` bị

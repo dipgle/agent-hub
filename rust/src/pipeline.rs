@@ -3106,7 +3106,7 @@ fn watch_terminal_job(w: i64, tty: String, line: String) {
 /// Không thấy dòng lệnh (màn đã cuộn qua, lệnh quá dài bị bẻ đôi) thì trả cả
 /// khúc đang có: thà thừa vài dòng ngữ cảnh còn hơn trả về chuỗi rỗng và để
 /// người đọc tưởng lệnh không in ra gì.
-fn tail_after_command(screen: &str, line: &str) -> String {
+pub fn tail_after_command(screen: &str, line: &str) -> String {
     let needle = line.trim();
     let mut lines: Vec<&str> = screen.lines().collect();
     if let Some(i) = lines.iter().rposition(|l| l.contains(needle)) {
@@ -3632,17 +3632,7 @@ pub fn say_from_session(
 ) {
     // Lệnh lấy từ NHẬT KÝ phiên (`tool_use`), không đoán từ chữ — cùng nguồn
     // với `/shot`, nên hai tin nói về cùng một lượt cho ra cùng một bộ nút.
-    //
-    // 🔴 CHỈ giữ lệnh CÓ MẶT trong chính câu này. `session_layout` cố ý nối
-    // thêm khu *"Lệnh phiên chạy không được"* cho lệnh nó không tìm thấy trong
-    // chữ — đúng cho `/shot` (ảnh màn thiếu dòng bị cổng quyền chặn), sai cho
-    // mọi câu khác: một cái ack hai dòng sẽ mọc thêm cả một danh sách lệnh
-    // không ai hỏi, đúng thứ Hà đã chê hôm nay (*"một mớ text không cần
-    // thiết"*). Cửa này ĐỊNH DẠNG cái đang có, không thêm nội dung.
-    let cmds: Vec<crate::sessions::Cmd> = crate::sessions::commands_of(cfg, sid, CMD_LINES_MAX)
-        .into_iter()
-        .filter(|c| text.contains(c.line.as_str()))
-        .collect();
+    let cmds = cmds_present_in(text, crate::sessions::commands_of(cfg, sid, CMD_LINES_MAX));
     let mut buttons = remember_quick(db, sid, &cmds);
     buttons.extend(extra.iter().cloned());
     let data = SessionData {
@@ -3651,6 +3641,21 @@ pub fn say_from_session(
         ..Default::default()
     };
     say_session_data(tg, text, &buttons, log_key, &data);
+}
+
+/// 🔴 CHỈ những lệnh CÓ MẶT trong chính câu này — cửa định dạng không thêm nội
+/// dung.
+///
+/// `session_layout` cố ý nối thêm khu *"Lệnh phiên chạy không được (cổng quyền
+/// chặn)"* cho lệnh nó không tìm thấy trong chữ. Đúng cho `/shot`: ảnh màn
+/// thiếu đúng dòng bị cổng quyền chặn, và dòng ấy là thứ đáng đọc nhất. Sai cho
+/// mọi câu khác — một cái ack hai dòng sẽ mọc thêm cả một danh sách lệnh không
+/// ai hỏi, đúng thứ Hà đã chê sáng 16/08 (*"một mớ text không cần thiết"* ·
+/// *"quá tốn context"*).
+pub fn cmds_present_in(text: &str, cmds: Vec<crate::sessions::Cmd>) -> Vec<crate::sessions::Cmd> {
+    cmds.into_iter()
+        .filter(|c| text.contains(c.line.as_str()))
+        .collect()
 }
 
 /// Trả lời một cú bấm/lệnh mà nội dung là CHỮ CỦA PHIÊN — qua đúng cửa trên.
@@ -6425,16 +6430,17 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // Hỏi cả ba nguồn: hộp chọn trên màn · thanh tab của bảng ·
                     // bảng đọc từ nhật ký (đúng cho cả phiên hub không đọc được
                     // màn).
-                    let running = ack.contains("esc to interrupt");
-                    // 🔴 `shot_choices` — phép đo trên MÀN GỐC — chứ KHÔNG
-                    // `parse_choices(&ack)`, 2026-08-15. Xem `ScreenReport`:
-                    // `ack` chép lại hộp chọn lên đầu tin, nên đo trên nó ra
-                    // `1,2,3,4,1,2,3,4` và luật "liên tiếp từ 1" trả về rỗng.
-                    // Cửa an toàn này khi ấy MỞ, đúng lúc nó phải đóng — và
-                    // đó chính là cái nút `⏎` Hà chụp được lần thứ hai.
-                    let has_choices = !shot_choices.is_empty()
-                        || crate::keys::ask_table(&ack).is_some()
-                        || shot_asking.is_some();
+                    // 🪦 `running` — cửa thứ ba của hai nút ⏎/⌫ ở đáy ("phiên
+                    // đang chạy thì Ctrl+C là NGẮT lượt, không phải xoá ô"), đi
+                    // cùng chúng 2026-08-16.
+                    // 🪦 `has_choices` — cửa an toàn của hai nút ⏎/⌫ ở đáy, đi
+                    // cùng chúng ngày 2026-08-16 (bia mộ bên dưới). Phép đo
+                    // đúng của nó vẫn được ghi lại ở đây vì nó là một bài học
+                    // chứ không phải một dòng mã: đo hộp chọn trên MÀN GỐC
+                    // (`shot_choices`), KHÔNG `parse_choices(&ack)` — `ack`
+                    // chép hộp chọn lên đầu tin nên đo trên nó ra
+                    // `1,2,3,4,1,2,3,4`, luật "liên tiếp từ 1" trả rỗng, và
+                    // cửa an toàn MỞ đúng lúc nó phải đóng.
                     // Hộp chọn trên màn ⟹ MỖI LỰA CHỌN MỘT CÁI NÚT.
                     //
                     // 🔴 Hà 2026-08-15, ảnh chụp `/shot` của `[dwork]` đang mở
@@ -6485,28 +6491,23 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // không gửi gì cả, nên cái nút chỉ còn là tiếng ồn — và
                     // tiếng ồn trên màn 390px thì đắt.
                     //
-                    // Đọc ô nhập CHỈ để quyết định CÓ HIỆN NÚT hay không, không
-                    // để dựng nội dung: đó đúng ranh giới mà bài học cũ đặt ra
-                    // (không phân biệt được "gợi ý mờ" với "chữ đã gõ" vì màn
-                    // đọc về mất màu). Có chữ hay không thì đọc được; chữ ấy
-                    // của ai thì không, và ở đây không cần biết.
-                    // Hộp chọn đang mở ⟹ ô nhập TRỐNG, thứ `❯` trỏ vào là một
-                    // lựa chọn. Dựng nút ⏎/⌫ ở đây là mời bấm vào chỗ không có
-                    // gì (đo được: `/type clear` trả "màn KHÔNG đổi").
-                    let box_has_text = !crate::keys::has_chooser_footer(&ack)
-                        && crate::keys::input_box_text(&ack).is_some_and(|t| !t.trim().is_empty());
-                    if !running && !has_choices && box_has_text && !shot_sid.is_empty() {
-                        quick.push(("⏎".to_string(), format!("key:{shot_sid}:enter")));
-                        // 🔴 Hà 2026-08-16: *"còn lăn tăn nó là text mờ hay tỏ
-                        // thì thêm 1 nút xóa bên cạnh nữa để tự thao tác"*.
-                        // hub không phân biệt được chữ chủ máy gõ với gợi ý mờ
-                        // (đọc màn về là chữ mất màu) — nên đừng đoán, đưa cả
-                        // hai đường ra. Người đang nhìn màn hình thì biết ngay.
-                        //
-                        // Chỉ khi phiên KHÔNG chạy: Ctrl+C lúc đang chạy là
-                        // NGẮT lượt, không phải xoá ô (xem `keys::key_payload`).
-                        quick.push(("⌫".to_string(), format!("key:{shot_sid}:clear")));
-                    }
+                    // 🪦 HAI NÚT ⏎/⌫ Ở ĐÁY TIN — gỡ 2026-08-16. Hà, gửi kèm ảnh
+                    // một `/shot` cửa sổ trần: *"2 cái nút ⏎ ⌫ trống ở cuối vẫn
+                    // còn kìa"* → *"Bỏ 2 nút trống đó đi"*.
+                    //
+                    // Chúng đã sống qua ba lượt vá vì cùng một lý do: mỗi lượt
+                    // chỉ siết thêm ĐIỀU KIỆN hiện nút (không chạy · không có
+                    // hộp chọn · ô có chữ), mà điều kiện cuối đứng trên một
+                    // phép đo hub làm không nổi — `input_box_text` đọc màn
+                    // shell rồi tưởng dấu nhắc `hanguyen@… %` là chữ trong ô.
+                    // Nên nút mọc ra ở đúng chỗ không có gì để gửi, và ở dạng
+                    // TRỐNG: nhãn chỉ có một icon, không nói nó làm gì.
+                    //
+                    // Đường thật vẫn còn và tốt hơn hẳn: khi ô có chữ thật,
+                    // `session_layout` chèn `⏎` NGAY SAU chữ ấy và `⌫ xoá ô
+                    // nhập` xuống dòng dưới — có nhãn, nằm cạnh thứ nó tác
+                    // động, và chỉ dựng được khi phép định vị tìm thấy dòng ô
+                    // nhập thật. Hai đường cho một việc thì bỏ đường mù.
                     // text đó tới phiên"*) — nhưng nó đứng trên một phép đo hub
                     // KHÔNG làm được.
                     // phân biệt 'chữ đã gõ' với 'gợi ý mờ' CHÍNH LÀ màu"*, mà

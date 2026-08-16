@@ -54,11 +54,15 @@ fn an_idle_bare_window_closes_without_a_question() {
     assert!(!hub::sessions::closing_needs_confirm(&bare_window(false)));
 }
 
-/// …nhưng cửa sổ ĐANG CHẠY DỞ thì vẫn phải hỏi: đó mới là cái câu hỏi ấy sinh
-/// ra để giữ. Bỏ luôn ở đây là biến một nút tiện thành một nút mất việc.
+/// 🔴 ĐẢO CHIỀU 2026-08-16 (bản cũ: `a_busy_bare_window_still_asks`). Hà:
+/// *"đóng cửa sổ trần bỏ hỏi luôn"*.
+///
+/// Bản cũ giữ câu hỏi cho cửa sổ trần ĐANG CHẠY DỞ, và lý lẽ nghe hợp lý — trừ
+/// một điều: người bấm ⏹ là chủ máy, trên đúng cái hàng vừa in ra nó đang chạy
+/// gì. Hỏi lại là bắt xác nhận một điều vừa đọc.
 #[test]
-fn a_busy_bare_window_still_asks() {
-    assert!(hub::sessions::closing_needs_confirm(&bare_window(true)));
+fn a_busy_bare_window_closes_without_a_question_too() {
+    assert!(!hub::sessions::closing_needs_confirm(&bare_window(true)));
 }
 
 /// Phiên CLI luôn hỏi, kể cả lúc rảnh — nó giữ cả một hội thoại, và `working`

@@ -6335,11 +6335,30 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             }
                                         }
                                         if ghost {
-                                            format!(
-                                                "✓ đã gửi · {name}\n\
-                                                 Ô nhập đang là GỢI Ý MỜ nên Enter trơn không ăn — \
-                                                 tôi bấm → để nhận gợi ý, rồi một Enter rời để gửi."
-                                            )
+                                            // 🔴 XONG THÌ CHỈ NÓI XONG — Hà
+                                            // 2026-08-16: *"Xác nhận xử xong là
+                                            // được giải thích dài dòng làm gì"*.
+                                            //
+                                            // Bản cũ kể lại cả cách xoay xở
+                                            // ("ô đang là gợi ý mờ nên Enter
+                                            // trơn không ăn, tôi bấm → rồi một
+                                            // Enter rời"). Đúng sự thật, sai chỗ
+                                            // đứng: người đọc hỏi *câu của tôi
+                                            // đi chưa*, không hỏi hub vượt qua
+                                            // cái gì. Cùng lỗi đã sửa 12/08 cho
+                                            // `/type` (*"chỉ cần báo đã gõ được
+                                            // thôi cần gì báo đã gửi enter
+                                            // rời"*) và 16/08 cho `/runin`
+                                            // (*"Tại sao để báo trần 120s làm
+                                            // gì"*) — ba lần cùng một hình dạng.
+                                            //
+                                            // Đường đi vẫn ghi đủ trong log
+                                            // (`keys_ghost_accepted`), chỗ dành
+                                            // cho người đi gỡ lỗi. Và câu này
+                                            // nay đúng dạng `ack_as_emoji` nhận
+                                            // ra, nên nó về thành một dấu thả
+                                            // lên tin gốc, không chiếm dòng nào.
+                                            format!("✓ đã gửi · {name}")
                                         } else if ghost_accepted {
                                             // 🔴 Nhịp giữa, và nó PHẢI có tên
                                             // riêng: gợi ý đã vào ô thành chữ

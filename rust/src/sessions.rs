@@ -2631,12 +2631,20 @@ pub fn refresh_activity(rows: &mut [LiveSession]) -> bool {
 /// quyết định một thao tác không lùi được có được chạy thẳng hay không, nên nó
 /// phải đo được từ ngoài.
 ///
-/// Gác bằng `working` — đúng trường vẽ ra dấu 🟢/⚪ trong `/terminal` — nên cái
-/// mắt thấy và cái tay chạm là một. Phiên CLI thì LUÔN hỏi, kể cả lúc rảnh: nó
-/// giữ cả một hội thoại, và cái đó mất là mất thật.
+/// 🔴 CỬA SỔ TRẦN: KHÔNG HỎI, kể cả khi đang chạy dở — Hà 2026-08-16: *"đóng
+/// cửa sổ trần bỏ hỏi luôn"*.
+///
+/// Bản trước còn gác bằng `working` (trần + đang chạy ⟹ vẫn hỏi). Câu hỏi ấy
+/// đứng trên một giả định sai về ai đang bấm: đây là **chủ máy** bấm ⏹ trên
+/// đúng cái cửa sổ anh vừa đọc dòng "đang chạy gì" của nó, tức anh đã biết mình
+/// đóng cái gì trước khi chạm. Hỏi lại chỉ là bắt xác nhận một điều vừa đọc —
+/// đúng hình dạng *"đã qua hub thì đừng có chặn gì cả"*.
+///
+/// Phiên CLI thì LUÔN hỏi, kể cả lúc rảnh, và đó không phải nửa vời: nó giữ cả
+/// một hội thoại — thứ không dựng lại được — chứ không phải một dấu nhắc.
 pub fn closing_needs_confirm(s: &LiveSession) -> bool {
     let bare_window = s.kind == "shell" && s.account.trim().is_empty();
-    !bare_window || s.working
+    !bare_window
 }
 
 /// Mốc lần dò Terminal gần nhất CÒN TRẢ LỜI ĐƯỢC.

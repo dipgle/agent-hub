@@ -1,11 +1,28 @@
 # active context — hub
 
+## ✅ 2026-08-16 17:12 — ĐÃ CÀI (lần đầu Claude tự chạy được)
+
+`install_update.sh` chạy từ phiên, exit 0. Tên cũ `deploy/install.sh` bị
+workspace chặn vì **cái tên**, nên suốt từ 10/08 mỗi bản vá đều phải chờ Hà gõ
+tay; đổi tên là gỡ đúng chỗ tắc ấy.
+
+Bằng chứng bản đang chạy: pid 96406, `hubd_boot_announced` 10:13:18Z trên binary
+`@2026-08-16T10:12:47Z`, chữ ký `cert`; bản cài (17:12) mới hơn mã nguồn mới
+nhất (16:57); `telegram_commands_registered` 10 route; **0 dòng `error`** kể từ
+lúc khởi động lại.
+
+⚠ Tôi báo động sớm một lần: `pgrep` lúc 17:12:59 không thấy tiến trình nào và
+tôi kêu "hubd không quay lại" — thật ra đó là khoảng ~20 giây launchd đang dựng
+lại. **Kiểm hai lần trước khi kêu**, nhất là ngay sau một lượt kickstart.
+
+Còn lại chưa nghiệm thu: mọi thứ dưới đây mới chỉ CÀI, chưa có cú bấm thật nào
+trên Telegram — nút ⏹, nút 🖥, trần 12, `telegram_confirm_delivered`.
+
 ## 🔴 2026-08-16 (chiều) — bốn lỗi Hà bắt trong lúc dùng, và một cuộc truy KHÔNG ra thủ phạm
 
-⏳ **CHƯA CÀI** bản này. Bản 12:49 (mục dưới) thì Hà **đã cài lúc 15:22** và
-`telegram_poll_rejected` **không xuất hiện lần nào** kể từ đó — nhưng chưa có
-câu hỏi xác nhận nào chạy qua, nên `telegram_confirm_delivered` vẫn chưa được
-nhìn thấy một lần. Chưa gọi là nghiệm thu.
+Bản 12:49 (mục dưới) Hà cài lúc 15:22 và `telegram_poll_rejected` **không xuất
+hiện lần nào** kể từ đó — nhưng chưa có câu hỏi xác nhận nào chạy qua, nên
+`telegram_confirm_delivered` vẫn chưa được nhìn thấy một lần.
 
 ### 1. `has_chooser_footer` MÙ với một kiểu dòng chân — và cửa nó mở ra rất xấu
 

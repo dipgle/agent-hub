@@ -4947,18 +4947,23 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
             // Nút thì vẫn dựng — ở chỗ gọi, từ chính `ack` này
             // (`commands_on_screen`), nên không mất đường bấm nào.
             let quick_note = String::new();
-            let text = if choices.is_empty() {
-                format!("📷 Màn của {what}:\n\n{body}{quick_note}")
-            } else {
-                let list: Vec<String> =
-                    choices.iter().map(|(n, l)| format!("  {n}. {l}")).collect();
-                format!(
-                    "📷 {what} đang hỏi — bấm số ở hàng phím để chọn:\n{}\n\n{}{}",
-                    list.join("\n"),
-                    body,
-                    quick_note
-                )
-            };
+            // 🔴 THÔI CHÉP DANH SÁCH LỰA CHỌN LÊN ĐẦU TIN — Hà 2026-08-17:
+            // *"Bảo ko chèn ở dưới thì lại chèn lên đầu làm ăn kiểu gì thế"*.
+            //
+            // Khối ấy là bản sao thứ hai của thứ đã nằm ngay bên dưới, trong
+            // chính ảnh màn. Nó ra đời khi hub chưa chèn được gì vào giữa chữ:
+            // hồi ấy phải kể lại danh sách thì mới nói được "bấm số nào". Nay ☑
+            // nằm ngay tại dòng của mỗi lựa chọn, nên bản chép không những
+            // thừa — nó còn CƯỚP MẤT chỗ neo: `html_with_links` bám dòng ĐẦU
+            // TIÊN khớp nhãn, mà bản chép nằm trên màn thật, nên mọi cái ☑ dán
+            // hết vào bản chép và màn thật thì trơ ra. Đúng thứ Hà nhìn thấy:
+            // "chèn lên đầu".
+            //
+            // Cùng một bài học đã trả giá cho khối chữ lệnh (15/08) và cho khu
+            // `/pick_…` ở cuối tin (17/08, nửa tiếng trước): nội dung đã có mặt
+            // trên màn thì đừng kể lại, hãy gắn action VÀO CHÍNH NÓ.
+            let _ = &choices;
+            let text = format!("📷 Màn của {what}:\n\n{body}{quick_note}");
             ScreenReport { text, choices }
         }
         Err(e) => ScreenReport {

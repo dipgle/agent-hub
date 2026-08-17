@@ -2169,16 +2169,27 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
             }
             Ok(false) => {
                 match crate::keys::close_window(c.w) {
-                    Ok(()) => {
+                    Ok(what) => {
                         logging::info(
                             "close_done",
-                            json!({ "session": id, "window": c.w, "waited_sec": now - c.t }),
+                            json!({ "session": id, "window": c.w, "waited_sec": now - c.t,
+                                    "hidden": matches!(what, crate::keys::Closed::Hidden) }),
                         );
-                        say_closed(cfg, &format!(
-                            "⏹ Đã đóng hẳn {} — CLI chạy nốt rồi thoát, cửa sổ terminal đã đóng (chờ {}s).",
-                            c.n,
-                            now - c.t
-                        ));
+                        // Ẩn KHÔNG phải đóng, nên câu báo cũng khác — xem
+                        // `keys::close_window`.
+                        say_closed(cfg, &match what {
+                            crate::keys::Closed::Gone => format!(
+                                "⏹ Đã đóng hẳn {} — CLI chạy nốt rồi thoát, cửa sổ terminal đã đóng (chờ {}s).",
+                                c.n,
+                                now - c.t
+                            ),
+                            crate::keys::Closed::Hidden => format!(
+                                "⏹ {} đã thoát CLI (chờ {}s), nhưng Terminal KHÔNG đóng cửa sổ ấy — hub đã ẩn nó đi. \
+                                 Nó rời khỏi mọi danh sách của hub; ⌘W khi anh ngồi máy là hết hẳn.",
+                                c.n,
+                                now - c.t
+                            ),
+                        });
                     }
                     Err(e) => {
                         // Cửa sổ biến mất giữa hai lượt hỏi là chuyện thường
@@ -6436,6 +6447,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                 "window": match win {
                                                     crate::sessions::Closing::Background => None,
                                                     crate::sessions::Closing::Closed(w)
+                                                    | crate::sessions::Closing::Hidden(w)
                                                     | crate::sessions::Closing::Exiting(w) => Some(w),
                                                 } }),
                                     );
@@ -6456,6 +6468,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         // gì phải hẹn.
                                         crate::sessions::Closing::Closed(_) => format!(
                                             "⏹ Đã đóng {} — cửa sổ trần, shell đã thoát từ trước nên không có gì để chờ.",
+                                            crate::sessions::shown(s)
+                                        ),
+                                        // Ẩn ≠ đóng, và chủ máy phải biết đúng
+                                        // cái vừa xảy ra với máy của mình.
+                                        crate::sessions::Closing::Hidden(_) => format!(
+                                            "⏹ Terminal KHÔNG chịu đóng {} (lỗi của nó, hub đã thử đủ cách) — nên hub ẩn cửa sổ ấy đi. \
+                                             Nó biến mất khỏi mọi danh sách của hub; ⌘W khi anh ngồi máy là hết hẳn.",
                                             crate::sessions::shown(s)
                                         ),
                                         crate::sessions::Closing::Exiting(w) => {

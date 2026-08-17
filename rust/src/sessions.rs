@@ -4750,7 +4750,10 @@ pub fn start_fresh_after_handover(
     // một cửa sổ thừa còn mở thì chủ máy đóng bằng tay được — nói ra là đủ.
     let closed_err = match crate::keys::window_of(&session.tty) {
         Ok(Some(w)) => match crate::keys::quit_and_close(w) {
-            Ok(()) => None,
+            // Ẩn được cũng coi là xong ở đây: cửa sổ cũ đã khuất, và câu báo
+            // riêng cho nó nằm ở route `/close` chứ không phải giữa một lượt
+            // bàn giao.
+            Ok(_) => None,
             Err(e) => Some(truncate(&e.to_string(), 200)),
         },
         Ok(None) => Some("không tìm thấy cửa sổ của phiên cũ".to_string()),
@@ -5282,8 +5285,10 @@ pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Closing> {
                 json!({ "window": window, "tty": session.tty,
                         "why": "tab không còn tiến trình nào — không có gì để `exit`" }),
             );
-            crate::keys::close_window(window)?;
-            return Ok(Closing::Closed(window));
+            return Ok(match crate::keys::close_window(window)? {
+                crate::keys::Closed::Gone => Closing::Closed(window),
+                crate::keys::Closed::Hidden => Closing::Hidden(window),
+            });
         }
         // Đây là một dấu nhắc SHELL, không phải TUI — ở shell thì dấu
         // xuống dòng `do script` tự kèm chính là cú Enter. Luật 13 chỉ
@@ -5305,6 +5310,9 @@ pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Closing> {
 pub enum Closing {
     /// Phiên NỀN: đã dừng, không có cửa sổ nào để đóng.
     Background,
+    /// `close` không ăn nhưng ẩn được — cửa sổ khuất mắt và rời khỏi mọi danh
+    /// sách của hub, mà vẫn còn trong menu Window của Terminal.
+    Hidden(i64),
     /// Cửa sổ đã đóng XONG ngay trong lượt này (và `close_window` đã kiểm).
     Closed(i64),
     /// Đã gõ lệnh thoát; cửa sổ vào sổ chờ, vòng chạy đóng sau.

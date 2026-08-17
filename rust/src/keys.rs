@@ -707,6 +707,7 @@ fn tabs_script(with_screens: bool) -> String {
   set skipped to 0
   repeat with w in every window
     try
+      if visible of w then
       set wid to id of w
       repeat with k from 1 to (count of tabs of w)
         set tb to tab k of window id wid
@@ -715,6 +716,7 @@ fn tabs_script(with_screens: bool) -> String {
         set AppleScript's text item delimiters to ""{screens}
         set acc to acc & (tty of tb) & TAB9 & (busy of tb) & TAB9 & ps & TAB9 & np & linefeed{body}
       end repeat
+      end if
     on error
       set skipped to skipped + 1
     end try
@@ -933,29 +935,69 @@ end tell"#
 /// chụp màn hình cũng bị chặn, nên không nhìn được có hộp thoại nào đang treo
 /// trên chúng không). Chưa biết thì KHÔNG đoán trong câu báo lỗi — chỉ kể thứ
 /// đo được và chỉ đường ⌘W.
-pub fn close_window(window: i64) -> Result<()> {
+pub fn close_window(window: i64) -> Result<Closed> {
     osascript(&format!(
         r#"tell application "Terminal" to close (first window whose id is {window})"#
     ))?;
     for _ in 0..6 {
         std::thread::sleep(std::time::Duration::from_millis(300));
         match window_gone(window) {
-            Ok(true) => return Ok(()),
+            Ok(true) => return Ok(Closed::Gone),
             Ok(false) => {}
             Err(e) => return Err(e.context(
                 "đã gửi lệnh đóng nhưng không hỏi lại được cửa sổ — KHÔNG biết nó đã đóng hay chưa",
             )),
         }
     }
+    // 🔴 ĐÓNG KHÔNG ĐƯỢC THÌ ẨN, và nói đúng là ĐÃ ẨN — Hà bấm ⏹ bốn lượt liền
+    // rồi nhận bốn câu *"chưa đóng được"* (17/08). Câu ấy thật thà, nhưng thật
+    // thà xong thì cửa sổ rác vẫn nằm đó và danh sách vẫn dài ra.
+    //
+    // Đo cùng lúc trên CHÍNH những cửa sổ ấy: `close` không ăn, mà
+    // `set visible to false` ăn ngay. Nên hub làm được đúng một nửa việc — và
+    // một nửa nói ra được vẫn hơn không nửa nào.
+    //
+    // Ẩn KHÔNG phải đóng: cửa sổ vẫn còn trong menu Window của Terminal (⌘W khi
+    // ngồi máy), nhưng nó rời khỏi mắt và rời khỏi mọi danh sách của hub
+    // (`tabs_script` bỏ cửa sổ đã ẩn) — nên câu trả lời phải nói cả hai điều ấy.
+    let hidden = osascript(&format!(
+        r#"tell application "Terminal"
+  try
+    set visible of window id {window} to false
+    return "an"
+  on error errm
+    return "hong: " & errm
+  end try
+end tell"#
+    ))
+    .map(|s| s.trim() == "an")
+    .unwrap_or(false);
+    if hidden {
+        logging::info(
+            "window_hidden_not_closed",
+            json!({ "window": window,
+                    "why": "close chạy êm mà cửa sổ không đóng — ẩn được thì ẩn, và NÓI là ẩn" }),
+        );
+        return Ok(Closed::Hidden);
+    }
     anyhow::bail!(
-        "Terminal nhận lệnh đóng (osascript trả 0) mà cửa sổ vẫn còn tab và vẫn hiện sau ~2 giây. \
-         Đo 2026-08-17: phần lớn cửa sổ đóng được bình thường, nhưng có những cửa sổ — đo được trên \
-         năm cái từng chạy một CLI bị `kill` — thì `close` chạy êm mà không đóng, đủ mọi cách viết. \
-         Chưa rõ vì sao. Đóng tay bằng ⌘W thì được."
+        "Terminal nhận lệnh đóng (osascript trả 0) mà cửa sổ vẫn còn tab và vẫn hiện sau ~2 giây, \
+         ẩn nó đi cũng không xong. Đo 2026-08-17: phần lớn cửa sổ đóng được bình thường, nhưng có \
+         những cửa sổ — đo được trên năm cái từng chạy một CLI bị `kill` — thì `close` chạy êm mà \
+         không đóng, đủ mọi cách viết. Chưa rõ vì sao. Đóng tay bằng ⌘W thì được."
     )
 }
 
-pub fn quit_and_close(window: i64) -> Result<()> {
+/// Hai kết cục KHÁC NHAU của một lượt đóng, nên hai giá trị.
+pub enum Closed {
+    /// Cửa sổ đã biến mất — đo bằng số tab + `visible` (xem [`window_gone`]).
+    Gone,
+    /// `close` không ăn nhưng ẩn được: khuất mắt và khuất khỏi danh sách của
+    /// hub, mà vẫn còn trong menu Window của Terminal cho tới khi ⌘W.
+    Hidden,
+}
+
+pub fn quit_and_close(window: i64) -> Result<Closed> {
     // Một đường gõ `/exit` duy nhất — xem `send_exit`. Trước 2026-08-15 đây là
     // bản chép tay THỨ HAI của cùng một dòng `do script`, và nó là bản thiếu cú
     // Enter rời.

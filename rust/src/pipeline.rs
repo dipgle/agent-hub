@@ -6719,12 +6719,18 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             //
                             // Nhật ký 12:06–12:07 cho thấy phím tới đúng cửa sổ
                             // (2214), mà `/shot` cùng lúc ra **mã nguồn**: bảng
-                            // trong tin là bảng CŨ, phiên đã đi tiếp từ lâu. Số
-                            // ấy rơi vào ô nhập, và vì `do script` luôn kèm một
-                            // CR, nó KHÔNG nằm yên ở đó — nó đi làm một lượt
-                            // chat "1" trong phiên của chủ máy. Một cú bấm vào
-                            // cái bảng đã chết mà đẻ ra một lượt rác thì tệ hơn
-                            // hẳn một cú bấm không làm gì.
+                            // trong tin là bảng CŨ, phiên đã đi tiếp từ lâu.
+                            //
+                            // Lần ấy KHÔNG có lượt rác nào được đẻ ra — kiểm
+                            // transcript của phiên: lượt `user` cuối cùng là
+                            // 12:00:06, còn bốn cú bấm rơi vào 12:06–12:07. Nói
+                            // đúng chừng ấy, đừng kể một hậu quả chưa xảy ra.
+                            //
+                            // Nhưng RỦI RO thì có thật và đó là lý do có cổng
+                            // này: `do script` luôn kèm một CR, nên một con số
+                            // gửi vào màn không có hộp chọn có thể đi làm một
+                            // lượt chat trong phiên của chủ máy — và một cú bấm
+                            // đẻ ra lượt rác thì tệ hơn hẳn cú bấm không làm gì.
                             //
                             // Nên: nhìn màn TRƯỚC, và chỉ gửi con số khi màn
                             // đang thật sự có hộp chọn. Không đọc được màn thì

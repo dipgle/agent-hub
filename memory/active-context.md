@@ -1,5 +1,109 @@
 # active context — hub
 
+## 🎯 2026-08-17 (chiều) — "bấm cái nọ mất cái kia", và bốn lỗi cùng họ
+
+Cả buổi chỉ có một hình dạng lặp lại: **hai phép đo cho một câu hỏi**. Chỗ DỰNG
+chữ và chỗ THI HÀNH hỏi hai câu khác nhau về cùng một thứ, nên hub vẽ ra những
+đích chạm trỏ vào chỗ chính nó nói là không tồn tại — hoặc chạy một thứ khác với
+thứ nó ghi trên mình.
+
+Năm commit, tất cả **đã cài + push**: `909548b` · `0f2a0f6` · `961c817` ·
+`93283e1` · `24fcb40`. `402 test · clippy 0 · fmt 0`, hubd `@10:11:00Z`, cert.
+
+### 1. Bấm ô này mất dấu ô kia (`keys::press_writes`, `nav_plan`)
+
+Hà: *"Bấm cái nọ mất cái kia ảo lắm"*. Nhật ký 12:39–12:40 khớp cả ba cú: ô bị
+mất luôn là ô con trỏ **vừa rời khỏi**.
+
+Gốc: `do script` kèm một **CR** vào cuối MỌI lượt ghi, không tắt được — nên bản
+"mỗi phím một lượt ghi" biến mỗi mũi tên thành một cú bật/tắt. Đo trên hộp thật
+(cửa sổ nháp, 4 vòng, ~25 lượt ghi):
+
+- một lượt ghi = ĐÚNG MỘT cú bật/tắt, rơi vào dòng con trỏ ĐANG ĐỨNG;
+- payload có mũi tên ⟹ vừa bật/tắt dòng đang đứng, vừa dời đi;
+- k mũi tên trong CÙNG một lượt dời đủ k bước mà vẫn một cú bật/tắt;
+- hai CR trong một lượt gộp làm một;
+- **không chặn được cái CR ấy**: `ESC` cuối payload không chặn (nó chặn ở Ô
+  NHẬP — `clear_box` — mà không chặn ở hộp chọn), CSI cụt cũng không, và phím số
+  thì hộp chọn nhiều không nhận (gửi `"4"` khi đứng ở mục 1 ⟹ chỉ mục 1 đổi).
+
+⟹ `nav_plan` trả **ba lượt ghi** xếp cho các cú thừa tự triệt tiêu: `[enter]` lật
+ô đang đứng · `[cả k mũi tên trong một lượt]` lật lại đúng ô ấy rồi đi trọn
+quãng · `[enter]` lật ô ĐÍCH. Chạy thử trên hộp thật: bấm mục 3, 1, 4 — mỗi lần
+đúng một ô đổi.
+
+**Và `Submit` KHÔNG nằm trong vòng đi dọc**: con trỏ ở mục 4, `↓↓` để tới dòng
+`Submit` ⟹ con trỏ **quấn về mục 1** và cú Enter cuối lật mất dấu mục 1; bảng vẫn
+mở. Đường thật là thanh tab ngang — `[enter] · [→] · [enter]`. Đo trọn vòng: tick
+mục 2+4 rồi chốt ⟹ phiên nhận đúng `Chon muc nao? → Beta, Delta`.
+
+### 2. Ba lỗi hiển thị (`split_for_telegram`, `session_layout`, `tame_auto_links`)
+
+- **Tin bị cắt**: mỗi mẩu nay tự khai chỗ đứng (`⋯ mẩu 2/3, nối tiếp tin trên`).
+- **Lệnh in hai biến thể**: `session_layout` hỏi "có trên màn không" bằng
+  `text.contains`, chỗ gắn nút hỏi bằng `line_carries` (khớp cả dòng bị cửa sổ bẻ
+  đôi) ⟹ lệnh dài bị chép thêm một bản ở cuối tin. Nay cùng một phép đo. Bài kiểm
+  tái hiện: RED với phép cũ, GREEN với phép mới. Nhãn thôi đoán nguyên nhân
+  ("cổng quyền chặn" → "không thấy trên màn").
+- **`/healthz` và `@update-be` bị Telegram tô thành lệnh bot / mention**: bọc
+  `<code>`. Ranh giới theo đúng cái Telegram làm — `/` chỉ tính khi mở đầu một từ
+  (nên `~/projects`, `http://x/healthz` không bị đụng), `@` tính sau bất kỳ ký tự
+  không-chữ-số nào (kể cả dấu nháy), trừ địa chỉ thư. Route THẬT của hub giữ
+  nguyên đích chạm (`commands::lookup` là chỗ duy nhất biết cái nào thật).
+
+### 3. Lệnh trong nội dung mà không có nút (`keys::KNOWN`, `add_prose_cmds`)
+
+`printf '@update-be …' > …/.cmd-queue/up.cmd` — đúng cách xếp việc vào file-queue
+daemon — không thành nút vì `printf` không có trong hàng rào. Đã thêm.
+
+Kèm hai bẫy cùng chỗ: **mảnh bị cửa sổ bẻ** (nửa đầu của một lệnh) không được
+thành một nút thứ hai — nút ấy chạy một lệnh KHÁC HẲN; và nguồn "lệnh trong lượt
+nói cuối của nhật ký" phải **lọc theo chữ đang định dạng**, nếu không thì mỗi ack
+hai dòng kéo theo cả sổ lệnh của phiên (Hà: ba tin liền nhau, tin nào cũng có).
+
+### 4. Nút ⏹ nói dối, rồi nói thật, rồi làm được một nửa
+
+- `close_session` tra cửa sổ bằng `window_of` (lọc `processes > 0`) trong khi
+  danh sách `/terminal` dựng từ MỌI tab ⟹ hàng có nút mà bấm thì
+  *"không còn cửa sổ nào chạy ttys014"*. Tách `window_of_any` cho ĐÚNG đường đóng
+  (đường gõ giữ nguyên hàng rào — gõ vào cái xác là gõ vào chỗ không ai đọc).
+- `close_window` trả `Ok(())` ngay sau `osascript` ⟹ báo xong cho việc không xảy
+  ra. Nay đo bằng **số tab + `visible`** (`id of every window` KHÔNG trả lời được:
+  cửa sổ đã đóng vẫn nằm trong danh sách ấy — tôi tin nó một lượt và rút ra một
+  kết luận SAI "vì máy khoá màn hình", đã đính chính).
+- Đo lại sạch: cửa sổ mới mở ⟹ đóng được; vừa `exit` ⟹ đóng được; **năm cửa sổ
+  từng chạy `claude` bị `kill`** ⟹ `close` chạy êm mà không đóng, đủ mọi cách
+  viết, cả khi Terminal đứng trước, cả sau khi mở khoá máy. `set custom title`
+  trên chính chúng thì ăn. **Chưa biết vì sao** (Accessibility không cho đọc cửa
+  sổ Terminal, `screencapture` bị chặn).
+- Nên: đóng không được thì **ẩn** (`set visible to false` — ăn ngay), và NÓI là
+  ẩn. `tabs_script` bỏ cửa sổ đã ẩn nên nó rời khỏi mọi danh sách của hub. Hà bấm
+  hết: **danh sách sạch**, 6 cửa sổ còn hiện đều là phiên `claude` thật.
+
+### 5. `/terminal`: mỗi cửa sổ MỘT dòng
+
+8 cửa sổ từng đẻ ra 16 nút xếp dọc, hai cái một cặp cùng nhãn. Nay:
+`⚪ ttys014 · 🖥 vào · ⏹ đóng — dấu nhắc trống`, đi bằng deep link `w_<tty>` /
+`wx_<tty>` (payload deep link không nhận dấu `:` nên `sess:`/`close:` không dùng
+được) — vẫn về đúng route cũ. **Đã nghiệm thu trên tin thật** (ảnh 16:56).
+
+## Việc kế tiếp
+
+1. Ba lỗi hiển thị (mục 2) mới xanh ở bài kiểm + đọc mã; `/shot` một phiên bất kỳ
+   là thấy ngay trên tin thật.
+2. Năm cửa sổ đã ẩn vẫn còn trong menu Window của Terminal — ⌘W khi ngồi máy.
+3. Chưa giải thích được vì sao `close` không ăn với những cửa sổ ấy. Đừng đoán
+   thêm nếu không đo được; đường đo còn thiếu là Accessibility cho Terminal.
+
+## Bài học giữ lại
+
+**Phép đo phải trỏ đúng chỗ.** Ba lần trong một buổi tôi kết luận từ một phép đo
+mù: `id of every window` (cửa sổ đã đóng vẫn còn id), `ticked()` (hai ô lật ngược
+chiều ra đúng con số cũ), và `System Events` đếm 0 cửa sổ (vì không có quyền, chứ
+không phải vì không có hộp thoại). Cả ba đều "xanh" trong khi sự thật ngược lại.
+
+---
+
 ## 🌉 2026-08-16 (tối) — hub thôi giấu, thôi chặn, và nói MỘT giọng
 
 Phiên trước đóng sổ với một câu hỏi treo: giữ hay trả lại năm thứ tôi tự quyết.

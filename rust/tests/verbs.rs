@@ -492,3 +492,42 @@ fn the_terminal_verb_says_what_it_opens() {
         "route vô hình là route không ai gọi — đó là cả bài học của lần gỡ nhầm"
     );
 }
+
+/// Hai đích chạm của MỘT hàng `/terminal`, dạng liên kết chèn giữa chữ.
+///
+/// 🔴 Hà 2026-08-17, ảnh 8 cửa sổ đẻ ra 16 cái nút xếp dọc, hai cái một cặp
+/// giống hệt nhau: *"danh sách đó mỗi cái và nút nằm trên 1 dòng"*. Nút chỉ nằm
+/// được dưới đáy tin; thứ đặt được ngay trên dòng của cửa sổ là một liên kết —
+/// và payload deep link chỉ nhận `[A-Za-z0-9_-]`, nên `sess:`/`close:` (có dấu
+/// hai chấm) không đi đường ấy được.
+///
+/// Vẫn về đúng route cũ: thêm một chỗ BẤM, không thêm một đường ĐI.
+#[test]
+fn a_terminal_row_carries_its_own_two_taps() {
+    use hub::adapters::CommandKind;
+    assert_eq!(
+        parse_command("/start w_ttys014"),
+        Some((CommandKind::Session, 0, "win-ttys014".to_string())),
+        "🖥 vào = /session win-<tty>"
+    );
+    assert_eq!(
+        parse_command("/start wx_ttys014"),
+        Some((CommandKind::Close, 0, "win-ttys014".to_string())),
+        "⏹ đóng = /close win-<tty>"
+    );
+    // Hẹp có chủ ý: payload lạ thì KHÔNG được hoá thành một id phiên.
+    for bad in [
+        "/start w_",
+        "/start w_abc",
+        "/start wx_../etc",
+        "/start w_ttys",
+    ] {
+        assert!(
+            !matches!(
+                parse_command(bad),
+                Some((CommandKind::Session, _, _)) | Some((CommandKind::Close, _, _))
+            ),
+            "{bad} không được đi tới cửa sổ nào"
+        );
+    }
+}

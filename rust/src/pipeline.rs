@@ -4219,9 +4219,25 @@ fn add_prose_cmds(cfg: &Config, sid: &str, text: &str, out: &mut Vec<crate::sess
     //
     // Màn vẫn là chỗ để BÁM (`line_carries` khớp cả phần đầu cho dòng bị bẻ);
     // lệnh nào không bám được thì `session_layout` viết thêm nó vào cuối tin.
+    //
+    // 🔴 …NHƯNG NGUỒN NÀY PHẢI LỌC THEO CHÍNH CHỮ ĐANG ĐỊNH DẠNG — Hà 2026-08-17,
+    // ảnh ba cái ack liên tiếp, cái nào cũng mọc thêm một khu *"Lệnh của phiên,
+    // không thấy trên màn"* dài bốn dòng: `open -W -g "/Applications/Docker.app…`,
+    // `docker exec`, `cargo clippy …`, `node --check`.
+    //
+    // Chúng là lệnh trong LƯỢT NÓI CUỐI của phiên, không phải trong cái ack hai
+    // dòng vừa gửi. Không lọc thì mỗi lời đáp "▶ đang chạy — …" lại kéo theo cả
+    // sổ lệnh của phiên, đúng thứ `cmds_present_in` sinh ra để chặn và đúng thứ
+    // Hà đã chê từ 16/08 (*"một mớ text không cần thiết"*).
+    //
+    // Lọc bằng `line_carries` chứ không `contains`: với `/shot`, cửa sổ bẻ đôi
+    // một lệnh dài nên màn chỉ mang NỬA ĐẦU — mà nửa đầu ấy vẫn là "có mặt".
+    // Cùng phép đo với `session_layout`, để hai bên không nói ngược nhau.
     if let Some(said) = crate::sessions::last_say_by_id(cfg, sid, crate::sessions::SAY_MAX) {
         for line in crate::keys::commands_in_report(&said, CMD_LINES_MAX) {
-            add(line, out);
+            if text.lines().any(|l| line_carries(l, &line)) {
+                add(line, out);
+            }
         }
     }
 }
@@ -5704,13 +5720,14 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     //
                     // Đó cũng là câu trả lời cho *"chưa kế thừa được các lệnh"*:
                     // thêm một hạng mục tiêu mà KHÔNG thêm một đường đi.
-                    let (ack, buttons) = match crate::keys::terminal_tabs() {
+                    let (ack, buttons, inline_html) = match crate::keys::terminal_tabs() {
                         Err(e) => (
                             format!(
                                 "⚠ không hỏi được Terminal: {}",
                                 crate::exec::truncate(&e.to_string(), 200)
                             ),
                             Vec::new(),
+                            None,
                         ),
                         Ok(tabs) => {
                             // Có CLI chạy ⟹ KHÔNG phải cửa sổ trần. Gõ lệnh
@@ -5737,10 +5754,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         tabs.len()
                                     )
                                 };
-                                (msg, Vec::new())
+                                (msg, Vec::new(), None)
                             } else {
                                 let mut out = format!("🖥 {} cửa sổ Terminal trần:\n", bare.len());
                                 let mut btns: Vec<(String, String)> = Vec::new();
+                                // Bản HTML đi song song: mỗi cửa sổ MỘT dòng,
+                                // hai đích chạm nằm ngay trên dòng ấy. `out`
+                                // (chữ trần + nút đáy) ở lại làm đường lui.
+                                let mut html =
+                                    format!("🖥 {} cửa sổ Terminal trần:\n\n", bare.len());
                                 for tb in &bare {
                                     // 🔴 KHÔNG in "dấu nhắc trống" cho MỌI hàng
                                     // — Hà 2026-08-16: *"trạng thái có đang chạy
@@ -5783,20 +5805,58 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         if tb.busy { "🟢" } else { "⚪" },
                                         tb.tty
                                     ));
-                                    let id =
-                                        format!("{}{}", crate::sessions::SHELL_ID_PREFIX, tb.tty);
-                                    btns.push((format!("🖥 {}", tb.tty), format!("sess:{id}")));
-                                    // Nút đóng đi LIỀN SAU nút mở của chính hàng
-                                    // ấy, mang tty trong nhãn: hai nút trơn cạnh
-                                    // nhau thì không ai biết cái nào của cửa sổ
-                                    // nào (cùng bài học với ⏎/⌫ của ô nhập).
-                                    btns.push((format!("⏹ {}", tb.tty), format!("close:{id}")));
+                                    // 🔴 MỘT CỬA SỔ = MỘT DÒNG, và hai đích chạm
+                                    // nằm NGAY TRÊN dòng ấy — Hà 2026-08-17:
+                                    // *"danh sách đó mỗi cái và nút nằm trên 1
+                                    // dòng"*, sau khi 8 cửa sổ đẻ ra 16 cái nút
+                                    // xếp dọc, hai cái một cặp giống hệt nhau.
+                                    //
+                                    // Cái nút chỉ nằm được dưới đáy tin; thứ đặt
+                                    // được giữa chữ là LIÊN KẾT. Cùng cách ☑ bám
+                                    // dòng lựa chọn và ▶️ bám dòng lệnh.
+                                    let mark = if tb.busy { "🟢" } else { "⚪" };
+                                    let open = crate::telegram::deep_link(&format!("w_{}", tb.tty));
+                                    let shut =
+                                        crate::telegram::deep_link(&format!("wx_{}", tb.tty));
+                                    match (open, shut) {
+                                        (Some(o), Some(c)) => html.push_str(&format!(
+                                            "{mark} <code>{}</code> · <a href=\"{}\">🖥 vào</a> · <a href=\"{}\">⏹ đóng</a> — {}\n",
+                                            crate::telegram::html_escape(&tb.tty),
+                                            crate::telegram::html_escape(&o),
+                                            crate::telegram::html_escape(&c),
+                                            crate::telegram::html_escape(&doing),
+                                        )),
+                                        // Chưa biết tên bot ⟹ không dựng được
+                                        // liên kết. Rơi về khối nút cũ chứ không
+                                        // im: mất chỗ bấm là mất cả tính năng.
+                                        _ => {
+                                            let id = format!(
+                                                "{}{}",
+                                                crate::sessions::SHELL_ID_PREFIX,
+                                                tb.tty
+                                            );
+                                            btns.push((
+                                                format!("🖥 {}", tb.tty),
+                                                format!("sess:{id}"),
+                                            ));
+                                            btns.push((
+                                                format!("⏹ {}", tb.tty),
+                                                format!("close:{id}"),
+                                            ));
+                                        }
+                                    }
                                 }
-                                out.push_str(
-                                    "\n\n🖥 bấm để làm việc với cửa sổ · ⏹ đóng nó · /new mở cửa sổ mới\n\
-                                     Cửa sổ đang chạy dở (🟢) thì hub hỏi lại trước khi đóng.",
-                                );
-                                (out, btns)
+                                let foot = "\n🖥 vào để làm việc với cửa sổ · ⏹ đóng nó · /new mở cửa sổ mới\n\
+                                     Cửa sổ đang chạy dở (🟢) thì hub hỏi lại trước khi đóng.";
+                                out.push('\n');
+                                out.push_str(foot);
+                                html.push_str(&crate::telegram::html_escape(foot));
+                                // Chỉ đi đường HTML khi MỌI hàng dựng được liên
+                                // kết: nửa nọ nửa kia thì cùng một danh sách có
+                                // hàng bấm được hàng không, đúng thứ khó đoán
+                                // nhất cho người đọc.
+                                let inline = btns.is_empty().then_some(html);
+                                (out, btns, inline)
                             }
                         }
                     };
@@ -5804,16 +5864,28 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // thêm lần nữa là chủ máy nhận hai tin cùng nội dung, một
                     // cái bấm được một cái không. Cùng hình dạng với `/session`.
                     let mut sent = false;
-                    if adapter == crate::telegram::NAME && !buttons.is_empty() {
+                    if adapter == crate::telegram::NAME {
                         if let Some(tg) = crate::telegram::inbox() {
-                            match tg.send_buttons(&ack, &buttons) {
-                                Ok(()) => sent = true,
-                                // Hỏng thì rơi về đường chữ thường, đừng nuốt:
-                                // thà một tin không nút còn hơn im.
-                                Err(e) => logging::error(
-                                    "telegram_ack_failed",
-                                    json!({ "err": e, "what": "terminal_buttons" }),
-                                ),
+                            // Đích chạm nằm TRONG chữ thì gửi bản HTML; không
+                            // dựng được liên kết thì mới tới khối nút ở đáy.
+                            match (&inline_html, buttons.is_empty()) {
+                                (Some(h), _) => match tg.send_html(h) {
+                                    Ok(()) => sent = true,
+                                    Err(e) => logging::error(
+                                        "telegram_ack_failed",
+                                        json!({ "err": e, "what": "terminal_inline" }),
+                                    ),
+                                },
+                                (None, false) => match tg.send_buttons(&ack, &buttons) {
+                                    Ok(()) => sent = true,
+                                    // Hỏng thì rơi về đường chữ thường, đừng
+                                    // nuốt: thà một tin không nút còn hơn im.
+                                    Err(e) => logging::error(
+                                        "telegram_ack_failed",
+                                        json!({ "err": e, "what": "terminal_buttons" }),
+                                    ),
+                                },
+                                (None, true) => {}
                             }
                         }
                     }

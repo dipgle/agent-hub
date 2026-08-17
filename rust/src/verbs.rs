@@ -14,6 +14,14 @@
 
 use crate::adapters::CommandKind;
 
+/// `ttys014` — tên một tty như Terminal khai, đã bỏ `/dev/`.
+///
+/// Hẹp có chủ ý: payload đi thẳng vào `win-<tty>` rồi thành id phiên, nên nhận
+/// bừa một chuỗi lạ ở đây là để nó chạy tiếp xuống tận chỗ tra cửa sổ.
+fn is_tty_name(s: &str) -> bool {
+    s.len() > 4 && s.starts_with("ttys") && s[4..].chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 /// Một mệnh lệnh gõ trên kênh, nếu chữ này là lệnh.
 ///
 /// 🔴 **Cổng người đã rời khỏi hàm này**, 2026-08-14, cùng lượt gỡ tfl5. Trước
@@ -157,6 +165,36 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     if let Some(n) = verb.strip_prefix("term_") {
         if !n.is_empty() && n.chars().all(|c| c.is_ascii_hexdigit()) {
             return Some((CommandKind::RunInTerminal, 0, n.to_string()));
+        }
+    }
+    // `w_<tty>` / `wx_<tty>` — hai đích chạm của MỘT hàng trong `/terminal`, đặt
+    // ngay trên dòng của cửa sổ ấy thay vì thành hai cái nút ở đáy.
+    //
+    // 🔴 Hà 2026-08-17, ảnh một danh sách 8 cửa sổ kéo theo 16 cái nút xếp dọc:
+    // *"danh sách đó mỗi cái và nút nằm trên 1 dòng"*. Một cái nút chỉ nằm được
+    // dưới đáy tin và Telegram cắt nhãn của nó, nên hai nút `ttys014` giống hệt
+    // nhau nằm cạnh nhau mà không nói được cái nào mở cái nào đóng — cùng bài
+    // học với ⏎/⌫ của ô nhập và với ☑ của dòng lựa chọn.
+    //
+    // Vì sao không dùng thẳng `sess:`/`close:` như cái nút: payload của deep
+    // link chỉ nhận `[A-Za-z0-9_-]`, mà hai cái ấy mang dấu `:`. Nên chúng đi
+    // đúng route cũ, chỉ khác cái vỏ — không thêm một đường ĐI nào.
+    if let Some(tty) = verb.strip_prefix("wx_") {
+        if is_tty_name(tty) {
+            return Some((
+                CommandKind::Close,
+                0,
+                format!("{}{tty}", crate::sessions::SHELL_ID_PREFIX),
+            ));
+        }
+    }
+    if let Some(tty) = verb.strip_prefix("w_") {
+        if is_tty_name(tty) {
+            return Some((
+                CommandKind::Session,
+                0,
+                format!("{}{tty}", crate::sessions::SHELL_ID_PREFIX),
+            ));
         }
     }
     // `f_<n>` — 📎 tải về một TỆP phiên vừa nhắc tới, bấm ngay tại tên tệp trong

@@ -1,5 +1,66 @@
 # active context — hub
 
+## 🎯 2026-08-17 (tối) — hai kết cục bị gộp làm một, đo được bằng 190 dòng warn
+
+Không có ảnh nào của Hà trong phiên này (bàn giao dặn chờ ảnh, **đừng vá mò**),
+nên chỗ đi được là chỗ CÓ SỐ ĐO: nhật ký của chính daemon đang chạy. Hai commit,
+**đã cài + push** — `bc85f0d` · `df14384`, `414 test · clippy 0 · fmt 0`,
+hubd `@14:19:35Z` cert, cây sạch.
+
+### 1. `close_check_failed` × 190 — "cửa sổ không còn" ≠ "hub mù" (`bc85f0d`)
+
+`~/Library/Logs/hubd.err`: **190 dòng trong 5 tiếng**, 08:44:50Z → 13:47:06Z,
+cách nhau đúng 30 giây, tất cả về `window 2131` / phiên `win-ttys002`, tất cả một
+câu: *"Can't make «class busy» of «class tcnt» of window id 2131 … into type
+text. (-1700)"*. Sổ trong DB xác nhận: mục ấy nằm đó **5 giờ 24 phút**.
+
+Cửa sổ đã đóng từ lâu. `selected tab` của cửa sổ 0 tab = `missing value`, ép sang
+chữ là -1700 ⟹ `tab_busy -> Result<bool>` chỉ có nhánh `Err` để đựng sự thật "không
+còn", mà `Err` nghĩa là *hub mù*, và luật với cái mù là GIỮ trong sổ. Luật đúng;
+phép đo không có từ để nói "không còn".
+
+⟹ `keys::tab_state -> TabState::{Busy,Idle,Gone}` (hỏi số tab TRƯỚC, cùng một lượt
+`osascript`). Phán đoán tách thành `pipeline::close_step` — hàm thuần, bài kiểm
+chạm được. Thêm: **mù quá `CLOSE_GIVE_UP_SEC` cũng phải nói rồi buông**.
+
+**Chạy thật:** cài lúc 14:01:46Z → 14:02:19.063Z log `close_window_gone`
+`seen=tab_state waited_sec=19524`, sổ về `{}`, không còn dòng `close_check_failed`
+nào sau đó, `close_ack_failed` = 0 (tin đã ra Telegram).
+
+### 2. Ẩn rồi bỏ đó = rác vô hình; lời từ chối ấy là NHẤT THỜI (`df14384`)
+
+Đo A/B lúc 14:1xZ trên ĐÚNG những cửa sổ Terminal từ chối đóng lúc 10:20Z, khi
+chúng vẫn đang ẩn: `2151` · `2153` · `2156` → `close` ăn ngay lượt đầu
+(`1/false` → `0/false`). Nên "close không ăn" là nhất thời, không phải thuộc tính
+cửa sổ — và giả thuyết trung gian của tôi ("ẩn nên không nhận close") cũng sai:
+bước "hiện rồi đóng" ăn, nhưng bước "đóng khi đang ẩn" trên ba cửa sổ khác cũng ăn.
+
+⟹ mục **ở lại sổ** sau khi ẩn (`Closing.h`/`.r`), `hidden_next` quyết mỗi lượt:
+chờ · thử lại 5 phút/lượt · bỏ cuộc sau 6 tiếng và NÓI. Hai cổng: `close_hidden_again`
+đo bằng `tab_state` chứ KHÔNG bằng `window_gone` (hàm ấy coi `visible=false` là đã
+đi ⟹ với cửa sổ vốn ẩn nó báo "đóng hẳn" cho cửa sổ còn nguyên); `tab_process_count`
+gác id cửa sổ bị dùng lại (id `156` nằm cạnh đám `21xx`) — chỉ đóng cửa sổ **0 tiến
+trình**; cửa sổ nay có người ở thì buông và nói.
+
+**Chạy thật:** chuỗi của `close_hidden_again` gọi tay lên cửa sổ ẩn cuối (`2150`)
+→ `gone` ngay lượt đo đầu. **Cả 5 cửa sổ rác nay hết sạch** (không cửa sổ ẩn nào
+còn tab). ⚠ Vòng sổ→thử lại→báo CHƯA chạy thật đầu-cuối: không ép Terminal từ
+chối `close` theo ý mình được.
+
+### 3. Còn treo — cần Hà
+
+- **`/anh`**: `screencapture` bị từ chối (*"could not create image from display"*).
+  Đo trong TCC.db của user: **không có một dòng `kTCCServiceScreenCapture` nào** —
+  chưa app nào trên máy này được cấp Screen Recording, và cũng chưa có lời từ chối
+  nào được ghi, tức hộp xin quyền chưa từng hiện. hubd đã có `kTCCServiceAppleEvents`
+  (đường dẫn bản cài, `auth_value=2`) nên đường Apple Event thì thông.
+  Cần Hà thêm tay: System Settings → Privacy & Security → Screen & System Audio
+  Recording → `+` → ⌘⇧G → `~/Library/Application Support/hub/bin/hubd`.
+  Nếu bảng ấy không nhận một binary trần thì đường vòng đo được là chạy
+  `screencapture` **trong một cửa sổ Terminal** (Terminal là app, cấp quyền dễ) —
+  chưa dựng, vì chưa biết cần.
+- Chưa nghiệm thu trên tin thật: bấm ô, ✅ Submit, dấu nối mẩu, `/shot` bù lời cuối.
+
 ## 🎯 2026-08-17 (chiều) — "bấm cái nọ mất cái kia", và bốn lỗi cùng họ
 
 Cả buổi chỉ có một hình dạng lặp lại: **hai phép đo cho một câu hỏi**. Chỗ DỰNG

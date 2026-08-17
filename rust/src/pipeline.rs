@@ -6906,10 +6906,44 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             // đang tick — và con số ấy bắt được
                                             // cả ca phím tới nơi nhưng rơi vào
                                             // mục khác, thứ mà "đã bấm" che mất.
-                                            let after_screen = crate::keys::screen_of(&s.tty, 40)
-                                                .map(|x| x.0)
-                                                .unwrap_or_default();
-                                            let (on, all) = crate::keys::ticked(&after_screen);
+                                            // 🔴 ĐỌC MÀN ĐÃ CHỜ, VÀ CHỜ TỚI KHI
+                                            // NÓ ĐỔI — Hà 2026-08-17, ảnh năm
+                                            // cú bấm liền: `2/5 · 2/5 · 2/5 ·
+                                            // 0/5 · 4/5`. Con số nhảy vì bản
+                                            // đầu của tôi đọc màn NGAY sau khi
+                                            // gửi phím, tức đọc trước lúc TUI
+                                            // vẽ xong — đúng cái bẫy `keys_
+                                            // screen_waited` sinh ra để tránh,
+                                            // mà tôi lại đi đọc một lượt riêng
+                                            // bên cạnh nó.
+                                            let mut ticked = view
+                                                .as_ref()
+                                                .map(|(b, _)| crate::keys::ticked(b))
+                                                .unwrap_or((0, 0));
+                                            let was = before
+                                                .as_deref()
+                                                .map(crate::keys::ticked)
+                                                .unwrap_or((0, 0));
+                                            // Chưa thấy đổi thì đọc lại vài
+                                            // nhịp: một cú toggle phải làm con
+                                            // số nhúc nhích, và nếu nó không
+                                            // nhúc nhích thật thì ba nhịp nữa
+                                            // cũng vậy — không có vòng lặp vô
+                                            // hạn nào ở đây.
+                                            for _ in 0..3 {
+                                                if ticked != was || ticked.1 == 0 {
+                                                    break;
+                                                }
+                                                std::thread::sleep(
+                                                    std::time::Duration::from_millis(400),
+                                                );
+                                                if let Some((b, _)) =
+                                                    crate::keys::screen_of(&s.tty, 40)
+                                                {
+                                                    ticked = crate::keys::ticked(&b);
+                                                }
+                                            }
+                                            let (on, all) = ticked;
                                             if all > 0 {
                                                 format!(
                                                     "✓ đã bấm '{}' · {name} — {on}/{all} ô đang chọn",

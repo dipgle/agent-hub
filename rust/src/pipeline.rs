@@ -885,9 +885,34 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         }
         match (buttons, crate::telegram::inbox()) {
             (Some((opts, multi, rest)), Some(tg)) => {
-                if let Err(e) = tg.ask_choices(&text, &id, opts, enter.is_some(), multi, rest) {
-                    logging::error("session_change_telegram_failed", json!({ "err": e }));
-                }
+                // 🔴 ☑ NGAY TẠI DÒNG LỰA CHỌN — Hà 2026-08-17, ảnh một tin tự
+                // phát có bốn lựa chọn và bốn cái nút `☐ 1 Khô` `☐ 2 Bí d`… ở
+                // đáy: *"Sao không chèn icon thẳng vào các lựa chọn mà chèn phía
+                // dưới"*.
+                //
+                // Đúng, và đây là đường CUỐI CÙNG còn dựng khối nút ở đáy cho
+                // thứ đã có chỗ đứng trong chữ. `/shot` chèn ☑ vào chính dòng
+                // của lựa chọn từ 16/08; tin tự phát thì không, nên cùng một
+                // hộp hỏi cho hai hình dạng khác nhau tuỳ nó tới bằng đường nào
+                // — và bản ở đáy còn tệ hơn: nhãn bị Telegram cắt ở 52 ký tự
+                // nên `Không xoá gì` đọc thành `1 Khô`.
+                //
+                // Nút vẫn dựng như cũ rồi truyền vào cùng cửa: `session_layout`
+                // tự bỏ những nút `key:` đã thành ☑ trong chữ, và giữ lại
+                // `✅ Gửi lựa chọn` cùng nút của các câu sau — thứ KHÔNG có chỗ
+                // neo nào trong chữ để mà chèn.
+                let btns = crate::telegram::choice_buttons(&id, opts, enter.is_some(), multi, rest);
+                let data = SessionData {
+                    sid: id.clone(),
+                    cmds: crate::sessions::lines_of(&cmds),
+                    choices: opts
+                        .iter()
+                        .enumerate()
+                        .map(|(i, l)| (i + 1, l.clone()))
+                        .collect(),
+                    ..Default::default()
+                };
+                say_session_data(tg, &text, &btns, "session_change_telegram_failed", &data);
             }
             (None, Some(tg)) if enter.is_some() || !quick.is_empty() => {
                 // 🔴 Hà 2026-08-14: *"nút chạy lệnh chỉ cần 1 icon là đủ chèn
@@ -3075,6 +3100,9 @@ pub fn prompt_line_text(shown: &str) -> Option<String> {
 /// không phải dưới đáy tin, nơi không có gì nói chúng thuộc về cái gì.
 ///
 /// Trả `(html, số liên kết đã chèn, chỉ số neo không chèn được)`.
+/// Các liên kết của MỘT neo, mượn từ bảng neo — `(href, nhãn)`.
+type Links<'a> = Vec<&'a (String, String)>;
+
 pub fn html_with_links(
     shown: &str,
     anchors: &[(String, Vec<(String, String)>)],
@@ -3110,6 +3138,28 @@ pub fn html_with_links(
             Some((_, (a, _))) if is_a_command(a) => split_at_anchor(line, a),
             _ => (line, "", ""),
         };
+        // 🔴 Icon mở đầu bằng TAB ⟹ chèn TRƯỚC dòng, không phải sau — Hà
+        // 2026-08-17: *"Chèn phía trước số mỗi dòng"*.
+        //
+        // Với lựa chọn thì đúng chỗ của ☑ là đầu dòng, ngay trước `1.`: mắt
+        // chạy dọc cột số để chọn, nên đích chạm phải nằm trên cùng cột ấy. Dán
+        // vào cuối nhãn thì mỗi dòng một chỗ khác nhau, và với nhãn dài thì nó
+        // rơi tận cuối câu.
+        //
+        // Cùng quy ước với `\n` (xuống hẳn một dòng) đã có từ 16/08: một ký tự
+        // điều khiển ở đầu nhãn nói VỊ TRÍ, không phải nội dung.
+        let (before, after): (Links, Links) = match hit {
+            Some((_, (_, links))) => links.iter().partition(|(_, i)| i.starts_with('\t')),
+            None => (Vec::new(), Vec::new()),
+        };
+        for (href, icon) in &before {
+            html.push_str(&format!(
+                "<a href=\"{}\">{}</a> ",
+                crate::telegram::html_escape(href),
+                icon.trim_start_matches('\t')
+            ));
+            linked += 1;
+        }
         html.push_str(&crate::telegram::html_escape(head));
         if !cmd_part.is_empty() {
             html.push_str(&format!(
@@ -3126,7 +3176,7 @@ pub fn html_with_links(
                 // một dòng lệnh không có đường bấm là một cây cầu hụt nhịp.
                 unlinked.push(i);
             }
-            for (href, icon) in links {
+            for (href, icon) in &after {
                 // Nhãn mở đầu bằng xuống dòng ⟹ nút ấy xuống HẲN một dòng.
                 //
                 // 🔴 Hà 2026-08-16: *"2 nút enter và clear gần nhau quá dễ bấm
@@ -4233,9 +4283,25 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
         let short = data.short();
         for (n, label) in &data.choices {
             if let Some(href) = crate::telegram::deep_link(&format!("k_{short}_{n}")) {
-                anchors.push((label.clone(), vec![(href, "☑".to_string())]));
+                // TAB ở đầu nhãn = chèn TRƯỚC dòng, tức trước `1.` (Hà 17/08:
+                // *"Chèn phía trước số mỗi dòng"*) — xem `html_with_links`.
+                anchors.push((label.clone(), vec![(href, "\t☑".to_string())]));
             }
         }
+    }
+    // …và lựa chọn đã có ☑ trong chữ thì THÔI nằm ở đáy. Một việc, một chỗ bấm:
+    // hai đường cho cùng một lựa chọn thì cái ở đáy chỉ mang con số trần, còn bị
+    // Telegram cắt nhãn ở 52 ký tự (`☐ 1 Khô`) — đúng thứ Hà đọc được 17/08.
+    //
+    // Luật này nằm ở ĐÂY chứ không ở từng chỗ gọi: `/shot` đã chép tay nó một
+    // lần, và tin tự phát thì quên — cùng hình dạng "vá một chỗ, sót chỗ bên
+    // cạnh" đã lặp nhiều lần trong tệp này. Giữ `:enter`/`:clear` (ô nhập, không
+    // phải lựa chọn) và `pick:` (bảng nhiều câu — các câu sau không có neo nào
+    // trong chữ để mà chèn).
+    if !data.choices.is_empty() {
+        rest_btns.retain(|(_, d)| {
+            !d.starts_with("key:") || d.ends_with(":enter") || d.ends_with(":clear")
+        });
     }
     // 📎 NGAY TẠI TÊN TỆP. Neo là đường dẫn đúng như nó hiện trong chữ, nên chỗ
     // gọi phải lấy nó từ chính chữ ấy (`keys::paths_on_screen`), không tự dựng

@@ -149,6 +149,34 @@ fn text_in_the_input_box_always_gets_a_send_link() {
     assert!(shown.contains("xoá ô nhập"), "…và một đường xoá ô: {shown}");
 }
 
+/// ☑ của một lựa chọn nằm TRƯỚC số thứ tự, không phải cuối nhãn.
+///
+/// 🔴 Hà 2026-08-17, ảnh một tin tự phát có bốn lựa chọn và bốn nút `☐ 1 Khô`…
+/// ở đáy: *"Sao không chèn icon thẳng vào các lựa chọn mà chèn phía dưới"* →
+/// *"Chèn phía trước số mỗi dòng"*. Mắt chạy dọc CỘT SỐ để chọn, nên đích chạm
+/// phải nằm trên cùng cột ấy; dán cuối nhãn thì mỗi dòng một chỗ khác nhau.
+#[test]
+fn a_choice_gets_its_tick_before_the_number() {
+    hub::telegram::set_bot_username("hub_test_bot");
+    let text = "⚠ [dwork] dừng lại HỎI — Xoá gì\n\n1. Không xoá gì\n2. Rác build";
+    let shown = render_session_data(
+        text,
+        &SessionData {
+            sid: "abc12345".to_string(),
+            choices: vec![
+                (1, "Không xoá gì".to_string()),
+                (2, "Rác build".to_string()),
+            ],
+            ..Default::default()
+        },
+    );
+    for line in shown.lines().filter(|l| l.contains("Không xoá gì")) {
+        let tick = line.find('☑').expect("phải có ☑");
+        let num = line.find("1.").expect("phải còn số thứ tự");
+        assert!(tick < num, "☑ phải đứng TRƯỚC số: {line}");
+    }
+}
+
 /// 🖥 trả về KẾT QUẢ của lệnh vừa gõ, không trả cả màn hình có sẵn từ trước.
 #[test]
 fn the_terminal_button_reports_only_what_the_command_printed() {

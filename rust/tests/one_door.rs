@@ -39,6 +39,11 @@ fn a_bare_acknowledgement_stays_an_emoji_and_never_goes_through_the_door() {
     for real in [
         "📷 Màn của 🟪 [hub]:\n\n❯ làm gì đó",
         "📋 Đã đóng sổ phiên [tfl5]. Tiếp tục bằng:\ncd /x && claude --resume 1",
+        // 🔴 Ack của một cú bấm trong hộp chọn mang cả BẢNG trạng thái, và nó
+        // vẫn mở đầu bằng `✓` — thiếu cổng "nhiều dòng thì không phải xác nhận
+        // trơn" thì nó bị rút thành một mặt cười, mất sạch bảng (Hà 17/08:
+        // *"Phản hồi nên thêm ô đã tích hay chưa và cho phép bấm được luôn"*).
+        "✓ 🟥 [dwork] — 4/5 ô đang chọn\n1. [✓] Không xoá gì\n2. [ ] Rác build\nSubmit",
     ] {
         assert!(
             needs_formatting(real),

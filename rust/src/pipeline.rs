@@ -6220,6 +6220,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // ở dưới — chứ KHÔNG đo lại trên `ack`: `ack` có chữ của chính
                 // hub, và chính chỗ ấy đã làm hỏng phép đo (xem `ScreenReport`).
                 let mut shot_choices: Vec<(String, String)> = Vec::new();
+                // Màn có dòng `Submit` ⟹ gắn ✅ vào đó. Điền ở nhánh `/shot` lẫn
+                // nhánh bấm phím, vì cả hai đều trả về một bảng bấm được.
+                let mut shot_submit = false;
                 let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
@@ -6945,9 +6948,57 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             }
                                             let (on, all) = ticked;
                                             if all > 0 {
+                                                // 🔴 TRẢ VỀ CẢ BẢNG, BẤM ĐƯỢC
+                                                // NGAY — Hà 2026-08-17: *"Phản
+                                                // hồi nên thêm ô đã tích hay
+                                                // chưa và cho phép bấm được
+                                                // luôn"*.
+                                                //
+                                                // Một con số `4/5` nói được
+                                                // "có gì đó đã đổi" nhưng
+                                                // không nói ô NÀO, nên sau mỗi
+                                                // cú bấm vẫn phải `/shot` để
+                                                // nhìn — tức cây cầu bắt người
+                                                // ta đi thêm một nhịp cho thứ
+                                                // hub vừa đọc xong.
+                                                //
+                                                // Chữ dựng từ MÀN ĐÃ CHỜ, và
+                                                // `shot_choices`/`shot_submit`
+                                                // được điền ngay tại đây nên
+                                                // cửa định dạng gắn ☑ vào từng
+                                                // dòng và ✅ vào dòng Submit —
+                                                // cùng bộ máy với `/shot`,
+                                                // không đẻ nhánh nào.
+                                                let screen = view
+                                                    .as_ref()
+                                                    .map(|(b, _)| b.clone())
+                                                    .unwrap_or_default();
+                                                let opts = crate::keys::parse_choices(&screen);
+                                                let table = shot_asking
+                                                    .as_ref()
+                                                    .is_some_and(|a| !a.rest.is_empty());
+                                                shot_choices = opts
+                                                    .iter()
+                                                    .map(|(n, l)| {
+                                                        let code = if table {
+                                                            format!("1.{n}")
+                                                        } else {
+                                                            n.to_string()
+                                                        };
+                                                        (code, l.clone())
+                                                    })
+                                                    .collect();
+                                                shot_submit =
+                                                    crate::keys::submit_keys(&screen).is_some();
+                                                let lines: Vec<String> = opts
+                                                    .iter()
+                                                    .map(|(n, l)| format!("{n}. {l}"))
+                                                    .collect();
+                                                let submit_line =
+                                                    if shot_submit { "\nSubmit" } else { "" };
                                                 format!(
-                                                    "✓ đã bấm '{}' · {name} — {on}/{all} ô đang chọn",
-                                                    typed.trim()
+                                                    "✓ {name} — {on}/{all} ô đang chọn\n{}{submit_line}",
+                                                    lines.join("\n")
                                                 )
                                             } else {
                                                 format!("✓ đã bấm '{}' · {name}", typed.trim())
@@ -7301,7 +7352,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // 17/08: *"chưa bấm được submit"*). Hỏi bằng chính
                             // hàm dựng chuỗi phím, nên "thấy Submit" ở hai chỗ
                             // là MỘT phép đo.
-                            submit: crate::keys::submit_keys(&ack).is_some(),
+                            submit: shot_submit || crate::keys::submit_keys(&ack).is_some(),
                             box_text: None,
                             files: shot_files.clone(),
                         };
@@ -8075,6 +8126,14 @@ pub fn ack_emoji(project: Option<&str>, k: Ack) -> &'static str {
 
 pub fn ack_as_emoji(ack: &str) -> Option<&'static str> {
     let t = ack.trim();
+    // 🔴 NHIỀU DÒNG ⟹ KHÔNG PHẢI XÁC NHẬN TRƠN. Một cái dấu thả lên tin gốc nói
+    // được đúng "đã nhận"; nó không nói thay được một BẢNG. Từ 17/08 ack của một
+    // cú bấm trong hộp chọn mang cả danh sách ô đã tích (Hà: *"Phản hồi nên thêm
+    // ô đã tích hay chưa và cho phép bấm được luôn"*), và câu ấy vẫn mở đầu bằng
+    // `✓` — thiếu cổng này thì nó bị rút thành một mặt cười, mất sạch bảng.
+    if t.lines().count() > 1 {
+        return None;
+    }
     // 🔴 Hà 2026-08-14: *"Mọi tin tôi gửi phản hồi hết bằng emoji đi"* · *"Vì nó
     // đơn giản là xác nhận thôi không cần thông tin"*. Đó chính là phép thử,
     // và nó cắt cả hai chiều: câu nào chỉ nói "đã nhận, đã làm" thì thành một

@@ -117,6 +117,26 @@ fn an_entry_that_was_never_hidden_says_so() {
     assert_eq!(hidden_next(0, 0, HID), HiddenNext::NotHidden);
 }
 
+/// Sổ CŨ (chưa có `h`/`r`) phải đọc được bằng mã mới. Không phải chuyện lý
+/// thuyết: đúng lúc nâng cấp, trong DB đang có một mục thật —
+/// `{"win-ttys002":{"w":2131,…}}` — và một mục không đọc được là một cửa sổ
+/// KHÔNG AI quay lại đóng, im lặng. Cùng luật "hợp đồng và người dùng hợp đồng
+/// đi chung một commit".
+#[test]
+fn an_old_book_row_still_parses() {
+    let old = r#"{"win-ttys002":{"w":2131,"n":"⬜ cửa sổ ttys002","t":1786955814,"c":1786975251}}"#;
+    let book: std::collections::BTreeMap<String, hub::pipeline::Closing> =
+        serde_json::from_str(old).expect("sổ cũ phải đọc được bằng mã mới");
+    let c = &book["win-ttys002"];
+    assert_eq!(c.w, 2131);
+    assert_eq!(c.t, 1786955814);
+    // Mục cũ = "chưa từng bị ẩn", nên nó đi đường thường, không rơi vào vòng
+    // thử-lại với một mốc thời gian bịa ra.
+    assert_eq!(c.h, 0);
+    assert_eq!(c.r, 0);
+    assert_eq!(hidden_next(c.h, c.r, 1_800_000_000), HiddenNext::NotHidden);
+}
+
 /// Bốn kết cục PHẢI phân biệt được nhau. Bài kiểm này tồn tại vì lỗi vừa sửa
 /// đúng là hai kết cục bị gộp làm một: nếu ai đó gộp lại lần nữa cho gọn, chỗ
 /// này đỏ trước khi cửa sổ nào kẹt trong sổ 5 tiếng.

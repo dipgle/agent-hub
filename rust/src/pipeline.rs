@@ -6631,6 +6631,41 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     })
                                     .collect();
                                 let mut out = rep.text;
+                                // 🔴 MÀN KHÔNG CÓ LỜI NÀO CỦA PHIÊN ⟹ BÙ BẰNG
+                                // NHẬT KÝ. Hà 2026-08-17, ảnh `/shot` của
+                                // `[AI/onghut]` ra nguyên một tệp mã kèm
+                                // *"… +35 lines"*: *"Sao phiên này hiện như vậy,
+                                // biết đằng nào làm tiếp"*.
+                                //
+                                // `/shot` là ẢNH của 40 dòng cuối cửa sổ, và nó
+                                // trung thực: phiên vừa in một tệp nên phần nó
+                                // NÓI bị đẩy lên trên khung. Ảnh đúng mà vô
+                                // dụng — người ở xa không có cách nào cuộn.
+                                //
+                                // Nhật ký thì giữ nguyên lời cuối. Chỉ bù khi
+                                // màn thật sự không có lời nào (`⏺` là dấu
+                                // `claude` in trước mỗi câu của nó) và cũng
+                                // không có hộp chọn — bù mọi lượt là chép lại
+                                // thứ đã nằm ngay trên màn, đúng cái vừa gỡ đi
+                                // hai lần hôm nay.
+                                let screen_has_prose =
+                                    out.contains('\u{23fa}') || !shot_choices.is_empty();
+                                if !screen_has_prose {
+                                    if let Some(said) = crate::sessions::last_say_by_id(
+                                        cfg,
+                                        &shot_sid,
+                                        crate::sessions::SAY_MAX,
+                                    ) {
+                                        let said = said.trim();
+                                        if !said.is_empty() {
+                                            out.push_str(&format!(
+                                                "\n\n🗣 Màn đang là đầu ra của một lệnh, không có lời nào của phiên. \
+                                                 Lời cuối nó nói (lấy từ nhật ký):\n{}",
+                                                crate::exec::truncate(said, 600)
+                                            ));
+                                        }
+                                    }
+                                }
                                 // Câu ĐANG HIỆN đã có ☑ ngay tại dòng của nó,
                                 // nên khu chữ ở cuối chỉ còn việc với các câu
                                 // SAU — và với dòng `/send_…`.
@@ -6677,7 +6712,65 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // CHỐT một lựa chọn. Đường an toàn khi biết có hộp
                             // chọn vẫn là `/key <số>`, và tin báo "dừng lại
                             // HỎI" vẫn hiện đủ lựa chọn để bấm.
-                            let refusal = if is_key && arrow {
+                            // 🔴 BẤM SỐ THÌ PHẢI CÓ HỘP CHỌN ĐỂ MÀ BẤM — Hà
+                            // 2026-08-17: *"Bấm nhiều lần 1 lựa chọn"*, kèm ảnh
+                            // bốn cú bấm `1` vào `[onghut]`: hai cú đầu hub đáp
+                            // *"✓ đã bấm '1'"*, hai cú sau *"màn KHÔNG đổi"*.
+                            //
+                            // Nhật ký 12:06–12:07 cho thấy phím tới đúng cửa sổ
+                            // (2214), mà `/shot` cùng lúc ra **mã nguồn**: bảng
+                            // trong tin là bảng CŨ, phiên đã đi tiếp từ lâu. Số
+                            // ấy rơi vào ô nhập, và vì `do script` luôn kèm một
+                            // CR, nó KHÔNG nằm yên ở đó — nó đi làm một lượt
+                            // chat "1" trong phiên của chủ máy. Một cú bấm vào
+                            // cái bảng đã chết mà đẻ ra một lượt rác thì tệ hơn
+                            // hẳn một cú bấm không làm gì.
+                            //
+                            // Nên: nhìn màn TRƯỚC, và chỉ gửi con số khi màn
+                            // đang thật sự có hộp chọn. Không đọc được màn thì
+                            // cũng KHÔNG gửi — cùng luật với `arrow_verdict`,
+                            // vì "không đọc được" không phải "không có hộp".
+                            let digit = is_key
+                                && typed.trim().len() == 1
+                                && typed.trim().chars().all(|c| c.is_ascii_digit());
+                            let refusal = if digit {
+                                match crate::keys::look(&s.tty, 24) {
+                                    crate::keys::Look::Saw { body, .. }
+                                        if !crate::keys::parse_choices(&body).is_empty() =>
+                                    {
+                                        None
+                                    }
+                                    crate::keys::Look::Saw { .. } => {
+                                        logging::info(
+                                            "keys_choice_refused",
+                                            json!({ "session": s.session_id, "key": typed.trim(),
+                                                    "why": "màn không có hộp chọn — bảng trong tin đã cũ" }),
+                                        );
+                                        Some(format!(
+                                            "⚠ {} lúc này KHÔNG có hộp chọn nào trên màn, nên tôi không gửi số \
+                                             '{}' — bảng trong tin là bảng cũ, phiên đã đi tiếp. Gửi số vào đó \
+                                             là đẻ ra một lượt chat rác trong phiên. /shot để nhìn màn hiện tại.",
+                                            crate::sessions::shown(&s),
+                                            typed.trim()
+                                        ))
+                                    }
+                                    crate::keys::Look::Blind { why } => {
+                                        logging::warn(
+                                            "keys_choice_refused",
+                                            json!({ "session": s.session_id, "key": typed.trim(),
+                                                    "why": "blind", "detail": why }),
+                                        );
+                                        Some(format!(
+                                            "⚠ Lúc này tôi KHÔNG đọc được màn của {} ({}), nên KHÔNG gửi số '{}'. \
+                                             Không đọc được không có nghĩa là đang có hộp chọn — mà nếu không có \
+                                             thì con số ấy đi làm một lượt chat trong phiên.",
+                                            crate::sessions::shown(&s),
+                                            why,
+                                            typed.trim()
+                                        ))
+                                    }
+                                }
+                            } else if is_key && arrow {
                                 match crate::keys::arrow_verdict(&crate::keys::look(&s.tty, 24)) {
                                     crate::keys::Arrow::Send => None,
                                     crate::keys::Arrow::RefuseDialog => {
@@ -7439,7 +7532,43 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                     lines.join("\n")
                                                 )
                                             } else {
-                                                format!("✓ đã bấm '{}' · {name}", typed.trim())
+                                                // 🔴 "Đã bấm" chỉ khai rằng phím
+                                                // rời khỏi hub. Với hộp chọn MỘT
+                                                // thì KẾT QUẢ đo được là: bảng
+                                                // còn hay đã đóng.
+                                                //
+                                                // Hà 2026-08-17 bấm `1` bốn lượt
+                                                // vào một bảng đã cũ; hai lượt
+                                                // đầu hub đáp `✓ đã bấm '1'` —
+                                                // xanh, vì phép đo cũ chỉ hỏi
+                                                // "màn có đổi gì không", mà một
+                                                // phiên đang chạy thì màn luôn
+                                                // đổi (đồng hồ, con quay).
+                                                let n_before = before
+                                                    .as_deref()
+                                                    .map(|b| crate::keys::parse_choices(b).len())
+                                                    .unwrap_or(0);
+                                                let n_after = view
+                                                    .as_ref()
+                                                    .map(|(b, _)| {
+                                                        crate::keys::parse_choices(b).len()
+                                                    })
+                                                    .unwrap_or(0);
+                                                match (n_before, n_after) {
+                                                    (b, 0) if b > 0 => format!(
+                                                        "✓ đã chọn '{}' — bảng đã đóng · {name}",
+                                                        typed.trim()
+                                                    ),
+                                                    (b, a) if b > 0 && a == b => format!(
+                                                        "⚠ đã gửi '{}' mà bảng vẫn còn nguyên {b} lựa chọn · {name}\n\
+                                                         Hộp này có thể không nhận phím số — /shot để nhìn.",
+                                                        typed.trim()
+                                                    ),
+                                                    _ => format!(
+                                                        "✓ đã bấm '{}' · {name}",
+                                                        typed.trim()
+                                                    ),
+                                                }
                                             }
                                         }
                                     } else if what == Some(crate::keys::Landed::Queued) {

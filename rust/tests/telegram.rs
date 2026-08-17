@@ -1831,11 +1831,21 @@ fn every_option_becomes_a_tappable_command_next_to_its_question() {
             multi: true,
         }],
     };
-    let txt = hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a);
+    let txt = hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, false);
     // Tham số nằm trong TÊN lệnh: chạm chỉ gửi lại token, chữ sau dấu cách rơi.
     assert!(txt.contains("/pick_4963b95c_1_1 Từ chối"), "{txt}");
     assert!(txt.contains("/pick_4963b95c_1_2 Vẫn lưu"), "{txt}");
     assert!(txt.contains("/pick_4963b95c_2_1 Không phân biệt"), "{txt}");
+
+    // 🔴 …VÀ khi câu đang hiện đã có ☑ ngay tại dòng của nó trên màn thì đừng
+    // liệt kê lại nó ở cuối (Hà 2026-08-17: *"Sao không chèn trực tiếp vào văn
+    // bản lại đi chèn thêm xuống cuối"*). Các câu SAU thì vẫn phải có: chúng
+    // chưa hiện trên màn nên không có dòng nào để neo.
+    let skipped =
+        hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, true);
+    assert!(!skipped.contains("/pick_4963b95c_1_1"), "{skipped}");
+    assert!(skipped.contains("/pick_4963b95c_2_1"), "{skipped}");
+    assert!(skipped.contains("/send_4963b95c"), "{skipped}");
     // Tên lệnh phải lọt trần 32 ký tự của Telegram.
     for tok in txt.split_whitespace().filter(|w| w.starts_with("/pick_")) {
         assert!(tok.len() <= 32, "tên lệnh quá dài: {tok} ({})", tok.len());

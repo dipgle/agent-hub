@@ -16,7 +16,13 @@ fn every_option_line_carries_its_own_tick() {
 
     let data = hub::pipeline::SessionData {
         sid: "f168de42-5cfb-44cb-a97e-1861cbe0b49c".to_string(),
-        choices: choices.clone(),
+        // `parse_choices` trả `(số, nhãn)`; `SessionData` mang MÃ dạng chuỗi
+        // (`"3"` cho hộp một câu, `"1.3"` cho bảng nhiều câu) — xem
+        // `pipeline::session_layout`.
+        choices: choices
+            .iter()
+            .map(|(n, l)| (n.to_string(), l.clone()))
+            .collect(),
         ..Default::default()
     };
     let tg = hub::telegram::Inbox::start(&cfg, None).expect("có bot token");

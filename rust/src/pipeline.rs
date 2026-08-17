@@ -905,10 +905,20 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 let data = SessionData {
                     sid: id.clone(),
                     cmds: crate::sessions::lines_of(&cmds),
+                    // Bảng nhiều câu ⟹ mã `"1.<n>"` (câu 1) để ☑ đi bằng
+                    // `pick_`; hộp một câu ⟹ mã `"<n>"`, đi bằng `k_`.
                     choices: opts
                         .iter()
                         .enumerate()
-                        .map(|(i, l)| (i + 1, l.clone()))
+                        .map(|(i, l)| {
+                            let n = i + 1;
+                            let code = if rest.is_empty() {
+                                n.to_string()
+                            } else {
+                                format!("1.{n}")
+                            };
+                            (code, l.clone())
+                        })
                         .collect(),
                     ..Default::default()
                 };
@@ -3808,7 +3818,9 @@ pub struct SessionData {
     /// Dòng lệnh phiên nhắc tới → ▶️ chạy.
     pub cmds: Vec<String>,
     /// Lựa chọn đang hiện trên màn → ☑ bấm chọn, NGAY TẠI dòng của nó.
-    pub choices: Vec<(usize, String)>,
+    /// `(mã lựa chọn, nhãn)` — mã là `"3"` cho hộp một câu, `"1.3"` cho bảng
+    /// nhiều câu (câu 1, lựa chọn 3). Xem `session_layout`.
+    pub choices: Vec<(String, String)>,
     /// Chữ đang nằm trong ô nhập → ⏎ gửi · ⌫ xoá.
     pub box_text: Option<String>,
     /// Tệp phiên nhắc tới → 📎 tải về, NGAY TẠI tên tệp trong chữ.
@@ -3876,7 +3888,7 @@ pub fn say_from_session_with(
     sid: &str,
     text: &str,
     extra: &[(String, String)],
-    choices: &[(usize, String)],
+    choices: &[(String, String)],
     log_key: &str,
 ) {
     let cmds = cmds_of_text(cfg, sid, text);
@@ -3973,7 +3985,7 @@ pub fn screen_tail(
     cfg: &Config,
     sid: &str,
     lines: usize,
-) -> Option<(String, Vec<(usize, String)>)> {
+) -> Option<(String, Vec<(String, String)>)> {
     let live = crate::sessions::snapshot(cfg);
     let s = live
         .sessions
@@ -3982,7 +3994,14 @@ pub fn screen_tail(
     if !crate::sessions::is_real_tty(&s.tty) {
         return None;
     }
-    crate::keys::screen_of(&s.tty, lines)
+    let (body, choices) = crate::keys::screen_of(&s.tty, lines)?;
+    // Hộp trên màn lúc này là hộp MỘT CÂU đang mở, nên mã đi bằng `k_` — bảng
+    // nhiều câu có đường riêng (`pick_`) và nó được dựng ở chỗ biết số câu.
+    let choices = choices
+        .into_iter()
+        .map(|(n, l)| (n.to_string(), l))
+        .collect();
+    Some((body, choices))
 }
 
 /// 🔴 CHỈ những lệnh CÓ MẶT trong chính câu này — cửa định dạng không thêm nội
@@ -4282,7 +4301,17 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     if key_sid.is_some() {
         let short = data.short();
         for (n, label) in &data.choices {
-            if let Some(href) = crate::telegram::deep_link(&format!("k_{short}_{n}")) {
+            // 🔴 BẢNG NHIỀU CÂU đi bằng `pick_`, hộp một câu đi bằng `k_`. Cùng
+            // một dòng lựa chọn trên màn, hai đường gửi khác nhau — xem
+            // `CLAUDE.md §7` (`/key <số>` là ngõ cụt với bảng nhiều câu).
+            //
+            // Chỗ gọi khai `n` là "số lựa chọn" hay "câu.lựa chọn" bằng chính
+            // hình dạng chuỗi: có dấu chấm ⟹ bảng nhiều câu.
+            let payload = match n.split_once('.') {
+                Some((q, o)) => format!("pick_{short}_{q}_{o}"),
+                None => format!("k_{short}_{n}"),
+            };
+            if let Some(href) = crate::telegram::deep_link(&payload) {
                 // TAB ở đầu nhãn = chèn TRƯỚC dòng, tức trước `1.` (Hà 17/08:
                 // *"Chèn phía trước số mỗi dòng"*) — xem `html_with_links`.
                 anchors.push((label.clone(), vec![(href, "\t☑".to_string())]));
@@ -4464,7 +4493,22 @@ pub fn split_for_telegram(text: &str) -> Vec<String> {
 ///
 /// Tham số nằm trong TÊN lệnh vì chạm chỉ gửi lại token lệnh — chữ sau dấu cách
 /// rơi mất. `pick_<8 ký tự đầu id>_<câu>_<lựa chọn>` = 17 ký tự, dưới trần 32.
-pub fn ask_command_lines(session_id: &str, a: &crate::sessions::Asking) -> String {
+/// `skip_current` = câu ĐANG HIỆN trên màn đã có ☑ ngay tại dòng của nó, nên
+/// đừng liệt kê lại nó ở cuối tin.
+///
+/// 🔴 Hà 2026-08-17, ảnh một `/shot` có đủ bốn lựa chọn trên màn RỒI lại thêm
+/// bốn dòng `/pick_…` ở cuối: *"Sao không chèn trực tiếp vào văn bản lại đi chèn
+/// thêm xuống cuối"*. Khu chữ ấy ra đời khi chưa có cách chèn vào giữa dòng; nay
+/// có rồi thì nó thành bản sao thứ hai của cùng một danh sách, dài gấp đôi và
+/// bắt mắt đọc hai lần.
+///
+/// Cái nó CÒN việc để làm: các câu SAU của một bảng nhiều câu — chúng chưa hiện
+/// trên màn nên không có dòng nào để neo — và dòng `/send_…`.
+pub fn ask_command_lines(
+    session_id: &str,
+    a: &crate::sessions::Asking,
+    skip_current: bool,
+) -> String {
     let sid: String = session_id.chars().take(8).collect();
     if sid.is_empty() {
         return String::new();
@@ -4485,7 +4529,7 @@ pub fn ask_command_lines(session_id: &str, a: &crate::sessions::Asking) -> Strin
         )
     }));
     for (qi, (header, question, options, multi)) in all.enumerate() {
-        if options.is_empty() {
+        if options.is_empty() || (skip_current && qi == 0) {
             continue;
         }
         let head = if header.is_empty() {
@@ -6153,7 +6197,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Hộp chọn đọc từ MÀN GỐC, giữ lại để dựng nút. Đo ở đây, dùng
                 // ở dưới — chứ KHÔNG đo lại trên `ack`: `ack` có chữ của chính
                 // hub, và chính chỗ ấy đã làm hỏng phép đo (xem `ScreenReport`).
-                let mut shot_choices: Vec<(usize, String)> = Vec::new();
+                let mut shot_choices: Vec<(String, String)> = Vec::new();
                 let ack = match target {
                     None if want.is_empty() => {
                         "⚠ chưa mở phiên nào. Chạm một phiên rồi gõ.".to_string()
@@ -6185,12 +6229,31 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     .parse::<usize>()
                                     .unwrap_or(SHOT_LINES);
                                 let rep = screen_report(&s, w, n);
-                                shot_choices = rep.choices;
+                                // 🔴 ☑ CHÈN THẲNG VÀO DÒNG LỰA CHỌN — Hà
+                                // 2026-08-17: *"Sao không chèn trực tiếp vào văn
+                                // bản lại đi chèn thêm xuống cuối"*.
+                                //
+                                // Bảng nhiều câu thì mã mang cả số câu (`1.<n>`)
+                                // để ☑ đi bằng `pick_`; hộp một câu đi bằng
+                                // `k_`. Chỉ CÂU ĐANG HIỆN mới chèn được — các
+                                // câu sau chưa có mặt trên màn, nên chúng vẫn
+                                // cần khu chữ ở cuối (xem `ask_command_lines`).
+                                let table = shot_asking.as_ref().is_some_and(|a| !a.rest.is_empty());
+                                shot_choices = rep
+                                    .choices
+                                    .into_iter()
+                                    .map(|(n, l)| {
+                                        let code =
+                                            if table { format!("1.{n}") } else { n.to_string() };
+                                        (code, l)
+                                    })
+                                    .collect();
                                 let mut out = rep.text;
-                                // Phiên đang mở bảng hỏi ⟹ viết luôn từng lựa
-                                // chọn thành lệnh chạm-được, ngay dưới màn.
+                                // Câu ĐANG HIỆN đã có ☑ ngay tại dòng của nó,
+                                // nên khu chữ ở cuối chỉ còn việc với các câu
+                                // SAU — và với dòng `/send_…`.
                                 if let Some(a) = shot_asking.as_ref() {
-                                    out.push_str(&ask_command_lines(&shot_sid, a));
+                                    out.push_str(&ask_command_lines(&shot_sid, a, true));
                                 }
                                 out
                             } else if matches!(cmd.kind, CommandKind::Pick) {

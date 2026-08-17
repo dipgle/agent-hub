@@ -163,9 +163,11 @@ fn a_choice_gets_its_tick_before_the_number() {
         text,
         &SessionData {
             sid: "abc12345".to_string(),
+            // Mã `"1"`/`"2"` = hộp MỘT câu (đi bằng `k_`). Bảng nhiều câu mang
+            // mã `"1.2"` và đi bằng `pick_` — xem `session_layout`.
             choices: vec![
-                (1, "Không xoá gì".to_string()),
-                (2, "Rác build".to_string()),
+                ("1".to_string(), "Không xoá gì".to_string()),
+                ("2".to_string(), "Rác build".to_string()),
             ],
             ..Default::default()
         },

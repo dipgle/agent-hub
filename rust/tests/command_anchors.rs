@@ -152,7 +152,7 @@ fn typed_box_text_is_never_boxed() {
 fn session_data_still_renders() {
     let data = SessionData {
         sid: "f168de42".into(),
-        choices: vec![(1, "Set it up".into())],
+        choices: vec![("1".to_string(), "Set it up".into())],
         ..Default::default()
     };
     let html = hub::pipeline::render_session_data("❯ 1. Set it up\n  2. Not now", &data);

@@ -158,7 +158,7 @@ fn the_send_command_carries_its_id_inside_the_name() {
             multi: false,
         }],
     };
-    let txt = hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a);
+    let txt = hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, false);
     assert!(
         txt.contains("/send_4963b95c"),
         "phải là lệnh chạm được: {txt}"

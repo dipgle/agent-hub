@@ -1829,6 +1829,42 @@ fn unwrap_terminal_wrap(span: &str) -> Option<String> {
 /// Nhận diện bằng HÌNH DẠNG (`❯` hoặc `N.` đứng đầu dòng), không bằng cách
 /// đoán nội dung: câu hỏi là chữ của người khác viết, hình dạng mới là thứ
 /// `claude` bảo đảm.
+/// Chuỗi phím đưa con trỏ tới dòng **Submit** rồi Enter — cho hộp CHỌN NHIỀU.
+///
+/// 🔴 Hà 2026-08-17, sau khi bấm đủ bốn lựa chọn rồi `/send_…`: *"Ko qua nổi màn
+/// này"*. Đúng, và một dấu Enter trần không bao giờ qua được: trong hộp chọn
+/// nhiều, Enter tác động lên DÒNG CON TRỎ ĐANG ĐỨNG — tức bật/tắt đúng cái ô
+/// vừa chọn — còn thứ gửi bảng đi là một dòng riêng tên `Submit`, không mang số
+/// nên không bấm số tới được.
+///
+/// Ba cửa, và cả ba đều đo trên chính màn ấy chứ không đoán:
+/// · dòng chân phải NÓI `↑/↓ to navigate` — chính TUI khai rằng mũi tên chỉ di
+///   chuyển, nên ở đây nó không phạm luật "mũi tên vừa move vừa confirm";
+/// · phải thấy dòng `Submit`;
+/// · phải thấy con trỏ `❯` để biết đang đứng đâu.
+/// Thiếu một cái ⟹ `None`, và chỗ gọi rơi về Enter trần như cũ.
+pub fn submit_keys(screen: &str) -> Option<Vec<String>> {
+    if !screen.contains("to navigate") {
+        return None;
+    }
+    let lines: Vec<&str> = screen.lines().collect();
+    let cursor = lines
+        .iter()
+        .position(|l| l.trim_start().starts_with('\u{276f}'))?;
+    let submit = lines.iter().position(|l| {
+        let t = l.trim();
+        t == "Submit"
+            || t.ends_with(" Submit")
+            || t.trim_start_matches('\u{276f}').trim() == "Submit"
+    })?;
+    let delta = submit as isize - cursor as isize;
+    let key = if delta > 0 { "down" } else { "up" };
+    let mut keys: Vec<String> =
+        std::iter::repeat_n(key.to_string(), delta.unsigned_abs()).collect();
+    keys.push("enter".to_string());
+    Some(keys)
+}
+
 pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
     let mut out: Vec<(usize, String, usize)> = Vec::new();
     for (idx, line) in screen.lines().enumerate() {

@@ -4709,10 +4709,12 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
     // ĐỌC LẠI, và chờ vì TUI vẽ sau. Ba nhịp ngắn thay vì một nhịp dài: nếu nó
     // vẽ nhanh thì trả lời nhanh, còn máy đang swap thì vẫn kịp thấy.
     let mut after = None;
+    let mut seen_body = String::new();
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(900));
         if let crate::keys::Look::Saw { body, .. } = crate::keys::look(&s.tty, PICK_LINES) {
             let t = crate::keys::ask_table(&body);
+            seen_body = body;
             if t.as_ref().map(|t| t.left()) != before {
                 after = t;
                 break;
@@ -4720,6 +4722,20 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
             after = t;
         }
     }
+    // 🔴 HỘP CHỌN MỘT CÂU KHÔNG PHẢI MỘT BẢNG — Hà 2026-08-17, ảnh bốn cú
+    // `/pick` liên tiếp trên `[dwork]`, mỗi cú trả lời *"Bảng không còn trên màn
+    // — nhiều khả năng nó vừa được gửi đi"* trong khi bảng vẫn nằm nguyên đó:
+    // *"Ko qua nổi màn này"*.
+    //
+    // `ask_table` đọc THANH TAB của bảng NHIỀU CÂU (`←  ☒ …  ✔ Submit  →`). Một
+    // hộp CHỌN NHIỀU chỉ có một câu thì không có thanh ấy, nên nó trả `None` —
+    // và cả hai đầu `before`/`after` cùng `None` rơi thẳng vào nhánh cuối, thứ
+    // đọc `None` thành "bảng biến mất". Một phép đo trả lời câu hỏi KHÁC với
+    // câu đang hỏi, và nó sai theo hướng tệ nhất: bảo người ta rằng việc đã
+    // xong trong khi họ còn phải bấm tiếp.
+    //
+    // Hỏi thẳng thứ đang cần biết: màn CÒN hộp chọn không.
+    let still_choosing = !crate::keys::parse_choices(&seen_body).is_empty();
     let label = asking
         .rest
         .get(q.saturating_sub(2))
@@ -4767,6 +4783,12 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
         {
             format!("✅ {name} · câu {q} ({label}) → chọn {opt}. Bảng ĐÃ GỬI ĐI — phiên đang chạy tiếp.")
         }
+        // Không có THANH TAB nhưng màn vẫn còn hộp chọn ⟹ hộp một câu (thường
+        // là CHỌN NHIỀU): bấm được tiếp, và phải nói ra đường gửi.
+        _ if still_choosing => format!(
+            "✅ {name} → chọn {opt}. Hộp vẫn mở: bấm thêm lựa chọn, xong thì /send_{sid} để gửi.",
+            sid = s.session_id.chars().take(8).collect::<String>()
+        ),
         _ => format!(
             "✅ {name} · câu {q} ({label}) → chọn {opt}. Bảng không còn trên màn — nhiều khả năng \
              nó vừa được gửi đi. `/shot` để nhìn."
@@ -6286,6 +6308,31 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             );
                                         }
                                     })
+                                } else if typed.trim() == "enter" {
+                                    // 🔴 ENTER TRẦN KHÔNG GỬI ĐƯỢC HỘP CHỌN
+                                    // NHIỀU — Hà 2026-08-17, sau khi bấm đủ bốn
+                                    // lựa chọn rồi `/send_…`: *"Ko qua nổi màn
+                                    // này"*.
+                                    //
+                                    // Trong hộp ấy, Enter tác động lên DÒNG CON
+                                    // TRỎ ĐANG ĐỨNG (bật/tắt đúng ô vừa chọn),
+                                    // còn thứ gửi bảng đi là một dòng riêng tên
+                                    // `Submit` — không mang số nên bấm số không
+                                    // tới được. Nên `/send` phải ĐI TỚI đó rồi
+                                    // mới Enter; xem `keys::submit_keys`, và cả
+                                    // ba cửa của nó đo trên chính màn ấy.
+                                    match before.as_deref().and_then(crate::keys::submit_keys) {
+                                        Some(seq) => {
+                                            logging::info(
+                                                "keys_submit_seq",
+                                                json!({ "session": s.session_id, "keys": seq }),
+                                            );
+                                            let refs: Vec<&str> =
+                                                seq.iter().map(String::as_str).collect();
+                                            crate::keys::press_seq(w, &refs)
+                                        }
+                                        None => crate::keys::press(w, "enter"),
+                                    }
                                 } else {
                                     crate::keys::press(w, typed.trim())
                                 }

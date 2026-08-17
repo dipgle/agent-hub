@@ -2346,6 +2346,37 @@ pub fn full_report(db: &Db, n: usize) -> Option<(String, String, String)> {
 /// Đường dẫn file hub vừa nhắc tới trên màn — để nút `file:<n>` tìm lại được.
 pub const FILES_KEY: &str = "quick:files";
 
+/// Tin đang mang BẢNG lựa chọn của mỗi phiên — để cú bấm sau sửa đúng nó.
+pub const PANEL_KEY: &str = "panel:msg";
+
+/// `message_id` của bảng đang mở cho phiên ấy, nếu có.
+pub fn panel_id(db: &Db, sid: &str) -> Option<i64> {
+    let v = db.cursor_or_log(PANEL_KEY)?;
+    let map: std::collections::BTreeMap<String, i64> = serde_json::from_str(&v).ok()?;
+    map.get(sid).copied()
+}
+
+/// Ghi lại tin vừa mang bảng. `None` ⟹ xoá, vì lần sau không có gì để sửa.
+fn remember_panel(db: &Db, sid: &str, message_id: Option<i64>) {
+    let mut map: std::collections::BTreeMap<String, i64> = db
+        .cursor_or_log(PANEL_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    match message_id {
+        Some(id) => {
+            map.insert(sid.to_string(), id);
+        }
+        None => {
+            map.remove(sid);
+        }
+    }
+    if let Ok(v) = serde_json::to_string(&map) {
+        if let Err(e) = db.set_cursor(PANEL_KEY, &v) {
+            logging::error("panel_not_saved", json!({ "err": e.to_string() }));
+        }
+    }
+}
+
 /// Điểm dùng của từng loại lệnh, để xếp menu ☰ — xem [`menu_reorder_if_needed`].
 pub const MENU_KEY: &str = "menu:usage";
 /// Thứ tự menu đã khai với Telegram lần gần nhất (để biết khi nào phải khai lại).
@@ -4400,6 +4431,28 @@ pub fn say_session_data(
     log_key: &str,
     data: &SessionData,
 ) {
+    let _ = say_session_data_at(tg, text, buttons, log_key, data, None);
+}
+
+/// Như trên, nhưng SỬA một tin đã có (`edit`) thay vì gửi tin mới — và trả về
+/// `message_id` của tin mang bảng, để lần bấm sau sửa đúng nó.
+///
+/// 🔴 Hà 2026-08-17: *"Khi bấm ở phản hồi nên sửa tin tại phản hồi đó luôn không
+/// cần gửi 1 tin mới"*. Một hộp năm ô là năm cú bấm; mỗi cú một tin thì buồng
+/// chat có năm bảng gần giống hệt nhau và bảng ĐÚNG là cái cuối — người đọc phải
+/// cuộn để biết mình đang nhìn trạng thái nào.
+///
+/// Sửa được thì trả lại chính `message_id` ấy. Sửa hỏng (tin quá cũ, Telegram
+/// từ chối) ⟹ NÓI ra trong log rồi gửi tin mới: mất chỗ sửa còn hơn mất câu trả
+/// lời.
+pub fn say_session_data_at(
+    tg: &crate::telegram::Inbox,
+    text: &str,
+    buttons: &[(String, String)],
+    log_key: &str,
+    data: &SessionData,
+    edit: Option<i64>,
+) -> Option<i64> {
     // 🔴 MỘT KIỂU THÔI — Hà 2026-08-16: *"tại sao hub chèn lệnh này mà ở các
     // phiên khác lại chèn kiểu button? sao không dùng giống link này?"*
     //
@@ -4456,7 +4509,7 @@ pub fn say_session_data(
                 logging::error(log_key, json!({ "err": e, "slice": n }));
             }
         }
-        return;
+        return None;
     }
 
     // MỘT tin — trừ khi dài quá trần Telegram, và lúc ấy cắt theo DÒNG nên
@@ -4464,16 +4517,32 @@ pub fn say_session_data(
     // Bàn phím đi cùng tin CUỐI, trong cùng một lời gọi.
     let mut chunks = split_for_telegram(&html);
     let tail = chunks.pop().unwrap_or_default();
+    let chunks_len = chunks.len();
     for (k, head) in chunks.into_iter().enumerate() {
         if let Err(e) = tg.send_html(&head) {
             logging::error(log_key, json!({ "err": e, "chunk": k }));
         }
     }
-    if let Err(e) = tg.send_html_buttons(&tail, &row) {
-        logging::error(
-            log_key,
-            json!({ "err": e, "chunk": "tail", "linked": linked }),
-        );
+    // Sửa tại chỗ khi chỗ gọi biết tin nào đang mang bảng — chỉ làm được với tin
+    // MỘT MẨU: bảng bị cắt đôi thì sửa mẩu cuối để lại mẩu đầu nói chuyện cũ.
+    if let (Some(mid), true) = (edit, chunks_len == 0) {
+        match tg.edit_html(mid, &tail, &row) {
+            Ok(()) => return Some(mid),
+            Err(e) => logging::info(
+                "telegram_edit_fell_back_to_new",
+                json!({ "message_id": mid, "why": e }),
+            ),
+        }
+    }
+    match tg.send_html_report(&tail, &row) {
+        Ok(sent) => Some(sent.message_id),
+        Err(e) => {
+            logging::error(
+                log_key,
+                json!({ "err": e, "chunk": "tail", "linked": linked }),
+            );
+            None
+        }
     }
 }
 
@@ -7372,7 +7441,32 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 .cloned()
                                 .collect()
                         };
-                        say_session_data(tg, &ack, &quick, "quick_buttons_failed", &data);
+                        // 🔴 SỬA TẠI CHỖ khi đây là một BẢNG của cùng phiên —
+                        // Hà 2026-08-17: *"Khi bấm ở phản hồi nên sửa tin tại
+                        // phản hồi đó luôn không cần gửi 1 tin mới"*.
+                        //
+                        // Chỉ áp cho bảng lựa chọn: nó là thứ người ta bấm
+                        // nhiều lần liên tiếp, và mỗi lần một tin thì buồng
+                        // chat đầy những bản gần giống nhau mà bản đúng là cái
+                        // cuối. Còn `/shot` là ẢNH của một thời điểm — sửa đè
+                        // lên ảnh cũ là xoá mất thứ chủ máy có thể đang đối
+                        // chiếu, nên nó vẫn gửi tin mới.
+                        let panel = if data.choices.is_empty() {
+                            None
+                        } else {
+                            panel_id(db, &shot_sid)
+                        };
+                        let sent = say_session_data_at(
+                            tg,
+                            &ack,
+                            &quick,
+                            "quick_buttons_failed",
+                            &data,
+                            panel.filter(|_| matches!(cmd.kind, CommandKind::Key)),
+                        );
+                        if !data.choices.is_empty() {
+                            remember_panel(db, &shot_sid, sent);
+                        }
                     }
                     _ => reply_in_channel(db, cfg, adapter, cmd, &ack),
                 }

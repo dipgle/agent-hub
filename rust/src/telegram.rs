@@ -2295,6 +2295,54 @@ impl Inbox {
         }
     }
 
+    /// SỬA một tin đã gửi, tại chỗ — không đẻ tin mới.
+    ///
+    /// 🔴 Hà 2026-08-17: *"Khi bấm ở phản hồi nên sửa tin tại phản hồi đó luôn
+    /// không cần gửi 1 tin mới"*. Một hộp chọn năm ô là năm cú bấm; mỗi cú một
+    /// tin thì buồng chat có năm bảng gần giống hệt nhau, và bảng ĐÚNG là cái
+    /// cuối — người đọc phải cuộn để biết mình đang nhìn trạng thái nào.
+    ///
+    /// Telegram từ chối `editMessageText` khi nội dung **không đổi một ký tự**
+    /// (*"message is not modified"*) — đó không phải lỗi, mà là câu trả lời
+    /// đúng cho một cú bấm không đổi gì; chỗ gọi đọc nó như vậy.
+    pub fn edit_html(
+        &self,
+        message_id: i64,
+        html: &str,
+        buttons: &[(String, String)],
+    ) -> Result<(), String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let mut body = json!({
+            "chat_id": self.chat_id,
+            "message_id": message_id,
+            "text": html,
+            "parse_mode": "HTML",
+            "link_preview_options": { "is_disabled": true },
+        });
+        if !buttons.is_empty() {
+            body["reply_markup"] = json!({ "inline_keyboard": Self::keyboard_rows(buttons) });
+        }
+        let r = client
+            .post(self.api("editMessageText"))
+            .json(&body)
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            logging::info(
+                "telegram_message_edited",
+                json!({ "message_id": message_id, "chars": html.chars().count() }),
+            );
+            Ok(())
+        } else {
+            Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối editMessageText")
+                .to_string())
+        }
+    }
+
     /// Thả MỘT emoji lên chính tin của chủ máy, thay cho một câu trả lời.
     ///
     /// 🔴 Hà 2026-08-14: *"Có thể đổi cách phản hồi tin đã gửi bằng 1 emoji

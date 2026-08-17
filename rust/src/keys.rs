@@ -1008,7 +1008,7 @@ end tell"#
 /// Hộp chọn của `claude` đi bằng mũi tên + Enter, và gửi chữ "xuống" vào đó thì
 /// nó gõ ra chữ chứ không di chuyển.
 pub fn press(window: i64, keyname: &str) -> Result<()> {
-    press_seq(window, std::slice::from_ref(&keyname))
+    press_writes(window, &[vec![keyname.to_string()]])
 }
 
 /// Chữ này có phải TÊN MỘT PHÍM không — hỏi chính bảng phím, không chép lại.
@@ -1064,44 +1064,64 @@ fn key_payload(keyname: &str) -> Result<String> {
     })
 }
 
-/// Nhiều phím trong MỘT lời gọi `do script` — cả dãy đi vào tab như một lần gõ.
+/// Nhịp nghỉ giữa hai LƯỢT GHI.
 ///
-/// Vì sao phải có, thay vì gọi [`press`] nhiều lần: mỗi `do script` **tự kèm
-/// một dấu xuống dòng** và không tắt được (xem `do_script`). Nên gọi ba lần là
-/// ba dấu Enter chen vào giữa dãy phím — trên một bảng hỏi, mỗi Enter thừa là
-/// một lần CHỐT hộ chủ máy. Gộp lại thì cả dãy chỉ còn đúng một dấu ở cuối, tức
-/// số Enter đếm được và nằm ở chỗ mình chọn.
-///
-/// Hàm này KHÔNG tự quyết được dãy phím ấy có an toàn hay không — chỗ gọi phải
-/// tự chịu trách nhiệm, cùng luật với `arrow_verdict`.
-/// Nhịp nghỉ giữa hai phím trong một dãy.
-///
-/// Đủ để TUI vẽ xong bước trước (đo trên máy: một bước điều hướng của `claude`
-/// mất chừng 30–60 ms), và đủ ngắn để bốn lựa chọn không thành một lượt chờ dài.
+/// Đủ để TUI vẽ xong lượt trước (đo trên máy: một bước điều hướng của `claude`
+/// mất chừng 30–60 ms), và đủ ngắn để ba lượt không thành một lượt chờ dài.
 const SEQ_GAP_MS: u64 = 120;
 
-pub fn press_seq(window: i64, keys: &[&str]) -> Result<()> {
-    if keys.is_empty() {
-        return Err(anyhow!("không có phím nào để gửi"));
+/// Gửi từng LƯỢT GHI một — mỗi lượt là đúng một `do script`.
+///
+/// 🔴 ĐƠN VỊ Ở ĐÂY LÀ **LƯỢT GHI, KHÔNG PHẢI PHÍM**, và đó là cả bài học của
+/// 2026-08-17. Terminal kèm một **CR** vào cuối MỌI `do script`, không tắt được
+/// (xem `do_script`) — nên "mỗi phím một lượt ghi" nghĩa là **mỗi phím kéo theo
+/// một cú Enter**, và trên hộp chọn nhiều, Enter là một cú BẬT/TẮT.
+///
+/// Hà đọc ra hậu quả trước khi tôi đọc ra nó trong mã: *"Bấm cái nọ mất cái kia
+/// ảo lắm"*. Nhật ký 12:39–12:40 khớp từng cú, không phải cảm giác: bấm mục 1 ⟹
+/// mục 2 mất dấu; bấm mục 2 ⟹ mục 1 mất dấu; bấm mục 3 ⟹ mục 2 mất dấu. Cùng
+/// một hình dạng cả ba lần — cái ô bị mất luôn là ô con trỏ **vừa rời khỏi**.
+///
+/// Đo lại trên hộp thật (cửa sổ nháp riêng, 3 vòng, 18 lượt ghi, cùng ngày):
+/// · một lượt ghi = **đúng một** cú bật/tắt, rơi vào **dòng con trỏ ĐANG ĐỨNG**;
+/// · payload có mũi tên thì lượt ấy **vừa bật/tắt dòng đang đứng, vừa dời đi** —
+///   `↓` đứng ở mục 1 ⟹ mục 1 đổi dấu, con trỏ sang mục 2;
+/// · k mũi tên trong CÙNG một lượt ghi dời đủ k bước (3 `↓`: mục 1 → mục 4) mà
+///   vẫn chỉ một cú bật/tắt — nên đi xa không đắt hơn đi gần;
+/// · hai CR trong cùng một lượt ghi chỉ ra MỘT cú bật/tắt (chúng gộp làm một);
+/// · **không chặn được cái CR ấy**: `ESC` cuối payload không chặn (nó chặn được
+///   ở Ô NHẬP — xem `clear_box` — mà không chặn ở hộp chọn), CSI cụt (`ESC[`)
+///   cũng không, và phím số thì hộp chọn nhiều không nhận (đo lại: gửi `"4"`
+///   trong khi đứng ở mục 1 ⟹ mục 4 không nhúc nhích, chỉ mục 1 đổi dấu).
+///
+/// Cả năm phép đo ấy hợp thành một luật dùng được: **một lượt ghi là một cú
+/// Enter, cộng thêm quãng đường mà mũi tên trong lượt ấy đi được**. Xem
+/// [`nav_plan`] để biết cách xếp ba lượt sao cho chỉ đúng một ô đổi dấu.
+///
+/// Hàm này KHÔNG tự quyết được dãy ấy có an toàn không — chỗ gọi phải tự chịu
+/// trách nhiệm, cùng luật với `arrow_verdict`.
+pub fn press_writes(window: i64, writes: &[Vec<String>]) -> Result<()> {
+    if writes.is_empty() {
+        return Err(anyhow!("không có lượt ghi nào để gửi"));
     }
-    // 🔴 TỪNG PHÍM MỘT, có nhịp nghỉ — Hà 2026-08-17, sau khi bấm bốn lựa chọn
-    // liền tay: *"Bấm chọn hết nhưng shot lại thiếu, do bấm nhanh quá? Phản hồi
-    // về là bấm rồi mà"*. Log cho thấy chuỗi phím hub tính ra ĐÚNG từng lượt
-    // (`['enter']`, rồi `['down','enter']` × 3), mà màn chỉ nhận được một phần.
-    //
-    // Bản cũ nối cả dãy vào MỘT `do script`, tức `↓` và CR tới trong cùng một
-    // lượt ghi — và luật 13 của dự án đã ghi rõ điều gì xảy ra khi nhiều ký tự
-    // vào TUI trong một lượt: nó đọc cả cụm như một cú DÁN. Với chữ thì cú dán
-    // ấy nuốt dấu xuống dòng; với phím điều hướng thì nó nuốt luôn cả bước di
-    // chuyển, nên Enter rơi vào chỗ con trỏ CHƯA kịp tới.
-    //
-    // Người ngồi ở máy bấm ↓ rồi mới bấm Enter, cách nhau một nhịp. Cây cầu phải
-    // mang sang đúng chừng ấy.
-    for k in keys {
-        osascript(&do_script(window, &key_payload(k)?))?;
+    for keys in writes {
+        osascript(&do_script(window, &write_payload(keys)?))?;
         std::thread::sleep(std::time::Duration::from_millis(SEQ_GAP_MS));
     }
     Ok(())
+}
+
+/// Payload AppleScript của MỘT lượt ghi: nối payload từng phím lại.
+///
+/// Dãy RỖNG là một lượt hợp lệ và có nghĩa — chuỗi rỗng, tức lượt ấy chỉ mang
+/// đúng cái CR mà `do script` kèm sẵn.
+fn write_payload(keys: &[String]) -> Result<String> {
+    let mut out = String::from("\"\"");
+    for k in keys {
+        out.push_str(" & ");
+        out.push_str(&key_payload(k)?);
+    }
+    Ok(format!("({out})"))
 }
 
 // 🔴 ĐÃ XOÁ: cả nhánh CHỤP ẢNH MÀN HÌNH (`capture` → PNG, `capture_base64` →
@@ -1862,9 +1882,40 @@ fn unwrap_terminal_wrap(span: &str) -> Option<String> {
 /// · phải thấy dòng `Submit`;
 /// · phải thấy con trỏ `❯` để biết đang đứng đâu.
 /// Thiếu một cái ⟹ `None`, và chỗ gọi rơi về Enter trần như cũ.
-pub fn submit_keys(screen: &str) -> Option<Vec<String>> {
-    let target = screen.lines().position(is_submit_line)?;
-    nav_keys(screen, target)
+/// 🔴 `Submit` KHÔNG nằm trong vòng đi dọc — đo 2026-08-17, và bản trước đó tin
+/// ngược lại nên nó **chốt hụt và lật thêm một ô**.
+///
+/// Phép đo: hộp 4 lựa chọn, con trỏ ở mục 4, gửi đúng kế hoạch cũ (`↓↓` rồi
+/// Enter) để tới dòng `Submit` nằm ngay dưới mục 5. Kết quả: con trỏ **quấn về
+/// mục 1** (4→5→1) và cú Enter cuối lật mất dấu của mục 1. Bảng vẫn mở nguyên.
+/// Vòng đi dọc chỉ gồm những dòng `<số>. [` — dòng `Submit` và dòng không có ô
+/// (`6. Chat about this`) không phải chỗ con trỏ dừng được.
+///
+/// Đường thật là thanh tab NGANG: `←  ☒ Pick  ✔ Submit  →`. Từ câu đang mở, mỗi
+/// `→` sang một tab, và tab cuối là nút gửi. Đo trọn vòng trên hộp thật: tick
+/// mục 2 và 4, rồi `[enter] · [→] · [enter]` ⟹ phiên nhận đúng
+/// `Chon muc nao? → Beta, Delta`, không thừa không thiếu một mục.
+///
+/// `at_question` là câu ĐANG MỞ (0 là câu đầu), đọc từ màn bằng
+/// [`cursor_on`] — không đếm phím đã bấm, vì chủ máy có thể vừa tự bấm.
+pub fn submit_plan(screen: &str, at_question: usize) -> Option<Vec<Vec<String>>> {
+    if !has_submit(screen) {
+        return None;
+    }
+    // Không thấy thanh tab (nó có thể nằm ngoài khung màn đọc được) ⟹ coi như
+    // bảng MỘT câu: một bước `→`. Đó là hình dạng thường gặp, và nếu đoán sai
+    // thì bảng vẫn mở — chỗ gọi đọc lại màn rồi nói đúng thứ đã xảy ra.
+    let questions = ask_table(screen).map(|t| t.answered.len()).unwrap_or(1);
+    let steps = questions.saturating_sub(at_question).max(1);
+    let enter = || vec!["enter".to_string()];
+    let rights: Vec<String> = std::iter::repeat_n("right".to_string(), steps).collect();
+    Some(vec![enter(), rights, enter()])
+}
+
+/// Màn này có nút gửi bấm tới được không — dùng để quyết định có gắn ✅ hay
+/// không, nên nó KHÔNG phụ thuộc con trỏ đang đứng đâu.
+pub fn has_submit(screen: &str) -> bool {
+    is_checkbox_list(screen) && screen.contains("to navigate") && screen.lines().any(is_submit_line)
 }
 
 /// Dòng `Submit` của hộp chọn nhiều — mục duy nhất không mang số.
@@ -1873,21 +1924,23 @@ fn is_submit_line(l: &str) -> bool {
     t == "Submit" || t.ends_with(" Submit")
 }
 
-/// Một MỤC con trỏ dừng được: dòng mang `<số>.`, hoặc dòng `Submit`.
+/// Một MỤC con trỏ dừng được: dòng mang `<số>.` **và có ô** `[ ]`.
 ///
-/// Phần mô tả thụt vào dưới mỗi lựa chọn KHÔNG phải mục — và đó là cả bản vá
-/// 2026-08-17: bản `submit_keys` đầu tiên đếm theo DÒNG, nên với một hộp mà mỗi
-/// lựa chọn kéo theo hai ba dòng mô tả, con trỏ dừng giữa đường và cú Enter rơi
-/// vào một lựa chọn thay vì Submit.
+/// Hai thứ bị loại ra, cả hai đều đo được chứ không suy:
+/// · **Phần mô tả thụt vào** dưới mỗi lựa chọn không phải mục — bản đầu (sáng
+///   17/08) đếm theo DÒNG, nên với hộp mà mỗi lựa chọn kéo hai ba dòng giải
+///   thích, con trỏ dừng giữa đường và cú Enter rơi vào một lựa chọn.
+/// · **Dòng `Submit` và dòng không có ô** (`6. Chat about this`) — chiều 17/08:
+///   con trỏ ở mục 4, hai `↓` để tới `Submit` nằm ngay dưới mục 5, mà con trỏ
+///   **quấn về mục 1** (4→5→1). Vòng đi dọc đóng lại ở mục cuối CÓ Ô; `Submit`
+///   tới bằng `→` trên thanh tab (xem [`submit_plan`]).
 fn is_item_line(l: &str) -> bool {
-    if is_submit_line(l) {
-        return true;
-    }
     let t = l.trim().trim_start_matches('\u{276f}').trim();
-    t.split_once('.').is_some_and(|(n, _)| {
+    t.split_once('.').is_some_and(|(n, rest)| {
         n.trim()
             .parse::<usize>()
             .is_ok_and(|n| (1..=9).contains(&n))
+            && rest.trim_start().starts_with('[')
     })
 }
 
@@ -1914,12 +1967,31 @@ pub fn is_checkbox_list(screen: &str) -> bool {
         >= 2
 }
 
-/// Chuỗi phím đưa con trỏ tới MỤC ở dòng `target_line`, rồi Enter.
+/// BA LƯỢT GHI đưa con trỏ tới MỤC ở dòng `target_line` rồi Enter — mà chỉ đúng
+/// một ô đổi dấu.
 ///
-/// Cửa an toàn: dòng chân phải khai `↑/↓ to navigate` — chính TUI nói mũi tên
-/// chỉ di chuyển, nên ở đây nó không phạm luật "mũi tên vừa move vừa confirm".
-/// Không có dòng ấy ⟹ `None`, chỗ gọi giữ nguyên đường cũ.
-pub fn nav_keys(screen: &str, target_line: usize) -> Option<Vec<String>> {
+/// Vì sao ba, chứ không phải "mấy mũi tên rồi Enter": mỗi lượt ghi tự mang một
+/// CR không gỡ được, tức **mỗi lượt là một cú bật/tắt vào dòng đang đứng** (đo:
+/// xem [`press_writes`]). Nên bản cũ — một mũi tên một lượt, rồi một Enter —
+/// bật/tắt đúng bấy nhiêu ô dọc đường: đi từ mục 2 lên mục 1 thì mục 2 mất dấu,
+/// và đó chính là *"bấm cái nọ mất cái kia"*.
+///
+/// Ba lượt, xếp cho các cú bật/tắt tự triệt tiêu nhau:
+/// 1. `enter` tại chỗ ⟹ ô ĐANG ĐỨNG đổi dấu (hỏng có chủ ý, sẽ trả lại ngay);
+/// 2. cả k mũi tên trong MỘT lượt ⟹ ô đang đứng đổi dấu **lần hai** (về đúng
+///    như cũ) và con trỏ đi trọn k bước;
+/// 3. `enter` ⟹ ô ĐÍCH đổi dấu. Một cú, đúng chỗ.
+///
+/// Con trỏ dừng lại ở mục đích — đúng chỗ tay người sẽ để nó lại — nên bấm lại
+/// chính ô ấy chỉ tốn một lượt ghi.
+///
+/// Đích là dòng `Submit` thì lượt 3 là cú CHỐT, và hai lượt đầu đã lo cho bảng
+/// đi đúng bằng những ô chủ máy đã chọn. Bản cũ chốt **sau khi** đã lỡ bật/tắt
+/// từng ô nó đi ngang qua — sai lặng lẽ, và không lùi lại được.
+///
+/// Cửa an toàn giữ nguyên: dòng chân phải khai `↑/↓ to navigate` — chính TUI nói
+/// mũi tên chỉ di chuyển. Không có dòng ấy ⟹ `None`, chỗ gọi giữ đường cũ.
+pub fn nav_plan(screen: &str, target_line: usize) -> Option<Vec<Vec<String>>> {
     if !screen.contains("to navigate") {
         return None;
     }
@@ -1936,11 +2008,15 @@ pub fn nav_keys(screen: &str, target_line: usize) -> Option<Vec<String>> {
     let from = items.iter().position(|i| *i == cursor_line)?;
     let to = items.iter().position(|i| *i == target_line)?;
     let delta = to as isize - from as isize;
+    let enter = || vec!["enter".to_string()];
+    // Đã đứng sẵn ở đó thì không có quãng đường nào để đi, nên cũng không có ô
+    // nào phải trả lại: đúng một lượt ghi, đúng một cú bật/tắt.
+    if delta == 0 {
+        return Some(vec![enter()]);
+    }
     let key = if delta > 0 { "down" } else { "up" };
-    let mut keys: Vec<String> =
-        std::iter::repeat_n(key.to_string(), delta.unsigned_abs()).collect();
-    keys.push("enter".to_string());
-    Some(keys)
+    let arrows: Vec<String> = std::iter::repeat_n(key.to_string(), delta.unsigned_abs()).collect();
+    Some(vec![enter(), arrows, enter()])
 }
 
 /// Bao nhiêu ô đã tick / tổng số ô, trên một hộp CHỌN NHIỀU.
@@ -1949,32 +2025,58 @@ pub fn nav_keys(screen: &str, target_line: usize) -> Option<Vec<String>> {
 /// phím rời khỏi hub, còn "3/5 ô đã chọn" mới là thứ người ở xa cần biết — và
 /// nó bắt được cả ca phím tới nơi nhưng rơi vào mục khác.
 pub fn ticked(screen: &str) -> (usize, usize) {
-    let mut on = 0;
-    let mut all = 0;
+    let marks = tick_marks(screen);
+    (marks.iter().filter(|(_, on)| *on).count(), marks.len())
+}
+
+/// Từng ô một: `(số mục, đang tick hay không)`, theo đúng thứ tự trên màn.
+///
+/// Tách ra khỏi [`ticked`] để có thứ con số tổng không nói được: ô NÀO đổi. Một
+/// cú bấm đúng làm đổi đúng một ô, nên "mấy ô đổi" là phép đo bắt được đúng lỗi
+/// *"bấm cái nọ mất cái kia"* — thứ mà `3/5` vẫn xanh rờn khi hai ô cùng lật.
+pub fn tick_marks(screen: &str) -> Vec<(usize, bool)> {
+    let mut out = Vec::new();
     for l in screen.lines() {
         let t = l.trim().trim_start_matches('\u{276f}').trim();
         let Some((n, rest)) = t.split_once('.') else {
             continue;
         };
-        if n.trim().parse::<usize>().is_err() {
+        let Ok(n) = n.trim().parse::<usize>() else {
             continue;
-        }
-        let rest = rest.trim_start();
-        if let Some(inside) = rest.strip_prefix('[').and_then(|r| r.split(']').next()) {
-            all += 1;
-            if !inside.trim().is_empty() {
-                on += 1;
-            }
+        };
+        if let Some(inside) = rest
+            .trim_start()
+            .strip_prefix('[')
+            .and_then(|r| r.split(']').next())
+        {
+            out.push((n, !inside.trim().is_empty()));
         }
     }
-    (on, all)
+    out
+}
+
+/// Những mục có dấu tick KHÁC nhau giữa hai màn.
+///
+/// Rỗng = không ô nào đổi (cú bấm rơi vào đâu mất). Một phần tử = đúng một ô
+/// đổi, dạng duy nhất được coi là lành. Từ hai trở lên = hub vừa lật hộ chủ máy
+/// một ô anh không bấm, và chỗ gọi PHẢI nói ra chứ không được nuốt.
+///
+/// So theo SỐ MỤC chứ không theo vị trí trong danh sách: hộp có thể vẽ lại
+/// (mô tả dài ra, dòng gấp khúc), còn số mục thì không đổi giữa hai nhịp.
+pub fn ticks_changed(before: &str, after: &str) -> Vec<usize> {
+    let a = tick_marks(before);
+    let b = tick_marks(after);
+    b.iter()
+        .filter(|(n, on)| a.iter().any(|(m, was)| m == n && was != on))
+        .map(|(n, _)| *n)
+        .collect()
 }
 
 /// Chuỗi phím để bật/tắt LỰA CHỌN số `n` trong một hộp CHỌN NHIỀU.
 ///
 /// `None` khi màn không phải hộp checkbox hoặc không thấy mục ấy — chỗ gọi giữ
 /// đường cũ (gõ thẳng con số), thứ vẫn đúng cho hộp chọn một.
-pub fn checkbox_keys(screen: &str, n: usize) -> Option<Vec<String>> {
+pub fn checkbox_plan(screen: &str, n: usize) -> Option<Vec<Vec<String>>> {
     if !is_checkbox_list(screen) {
         return None;
     }
@@ -1983,7 +2085,7 @@ pub fn checkbox_keys(screen: &str, n: usize) -> Option<Vec<String>> {
         t.split_once('.')
             .is_some_and(|(num, _)| num.trim().parse::<usize>() == Ok(n))
     })?;
-    nav_keys(screen, target)
+    nav_plan(screen, target)
 }
 
 pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {

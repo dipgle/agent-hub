@@ -4821,9 +4821,13 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
     };
 
     let before = table.as_ref().map(|t| t.left());
+    // 🔴 CẢ DÃY VÀO **MỘT** LƯỢT GHI, và đây là chỗ luật ấy sinh ra (13/08):
+    // bảng nhiều câu đi bằng mũi tên + số, mà mỗi lượt ghi tự kèm một CR — nên
+    // tách ra nhiều lượt là rải Enter vào giữa đường, tức CHỐT hộ chủ máy đúng
+    // cái câu con trỏ đang đứng trước khi tới được câu anh bấm. Gộp lại thì cả
+    // dãy chỉ còn đúng một dấu, và nó nằm sau con số.
     let keys = pick_keys(cursor, q - 1, opt);
-    let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
-    if let Err(e) = crate::keys::press_seq(w, &refs) {
+    if let Err(e) = crate::keys::press_writes(w, std::slice::from_ref(&keys)) {
         logging::warn(
             "pick_send_failed",
             json!({ "session": s.session_id, "keys": keys, "err": e.to_string() }),
@@ -6478,15 +6482,36 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // tới được. Nên `/send` phải ĐI TỚI đó rồi
                                     // mới Enter; xem `keys::submit_keys`, và cả
                                     // ba cửa của nó đo trên chính màn ấy.
-                                    match before.as_deref().and_then(crate::keys::submit_keys) {
-                                        Some(seq) => {
+                                    //
+                                    // 🔴 Và `Submit` KHÔNG ở phía DƯỚI: đo
+                                    // 17/08, đi `↓` tới nó thì con trỏ quấn về
+                                    // mục 1 rồi Enter lật mất một ô. Nó là tab
+                                    // bên PHẢI trên thanh `← ☒ … ✔ Submit →`,
+                                    // nên phải biết đang đứng ở CÂU nào —
+                                    // đọc từ màn, không đếm phím.
+                                    let at_q = {
+                                        let asking = s.asking.clone().unwrap_or_default();
+                                        let questions: Vec<String> =
+                                            std::iter::once(asking.question.clone())
+                                                .chain(
+                                                    asking.rest.iter().map(|r| r.question.clone()),
+                                                )
+                                                .collect();
+                                        before
+                                            .as_deref()
+                                            .and_then(|scr| crate::keys::cursor_on(scr, &questions))
+                                            .unwrap_or(0)
+                                    };
+                                    match before
+                                        .as_deref()
+                                        .and_then(|scr| crate::keys::submit_plan(scr, at_q))
+                                    {
+                                        Some(plan) => {
                                             logging::info(
-                                                "keys_submit_seq",
-                                                json!({ "session": s.session_id, "keys": seq }),
+                                                "keys_submit_plan",
+                                                json!({ "session": s.session_id, "plan": plan }),
                                             );
-                                            let refs: Vec<&str> =
-                                                seq.iter().map(String::as_str).collect();
-                                            crate::keys::press_seq(w, &refs)
+                                            crate::keys::press_writes(w, &plan)
                                         }
                                         None => crate::keys::press(w, "enter"),
                                     }
@@ -6507,17 +6532,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         .parse::<usize>()
                                         .ok()
                                         .zip(before.as_deref())
-                                        .and_then(|(n, scr)| crate::keys::checkbox_keys(scr, n));
+                                        .and_then(|(n, scr)| crate::keys::checkbox_plan(scr, n));
                                     match as_item {
-                                        Some(seq) => {
+                                        Some(plan) => {
                                             logging::info(
-                                                "keys_checkbox_seq",
+                                                "keys_checkbox_plan",
                                                 json!({ "session": s.session_id, "n": typed.trim(),
-                                                        "keys": seq }),
+                                                        "plan": plan }),
                                             );
-                                            let refs: Vec<&str> =
-                                                seq.iter().map(String::as_str).collect();
-                                            crate::keys::press_seq(w, &refs)
+                                            crate::keys::press_writes(w, &plan)
                                         }
                                         None => crate::keys::press(w, typed.trim()),
                                     }
@@ -7057,16 +7080,78 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                         (code, l.clone())
                                                     })
                                                     .collect();
-                                                shot_submit =
-                                                    crate::keys::submit_keys(&screen).is_some();
+                                                shot_submit = crate::keys::has_submit(&screen);
                                                 let lines: Vec<String> = opts
                                                     .iter()
                                                     .map(|(n, l)| format!("{n}. {l}"))
                                                     .collect();
                                                 let submit_line =
                                                     if shot_submit { "\nSubmit" } else { "" };
+                                                // 🔴 ĐẾM XEM MẤY Ô ĐỔI, KHÔNG
+                                                // CHỈ ĐẾM MẤY Ô ĐANG BẬT — Hà
+                                                // 2026-08-17: *"Bấm cái nọ mất
+                                                // cái kia ảo lắm"*.
+                                                //
+                                                // Hôm ấy hub bấm mục 1 và làm
+                                                // mất dấu mục 2, rồi vẫn ack
+                                                // `3/5` xanh rờn: tổng số ô bật
+                                                // KHÔNG đổi khi một ô lật lên
+                                                // còn một ô lật xuống, nên phép
+                                                // đo cũ mù đúng cái ca này. Một
+                                                // cú bấm lành làm đổi ĐÚNG MỘT
+                                                // ô — nên đổi khác thế là nói ra,
+                                                // ngay trong tin, chứ không đợi
+                                                // chủ máy tự soi ảnh.
+                                                let flipped = before
+                                                    .as_deref()
+                                                    .map(|b| {
+                                                        crate::keys::ticks_changed(b, &screen)
+                                                    })
+                                                    .unwrap_or_default();
+                                                let odd = if flipped.is_empty() {
+                                                    // Không đổi gì cũng là một
+                                                    // kết quả, và là kết quả
+                                                    // hay bị nuốt nhất: bảng in
+                                                    // ra y như cũ thì đọc như
+                                                    // "xong rồi".
+                                                    logging::warn(
+                                                        "keys_no_toggle",
+                                                        json!({ "session": s.session_id,
+                                                                "typed": typed.trim(),
+                                                                "why": "bấm xong mà không ô nào đổi dấu" }),
+                                                    );
+                                                    if typed.trim() == "enter" {
+                                                        "\n⚠ Bảng VẪN mở — chưa chốt được. \
+                                                         Bấm ✅ Submit lần nữa, hoặc /shot để nhìn."
+                                                            .to_string()
+                                                    } else {
+                                                        "\n⚠ Không ô nào đổi dấu — cú bấm ấy \
+                                                         không tới được mục nào."
+                                                            .to_string()
+                                                    }
+                                                } else if flipped.len() > 1 {
+                                                    logging::warn(
+                                                        "keys_multi_toggle",
+                                                        json!({ "session": s.session_id,
+                                                                "flipped": flipped,
+                                                                "why": "một cú bấm mà nhiều ô đổi dấu — phím rơi sai chỗ" }),
+                                                    );
+                                                    format!(
+                                                        "\n⚠ Một cú bấm mà {} ô đổi dấu (mục {}). \
+                                                         Bảng trên là thứ màn ĐANG có — sửa lại bằng \
+                                                         cách bấm chính những ô ấy.",
+                                                        flipped.len(),
+                                                        flipped
+                                                            .iter()
+                                                            .map(usize::to_string)
+                                                            .collect::<Vec<_>>()
+                                                            .join(", ")
+                                                    )
+                                                } else {
+                                                    String::new()
+                                                };
                                                 format!(
-                                                    "✓ {name} — {on}/{all} ô đang chọn\n{}{submit_line}",
+                                                    "✓ {name} — {on}/{all} ô đang chọn\n{}{submit_line}{odd}",
                                                     lines.join("\n")
                                                 )
                                             } else {
@@ -7421,7 +7506,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // 17/08: *"chưa bấm được submit"*). Hỏi bằng chính
                             // hàm dựng chuỗi phím, nên "thấy Submit" ở hai chỗ
                             // là MỘT phép đo.
-                            submit: shot_submit || crate::keys::submit_keys(&ack).is_some(),
+                            submit: shot_submit || crate::keys::has_submit(&ack),
                             box_text: None,
                             files: shot_files.clone(),
                         };

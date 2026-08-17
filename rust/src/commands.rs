@@ -35,6 +35,16 @@ pub enum Arg {
     /// Luật riêng, `parse_command` tự xử — khai ở đây để `/help` và
     /// `setMyCommands` vẫn thấy nó (`/new` đọc cờ, `/runin` đòi id đứng trước).
     Custom,
+    /// Tham số CỐ ĐỊNH, gõ sẵn trong bảng: cái tên lệnh đã là toàn bộ ý định.
+    ///
+    /// 🔴 Hà 2026-08-17: *"Thêm vào menu lệnh để bấm chọn nhanh: type right;
+    /// type enter"* · *"Để bấm gửi luôn trong ô chờ mờ"* · *"Đỡ phải chèn nút"*.
+    ///
+    /// Menu ☰ của Telegram chỉ khai được TÊN lệnh, không khai được tham số —
+    /// nên `/key right` không bao giờ vào menu được. Một route mang sẵn tham số
+    /// thì vào được, và đó là cách rẻ nhất để thay một cái nút: menu luôn ở đó,
+    /// không chiếm dòng nào trong tin, không phụ thuộc tin nào còn trên màn.
+    Fixed(&'static str),
 }
 
 /// Một lệnh: tên, các tên gọi khác, việc nó làm, và câu mô tả DUY NHẤT.
@@ -128,6 +138,28 @@ pub const ROUTES: &[Route] = &[
         usage: "<up|down|left|right|enter|esc|tab|space|1-9>",
         help: "Bấm một phím vào cửa sổ phiên",
         listed: false,
+    },
+    // Hai phím dùng nhiều nhất, mỗi phím một cái tên gõ được và một chỗ trong
+    // menu ☰ — xem `Arg::Fixed`. Chúng đi ĐÚNG route `/key`, không đẻ nhánh xử
+    // lý nào: cùng phép đọc màn, cùng cổng an toàn (mũi tên chỉ gửi khi chứng
+    // minh được màn không có hộp chọn).
+    Route {
+        name: "enter",
+        aliases: &["gui"],
+        kind: CommandKind::Key,
+        arg: Arg::Fixed("enter"),
+        usage: "",
+        help: "Gửi chữ đang nằm trong ô nhập của phiên",
+        listed: true,
+    },
+    Route {
+        name: "right",
+        aliases: &["goiy"],
+        kind: CommandKind::Key,
+        arg: Arg::Fixed("right"),
+        usage: "",
+        help: "Nhận gợi ý mờ vào ô nhập (→), rồi /enter để gửi",
+        listed: true,
     },
     Route {
         name: "pick",

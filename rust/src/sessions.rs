@@ -1579,6 +1579,27 @@ pub fn last_say(cfg: &Config, session: &LiveSession, max_chars: usize) -> Option
     last_prose(&tail, max_chars)
 }
 
+/// Như [`last_say`] nhưng CHỈ CÓ MÃ PHIÊN — tìm nhật ký bằng `find_transcript`.
+///
+/// 🔴 Vì sao cần bản này: chữ trên MÀN bị cửa sổ bẻ dòng, nên một lệnh dài trên
+/// màn không còn là một dòng nào cả. Hà 2026-08-17, ảnh `/shot` `[codetrail]`
+/// có nguyên dòng `git -C ~/… add … && git -C ~/… commit -m "…"` mà không một
+/// cái nút: *"Có lệnh trong nội dung nhưng không có nút, sao xử lý mãi không
+/// xong vấn đề này thế"*.
+///
+/// Nhật ký giữ **nguyên văn** lượt phiên vừa nói, không qua tay cửa sổ nào — nên
+/// nó là nguồn đúng cho việc bóc lệnh, còn màn chỉ để BÁM (`line_carries` có
+/// nhánh khớp phần đầu cho dòng bị bẻ). Rẻ và tất định: một lượt đọc tệp, không
+/// gọi model nào.
+pub fn last_say_by_id(cfg: &Config, session_id: &str, max_chars: usize) -> Option<String> {
+    if session_id.is_empty() || is_shell_id(session_id) {
+        return None;
+    }
+    let path = find_transcript(&cfg.claude_transcript_root(), session_id)?;
+    let tail = read_tail(&path).ok()?;
+    last_prose(&tail, max_chars)
+}
+
 /// Lời cuối cùng **phiên nói ra**, bỏ qua những lượt chỉ gọi công cụ.
 ///
 /// 🔴 Bỏ lượt-công-cụ không phải chuyện làm đẹp — không có nó thì tin báo mang

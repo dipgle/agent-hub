@@ -209,6 +209,9 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
         };
         match r.arg {
             crate::commands::Arg::None => return Some((r.kind, 0, String::new())),
+            // Tham số nằm sẵn trong bảng (`/enter`, `/right`) — chữ gõ thêm sau
+            // tên lệnh bị bỏ qua, vì cái tên đã là toàn bộ ý định.
+            crate::commands::Arg::Fixed(v) => return Some((r.kind, 0, v.to_string())),
             crate::commands::Arg::Rest => return Some((r.kind, 0, rest())),
             crate::commands::Arg::RestRequired => {
                 let v = rest();

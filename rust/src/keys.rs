@@ -158,7 +158,23 @@ pub enum Landed {
 /// khung nào — chủ đề khác, cửa sổ hẹp — thì lùi về **4 dòng không rỗng cuối**:
 /// vẫn là vùng đáy, chỉ kém sắc nét hơn, và thà kém sắc nét còn hơn soi cả màn
 /// rồi đọc phần hội thoại thành nội dung ô nhập.
-fn box_region(screen: &str) -> String {
+/// Phần màn TRƯỚC ô nhập — tức nội dung phiên đã nói, không kể chữ đang chờ gõ.
+///
+/// 🔴 Hà 2026-08-17, ảnh `/shot` `[codetrail]` có dòng `❯ vá luôn runner.sh 📎`:
+/// *"Tại sao lại gắn nút tải file vào ô chát gợi ý mờ"*. Đúng: ô nhập là chỗ để
+/// GỬI, và đích chạm của nó đã có rồi (⏎ · ⌫). Một cái 📎 mọc lên giữa câu chưa
+/// gửi vừa thừa vừa gây hiểu nhầm — nó trông như thể chữ ấy đã là nội dung.
+///
+/// Không có khung ô nhập ⟹ trả cả màn: thà giữ nguyên hành vi cũ còn hơn cắt
+/// mất phần thân vì một phép đoán.
+pub fn body_before_box(screen: &str) -> &str {
+    match screen.rfind('╭') {
+        Some(i) => &screen[..i],
+        None => screen,
+    }
+}
+
+pub fn box_region(screen: &str) -> String {
     if let Some(i) = screen.rfind('╭') {
         return screen[i..].to_string();
     }

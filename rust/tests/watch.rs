@@ -453,8 +453,12 @@ fn the_message_reports_what_was_seen_and_never_repeats_itself() {
         None,
     );
     assert!(hidden.contains('2'), "{hidden}");
+    // 🔴 CẬP NHẬT 2026-08-17: câu cũ đổ cho *"màn có dấu hiệu bí mật"*, mà nhánh
+    // ấy chết từ 16/08 khi `keys::Look::Withheld` bị gỡ — nên nó thành một lời
+    // giải thích SAI cho một sự thật khác (đếm được lựa chọn, không đọc được
+    // chữ). Vẫn phải KHAI vì sao chỉ có con số; chỉ khai cho đúng lý do.
     assert!(
-        hidden.contains("bí mật"),
+        hidden.contains("không đọc được"),
         "phải khai vì sao không có chữ: {hidden}"
     );
 

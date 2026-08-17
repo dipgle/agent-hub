@@ -3000,6 +3000,19 @@ pub fn prompt_line_text(shown: &str) -> Option<String> {
     // được hộp ấy kể cả khi dòng chân lạ — nên hai cổng hỏng độc lập với nhau.
     // Một cái mù thì cái kia vẫn đứng.
     let choices = crate::keys::parse_choices(shown);
+    // 🔴 CHỈ ĐỌC TRONG Ô NHẬP, không quét ngược cả màn — Hà 2026-08-17: *"Text
+    // lên hàng đợi rồi vẫn chèn 2 nút vào làm gì"* · *"bắt ký tự ô chát chờ
+    // cuối cùng thôi chứ"*.
+    //
+    // Màn ấy có `❯ làm 8 lỗi walk đi…` nằm trong phần HỘI THOẠI (câu đã gửi,
+    // phiên đang chạy nó) và một ô nhập TRỐNG ở cuối. Vòng quét ngược bỏ qua ô
+    // trống (dưới 4 ký tự) rồi đi tiếp lên trên, gặp câu cũ và dựng ⏎/⌫ cho nó
+    // — tức mời gửi lại một câu vừa gửi xong.
+    //
+    // `box_region` là khối đóng khung cuối cùng, đúng thứ `still_in_box` đã
+    // dùng từ 12/08 cho cùng câu hỏi. Hai hàm hỏi "ô nhập có gì" mà đọc hai
+    // vùng khác nhau thì tới lúc chúng lệch, không ai biết bên nào sai.
+    let shown = crate::keys::box_region(shown);
     shown.lines().rev().find_map(|l| {
         let t = l.trim();
         let rest = t.strip_prefix('❯').or_else(|| t.strip_prefix('>'))?.trim();
@@ -3768,7 +3781,13 @@ pub fn say_from_session(
     let mut buttons = remember_quick(db, sid, &cmds);
     // Tệp NHẮC TỚI trong chính câu này phải mở được ngay tại tên nó — cùng luật
     // với `/shot`, vì "lúc được lúc không" là thứ người đọc không đoán nổi.
-    let seen_paths = paths_not_in_commands(&crate::keys::paths_on_screen(text, 4), &cmds);
+    //
+    // Dò trên phần THÂN, không kể ô nhập: chữ chưa gửi thì đích chạm của nó là
+    // ⏎/⌫, không phải 📎 (xem `keys::body_before_box`).
+    let seen_paths = paths_not_in_commands(
+        &crate::keys::paths_on_screen(crate::keys::body_before_box(text), 4),
+        &cmds,
+    );
     let files = file_anchors(db, cfg, sid, &seen_paths);
     if !files.is_empty() {
         // Sổ tệp phải được ghi thì cú bấm sau mới tra ra đường dẫn; nút ở đáy
@@ -3815,15 +3834,54 @@ pub fn cmds_present_in(text: &str, cmds: Vec<crate::sessions::Cmd>) -> Vec<crate
 /// trước để `cwd` của nó thắng khi cùng một dòng xuất hiện ở cả hai.
 pub fn cmds_of_text(cfg: &Config, sid: &str, text: &str) -> Vec<crate::sessions::Cmd> {
     let mut out = cmds_present_in(text, crate::sessions::commands_of(cfg, sid, CMD_LINES_MAX));
-    for line in crate::keys::commands_in_report(text, CMD_LINES_MAX) {
-        if !out.iter().any(|c| c.line == line) {
+    add_prose_cmds(cfg, sid, text, &mut out);
+    out
+}
+
+/// Bộ lệnh cho một ẢNH MÀN (`/shot`) — cùng ba nguồn, **không lọc theo màn**.
+///
+/// Khác `cmds_of_text` đúng một điểm, và điểm ấy có chủ: lệnh trong nhật ký mà
+/// KHÔNG có trên màn vẫn được giữ, để `session_layout` viết thêm nó vào cuối tin
+/// dưới nhãn *"Lệnh phiên chạy không được (cổng quyền chặn)"*. Đó là ca dòng
+/// lệnh bị cổng quyền từ chối: phiên không hề viết nó ra lời, nên bỏ nó đi là
+/// giấu mất đúng dòng đáng đọc nhất.
+pub fn cmds_for_screen(cfg: &Config, sid: &str, screen: &str) -> Vec<crate::sessions::Cmd> {
+    let mut out = crate::sessions::commands_of(cfg, sid, CMD_LINES_MAX);
+    add_prose_cmds(cfg, sid, screen, &mut out);
+    out
+}
+
+/// Thêm lệnh bóc từ CHỮ: chữ đang hiện, rồi nguyên văn lượt cuối trong nhật ký.
+fn add_prose_cmds(cfg: &Config, sid: &str, text: &str, out: &mut Vec<crate::sessions::Cmd>) {
+    let add = |line: String, out: &mut Vec<crate::sessions::Cmd>| {
+        if !line.trim().is_empty() && !out.iter().any(|c| c.line == line) {
             out.push(crate::sessions::Cmd {
                 line,
                 cwd: String::new(),
             });
         }
+    };
+    for line in crate::keys::commands_in_report(text, CMD_LINES_MAX) {
+        add(line, out);
     }
-    out
+    // 🔴 NGUỒN THỨ BA: nguyên văn lượt cuối trong NHẬT KÝ — Hà 2026-08-17, ảnh
+    // `/shot` `[codetrail]`: *"Có lệnh trong nội dung nhưng không có nút, sao xử
+    // lý mãi không xong vấn đề này thế, có cần dùng ai để bóc tách không"*.
+    //
+    // Dòng ấy là `git -C ~/… add … && git -C ~/… commit -m "…"`, dài hơn bề
+    // ngang cửa sổ nên MÀN bẻ nó làm bốn. Bóc lệnh từ màn thì không dòng nào còn
+    // là một lệnh; đó không phải chuyện đoán giỏi hay dở, mà là nguồn đã hỏng
+    // trước khi đọc. Nhật ký giữ nguyên văn, nên câu trả lời cho *"có cần dùng
+    // AI để bóc tách không"* là KHÔNG: đọc đúng nguồn thì một phép so chuỗi là
+    // đủ, tất định và không tốn hạn mức nào.
+    //
+    // Màn vẫn là chỗ để BÁM (`line_carries` khớp cả phần đầu cho dòng bị bẻ);
+    // lệnh nào không bám được thì `session_layout` viết thêm nó vào cuối tin.
+    if let Some(said) = crate::sessions::last_say_by_id(cfg, sid, crate::sessions::SAY_MAX) {
+        for line in crate::keys::commands_in_report(&said, CMD_LINES_MAX) {
+            add(line, out);
+        }
+    }
 }
 
 /// Bỏ những đường dẫn NẰM TRONG một dòng lệnh — chúng đã có đích chạm riêng.
@@ -6578,7 +6636,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // một lệnh là thêm một icon ở một dòng vốn đã có, không
                     // chiếm thêm chỗ nào. Cái giá đã biến mất; cái trần thì ở
                     // lại. 12 là chặn-chuyện-vô-lý, không phải chắt lọc.
-                    let cmds = crate::sessions::commands_of(cfg, &shot_sid, CMD_LINES_MAX);
+                    // Ba nguồn, một chỗ — xem `cmds_for_screen`. Nguồn nhật ký
+                    // văn xuôi là thứ cứu được lệnh dài bị cửa sổ bẻ làm bốn.
+                    let cmds = cmds_for_screen(cfg, &shot_sid, &ack);
                     let n_cmds = cmds.len();
                     cmd_lines = crate::sessions::lines_of(&cmds[..n_cmds]);
                     // 🪦 Nút "✅ làm đi" — GỠ 2026-08-16, Hà: *"1 xóa nút đó đi
@@ -6624,7 +6684,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // Đường dẫn nằm TRONG một dòng lệnh thì thôi — dòng ấy đã có
                     // ▶️/🖥 của nó (xem `paths_not_in_commands`).
                     let seen_paths = paths_not_in_commands(
-                        &crate::keys::paths_on_screen(&ack, 4),
+                        &crate::keys::paths_on_screen(crate::keys::body_before_box(&ack), 4),
                         &cmds_of_text(cfg, &want, &ack),
                     );
                     quick.extend(remember_files(db, cfg, &want, &seen_paths));

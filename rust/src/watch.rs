@@ -344,9 +344,16 @@ impl Change {
                     }
                     // Không đọc được chữ thì nói RÕ vì sao chỉ có con số, đừng
                     // để người ta tưởng hub keo kiệt thông tin.
+                    //
+                    // 🔴 Câu cũ đổ cho "màn có dấu hiệu bí mật" — nhánh ấy CHẾT
+                    // từ 2026-08-16 khi `keys::Look::Withheld` bị gỡ, nên từ đó
+                    // nó là một lời giải thích SAI cho một sự thật khác: hub
+                    // đếm được số lựa chọn mà không đọc nổi chữ (cửa sổ đã đóng,
+                    // osascript ngã). Một câu nói sai lý do còn tệ hơn không nói
+                    // gì: nó gửi người đọc đi tìm nhầm chỗ.
                     Idle::Asking { n, .. } => format!(
-                        "⚠ {name} dừng lại HỎI ({n} lựa chọn) — màn có dấu hiệu bí mật nên hub \
-                         không đưa nội dung ra; mở phiên trên máy để đọc"
+                        "⚠ {name} dừng lại HỎI ({n} lựa chọn) — hub đếm được số lựa chọn nhưng \
+                         không đọc được chữ trên màn. /shot để thử đọc lại"
                     ),
                     Idle::Failed { line } => format!(
                         "🔴 {name} gặp LỖI API sau {} phút chạy:\n{}",

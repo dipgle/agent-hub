@@ -1196,11 +1196,20 @@ impl Inbox {
                         "why": "chủ máy tự bấm gửi vào buồng chat riêng của mình (Hà 2026-08-16)" }),
             );
         }
-        let risk_note = if risk.is_empty() {
-            String::new()
-        } else {
-            format!("\n⚠ trong tệp có dấu hiệu bí mật ({})", risk.join(", "))
-        };
+        // 🪦 Dòng `⚠ trong tệp có dấu hiệu bí mật (…)` dán vào chú thích tệp —
+        // gỡ 2026-08-17, Hà đọc nó ngay dưới một tệp anh vừa tự bấm gửi: *"Sao
+        // vẫn bị báo như thế này"*.
+        //
+        // Nó là cái còn sót của hàng rào đã gỡ hôm qua: chặn thì đã bỏ, nhưng
+        // câu cảnh báo ở lại và vẫn nói với chủ máy về CHÍNH TỆP CỦA ANH, trong
+        // buồng chat riêng của anh, sau khi anh chủ động bấm. Cảnh báo chỉ có
+        // nghĩa khi người đọc còn quyết được điều gì; ở đây việc đã xong, nên
+        // nó chỉ là tiếng ồn — cùng họ với *"Xác nhận xử xong là được giải
+        // thích dài dòng làm gì"*.
+        //
+        // Dấu hiệu vẫn được GHI (`telegram_document_risky_but_sent`) — đủ để
+        // trả lời "tệp nào đã rời máy" khi cần, mà không dạy chủ máy bỏ qua một
+        // dòng ⚠ nào đó mỗi lần mở tệp của mình.
 
         let name = real
             .file_name()
@@ -1216,10 +1225,10 @@ impl Inbox {
             .text("chat_id", self.chat_id.clone())
             .text(
                 "caption",
-                format!(
-                    "{}{risk_note}",
-                    real.strip_prefix(&root_real).unwrap_or(&real).display()
-                ),
+                real.strip_prefix(&root_real)
+                    .unwrap_or(&real)
+                    .display()
+                    .to_string(),
             )
             .part("document", part);
         let r = client

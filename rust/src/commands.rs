@@ -319,6 +319,29 @@ pub fn for_telegram() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// Cùng danh sách ấy, **xếp theo tần suất dùng** — nhiều nhất lên đầu.
+///
+/// 🔴 Hà 2026-08-17: *"Menu có sắp xếp tự động theo tần suất tương tác được
+/// không"*. Được, và rẻ: Telegram hiện menu ☰ **đúng thứ tự** danh sách gửi lên
+/// `setMyCommands`, nên "sắp xếp lại menu" chỉ là gửi lại danh sách theo thứ tự
+/// khác — một lượt HTTP, và chỉ khi thứ tự thật sự đổi.
+///
+/// `count_of` trả số lượt đã dùng của một route. Hoà nhau thì giữ NGUYÊN thứ tự
+/// trong bảng: sắp xếp ổn định, nên menu không nhảy chỗ vì hai lệnh cùng đếm 0 —
+/// một cái menu tự đổi chỗ mỗi lượt là cái menu không ai nhớ nổi.
+pub fn for_telegram_by_usage(
+    count_of: impl Fn(&Route) -> u64,
+) -> Vec<(&'static str, &'static str)> {
+    let mut rows: Vec<&Route> = ROUTES.iter().filter(|r| r.listed).collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(count_of(r)));
+    rows.into_iter().map(|r| (r.name, r.help)).collect()
+}
+
+/// Route nào mang `kind` này — dùng để quy một lượt chạy về đúng (các) tên lệnh.
+pub fn routes_of_kind(kind: CommandKind) -> impl Iterator<Item = &'static Route> {
+    ROUTES.iter().filter(move |r| r.kind == kind)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

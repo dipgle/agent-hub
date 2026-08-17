@@ -543,6 +543,22 @@ pub fn callback_to_command(data: &str) -> Option<String> {
         }
         return Some(format!("/close {sid}"));
     }
+    // `shot:<id>` — nút 📷 đi kèm câu chào khi vừa chọn một phiên.
+    //
+    // 🔴 Hà 2026-08-17: *"Khi bấm vào 1 phiên từ danh sách lại không có nút xem
+    // chi tiết, sau đó lại càng không xem được"*. Câu chào ấy chỉ có mỗi dòng
+    // chữ *"(xem màn: /shot)"* — mà từ điện thoại thì đọc một cái tên lệnh rồi
+    // phải gõ lại nó đúng là "không xem được": cây cầu bắt người ta tự bắc nốt
+    // nhịp cuối.
+    //
+    // Vẫn đi đúng route `/shot <id>` sẵn có: thêm một chỗ BẤM, không thêm một
+    // đường ĐI (cùng lý do với `sess:` và `close:` ở trên).
+    if let Some(sid) = data.strip_prefix("shot:") {
+        if sid.is_empty() {
+            return None;
+        }
+        return Some(format!("/shot {sid}"));
+    }
     None
 }
 
@@ -984,8 +1000,17 @@ impl Inbox {
     /// `/help`. Gọi mỗi lần khởi động: rẻ (một lượt HTTP), và nó tự sửa khi
     /// bảng đổi — không có bước "nhớ chạy tay" nào để mà quên.
     pub fn register_commands(&self) -> Result<(), String> {
+        self.register_command_list(crate::commands::for_telegram())
+    }
+
+    /// Khai một danh sách CỤ THỂ — dùng khi thứ tự menu đổi theo tần suất dùng
+    /// (`pipeline::menu_reorder_if_needed`). Telegram hiện menu đúng thứ tự này.
+    pub fn register_command_list(
+        &self,
+        rows: Vec<(&'static str, &'static str)>,
+    ) -> Result<(), String> {
         let client = self.client().ok_or("không dựng được HTTP client")?;
-        let list: Vec<Value> = crate::commands::for_telegram()
+        let list: Vec<Value> = rows
             .into_iter()
             .map(|(c, d)| json!({ "command": c, "description": d }))
             .collect();
@@ -1967,7 +1992,32 @@ impl Inbox {
                         // đọc lại lượt MỚI NHẤT của phiên — hai thứ khác nhau
                         // khi phiên đã chạy tiếp kể từ lúc tin ấy gửi đi, và ở
                         // đây thứ đúng là đoạn chữ đang hiện dưới mắt anh.
-                        let body = format!("{text}{tail}");
+                        // 🔴 …VÀ KÈM KHÚC CUỐI CỦA MÀN — Hà 2026-08-17: *"Xem
+                        // đầy đủ gắn thêm phía cuối nội dung cuối của shot bao
+                        // gồm ô chờ nhập để biết đang gợi ý gì còn thao tác
+                        // nhanh luôn"* · *"mỗi text có biết thực sự màn đang
+                        // hiện gì đâu mà thao tác tiếp, tức tôi ko ngồi máy
+                        // không nhìn thấy toàn cảnh"*.
+                        //
+                        // Đây là chỗ hai nguồn BỔ CHO NHAU chứ không thay nhau:
+                        // nhật ký cho chữ nguyên vẹn (màn thì bẻ dòng, cắt `…`,
+                        // cuộn mất phần trên), còn màn là thứ DUY NHẤT biết ô
+                        // nhập đang có gì và hộp chọn đang mở hay không. Thiếu
+                        // vế sau thì bản đầy đủ đọc xong vẫn không thao tác tiếp
+                        // được — đúng cảnh người không ngồi trước máy.
+                        let (screen, choices) =
+                            match crate::pipeline::screen_tail(&self.cfg, &sid, 12) {
+                                Some((s, c)) => (format!("\n\n📷 Màn đang hiện:\n{s}"), c),
+                                // Không đọc được thì NÓI, đừng im: thiếu khúc
+                                // này mà không biết vì sao thì người đọc tưởng
+                                // phiên đang trống.
+                                None => (
+                                    "\n\n(không đọc được màn lúc này — /shot để thử lại)"
+                                        .to_string(),
+                                    Vec::new(),
+                                ),
+                            };
+                        let body = format!("{text}{tail}{screen}");
                         // 🔴 CÙNG MỘT CỬA VỚI `/shot` — Hà 2026-08-16: *"Bấm xem
                         // đầy đủ sao lại khác lệnh shot, chưa gắn được nút chạy
                         // lệnh"*.
@@ -1979,13 +2029,14 @@ impl Inbox {
                         // nguồn lệnh (nhật ký + chữ), một phép lọc tệp, một cách
                         // hiện.
                         match db.as_ref() {
-                            Some(db) => crate::pipeline::say_from_session(
+                            Some(db) => crate::pipeline::say_from_session_with(
                                 db,
                                 &self.cfg,
                                 self,
                                 &sid,
                                 &body,
                                 &[],
+                                &choices,
                                 "telegram_ack_failed",
                             ),
                             // Không mở được sổ thì vẫn phải GỬI, chỉ là không có

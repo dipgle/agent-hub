@@ -2311,6 +2311,39 @@ pub fn full_report(db: &Db, n: usize) -> Option<(String, String, String)> {
 /// Đường dẫn file hub vừa nhắc tới trên màn — để nút `file:<n>` tìm lại được.
 pub const FILES_KEY: &str = "quick:files";
 
+/// Điểm dùng của từng loại lệnh, để xếp menu ☰ — xem [`menu_reorder_if_needed`].
+pub const MENU_KEY: &str = "menu:usage";
+/// Thứ tự menu đã khai với Telegram lần gần nhất (để biết khi nào phải khai lại).
+pub const MENU_ORDER_KEY: &str = "menu:order";
+
+/// Sau bao lâu thì một lượt dùng chỉ còn đáng NỬA.
+///
+/// 🔴 Hà 2026-08-17, ngay sau khi hỏi menu có tự xếp theo tần suất được không:
+/// *"Nó tần suất phải gắn cả thời gian thì mới phản ánh đúng nó đc dùng nhiều
+/// thật hay chỉ là trong quá khứ"*.
+///
+/// Đúng, và đó là khác biệt giữa một cái đếm và một thước đo: đếm thuần thì một
+/// lệnh dùng 200 lần hồi tháng trước đứng đầu menu mãi mãi, kể cả khi nó chết
+/// hẳn — cùng hình dạng với `/win` và `/project` (0 lượt từ 26/07 mà vẫn nằm
+/// trong bảng tới 15/08). Bảy ngày là cỡ một nhịp làm việc: đủ dài để một lệnh
+/// dùng hằng ngày không tụt hạng vì nghỉ cuối tuần, đủ ngắn để thói quen tháng
+/// trước không quyết định menu tháng này.
+pub const MENU_HALF_LIFE_MS: i64 = 7 * 24 * 3_600_000;
+
+/// Điểm cũ, nhìn từ HÔM NAY: mỗi `half_life_ms` trôi qua thì còn một nửa.
+///
+/// Hàm thuần để đo được: nó là toàn bộ phần "gắn thời gian" của tần suất, và
+/// một phép đo tính sai chỗ này thì menu xếp sai mà không ai thấy.
+pub fn decayed(score: f64, last_ms: i64, now_ms: i64, half_life_ms: i64) -> f64 {
+    if half_life_ms <= 0 || score <= 0.0 {
+        return 0.0;
+    }
+    // Đồng hồ chạy lùi (đổi giờ hệ thống, sổ chép từ máy khác) ⟹ coi như vừa
+    // dùng: thà giữ nguyên điểm còn hơn nhân nó lên bằng một số mũ dương.
+    let elapsed = (now_ms - last_ms).max(0) as f64;
+    score * 0.5f64.powf(elapsed / half_life_ms as f64)
+}
+
 /// Nhớ các đường dẫn rồi dựng nút `📎 <tên file>`.
 ///
 /// Cùng khuôn với [`remember_quick`] và cố ý thế: một cuốn sổ, một dạng
@@ -3777,6 +3810,25 @@ pub fn say_from_session(
     extra: &[(String, String)],
     log_key: &str,
 ) {
+    say_from_session_with(db, cfg, tg, sid, text, extra, &[], log_key)
+}
+
+/// Như trên, nhưng chỗ gọi khai thêm LỰA CHỌN đang hiện trên màn → ☑ ngay tại
+/// dòng của nó.
+///
+/// Dùng cho bản *"Xem đầy đủ"*, thứ nay mang theo cả khúc màn cuối — xem
+/// `screen_tail`.
+#[allow(clippy::too_many_arguments)]
+pub fn say_from_session_with(
+    db: &Db,
+    cfg: &Config,
+    tg: &crate::telegram::Inbox,
+    sid: &str,
+    text: &str,
+    extra: &[(String, String)],
+    choices: &[(usize, String)],
+    log_key: &str,
+) {
     let cmds = cmds_of_text(cfg, sid, text);
     let mut buttons = remember_quick(db, sid, &cmds);
     // Tệp NHẮC TỚI trong chính câu này phải mở được ngay tại tên nó — cùng luật
@@ -3800,9 +3852,87 @@ pub fn say_from_session(
         sid: sid.to_string(),
         cmds: crate::sessions::lines_of(&cmds),
         files,
+        choices: choices.to_vec(),
         ..Default::default()
     };
     say_session_data(tg, text, &buttons, log_key, &data);
+}
+
+/// Ghi một lượt dùng, rồi khai lại menu ☰ NẾU thứ tự đổi.
+///
+/// Điểm của mỗi loại lệnh suy giảm theo thời gian (xem [`decayed`]) và cộng 1
+/// cho lượt vừa chạy. Khai lại chỉ khi thứ tự khác lần trước: Telegram không có
+/// cách nào "sửa một dòng", mỗi lần khai là gửi cả danh sách, nên gửi mỗi lượt
+/// bấm là tốn một lượt HTTP cho một cái menu y hệt.
+pub fn menu_reorder_if_needed(db: &Db, kind: CommandKind, now_ms: i64) {
+    let mut book: std::collections::BTreeMap<String, (f64, i64)> = db
+        .cursor_or_log(MENU_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    let key = format!("{kind:?}");
+    let cur = book.get(&key).copied().unwrap_or((0.0, now_ms));
+    let score = decayed(cur.0, cur.1, now_ms, MENU_HALF_LIFE_MS) + 1.0;
+    book.insert(key, (score, now_ms));
+    if let Ok(v) = serde_json::to_string(&book) {
+        if let Err(e) = db.set_cursor(MENU_KEY, &v) {
+            logging::error("menu_usage_not_saved", json!({ "err": e.to_string() }));
+            return;
+        }
+    }
+    let rows = crate::commands::for_telegram_by_usage(|r| {
+        let k = format!("{:?}", r.kind);
+        let (s, t) = book.get(&k).copied().unwrap_or((0.0, now_ms));
+        // Xếp bằng số nguyên để thứ tự không nhảy vì sai số dấu phẩy động; nhân
+        // 1000 giữ đủ phân giải cho những điểm đã mờ gần hết.
+        (decayed(s, t, now_ms, MENU_HALF_LIFE_MS) * 1000.0) as u64
+    });
+    let order: Vec<&str> = rows.iter().map(|(n, _)| *n).collect();
+    let joined = order.join(",");
+    if db.cursor_or_log(MENU_ORDER_KEY).as_deref() == Some(joined.as_str()) {
+        return;
+    }
+    let Some(tg) = crate::telegram::inbox() else {
+        return;
+    };
+    match tg.register_command_list(rows) {
+        Ok(()) => {
+            if let Err(e) = db.set_cursor(MENU_ORDER_KEY, &joined) {
+                logging::error("menu_order_not_saved", json!({ "err": e.to_string() }));
+            }
+            logging::info("menu_reordered", json!({ "order": order }));
+        }
+        // Không khai được thì THÔI, và nói ra: menu cũ vẫn dùng được, đây là
+        // tiện nghi chứ không phải đường đi của một mệnh lệnh nào.
+        Err(e) => logging::warn("menu_reorder_failed", json!({ "err": e })),
+    }
+}
+
+/// Khúc CUỐI của màn phiên — gồm cả ô nhập — kèm lựa chọn đang hiện.
+///
+/// 🔴 Hà 2026-08-17: *"Xem đầy đủ gắn thêm phía cuối nội dung cuối của shot bao
+/// gồm ô chờ nhập để biết đang gợi ý gì còn thao tác nhanh luôn"*.
+///
+/// Hai thứ ấy vốn ở hai nguồn khác nhau, và đó là lý do chúng khác nhau: bản
+/// đầy đủ là NGUYÊN VĂN lượt cuối trong nhật ký (không bẻ dòng, không cắt),
+/// còn ô nhập với hộp chọn chỉ tồn tại trên MÀN. Nên bản đầy đủ không thể tự
+/// biết ô nhập đang có gì — phải đi đọc màn, ngay lúc bấm.
+///
+/// `None` khi phiên không còn cửa sổ, hoặc không đọc được màn: lúc ấy bản đầy đủ
+/// vẫn gửi được, chỉ thiếu phần đuôi — thà thiếu một khúc còn hơn nuốt cả tin.
+pub fn screen_tail(
+    cfg: &Config,
+    sid: &str,
+    lines: usize,
+) -> Option<(String, Vec<(usize, String)>)> {
+    let live = crate::sessions::snapshot(cfg);
+    let s = live
+        .sessions
+        .iter()
+        .find(|s| same_session(&s.session_id, sid))?;
+    if !crate::sessions::is_real_tty(&s.tty) {
+        return None;
+    }
+    crate::keys::screen_of(&s.tty, lines)
 }
 
 /// 🔴 CHỈ những lệnh CÓ MẶT trong chính câu này — cửa định dạng không thêm nội
@@ -7212,11 +7342,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // Muốn nhìn màn thì `/shot` — một động từ, một
                                     // việc; ack nói ra đường ấy để không ai phải
                                     // đoán.
-                                    if adapter == crate::telegram::NAME {
-                                        format!("{head}\n(xem màn: /shot)")
-                                    } else {
-                                        head
-                                    }
+                                    // 🔴 MỘT CÁI NÚT, KHÔNG PHẢI MỘT CÁI TÊN —
+                                    // Hà 2026-08-17: *"Khi bấm vào 1 phiên từ
+                                    // danh sách lại không có nút xem chi tiết,
+                                    // sau đó lại càng không xem được"*. Dòng
+                                    // `(xem màn: /shot)` bảo người ta tự gõ lại
+                                    // một cái tên lệnh trên điện thoại — đúng
+                                    // nhịp cuối mà cây cầu bỏ dở. Nút gắn ngay
+                                    // dưới câu chào (xem `shot:` trong
+                                    // `telegram::button_command`).
+                                    head
                                 }
                                 Err(e) => format!("⚠ không theo được: {e}"),
                             },
@@ -7227,7 +7362,26 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             ),
                         }
                     };
-                    reply_in_channel(db, cfg, adapter, cmd, &ack);
+                    // Câu chào đi kèm NÚT 📷 khi vừa chọn được một phiên: bấm
+                    // là thấy màn, không phải gõ lại tên lệnh. Lời từ chối thì
+                    // không có nút — không có phiên nào để mà xem.
+                    let shot_btn: Vec<(String, String)> = if ack.starts_with('👁') {
+                        vec![("📷 Xem màn".to_string(), format!("shot:{want}"))]
+                    } else {
+                        Vec::new()
+                    };
+                    match (shot_btn.is_empty(), crate::telegram::inbox()) {
+                        (false, Some(tg)) if adapter == crate::telegram::NAME => {
+                            if let Err(e) = tg.send_buttons(&ack, &shot_btn) {
+                                logging::error(
+                                    "telegram_ack_failed",
+                                    json!({ "err": e, "what": "follow_ack_shot_button" }),
+                                );
+                                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                            }
+                        }
+                        _ => reply_in_channel(db, cfg, adapter, cmd, &ack),
+                    }
                     Some(ack)
                 }
             }
@@ -7265,6 +7419,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             json!({ "kind": format!("{:?}", cmd.kind), "adapter": adapter,
                     "ms": cmd_started.elapsed().as_millis() }),
         );
+        // Menu ☰ xếp theo cái thật sự đang được dùng — xem `menu_reorder_if_needed`.
+        menu_reorder_if_needed(db, cmd.kind, chrono::Utc::now().timestamp_millis());
         if let Some(ack) = answered {
             logging::info(
                 "channel_command_handled",

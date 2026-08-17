@@ -6419,7 +6419,36 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         None => crate::keys::press(w, "enter"),
                                     }
                                 } else {
-                                    crate::keys::press(w, typed.trim())
+                                    // 🔴 SỐ KHÔNG ĂN TRONG HỘP CHỌN NHIỀU — Hà
+                                    // 2026-08-17, ảnh `/shot` sau khi bấm: *"Bấm
+                                    // xong xem lại vẫn đứng im"*. Log ghi *"đã
+                                    // bấm '1'"*, mà không một ô `[ ]` nào đổi.
+                                    //
+                                    // Hộp chọn MỘT nhận phím số (đường này chạy
+                                    // từ 13/08); hộp CHỌN NHIỀU thì không —
+                                    // dòng chân của nó chỉ khai `Enter to select
+                                    // · ↑/↓ to navigate`. Nhận nó bằng ô `[ ]`
+                                    // trên nhãn (Hà: *"chèn [] là tương ứng chọn
+                                    // được nhiều à"*) rồi ĐI TỚI mục ấy và Enter.
+                                    let as_item = typed
+                                        .trim()
+                                        .parse::<usize>()
+                                        .ok()
+                                        .zip(before.as_deref())
+                                        .and_then(|(n, scr)| crate::keys::checkbox_keys(scr, n));
+                                    match as_item {
+                                        Some(seq) => {
+                                            logging::info(
+                                                "keys_checkbox_seq",
+                                                json!({ "session": s.session_id, "n": typed.trim(),
+                                                        "keys": seq }),
+                                            );
+                                            let refs: Vec<&str> =
+                                                seq.iter().map(String::as_str).collect();
+                                            crate::keys::press_seq(w, &refs)
+                                        }
+                                        None => crate::keys::press(w, typed.trim()),
+                                    }
                                 }
                             } else {
                                 crate::keys::type_into(w, &typed)

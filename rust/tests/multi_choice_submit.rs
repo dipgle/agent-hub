@@ -50,6 +50,55 @@ const SCREEN: &str = "\
   6. Chat about this
 Enter to select · ↑/↓ to navigate · Esc to cancel";
 
+/// Mỗi lựa chọn kéo theo MẤY DÒNG mô tả — đếm dòng thì con trỏ dừng giữa đường.
+///
+/// 🔴 Đây là màn THẬT của `[dwork]`: mỗi lựa chọn có hai ba dòng giải thích thụt
+/// vào. Bản `submit_keys` đầu tiên đếm theo dòng, nên nó bắn 5 `down` cho một
+/// quãng chỉ dài 5 MỤC nhưng 14 DÒNG — và cú Enter rơi vào một lựa chọn.
+const SCREEN_WITH_DESCRIPTIONS: &str = "\
+\u{276f} 1. [ ] Không xoá gì (Recommended)
+   Đĩa đã trống 218 Gi, vitest chạy lại 1517/1517 exit 0.
+   Không có gì cần dọn.
+  2. [ ] Bí danh deploy-*
+   Xoá 7 dòng bí danh tương thích.
+  3. [ ] legacy-memory/update.md
+   Ảnh chụp quy trình deploy PROD cũ.
+  4. [ ] Rác build (target/, node_modules, cache)
+   Dọn artifact tái tạo được.
+  5. [ ] Type something
+     Submit
+  6. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel";
+
+#[test]
+fn walking_counts_items_not_lines() {
+    let keys = submit_keys(SCREEN_WITH_DESCRIPTIONS).expect("phải dựng được chuỗi phím");
+    assert_eq!(
+        keys,
+        vec!["down", "down", "down", "down", "down", "enter"],
+        "từ mục 1 tới Submit là 5 MỤC, dù cách nhau 10 dòng"
+    );
+}
+
+/// Trong hộp CHỌN NHIỀU, "chọn mục 3" = đi tới mục 3 rồi Enter — không phải gõ
+/// phím `3`.
+///
+/// 🔴 Hà 2026-08-17: *"Bấm xong xem lại vẫn đứng im"*. Log ghi "đã bấm '1'" mà
+/// màn không đổi một ô nào — hộp này không nhận phím số.
+#[test]
+fn choosing_an_item_in_a_checkbox_list_walks_instead_of_typing_a_number() {
+    let keys = hub::keys::checkbox_keys(SCREEN_WITH_DESCRIPTIONS, 3).expect("phải dựng được");
+    assert_eq!(keys, vec!["down", "down", "enter"]);
+}
+
+/// …còn hộp chọn MỘT thì giữ nguyên đường gõ số (chạy từ 13/08).
+#[test]
+fn a_plain_choice_box_is_not_a_checkbox_list() {
+    let screen = "\u{276f} 1. Vá ACL\n  2. Bỏ qua\nEnter to select · ↑/↓ to navigate";
+    assert!(!hub::keys::is_checkbox_list(screen));
+    assert!(hub::keys::checkbox_keys(screen, 2).is_none());
+}
+
 #[test]
 fn the_cursor_walks_down_to_submit_then_presses_enter() {
     let keys = submit_keys(SCREEN).expect("phải dựng được chuỗi phím");

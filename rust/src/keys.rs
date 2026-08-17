@@ -1844,25 +1844,100 @@ fn unwrap_terminal_wrap(span: &str) -> Option<String> {
 /// · phải thấy con trỏ `❯` để biết đang đứng đâu.
 /// Thiếu một cái ⟹ `None`, và chỗ gọi rơi về Enter trần như cũ.
 pub fn submit_keys(screen: &str) -> Option<Vec<String>> {
+    let target = screen.lines().position(is_submit_line)?;
+    nav_keys(screen, target)
+}
+
+/// Dòng `Submit` của hộp chọn nhiều — mục duy nhất không mang số.
+fn is_submit_line(l: &str) -> bool {
+    let t = l.trim().trim_start_matches('\u{276f}').trim();
+    t == "Submit" || t.ends_with(" Submit")
+}
+
+/// Một MỤC con trỏ dừng được: dòng mang `<số>.`, hoặc dòng `Submit`.
+///
+/// Phần mô tả thụt vào dưới mỗi lựa chọn KHÔNG phải mục — và đó là cả bản vá
+/// 2026-08-17: bản `submit_keys` đầu tiên đếm theo DÒNG, nên với một hộp mà mỗi
+/// lựa chọn kéo theo hai ba dòng mô tả, con trỏ dừng giữa đường và cú Enter rơi
+/// vào một lựa chọn thay vì Submit.
+fn is_item_line(l: &str) -> bool {
+    if is_submit_line(l) {
+        return true;
+    }
+    let t = l.trim().trim_start_matches('\u{276f}').trim();
+    t.split_once('.').is_some_and(|(n, _)| {
+        n.trim()
+            .parse::<usize>()
+            .is_ok_and(|n| (1..=9).contains(&n))
+    })
+}
+
+/// Đây có phải hộp CHỌN NHIỀU không — nhận bằng ô `[ ]` / `[✓]` trên nhãn.
+///
+/// 🔴 Hà 2026-08-17: *"Mà chèn [] là tương ứng chọn được nhiều à"*. Đúng, và nó
+/// là dấu hiệu ĐO ĐƯỢC cho một khác biệt đắt: hộp chọn MỘT nhận phím số
+/// (`/key <số>`, chạy từ 13/08), còn hộp CHỌN NHIỀU thì KHÔNG — dòng chân của
+/// nó chỉ khai `Enter to select · ↑/↓ to navigate`. Đo thật hôm ấy: hub bấm
+/// `1`, log ghi "đã bấm '1'", màn không đổi một ô nào; rồi `/shot` lại vẫn thấy
+/// `[ ]` trống trơn.
+///
+/// Nên trong hộp này, "chọn mục n" nghĩa là ĐI TỚI mục n rồi Enter.
+pub fn is_checkbox_list(screen: &str) -> bool {
+    screen
+        .lines()
+        .filter(|l| {
+            let t = l.trim().trim_start_matches('\u{276f}').trim();
+            t.split_once('.').is_some_and(|(n, rest)| {
+                n.trim().parse::<usize>().is_ok() && rest.trim_start().starts_with('[')
+            })
+        })
+        .count()
+        >= 2
+}
+
+/// Chuỗi phím đưa con trỏ tới MỤC ở dòng `target_line`, rồi Enter.
+///
+/// Cửa an toàn: dòng chân phải khai `↑/↓ to navigate` — chính TUI nói mũi tên
+/// chỉ di chuyển, nên ở đây nó không phạm luật "mũi tên vừa move vừa confirm".
+/// Không có dòng ấy ⟹ `None`, chỗ gọi giữ nguyên đường cũ.
+pub fn nav_keys(screen: &str, target_line: usize) -> Option<Vec<String>> {
     if !screen.contains("to navigate") {
         return None;
     }
     let lines: Vec<&str> = screen.lines().collect();
-    let cursor = lines
+    let items: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| is_item_line(l))
+        .map(|(i, _)| i)
+        .collect();
+    let cursor_line = lines
         .iter()
         .position(|l| l.trim_start().starts_with('\u{276f}'))?;
-    let submit = lines.iter().position(|l| {
-        let t = l.trim();
-        t == "Submit"
-            || t.ends_with(" Submit")
-            || t.trim_start_matches('\u{276f}').trim() == "Submit"
-    })?;
-    let delta = submit as isize - cursor as isize;
+    let from = items.iter().position(|i| *i == cursor_line)?;
+    let to = items.iter().position(|i| *i == target_line)?;
+    let delta = to as isize - from as isize;
     let key = if delta > 0 { "down" } else { "up" };
     let mut keys: Vec<String> =
         std::iter::repeat_n(key.to_string(), delta.unsigned_abs()).collect();
     keys.push("enter".to_string());
     Some(keys)
+}
+
+/// Chuỗi phím để bật/tắt LỰA CHỌN số `n` trong một hộp CHỌN NHIỀU.
+///
+/// `None` khi màn không phải hộp checkbox hoặc không thấy mục ấy — chỗ gọi giữ
+/// đường cũ (gõ thẳng con số), thứ vẫn đúng cho hộp chọn một.
+pub fn checkbox_keys(screen: &str, n: usize) -> Option<Vec<String>> {
+    if !is_checkbox_list(screen) {
+        return None;
+    }
+    let target = screen.lines().position(|l| {
+        let t = l.trim().trim_start_matches('\u{276f}').trim();
+        t.split_once('.')
+            .is_some_and(|(num, _)| num.trim().parse::<usize>() == Ok(n))
+    })?;
+    nav_keys(screen, target)
 }
 
 pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {

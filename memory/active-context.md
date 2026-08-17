@@ -2,6 +2,10 @@
 
 ## 🎯 2026-08-17 (khuya) — 73 dòng chữ cho 73 cú bấm: hub xoá tin, rồi thả dấu lên chính tin ấy
 
+Một commit, **đã cài + push** — `ac0e4c6`, `419 test · clippy 0 · fmt 0`, hubd
+`@16:07:39Z` cert (sổ `boot:binary` xác nhận bản đang chạy là bản vừa cài), cây
+sạch, sau khi cài chỉ có đúng một dòng `warn`: `stale_lock_removed` của pid cũ.
+
 Không có yêu cầu mới; chỗ đi được là chỗ CÓ SỐ ĐO. Nhật ký daemon hôm nay:
 `telegram_reaction_failed` **73 lần**, tất cả một câu — *"Bad Request: message to
 react not found"* — và tất cả rơi vào lệnh sinh từ một **liên kết trong chữ**

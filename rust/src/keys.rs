@@ -1074,14 +1074,33 @@ fn key_payload(keyname: &str) -> Result<String> {
 ///
 /// Hàm này KHÔNG tự quyết được dãy phím ấy có an toàn hay không — chỗ gọi phải
 /// tự chịu trách nhiệm, cùng luật với `arrow_verdict`.
+/// Nhịp nghỉ giữa hai phím trong một dãy.
+///
+/// Đủ để TUI vẽ xong bước trước (đo trên máy: một bước điều hướng của `claude`
+/// mất chừng 30–60 ms), và đủ ngắn để bốn lựa chọn không thành một lượt chờ dài.
+const SEQ_GAP_MS: u64 = 120;
+
 pub fn press_seq(window: i64, keys: &[&str]) -> Result<()> {
     if keys.is_empty() {
         return Err(anyhow!("không có phím nào để gửi"));
     }
-    let parts: Result<Vec<String>> = keys.iter().map(|k| key_payload(k)).collect();
-    // `enter` giữa dãy là chuỗi rỗng nên nối vào không sinh ký tự — đúng ý:
-    // dấu xuống dòng DUY NHẤT là cái `do script` kèm ở cuối.
-    osascript(&do_script(window, &parts?.join(" & ")))?;
+    // 🔴 TỪNG PHÍM MỘT, có nhịp nghỉ — Hà 2026-08-17, sau khi bấm bốn lựa chọn
+    // liền tay: *"Bấm chọn hết nhưng shot lại thiếu, do bấm nhanh quá? Phản hồi
+    // về là bấm rồi mà"*. Log cho thấy chuỗi phím hub tính ra ĐÚNG từng lượt
+    // (`['enter']`, rồi `['down','enter']` × 3), mà màn chỉ nhận được một phần.
+    //
+    // Bản cũ nối cả dãy vào MỘT `do script`, tức `↓` và CR tới trong cùng một
+    // lượt ghi — và luật 13 của dự án đã ghi rõ điều gì xảy ra khi nhiều ký tự
+    // vào TUI trong một lượt: nó đọc cả cụm như một cú DÁN. Với chữ thì cú dán
+    // ấy nuốt dấu xuống dòng; với phím điều hướng thì nó nuốt luôn cả bước di
+    // chuyển, nên Enter rơi vào chỗ con trỏ CHƯA kịp tới.
+    //
+    // Người ngồi ở máy bấm ↓ rồi mới bấm Enter, cách nhau một nhịp. Cây cầu phải
+    // mang sang đúng chừng ấy.
+    for k in keys {
+        osascript(&do_script(window, &key_payload(k)?))?;
+        std::thread::sleep(std::time::Duration::from_millis(SEQ_GAP_MS));
+    }
     Ok(())
 }
 
@@ -1922,6 +1941,33 @@ pub fn nav_keys(screen: &str, target_line: usize) -> Option<Vec<String>> {
         std::iter::repeat_n(key.to_string(), delta.unsigned_abs()).collect();
     keys.push("enter".to_string());
     Some(keys)
+}
+
+/// Bao nhiêu ô đã tick / tổng số ô, trên một hộp CHỌN NHIỀU.
+///
+/// Dùng để ack nói KẾT QUẢ chứ không nói hành động: "đã bấm '3'" chỉ khai rằng
+/// phím rời khỏi hub, còn "3/5 ô đã chọn" mới là thứ người ở xa cần biết — và
+/// nó bắt được cả ca phím tới nơi nhưng rơi vào mục khác.
+pub fn ticked(screen: &str) -> (usize, usize) {
+    let mut on = 0;
+    let mut all = 0;
+    for l in screen.lines() {
+        let t = l.trim().trim_start_matches('\u{276f}').trim();
+        let Some((n, rest)) = t.split_once('.') else {
+            continue;
+        };
+        if n.trim().parse::<usize>().is_err() {
+            continue;
+        }
+        let rest = rest.trim_start();
+        if let Some(inside) = rest.strip_prefix('[').and_then(|r| r.split(']').next()) {
+            all += 1;
+            if !inside.trim().is_empty() {
+                on += 1;
+            }
+        }
+    }
+    (on, all)
 }
 
 /// Chuỗi phím để bật/tắt LỰA CHỌN số `n` trong một hộp CHỌN NHIỀU.

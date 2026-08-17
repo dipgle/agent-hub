@@ -91,6 +91,22 @@ fn choosing_an_item_in_a_checkbox_list_walks_instead_of_typing_a_number() {
     assert_eq!(keys, vec!["down", "down", "enter"]);
 }
 
+/// Ack phải nói KẾT QUẢ (mấy ô đang tick), không chỉ nói đã bấm.
+///
+/// 🔴 Hà 2026-08-17: *"Bấm chọn hết nhưng shot lại thiếu… Phản hồi về là bấm rồi
+/// mà"*. `✓ đã bấm '3'` chỉ khai phím rời khỏi hub — nó vẫn xanh y hệt khi phím
+/// rơi vào mục khác.
+#[test]
+fn the_tick_count_is_read_from_the_screen() {
+    let none = hub::keys::ticked(SCREEN_WITH_DESCRIPTIONS);
+    assert_eq!(none, (0, 5), "5 ô, chưa tick ô nào");
+
+    let two = SCREEN_WITH_DESCRIPTIONS
+        .replacen("1. [ ]", "1. [\u{2713}]", 1)
+        .replacen("3. [ ]", "3. [\u{2713}]", 1);
+    assert_eq!(hub::keys::ticked(&two), (2, 5));
+}
+
 /// …còn hộp chọn MỘT thì giữ nguyên đường gõ số (chạy từ 13/08).
 #[test]
 fn a_plain_choice_box_is_not_a_checkbox_list() {

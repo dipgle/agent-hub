@@ -6895,7 +6895,29 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                 if tried_right { " rồi bấm → để nhận gợi ý" } else { "" }
                                             )
                                         } else {
-                                        format!("✓ đã bấm '{}' · {name}", typed.trim())
+                                            // 🔴 NÓI KẾT QUẢ, KHÔNG NÓI HÀNH
+                                            // ĐỘNG — Hà 2026-08-17: *"Bấm chọn
+                                            // hết nhưng shot lại thiếu… Phản hồi
+                                            // về là bấm rồi mà"*.
+                                            //
+                                            // `✓ đã bấm '3'` chỉ khai rằng phím
+                                            // rời khỏi hub. Với hộp CHỌN NHIỀU,
+                                            // thứ người ở xa cần biết là mấy ô
+                                            // đang tick — và con số ấy bắt được
+                                            // cả ca phím tới nơi nhưng rơi vào
+                                            // mục khác, thứ mà "đã bấm" che mất.
+                                            let after_screen = crate::keys::screen_of(&s.tty, 40)
+                                                .map(|x| x.0)
+                                                .unwrap_or_default();
+                                            let (on, all) = crate::keys::ticked(&after_screen);
+                                            if all > 0 {
+                                                format!(
+                                                    "✓ đã bấm '{}' · {name} — {on}/{all} ô đang chọn",
+                                                    typed.trim()
+                                                )
+                                            } else {
+                                                format!("✓ đã bấm '{}' · {name}", typed.trim())
+                                            }
                                         }
                                     } else if what == Some(crate::keys::Landed::Queued) {
                                         format!("✓ vào hàng chờ · {name}")

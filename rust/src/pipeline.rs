@@ -6361,7 +6361,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     logging::info(
                                         "session_closed",
                                         json!({ "session": s.session_id, "kind": s.kind,
-                                                "window": win }),
+                                                "window": match win {
+                                                    crate::sessions::Closing::Background => None,
+                                                    crate::sessions::Closing::Closed(w)
+                                                    | crate::sessions::Closing::Exiting(w) => Some(w),
+                                                } }),
                                     );
                                     // Nói ĐÚNG cái vừa xảy ra, và ở đây "vừa
                                     // xảy ra" mới là gõ `/exit` — cửa sổ chưa
@@ -6369,11 +6373,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // này là kể một việc chưa xảy ra, đúng thứ
                                     // luật 3 của dự án cấm.
                                     match win {
-                                        None => format!(
+                                        crate::sessions::Closing::Background => format!(
                                             "⏹ Đã dừng phiên nền {} — nó không có cửa sổ nào để đóng. Hội thoại vẫn còn.",
                                             crate::sessions::shown(s)
                                         ),
-                                        Some(w) => {
+                                        // …và ca này thì ĐÃ đóng thật, đã kiểm
+                                        // bằng số tab chứ không bằng mã trả về
+                                        // (xem `keys::window_gone`). Cửa sổ trần
+                                        // không có CLI nào để chờ, nên không có
+                                        // gì phải hẹn.
+                                        crate::sessions::Closing::Closed(_) => format!(
+                                            "⏹ Đã đóng {} — cửa sổ trần, shell đã thoát từ trước nên không có gì để chờ.",
+                                            crate::sessions::shown(s)
+                                        ),
+                                        crate::sessions::Closing::Exiting(w) => {
                                             let now = chrono::Utc::now().timestamp();
                                             remember_closing(
                                                 db,

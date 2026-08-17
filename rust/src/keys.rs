@@ -436,6 +436,86 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
     }
 }
 
+/// Cửa sổ mang tty này, **KỂ CẢ tab đã chết** (shell thoát, `[Process
+/// completed]`, 0 tiến trình).
+///
+/// 🔴 Hà 2026-08-17: *"Ko còn sao vẫn liệt kê, hay nó ở tab con"*. Anh bấm ◻ ở
+/// một hàng `/terminal` và nhận `⚠ không còn cửa sổ terminal nào chạy ttys014`
+/// — trong khi cửa sổ ấy đang nằm ngay đó. Đo ra ngay: `tabs_script` (thứ DỰNG
+/// danh sách) đọc **mọi** tab, còn [`window_of`] (thứ THI HÀNH) lọc
+/// `count of processes > 0`. Hai bộ liệt kê, một câu hỏi, hai câu trả lời — nên
+/// hub vẽ ra một cái nút trỏ vào chỗ chính nó nói là không tồn tại. Cùng hình
+/// dạng với lỗi "lệnh in hai biến thể" cùng ngày.
+///
+/// Cái lọc ấy KHÔNG sai và không được gỡ: tab chết vẫn khai tty cũ, macOS thì
+/// dùng lại số tty, nên gõ chữ theo tty trần là gõ vào một cái xác (đo
+/// 2026-08-11, ba cửa sổ cùng khai `/dev/ttys005`). Nhưng ĐÓNG thì ngược lại:
+/// cái xác chính là thứ cần đóng. Nên tách hai đường, và chỉ đường ĐÓNG được
+/// nhìn thấy tab chết.
+///
+/// Thứ tự ưu tiên giữ nguyên như [`window_of`] — tab đang chạy chương trình,
+/// rồi tab còn sống — và chỉ khi không còn gì sống mới nhận tab chết.
+pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
+    if tty.is_empty() || tty == "??" || tty == "-" {
+        return Ok(None);
+    }
+    let dev = if tty.starts_with("/dev/") {
+        tty.to_string()
+    } else {
+        format!("/dev/{tty}")
+    };
+    Ok(osascript(&window_any_script(&dev))?
+        .trim()
+        .parse::<i64>()
+        .ok())
+}
+
+/// Tách ra để KIỂM ĐƯỢC — cùng lý do với [`window_script`]: ba lỗi AppleScript
+/// đắt nhất của tệp này đều nằm trong một chuỗi mà không bài kiểm nào chạm tới.
+fn window_any_script(dev: &str) -> String {
+    format!(
+        r#"tell application "Terminal"
+  set alive to missing value
+  set dead to missing value
+  repeat with w in every window
+    try
+      repeat with t in tabs of w
+        if tty of t is {} then
+          if (count of (processes of t)) > 0 then
+            if busy of t then return id of w
+            if alive is missing value then set alive to id of w
+          else
+            if dead is missing value then set dead to id of w
+          end if
+        end if
+      end repeat
+    end try
+  end repeat
+  if alive is not missing value then return alive
+  if dead is not missing value then return dead
+end tell"#,
+        as_string(dev)
+    )
+}
+
+/// Tab của cửa sổ ấy còn tiến trình nào không — `0` nghĩa là shell đã thoát.
+///
+/// Dùng để biết có gì để `exit` hay không: gõ `exit` vào một tab `[Process
+/// completed]` là gõ vào chỗ không ai đọc, rồi hub ngồi chờ một cú thoát không
+/// bao giờ tới.
+pub fn tab_proc_count(window: i64) -> Result<usize> {
+    let out = osascript(&format!(
+        r#"tell application "Terminal"
+  try
+    return (count of processes of selected tab of window id {window}) as text
+  on error
+    return "0"
+  end try
+end tell"#
+    ))?;
+    Ok(out.trim().parse::<usize>().unwrap_or(0))
+}
+
 /// Sổ nhớ `tty → id cửa sổ`. Bé, và cố ý không có hạn dùng: id chỉ đổi khi cửa
 /// sổ đóng, và lúc ấy `do script` hỏng ra lỗi rõ ràng chứ không im.
 static WINDOW_CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
@@ -804,12 +884,28 @@ pub fn send_exit(window: i64) -> Result<()> {
     Ok(())
 }
 
-/// Cửa sổ ấy còn trong danh sách của Terminal không — hỏi CHÍNH Terminal.
-pub fn window_exists(window: i64) -> Result<bool> {
-    let out = osascript(r#"tell application "Terminal" to get id of every window"#)?;
-    Ok(out
-        .split(',')
-        .any(|s| s.trim().parse::<i64>().ok() == Some(window)))
+/// Cửa sổ ấy ĐÃ ĐÓNG chưa — và phép đo phải trỏ đúng chỗ.
+///
+/// 🔴 `id of every window` KHÔNG trả lời được câu này, dù nó là chỗ đầu tiên ai
+/// cũng nhìn: một cửa sổ đã đóng vẫn nằm trong danh sách ấy. Đo 2026-08-17, hai
+/// cửa sổ vừa đóng xong: `2169 tabs=0 visible=false` · `2170 tabs=0
+/// visible=false` — id còn nguyên, cửa sổ thì đã biến mất khỏi màn hình.
+///
+/// Tôi đã tin cái danh sách ấy đúng một lượt, và nó dẫn tôi tới một kết luận
+/// SAI ("máy khoá màn hình nên `close` không chạy") mà tôi đã nói ra với chủ
+/// máy trước khi kiểm lại. Thứ nói đúng chuyện là **số tab** và **`visible`**.
+pub fn window_gone(window: i64) -> Result<bool> {
+    let out = osascript(&format!(
+        r#"tell application "Terminal"
+  try
+    return ((count of tabs of window id {window}) as text) & "/" & ((visible of window id {window}) as text)
+  on error
+    return "0/false"
+  end try
+end tell"#
+    ))?;
+    let t = out.trim();
+    Ok(t.starts_with("0/") || t.ends_with("false"))
 }
 
 /// Đóng cửa sổ, **rồi hỏi lại xem nó đã đi chưa**. Gọi khi ĐÃ biết tab không
@@ -817,37 +913,45 @@ pub fn window_exists(window: i64) -> Result<bool> {
 ///
 /// 🔴 `osascript` TRẢ 0 CHO MỘT LỆNH KHÔNG LÀM GÌ — đo 2026-08-17, và đây là lần
 /// thứ hai cùng một cái bẫy trong tệp này (lần trước: `do script` trả 0 chỉ nói
-/// bytes tới tab, xem `send_exit`).
+/// bytes tới tab, xem `send_exit`). Bản cũ trả `Ok(())` ngay sau lời gọi, nên
+/// nút ◻ *"đóng nó"* của route `/terminal` báo xong trong khi cửa sổ còn y
+/// nguyên. Hà, đúng lúc ấy: *"Nút tắt nhanh đâu"* — anh bấm, không có gì xảy ra.
 ///
-/// Hôm ấy máy đang **khoá màn hình** — `loginwindow` là tiến trình trước, và
-/// System Events đếm ra 0 cửa sổ cho mọi ứng dụng. Trong trạng thái ấy
-/// `close (first window whose id is …)` chạy êm, trả 0, và **cửa sổ đứng nguyên**.
-/// Đo ba lần trên ba trạng thái: cửa sổ có shell sống, cửa sổ đã `[Process
-/// completed]`, và một cửa sổ vừa mở mới tinh — cả ba đều "thành công" mà không
-/// đóng. Bản cũ trả `Ok(())` ngay sau lời gọi, nên nút ◻ *"đóng nó"* của route
-/// `/terminal` báo xong trong khi cửa sổ còn y nguyên trên máy. Hà, đúng lúc ấy:
-/// *"Nút tắt nhanh đâu"* — anh bấm, và không có gì xảy ra.
+/// Đo được (cửa sổ nháp, cùng ngày), và nó KHÔNG phải chuyện khoá màn hình —
+/// giả thuyết ấy tôi nói ra rồi phải rút lại sau khi đo đúng chỗ:
+/// · cửa sổ vừa mở, shell còn sống ⟹ `close` ĐÓNG được;
+/// · cửa sổ vừa `exit`, tab `[Process completed]`, 0 tiến trình ⟹ ĐÓNG được;
+/// · **năm cửa sổ có `claude` bị `kill`** rồi shell thoát ⟹ `close` chạy êm,
+///   trả 0, và cửa sổ đứng nguyên (`tabs=1 visible=true`), thử đủ bốn cách viết
+///   (`close window id`, `close (first window whose id is …)`,
+///   `tell window id … to close`, `close … saving no`) và cả khi Terminal đang
+///   là app trước. Cùng lúc ấy `set custom title` trên CHÍNH cửa sổ đó lại ăn
+///   ngay — tức đường Apple Event vẫn thông, chỉ riêng động từ `close` không có
+///   hiệu lực với những cửa sổ ấy.
 ///
-/// Khoá màn hình KHÔNG phải ca hiếm: nó là ca THƯỜNG của hub (chủ máy ở xa, cầm
-/// điện thoại). Nên hàm này phải kể đúng chuyện đó, không được để cái nút nói
-/// dối.
+/// Vì sao thì chưa biết (Accessibility không cho đọc cửa sổ của Terminal, và
+/// chụp màn hình cũng bị chặn, nên không nhìn được có hộp thoại nào đang treo
+/// trên chúng không). Chưa biết thì KHÔNG đoán trong câu báo lỗi — chỉ kể thứ
+/// đo được và chỉ đường ⌘W.
 pub fn close_window(window: i64) -> Result<()> {
     osascript(&format!(
         r#"tell application "Terminal" to close (first window whose id is {window})"#
     ))?;
     for _ in 0..6 {
         std::thread::sleep(std::time::Duration::from_millis(300));
-        match window_exists(window) {
-            Ok(false) => return Ok(()),
-            Ok(true) => {}
-            Err(e) => return Err(e.context("đã gửi lệnh đóng nhưng không hỏi lại được danh sách cửa sổ — KHÔNG biết nó đã đóng hay chưa")),
+        match window_gone(window) {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(e) => return Err(e.context(
+                "đã gửi lệnh đóng nhưng không hỏi lại được cửa sổ — KHÔNG biết nó đã đóng hay chưa",
+            )),
         }
     }
     anyhow::bail!(
-        "Terminal nhận lệnh đóng (osascript trả 0) mà cửa sổ vẫn CÒN trong danh sách sau ~2 giây. \
-         Đo 2026-08-17: khi máy đang KHOÁ MÀN HÌNH, `close` của Terminal là lệnh không làm gì — \
-         trả 0 và cửa sổ đứng yên (thử cả cửa sổ mới mở lẫn cửa sổ đã thoát shell). \
-         Mở khoá máy rồi bấm lại, hoặc đóng tay bằng ⌘W."
+        "Terminal nhận lệnh đóng (osascript trả 0) mà cửa sổ vẫn còn tab và vẫn hiện sau ~2 giây. \
+         Đo 2026-08-17: phần lớn cửa sổ đóng được bình thường, nhưng có những cửa sổ — đo được trên \
+         năm cái từng chạy một CLI bị `kill` — thì `close` chạy êm mà không đóng, đủ mọi cách viết. \
+         Chưa rõ vì sao. Đóng tay bằng ⌘W thì được."
     )
 }
 
@@ -2635,8 +2739,8 @@ pub fn api_error(screen: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        activity, arrow_verdict, as_string, ghost_verdict, landed, window_script, Arrow, Landed,
-        Look,
+        activity, arrow_verdict, as_string, ghost_verdict, landed, window_any_script,
+        window_script, Arrow, Landed, Look,
     };
 
     /// Đọc ĐÚNG chữ terminal đang hiện, và neo vào đồng hồ chứ không vào động từ.
@@ -2879,6 +2983,39 @@ mod tests {
         // Nhưng hộp thật giãn một dòng trống thì vẫn phải nhận ra.
         let spaced = "❯ 1. Yes\n\n  2. No, tell Claude what to do differently";
         assert_eq!(parse_choices(spaced).len(), 2, "{spaced}");
+    }
+
+    /// Đường ĐÓNG phải nhìn thấy được tab đã chết — đường GÕ thì không.
+    ///
+    /// 🔴 Hà 2026-08-17, bấm ◻ ở một hàng `/terminal`: *"Ko còn sao vẫn liệt kê,
+    /// hay nó ở tab con"*. hub trả lời *"không còn cửa sổ terminal nào chạy
+    /// ttys014"* trong khi cửa sổ ấy đang mở ngay đó — vì `tabs_script` (thứ
+    /// DỰNG danh sách) đọc mọi tab, còn `window_script` (thứ THI HÀNH) lọc
+    /// `count of processes > 0`. Đo lại bằng tay hôm ấy: `window_any_script`
+    /// trả `2158` cho `/dev/ttys014`, còn `window_script` trả rỗng.
+    #[test]
+    fn the_close_path_can_see_a_dead_tab_but_the_typing_path_cannot() {
+        let any = window_any_script("/dev/ttys014");
+        assert!(any.contains(r#"is "/dev/ttys014" then"#), "{any}");
+        assert!(
+            any.contains("if dead is missing value then set dead to id of w"),
+            "phải có nhánh nhận tab KHÔNG còn tiến trình:\n{any}"
+        );
+        assert!(
+            any.find("set alive to id of w").unwrap() < any.find("set dead to id of w").unwrap(),
+            "tab còn sống phải được ưu tiên trước cái xác:\n{any}"
+        );
+        // …còn đường gõ giữ nguyên hàng rào: gõ vào một cái xác là gõ vào chỗ
+        // không ai đọc (đo 2026-08-11, ba cửa sổ cùng khai `/dev/ttys005`).
+        let typing = window_script("/dev/ttys014");
+        assert!(
+            !typing.contains("set dead to"),
+            "đường gõ KHÔNG được nhận tab chết:\n{typing}"
+        );
+        assert_eq!(any.matches('"').count() % 2, 0, "dấu nháy lẻ:\n{any}");
+        assert_eq!(any.matches("end try").count(), 1, "{any}");
+        assert!(any.trim_end().ends_with("end tell"), "{any}");
+        assert!(!any.contains("{}"), "{any}");
     }
 
     #[test]

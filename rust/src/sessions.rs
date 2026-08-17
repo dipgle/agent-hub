@@ -5236,23 +5236,27 @@ fn short_id(session_id: &str) -> &str {
 /// thoại "terminate running processes", thứ khoá mồm mọi lệnh automation sau nó.
 /// Trả `None` khi phiên là phiên NỀN (đã dừng xong, không có cửa sổ nào để
 /// đóng), `Some(window)` khi đã gõ `/exit` và cửa sổ ấy đang chờ được đóng.
-pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Option<i64>> {
+pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Closing> {
     if session.kind == "background" {
         // Phiên nền không có cửa sổ nào để đóng: đóng hẳn nó CHÍNH LÀ dừng nó.
         // Nói ra ở chỗ gọi, đừng để người bấm tưởng vừa có một cửa sổ biến mất.
         stop_background(cfg, session)?;
-        return Ok(None);
+        return Ok(Closing::Background);
     }
     logging::info(
         "session_close_window",
         json!({ "session": session.session_id, "kind": session.kind,
                 "by_hub": session.started_by_hub }),
     );
-    let window = crate::keys::window_of(&session.tty)
+    // 🔴 ĐÓNG thì phải nhìn thấy được cả tab ĐÃ CHẾT — xem `keys::window_of_any`.
+    // Hàng `/terminal` được dựng từ MỌI tab, kể cả tab `[Process completed]`;
+    // nếu chỗ thi hành lại lọc mất đúng những tab ấy thì hub vẽ ra một cái nút
+    // trỏ vào chỗ chính nó nói là không tồn tại (Hà 17/08, `ttys014`).
+    let window = crate::keys::window_of_any(&session.tty)
         .map_err(|e| anyhow::anyhow!("không dò được cửa sổ terminal của phiên: {e}"))?
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "không còn cửa sổ terminal nào chạy {} — phiên có lẽ đã tắt rồi",
+                "không còn cửa sổ terminal nào mang {} — cửa sổ có lẽ đã đóng rồi",
                 if session.tty.is_empty() {
                     "(không rõ tty)"
                 } else {
@@ -5268,6 +5272,19 @@ pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Option<i64>>
     // rồi cửa sổ nằm nguyên đó — hub báo "đang đóng" cho một việc không bao
     // giờ xảy ra.
     if session.host == "shell" {
+        // 🔴 Tab đã chết thì KHÔNG có gì để thoát. Gõ `exit` vào một tab
+        // `[Process completed]` là gõ vào chỗ không ai đọc, rồi vòng chạy ngồi
+        // canh một cú thoát không bao giờ tới — cửa sổ nằm đó tới hết ngày còn
+        // hub thì báo "đang đóng". Đóng thẳng, và `close_window` tự kiểm.
+        if crate::keys::tab_proc_count(window).unwrap_or(1) == 0 {
+            logging::info(
+                "close_dead_tab_directly",
+                json!({ "window": window, "tty": session.tty,
+                        "why": "tab không còn tiến trình nào — không có gì để `exit`" }),
+            );
+            crate::keys::close_window(window)?;
+            return Ok(Closing::Closed(window));
+        }
         // Đây là một dấu nhắc SHELL, không phải TUI — ở shell thì dấu
         // xuống dòng `do script` tự kèm chính là cú Enter. Luật 13 chỉ
         // nói về ô nhập của `claude`.
@@ -5275,7 +5292,23 @@ pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Option<i64>>
     } else {
         crate::keys::send_exit(window)?;
     }
-    Ok(Some(window))
+    Ok(Closing::Exiting(window))
+}
+
+/// Ba kết cục của một lệnh đóng, và chúng phải là BA — không phải `Option`.
+///
+/// 🔴 Bản cũ trả `Option<i64>`: `None` nghĩa là "phiên nền, không có cửa sổ
+/// nào", `Some(w)` nghĩa là "đã gõ lệnh thoát, chờ đóng sau". Đóng ngay được
+/// một cửa sổ (tab đã chết, không có gì để thoát) không có chỗ trong hai ô ấy,
+/// và nhét nó vào `None` là để chủ máy đọc *"đã dừng phiên nền"* cho một việc
+/// khác hẳn. Một kiểu dữ liệu thiếu ô thì chỗ gọi sẽ bịa ra một câu.
+pub enum Closing {
+    /// Phiên NỀN: đã dừng, không có cửa sổ nào để đóng.
+    Background,
+    /// Cửa sổ đã đóng XONG ngay trong lượt này (và `close_window` đã kiểm).
+    Closed(i64),
+    /// Đã gõ lệnh thoát; cửa sổ vào sổ chờ, vòng chạy đóng sau.
+    Exiting(i64),
 }
 
 /// Stop a background session. Its conversation is kept, so it can be continued.

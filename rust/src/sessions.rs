@@ -1596,8 +1596,36 @@ pub fn last_say_by_id(cfg: &Config, session_id: &str, max_chars: usize) -> Optio
         return None;
     }
     let path = find_transcript(&cfg.claude_transcript_root(), session_id)?;
-    let tail = read_tail(&path).ok()?;
-    last_prose(&tail, max_chars)
+    last_prose_of_file(&path, max_chars)
+}
+
+/// Lời cuối phiên NÓI, đọc ngược từ cuối tệp và **nới dần khung đọc**.
+///
+/// 🔴 Hà 2026-08-17, `/shot` `[AI/onghut]` ra nguyên một tệp mã: *"Sao phiên này
+/// hiện như vậy, biết đằng nào làm tiếp"*. Tôi vá bằng cách bù lời cuối từ nhật
+/// ký — và bản vá ấy **không nổ**, vì `read_tail` chỉ đọc 256 KB.
+///
+/// Đo trên chính tệp ấy: nhật ký 5,66 MB / 401 dòng, lượt CÓ CHỮ cuối cùng nằm ở
+/// dòng 172 — **cách cuối tệp 4,56 MB**. Phiên vừa nuốt cả một tệp mã vào nhật
+/// ký, nên 229 lượt cuối toàn `tool_use`: trong khung 256 KB không có lấy một
+/// chữ nào của phiên. Một cái trần hợp lý cho phiên thường lại mù đúng với phiên
+/// đang làm việc nặng — tức mù đúng lúc người ở xa cần biết nó đang làm gì.
+///
+/// Nới DẦN chứ không nới thẳng: gần như mọi lượt gọi tìm thấy chữ ngay trong 256
+/// KB đầu tiên và dừng ở đó, chỉ ca hiếm mới trả giá đọc rộng hơn. Trần 16 MB là
+/// cái phanh cuối cho một nhật ký khổng lồ.
+pub fn last_prose_of_file(path: &Path, max_chars: usize) -> Option<String> {
+    let len = std::fs::metadata(path).ok()?.len();
+    for window in [TAIL_BYTES, 1 << 20, 4 << 20, 16 << 20] {
+        let tail = read_tail_n(path, window).ok()?;
+        if let Some(said) = last_prose(&tail, max_chars) {
+            return Some(said);
+        }
+        if len <= window {
+            break;
+        }
+    }
+    None
 }
 
 /// Lời cuối cùng **phiên nói ra**, bỏ qua những lượt chỉ gọi công cụ.
@@ -2312,12 +2340,18 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
 }
 
 fn read_tail(path: &Path) -> Result<String> {
+    read_tail_n(path, TAIL_BYTES)
+}
+
+/// Như trên nhưng khai rõ khung đọc — dùng cho [`last_prose_of_file`], thứ phải
+/// nới dần khi phần đuôi toàn lượt gọi công cụ.
+fn read_tail_n(path: &Path, bytes: u64) -> Result<String> {
     let mut file = std::fs::File::open(path)?;
     let len = file.metadata()?.len();
-    if len > TAIL_BYTES {
-        file.seek(SeekFrom::Start(len - TAIL_BYTES))?;
+    if len > bytes {
+        file.seek(SeekFrom::Start(len - bytes))?;
     }
-    let mut buf = Vec::with_capacity(TAIL_BYTES as usize);
+    let mut buf = Vec::with_capacity(bytes.min(len) as usize);
     file.read_to_end(&mut buf)?;
     Ok(String::from_utf8_lossy(&buf).to_string())
 }

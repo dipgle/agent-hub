@@ -4961,7 +4961,7 @@ pub fn say_session_data_at(
     // MỘT MẨU: bảng bị cắt đôi thì sửa mẩu cuối để lại mẩu đầu nói chuyện cũ.
     if let (Some(mid), true) = (edit, chunks_len == 0) {
         match tg.edit_html(mid, &tail, &row) {
-            Ok(()) => return Some(mid),
+            Ok(_) => return Some(mid),
             Err(e) => logging::info(
                 "telegram_edit_fell_back_to_new",
                 json!({ "message_id": mid, "why": e }),
@@ -9120,7 +9120,20 @@ fn reply_in_channel(db: &Db, _cfg: &Config, adapter: &str, cmd: &ChannelCommand,
                     ),
                 }
             }
-            if let Err(e) = i.send_text(text) {
+            // 🔴 Không thả được dấu thì câu xác nhận vẫn phải đọc được — nhưng
+            // nó KHÔNG cần một dòng mới mỗi lần. Cú bấm đi qua một liên kết
+            // trong chữ (`t.me/<bot>?start=k_…`) không có tin nào để thả dấu
+            // lên: tiếng vọng `/start` bị hub dọn ngay khi nhận. Đo ngày 17/08:
+            // **73 dòng `✓ đã gửi · …`** cho 73 cú bấm phím, xếp dọc buồng chat,
+            // đúng thứ Hà bảo bỏ (*"Có thể đổi cách phản hồi … cho gọn"*).
+            // `send_ack` gộp câu giống hệt vào chính tin trước (`×N`), và chỉ
+            // gộp khi nó còn là tin cuối.
+            let sent = if ack_as_emoji(text).is_some() {
+                i.send_ack(text)
+            } else {
+                i.send_text(text)
+            };
+            if let Err(e) = sent {
                 logging::error("telegram_ack_failed", json!({ "err": e }));
             }
         }

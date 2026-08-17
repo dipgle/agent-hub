@@ -2655,3 +2655,82 @@ fn a_link_that_opens_a_line_reports_no_text_before_it() {
     assert_eq!(sent.links[0].label, "⌫ xoá ô nhập");
     assert_eq!(sent.before_link(0), "");
 }
+
+/// Bấm một liên kết trong chữ ⟹ client gửi `/start k_…`, và hub XOÁ tiếng vọng
+/// ấy ngay. Nên nó không phải chỗ để thả dấu xác nhận lên.
+///
+/// Bài kiểm tái hiện lỗi ngày 17/08: đường trả lời cầm `message_id` của tin vừa
+/// bị xoá ⟹ `Bad Request: message to react not found` **73 lần trong một ngày**,
+/// mỗi lần rơi về một dòng chữ thừa trong buồng chat. RED với bản cũ (nó truyền
+/// thẳng `Some(mid)`), GREEN với `ack_target`.
+#[test]
+fn the_echo_of_a_tapped_link_is_not_something_to_react_to() {
+    // Tin chữ thật của chủ máy: còn nằm đó, thả dấu được.
+    assert_eq!(hub::telegram::ack_target(false, Some(4102)), Some(4102));
+    // Tiếng vọng `/start …` của một cú bấm: hub dọn nó, nên không có đích nào.
+    assert_eq!(hub::telegram::ack_target(true, Some(4102)), None);
+    // Không có id thì cũng không có đích — không được bịa ra một cái.
+    assert_eq!(hub::telegram::ack_target(false, None), None);
+}
+
+/// Câu xác nhận trơn LẶP LẠI thì sửa tin cũ tại chỗ, không đẻ dòng mới.
+///
+/// Hà 2026-08-17: *"Khi bấm ở phản hồi nên sửa tin tại phản hồi đó luôn không
+/// cần gửi 1 tin mới"*.
+#[test]
+fn the_same_confirmation_twice_edits_the_first_one() {
+    use hub::telegram::{fold_ack, AckLive, AckPlan};
+    // Lần đầu: chưa có gì để gộp.
+    assert_eq!(fold_ack(None, "✓ đã gửi · 🟩 [tfl5]"), AckPlan::New);
+    let live = AckLive {
+        message_id: 4111,
+        text: "✓ đã gửi · 🟩 [tfl5]".into(),
+        times: 1,
+    };
+    // Lần hai, y hệt: sửa chính tin ấy, và ĐẾM cho người đọc biết là hai lần.
+    assert_eq!(
+        fold_ack(Some(&live), "✓ đã gửi · 🟩 [tfl5]"),
+        AckPlan::Fold {
+            message_id: 4111,
+            text: "✓ đã gửi · 🟩 [tfl5] ×2".into(),
+            times: 2,
+        }
+    );
+}
+
+/// …nhưng CHỈ khi câu giống hệt: câu khác mang thông tin khác, và ghi đè nó là
+/// xoá mất thứ vừa nói. Dự án khác, hay "vào hàng chờ" thay vì "đã gửi", đều là
+/// một việc khác.
+#[test]
+fn a_different_confirmation_gets_its_own_line() {
+    use hub::telegram::{fold_ack, AckLive, AckPlan};
+    let live = AckLive {
+        message_id: 4111,
+        text: "✓ đã gửi · 🟩 [tfl5]".into(),
+        times: 3,
+    };
+    assert_eq!(fold_ack(Some(&live), "✓ đã gửi · 🟥 [dwork]"), AckPlan::New);
+    assert_eq!(
+        fold_ack(Some(&live), "✓ đã vào hàng chờ · 🟩 [tfl5]"),
+        AckPlan::New
+    );
+}
+
+/// Đếm tiếp từ số đang có, không đếm lại từ đầu — nếu không thì bấm mười lần
+/// vẫn đọc ra `×2` và cái đếm nói dối.
+#[test]
+fn the_count_keeps_climbing() {
+    use hub::telegram::{fold_ack, AckLive, AckPlan};
+    let live = AckLive {
+        message_id: 7,
+        text: "✓ đã gửi · 🟪 [hub]".into(),
+        times: 9,
+    };
+    match fold_ack(Some(&live), "✓ đã gửi · 🟪 [hub]") {
+        AckPlan::Fold { text, times, .. } => {
+            assert_eq!(times, 10);
+            assert!(text.ends_with("×10"), "{text}");
+        }
+        AckPlan::New => panic!("câu y hệt phải gộp"),
+    }
+}

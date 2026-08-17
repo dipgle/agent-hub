@@ -581,6 +581,33 @@ tab của nó; `ps` biến mất trước khi shell kịp in dấu nhắc), rồ
 cửa sổ, không đọc được màn, và quá `LONG_JOB_MAX_SEC` (lúc ấy nói "hub thôi
 canh", vì cửa sổ vẫn còn đó — khác hẳn "lệnh chết").
 
+## Câu xác nhận TRƠN: một dòng sống, không phải một dòng mỗi cú bấm (2026-08-17)
+
+Hà 2026-08-14: *"Có thể đổi cách phản hồi tin đã gửi bằng 1 emoji trực tiếp vào
+tin nhắn cho gọn"*; 2026-08-17: *"Khi bấm ở phản hồi nên sửa tin tại phản hồi đó
+luôn không cần gửi 1 tin mới"*. Ba đường ra, theo thứ tự:
+
+1. **Thả dấu lên tin của chủ máy** — khi lệnh đến từ một tin chữ anh gõ. Rẻ
+   nhất, không chiếm dòng nào.
+2. **Sửa câu xác nhận trước** (`telegram::send_ack` + `fold_ack`) — khi câu mới
+   GIỐNG HỆT câu đang nằm ở đáy buồng chat: `✓ đã gửi · 🟩 [tfl5] ×3`.
+3. **Một dòng mới** — khi câu khác đi, hoặc khi có tin nào khác đã chen vào.
+
+🔴 Hai sự thật phải giữ, mỗi cái đã trả giá một lần:
+
+- **Tiếng vọng `/start` không phải chỗ thả dấu.** Bấm một liên kết trong chữ ⟹
+  client gửi `/start <payload>` ⟹ hub XOÁ tin ấy ngay. Bản trước vẫn mang
+  `message_id` của nó sang đường trả lời: **73 lần `message to react not found`
+  trong ngày 17/08**, mỗi lần một dòng chữ thừa. `telegram::ack_target` nay là
+  chỗ duy nhất trả lời câu ấy.
+- **Bot KHÔNG thả được dấu lên tin của CHÍNH nó** — đo thật trên buồng chat:
+  `setMessageReaction` trả `REACTION_INVALID`. Nên "thả dấu lên tin chứa nút" là
+  ngõ cụt; đừng thử lại.
+
+Sổ `ack_live` chỉ đúng chừng nào câu ấy còn ở ĐÁY. Thêm một đường gửi mới thì
+phải gọi `forget_ack_live()` trong đó — thiếu một cửa là sửa một dòng người đọc
+đã cuộn qua.
+
 ## When you change something
 
 - Changed the snapshot shape or a chat verb? `install_update.sh` in the same

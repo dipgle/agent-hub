@@ -88,6 +88,83 @@ pub struct Incoming {
 /// Hàng update chờ thợ, kèm mốc NHẬN của từng cái (để đo thời gian nằm chờ).
 type Inflight = (Mutex<VecDeque<(Value, std::time::Instant)>>, Condvar);
 
+/// Câu xác nhận TRƠN đang là tin cuối cùng hub gửi — chỗ để gộp câu kế tiếp.
+///
+/// Chỉ tồn tại khi tin ấy còn ở đáy buồng chat: bất cứ tin nào khác đi ra (hoặc
+/// một tin của chủ máy còn nằm lại) đều xoá sổ này, vì lúc ấy sửa nó là sửa một
+/// dòng đã trôi lên giữa màn.
+#[derive(Debug, Clone)]
+pub struct AckLive {
+    pub message_id: i64,
+    /// Nguyên văn câu xác nhận, chưa gắn đuôi đếm — để biết câu kế tiếp có
+    /// PHẢI CÙNG MỘT CÂU hay không.
+    pub text: String,
+    /// Đã nói câu ấy mấy lần.
+    pub times: u32,
+}
+
+/// Câu xác nhận kế tiếp: sửa tin cũ tại chỗ, hay đẻ một tin mới?
+#[derive(Debug, PartialEq, Eq)]
+pub enum AckPlan {
+    /// Không có gì để gộp — gửi tin mới.
+    New,
+    /// Sửa tin `message_id` thành `text` (đã kèm đuôi đếm).
+    Fold {
+        message_id: i64,
+        text: String,
+        times: u32,
+    },
+}
+
+/// Câu xác nhận trơn kế tiếp đi đường nào — hàm THUẦN, kiểm được không cần mạng.
+///
+/// 🔴 Hà 2026-08-17: *"Khi bấm ở phản hồi nên sửa tin tại phản hồi đó luôn không
+/// cần gửi 1 tin mới"*. Câu ấy đã được cài cho BẢNG (`say_from_session(edit)`),
+/// nhưng không cho câu xác nhận trơn — nên đường đi qua một LIÊN KẾT trong chữ
+/// (`t.me/<bot>?start=k_…`) vẫn đẻ một dòng mỗi cú bấm.
+///
+/// Đo trên `hubd.err` ngày 17/08: **73 dòng `✓ đã gửi · …`** cho 73 cú bấm phím,
+/// mỗi dòng kèm một `telegram_reaction_failed` — vì tin sinh ra lệnh là tiếng
+/// vọng `/start`, mà hub XOÁ ngay tiếng vọng ấy, nên cái dấu không có chỗ để
+/// thả. Hai chuyện tách bạch: dấu thả lên tin của chủ máy (còn nguyên), còn
+/// đường này thì gộp.
+///
+/// Chỉ gộp khi CÂU GIỐNG HỆT: `✓ đã gửi · 🟩 [tfl5]` hai lần liền là cùng một
+/// việc lặp lại, gộp được thành `×2`. Câu khác đi (dự án khác, "vào hàng chờ"
+/// thay vì "đã gửi") mang thông tin khác, và ghi đè nó là xoá mất thứ vừa nói.
+pub fn fold_ack(prev: Option<&AckLive>, text: &str) -> AckPlan {
+    let Some(p) = prev else { return AckPlan::New };
+    if p.text != text {
+        return AckPlan::New;
+    }
+    let times = p.times.saturating_add(1);
+    AckPlan::Fold {
+        message_id: p.message_id,
+        text: format!("{text} ×{times}"),
+        times,
+    }
+}
+
+/// Tin nào còn lại để thả dấu lên — `None` cho tiếng vọng `/start`, vì hub dọn
+/// chính nó ngay sau đó.
+///
+/// 🔴 Một sự thật, hai chỗ đọc. Bản trước xếp lệnh vào hàng KÈM `message_id`
+/// rồi mới xoá tiếng vọng ấy, nên đường trả lời cầm id của một tin **không còn
+/// tồn tại**: mọi cú bấm liên kết kết thúc bằng `Bad Request: message to react
+/// not found` — **73 lần ngày 17/08**, mỗi lần kèm một dòng chữ thừa. Chỗ xoá
+/// và chỗ thả dấu nay nhìn cùng một câu hỏi *"tin này có sống sót không"*.
+///
+/// Xoá HỎNG thì tin nằm lại và cái dấu ấy mất chỗ đúng ra thả được — đo trên
+/// toàn bộ log: `telegram_start_echo_kept` = 0 lần, nên cái giá ấy nhỏ hơn hẳn
+/// việc bắt mọi cú bấm chờ một lượt `deleteMessage` xong mới được chạy.
+pub fn ack_target(is_start_echo: bool, mid: Option<i64>) -> Option<i64> {
+    if is_start_echo {
+        None
+    } else {
+        mid
+    }
+}
+
 /// Một câu hỏi xác nhận đang chờ cú bấm của chủ máy.
 struct Waiter {
     /// Con dấu ghép câu trả lời với câu hỏi — `confirm.rs` dựng, gắn vào
@@ -151,6 +228,13 @@ pub struct Inbox {
     /// cú đánh thức nay lo phần còn lại — ảnh chụp, cái loa "vừa xong / vừa
     /// tắt", bảng sức khoẻ — thứ nếu không có nó thì đi sau sự thật 120 giây.
     waker: Option<Arc<crate::runtime::Waker>>,
+    /// Câu xác nhận trơn đang nằm ở đáy buồng chat — xem [`fold_ack`].
+    ///
+    /// Trong bộ nhớ chứ không phải trong sổ SQLite, và đó là chủ ý: sổ này chỉ
+    /// đúng chừng nào tin ấy vẫn là tin CUỐI, mà "cuối" là chuyện của phiên
+    /// chạy hiện tại. hubd khởi động lại thì câu kế tiếp đi tin mới — đúng, vì
+    /// lúc ấy không ai biết buồng chat đã trôi thêm những gì.
+    ack_live: Arc<Mutex<Option<AckLive>>>,
 }
 
 /// Một cú bấm nút → **đúng dòng lệnh mà ngón tay sẽ gõ**, không phải một nhánh
@@ -773,6 +857,7 @@ impl Inbox {
             chat_id,
             cfg: std::sync::Arc::new(cfg.clone()),
             waker,
+            ack_live: Arc::new(Mutex::new(None)),
         };
         let _ = INBOX.set(inbox.clone());
         // Luồng THỢ trước, vòng đọc sau: dựng ngược thì có một khoảnh khắc
@@ -1242,6 +1327,7 @@ impl Inbox {
             .unwrap_or("file")
             .to_string();
         let client = self.client().ok_or("không dựng được HTTP client")?;
+        self.forget_ack_live();
         let part = reqwest::blocking::multipart::Part::bytes(body.into_bytes())
             .file_name(name.clone())
             .mime_str("text/plain; charset=utf-8")
@@ -1302,6 +1388,7 @@ impl Inbox {
         }
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
         let client = self.client().ok_or("không dựng được HTTP client")?;
+        self.forget_ack_live();
         let part = reqwest::blocking::multipart::Part::bytes(bytes)
             .file_name("man-hinh.png")
             .mime_str("image/png")
@@ -2138,6 +2225,9 @@ impl Inbox {
         // khiến lượt truy sau đi tìm nhầm thư mục.
         if from == self.chat_id {
             if let Some((file_id, name)) = attachment_of(msg) {
+                // Tấm ảnh vừa gửi NẰM LẠI ở đáy buồng chat — câu xác nhận cũ
+                // thôi là tin cuối, nên đừng sửa nó nữa (xem `fold_ack`).
+                self.forget_ack_live();
                 self.take_file(
                     &file_id,
                     &name,
@@ -2157,7 +2247,17 @@ impl Inbox {
             );
             return;
         }
-        self.push_text_from(text, msg.get("message_id").and_then(Value::as_i64));
+        let is_start_echo = text == "/start" || text.starts_with("/start ");
+        // Một tin của chủ máy còn nằm lại ở đáy buồng chat ⟹ câu xác nhận đang
+        // mở thôi là tin cuối, nên đừng sửa nó nữa (xem `fold_ack`). Tiếng vọng
+        // `/start` KHÔNG tính: nó bị dọn ngay dưới đây.
+        if !is_start_echo {
+            self.forget_ack_live();
+        }
+        self.push_text_from(
+            text,
+            ack_target(is_start_echo, msg.get("message_id").and_then(Value::as_i64)),
+        );
         // 🔴 Hà 2026-08-14, ảnh chụp buồng chat sau khi bấm icon ▶️: *"Sao bấm
         // lại thành lệnh start à"*.
         //
@@ -2172,12 +2272,13 @@ impl Inbox {
         // RIÊNG, bot xoá được tin đến (Bot API, `deleteMessage`, trong 48 giờ).
         // Xoá hỏng thì thôi, không phải lỗi chặn việc — nhưng phải có dòng nói
         // ra, đừng im.
-        if text == "/start" || text.starts_with("/start ") {
+        if is_start_echo {
             if let Some(mid) = msg.get("message_id").and_then(Value::as_i64) {
                 if let Err(e) = self.delete_message(mid) {
                     logging::info(
                         "telegram_start_echo_kept",
-                        json!({ "why": e, "what": "tiếng vọng /start của một cú bấm icon" }),
+                        json!({ "why": e, "what": "tiếng vọng /start của một cú bấm icon",
+                                "effect": "câu xác nhận đi bằng chữ — `ack_target` đã bỏ id ấy" }),
                     );
                 }
             }
@@ -2246,6 +2347,15 @@ impl Inbox {
     /// chỗ gọi phải phân biệt "hỏng mạng, thử lại sau" với "không bao giờ xoá
     /// được nữa".
     pub fn delete_message(&self, message_id: i64) -> Result<(), String> {
+        // Xoá đúng cái tin đang giữ sổ ⟹ bỏ sổ. Không bỏ thì lượt sau sửa một
+        // tin không còn, và câu xác nhận rơi về dòng mới qua đường lỗi thay vì
+        // đi thẳng.
+        {
+            let mut live = self.ack_live.lock().unwrap_or_else(|e| e.into_inner());
+            if live.as_ref().is_some_and(|a| a.message_id == message_id) {
+                *live = None;
+            }
+        }
         let client = self.client().ok_or("không dựng được HTTP client")?;
         let r = client
             .post(self.api("deleteMessage"))
@@ -2309,6 +2419,9 @@ impl Inbox {
         html: &str,
         buttons: &[(String, String)],
     ) -> Result<Sent, String> {
+        // Một tin khác đi ra ⟹ câu xác nhận đang mở thôi là tin cuối.
+        // `send_ack` ghi lại sổ NGAY SAU khi gửi, nên đường ấy không mất gì.
+        self.forget_ack_live();
         let client = self.client().ok_or("không dựng được HTTP client")?;
         let mut body = json!({
             "chat_id": self.chat_id,
@@ -2356,12 +2469,16 @@ impl Inbox {
     /// Telegram từ chối `editMessageText` khi nội dung **không đổi một ký tự**
     /// (*"message is not modified"*) — đó không phải lỗi, mà là câu trả lời
     /// đúng cho một cú bấm không đổi gì; chỗ gọi đọc nó như vậy.
+    /// Trả về thứ Telegram nói tin ấy hiển thị SAU khi sửa — cùng lý do
+    /// `send_html_report` trả `Sent`: từ máy này không nhìn thấy màn hình điện
+    /// thoại, nên "đã sửa" phải đọc được thành chữ chứ không phải suy ra từ
+    /// việc không có lỗi.
     pub fn edit_html(
         &self,
         message_id: i64,
         html: &str,
         buttons: &[(String, String)],
-    ) -> Result<(), String> {
+    ) -> Result<Sent, String> {
         let client = self.client().ok_or("không dựng được HTTP client")?;
         let mut body = json!({
             "chat_id": self.chat_id,
@@ -2384,7 +2501,7 @@ impl Inbox {
                 "telegram_message_edited",
                 json!({ "message_id": message_id, "chars": html.chars().count() }),
             );
-            Ok(())
+            Ok(Sent::read(&v))
         } else {
             Err(v
                 .get("description")
@@ -2450,8 +2567,73 @@ impl Inbox {
         Err(last)
     }
 
+    /// Câu xác nhận đang mở, nếu có — để bài kiểm đọc được sổ mà không phải
+    /// đoán từ bên ngoài.
+    pub fn ack_live_now(&self) -> Option<AckLive> {
+        self.ack_live
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Quên câu xác nhận đang mở — gọi từ MỌI đường gửi khác.
+    ///
+    /// Gộp chỉ đúng khi câu cũ vẫn nằm ở đáy buồng chat. Một tin khác đi ra (kết
+    /// quả lệnh, ảnh màn, câu hỏi xác nhận) đẩy nó lên trên, và sửa một dòng ở
+    /// giữa màn là nói với người đọc một chuyện họ đã cuộn qua.
+    pub fn forget_ack_live(&self) {
+        *self.ack_live.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// Gửi một câu xác nhận TRƠN — gộp vào câu trước nếu nó y hệt và còn ở đáy.
+    ///
+    /// Đường này chỉ dành cho câu mà [`crate::pipeline::ack_as_emoji`] nhận là
+    /// xác nhận trơn; câu mang thông tin đi `send_text` như cũ, vì gộp nó là
+    /// giấu mất thứ người ta cần đọc.
+    pub fn send_ack(&self, text: &str) -> Result<(), String> {
+        let plan = {
+            let live = self.ack_live.lock().unwrap_or_else(|e| e.into_inner());
+            fold_ack(live.as_ref(), text)
+        };
+        if let AckPlan::Fold {
+            message_id,
+            text: shown,
+            times,
+        } = plan
+        {
+            match self.edit_html(message_id, &html_escape(&shown), &[]) {
+                Ok(_) => {
+                    *self.ack_live.lock().unwrap_or_else(|e| e.into_inner()) = Some(AckLive {
+                        message_id,
+                        text: text.to_string(),
+                        times,
+                    });
+                    logging::info(
+                        "telegram_ack_folded",
+                        json!({ "message_id": message_id, "times": times }),
+                    );
+                    return Ok(());
+                }
+                // Sửa không được thì NÓI rồi gửi mới: tin cũ có thể đã bị xoá
+                // tay, và im lặng ở đây là một câu trả lời biến mất.
+                Err(e) => logging::info(
+                    "telegram_ack_fold_fell_back",
+                    json!({ "message_id": message_id, "why": e }),
+                ),
+            }
+        }
+        let sent = self.send_html_report(&html_escape(text), &[])?;
+        *self.ack_live.lock().unwrap_or_else(|e| e.into_inner()) = Some(AckLive {
+            message_id: sent.message_id,
+            text: text.to_string(),
+            times: 1,
+        });
+        Ok(())
+    }
+
     /// Gửi một câu ra Telegram. `Err` chứ không nuốt — chỗ gọi phải log.
     pub fn send_text(&self, text: &str) -> Result<(), String> {
+        self.forget_ack_live();
         let client = self.client().ok_or("không dựng được HTTP client")?;
         let r = client
             .post(self.api("sendMessage"))
@@ -2565,6 +2747,7 @@ impl Inbox {
         if buttons.is_empty() {
             return self.send_text(text);
         }
+        self.forget_ack_live();
         let client = self.client().ok_or("không dựng được HTTP client")?;
         let keyboard = Self::keyboard_rows(buttons);
         let r = client
@@ -2695,6 +2878,7 @@ mod tests {
             chat_id: "1".into(),
             cfg: Arc::new(Config::default()),
             waker: None,
+            ack_live: Arc::new(Mutex::new(None)),
         }
     }
 

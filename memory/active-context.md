@@ -1,5 +1,61 @@
 # active context — hub
 
+## 🎯 2026-08-17 (khuya) — 73 dòng chữ cho 73 cú bấm: hub xoá tin, rồi thả dấu lên chính tin ấy
+
+Không có yêu cầu mới; chỗ đi được là chỗ CÓ SỐ ĐO. Nhật ký daemon hôm nay:
+`telegram_reaction_failed` **73 lần**, tất cả một câu — *"Bad Request: message to
+react not found"* — và tất cả rơi vào lệnh sinh từ một **liên kết trong chữ**
+(`Key` 73 · `Close` 4 · `Type` 1; đối chiếu: `telegram_ack_as_reaction` thành
+công 252 lần, toàn `Type` gõ tay).
+
+### 1. Gốc: hai chỗ đọc một sự thật ngược nhau (`ack_target`)
+
+Bấm liên kết ⟹ client gửi `/start k_<sid>_<n>` ⟹ `handle_update` xếp lệnh vào
+hàng **kèm `message_id` của tiếng vọng ấy**, RỒI xoá chính tiếng vọng đó (xoá
+được 100% — `telegram_start_echo_kept` = 0 trên toàn bộ log). Nên đường trả lời
+cầm id của một tin không còn tồn tại: dấu thả hỏng ⟹ rơi về **một dòng chữ
+`✓ đã gửi · …` cho mỗi cú bấm**. Nay `telegram::ack_target` là chỗ duy nhất trả
+lời *"còn tin nào để thả dấu không"*.
+
+### 2. Đo trước khi thiết kế: bot KHÔNG thả được dấu lên tin của chính nó
+
+Đường sửa "hiển nhiên" là thả dấu lên tin CHỨA nút. Đo thật trên buồng chat (gửi
+tin nháp → thả → xoá): `setMessageReaction` lên tin của bot trả
+**`REACTION_INVALID`**; lên một id không tồn tại trả đúng câu *"message to react
+not found"* của 73 lần kia. Ngõ cụt ấy loại bằng ĐO, không bằng đoán — đừng thử
+lại.
+
+### 3. Vá: câu xác nhận trơn lặp lại thì SỬA tin cũ (`fold_ack` + `send_ack`)
+
+Hà 2026-08-17: *"Khi bấm ở phản hồi nên sửa tin tại phản hồi đó luôn không cần
+gửi 1 tin mới"* — đã cài cho BẢNG (`say_from_session(edit)`), chưa cài cho câu
+xác nhận trơn. Nay câu **giống hệt** sửa chính tin trước và đếm lên
+(`✓ đã gửi · 🟩 [tfl5] ×3`); câu khác đi (dự án khác, "vào hàng chờ" thay vì "đã
+gửi") vẫn có dòng riêng, vì gộp nó là ghi đè thứ vừa nói.
+
+Sổ `ack_live` nằm trong bộ nhớ tiến trình, và **mọi đường gửi khác xoá nó**
+(`send_text`, `send_html_report`, `send_buttons`, ảnh, tệp) — cùng với mọi tin
+của chủ máy còn nằm lại (chữ hoặc đính kèm). Tiếng vọng `/start` KHÔNG tính: nó
+bị dọn ngay. Thiếu một trong những cửa ấy là sửa một dòng đã trôi lên giữa màn.
+
+**Chạy thật:** `tests/ack_fold_live.rs` (2 bài, `#[ignore]`, gửi + xoá thật) —
+tin `4125` bị **sửa tại chỗ**, `telegram_message_edited` + `telegram_ack_folded
+times=2`, và chữ Telegram trả về mang đúng `×2`. Hai tin thử đã xoá.
+⚠ Tác dụng phụ đã biết của mọi bài kiểm live trong repo này: nó dựng một `Inbox`
+thứ hai ⟹ `telegram_poll_rejected` (Conflict) một nhịp, hubd điếc ~30 giây.
+
+`edit_html` nay trả `Sent` chứ không `()`: "đã sửa" phải đọc được thành chữ, y
+như `send_html_report` — không suy ra từ việc không có lỗi.
+
+### 4. Còn treo
+
+- **Chưa nghiệm thu trên cú bấm THẬT của Hà** — cần đúng một cú bấm phím trên
+  điện thoại; dấu hiệu xanh: `telegram_ack_folded` xuất hiện và
+  `telegram_reaction_failed` về 0.
+- `/anh` vẫn chờ Hà cấp Screen Recording cho `~/Library/Application Support/hub/bin/hubd`.
+- `terminal_probe_failed` (osascript quá 20s): 27 lần 16/08, 8 lần 17/08 — chưa
+  truy, hậu quả là hub tạm mù cửa sổ trong lượt ấy.
+
 ## 🎯 2026-08-17 (tối) — hai kết cục bị gộp làm một, đo được bằng 190 dòng warn
 
 Không có ảnh nào của Hà trong phiên này (bàn giao dặn chờ ảnh, **đừng vá mò**),

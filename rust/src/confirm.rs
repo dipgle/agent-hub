@@ -200,6 +200,13 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
             ]]
         }
     });
+    // Câu hỏi này là một tin MỚI ở đáy buồng chat ⟹ câu xác nhận trơn đang mở
+    // thôi là tin cuối, và sửa nó sau đó là sửa một dòng nằm trên câu hỏi
+    // (`telegram::fold_ack`). Đây là cửa gửi duy nhất KHÔNG đi qua `Inbox`, nên
+    // nó phải tự gọi — thiếu chỗ này là cả luật hở đúng một lối.
+    if let Some(i) = crate::telegram::inbox() {
+        i.forget_ack_live();
+    }
     let sent = client.post(api("sendMessage")).json(&body).send();
     let message_id = match sent {
         Ok(r) => {

@@ -886,6 +886,58 @@ pub fn send_exit(window: i64) -> Result<()> {
     Ok(())
 }
 
+/// Đưa cửa sổ của phiên ra TRƯỚC rồi chụp ảnh màn hình thật ra `path`.
+///
+/// 🔴 Hà 2026-08-17: *"Thêm lệnh chụp ảnh màn hình để tôi xem thực sự đang có gì
+/// trên màn hình"*, rồi ngay sau đó: *"Focus tới phiên thật"*. Câu thứ hai là cả
+/// thiết kế của hàm này — một tấm ảnh chụp bừa cả màn hình chỉ nói được "máy
+/// đang mở gì đó", còn thứ anh hỏi là *phiên ẤY* đang hiện gì.
+///
+/// Đưa ra trước rồi chụp CẢ màn (không cắt riêng cửa sổ): thứ đè lên cửa sổ —
+/// hộp thoại của macOS, một cửa sổ khác, thanh thông báo — chính là cái mà chữ
+/// đọc từ tab không bao giờ thấy, và cũng chính là thứ hay làm phiên đứng im.
+///
+/// ⚠ `screencapture` đòi quyền **Screen Recording**, và trên máy này nó đang bị
+/// từ chối (đo 2026-08-17: *"could not create image from display"*, exit 1).
+/// Nên hàm này KHÔNG được nuốt lỗi: nó nói đúng cái thiếu và chỗ cấp.
+pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
+    // Không đưa ra trước được thì vẫn chụp — một tấm ảnh cả màn hình còn hơn
+    // không có gì, và câu trả lời sẽ nói rõ là chưa focus được.
+    let focused = osascript(&format!(
+        r#"tell application "Terminal"
+  set index of window id {window} to 1
+  activate
+end tell"#
+    ))
+    .is_ok();
+    if focused {
+        std::thread::sleep(std::time::Duration::from_millis(700));
+    }
+    let out = crate::exec::run(
+        "screencapture",
+        &["-x", &path.display().to_string()],
+        crate::exec::RunOpts {
+            timeout: Some(std::time::Duration::from_secs(20)),
+            ..Default::default()
+        },
+    )?;
+    if out.code != Some(0) || !path.exists() {
+        anyhow::bail!(
+            "screencapture không chụp được ({}). Gần như luôn là quyền **Screen Recording**: \
+             System Settings → Privacy & Security → Screen Recording → bật cho `hubd` \
+             (~/Library/Application Support/hub/bin/hubd), rồi `/anh` lại. \
+             Đo 2026-08-17: chưa cấp thì nó trả đúng câu 'could not create image from display'.",
+            crate::exec::truncate(out.stderr.trim(), 160)
+        );
+    }
+    logging::info(
+        "screenshot_taken",
+        json!({ "window": window, "focused": focused,
+                "bytes": std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) }),
+    );
+    Ok(())
+}
+
 /// Cửa sổ ấy ĐÃ ĐÓNG chưa — và phép đo phải trỏ đúng chỗ.
 ///
 /// 🔴 `id of every window` KHÔNG trả lời được câu này, dù nó là chỗ đầu tiên ai

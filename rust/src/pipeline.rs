@@ -6526,7 +6526,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 }
                 Some(ack)
             }
-            CommandKind::Type | CommandKind::Key | CommandKind::Shot | CommandKind::Pick => {
+            // `/anh` đi CHUNG khối này với `/shot`: cùng cách tìm phiên, cùng
+            // cách tra cửa sổ, chỉ khác cái nó làm khi đã có cửa sổ trong tay.
+            CommandKind::Type
+            | CommandKind::Key
+            | CommandKind::Shot
+            | CommandKind::Photo
+            | CommandKind::Pick => {
                 // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
                 // khác, và đó là hàng rào duy nhất còn lại ở đường này.
@@ -6600,8 +6606,47 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     ),
                     Some(s) => match crate::keys::window_of(&s.tty) {
                         Ok(Some(w)) => {
-                            // `/shot` đi đường riêng: nó không gõ gì, chỉ nhìn.
-                            if matches!(cmd.kind, CommandKind::Shot) {
+                            // 🔴 `/anh` — ẢNH THẬT, và nó cũng chỉ NHÌN.
+                            //
+                            // Hà 2026-08-17: *"Thêm lệnh chụp ảnh màn hình để
+                            // tôi xem thực sự đang có gì trên màn hình"* ·
+                            // *"Focus tới phiên thật"*. Câu sau là cả thiết kế:
+                            // chụp bừa cả màn chỉ nói "máy đang mở gì đó", nên
+                            // đưa ĐÚNG cửa sổ phiên ra trước rồi mới bấm máy.
+                            if matches!(cmd.kind, CommandKind::Photo) {
+                                let path = std::env::temp_dir()
+                                    .join(format!("hub-man-hinh-{}.png", std::process::id()));
+                                match crate::keys::photograph_window(w, &path) {
+                                    Ok(()) => match crate::telegram::inbox() {
+                                        Some(tg) => {
+                                            let cap = format!(
+                                                "📸 {} — ảnh thật, cửa sổ đã đưa ra trước",
+                                                crate::sessions::shown(&s)
+                                            );
+                                            let out = match tg.send_photo(&path, &cap) {
+                                                Ok(()) => format!(
+                                                    "📸 Ảnh màn hình của {} ở trên.",
+                                                    crate::sessions::shown(&s)
+                                                ),
+                                                Err(e) => format!(
+                                                    "⚠ chụp được nhưng KHÔNG gửi được ảnh: {}",
+                                                    crate::exec::truncate(&e, 200)
+                                                ),
+                                            };
+                                            // Ảnh nằm trong thư mục tạm và đã đi
+                                            // rồi — giữ lại là để lại một tấm
+                                            // ảnh màn hình của chủ máy trên đĩa.
+                                            let _ = std::fs::remove_file(&path);
+                                            out
+                                        }
+                                        None => "⚠ chưa có kênh Telegram nào để gửi ảnh".to_string(),
+                                    },
+                                    Err(e) => format!(
+                                        "⚠ {}",
+                                        crate::exec::truncate(&e.to_string(), 420)
+                                    ),
+                                }
+                            } else if matches!(cmd.kind, CommandKind::Shot) {
                                 // Nút "gửi nhanh" chỉ dựng được khi biết màn có
                                 // gì — nên đọc màn một lần, dùng cho cả hai.
                                 // `/shot 80` — xin nhiều dòng hơn khi thứ cần

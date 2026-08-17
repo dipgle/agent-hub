@@ -64,6 +64,21 @@ pub enum CommandKind {
     /// ký: hộp chọn đang chờ, thanh tiến trình, lỗi vừa in ra. `sessions::
     /// stream` đọc tệp, mà tệp chỉ có sau khi lượt kết thúc.
     Shot,
+    /// `/anh` — ẢNH THẬT của màn hình, không phải chữ đọc từ tab.
+    ///
+    /// 🔴 Hà 2026-08-17: *"Thêm lệnh chụp ảnh màn hình để tôi xem thực sự đang
+    /// có gì trên màn hình"* · *"Focus tới phiên thật"*.
+    ///
+    /// `/shot` đọc CHỮ của tab (`contents of selected tab`) — đủ cho hộp chọn và
+    /// dòng lệnh, mà mù với mọi thứ không phải chữ: màu, con trỏ đang ở đâu, hộp
+    /// thoại của macOS đè lên cửa sổ, và cả cái phần bị cuộn ra ngoài khung. Khi
+    /// chữ đọc về "không nói lên điều gì" thì cây cầu phải có đường thứ hai.
+    ///
+    /// Nhánh chụp ảnh cũ bị xoá 2026-08-14 vì hồi ấy nó là đường DUY NHẤT và nó
+    /// đắt (base64 vài trăm KB, đòi quyền Screen Recording). Nay nó quay lại
+    /// đúng vai: đường phụ, chỉ chạy khi chủ máy gõ, và gửi PNG thật qua
+    /// `sendPhoto` chứ không nhồi base64 vào chữ.
+    Photo,
     /// `/key <tên phím>` — một phím điều khiển: up · down · enter · esc · tab ·
     /// space · 1-9. Hộp chọn của `claude` đi bằng mũi tên, gửi chữ "xuống" vào
     /// đó thì nó gõ ra chữ chứ không di chuyển.

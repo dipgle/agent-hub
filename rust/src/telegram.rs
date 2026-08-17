@@ -1279,6 +1279,57 @@ impl Inbox {
         }
     }
 
+    /// Gửi một ẢNH (PNG) lên buồng chat — dùng cho `/anh`, ảnh chụp màn hình.
+    ///
+    /// 🔴 KHÔNG đi qua `send_document`, và đây là chỗ dễ chép nhầm nhất: cửa của
+    /// `send_document` đòi tệp phải nằm trong cây làm việc VÀ đọc được thành chữ
+    /// UTF-8 (cổng quét rò). Cả hai đều đúng cho một tệp của dự án, và cả hai
+    /// đều sai cho một ảnh: nó là byte nhị phân, nằm trong thư mục tạm của hub,
+    /// và chính chủ máy vừa bấm để xin nó.
+    ///
+    /// Ảnh KHÔNG qua cổng quét rò được — không có chữ để quét. Nên luật ở đây là
+    /// luật của luật 5 (hub không giấu chữ với chủ máy) đọc tới cùng: ảnh chỉ đi
+    /// về ĐÚNG buồng chat của chủ máy, và chỉ khi anh gõ lệnh xin nó.
+    pub fn send_photo(&self, path: &std::path::Path, caption: &str) -> Result<(), String> {
+        const MAX_BYTES: u64 = 10 * 1024 * 1024;
+        let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
+        if meta.len() > MAX_BYTES {
+            return Err(format!(
+                "ảnh {:.1} MB — quá trần {} MB của Telegram",
+                meta.len() as f64 / 1_048_576.0,
+                MAX_BYTES / 1_048_576
+            ));
+        }
+        let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let part = reqwest::blocking::multipart::Part::bytes(bytes)
+            .file_name("man-hinh.png")
+            .mime_str("image/png")
+            .map_err(|e| e.to_string())?;
+        let form = reqwest::blocking::multipart::Form::new()
+            .text("chat_id", self.chat_id.clone())
+            .text("caption", caption.to_string())
+            .part("photo", part);
+        let r = client
+            .post(self.api("sendPhoto"))
+            .multipart(form)
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            remember_sent(&self.cfg, &v);
+            logging::info("telegram_photo_sent", json!({ "bytes": meta.len() }));
+            Ok(())
+        } else {
+            Err(format!(
+                "telegram từ chối: {}",
+                v.get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("không rõ")
+            ))
+        }
+    }
+
     /// Đăng ký chờ cú bấm của MỘT câu hỏi xác nhận.
     ///
     /// Gọi TRƯỚC khi gửi câu hỏi đi, không phải sau: khoảng giữa "đã gửi" và

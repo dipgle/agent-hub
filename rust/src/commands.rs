@@ -98,6 +98,15 @@ pub const ROUTES: &[Route] = &[
         listed: true,
     },
     Route {
+        name: "anh",
+        aliases: &["photo", "screenshot"],
+        kind: CommandKind::Photo,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "ẢNH THẬT của màn hình (đưa cửa sổ phiên ra trước rồi chụp)",
+        listed: true,
+    },
+    Route {
         name: "ask",
         aliases: &["hoi"],
         kind: CommandKind::Ask,

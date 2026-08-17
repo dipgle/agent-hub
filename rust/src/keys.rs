@@ -1096,6 +1096,67 @@ end tell"#
     )
 }
 
+/// Tab của cửa sổ này còn TIẾN TRÌNH nào không — `None` là không còn cửa sổ.
+///
+/// Khác `tab_state`: `busy` trả lời *"có chương trình nào đang chạy"* và một
+/// shell trống thì `false`, nên `Idle` KHÔNG phân biệt được "cửa sổ chết, chỉ
+/// còn dòng `[Process completed]`" với "cửa sổ mới mở, đang ở dấu nhắc". Đúng
+/// cái phân biệt ấy là cổng an toàn cho mọi lượt đóng LẠI: id cửa sổ của
+/// Terminal đánh lại từ số nhỏ sau khi Terminal khởi động lại (đo được ngay
+/// trên máy này: id `156` nằm cạnh đám `21xx`), nên một mục cũ trong sổ có thể
+/// trỏ vào một cửa sổ MỚI — cùng họ với bài học "tty là con số ĐƯỢC DÙNG LẠI".
+///
+/// Đo 2026-08-17: cửa sổ chết `2150` → `0` · hai cửa sổ phiên đang sống →
+/// `6` (`login-zsh claude project-agent node caffeinate`). Một phiên thật luôn
+/// có ít nhất cái shell, nên `Some(0)` là "không còn gì để mất".
+pub fn tab_process_count(window: i64) -> Result<Option<usize>> {
+    let out = osascript(&format!(
+        r#"tell application "Terminal"
+  try
+    return (count of processes of (selected tab of window id {window})) as text
+  on error
+    return "gone"
+  end try
+end tell"#
+    ))?;
+    let t = out.trim();
+    if t == "gone" {
+        return Ok(None);
+    }
+    match t.parse::<usize>() {
+        Ok(n) => Ok(Some(n)),
+        Err(_) => anyhow::bail!("Terminal trả lời lạ cho số tiến trình của cửa sổ {window}: {t:?}"),
+    }
+}
+
+/// Thử ĐÓNG LẠI một cửa sổ đã ẩn, và đo bằng thứ đo đúng chuyện.
+///
+/// 🔴 KHÔNG dùng `window_gone` ở đây, dù tên nó nghe đúng việc: nó coi
+/// `visible = false` **là đã đi** (có chủ ý — cửa sổ ẩn rời khỏi mọi danh sách
+/// của hub). Với một cửa sổ vốn ĐANG ẩn thì phép đo ấy trả `true` ngay lượt
+/// đầu, tức hub sẽ báo *"đã đóng hẳn"* cho một cửa sổ còn nguyên. Cùng một cái
+/// bẫy "phép đo trỏ nhầm chỗ" đã trả giá hai lần trong tệp này; câu hỏi ở đây
+/// là *"cửa sổ ấy còn tồn tại không"*, và `tab_state` là chỗ trả lời nó.
+///
+/// Vì sao có hàm này: 17/08 lúc 10:20Z, năm cửa sổ từ chối `close` (chạy êm,
+/// trả 0, cửa sổ đứng nguyên) nên hub ẩn chúng đi. Bốn tiếng sau, ĐÚNG những
+/// cửa sổ ấy, ĐÚNG lệnh ấy, gọi tay: cả ba cái thử đều đóng ngay lượt đầu
+/// (`1/false` → `0/false`). Nên lời từ chối kia là NHẤT THỜI, không phải thuộc
+/// tính của mấy cửa sổ đó — và thứ chữa một lời từ chối nhất thời là thử lại,
+/// chứ không phải bỏ nó nằm đó khuất mắt mãi mãi.
+pub fn close_hidden_again(window: i64) -> Result<bool> {
+    osascript(&format!(
+        r#"tell application "Terminal" to close (first window whose id is {window})"#
+    ))?;
+    for _ in 0..6 {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if matches!(tab_state(window)?, TabState::Gone) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Hai kết cục KHÁC NHAU của một lượt đóng, nên hai giá trị.
 pub enum Closed {
     /// Cửa sổ đã biến mất — đo bằng số tab + `visible` (xem [`window_gone`]).

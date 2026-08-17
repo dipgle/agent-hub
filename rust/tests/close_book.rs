@@ -20,7 +20,7 @@
 //! window`: **một câu hỏi, một phép đo, và phép đo phải trỏ đúng chỗ.**
 
 use hub::keys::TabState;
-use hub::pipeline::{close_step, CloseStep};
+use hub::pipeline::{close_step, hidden_next, CloseStep, HiddenNext};
 
 /// Trần bỏ cuộc trong `pipeline` là 600 giây; bài kiểm không đọc được hằng số
 /// riêng tư nên nó dùng hai mốc nằm hẳn hai bên (5 phút · 20 phút).
@@ -67,6 +67,54 @@ fn a_busy_tab_waits_then_gives_up_out_loud() {
         close_step(Some(TabState::Busy), OVER),
         CloseStep::GiveUpBusy
     );
+}
+
+// ── Cửa sổ ẩn: đo được rằng lời từ chối là NHẤT THỜI ────────────────────────
+//
+// 17/08 lúc 10:20Z, năm cửa sổ từ chối `close` (chạy êm, trả 0, cửa sổ đứng
+// nguyên) nên hub ẩn chúng đi. Gần bốn tiếng sau, gọi tay lên ĐÚNG những cửa sổ
+// ấy, ĐÚNG lệnh ấy, khi chúng vẫn đang ẩn: `2151` · `2153` · `2156` đều đóng
+// ngay lượt đầu (`1/false` → `0/false`). Phép thử A/B ấy bác luôn giả thuyết
+// "cửa sổ ẩn không nhận close" mà tôi vừa nêu ra trước đó — nên cái đúng để làm
+// là THỬ LẠI, và mục phải ở lại trong sổ thì mới có ai quay lại.
+
+/// Mốc thời gian trong `pipeline`: thử lại mỗi 300 giây, bỏ cuộc sau 6 tiếng.
+const RETRY_SEC: i64 = 300;
+const GIVE_UP_SEC: i64 = 6 * 3600;
+const HID: i64 = 1_000_000;
+
+/// Vừa ẩn xong thì chưa thử ngay — nhịp thưa là có chủ ý, cửa sổ rác không có
+/// ai đang chờ.
+#[test]
+fn a_freshly_hidden_window_waits_out_the_first_gap() {
+    assert_eq!(hidden_next(HID, 0, HID + RETRY_SEC - 1), HiddenNext::Wait);
+    assert_eq!(hidden_next(HID, 0, HID + RETRY_SEC), HiddenNext::Retry);
+}
+
+/// Nhịp đếm từ lần thử GẦN NHẤT, không phải từ lúc ẩn — nếu không thì sau lần
+/// thử đầu, mọi lượt sau đều "tới hạn" và hub thử lại mỗi vòng chạy.
+#[test]
+fn the_gap_is_measured_from_the_last_attempt() {
+    let r = HID + 500;
+    assert_eq!(hidden_next(HID, r, r + RETRY_SEC - 1), HiddenNext::Wait);
+    assert_eq!(hidden_next(HID, r, r + RETRY_SEC), HiddenNext::Retry);
+}
+
+/// Thử mãi cũng phải có hạn, và hạn ấy THẮNG nhịp thử lại — hết giờ thì nói một
+/// câu rồi buông, không im lặng thử tới vô tận (đúng cái vừa phải sửa ở nhánh mù).
+#[test]
+fn after_the_ceiling_it_gives_up_out_loud() {
+    let now = HID + GIVE_UP_SEC;
+    assert_eq!(hidden_next(HID, now - RETRY_SEC, now), HiddenNext::GiveUp);
+    // Ngay cả khi vừa thử xong một giây trước.
+    assert_eq!(hidden_next(HID, now - 1, now), HiddenNext::GiveUp);
+}
+
+/// Mục chưa từng bị ẩn không phải việc của hàm này — nó phải nói ra thế, chứ
+/// không lặng lẽ trả `Wait` (một mục thường mà rơi vào đường ẩn thì đứng mãi).
+#[test]
+fn an_entry_that_was_never_hidden_says_so() {
+    assert_eq!(hidden_next(0, 0, HID), HiddenNext::NotHidden);
 }
 
 /// Bốn kết cục PHẢI phân biệt được nhau. Bài kiểm này tồn tại vì lỗi vừa sửa

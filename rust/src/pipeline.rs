@@ -1998,6 +1998,16 @@ pub struct Closing {
     /// Lần kiểm gần nhất (epoch giây) — cách nhau 30 giây, không kiểm mỗi vòng.
     #[serde(default)]
     pub c: i64,
+    /// Lúc hub ẨN cửa sổ vì `close` không ăn (epoch giây; 0 = chưa ẩn lần nào).
+    ///
+    /// Mục KHÔNG rời sổ khi bị ẩn — xem `hidden_next`. Trước 17/08 nó rời sổ
+    /// ngay, nên một cửa sổ ẩn là một cửa sổ khuất mắt VĨNH VIỄN: nó rời khỏi
+    /// mọi danh sách của hub nên không ai quay lại đóng nó nữa.
+    #[serde(default)]
+    pub h: i64,
+    /// Lần thử đóng LẠI gần nhất sau khi ẩn (epoch giây; 0 = chưa thử lần nào).
+    #[serde(default)]
+    pub r: i64,
 }
 
 /// Bao lâu ngó lại một lần. Hà nói thẳng con số này.
@@ -2026,6 +2036,21 @@ const CLOSE_GIVE_UP_SEC: i64 = 600;
 /// Bao lâu thì nhắc một câu ra kênh chat trong lúc còn chờ.
 const CLOSE_SAY_EVERY_SEC: i64 = 120;
 
+/// Cửa sổ đã ẩn thì bao lâu thử đóng lại một lần.
+///
+/// Thưa hơn hẳn nhịp 30 giây của phần còn lại, vì đây là việc của một cửa sổ
+/// RÁC — không ai đang chờ nó, và mỗi lượt thử là một lần `osascript` chen vào
+/// hàng đợi Apple Event chung với những việc có người chờ.
+const CLOSE_HIDDEN_RETRY_SEC: i64 = 300;
+
+/// Thử lại tới bao giờ thì thôi.
+///
+/// Sáu tiếng, và con số ấy đo từ chính lần hỏng: 17/08 lúc 10:20Z Terminal từ
+/// chối đóng năm cửa sổ; tới 14:1xZ — **gần bốn tiếng sau** — đúng những cửa sổ
+/// ấy đóng ngay lượt đầu. Một trần nửa tiếng sẽ bỏ cuộc trước khi cơ hội tới,
+/// tức xây một cái máy thử-lại rồi tự tắt nó đúng lúc cần.
+const CLOSE_HIDDEN_GIVE_UP_SEC: i64 = 6 * 3600;
+
 /// Ghi một cửa sổ vào sổ chờ đóng.
 pub fn remember_closing(db: &Db, session_id: &str, window: i64, shown_name: &str, now: i64) {
     let mut book = closing_book(db);
@@ -2036,6 +2061,8 @@ pub fn remember_closing(db: &Db, session_id: &str, window: i64, shown_name: &str
             n: shown_name.to_string(),
             t: now,
             c: 0,
+            h: 0,
+            r: 0,
         },
     );
     save_closing(db, &book);
@@ -2135,6 +2162,46 @@ pub fn close_step(seen: Option<crate::keys::TabState>, waited_sec: i64) -> Close
     }
 }
 
+/// Mục ĐÃ ẨN thì lượt này làm gì.
+///
+/// 🔴 Vì sao có vòng thử lại (đo 2026-08-17, và nó BÁC một giả thuyết tôi vừa
+/// nêu ra): lúc 10:20Z năm cửa sổ từ chối `close` — chạy êm, `osascript` trả 0,
+/// cửa sổ đứng nguyên — nên hub ẩn chúng đi và nói đúng là đã ẩn. Gần bốn tiếng
+/// sau, gọi tay lên ĐÚNG những cửa sổ ấy, ĐÚNG lệnh ấy: `2151` · `2153` · `2156`
+/// đều đóng ngay lượt đầu (`1/false` → `0/false`), trong khi vẫn đang ẩn. Giả
+/// thuyết "cửa sổ ẩn không nhận `close`" bị chính phép thử A/B ấy bác bỏ.
+///
+/// Nên lời từ chối kia là **nhất thời**, không phải thuộc tính của mấy cửa sổ
+/// đó — và cái chữa một lời từ chối nhất thời là thử lại. Bỏ mục khỏi sổ ngay
+/// khi ẩn (bản cũ) là bảo đảm không bao giờ có ai quay lại: cửa sổ ẩn rời khỏi
+/// mọi danh sách của hub, nên nó thành rác vô hình, đúng thứ đã đếm được năm cái
+/// chỉ trong một ngày.
+pub fn hidden_next(hidden_at: i64, last_retry: i64, now: i64) -> HiddenNext {
+    if hidden_at == 0 {
+        return HiddenNext::NotHidden;
+    }
+    if now - hidden_at >= CLOSE_HIDDEN_GIVE_UP_SEC {
+        return HiddenNext::GiveUp;
+    }
+    if now - last_retry.max(hidden_at) >= CLOSE_HIDDEN_RETRY_SEC {
+        return HiddenNext::Retry;
+    }
+    HiddenNext::Wait
+}
+
+/// Bốn nước đi của một mục đã ẩn — xem [`hidden_next`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HiddenNext {
+    /// Mục chưa từng bị ẩn: đường thường, không phải việc của hàm này.
+    NotHidden,
+    /// Chưa tới nhịp thử lại.
+    Wait,
+    /// Thử đóng lại lượt này.
+    Retry,
+    /// Thử đủ lâu rồi: nói một câu rồi buông.
+    GiveUp,
+}
+
 /// Sáu nước đi của một mục trong sổ chờ đóng — xem [`close_step`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CloseStep {
@@ -2172,6 +2239,94 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
         c.c = now;
         changed = true;
         let waited = now - c.t;
+        // Mục ĐÃ ẨN đi đường riêng: nhịp thưa hơn (không ai đang chờ một cửa sổ
+        // rác), một cổng an toàn riêng, và câu nói khác — việc ở đây không còn
+        // là "chờ CLI thoát" mà là "dọn nốt cái vỏ".
+        if c.h != 0 {
+            match hidden_next(c.h, c.r, now) {
+                HiddenNext::NotHidden | HiddenNext::Wait => continue,
+                HiddenNext::GiveUp => {
+                    logging::warn(
+                        "close_hidden_gave_up",
+                        json!({ "session": id, "window": c.w, "hidden_sec": now - c.h }),
+                    );
+                    say_closed(cfg, &format!(
+                        "⚠ {} — hub thử đóng lại cửa sổ đã ẩn suốt {} tiếng mà Terminal vẫn không chịu, nên thôi. \
+                         Nó vẫn khuất mắt và khuất khỏi mọi danh sách của hub; ⌘W khi anh ngồi máy là hết hẳn.",
+                        c.n,
+                        (now - c.h) / 3600
+                    ));
+                    done.push(id.clone());
+                    continue;
+                }
+                HiddenNext::Retry => {
+                    c.r = now;
+                    // 🔴 Cổng an toàn của lượt đóng LẠI: chỉ đóng cửa sổ KHÔNG
+                    // CÒN TIẾN TRÌNH nào. id cửa sổ Terminal đánh lại từ số nhỏ
+                    // sau khi Terminal khởi động lại, nên một mục cũ có thể trỏ
+                    // vào cửa sổ MỚI — và `busy = false` thì một cửa sổ vừa mở,
+                    // đang ở dấu nhắc, cũng thoả. Số tiến trình thì không: phiên
+                    // thật luôn còn ít nhất cái shell.
+                    match crate::keys::tab_process_count(c.w) {
+                        Ok(None) => {
+                            logging::info(
+                                "close_hidden_window_gone",
+                                json!({ "session": id, "window": c.w, "hidden_sec": now - c.h }),
+                            );
+                            say_closed(
+                                cfg,
+                                &format!("⏹ Cửa sổ đã ẩn của {} nay không còn — hết hẳn.", c.n),
+                            );
+                            done.push(id.clone());
+                        }
+                        Ok(Some(0)) => match crate::keys::close_hidden_again(c.w) {
+                            Ok(true) => {
+                                logging::info(
+                                    "close_hidden_retry_worked",
+                                    json!({ "session": id, "window": c.w, "hidden_sec": now - c.h }),
+                                );
+                                say_closed(cfg, &format!(
+                                    "⏹ Đóng hẳn được cửa sổ của {} rồi — Terminal từ chối lúc nãy, thử lại sau {} phút thì ăn.",
+                                    c.n,
+                                    (now - c.h) / 60
+                                ));
+                                done.push(id.clone());
+                            }
+                            // Vẫn chưa chịu: im, vì đã nói một lần rồi. Còn
+                            // trong sổ nghĩa là còn người ngó lại.
+                            Ok(false) => logging::info(
+                                "close_hidden_retry_refused",
+                                json!({ "session": id, "window": c.w, "hidden_sec": now - c.h }),
+                            ),
+                            Err(e) => logging::warn(
+                                "close_hidden_retry_failed",
+                                json!({ "session": id, "window": c.w,
+                                        "err": crate::logging::err_chain(&e) }),
+                            ),
+                        },
+                        Ok(Some(n)) => {
+                            // Cửa sổ ấy nay có người ở. Đóng nó là đóng thứ của
+                            // người khác — buông, và nói ra chứ không im.
+                            logging::warn(
+                                "close_hidden_now_occupied",
+                                json!({ "session": id, "window": c.w, "procs": n }),
+                            );
+                            say_closed(cfg, &format!(
+                                "⚠ Cửa sổ đã ẩn của {} nay đang chạy thứ khác ({} tiến trình) — hub KHÔNG đóng nó nữa.",
+                                c.n, n
+                            ));
+                            done.push(id.clone());
+                        }
+                        Err(e) => logging::warn(
+                            "close_hidden_check_failed",
+                            json!({ "session": id, "window": c.w,
+                                    "err": crate::logging::err_chain(&e) }),
+                        ),
+                    }
+                    continue;
+                }
+            }
+        }
         // Hỏi MỘT lượt, giữ lại cả câu trả lời lẫn việc không trả lời được —
         // rồi mới phán. Phán đoán nằm trong `close_step`, đo được bằng bài kiểm.
         let seen = match crate::keys::tab_state(c.w) {
@@ -2243,11 +2398,20 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
                             ),
                             crate::keys::Closed::Hidden => format!(
                                 "⏹ {} đã thoát CLI (chờ {}s), nhưng Terminal KHÔNG đóng cửa sổ ấy — hub đã ẩn nó đi. \
-                                 Nó rời khỏi mọi danh sách của hub; ⌘W khi anh ngồi máy là hết hẳn.",
+                                 Nó rời khỏi mọi danh sách của hub, và cứ {} phút hub thử đóng lại một lượt \
+                                 (lời từ chối kiểu này đo được là nhất thời). ⌘W khi anh ngồi máy là hết ngay.",
                                 c.n,
-                                now - c.t
+                                now - c.t,
+                                CLOSE_HIDDEN_RETRY_SEC / 60
                             ),
                         });
+                        // Ẩn thì GIỮ TRONG SỔ: cửa sổ ẩn rời khỏi mọi danh sách
+                        // của hub, nên bỏ mục đi là bảo đảm không ai quay lại
+                        // đóng nó nữa — xem `hidden_next`.
+                        if matches!(what, crate::keys::Closed::Hidden) {
+                            c.h = now;
+                            continue;
+                        }
                     }
                     Err(e) => {
                         // Cửa sổ biến mất giữa hai lượt hỏi là chuyện thường

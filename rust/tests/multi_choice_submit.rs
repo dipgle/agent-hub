@@ -6,6 +6,38 @@
 //! dòng con trỏ đang đứng, tức bật/tắt lại chính cái ô vừa chọn.
 
 use hub::keys::submit_keys;
+use hub::pipeline::{render_session_data, SessionData};
+
+/// ✅ phải bám ngay tại dòng `Submit` — nếu không, hộp chọn nhiều không có
+/// đường gửi nào trong chữ.
+///
+/// 🔴 Hà 2026-08-17, sau khi ☑ đã bám đúng từng dòng: *"Bấm chọn được rồi, chưa
+/// bấm được submit"*. `Submit` là dòng THẬT trên màn nhưng không mang số, nên
+/// không `k_`/`pick_` nào trỏ tới nó.
+#[test]
+fn the_submit_line_gets_its_own_tap_target() {
+    hub::telegram::set_bot_username("hub_test_bot");
+    let shown = render_session_data(
+        SCREEN,
+        &SessionData {
+            sid: "8bf82c37-f88f-4e71-95a0-7810c07623cd".to_string(),
+            submit: true,
+            ..Default::default()
+        },
+    );
+    let line = shown
+        .lines()
+        .find(|l| l.contains("Submit"))
+        .expect("phải còn dòng Submit");
+    assert!(
+        line.contains("send_8bf82c37"),
+        "phải trỏ đúng route: {line}"
+    );
+    assert!(
+        line.find('\u{2705}').unwrap() < line.find("Submit").unwrap(),
+        "✅ đứng TRƯỚC chữ Submit như ☑ đứng trước số: {line}"
+    );
+}
 
 /// Màn chụp từ ảnh Hà gửi (rút gọn nhãn, giữ nguyên hình dạng).
 const SCREEN: &str = "\

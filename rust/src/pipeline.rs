@@ -3823,6 +3823,12 @@ pub struct SessionData {
     pub choices: Vec<(String, String)>,
     /// Chữ đang nằm trong ô nhập → ⏎ gửi · ⌫ xoá.
     pub box_text: Option<String>,
+    /// Màn có dòng `Submit` (hộp CHỌN NHIỀU) → ✅ gửi bảng, ngay tại dòng ấy.
+    ///
+    /// 🔴 Hà 2026-08-17, sau khi ☑ đã bám đúng từng dòng: *"Bấm chọn được rồi,
+    /// chưa bấm được submit"*. Dòng `Submit` là một dòng THẬT trên màn, không
+    /// mang số nên không có `k_`/`pick_` nào trỏ tới — nó cần đích chạm riêng.
+    pub submit: bool,
     /// Tệp phiên nhắc tới → 📎 tải về, NGAY TẠI tên tệp trong chữ.
     ///
     /// `(chuỗi neo — đường dẫn đúng như nó hiện trong chữ, chỉ số trong sổ tệp)`.
@@ -4331,6 +4337,17 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
         rest_btns.retain(|(_, d)| {
             !d.starts_with("key:") || d.ends_with(":enter") || d.ends_with(":clear")
         });
+    }
+    // ✅ NGAY TẠI DÒNG `Submit` — đường gửi của hộp CHỌN NHIỀU.
+    //
+    // Neo là chính chữ `Submit` trên màn. Không bám được (màn đổi, chữ khác) ⟹
+    // `html_with_links` báo `unlinked` và chỗ gọi vẫn còn nút ở đáy: mất một
+    // đích chạm thì phải thấy được, không được im.
+    if let (true, Some(sid)) = (data.submit, key_sid.as_ref()) {
+        let short: String = sid.chars().take(8).collect();
+        if let Some(href) = crate::telegram::deep_link(&format!("send_{short}")) {
+            anchors.push(("Submit".to_string(), vec![(href, "\t✅".to_string())]));
+        }
     }
     // 📎 NGAY TẠI TÊN TỆP. Neo là đường dẫn đúng như nó hiện trong chữ, nên chỗ
     // gọi phải lấy nó từ chính chữ ấy (`keys::paths_on_screen`), không tự dựng
@@ -7195,6 +7212,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             sid: shot_sid.clone(),
                             cmds: cmd_lines.clone(),
                             choices: shot_choices.clone(),
+                            // Màn có dòng `Submit` ⟹ gắn ✅ ngay tại đó (Hà
+                            // 17/08: *"chưa bấm được submit"*). Hỏi bằng chính
+                            // hàm dựng chuỗi phím, nên "thấy Submit" ở hai chỗ
+                            // là MỘT phép đo.
+                            submit: crate::keys::submit_keys(&ack).is_some(),
                             box_text: None,
                             files: shot_files.clone(),
                         };

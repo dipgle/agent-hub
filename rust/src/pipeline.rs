@@ -2108,11 +2108,56 @@ pub fn trust_dialog_tick(now: i64) {
     }
 }
 
+/// Một lượt hỏi trong sổ chờ đóng trả lời được gì, thì làm gì tiếp.
+///
+/// Tách rời vì đây là chỗ DUY NHẤT có phán đoán trong `close_pending_tick`;
+/// phần còn lại là `osascript` và Telegram, thứ không bài kiểm nào chạm tới
+/// được. Ba mệnh đề nó phải giữ, cả ba đều đã trả giá:
+///
+/// - **Cửa sổ không còn là việc XONG**, không phải hub mù. Gộp hai thứ ấy làm
+///   một là lỗi đã đo được: 190 dòng `close_check_failed` trong 5 tiếng cho một
+///   cửa sổ đóng từ lâu (xem `keys::tab_state`).
+/// - **Hỏi không được thì GIỮ trong sổ** — luật `Look::Blind`, không đổi.
+/// - Nhưng giữ mà im thì đúng bằng cái vừa xảy ra, nên **mù quá lâu cũng phải
+///   có tiếng nói**: cùng cái trần đã dùng cho "còn bận quá lâu"
+///   (`CLOSE_GIVE_UP_SEC`), cùng lý lẽ — hub thôi canh thì phải nói là thôi,
+///   chứ không lặng lẽ hỏi tới vô tận.
+pub fn close_step(seen: Option<crate::keys::TabState>, waited_sec: i64) -> CloseStep {
+    match seen {
+        Some(crate::keys::TabState::Gone) => CloseStep::Gone,
+        Some(crate::keys::TabState::Idle) => CloseStep::Close,
+        Some(crate::keys::TabState::Busy) if waited_sec >= CLOSE_GIVE_UP_SEC => {
+            CloseStep::GiveUpBusy
+        }
+        Some(crate::keys::TabState::Busy) => CloseStep::Wait,
+        None if waited_sec >= CLOSE_GIVE_UP_SEC => CloseStep::GiveUpBlind,
+        None => CloseStep::Blind,
+    }
+}
+
+/// Sáu nước đi của một mục trong sổ chờ đóng — xem [`close_step`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseStep {
+    /// Còn bận, chưa tới trần: chờ tiếp (và nhắc thưa thớt).
+    Wait,
+    /// Còn bận quá lâu: nói ra, trả quyền quyết định lại cho chủ máy.
+    GiveUpBusy,
+    /// Rảnh rồi: đóng.
+    Close,
+    /// Cửa sổ không còn — xong, dù không phải hub làm.
+    Gone,
+    /// Hỏi không được: giữ trong sổ, hỏi lại lượt sau.
+    Blind,
+    /// Hỏi mãi không được: nói ra rồi bỏ sổ.
+    GiveUpBlind,
+}
+
 /// Mỗi vòng: cửa sổ nào hết bận thì đóng, còn bận thì CHỜ TIẾP.
 ///
-/// Ba kết cục, cả ba đều nói ra: đóng được · cửa sổ không còn (ai đó đã đóng
-/// tay, hoặc `claude` thoát rồi Terminal tự dọn) · hỏi không được. Ca cuối
-/// **giữ nguyên trong sổ** — không hỏi được ≠ không còn, đúng luật `Look::Blind`.
+/// Bốn kết cục, cả bốn đều nói ra: đóng được · cửa sổ không còn (ai đó đã đóng
+/// tay, hoặc `claude` thoát rồi Terminal tự dọn) · còn bận quá lâu · hỏi không
+/// được. Ca cuối **giữ nguyên trong sổ** — không hỏi được ≠ không còn, đúng luật
+/// `Look::Blind` — cho tới trần `CLOSE_GIVE_UP_SEC` thì nói một câu rồi buông.
 pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
     let mut book = closing_book(db);
     if book.is_empty() {
@@ -2126,9 +2171,22 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
         }
         c.c = now;
         changed = true;
-        match crate::keys::tab_busy(c.w) {
-            Ok(true) => {
-                let waited = now - c.t;
+        let waited = now - c.t;
+        // Hỏi MỘT lượt, giữ lại cả câu trả lời lẫn việc không trả lời được —
+        // rồi mới phán. Phán đoán nằm trong `close_step`, đo được bằng bài kiểm.
+        let seen = match crate::keys::tab_state(c.w) {
+            Ok(s) => Some(s),
+            Err(e) => {
+                logging::warn(
+                    "close_check_failed",
+                    json!({ "session": id, "window": c.w, "waited_sec": waited,
+                            "err": crate::logging::err_chain(&e) }),
+                );
+                None
+            }
+        };
+        match close_step(seen, waited) {
+            CloseStep::Wait | CloseStep::GiveUpBusy => {
                 logging::info(
                     "close_still_busy",
                     json!({ "session": id, "window": c.w, "waited_sec": waited }),
@@ -2167,7 +2225,7 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
                     ));
                 }
             }
-            Ok(false) => {
+            CloseStep::Close => {
                 match crate::keys::close_window(c.w) {
                     Ok(what) => {
                         logging::info(
@@ -2205,14 +2263,41 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
                 }
                 done.push(id.clone());
             }
-            Err(e) => {
-                // KHÔNG bỏ khỏi sổ: hỏi không được là hub mù, không phải cửa sổ
-                // đã đóng. Bỏ đi là im lặng đánh rơi việc.
-                logging::warn(
-                    "close_check_failed",
-                    json!({ "session": id, "window": c.w,
-                            "err": crate::logging::err_chain(&e) }),
+            CloseStep::Gone => {
+                // Cửa sổ ấy không còn — hub không phải là người đóng, nhưng câu
+                // hỏi "đóng xong chưa" đã có câu trả lời, nên đóng sổ và NÓI.
+                // Trước 17/08 ca này rơi vào nhánh `Err` (`selected tab` của một
+                // cửa sổ 0 tab ép sang chữ là lỗi -1700) và nằm lại trong sổ
+                // mãi mãi — xem `keys::tab_state`.
+                logging::info(
+                    "close_window_gone",
+                    json!({ "session": id, "window": c.w, "waited_sec": waited,
+                            "seen": "tab_state" }),
                 );
+                say_closed(cfg, &format!(
+                    "⏹ {} đã thoát — cửa sổ ấy không còn nữa (Terminal tự dọn khi shell thoát, hoặc anh đã đóng tay). hub đóng sổ chờ.",
+                    c.n
+                ));
+                done.push(id.clone());
+            }
+            CloseStep::Blind => {
+                // KHÔNG bỏ khỏi sổ: hỏi không được là hub mù, không phải cửa sổ
+                // đã đóng. Bỏ đi là im lặng đánh rơi việc. (Dòng warn đã ghi ở
+                // chỗ hỏi, kèm `waited_sec`.)
+            }
+            CloseStep::GiveUpBlind => {
+                logging::warn(
+                    "close_gave_up_blind",
+                    json!({ "session": id, "window": c.w, "waited_sec": waited }),
+                );
+                say_closed(cfg, &format!(
+                    "⚠ {} — {} phút liền hub hỏi Terminal mà không lần nào biết được cửa sổ ấy còn bận hay không, \
+                     nên hub THÔI canh. Cửa sổ có thể vẫn còn: ⌘W khi anh ngồi máy, hoặc /terminal để xem lại. \
+                     Lý do từng lượt nằm ở log `close_check_failed`.",
+                    c.n,
+                    waited / 60
+                ));
+                done.push(id.clone());
             }
         }
     }
@@ -3388,11 +3473,25 @@ fn watch_terminal_job(w: i64, tty: String, line: String) {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let started = std::time::Instant::now();
             loop {
-                match crate::keys::tab_busy(w) {
-                    Ok(false) => break,
-                    Ok(true) => {}
-                    // Cửa sổ đã đóng (hoặc Terminal câm): NÓI RA, đừng im — im
-                    // ở đây là một cú bấm không bao giờ có câu trả lời.
+                match crate::keys::tab_state(w) {
+                    Ok(crate::keys::TabState::Idle) => break,
+                    Ok(crate::keys::TabState::Busy) => {}
+                    // Cửa sổ đóng giữa chừng: kết quả đi theo nó. Nói ĐÚNG chừng
+                    // ấy — "cửa sổ không còn" là thứ đo được, còn "lệnh chạy tới
+                    // đâu" thì không, và đoán hộ ở đây là bịa.
+                    Ok(crate::keys::TabState::Gone) => {
+                        logging::warn(
+                            "term_job_window_gone",
+                            json!({ "tty": tty, "sec": started.elapsed().as_secs(),
+                                    "cmd": crate::exec::truncate(&line, 120) }),
+                        );
+                        say_term_result(&format!(
+                            "🖥 cửa sổ {tty} đã đóng khi lệnh còn đang chạy — hub không đọc được kết quả, và không biết lệnh chạy tới đâu.\n$ {line}"
+                        ));
+                        return;
+                    }
+                    // Terminal câm (quyền bị rút, osascript chết): NÓI RA, đừng
+                    // im — im ở đây là một cú bấm không bao giờ có câu trả lời.
                     Err(e) => {
                         let why = crate::logging::err_chain(&e);
                         logging::warn(

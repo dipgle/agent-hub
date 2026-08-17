@@ -93,7 +93,7 @@ fn window_script(dev: &str) -> String {
     // Bản trước trả về cửa sổ ĐẦU TIÊN khớp, tức rất dễ trúng một cái xác. Hậu
     // quả không nhẹ: màn hình đẩy lên điện thoại là màn của phiên CŨ (Hà thấy
     // `accept edits on` trong khi phiên thật đang `auto mode on`), `/type` gõ
-    // vào cửa sổ chết, `can_type` khai bừa là gõ được, và `tab_busy` — thứ
+    // vào cửa sổ chết, `can_type` khai bừa là gõ được, và `tab_state` — thứ
     // quyết định có dám đóng cửa sổ không — đọc một tab không còn ai ở đó.
     //
     // Lọc bằng thứ Terminal trả lời được: tab CÒN TIẾN TRÌNH. Trong các tab còn
@@ -821,16 +821,72 @@ pub fn alive_tab<'a>(tabs: &'a [Tab], tty: &str) -> Option<&'a Tab> {
     alive
 }
 
-/// Tab của cửa sổ này còn chương trình nào đang chạy không.
+/// Tab của cửa sổ này còn chương trình nào đang chạy không — **và cửa sổ ấy còn
+/// không**. Ba câu trả lời, vì đó là ba sự thật khác nhau về thế giới.
 ///
 /// Đây là câu hỏi PHÂN BIỆT "thoát CLI xong" với "vẫn đang thoát": `ps` biến
 /// mất trước khi shell kịp in dấu nhắc, còn `busy` là chính Terminal trả lời về
 /// tab của nó. Dùng nó để CHỜ, chứ đừng đoán bằng `sleep`.
-pub fn tab_busy(window: i64) -> Result<bool> {
+///
+/// 🔴 Bản cũ là `tab_busy -> Result<bool>`, và nó gộp **"cửa sổ không còn"** vào
+/// nhánh `Err` — cùng một họ lỗi với `keys::look` gộp ba kết cục vào `None`, và
+/// lần này cái giá đo được nằm nguyên trong log: **190 dòng
+/// `close_check_failed` trong 5 tiếng** (`~/Library/Logs/hubd.err`,
+/// 08:44:50Z → 13:47:06Z), tất cả về đúng một cửa sổ 2131 của phiên
+/// `win-ttys002`, tất cả cùng một câu:
+/// *"Can't make «class busy» of «class tcnt» of window id 2131 … into type
+/// text. (-1700)"*. Cửa sổ ấy đã đóng từ lâu; `selected tab` của một cửa sổ
+/// không còn tab trả về `missing value`, ép sang chữ thì -1700, và
+/// `close_pending_tick` đọc `Err` đúng như luật của nó — *"hỏi không được là hub
+/// mù, không phải cửa sổ đã đóng"* — nên giữ nguyên mục trong sổ, hỏi lại sau 30
+/// giây, mãi mãi. Luật ấy KHÔNG sai; cái sai là bắt nó phán trên một phép đo
+/// không biết nói "không còn".
+///
+/// Nên câu hỏi "còn tab nào không" phải đứng TRƯỚC, trong cùng một lượt hỏi
+/// (hai lượt là hai câu trả lời có thể lệch nhau — bài học của `terminal_ttys`).
+/// `on error` ở đây chỉ bắt được lỗi PHÂN GIẢI ĐỐI TƯỢNG của Terminal, tức
+/// "không có cửa sổ ấy"; còn `osascript` chết, Terminal câm, quyền bị rút thì
+/// vẫn về `Err` như cũ — hub vẫn mù đúng chỗ đáng mù.
+///
+/// Đo thật trước khi tin, 2026-08-17 (`osascript` gọi tay, bốn hình dạng cửa sổ):
+/// 2221 cửa sổ đang chạy `claude` → `true` · 2131 cửa sổ trong sổ chờ đóng →
+/// `gone` · 2158 cửa sổ đã ẩn còn tab chết → `false` · 2122 cửa sổ 0 tab →
+/// `gone` · 99999 id không tồn tại → `gone`.
+pub fn tab_state(window: i64) -> Result<TabState> {
     let out = osascript(&format!(
-        r#"tell application "Terminal" to get busy of (selected tab of window id {window}) as text"#
+        r#"tell application "Terminal"
+  try
+    if (count of tabs of window id {window}) is 0 then return "gone"
+    return (busy of (selected tab of window id {window})) as text
+  on error
+    return "gone"
+  end try
+end tell"#
     ))?;
-    Ok(out.trim() == "true")
+    match out.trim() {
+        "true" => Ok(TabState::Busy),
+        "false" => Ok(TabState::Idle),
+        "gone" => Ok(TabState::Gone),
+        // Không đoán. Một câu trả lời lạ là hub mù, và mù thì phải nói là mù —
+        // đoán bừa "rảnh" ở đây là đóng nhầm một cửa sổ đang chạy dở.
+        other => anyhow::bail!(
+            "Terminal trả lời lạ cho câu hỏi tab của cửa sổ {window} còn bận không: {:?}",
+            crate::exec::truncate(other, 80)
+        ),
+    }
+}
+
+/// Ba kết cục của một lượt hỏi [`tab_state`] — xem chú thích của hàm ấy để biết
+/// vì sao kết cục thứ ba phải là một GIÁ TRỊ chứ không phải một lỗi.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TabState {
+    /// Tab còn chương trình đang chạy: chưa thoát xong.
+    Busy,
+    /// Tab đứng ở dấu nhắc: đóng được.
+    Idle,
+    /// Không còn cửa sổ ấy (hoặc nó không còn tab nào) — việc đã XONG, dù không
+    /// phải hub làm.
+    Gone,
 }
 
 /// Thoát CLI rồi ĐÓNG cửa sổ — định nghĩa "tắt hẳn" của chủ máy.
@@ -963,7 +1019,7 @@ end tell"#
 }
 
 /// Đóng cửa sổ, **rồi hỏi lại xem nó đã đi chưa**. Gọi khi ĐÃ biết tab không
-/// còn bận — xem `tab_busy`.
+/// còn bận — xem `tab_state`.
 ///
 /// 🔴 `osascript` TRẢ 0 CHO MỘT LỆNH KHÔNG LÀM GÌ — đo 2026-08-17, và đây là lần
 /// thứ hai cùng một cái bẫy trong tệp này (lần trước: `do script` trả 0 chỉ nói
@@ -1064,12 +1120,23 @@ pub fn quit_and_close(window: i64) -> Result<Closed> {
     let mut still_busy = true;
     for _ in 0..60 {
         std::thread::sleep(std::time::Duration::from_millis(500));
-        match tab_busy(window) {
-            Ok(false) => {
+        match tab_state(window) {
+            Ok(TabState::Idle) => {
                 still_busy = false;
                 break;
             }
-            Ok(true) => {}
+            Ok(TabState::Busy) => {}
+            // Cửa sổ biến mất trong lúc chờ là việc ĐÃ XONG, không phải hub mù:
+            // Terminal tự dọn cửa sổ khi shell thoát (tuỳ hồ sơ), và chủ máy
+            // ngồi ngay đấy bấm ⌘W cũng ra đúng kết cục này.
+            Ok(TabState::Gone) => {
+                logging::info(
+                    "close_window_gone_while_waiting",
+                    json!({ "window": window,
+                            "why": "cửa sổ không còn trong lúc chờ /exit — đã đóng, không phải hỏi không được" }),
+                );
+                return Ok(Closed::Gone);
+            }
             // Không hỏi được thì DỪNG, đừng đóng liều: đóng khi chưa chắc đã
             // thoát là đúng cái bật hộp thoại.
             Err(e) => return Err(e.context("không hỏi được tab còn bận không")),
@@ -1082,10 +1149,10 @@ pub fn quit_and_close(window: i64) -> Result<Closed> {
         // từ chỗ chỉ biết `osascript` trả 0. Hà đọc lại câu ấy rồi đi mở cửa sổ
         // ra soi và không thấy `/exit` đâu (2026-08-15), tức nó tiêu đúng thứ
         // đắt nhất một dòng log có: lòng tin. Thứ hàm này THẬT SỰ đo được chỉ là
-        // `tab_busy` — nên nó chỉ được nói chừng ấy, và chỉ đường tới dòng log
+        // `tab_state` — nên nó chỉ được nói chừng ấy, và chỉ đường tới dòng log
         // `keys_exit_sent` cho phần còn lại.
         anyhow::bail!(
-            "sau 30 giây `tab_busy` vẫn `true` — tức **CLI chưa thoát** (`busy` chỉ về `false` khi tiến trình trong tab kết thúc; xem chú thích của hàm này). Hai lý do có thể: phiên đang giữa một lượt nên `claude` xếp `/exit` vào hàng chờ, HOẶC dòng ấy chưa được gửi đi. Cửa sổ giữ nguyên (đóng lúc này sẽ bật hộp thoại 'terminate running processes'). Cắt lượt đang chạy bằng `/key esc` rồi `/close`, hoặc chờ phiên rảnh. Lệnh thoát có được đẩy đi hay không: xem log `keys_exit_sent`"
+            "sau 30 giây `tab_state` vẫn `Busy` — tức **CLI chưa thoát** (`busy` chỉ về `false` khi tiến trình trong tab kết thúc; xem chú thích của hàm này). Hai lý do có thể: phiên đang giữa một lượt nên `claude` xếp `/exit` vào hàng chờ, HOẶC dòng ấy chưa được gửi đi. Cửa sổ giữ nguyên (đóng lúc này sẽ bật hộp thoại 'terminate running processes'). Cắt lượt đang chạy bằng `/key esc` rồi `/close`, hoặc chờ phiên rảnh. Lệnh thoát có được đẩy đi hay không: xem log `keys_exit_sent`"
         );
     }
     // Một đường đóng duy nhất — và nó tự KIỂM. Bản trước chép tay lại dòng

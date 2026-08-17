@@ -79,7 +79,7 @@ fn the_failure_sentence_claims_only_what_it_measured() {
         "câu báo hỏng lại khẳng định một hành động chưa quan sát được"
     );
     assert!(
-        quit.contains("tab_busy"),
+        quit.contains("tab_state"),
         "câu báo hỏng phải nêu thứ nó THẬT SỰ đo được"
     );
     assert!(

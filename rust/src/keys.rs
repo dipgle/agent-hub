@@ -804,12 +804,51 @@ pub fn send_exit(window: i64) -> Result<()> {
     Ok(())
 }
 
-/// Đóng cửa sổ. Gọi khi ĐÃ biết tab không còn bận — xem `tab_busy`.
+/// Cửa sổ ấy còn trong danh sách của Terminal không — hỏi CHÍNH Terminal.
+pub fn window_exists(window: i64) -> Result<bool> {
+    let out = osascript(r#"tell application "Terminal" to get id of every window"#)?;
+    Ok(out
+        .split(',')
+        .any(|s| s.trim().parse::<i64>().ok() == Some(window)))
+}
+
+/// Đóng cửa sổ, **rồi hỏi lại xem nó đã đi chưa**. Gọi khi ĐÃ biết tab không
+/// còn bận — xem `tab_busy`.
+///
+/// 🔴 `osascript` TRẢ 0 CHO MỘT LỆNH KHÔNG LÀM GÌ — đo 2026-08-17, và đây là lần
+/// thứ hai cùng một cái bẫy trong tệp này (lần trước: `do script` trả 0 chỉ nói
+/// bytes tới tab, xem `send_exit`).
+///
+/// Hôm ấy máy đang **khoá màn hình** — `loginwindow` là tiến trình trước, và
+/// System Events đếm ra 0 cửa sổ cho mọi ứng dụng. Trong trạng thái ấy
+/// `close (first window whose id is …)` chạy êm, trả 0, và **cửa sổ đứng nguyên**.
+/// Đo ba lần trên ba trạng thái: cửa sổ có shell sống, cửa sổ đã `[Process
+/// completed]`, và một cửa sổ vừa mở mới tinh — cả ba đều "thành công" mà không
+/// đóng. Bản cũ trả `Ok(())` ngay sau lời gọi, nên nút ◻ *"đóng nó"* của route
+/// `/terminal` báo xong trong khi cửa sổ còn y nguyên trên máy. Hà, đúng lúc ấy:
+/// *"Nút tắt nhanh đâu"* — anh bấm, và không có gì xảy ra.
+///
+/// Khoá màn hình KHÔNG phải ca hiếm: nó là ca THƯỜNG của hub (chủ máy ở xa, cầm
+/// điện thoại). Nên hàm này phải kể đúng chuyện đó, không được để cái nút nói
+/// dối.
 pub fn close_window(window: i64) -> Result<()> {
     osascript(&format!(
         r#"tell application "Terminal" to close (first window whose id is {window})"#
     ))?;
-    Ok(())
+    for _ in 0..6 {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        match window_exists(window) {
+            Ok(false) => return Ok(()),
+            Ok(true) => {}
+            Err(e) => return Err(e.context("đã gửi lệnh đóng nhưng không hỏi lại được danh sách cửa sổ — KHÔNG biết nó đã đóng hay chưa")),
+        }
+    }
+    anyhow::bail!(
+        "Terminal nhận lệnh đóng (osascript trả 0) mà cửa sổ vẫn CÒN trong danh sách sau ~2 giây. \
+         Đo 2026-08-17: khi máy đang KHOÁ MÀN HÌNH, `close` của Terminal là lệnh không làm gì — \
+         trả 0 và cửa sổ đứng yên (thử cả cửa sổ mới mở lẫn cửa sổ đã thoát shell). \
+         Mở khoá máy rồi bấm lại, hoặc đóng tay bằng ⌘W."
+    )
 }
 
 pub fn quit_and_close(window: i64) -> Result<()> {
@@ -851,10 +890,11 @@ pub fn quit_and_close(window: i64) -> Result<()> {
             "sau 30 giây `tab_busy` vẫn `true` — tức **CLI chưa thoát** (`busy` chỉ về `false` khi tiến trình trong tab kết thúc; xem chú thích của hàm này). Hai lý do có thể: phiên đang giữa một lượt nên `claude` xếp `/exit` vào hàng chờ, HOẶC dòng ấy chưa được gửi đi. Cửa sổ giữ nguyên (đóng lúc này sẽ bật hộp thoại 'terminate running processes'). Cắt lượt đang chạy bằng `/key esc` rồi `/close`, hoặc chờ phiên rảnh. Lệnh thoát có được đẩy đi hay không: xem log `keys_exit_sent`"
         );
     }
-    osascript(&format!(
-        r#"tell application "Terminal" to close (first window whose id is {window})"#
-    ))?;
-    Ok(())
+    // Một đường đóng duy nhất — và nó tự KIỂM. Bản trước chép tay lại dòng
+    // `close` ở đây, nên khi `close_window` học được phép kiểm thì nhánh này vẫn
+    // mù: cùng hình dạng "bản chép tay thứ hai là bản thiếu" đã trả giá ở
+    // `send_exit`.
+    close_window(window)
 }
 
 /// Gõ `text` vào cửa sổ của phiên, rồi Enter.
@@ -1248,6 +1288,17 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
     const KNOWN: &[&str] = &[
         "git",
         "gh",
+        // 🔴 `printf` vào danh sách 2026-08-17, ảnh Hà gửi: *"Trong nội dung có
+        // lệnh nhưng ko có nút"*. Hai dòng ấy là
+        // `printf '@update-be …\n' > ~/projects/dwork/scripts/.cmd-queue/…cmd`
+        // — tức đúng cách xếp việc vào file-queue daemon mà CLAUDE.md của
+        // workspace dựng ra, và là dòng phiên BẢO CHỦ MÁY chạy. Không có nút thì
+        // cây cầu hụt đúng nhịp cuối: anh phải tự gõ lại một dòng dài trên điện
+        // thoại.
+        //
+        // Hàng rào vẫn là hàng rào: `printf` là lệnh có thật, chạy được, và
+        // không phải một động từ tiếng Anh lọt vào giữa câu văn như `echo`.
+        "printf",
         "npm",
         "npx",
         "node",

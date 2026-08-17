@@ -3144,6 +3144,90 @@ pub fn prompt_line_text(shown: &str) -> Option<String> {
 /// Các liên kết của MỘT neo, mượn từ bảng neo — `(href, nhãn)`.
 type Links<'a> = Vec<&'a (String, String)>;
 
+/// Chữ bắt đầu bằng `/` trong câu của PHIÊN không phải lệnh của hub — bọc lại.
+///
+/// 🔴 Hà 2026-08-17: *"`/healthz` bị Telegram tô xanh thành lệnh bot — bấm nhầm
+/// là gửi lệnh rác cho hub"*. Telegram tự nhận mọi `/<chữ>` đứng đầu một từ là
+/// một lệnh bot và biến nó thành đích chạm: chạm vào là **gửi ngay** chữ ấy cho
+/// bot. Nên một dòng `curl …/healthz` của phiên, hay một đường dẫn `/Users/…`,
+/// đều mọc ra một cái bẫy — chạm nhầm là hub nhận một lệnh nó không hiểu.
+///
+/// Vì sao `<code>`: Telegram không tự nối liên kết bên trong nó. Đó không phải
+/// suy đoán — cùng cơ chế ấy đã ĐO được ngày 16/08, khi `deploy.sh` với
+/// `update.sh` trong một dòng lệnh bị tự biến thành liên kết web (`.sh` là TLD
+/// có thật) và cách chữa là bọc `<code>` (xem [`html_with_links`]).
+///
+/// Lệnh THẬT của hub thì giữ nguyên màu — đó là đích chạm có ích, và bảng route
+/// (`commands::lookup`) là chỗ duy nhất biết cái nào thật. Chép tay danh sách ấy
+/// ở đây là dựng bản thứ hai sẽ lệch ngay lần thêm route sau.
+///
+/// 🔴 `@` cũng vậy — Hà 2026-08-17, ảnh `/shot` `[dwork]`: hai dòng
+/// `printf '@update-be …'` hiện ra với `@update` **xanh như một mention**. Cùng
+/// một cái bẫy, khác ký tự: Telegram tự nhận `@<tên>` là tài khoản và biến nó
+/// thành đích chạm dẫn tới một tài khoản không tồn tại. `@update-be` là tên
+/// trong THƯ VIỆN LỆNH của dwork (`.runner-commands`), không phải người.
+///
+/// Đầu vào phải là chữ ĐÃ escape HTML — hàm chỉ thêm thẻ `<code>`, không escape
+/// hộ ai, để không có chỗ nào escape hai lần.
+pub fn tame_auto_links(escaped: &str) -> String {
+    let mut out = String::with_capacity(escaped.len());
+    let mut rest = escaped;
+    let mut at_word_start = true;
+    while let Some(k) = rest.find(['/', '@']) {
+        let (before, from_slash) = rest.split_at(k);
+        out.push_str(before);
+        // Ranh giới đo theo ĐÚNG cái Telegram làm, và hai ký tự có hai luật —
+        // ảnh Hà gửi 17/08 cho thấy cả hai trong CÙNG một dòng:
+        //   printf '@update-be dci/config/holiday/\n' > ~/projects/…/up.cmd
+        // `@update` đứng sau dấu nháy: TÔ XANH. `~/projects` đứng sau `~`, và
+        // `holiday/` giữa từ: KHÔNG tô. Nên:
+        // · `/` chỉ thành lệnh khi mở đầu một từ (đầu tin hoặc sau khoảng trắng);
+        // · `@` thành mention sau BẤT KỲ ký tự nào không phải chữ-số — trừ thư
+        //   điện tử, nơi nó đứng ngay sau chữ.
+        let prev = before.chars().last();
+        let starts_word = match (rest[k..].starts_with('@'), prev) {
+            (_, None) => at_word_start,
+            (true, Some(c)) => !c.is_alphanumeric() && c != '_' && c != '.' && c != '-',
+            (false, Some(c)) => c.is_whitespace() || c == '(' || c == '[',
+        };
+        let end = from_slash
+            .find(char::is_whitespace)
+            .unwrap_or(from_slash.len());
+        let word = &from_slash[..end];
+        // Dấu câu dính đuôi không thuộc về cái lệnh. `;` KHÔNG cắt: chữ đã
+        // escape nên `&amp;` kết thúc bằng nó, cắt là vỡ thực thể.
+        let core = word.trim_end_matches(['.', ',', ':', ')', ']', '!', '?', '"', '\'']);
+        let mark = core.chars().next().unwrap_or(' ');
+        let name: String = core
+            .chars()
+            .skip(1)
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        let is_hub_route = mark == '/'
+            && !name.is_empty()
+            && core.len() == name.len() + 1
+            && crate::commands::lookup(&name).is_some();
+        // Tên tài khoản Telegram tối thiểu 5 ký tự — ngắn hơn thì nó không nối
+        // liên kết, và bọc bừa là biến một chữ thường thành thứ trông như mã.
+        let worth_taming = match mark {
+            '@' => name.chars().count() >= 5,
+            _ => core.chars().count() > 1,
+        };
+        if starts_word && worth_taming && !is_hub_route {
+            out.push_str("<code>");
+            out.push_str(core);
+            out.push_str("</code>");
+            out.push_str(&word[core.len()..]);
+        } else {
+            out.push_str(word);
+        }
+        rest = &from_slash[end..];
+        at_word_start = false;
+    }
+    out.push_str(rest);
+    out
+}
+
 pub fn html_with_links(
     shown: &str,
     anchors: &[(String, Vec<(String, String)>)],
@@ -3201,14 +3285,14 @@ pub fn html_with_links(
             ));
             linked += 1;
         }
-        html.push_str(&crate::telegram::html_escape(head));
+        html.push_str(&tame_auto_links(&crate::telegram::html_escape(head)));
         if !cmd_part.is_empty() {
             html.push_str(&format!(
                 "<code>{}</code>",
                 crate::telegram::html_escape(cmd_part)
             ));
         }
-        html.push_str(&crate::telegram::html_escape(tail));
+        html.push_str(&tame_auto_links(&crate::telegram::html_escape(tail)));
         if let Some((i, (_, links))) = hit {
             used[i] = true;
             if links.is_empty() {
@@ -4090,12 +4174,34 @@ pub fn cmds_for_screen(cfg: &Config, sid: &str, screen: &str) -> Vec<crate::sess
 /// Thêm lệnh bóc từ CHỮ: chữ đang hiện, rồi nguyên văn lượt cuối trong nhật ký.
 fn add_prose_cmds(cfg: &Config, sid: &str, text: &str, out: &mut Vec<crate::sessions::Cmd>) {
     let add = |line: String, out: &mut Vec<crate::sessions::Cmd>| {
-        if !line.trim().is_empty() && !out.iter().any(|c| c.line == line) {
-            out.push(crate::sessions::Cmd {
-                line,
-                cwd: String::new(),
-            });
+        if line.trim().is_empty() || out.iter().any(|c| c.line == line) {
+            return;
         }
+        // 🔴 MẢNH BỊ CỬA SỔ BẺ KHÔNG PHẢI MỘT LỆNH THỨ HAI — 2026-08-17.
+        //
+        // Cùng một dòng có thể tới đây hai lần với hai độ dài: nhật ký giữ
+        // nguyên văn, còn MÀN thì bị cửa sổ bẻ, nên nửa đầu của nó cũng lọt qua
+        // `commands_in_report`. Thêm cả hai là dựng ra hai cái nút cho một việc
+        // — và cái nút mọc từ mảnh cụt chạy một lệnh KHÁC HẲN: `printf '…\n'`
+        // thiếu mất `> …/up-holiday.cmd` chỉ in ra màn, không xếp việc nào cả.
+        // Một cái nút chạy sai thứ nó ghi trên mình là thứ tệ hơn không có nút.
+        if out.iter().any(|c| c.line.starts_with(&line)) {
+            return;
+        }
+        // Ngược chiều: bản dài hơn tới sau thì nó THAY mảnh cụt — nhưng chỉ thay
+        // mảnh bóc từ chữ (`cwd` rỗng), không đụng dòng của nhật ký (nó mang
+        // theo thư mục, thứ chữ không có).
+        if let Some(i) = out
+            .iter()
+            .position(|c| c.cwd.is_empty() && line.starts_with(&c.line))
+        {
+            out[i].line = line;
+            return;
+        }
+        out.push(crate::sessions::Cmd {
+            line,
+            cwd: String::new(),
+        });
     };
     for line in crate::keys::commands_in_report(text, CMD_LINES_MAX) {
         add(line, out);
@@ -4240,12 +4346,28 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     // sau khi đã trộn, nên nó bám vào dòng chữ hub tự viết. Không cần quét
     // ngược: chỗ này biết ranh giới, vì chính nó vẽ ra ranh giới ấy.
     let box_anchor = prompt_line_text(&crate::telegram::strip_markdown(text));
-    let missing: Vec<&String> = cmds.iter().filter(|c| !text.contains(c.as_str())).collect();
+    // 🔴 HỎI ĐÚNG CÂU HỎI MÀ CHỖ NEO SẼ HỎI — Hà 2026-08-17: *"Dòng lệnh in hai
+    // biến thể trùng nhau trong cùng một tin"*.
+    //
+    // "Có trên màn không" ở đây từng đo bằng `text.contains(cmd)`, còn chỗ chèn
+    // liên kết (`html_with_links`) đo bằng `line_carries` — thứ khớp cả DÒNG BỊ
+    // CỬA SỔ BẺ ĐÔI. Hai phép đo, một câu hỏi: với một lệnh dài, `contains` nói
+    // "không thấy" nên hàm này chép nguyên văn nó xuống cuối tin, trong khi
+    // `line_carries` vẫn bám được vào nửa đầu trên màn và gắn ▶️ ở đó. Kết quả
+    // đúng như Hà đọc: MỘT lệnh, hai biến thể, hai chỗ bấm, trong một tin.
+    //
+    // Và cái nhãn cũ (*"cổng quyền chặn"*) nói một NGUYÊN NHÂN mà hub không đo
+    // được: dòng vắng mặt vì bị chặn, vì màn đã cuộn qua, hay vì nó chỉ nằm
+    // trong nhật ký — ba chuyện khác nhau. Nói đúng thứ biết chắc.
+    let missing: Vec<&String> = cmds
+        .iter()
+        .filter(|c| !text.lines().any(|l| line_carries(l, c)))
+        .collect();
     let text = if missing.is_empty() {
         text.to_string()
     } else {
         let mut t = text.trim_end().to_string();
-        t.push_str("\n\nLệnh phiên chạy không được (cổng quyền chặn):\n");
+        t.push_str("\n\nLệnh của phiên, không thấy trên màn (lấy từ nhật ký):\n");
         for c in &missing {
             t.push_str(c);
             t.push('\n');
@@ -4497,6 +4619,28 @@ pub fn say_session_data_at(
         // Không chèn được liên kết nào: chữ thuần + nút như cũ. Không đi đường
         // HTML ở đây — chữ này chưa qua tay ai, và bật `parse_mode` cho một
         // chuỗi không cố ý mang thẻ là mời Telegram từ chối cả tin.
+        //
+        // 🔴 TRỪ khi trong chữ có một `/<chữ>` mà Telegram sẽ tô thành lệnh bot:
+        // ca ấy phải đi đường HTML, vì cái bẫy nằm ở chỗ KHÔNG có liên kết nào
+        // để mà đi cửa kia — đúng cái tin trơn Hà chạm nhầm. Escape rồi chỉ thêm
+        // `<code>`, nên chuỗi vẫn là chuỗi cũ về mặt nội dung.
+        let escaped = crate::telegram::html_escape(&shown);
+        let tamed = tame_auto_links(&escaped);
+        if tamed != escaped {
+            let parts = split_for_telegram(&tamed);
+            let last = parts.len().saturating_sub(1);
+            for (n, p) in parts.into_iter().enumerate() {
+                let sent = if n == last && !buttons.is_empty() {
+                    tg.send_html_report(&p, buttons).map(|_| ())
+                } else {
+                    tg.send_html(&p)
+                };
+                if let Err(e) = sent {
+                    logging::error(log_key, json!({ "err": e, "slice": n, "html": true }));
+                }
+            }
+            return None;
+        }
         let parts = split_for_telegram(&shown);
         let last = parts.len().saturating_sub(1);
         for (n, p) in parts.into_iter().enumerate() {
@@ -4550,6 +4694,17 @@ pub fn say_session_data_at(
 ///
 /// Luôn trả về ít nhất một mẩu (có thể rỗng), nên chỗ gọi `pop()` được mà không
 /// phải kiểm rỗng.
+///
+/// 🔴 CẮT LÀM ĐÔI THÌ PHẢI NÓI RA — Hà 2026-08-17: *"Tin dài bị cắt làm hai mẩu,
+/// mẩu sau không có dấu nối nên đọc như tin lạc"*.
+///
+/// Buồng chat không có khái niệm "trang 2": hai tin rời nằm cạnh nhau, và mẩu
+/// sau bắt đầu giữa câu, thường là giữa một danh sách. Người đọc trên điện thoại
+/// gặp nó trước khi kịp cuộn lên, nên nó đọc như một tin của chuyện khác — tệ
+/// nhất đúng lúc tin dài, tức đúng lúc nội dung đáng đọc.
+///
+/// Dấu nối là chữ THUẦN, không thẻ: mẩu này đi cả đường HTML lẫn đường chữ trần,
+/// và một cái thẻ lọt vào đường chữ trần thì Telegram in ra nguyên con.
 pub fn split_for_telegram(text: &str) -> Vec<String> {
     let mut parts: Vec<String> = Vec::new();
     let mut chunk = String::new();
@@ -4561,7 +4716,32 @@ pub fn split_for_telegram(text: &str) -> Vec<String> {
         chunk.push('\n');
     }
     parts.push(chunk);
+    // Mẩu rỗng là một tin Telegram từ chối (`message text is empty`) — giữ lại
+    // đúng một mẩu để hợp đồng "luôn có ít nhất một" không đổi.
+    if parts.iter().any(|p| !p.trim().is_empty()) {
+        parts.retain(|p| !p.trim().is_empty());
+    } else {
+        parts.truncate(1);
+    }
+    let n = parts.len();
+    if n < 2 {
+        return parts;
+    }
     parts
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let mut out = String::new();
+            if i > 0 {
+                out.push_str(&format!("⋯ mẩu {}/{n}, nối tiếp tin trên\n", i + 1));
+            }
+            out.push_str(&p);
+            if i + 1 < n {
+                out.push_str(&format!("⋯ còn mẩu {}/{n} ở tin dưới\n", i + 2));
+            }
+            out
+        })
+        .collect()
 }
 
 /// Bảng hỏi viết thành CHỮ CHẠM ĐƯỢC, mỗi lựa chọn một lệnh tự tô sáng.

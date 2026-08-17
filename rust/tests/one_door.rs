@@ -98,8 +98,11 @@ fn the_one_door_formats_what_is_there_and_adds_nothing() {
             ..Default::default()
         },
     );
+    // Nhãn của khu ấy đổi 2026-08-17 ("cổng quyền chặn" → "không thấy trên
+    // màn"): hub không đo được NGUYÊN NHÂN vắng mặt, nên nó thôi đoán. Bài kiểm
+    // bám vào phần nói được — có mọc thêm khu chữ hay không.
     assert!(
-        !shown.contains("chạy không được"),
+        !shown.contains("không thấy trên màn"),
         "ack không được mọc thêm danh sách lệnh: {shown}"
     );
     assert!(
@@ -118,7 +121,7 @@ fn the_one_door_formats_what_is_there_and_adds_nothing() {
         },
     );
     assert!(
-        unfiltered.contains("chạy không được"),
+        unfiltered.contains("không thấy trên màn"),
         "không bỏ lọc thì phải thấy khu chữ thừa — nếu không, phép đo trên vô nghĩa: {unfiltered}"
     );
 }

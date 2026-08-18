@@ -1,5 +1,54 @@
 # active context — hub
 
+## 🎯 2026-08-18 (sáng) — ảnh đen có HAI nguyên nhân, và `/clean` dọn hàng chờ
+
+Một commit, **đã cài + push** — `6bc944f`, `424 test · clippy 0 · fmt 0`, hubd
+`@2026-08-18T00:10:50Z` cert, menu lệnh Telegram **13 → 14**.
+
+### 1. Tôi đoán sai, Hà đo đúng
+
+Hà: *"Chụp ảnh ra den xì"*. Tôi kết luận ngay là thiếu quyền Screen Recording.
+Hà hỏi lại: *"Máy đang ở màn hình chờ đăng nhập không chụp được ảnh?"* — và đo
+ra đúng thế: `ioreg -n Root -d1` → `"CGSSessionScreenIsLocked"=Yes`. **Hai
+nguyên nhân, một tấm ảnh đen.** Bài học giữ lại: khi hai nguyên nhân cho cùng
+một triệu chứng, câu trả lời phải PHÂN BIỆT, không được chọn cái mình vừa nghĩ
+ra trước.
+
+Đo được cái hỏng: `screencapture -x` **exit 0**, tệp 112 KB, ảnh 3024×1964 toàn
+`#000000` — hub gửi thẳng nó đi kèm câu *"đây, màn hình của phiên"*. Nay
+`frame_is_blank` (co còn 1 điểm bằng `sips`, đọc byte BMP — không cần thư viện
+ảnh) chặn lại, và `blank_frame_reason` nói ba câu cho ba trạng thái. Bài kiểm
+khoá cả điều KHÔNG được nói: ca khoá màn không được nhắc Screen Recording.
+
+### 2. `/clean` — hàng chờ của PHIÊN (Hà chốt)
+
+*"Thêm lệnh clean xóa hết ở chờ"*. Đi đúng đường TUI tự quảng cáo (*"Press up to
+edit queued messages"*): `↑` lấy tin ra ô nhập, xoá ô, ESC chặn cái CR mà
+`do script` kèm sẵn (để nó rơi vào ô nhập là **gửi lại đúng tin mình định
+xoá**). Mỗi vòng đọc lại màn và đếm (`queued_count`); không giảm thì dừng và nói
+còn bao nhiêu.
+
+**Chạy thật** (cửa sổ nháp): 2 tin trong hàng chờ của một phiên đang bận ⟹
+`clean_queue_done removed=2 left=0`, màn đọc lại = 0.
+
+### 3. Hai vết tôi để lại trong lúc đo
+
+- Bài kiểm live đặt `assert!` TRƯỚC bước dọn ⟹ một lượt đỏ bỏ lại **ba cửa sổ
+  `claude` lạ**; Hà hỏi ngay: *"Sao tôi mở 3 phiên giờ nhảy lên thành 4"*. Đã
+  sửa: dọn trước, phán sau. Ba cửa sổ ấy đã đóng/ẩn xong.
+- Hai vỏ cửa sổ (`3072`, `3075`) **không chịu `close`** dù `claude` đã thoát và
+  tty không còn tiến trình nào — đúng bệnh 17/08. Đường lùi vẫn là ẩn; ⌘W khi
+  ngồi máy.
+
+### 4. Còn treo
+
+- `/clean` **chưa nghiệm thu bằng cú bấm của Hà** trên Telegram (đã chạy thật
+  qua `clear_queue`, chưa qua route).
+- Câu xác nhận gộp (`×N`, commit `ac0e4c6`) cũng vậy.
+- `/anh`: chờ Hà cấp Screen Recording cho `~/Library/Application Support/hub/bin/hubd`
+  — nhưng phải kiểm lại SAU khi mở khoá màn, vì tấm ảnh đen hôm nay giải thích
+  được bằng khoá màn rồi.
+
 ## 🎯 2026-08-17 (khuya) — 73 dòng chữ cho 73 cú bấm: hub xoá tin, rồi thả dấu lên chính tin ấy
 
 Một commit, **đã cài + push** — `ac0e4c6`, `419 test · clippy 0 · fmt 0`, hubd

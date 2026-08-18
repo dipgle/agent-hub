@@ -1,5 +1,36 @@
 # active context — hub
 
+## 🎯 2026-08-18 (chiều muộn) — hub tự đổi tên phiên giữa chừng
+
+Hà: *"đang làm phiên onghut giờ mất luôn thành 2 phiên tfl5"*. Không phải hub
+nhảy phiên — **cái nhãn lật**, và hai phiên khác nhau cùng đội tên `[tfl5]`.
+
+**Gốc:** `sessions.rs::folder_from_tail` đoán dự án bằng cách đếm tên thư mục
+xuất hiện trong đuôi nhật ký 256 KB, ai nhiều hơn thì thắng. Phiên onghut vừa
+làm một quãng đụng vào `AI/tfl5` (chỗ ghim Playwright của nó).
+
+**Dựng lại đúng cửa sổ ấy tại đúng lúc ấy** — byte `8508947..8771091` của nhật ký
+thật `08b1a8e8`, cắt tại `2026-08-18T08:47:47Z`: **`AI/tfl5` 43** vs
+**`onghut` 24** ⟹ census chọn tfl5. Trong khi lời cuối của chính phiên ấy mở đầu
+bằng `[onghut]`, và hub đã in nguyên tiền tố đó ra ngay dòng dưới cái nhãn sai.
+Đo lại lúc 15:53 thì tỉ lệ đã đảo (127 vs 5) — tức lỗi **tự đến tự đi** theo
+việc phiên đang làm, đúng loại không bao giờ bắt được bằng đọc mã.
+
+**Vá — nhãn có THỨ HẠNG** (`folder_for_session`): ① phiên tự khai
+(`folder_declared`: tiền tố `[tên]` ở đầu lượt nói, đối chiếu thư mục có thật)
+› ② đếm đường dẫn › ③ sổ nhớ. Và sổ nhớ nay mang hạng, nên phép đếm **không lật
+được** nhãn đã khai kể cả khi lời khai trôi khỏi cửa sổ đọc (`folder_label_kept`,
+có log — không im lặng).
+
+**Nghiệm thu trên máy thật** (`hub sessions --json`, bản đã cài): `08b1a8e8` →
+`onghut` · `cf2ce632` → `AI/tfl5` · `661171e5` → `hub` · `b3e8bd8f` → `dwork`.
+`448 test · clippy 0 · fmt 0`. Bài kiểm khoá lỗi chạy trên **fixture cắt từ chính
+nhật ký ấy** (`tests/fixtures/onghut-mislabel-2026-08-18.jsonl`), kèm ca ngược:
+không có lời khai thì phép đếm vẫn phải trả lời.
+
+⚠ Còn thiếu đúng một bước: `/session` bấm từ Telegram (luật của repo — `cargo
+test` xanh không phải nghiệm thu).
+
 ## 🚨 2026-08-18 (chiều) — cổng chất lượng trỏ vào chỗ TRỐNG suốt nhiều ngày
 
 Hà hỏi *"Xong hết chưa"*. Đi chạy cổng như `CLAUDE.md` bắt buộc thì:

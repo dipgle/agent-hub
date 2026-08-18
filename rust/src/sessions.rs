@@ -395,20 +395,26 @@ pub fn transcript_error(tail: &str) -> Option<String> {
 /// Bộ nhớ nằm trong tiến trình chứ không xuống đĩa: sổ `watch:sessions` đã giữ
 /// `Mark.d` để dùng sau khi khởi động lại, còn chỗ này chỉ cần vá đúng cái
 /// nhấp nháy giữa hai lượt đo trong CÙNG một lần chạy.
-static FOLDER_MEMO: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> =
+/// Nhãn kèm HẠNG của nó: phiên tự khai, hay hub đếm ra.
+///
+/// 🔴 Hạng là thứ vá nửa sau của lỗi 18/08. Một lời khai có thể trôi ra khỏi cửa
+/// sổ đọc 256 KB sau một quãng dài chỉ gọi công cụ; lúc ấy phép đếm quay lại một
+/// mình, và nếu nó được phép đè lên cái đã khai thì nhãn vẫn lật, chỉ chậm hơn.
+static FOLDER_MEMO: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (String, bool)>>> =
     std::sync::OnceLock::new();
 
-fn folder_memo() -> &'static std::sync::Mutex<HashMap<String, String>> {
+fn folder_memo() -> &'static std::sync::Mutex<HashMap<String, (String, bool)>> {
     FOLDER_MEMO.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
-/// Ghi nhớ dự án của một phiên. Rỗng thì KHÔNG ghi đè cái đã biết.
-fn remember_folder(session_id: &str, folder: &str) {
+/// Ghi nhớ dự án của một phiên, KÈM hạng của nguồn — xem [`FOLDER_MEMO`].
+/// Rỗng thì KHÔNG ghi đè cái đã biết.
+fn remember_folder_ranked(session_id: &str, folder: &str, declared: bool) {
     if folder.trim().is_empty() {
         return;
     }
     if let Ok(mut m) = folder_memo().lock() {
-        m.insert(session_id.to_string(), folder.to_string());
+        m.insert(session_id.to_string(), (folder.to_string(), declared));
     }
 }
 
@@ -417,8 +423,18 @@ fn recall_folder(session_id: &str) -> Option<String> {
     folder_memo()
         .lock()
         .ok()
-        .and_then(|m| m.get(session_id).cloned())
+        .and_then(|m| m.get(session_id).map(|(f, _)| f.clone()))
         .filter(|f| !f.trim().is_empty())
+}
+
+/// Chỉ trả nhãn mà phiên TỰ KHAI — `None` nếu cái đang nhớ chỉ là đếm được.
+fn recall_declared(session_id: &str) -> Option<String> {
+    folder_memo()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(session_id).cloned())
+        .filter(|(f, declared)| *declared && !f.trim().is_empty())
+        .map(|(f, _)| f)
 }
 
 pub fn display_name(name: &str, folder: &str) -> String {
@@ -1184,6 +1200,114 @@ fn open_drawer(
         Some((name, _)) => format!("{label}/{name}"),
         None => label,
     }
+}
+
+/// Dự án phiên **tự khai** — mạnh hơn mọi phép đếm, và đây là nhãn đúng.
+///
+/// 🔴 Hà 2026-08-18: *"đang làm phiên onghut giờ mất luôn thành 2 phiên tfl5"*.
+/// [`folder_from_tail`] đếm đường dẫn trong đuôi nhật ký rồi lấy cái nhiều nhất.
+/// Phiên onghut vừa làm một quãng đụng vào `AI/tfl5` (chỗ ghim Playwright), nên
+/// đếm lại đúng cửa sổ 256 KB tại đúng lúc ấy — byte `8508947..8771091` của nhật
+/// ký thật, cắt tại `2026-08-18T08:47:47Z` — ra **`AI/tfl5` 43 lần** so với
+/// **`onghut` 24 lần**. Nhãn lật, danh sách hiện HAI hàng `[tfl5]`, và dự án
+/// đang làm biến mất khỏi màn dù phiên vẫn sống.
+///
+/// Phép đếm không hỏng; nó trả lời đúng câu hỏi *"phiên này đụng vào thư mục nào
+/// nhiều nhất"*. Chỉ có điều đó không phải câu hỏi *"phiên này là dự án gì"* —
+/// và câu ấy phiên đã tự trả lời sẵn ở đầu mỗi lượt nói, theo đúng luật của
+/// `CLAUDE.md` workspace: *"Mọi response prefix `[<name>]`"*. Hub vốn đã in
+/// nguyên cái tiền tố ấy ra danh sách (`💬 [onghut] Đã viết lại kế hoạch…`) —
+/// tức sự thật nằm ngay cạnh cái nhãn sai, chỉ là chưa ai đọc nó.
+///
+/// Đọc NGƯỢC và lấy lời khai mới nhất: chỉ lượt của **phiên** (`assistant`), vì
+/// lượt `user` là câu chủ máy gõ — anh ấy nhắc tên dự án khác là chuyện thường.
+pub fn folder_declared(tail: &str, workspace_root: &str) -> Option<String> {
+    for line in tail.lines().rev() {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            // Dòng đầu cụt là bình thường: đuôi bắt đầu giữa tệp.
+            continue;
+        };
+        if record.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(text) = text_of(&record) else {
+            continue;
+        };
+        if let Some(label) = declared_label(&text, workspace_root) {
+            return Some(label);
+        }
+    }
+    None
+}
+
+/// Phần THUẦN của [`folder_declared`]: đọc `[tên]` ở ĐẦU một lượt nói.
+///
+/// Hai cổng giữ cho nó không nhận bừa, vì ngoặc vuông là dấu câu chứ không phải
+/// chữ ký:
+/// - phải nằm ở **đầu** lượt nói (bỏ qua ``` ` ```/`*`/`#`/`>` bọc ngoài — phiên
+///   hub viết `` `[hub]` ``), nên một câu văn nhắc `[BUG-02]` giữa dòng không
+///   tính; và tên không được chứa khoảng trắng, thứ loại luôn `[dùng Bash]` mà
+///   [`text_of`] dựng cho lượt chỉ-gọi-công-cụ;
+/// - phải là **thư mục có thật** trong workspace. Đây là cổng rẻ nhất chặn được
+///   cả lớp ngoặc-không-phải-dự-án, và nó cùng một luật với `open_drawer`: đo
+///   trên đĩa, đừng gõ cứng một danh sách tên.
+pub fn declared_label(text: &str, workspace_root: &str) -> Option<String> {
+    let head = text.trim_start_matches(|c: char| c.is_whitespace() || "`*_#>".contains(c));
+    let (name, _) = head.strip_prefix('[')?.split_once(']')?;
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 40 || name.contains(char::is_whitespace) {
+        return None;
+    }
+    let root = Path::new(workspace_root.trim_end_matches('/'));
+    if root.join(name).is_dir() {
+        return Some(name.to_string());
+    }
+    // `AI/` là ngăn kéo, y như trong `folder_from_tail`: phiên khai `[tfl5]`
+    // nhưng thư mục là `AI/tfl5`, và nhãn phải cùng một dạng với phép đếm để
+    // hai đường không đẻ ra hai cách gọi cùng một dự án.
+    root.join("AI")
+        .join(name)
+        .is_dir()
+        .then(|| format!("AI/{name}"))
+}
+
+/// Nhãn cuối cùng của một phiên — chỗ ghép của cả ba nguồn, theo đúng thứ hạng.
+///
+/// 1. **Phiên tự khai** ([`folder_declared`]) — thắng tuyệt đối.
+/// 2. **Đếm đường dẫn** ([`folder_from_tail`], rồi đầu nhật ký qua `census_head`)
+///    — chỉ khi không có lời khai nào, và **không được lật** một nhãn đã khai.
+/// 3. **Sổ nhớ** — khi cả hai đều im tiếng (luật 11b: một phép đo hỏng không
+///    phải một sự thật về thế giới).
+///
+/// `census_head` là lượt đọc ĐẦU nhật ký, truyền vào dạng closure để nó chỉ chạy
+/// khi thật sự cần — phiên đang làm việc bình thường không tốn thêm lần đọc đĩa.
+pub fn folder_for_session(
+    session_id: &str,
+    tail: &str,
+    workspace_root: &str,
+    census_head: impl FnOnce() -> Option<String>,
+) -> Option<String> {
+    if let Some(declared) = folder_declared(tail, workspace_root) {
+        remember_folder_ranked(session_id, &declared, true);
+        return Some(declared);
+    }
+    let Some(counted) = folder_from_tail(tail, workspace_root).or_else(census_head) else {
+        return recall_folder(session_id);
+    };
+    if let Some(declared) = recall_declared(session_id) {
+        if declared != counted {
+            // KHÔNG im lặng: hub vừa bỏ qua một phép đo, và lần sau đọc log phải
+            // thấy được nó đã bỏ qua cái gì.
+            logging::info(
+                "folder_label_kept",
+                json!({ "session": session_id, "declared": declared, "counted": counted,
+                        "why": "phiên tự khai dự án này — phép đếm đường dẫn không lật được nhãn" }),
+            );
+        }
+        return Some(declared);
+    }
+    remember_folder_ranked(session_id, &counted, false);
+    Some(counted)
 }
 
 /// Ngữ cảnh của lượt gần nhất + model của nó.
@@ -3236,19 +3360,16 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // Dự án đang làm: đọc từ chính đoạn nhật ký vừa nạp, không
                     // tốn thêm một lần đọc đĩa nào.
                     let ws = cfg.workspace_root.to_string_lossy().to_string();
-                    row.folder = folder_from_tail(&tail, &ws)
-                        // Đuôi im tiếng thì hỏi ĐẦU: phiên nào cũng mở đầu bằng
-                        // việc của một dự án cụ thể. Chỉ đọc thêm khi cần, nên
-                        // phiên đang làm việc bình thường không tốn gì.
-                        .or_else(|| {
-                            read_head(&path)
-                                .ok()
-                                .and_then(|head| folder_from_tail(&head, &ws))
-                        })
-                        // …và ĐỌC HỎNG THÌ NHỚ, đừng quên (xem `remember_folder`).
-                        .or_else(|| recall_folder(&row.session_id))
-                        .unwrap_or_default();
-                    remember_folder(&row.session_id, &row.folder);
+                    // Thứ hạng của ba nguồn nằm gọn trong `folder_for_session`:
+                    // phiên tự khai > đếm đường dẫn > sổ nhớ. Đuôi im tiếng thì
+                    // hỏi ĐẦU nhật ký — phiên nào cũng mở đầu bằng việc của một
+                    // dự án cụ thể — nhưng chỉ đọc thêm khi thật sự cần.
+                    row.folder = folder_for_session(&row.session_id, &tail, &ws, || {
+                        read_head(&path)
+                            .ok()
+                            .and_then(|head| folder_from_tail(&head, &ws))
+                    })
+                    .unwrap_or_default();
                     // Phiên có đang chờ một câu trả lời không — đọc từ chính
                     // đoạn nhật ký vừa nạp, không tốn thêm lần đọc nào.
                     row.asking = pending_question(&tail);
@@ -5489,12 +5610,12 @@ mod folder_memo_tests {
         let id = "memo-test-0000";
         assert_eq!(recall_folder(id), None, "chưa đo lần nào thì chưa biết gì");
 
-        remember_folder(id, "dwork");
+        remember_folder_ranked(id, "dwork", false);
         assert_eq!(recall_folder(id).as_deref(), Some("dwork"));
 
         // Lượt đo sau về RỖNG: giữ nguyên, không ghi đè.
-        remember_folder(id, "");
-        remember_folder(id, "   ");
+        remember_folder_ranked(id, "", false);
+        remember_folder_ranked(id, "   ", false);
         assert_eq!(
             recall_folder(id).as_deref(),
             Some("dwork"),
@@ -5502,7 +5623,7 @@ mod folder_memo_tests {
         );
 
         // Đo được dự án KHÁC thì đổi — phiên có thể chuyển thư mục thật.
-        remember_folder(id, "AI/hub");
+        remember_folder_ranked(id, "AI/hub", false);
         assert_eq!(recall_folder(id).as_deref(), Some("AI/hub"));
 
         // Và cái nhãn ấy phải đi tới tận câu chữ người đọc thấy.

@@ -1900,6 +1900,68 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
         "rg",
         "find",
         "ls",
+        // 🔴 CẢ HỌ LỆNH ĐỘNG TAY VÀO TỆP — thêm 2026-08-18, và lý do là một cái
+        // chặn đã bị gỡ mà cái này thì không.
+        //
+        // Hà, ảnh chụp `/shot` của `[AI/tfl5]`: *"Có lệnh nhưng lại không có nút
+        // chạy"*. Dòng ấy là dòng cuối cùng để đóng sổ một phiên:
+        // `rm ~/projects/AI/tfl5/ide/src/__tests__/deploy_domains_by_role.test.jsx`
+        // — không ▶️, không 🖥, mà đường dẫn trong nó lại mọc một nút 📎 mời TẢI
+        // VỀ đúng cái tệp dòng ấy bảo xoá.
+        //
+        // Ngày 16/08 cổng `destructive` bị gỡ hẳn (xem bia mộ ở cuối tệp) đúng
+        // vì câu này: *"tôi ở tele là phải gọi lệnh thao tác như ngồi máy thì
+        // chặn khác gì chặt tay"*. Nhưng `rm` chưa bao giờ có trong danh sách
+        // này, và danh sách này được hỏi TRƯỚC cái cổng ấy. Nên cái chặn không
+        // biến mất, nó chỉ lùi lên một tầng — và tầng này im lặng hơn hẳn tầng
+        // cũ, vì nó không có tên, không có dòng log, chỉ có một `continue`.
+        // Cùng hình dạng với ca `.docx` cùng ngày: **gỡ một luật mà quên gỡ
+        // những thứ dựng lên để phục vụ nó.**
+        //
+        // 📐 Đo trước khi chọn, không kê theo trí nhớ: quét toàn bộ `hub.log` từ
+        // 14/08, lấy mọi đoạn trong dấu nháy ngược qua được `looks_like_prose`
+        // rồi đếm động từ KHÔNG có trong danh sách — `cat` 3 · `cp` 3 · `ps` 2 ·
+        // `rm` · `lsof` · `psql`. Phần còn lại của danh sách dưới đây là cùng họ
+        // với chúng (đụng tệp, đụng tiến trình), thêm một lượt để lần sau không
+        // phải vá từng chữ một.
+        //
+        // Hàng rào vẫn giữ đúng việc của nó — chống VĂN XUÔI đội lốt lệnh, chứ
+        // không phải chống lệnh nguy hiểm. Ba cửa dưới nó không đổi:
+        // `looks_like_prose`, `forbids` (câu đang CẤM thì không mời chạy), và
+        // "phải có ít nhất một tham số". `sudo` cố ý ĐỨNG NGOÀI: nút ▶️ chạy
+        // bằng `zsh -lc` không có tty, nên một dòng `sudo` sẽ treo tới trần thời
+        // gian rồi chết câm — xem [[feedback_no_tty_password_prompts]].
+        "rm",
+        "mv",
+        "cp",
+        "mkdir",
+        "rmdir",
+        "touch",
+        "ln",
+        "chmod",
+        "chown",
+        "cat",
+        "head",
+        "wc",
+        "sed",
+        "awk",
+        "sort",
+        "diff",
+        "du",
+        "df",
+        "ps",
+        "lsof",
+        "kill",
+        "pkill",
+        "killall",
+        "xargs",
+        "jq",
+        "tar",
+        "unzip",
+        "zip",
+        "psql",
+        "defaults",
+        "which",
     ];
     let mut out: Vec<String> = Vec::new();
     let rows: Vec<&str> = screen.lines().collect();

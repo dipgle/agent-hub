@@ -15,11 +15,25 @@ fn the_two_commands_in_that_mailler_message() {
         println!("  · {g}");
     }
 
-    // `rm -f …` bị chặn CÓ CHỦ Ý: `keys::destructive` không dựng nút cho lệnh
-    // xoá. Một cái nút bấm nhầm là mất tệp, và đó là thứ không lùi lại được.
+    // 🔄 ĐẢO CHIỀU 2026-08-18 — bài kiểm này khoá một luật đã bị bãi bỏ.
+    //
+    // Bản cũ đọc: *"lệnh xoá KHÔNG được thành nút"*, lý do là `keys::destructive`.
+    // Cổng ấy Hà gỡ hẳn ngày 16/08 (*"tôi ở tele là phải gọi lệnh thao tác như
+    // ngồi máy thì chặn khác gì chặt tay"*) — nhưng `rm` vẫn không có trong
+    // `KNOWN`, nên hành vi không đổi và bài kiểm này vẫn xanh, che đúng chỗ hở
+    // suốt hai ngày. Nó xanh vì đo cái cổng đã chết, không phải vì sản phẩm đúng.
+    //
+    // Giữ bài kiểm, đảo lời hứa: từ nay "vá lại cho an toàn" là làm ĐỎ một bài
+    // kiểm có chủ, không phải bịt một chỗ hở. Cùng cách xử lý ba bài kiểm của
+    // luật 5 hôm 16/08 (`tests/sessions.rs`).
+    //
+    // Và chính dòng này là ca đáng có nút nhất: câu ngay trên nó nói *"tool rm
+    // bị hook chặn"*, tức phiên KHÔNG tự chạy được và đang nhờ chủ máy gõ tay —
+    // trên điện thoại thì gõ tay một đường dẫn dài là đúng thứ cây cầu sinh ra
+    // để khỏi phải làm.
     assert!(
-        !got.iter().any(|c| c.starts_with("rm ")),
-        "lệnh xoá KHÔNG được thành nút: {got:?}"
+        got.iter().any(|c| c.starts_with("rm ")),
+        "lệnh xoá phải có nút — cổng chặn nó đã gỡ từ 16/08: {got:?}"
     );
 
     // Lệnh `git … worktree remove` thì phải bắt được — nó không nằm trong danh

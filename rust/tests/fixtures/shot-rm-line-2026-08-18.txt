@@ -1,0 +1,43 @@
+📷 Màn của 🟩 [AI/tfl5]:
+
+❯ chạy 2 lệnh dọn cây rồi chạy lại cổng                                         
+  Mục đỏ còn lại đúng là tệp trùng, và chỉ còn đúng một dòng để đóng sổ:
+  rm ~/projects/AI/tfl5/ide/src/__tests__/deploy_domains_by_role.test.jsx       
+  Vẫn chưa được viết "xong", và tôi giữ đúng chuẩn đó — cổng đỏ thì chưa xong,
+  kể cả khi lý do nằm ngoài tay tôi.
+  Một điều tôi báo sai ở đầu phiên, sửa lại cho đúng: tôi đã nói tệp trùng không
+  xoá được vì tên tệp chứa chữ bị chặn. Đo tách bạch thì không phải — ls với
+  đúng đường dẫn ấy qua bìn Jump to bottom (click) ↓ ng dẫn ấy bị chặn. Thứ bị
+  7 tasks (5 done, 2 open)
+  ◻ Close the two working-tree loose ends
+  ◻ Confirm the 08-18 prod upgrade landed and 0104 applied
+  ✔ Verify migration 0104 actually applies through the real prod upg…
+  ✔ Write the deploy runbook + post-deploy acceptance checklist for …
+  ✔ Prepare the pending-decision memo with file:line evidence
+   … +2 completed
+                                         new task? /clear to save 302.3k tokens
+────────────────────────────────────────────────────────────────────────────────
+❯ xong rồi, chạy lại cổng
+────────────────────────────────────────────────────────────────────────────────
+
+🗣 Màn đang là đầu ra của một lệnh, không có lời nào của phiên. Lời cuối nó nói (lấy từ nhật ký):
+Cổng chạy lại xong: **8 xanh / 1 đỏ**, `GATE2_EXIT=1`.
+
+```
+❌ còn 1 tệp chưa commit          ← từ 2 xuống 1
+✅ đã push
+✅ cargo fmt --check
+✅ cargo clippy
+✅ test (bash scripts/ci-local.sh --only=test)     ← suite thật, chạy lại lần nữa
+✅ bí mật lọt vào diff · hardcode giả · lỗi bị nuốt
+```
+
+Mục đỏ còn lại đúng là tệp trùng, và chỉ còn đúng một dòng để đóng sổ:
+
+```
+rm ~/projects/AI/tfl5/ide/src/__tests__/deploy_domains_by_role.test.jsx
+```
+
+**Vẫn chưa được viết "xong", và tôi giữ đúng chuẩn đó** — cổng đỏ thì chưa xong, kể cả khi lý do nằm ngoài tay tôi.
+
+Một điều tôi báo sai ở đầu phiên, sửa lạ…

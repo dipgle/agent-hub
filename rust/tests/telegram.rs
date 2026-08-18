@@ -1462,10 +1462,16 @@ fn a_cd_then_command_line_is_still_a_command() {
     assert_eq!(got.len(), 1, "{got:?}");
 
     // Hàng rào KHÔNG được nới: phần sau `&&` vẫn phải là một động từ đã biết.
+    //
+    // 🔄 Ví dụ đổi 2026-08-18. Chỗ này từng dùng `rm -rf everything` làm mẫu
+    // "động từ lạ" — mà `rm` lạ chỉ vì cổng `destructive` (gỡ 16/08) đã giữ nó
+    // ngoài `KNOWN`. Nay `rm` là một động từ có thật và có nút, nên nó thôi làm
+    // được việc của một mẫu. Lời hứa của bài kiểm không đổi: `cd X && <lạ>` thì
+    // vẫn 0 nút. Mẫu mới là một công cụ KHÔNG có trên máy này.
     assert!(
-        commands_in_report("cd ~/projects && rm -rf everything", 3).is_empty(),
+        commands_in_report("cd ~/projects && kubectl apply -f everything.yaml", 3).is_empty(),
         "nới hàng rào: {:?}",
-        commands_in_report("cd ~/projects && rm -rf everything", 3)
+        commands_in_report("cd ~/projects && kubectl apply -f everything.yaml", 3)
     );
     // `cd` một mình không chạy gì cả.
     assert!(commands_in_report("cd ~/projects/AI/hub", 3).is_empty());

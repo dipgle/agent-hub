@@ -1,5 +1,64 @@
 # active context — hub
 
+## 🎯 2026-08-19 (khuya) — dòng `rm` không có nút, vì cái chặn chỉ LÙI một tầng
+
+Hà, ảnh chụp `/shot` phiên `[AI/tfl5]`: *"Có lệnh nhưng lại không có nút chạy"*.
+Dòng ấy là dòng cuối cùng để đóng sổ một phiên:
+
+```
+rm ~/projects/AI/tfl5/ide/src/__tests__/deploy_domains_by_role.test.jsx
+```
+
+Không ▶️, không 🖥 — mà đường dẫn trong nó lại mọc một nút 📎 mời **tải về** đúng
+cái tệp dòng ấy bảo xoá. Hai triệu chứng, một gốc.
+
+**Gốc: cổng `destructive` gỡ 16/08, `KNOWN` thì không.** Hôm ấy Hà nói *"tôi ở
+tele là phải gọi lệnh thao tác như ngồi máy thì chặn khác gì chặt tay"*, và cái
+cổng chặn `rm`/`kill`/`git reset --hard` bị gỡ hẳn, có bia mộ đàng hoàng. Nhưng
+danh sách động từ mà bộ bóc lệnh hỏi **trước** cổng ấy chưa bao giờ có `rm`. Nên
+cái chặn không biến mất, nó chỉ lùi lên một tầng — và tầng này im lặng hơn tầng
+cũ: không tên, không log, chỉ một `continue`. Đúng hình dạng ca `.docx` tối qua:
+**gỡ một luật mà quên gỡ những thứ dựng lên để phục vụ nó.**
+
+**Vì sao bài kiểm không bắt được.** `tests/cmd_catch.rs` khoá đúng luật đã bãi bỏ
+(*"lệnh xoá KHÔNG được thành nút"*) và vẫn **xanh** — nó đo cái cổng đã chết, nên
+xanh vì sản phẩm chưa đổi, không phải vì sản phẩm đúng. Bài kiểm 16/08 về nút 📎
+thì **tự tay dựng `Cmd{line:"rm …"}`**, tức tự trả lời hộ đúng câu hỏi đang hỏng.
+Cả hai nay đo bằng thứ bộ bóc **thật sự trả ra**; bài cũ được **đảo chiều**,
+không xoá (cùng cách xử lý ba bài kiểm của luật 5 hôm 16/08).
+
+**Chọn động từ bằng phép đo, không kê theo trí nhớ:** quét toàn bộ `hub.log` từ
+14/08, lấy mọi đoạn trong nháy ngược qua được `looks_like_prose` rồi đếm động từ
+lạ — `cat` 3 · `cp` 3 · `ps` 2 · `rm` · `lsof` · `psql`. Thêm cả họ đụng
+tệp/tiến trình một lượt. `sudo` cố ý đứng ngoài: ▶️ chạy `zsh -lc` không có tty
+nên nó sẽ treo tới trần rồi chết câm.
+
+**Nghiệm thu:** fixture là NGUYÊN VĂN tin ấy lấy từ log (1927 byte,
+`tests/fixtures/shot-rm-line-2026-08-18.txt`); RED trước (`commands_in_report`
+trả `[]`, và 📎 mọc trên đúng tệp bị xoá) → GREEN sau. `458 test · clippy 0 ·
+fmt 0`, mã thoát đọc trực tiếp qua daemon hàng đợi. Cài lúc 00:06, `hubd` pid
+53299 `@2026-08-18T17:06:37Z` chữ ký `cert`.
+⚠ Còn thiếu đúng một bước: cú bấm `/shot` thật của Hà.
+
+### Còn nợ — câu hỏi cũ CHƯA trả lời được (đừng gộp vào bản vá trên)
+
+Tin 16:22:07Z (`message_id` 4725), khu *"Lệnh của phiên, không thấy trên màn"*
+có **bốn** dòng; trên điện thoại chỉ **ba** dòng có ▶️🖥, dòng `python3 -m dhup`
+trắng trơn. Hà đã hỏi (*"Sao lệnh cuối lại không có nút chạy?"*) và phiên hôm ấy
+chết vì `API Error 529` trước khi trả lời.
+
+Đã loại được ba giả thuyết bằng đo, nên đừng đo lại: **không phải bị cắt**
+(`chars: 1985`, trần là `TG_TEXT_MAX = 3500`), **không phải lệnh cụt**
+(`python3 -m dhup` xuất hiện đủ 3 lần nguyên văn trong nhật ký phiên), **không
+phải nhắc hai lần** (chuỗi `python3` không có trong phần ảnh màn của tin).
+Và log nói `text_links: 8` — tức hub **đã chèn đủ 4 cặp icon**, trong khi mắt
+chỉ thấy 3. Chỗ mất nằm **sau** lúc đếm.
+
+Phép đo kế tiếp, khi ca ấy tái diễn: ghi cặp *chỉ số lệnh → chỉ số dòng* mà
+`html_with_links` gán (nghi can là `used[i]` bị một dòng khác giành trước, hoặc
+lệch chỉ số giữa `cmds` và tập `missing` mà `session_layout` in ra). Dựng lại
+bằng bốn dòng lệnh **đoán** thì chỉ ra kết luận đoán — nên chưa dựng.
+
 ## 🎯 2026-08-18 (tối, #2) — bản in `.docx` không tải được, vì một hàng rào đã gỡ
 
 Hà: *"Có file docx nhưng không có nút tải"* — ảnh một tin `/shot` phiên onghut,

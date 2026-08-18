@@ -1,5 +1,58 @@
 # active context — hub
 
+## 🎯 2026-08-18 (trưa) — "sao cứ update lại mất vài thứ": hai phép đo bị chuyển chỗ đứng
+
+Một commit, **đã cài + push** — `199ec93`, `435 test · clippy 0 · fmt 0`, hubd
+`@2026-08-18T01:26:30Z` cert (log nay mang `screen_busy` + `counts_as_busy`).
+
+Câu hỏi của Hà là câu đúng, và câu trả lời đo được: **không có tính năng nào bị
+gỡ**. Cả hai lần "mất", thứ hỏng là một phép đo bị đẩy sang đứng ở chỗ khác.
+
+### 1. Nút ⏎/⌫ của ô nhập biến mất (`SessionData.box_text`)
+
+Log cùng một phút: tin `/shot` của `[hub]` ra `text_links=0`, tin của `[tfl5]`
+ra `text_links=2`. Khác đúng một chỗ — phiên `[hub]` có màn chỉ là đầu ra lệnh
+nên hub **nối thêm** khối *"🗣 Lời cuối nó nói"*, mà `prompt_line_text` đọc
+*"khối đóng khung CUỐI CÙNG"*. Nối xong thì khối cuối là văn xuôi của chính hub
+⟹ `None` ⟹ mất cả hai đích chạm, không một tiếng động.
+
+Luật *"phải đo TRƯỚC khi trộn"* đã ghi sẵn trong `session_layout` từ 16/08 —
+nhưng chỗ trộn THỨ HAI nằm ở nhánh `/shot`, nên luật không đi theo. Nay đo trên
+ảnh màn gốc rồi truyền xuống bằng `box_text` (field khai sẵn, chưa ai nối).
+Fixture của bài kiểm là **nguyên văn** tin hub gửi lúc 00:58:46Z.
+
+### 2. Icon "đang chạy" cho phiên đang dừng (`shell_verdict`)
+
+16/08 vá chiều ngược (*"có shell đang chạy mà báo đã dừng"*) bằng luật: có
+tiến trình shell con ⟹ đang chạy. Nhưng **lệnh chạy NỀN cũng là tiến trình ấy**
+và sống tiếp sau khi phiên đã trả lời xong. Nay bằng chứng shell chỉ bị lật khi
+MÀN nói ngược lại; mù thì giữ nguyên ⟹ cả hai bản vá đứng cùng lúc.
+
+⚠ **Đừng dùng `is_busy` cho câu hỏi này.** Nó tìm đồng hồ dạng `(3m 12s ·`, mà
+màn thật của phiên đang chạy có thể là `✻ Cogitated for 37m 51s · 2 shells still
+running` — không ngoặc. Lấy nó lật ngược là xoá luôn bản vá 16/08; bài kiểm bắt
+được TRƯỚC khi lên máy. Phép đo đúng là dòng chân: `keys::screen_running` hỏi
+`esc to interrupt`.
+
+### 3. `/anh` — nghiệm thu bản vá hôm qua trên trạng thái thật
+
+Máy đang khoá (`CGSSessionScreenIsLocked=Yes`): hub **từ chối gửi**, xoá tấm ảnh
+rỗng, và nói đúng câu của ca khoá màn (không đổ cho quyền).
+`tests/black_frame_live.rs` chạy thật, xanh.
+
+### 4. Đính chính của chính tôi
+
+`/clean` KHÔNG im lặng như tôi vừa nói với Hà: log cho thấy hub trả lời cả hai
+lần — 23:06 *"Chưa hiểu lệnh này"* (route chưa cài lúc ấy), 00:52 *"🧹 không có
+tin nào trong hàng chờ"* (tin `4248`).
+
+### 5. Còn treo
+
+- `/clean` chưa gặp ca CÓ hàng chờ trên tin thật (mới chạy qua `clear_queue`).
+- Câu xác nhận gộp `×N` chưa nghiệm thu bằng cú bấm của Hà.
+- Bản vá #2 chưa quan sát được ca LẬT trên máy (`counts_as_busy:false`) — cần
+  một phiên rảnh mà còn lệnh nền; log sẽ tự ghi khi gặp.
+
 ## 🎯 2026-08-18 (sáng) — ảnh đen có HAI nguyên nhân, và `/clean` dọn hàng chờ
 
 Một commit, **đã cài + push** — `6bc944f`, `424 test · clippy 0 · fmt 0`, hubd

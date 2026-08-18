@@ -976,7 +976,17 @@ pub fn send_exit(window: i64) -> Result<()> {
 /// nhập cũng bắt đầu bằng `❯` nhưng KHÔNG thụt lề — nhầm hai cái là đếm luôn cả
 /// ô nhập, tức một hàng chờ rỗng đọc ra "còn 1" và `/clean` quay mãi.
 pub fn queued_count(screen: &str) -> usize {
-    if !screen.contains("queued message") {
+    // 🔴 HỎI Ở ĐÁY MÀN, KHÔNG QUÉT CẢ MÀN. Dòng quảng cáo `Press up to edit
+    // queued messages` là thứ TUI vẽ TRONG khung ô nhập — nhưng chính chữ ấy
+    // cũng nằm rải rác trong phần hội thoại của một phiên đang BÀN về cơ chế
+    // hàng chờ (phiên `[hub]` nói về nó cả ngày, và đoạn văn ấy cuộn trên màn
+    // hàng giờ sau đó).
+    //
+    // Quét cả màn thì `/clean` đọc ra "có hàng chờ" ở một phiên chẳng có gì để
+    // dọn, rồi gửi `↑` — và `↑` khi hàng chờ rỗng KHÔNG phải là không làm gì:
+    // nó kéo câu CŨ trong lịch sử vào ô nhập, tức hub tự chèn chữ vào chỗ chủ
+    // máy đang gõ.
+    if !box_region(screen).contains("queued message") {
         return 0;
     }
     screen

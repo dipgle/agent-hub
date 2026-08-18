@@ -4850,7 +4850,31 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
                     .map(|href| (href, icon.to_string()))
             })
             .collect();
-        if links.len() == 2 && !box_text.trim().is_empty() {
+        // 🔴 NEO PHẢI CHỈ ĐÚNG MỘT CHỖ. Hà 2026-08-18, ảnh chụp một tin `/shot`:
+        // *"Sao lại chèn lệnh /clear vào ô chat"* — hai nút ⏎/⌫ dán vào GIỮA
+        // đoạn văn, ngay sau chữ `/clean` trong một câu tôi viết, chứ không nằm
+        // ở dòng ô nhập dưới đáy.
+        //
+        // Vì sao: ô nhập lúc ấy chứa đúng `/clean`, và neo là CHUỖI ấy —
+        // `html_with_links` duyệt từ dòng đầu nên nó bám vào chỗ khớp ĐẦU TIÊN.
+        // Chữ trong ô nhập càng ngắn thì càng dễ trùng với chữ đang bàn về nó,
+        // và phiên `[hub]` thì nói về lệnh của hub suốt.
+        //
+        // Khớp nhiều dòng ⟹ KHÔNG neo giữa chữ, để hai cái nút ở đáy tin (đường
+        // lùi vẫn còn nguyên). Thà nút đứng xa một chút còn hơn nút chỉ sai chỗ:
+        // ⌫ ở nhầm dòng mời người ta xoá một thứ không phải ô nhập.
+        let hits = shown
+            .lines()
+            .filter(|l| line_carries(l, box_text.trim()))
+            .count();
+        if hits > 1 {
+            logging::info(
+                "box_anchor_ambiguous",
+                json!({ "hits": hits, "chars": box_text.trim().chars().count(),
+                        "why": "chữ trong ô nhập trùng với chữ ở chỗ khác trên màn — giữ nút ở đáy" }),
+            );
+        }
+        if links.len() == 2 && !box_text.trim().is_empty() && hits == 1 {
             anchors.push((box_text.trim().to_string(), links));
             // …và bỏ cái nút ⏎/⌫ trơn ở đáy: hai đường cho cùng một việc, mà
             // cái ở đáy là cái không nói được nó thuộc về dòng nào.

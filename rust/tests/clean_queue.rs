@@ -44,3 +44,29 @@ fn the_prompt_line_is_not_a_queued_message() {
 fn an_empty_screen_has_no_queue() {
     assert_eq!(queued_count(""), 0);
 }
+
+/// 🔴 Chữ `queued message` nằm trong phần HỘI THOẠI không phải hàng chờ.
+///
+/// Hà 2026-08-18, ảnh chụp một tin `/shot` của phiên `[hub]`: *"Sao lại chèn
+/// lệnh /clear vào ô chat"*. Cùng lượt đo ra chuyện này: phiên `[hub]` bàn về
+/// cơ chế hàng chờ suốt cả ngày, nên câu `Press up to edit queued messages` nằm
+/// nguyên trong đoạn văn đã cuộn trên màn — và cổng cũ (`screen.contains`) đọc
+/// đó thành "đang có hàng chờ".
+///
+/// Hậu quả không dừng ở một con số sai: `/clean` sẽ gửi `↑`, mà `↑` khi hàng
+/// chờ RỖNG kéo câu cũ trong lịch sử vào ô nhập — hub tự chèn chữ vào chỗ chủ
+/// máy đang gõ.
+#[test]
+fn the_phrase_in_the_conversation_is_not_a_queue() {
+    let talking_about_it = "⏺ Tôi vừa giải thích: TUI in `Press up to edit queued messages`\n\
+                            \x20 khi có tin xếp hàng, và hub đọc dòng ấy.\n\
+                            ────────────────────────────────────────\n\
+                            ❯ /clean\n\
+                            ────────────────────────────────────────\n\
+                            \x20 ⏵⏵ auto mode on · 2 shells · ← 1 agent";
+    assert_eq!(
+        queued_count(talking_about_it),
+        0,
+        "chữ trong hội thoại bị đọc thành hàng chờ ⟹ /clean sẽ gõ ↑ vào một phiên không có gì để dọn"
+    );
+}

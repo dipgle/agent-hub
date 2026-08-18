@@ -1,5 +1,41 @@
 # active context — hub
 
+## 🎯 2026-08-18 (trưa muộn) — nút bám nhầm dòng, và một cổng hỏi cả màn
+
+Một commit, **đã cài + push** — `68ff0d8`, `442 test · clippy 0 · fmt 0`, hubd
+`@2026-08-18T03:57:59Z` cert.
+
+Hà, kèm ảnh một tin `/shot`: *"Sao lại chèn lệnh /clear vào ô chat"* — hai nút ⏎
+và `⌫ xoá ô nhập` dán vào GIỮA một câu tôi viết, ngay sau chữ `/clean`.
+
+**Cái KHÔNG xảy ra** (đo trước khi vá): hub không gõ `/clean` vào ô chat — log
+không có một `keys_typed` nào của route ấy.
+
+### 1. Neo mập mờ (`box_anchor_ambiguous`)
+
+Ô nhập chứa đúng `/clean`, neo là CHUỖI ấy, `html_with_links` duyệt từ dòng đầu
+⟹ bám chỗ khớp ĐẦU TIÊN. Chữ ô nhập càng ngắn càng dễ trùng với chữ đang bàn về
+nó — mà phiên `[hub]` nói về lệnh của hub cả ngày. Nay khớp nhiều dòng ⟹ **không
+neo giữa chữ**, hai nút giữ ở đáy tin, và ghi log.
+
+### 2. Cổng đếm hàng chờ hỏi cả màn — nguy hiểm hơn, chưa kịp nổ
+
+`queued_count` mở cổng bằng `screen.contains("queued message")`, mà câu *"Press
+up to edit queued messages"* nằm nguyên trong đoạn văn tôi viết VỀ cơ chế ấy và
+còn cuộn trên màn hàng giờ. `/clean` chạy đúng lúc đó ⟹ tưởng có hàng chờ ⟹ gửi
+`↑` ⟹ **`↑` khi hàng chờ rỗng kéo câu cũ trong lịch sử vào ô nhập**, tức hub tự
+chèn chữ vào chỗ chủ máy đang gõ. Nay cổng chỉ hỏi `box_region`.
+
+Mỗi bản vá kèm ca đối chứng: chữ ô nhập DUY NHẤT vẫn neo như thường; hàng chờ
+THẬT vẫn đếm đủ.
+
+### 3. Nghiệm thu trong ngày (bằng chứng từ Telegram, không phải suy luận)
+
+`/shot` phiên onghut ở bước Review ⟹ link ra **`k_08b1a8e8_1` / `k_08b1a8e8_2`**,
+đúng đường `k_`. Đọc bằng cách forward chính tin ấy về lại buồng chat rồi đọc
+`entities` (log của hub chỉ ghi SỐ LƯỢNG liên kết), xoá bản sao ngay sau đó.
+
+
 ## 🎯 2026-08-18 (chiều) — màn onghut làm chuẩn: bước Review không phải một câu
 
 Một commit, **đã cài + push** — `5a74b24`, `439 test · clippy 0 · fmt 0`, hubd

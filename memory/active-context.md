@@ -1,5 +1,33 @@
 # active context — hub
 
+## 🚨 2026-08-18 (chiều) — cổng chất lượng trỏ vào chỗ TRỐNG suốt nhiều ngày
+
+Hà hỏi *"Xong hết chưa"*. Đi chạy cổng như `CLAUDE.md` bắt buộc thì:
+`bash ~/.claude/skills/quality-gate/audit.sh` → **exit 127, No such file**, và
+`~/.claude/hooks/` cũng rỗng. Tức luật ALWAYS-ON ấy **không có chỗ thi hành**, và
+mọi câu "đã qua gate" trước đó chỉ là lời nói.
+
+Hà chốt ngay: *"Mọi file ngoài projects đều ko hợp lệ"*.
+
+**Đã dựng lại trong workspace:** `~/projects/scripts/quality-gate.sh` — git sạch +
+đã push · fmt/clippy/test đọc **mã thoát trực tiếp** · quét diff tìm bí mật lọt ·
+hardcode giả · lỗi bị nuốt. `CLAUDE.md` đã trỏ sang đó kèm ghi lại sự cố.
+
+**Hai lỗi của chính cổng, cả hai lòi ra vì RED-verify chứ không vì đọc lại mã:**
+1. phần cargo chạy trong `( cd … )` ⟹ subshell mang `RED` đi theo khi thoát: cổng
+   in ❌ mà vẫn `exit 0`. Vá bằng `--manifest-path`.
+2. quét bí mật **mù với tệp untracked** — `git diff` không thấy tệp mới, nên một
+   tệp có nguyên chữ `password = "hunter2"` vẫn được chấm "không thấy". Mù đúng
+   chỗ nguy hiểm nhất. Nay đọc thêm `git ls-files --others`.
+
+**RED-verify (repo tạm):** ❌ cây bẩn · ❌ bí mật lọt · ❌ lỗi bị nuốt, `exit 1`.
+**Trên hub:** mọi mục cơ học ✅, `exit 0` (`442 test`).
+
+⚠ **`~/projects` KHÔNG phải git repo** (`fatal: not a git repository`) — nên
+`CLAUDE.md` và `scripts/` ở gốc **không được version**. Ghi chú cũ trong bộ nhớ
+nói ngược lại; đừng tưởng đã commit chúng.
+
+
 ## 🎯 2026-08-18 (trưa muộn) — nút bám nhầm dòng, và một cổng hỏi cả màn
 
 Một commit, **đã cài + push** — `68ff0d8`, `442 test · clippy 0 · fmt 0`, hubd

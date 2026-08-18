@@ -1,0 +1,38 @@
+📷 Màn của 🟥 [onghut]:
+
+chứ không phải lý do kỹ thuật: với 3 dòng sản phẩm và doanh thu chính từ đại lý thì mấy thứ đó tốn hơn giá trị mang
+  lại. Nói trước như vậy để lãnh đạo không hỏi ngược "sao không làm luôn cho đủ".
+  Câu về SEO tên miền cũ tôi để dạng cảnh báo riêng, vì đó là thứ duy nhất trong phương án không mua lại được bằng tiền
+  hay công sức — mỗi ngày chậm là mất thêm. 
+  Một lưu ý kỹ thuật đã xử lý
+  Pandoc một mình không đặt được font — phải dựng file mẫu bằng python-docx rồi trỏ pandoc vào. Điểm dễ sập: phải set
+  cả bốn slot font ascii/hAnsi/eastAsia/cs; thiếu eastAsia là Word âm thầm rơi về Calibri cho phần lớn chữ tiếng Việt
+  có dấu, mà lỗi chỉ lộ khi người ta mở file. Tôi đã đọc ngược file sau khi tạo để kiểm: 18 tiêu đề, 5 bảng, Normal =
+  Times New Roman 14pt, dấu tiếng Việt nguyên vẹn.
+  Dựng lại bất cứ lúc nào sau khi sửa bản .md: python3 tools/make-docx.py. 
+  Nếu Hà cần bản trình chiếu (slide) thay vì văn bản, hoặc cần rút còn 1 trang A4 để gửi trước qua Zalo, tôi làm tiếp
+  được.
+✻ Worked for 5m 11s
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Rút gọn còn 1 trang A4 để gửi Zalo trước
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+
+🗣 Màn đang là đầu ra của một lệnh, không có lời nào của phiên. Lời cuối nó nói (lấy từ nhật ký):
+[onghut] Xong bản trình.
+
+**`docs/phuong-an-trinh.md`** — bản đọc, và **`docs/phuong-an-trinh.docx`** — bản in, Times New Roman 14, A4, lề gáy 3cm theo chuẩn văn bản hành chính.
+
+Mở xem ngay:
+
+```
+open ~/projects/onghut/docs/phuong-an-trinh.docx
+```
+
+## Bố cục
+
+Chín mục, viết bằng ngôn ngữ nghiệp vụ — bỏ hết thuật ngữ kỹ thuật nhưng giữ nguyên số liệu:
+
+**I. Tóm tắt** — ba nhóm việc cần quyết, gói trong một bảng.
+
+**II. Website cũ hỏng ở đâu** — bốn trang menu chính chỉ có 78–183 ký tự ("chưa bằng một tin nhắn"), Google không đọc được, 20 màn quản trị lộ ra internet, một bài đăng trùng hai nơi…

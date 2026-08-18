@@ -2128,14 +2128,14 @@ fn dedupe_same_script(out: &mut Vec<String>) {
 /// file không đuôi — trong khi câu hỏi thật chỉ có một: *cổng quét rò đọc được
 /// nội dung này không?*
 ///
-/// Câu ấy chỉ trả lời được khi MỞ FILE RA, nên nó được trả lời đúng chỗ:
-/// `Inbox::send_document` đọc bằng `read_to_string`, và file nhị phân tự rơi ở
-/// đó (không phải UTF-8). Danh sách dưới đây chỉ còn làm một việc rẻ tiền: đừng
-/// dựng cái nút mà ai cũng biết trước là bấm vào sẽ hỏng.
+/// 🪦 Câu trả lời cũ: *"`send_document` đọc bằng `read_to_string`, file nhị phân
+/// tự rơi ở đó"*. Hết đúng từ 2026-08-18 — cửa ấy dựng để phục vụ luật 5 bản
+/// CŨ (*"thứ gì rời khỏi máy phải soi được"*), mà luật ấy đã đổi từ 16/08: quét
+/// thì GHI, không chặn. Nên nó chỉ còn chặn được đúng bản in của chủ máy.
 ///
-/// Luật gốc không đổi (luật 5): thứ gì rời khỏi máy này phải soi được. Một ảnh
-/// chụp màn hình mang nguyên mật khẩu mà mọi phép quét chuỗi đều nói "sạch".
-/// Đuôi tệp VĂN BẢN đủ quen để một đường TƯƠNG ĐỐI trên màn được coi là tệp.
+/// Danh sách dưới đây vì thế đổi vai: nó không còn nói "đọc được thành chữ",
+/// nó nói **đuôi nào đủ quen để một đường TƯƠNG ĐỐI trên màn được coi là tệp** —
+/// gồm cả `.docx`/`.pdf`. Câu "có thật không" vẫn để ĐĨA trả lời.
 ///
 /// Danh sách trắng, cố ý hẹp: đường tương đối không có `/` đầu để phân biệt với
 /// câu văn, nên thứ duy nhất còn phân biệt được là cái đuôi. Rộng tay ở đây thì
@@ -2179,13 +2179,34 @@ pub const TEXT_FILE_EXT: &[&str] = &[
     "env",
     "gitignore",
     "service",
+    // 🔴 BẢN IN — thêm 2026-08-18. Hà: *"Có file docx nhưng không có nút tải"*.
+    // Danh sách này sinh ra hồi hub chỉ gửi được tệp chữ, nên nó vô tình đúng
+    // bằng "những gì đọc thành UTF-8 được". Cửa ấy đã bỏ (`telegram::document_body`),
+    // và thứ rơi ra ngoài chính là **bản in** — `.docx` đúng chuẩn văn bản hành
+    // chính, `.xlsx` bảng số, `.pdf` bản gửi đi. Tức mỗi phiên làm xong việc thì
+    // hub gửi được bản nháp mà không gửi được bản thành phẩm.
+    "docx",
+    "xlsx",
+    "pptx",
+    "doc",
+    "xls",
+    "odt",
+    "ods",
+    "pdf",
 ];
 
-pub const UNSENDABLE_EXT: &[&str] = &[
-    "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "ico", "tiff", "pdf", "zip", "gz", "tgz",
-    "bz2", "xz", "7z", "rar", "dmg", "pkg", "app", "sqlite", "db", "bin", "exe", "dylib", "so",
-    "o", "a", "rlib", "wasm", "mp3", "mp4", "mov", "wav", "m4a", "avi", "webm", "ttf", "otf",
-    "woff", "woff2",
+/// Đuôi KHÔNG dựng nút — không phải "không gửi được".
+///
+/// 🔴 Tên cũ (`UNSENDABLE_EXT`) nói sai từ 2026-08-18: `send_document` nay gửi
+/// được byte thô, nên ảnh và kho nén cũng tới nơi nếu có ai bấm. Cái danh sách
+/// này chỉ còn một việc: **đừng tự mọc nút** cho thứ không ai đọc trên điện
+/// thoại, và đừng biến mọi đường dẫn ảnh trong một báo cáo thành một hàng nút.
+/// Ảnh màn hình đã có đường riêng (`/anh`, `send_photo`).
+pub const NO_BUTTON_EXT: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "ico", "tiff", "zip", "gz", "tgz", "bz2",
+    "xz", "7z", "rar", "dmg", "pkg", "app", "sqlite", "db", "bin", "exe", "dylib", "so", "o", "a",
+    "rlib", "wasm", "mp3", "mp4", "mov", "wav", "m4a", "avi", "webm", "ttf", "otf", "woff",
+    "woff2",
 ];
 
 /// Những ĐƯỜNG DẪN FILE hiện trên màn — thứ bấm một cái là nhận được file.
@@ -2215,8 +2236,12 @@ pub const UNSENDABLE_EXT: &[&str] = &[
 /// Đổi lại, đuôi phải nằm trong danh sách trắng: một câu văn đầy dấu chấm và
 /// dấu gạch chéo (`12/08`, `v.v.`) thì không được thành một cái nút.
 ///
-/// Phần "có đọc được không" KHÔNG hỏi ở đây: hàm này thuần, không chạm đĩa. Nó
-/// được hỏi đúng một lần, đúng lúc gửi — xem `UNSENDABLE_EXT`.
+/// Phần "có THẬT không" KHÔNG hỏi ở đây: hàm này thuần, không chạm đĩa. Nó được
+/// hỏi đúng một lần, ở `pipeline::sendable_file`.
+///
+/// 🪦 Và câu *"có đọc được thành chữ không"* thì thôi hỏi hẳn (2026-08-18): nó
+/// từng là cửa thật ở `send_document`, dựng cho một hàng rào đã gỡ từ 16/08.
+/// Bản in `.docx`/`.pdf` nay gửi được — xem `telegram::document_body`.
 pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for raw in text.lines() {
@@ -2250,7 +2275,7 @@ pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
                 continue;
             };
             let ext = last.rsplit('.').next().unwrap_or_default().to_lowercase();
-            if UNSENDABLE_EXT.contains(&ext.as_str()) {
+            if NO_BUTTON_EXT.contains(&ext.as_str()) {
                 continue;
             }
             // Đường TƯƠNG ĐỐI (kể cả TÊN TỆP TRẦN) chỉ cần mang đuôi văn bản

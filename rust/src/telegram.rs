@@ -132,6 +132,80 @@ pub enum AckPlan {
 /// Chỉ gộp khi CÂU GIỐNG HỆT: `✓ đã gửi · 🟩 [tfl5]` hai lần liền là cùng một
 /// việc lặp lại, gộp được thành `×2`. Câu khác đi (dự án khác, "vào hàng chờ"
 /// thay vì "đã gửi") mang thông tin khác, và ghi đè nó là xoá mất thứ vừa nói.
+/// Đọc một tệp để gửi đi — trả **byte thô** kèm kiểu MIME của nó.
+///
+/// 🔴 Hà 2026-08-18: *"Có file docx nhưng không có nút tải"*. Bản trước đọc bằng
+/// `read_to_string`, nên `.docx` (một kho ZIP), `.pdf`, `.xlsx` đều rụng ngay
+/// tại lượt đọc — tức đúng những **bản in** chủ máy làm ra để cầm đi họp.
+///
+/// Lý do của cửa ấy là luật 5 bản CŨ: *"thứ gì rời khỏi máy này phải soi được"*.
+/// Nhưng cổng quét rò đã **thôi chặn từ 2026-08-16** — nó chỉ ghi log rồi đi
+/// tiếp. Một cửa dựng để phục vụ hàng rào đã gỡ thì không bảo vệ ai; nó chỉ
+/// chặn đúng cái tệp người ta vừa chỉ tay vào, và không có đường nào khác để
+/// lấy về điện thoại.
+///
+/// Nên phép soi vẫn chạy, chỉ đổi chỗ đứng: đọc được thành chữ thì soi và ghi
+/// dấu hiệu; không đọc được thì **ghi đúng câu đó** (`telegram_document_unscanned`)
+/// rồi vẫn gửi. Im lặng ở nhánh nhị phân mới là thứ phải tránh — lúc ấy không ai
+/// trả lời được câu *"tệp nào đã rời máy mà chưa soi"*.
+///
+/// Ba cửa THẬT không đổi và không nằm ở đây: phải trong cây làm việc, phải là
+/// một tệp, và trần 5 MB — xem [`Inbox::send_document`].
+pub fn document_body(path: &std::path::Path) -> Result<(Vec<u8>, String), String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("không đọc được: {e}"))?;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    let is_text = match std::str::from_utf8(&bytes) {
+        Ok(text) => {
+            let risk = crate::redaction::file_risk(text);
+            if !risk.is_empty() {
+                logging::warn(
+                    "telegram_document_risky_but_sent",
+                    json!({ "path": path.display().to_string(), "risk": risk,
+                            "why": "chủ máy tự bấm gửi vào buồng chat riêng của mình (Hà 2026-08-16)" }),
+                );
+            }
+            true
+        }
+        Err(_) => {
+            logging::info(
+                "telegram_document_unscanned",
+                json!({ "path": path.display().to_string(), "ext": ext, "bytes": bytes.len(),
+                        "why": "tệp nhị phân — cổng quét rò không đọc được; GHI LẠI rồi vẫn gửi (luật 5 bản 16/08)" }),
+            );
+            false
+        }
+    };
+    Ok((bytes, document_mime(&ext, is_text).to_string()))
+}
+
+/// Kiểu MIME theo đuôi tệp — đủ để Telegram/điện thoại mở đúng ứng dụng.
+///
+/// Danh sách cố ý ngắn: chỉ những thứ một phiên thật sự làm ra. Đuôi lạ thì hỏi
+/// NỘI DUNG (`is_text`), đừng đoán theo tên — gán `text/plain` cho một tệp nhị
+/// phân là dạy điện thoại mở nó bằng trình đọc chữ.
+fn document_mime(ext: &str, is_text: bool) -> &'static str {
+    match ext {
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "doc" => "application/msword",
+        "xls" => "application/vnd.ms-excel",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "html" | "htm" => "text/html; charset=utf-8",
+        "csv" => "text/csv; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        _ if is_text => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
 pub fn fold_ack(prev: Option<&AckLive>, text: &str) -> AckPlan {
     let Some(p) = prev else { return AckPlan::New };
     if p.text != text {
@@ -1219,10 +1293,12 @@ impl Inbox {
     /// * **Phải nằm trong cây làm việc** — đường dẫn tới từ chữ trên màn, mà
     ///   chữ trên màn thì ai viết cũng được. `/etc/passwd` là một đường dẫn hợp
     ///   lệ về mặt hình dạng.
-    /// * **Phải qua `preview_risk`** (luật 5): thứ gì rời khỏi máy này đều bị
-    ///   soi, y như phần xem trước của phiên. Đây cũng là lý do chỉ gửi file
-    ///   CHỮ — cổng soi không đọc được file nhị phân, mà gửi cái không soi được
-    ///   thì cái cổng chỉ còn là hình thức.
+    /// * ~~**Phải qua `preview_risk`**~~ — 🪦 gỡ 2026-08-18, cùng lý do đã gỡ
+    ///   chính cái cổng ấy hai ngày trước: nó KHÔNG chặn nữa, chỉ ghi log. Câu
+    ///   *"chỉ gửi file CHỮ vì cổng soi không đọc được file nhị phân"* vì thế
+    ///   thành cái vỏ của một hàng rào không còn ai gác — nó không bảo vệ gì,
+    ///   chỉ chặn đúng tệp chủ máy vừa chỉ tay vào (Hà: *"Có file docx nhưng
+    ///   không có nút tải"*). Nay đọc BYTE và gửi, xem [`document_body`].
     /// * **Trần dung lượng**: Telegram chặn ở 50 MB, nhưng hub chặn sớm hơn
     ///   nhiều — một file 5 MB đọc trên điện thoại là chuyện không xảy ra.
     pub fn send_document(
@@ -1268,14 +1344,8 @@ impl Inbox {
                 MAX_BYTES / 1_048_576
             ));
         }
-        // Cổng THẬT nằm ở đây, và nó là một câu hỏi về NỘI DUNG chứ không phải
-        // về cái tên: `read_to_string` hỏng nghĩa là file không phải UTF-8,
-        // tức cổng quét rò không đọc nổi nó — mà thứ không soi được thì không
-        // rời khỏi máy này (luật 5). Danh sách đuôi chỉ để khỏi dựng cái nút
-        // chắc chắn hỏng; nó không phải hàng rào.
-        let body = std::fs::read_to_string(&real).map_err(|_| {
-            "không phải file chữ (cổng quét rò không đọc được) nên hub không gửi".to_string()
-        })?;
+        // Đọc BYTE, không đọc chữ — xem [`document_body`].
+        let (body, mime) = document_body(&real)?;
         // 🔴 CỔNG NÀY THÔI CHẶN — nó BÁO. Hà 2026-08-16, ảnh chụp đúng lúc bấm
         // nút 📎: *"cái gì giữ lại vậy, hub là tôi yêu cầu bạn viết để tôi gửi
         // các lệnh và thực hiện mà?"*. Tệp bị giữ là
@@ -1298,14 +1368,9 @@ impl Inbox {
         // Một cảnh báo đọc được thì có ích; một hàng rào chặn tay chủ máy thì
         // không. (`sessions.rs` dùng `file_risk` cho việc KHÁC — chấm một dòng
         // lệnh trước khi chạy — và chỗ ấy không đổi.)
-        let risk = crate::redaction::file_risk(&body);
-        if !risk.is_empty() {
-            logging::warn(
-                "telegram_document_risky_but_sent",
-                json!({ "path": real.display().to_string(), "risk": risk,
-                        "why": "chủ máy tự bấm gửi vào buồng chat riêng của mình (Hà 2026-08-16)" }),
-            );
-        }
+        // …và phép quét ấy nay nằm trong [`document_body`], cùng chỗ với lượt
+        // đọc byte: soi được thì GHI dấu hiệu, không soi được (tệp nhị phân)
+        // thì ghi ĐÚNG câu đó rồi vẫn gửi.
         // 🪦 Dòng `⚠ trong tệp có dấu hiệu bí mật (…)` dán vào chú thích tệp —
         // gỡ 2026-08-17, Hà đọc nó ngay dưới một tệp anh vừa tự bấm gửi: *"Sao
         // vẫn bị báo như thế này"*.
@@ -1328,9 +1393,9 @@ impl Inbox {
             .to_string();
         let client = self.client().ok_or("không dựng được HTTP client")?;
         self.forget_ack_live();
-        let part = reqwest::blocking::multipart::Part::bytes(body.into_bytes())
+        let part = reqwest::blocking::multipart::Part::bytes(body)
             .file_name(name.clone())
-            .mime_str("text/plain; charset=utf-8")
+            .mime_str(&mime)
             .map_err(|e| e.to_string())?;
         let form = reqwest::blocking::multipart::Form::new()
             .text("chat_id", self.chat_id.clone())

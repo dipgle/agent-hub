@@ -1,5 +1,33 @@
 # active context — hub
 
+## 🎯 2026-08-18 (tối, #2) — bản in `.docx` không tải được, vì một hàng rào đã gỡ
+
+Hà: *"Có file docx nhưng không có nút tải"* — ảnh một tin `/shot` phiên onghut,
+hai tệp nằm CẠNH NHAU trong cùng một câu: `docs/phuong-an-trinh.md` mọc nút,
+`docs/phuong-an-trinh.docx` thì không. Mà **bản in mới là thứ cầm đi họp**.
+
+**Hai cửa chặn, cùng một lý do đã bãi bỏ:**
+1. `keys::TEXT_FILE_EXT` — đường tương đối phải mang đuôi "văn bản đã biết";
+   `docx`/`xlsx`/`pdf` không có trong đó.
+2. `telegram::send_document` đọc tệp bằng `read_to_string` ⟹ mọi thứ không phải
+   UTF-8 rụng ngay tại lượt đọc.
+
+Lý do của cả hai là **luật 5 bản CŨ** (*"thứ gì rời khỏi máy phải soi được"*).
+Luật ấy đã đổi **16/08** — quét thì GHI, không chặn. Nên hai cửa này là cái vỏ
+của một hàng rào không còn ai gác: không bảo vệ ai, chỉ chặn đúng tệp chủ máy
+vừa chỉ tay vào. Đây là dạng nợ đáng nhớ: **gỡ một luật mà quên gỡ những thứ
+dựng lên để phục vụ nó.**
+
+**Vá:** `telegram::document_body` đọc BYTE + gán MIME theo đuôi (docx/xlsx/pptx/
+pdf/odt…); soi được thì ghi dấu hiệu, không soi được thì ghi
+`telegram_document_unscanned` rồi vẫn gửi — im lặng ở nhánh nhị phân mới là thứ
+phải tránh. Đuôi lạ thì hỏi NỘI DUNG chứ không đoán theo tên (gán `text/plain`
+cho tệp nhị phân là dạy điện thoại mở sai trình đọc). `UNSENDABLE_EXT` đổi tên
+thành `NO_BUTTON_EXT` — nó không còn nói "không gửi được", chỉ còn nói "đừng tự
+mọc nút" (ảnh đã có `/anh`).
+
+Ba cửa THẬT không đổi: trong cây làm việc · phải là một tệp · trần 5 MB.
+
 ## 🎯 2026-08-18 (tối) — tệp mất nút tải vì nó được nhắc HAI lần
 
 Hà, ảnh chụp một tin `/shot` của phiên dwork: *"Nội dung này có file html nhưng

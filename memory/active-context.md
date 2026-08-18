@@ -1,5 +1,34 @@
 # active context — hub
 
+## 🎯 2026-08-18 (chiều) — màn onghut làm chuẩn: bước Review không phải một câu
+
+Một commit, **đã cài + push** — `5a74b24`, `439 test · clippy 0 · fmt 0`, hubd
+`@2026-08-18T02:18:36Z` cert.
+
+Hà: *"Màn phiên onghut đang chờ chọn với nhiều tab, lấy đó làm chuẩn để test
+trường hợp nhiều option"*. Lấy nguyên văn màn ấy làm fixture
+(`tests/fixtures/chooser-review-2026-08-18.txt`) thì lòi ra lỗi thứ BA cùng họ
+trong một ngày.
+
+**Lỗi:** ở bước cuối (`←  ☒ App onghut  ☒ Dung lượng  ✔ Submit  →`, còn mỗi
+`1. Submit answers · 2. Cancel`), hub dựng nút bằng mã `pick_<sid>_1_<n>` — đường
+gửi *mũi tên rồi số* để đi tới câu 1. Nhưng màn ấy không còn câu nào để đi tới.
+
+**Gốc:** `table` hỏi NHẬT KÝ (*"bảng có nhiều câu không"*) rồi dùng câu trả lời
+ấy cho chuyện khác (*"màn đang đứng ở đâu"*) — y hệt `is_busy` bị hỏi hộ câu
+"phiên có đang chạy không" sáng nay. `pipeline::multi_question_screen` nay hỏi
+mỗi bên một câu, nối ở CẢ HAI chỗ quyết định (`/shot` và sau khi bấm phím).
+
+**Ba thứ cùng màn ấy đang đúng, nay có bài kiểm giữ:** hộp Submit đọc đủ 2 mục ·
+thanh tab ra `[☒,☒]` với `left()==0` · `❯ 1. Submit answers` KHÔNG bị đọc thành ô
+nhập — ca này đặc biệt vì màn **không có dòng chân** `Enter to select`, nên cổng
+an toàn thứ nhất mù và cổng thứ hai phải đỡ; đọc nhầm là hub dựng nút ⏎ và một
+cú bấm sẽ CHỐT Submit hộ chủ máy.
+
+**Dọn:** hai vỏ cửa sổ nháp (`3072`, `3075`) nay đã đóng hẳn — tiến trình trong
+đó kết thúc (`[Process completed]`) thì `close` ăn ngay, khớp phép đo 17/08 rằng
+chỉ cửa sổ CÒN tiến trình mới từ chối đóng.
+
 ## 🎯 2026-08-18 (trưa) — "sao cứ update lại mất vài thứ": hai phép đo bị chuyển chỗ đứng
 
 Một commit, **đã cài + push** — `199ec93`, `435 test · clippy 0 · fmt 0`, hubd

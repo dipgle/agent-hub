@@ -1,0 +1,17 @@
+quyền, cấp cho hubd · không đo được → đây là hai khả năng, kiểm theo thứ tự. Bài kiểm khoá cả điều không được nói: ca khoá màn không được đổ cho quyền.
+  2. /clean — xoá hàng chờ của phiên (theo đúng cái anh chọn). Nó đi bằng đường TUI tự quảng cáo ("Press up to edit queued messages") và không tin cú bấm: mỗi vòng đọc lại màn,
+  đếm, hàng chờ không giảm thì dừng và nói còn bao nhiêu. Chạy thật trên cửa sổ nháp: 2 tin trong hàng chờ của một phiên đang bận → removed=2 left=0, màn xác nhận trống. Lượt
+  đang chạy không bị cắt (muốn cắt là /key esc).
+  424 test · clippy 0 · fmt 0 · exit 0; daemon đang chạy bản mới (hubd@00:10:50Z), menu lệnh Telegram nhảy 13 → 14 — chính là /clean vừa được khai.
+  Về phiên thứ 4 anh thấy: đó là tôi, và tôi để lại rác thật — bài kiểm live của tôi đặt assert trước bước dọn nên một lượt đỏ bỏ lại ba cửa sổ. Đã sửa (dọn trước, phán sau) và
+  đã dọn sạch: giờ đúng 4 cửa sổ hiện = 3 phiên của anh + phiên này. Hai vỏ cửa sổ rỗng không chịu close (đúng bệnh hôm qua, claude đã thoát mà cửa sổ vẫn còn) tôi đã ẩn — ⌘W khi
+  anh ngồi máy.
+  Cần anh một cú bấm để nghiệm thu: gõ /clean khi có phiên đang bận mà anh vừa gõ chữ vào; và bấm một phím trong bảng chọn để xác nhận câu xác nhận nay gộp thành ×2, ×3 thay vì
+  đẻ dòng mới.
+✻ Cogitated for 37m 51s · 2 shells still running
+※ recap: Đang làm hub: đã sửa lỗi ảnh đen (hub nay tự phân biệt màn khoá vs thiếu quyền) và thêm route /clean xoá hàng chờ của phiên, đã cài và push. Việc kế: anh bấm /clean thử 
+  trên Telegram để nghiệm thu. (disable recaps in /config)                  
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Đã bấm /clean rồi, không thấy phản hồi gì
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on · 2 shells · ← 1 agent · ↓ to manage

@@ -1481,6 +1481,30 @@ pub const IDLE_AFTER_SEC: i64 = 180;
 /// "đang chạy" trên một phiên đã đứng lại.
 pub const WRITING_NOW_SEC: i64 = 15;
 
+/// Một shell con có nghĩa là "phiên đang chạy" không — hàm THUẦN, ba ngả.
+///
+/// 🔴 Hai lỗi ngược chiều nhau, cách nhau đúng hai ngày, và đây là chỗ chúng
+/// gặp nhau:
+///
+/// - 16/08, Hà: *"Rõ ràng dưới cùng có shell đang chạy, nhưng ở danh sách phiên
+///   lại báo đã dừng"* — nhật ký đứng im suốt lượt chạy 12 phút, nên suy từ nhật
+///   ký thì phiên càng bận càng trông càng rảnh. Bản vá: có shell con ⟹ đang
+///   chạy.
+/// - 18/08, Hà: *"lệnh session hiện danh sách phiên với icon biểu thị đang chạy
+///   nhưng thực ra phiên đang dừng"* — vì một lệnh chạy NỀN cũng là đúng cái
+///   tiến trình shell ấy, và nó sống tiếp sau khi phiên đã trả lời xong.
+///
+/// Nên bằng chứng shell chỉ bị lật khi có một phép đo KHÁC nói ngược lại: màn
+/// hình. `None` = không đọc được màn ⟹ giữ nguyên bằng chứng cũ, vì mù không
+/// phải là lý do để kết luận ngược (cùng luật với `keys::look` trả `Blind`).
+pub fn shell_verdict(shell: bool, screen_busy: Option<bool>) -> bool {
+    match (shell, screen_busy) {
+        (false, _) => false,
+        (true, Some(false)) => false,
+        (true, _) => true,
+    }
+}
+
 /// Phiên có đang làm việc không — ba nguồn, không nguồn nào cần đọc màn.
 ///
 /// Thứ tự có ý nghĩa:
@@ -3254,15 +3278,42 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // Một lệnh shell ĐANG CHẠY là bằng chứng trực tiếp, và nó
                     // đứng TRƯỚC mọi phép suy từ nhật ký — xem `running_shell`.
                     let shell = procs.running_shell(row.pid);
+                    // 🔴 …NHƯNG MỘT SHELL CON KHÔNG PHẢI LÚC NÀO CŨNG LÀ LƯỢT
+                    // ĐANG CHẠY. Hà 2026-08-18: *"lệnh session hiện danh sách
+                    // phiên với icon biểu thị đang chạy nhưng thực ra phiên đang
+                    // dừng"*. Một lệnh chạy NỀN (`run_in_background`) cũng là
+                    // đúng cái tiến trình `zsh -c source …/shell-snapshots/…`
+                    // ấy, và nó sống hàng phút SAU khi phiên đã trả lời xong và
+                    // đang đứng chờ người gõ tiếp.
+                    //
+                    // Màn phân biệt được hai ca ấy, và chữ đã nằm sẵn trong
+                    // `tabs` nên hỏi nó không tốn thêm lượt `osascript` nào:
+                    // lượt đang chạy có đồng hồ (`(2m 5s · esc to interrupt)`),
+                    // còn phiên rảnh mang lệnh nền chỉ ghi `· 2 shells` ở dòng
+                    // trạng thái. Không đọc được màn thì GIỮ bằng chứng cũ —
+                    // mù không phải là lý do để lật ngược một phép đo đã có.
+                    let screen_busy = if shell && !row.tty.is_empty() {
+                        crate::keys::alive_tab(&tabs, &row.tty)
+                            .and_then(|t| t.screen.as_deref())
+                            .and_then(crate::keys::screen_running)
+                    } else {
+                        None
+                    };
+                    let shell_busy = shell_verdict(shell, screen_busy);
                     if shell {
                         logging::info(
                             "session_busy_by_shell",
                             json!({ "session": row.session_id, "pid": row.pid,
-                                    "why": "có tiến trình con shell-snapshot ⟹ đang chạy một lệnh, dù nhật ký đứng im" }),
+                                    "screen_busy": screen_busy, "counts_as_busy": shell_busy,
+                                    "why": if shell_busy {
+                                        "có tiến trình con shell-snapshot ⟹ đang chạy một lệnh, dù nhật ký đứng im"
+                                    } else {
+                                        "có shell con nhưng MÀN nói phiên đang chờ ⟹ lệnh chạy NỀN, không phải lượt đang chạy"
+                                    } }),
                         );
                     }
                     row.working = row.host != "dead"
-                        && (shell
+                        && (shell_busy
                             || is_working(
                                 row.status.as_deref(),
                                 row.pending_subagents,

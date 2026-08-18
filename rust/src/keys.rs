@@ -2965,6 +2965,28 @@ pub fn activity(screen: &str) -> Option<Activity> {
     None
 }
 
+/// Phiên có đang chạy một lượt không — hỏi DÒNG CHÂN, thứ TUI luôn vẽ.
+///
+/// `None` = không tìm thấy dòng chân ⟹ không đo được, và chỗ gọi phải xử lý
+/// đúng như thế chứ không được đọc thành "rảnh".
+///
+/// 🔴 Vì sao không dùng [`is_busy`] cho câu hỏi này: `is_busy` tìm một đồng hồ
+/// dạng `(3m 12s ·`, mà TUI có ÍT NHẤT hai kiểu dòng đang-chạy, và kiểu thứ hai
+/// không có ngoặc — `✻ Cogitated for 37m 51s · 2 shells still running` (nguyên
+/// văn, từ ảnh màn hub gửi đi 18/08). Đọc bằng `is_busy` thì phiên ấy ra "rảnh",
+/// và nếu lấy đó làm cớ để lật ngược bằng chứng shell thì bản vá 16/08 chết —
+/// bài kiểm `shell_is_not_busy` bắt đúng ca ấy trước khi nó kịp lên máy.
+///
+/// Dòng chân thì nói thẳng và không đổi theo lượt: đang chạy thì nó mang
+/// `esc to interrupt`, đang chờ thì không. Đo trên ĐÚNG dòng ấy chứ không quét
+/// cả màn: chữ `esc to interrupt` còn nằm rải rác trong phần hội thoại đã cuộn.
+pub fn screen_running(screen: &str) -> Option<bool> {
+    let footer = screen.lines().rev().find(|l| {
+        l.contains("⏵⏵") || l.contains("auto mode") || l.contains("bypass permissions")
+    })?;
+    Some(footer.contains("esc to interrupt"))
+}
+
 pub fn is_busy(screen: &str) -> bool {
     screen.lines().any(|l| {
         let b = l.as_bytes();

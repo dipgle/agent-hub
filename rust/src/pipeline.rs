@@ -4635,7 +4635,15 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     // khu THỨ NHẤT, và phải đo TRƯỚC khi trộn — bản 08:01 đi tìm lại dấu nhắc
     // sau khi đã trộn, nên nó bám vào dòng chữ hub tự viết. Không cần quét
     // ngược: chỗ này biết ranh giới, vì chính nó vẽ ra ranh giới ấy.
-    let box_anchor = prompt_line_text(&crate::telegram::strip_markdown(text));
+    // Chỗ gọi ĐO ĐƯỢC ô nhập trên ảnh màn gốc thì lời nó nói thắng: tới đây
+    // `text` có thể đã mang thêm khu chữ do hub nối (*"🗣 Lời cuối nó nói"*,
+    // *"Lệnh phiên chạy không được"*), và đọc "khối khung cuối cùng" trên chuỗi
+    // đã trộn là đọc nhầm khu — đúng lỗi 18/08 làm mất hai nút ⏎/⌫.
+    let box_anchor = data
+        .box_text
+        .clone()
+        .filter(|t| !t.trim().is_empty())
+        .or_else(|| prompt_line_text(&crate::telegram::strip_markdown(text)));
     // 🔴 HỎI ĐÚNG CÂU HỎI MÀ CHỖ NEO SẼ HỎI — Hà 2026-08-17: *"Dòng lệnh in hai
     // biến thể trùng nhau trong cùng một tin"*.
     //
@@ -6847,6 +6855,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // ở dưới — chứ KHÔNG đo lại trên `ack`: `ack` có chữ của chính
                 // hub, và chính chỗ ấy đã làm hỏng phép đo (xem `ScreenReport`).
                 let mut shot_choices: Vec<(String, String)> = Vec::new();
+                // Chữ trong ô nhập, đo trên ẢNH MÀN trước khi hub nối thêm khu
+                // nào — xem chỗ gán bên dưới.
+                let mut shot_box: Option<String> = None;
                 // Màn có dòng `Submit` ⟹ gắn ✅ vào đó. Điền ở nhánh `/shot` lẫn
                 // nhánh bấm phím, vì cả hai đều trả về một bảng bấm được.
                 let mut shot_submit = false;
@@ -6987,6 +6998,26 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // không có hộp chọn — bù mọi lượt là chép lại
                                 // thứ đã nằm ngay trên màn, đúng cái vừa gỡ đi
                                 // hai lần hôm nay.
+                                // 🔴 ĐO Ô NHẬP TRÊN ẢNH MÀN, TRƯỚC MỌI THỨ HUB
+                                // NỐI THÊM. Hà 2026-08-18, ảnh chụp tin `/shot`:
+                                // *"ô chat có gợi ý tại sao lại không có nút
+                                // bấm, sao cứ update lại mất vài thứ"*.
+                                //
+                                // Đo được: tin ấy đi ra với `text_links=0`,
+                                // trong khi tin `/shot` của một phiên khác cùng
+                                // phút có `text_links=2`. Khác nhau đúng một
+                                // chỗ: phiên này màn chỉ là đầu ra lệnh nên hub
+                                // NỐI THÊM khối *"🗣 Lời cuối nó nói"* ở dưới —
+                                // và `prompt_line_text` đọc "khối đóng khung
+                                // CUỐI CÙNG", tức từ lúc ấy nó đọc phần văn
+                                // xuôi hub tự viết chứ không đọc ô nhập nữa.
+                                //
+                                // Cùng một bài học đã ghi trong `session_layout`
+                                // (*"phải đo TRƯỚC khi trộn"*) — nhưng chỗ trộn
+                                // thứ hai nằm ở ĐÂY, nên luật ấy phải đi theo.
+                                // `SessionData.box_text` vốn đã khai sẵn cho
+                                // đúng việc này mà chưa ai nối vào.
+                                shot_box = prompt_line_text(&crate::telegram::strip_markdown(&out));
                                 let screen_has_prose =
                                     out.contains('\u{23fa}') || !shot_choices.is_empty();
                                 if !screen_has_prose {
@@ -8265,7 +8296,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // hàm dựng chuỗi phím, nên "thấy Submit" ở hai chỗ
                             // là MỘT phép đo.
                             submit: shot_submit || crate::keys::has_submit(&ack),
-                            box_text: None,
+                            // Đo trên ảnh màn, không đo lại trên `ack` — `ack`
+                            // đã mang cả khu chữ hub tự nối.
+                            box_text: shot_box.clone(),
                             files: shot_files.clone(),
                         };
                         // Lựa chọn nào đã thành ☑ trong chữ thì thôi nằm ở đáy:

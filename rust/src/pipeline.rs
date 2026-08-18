@@ -6795,6 +6795,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             | CommandKind::Key
             | CommandKind::Shot
             | CommandKind::Photo
+            | CommandKind::Clean
             | CommandKind::Pick => {
                 // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
@@ -6907,6 +6908,36 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     Err(e) => format!(
                                         "⚠ {}",
                                         crate::exec::truncate(&e.to_string(), 420)
+                                    ),
+                                }
+                            } else if matches!(cmd.kind, CommandKind::Clean) {
+                                // 🔴 `/clean` — dọn HÀNG CHỜ, và nói đúng con số.
+                                //
+                                // Hà 2026-08-18: *"Thêm lệnh clean xóa hết ở
+                                // chờ"*. Câu trả lời mang ba trạng thái khác
+                                // nhau vì việc của người đọc khác nhau: sạch rồi
+                                // · vừa dọn xong N tin · dọn không được (và lúc
+                                // ấy phải nói còn bao nhiêu, chứ không phải một
+                                // câu "xong" cho một việc chưa xong).
+                                match crate::keys::clear_queue(w) {
+                                    Ok((0, 0)) => format!(
+                                        "🧹 {} không có tin nào trong hàng chờ.",
+                                        crate::sessions::shown(&s)
+                                    ),
+                                    Ok((removed, 0)) => format!(
+                                        "🧹 Đã xoá {removed} tin khỏi hàng chờ của {} — hàng chờ trống. \
+                                         Lượt đang chạy KHÔNG bị cắt (muốn cắt thì `/key esc`).",
+                                        crate::sessions::shown(&s)
+                                    ),
+                                    Ok((removed, left)) => format!(
+                                        "⚠ mới xoá được {removed} tin, còn {left} nằm lại trong hàng chờ của {} \
+                                         — phím ↑ thôi lấy được tin ra (xem log `clean_queue_stuck`). \
+                                         Gõ `/clean` lần nữa, hoặc dọn tay ở máy.",
+                                        crate::sessions::shown(&s)
+                                    ),
+                                    Err(e) => format!(
+                                        "⚠ không dọn được hàng chờ: {}",
+                                        crate::exec::truncate(&e.to_string(), 200)
                                     ),
                                 }
                             } else if matches!(cmd.kind, CommandKind::Shot) {

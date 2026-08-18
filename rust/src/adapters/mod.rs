@@ -95,6 +95,17 @@ pub enum CommandKind {
     /// (mũi tên + số) vào MỘT `do script`, nên chỉ có đúng một dấu xuống dòng,
     /// ở cuối, chỗ mình chọn.
     Pick,
+    /// `/clean [id]` — xoá SẠCH hàng chờ của phiên: những dòng đã gõ vào lúc nó
+    /// đang bận và còn nằm đợi lượt sau.
+    ///
+    /// 🔴 Hà 2026-08-18: *"Thêm lệnh clean xóa hết ở chờ"*. Từ điện thoại,
+    /// một câu gõ nhầm vào phiên đang chạy là một câu **không rút lại được**:
+    /// nó sẽ chạy khi phiên rảnh, có khi nửa tiếng sau, và lúc ấy chẳng ai ngồi
+    /// đó mà đọc. Ngồi ở máy thì bấm `↑` rồi xoá — đúng phép thử cây cầu, nên
+    /// điện thoại phải làm được đúng chừng ấy.
+    ///
+    /// KHÔNG cắt lượt đang chạy (đó là `/key esc`): chỉ dọn phần chưa bắt đầu.
+    Clean,
     /// `/run_<n>` — chạy lệnh thứ `n` trong sổ lệnh vừa thấy trên màn.
     ///
     /// Anh em sinh đôi của nút `run:<n>`, khác đúng một chỗ và chỗ ấy là cả lý

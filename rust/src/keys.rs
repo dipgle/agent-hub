@@ -956,6 +956,166 @@ pub fn send_exit(window: i64) -> Result<()> {
 /// ⚠ `screencapture` đòi quyền **Screen Recording**, và trên máy này nó đang bị
 /// từ chối (đo 2026-08-17: *"could not create image from display"*, exit 1).
 /// Nên hàm này KHÔNG được nuốt lỗi: nó nói đúng cái thiếu và chỗ cấp.
+/// Bao nhiêu tin đang nằm trong HÀNG CHỜ của TUI — đọc từ chính màn hình.
+///
+/// 🔴 Hà 2026-08-18: *"Thêm lệnh clean xóa hết ở chờ"* (và chốt sau đó: hàng chờ
+/// của PHIÊN, không phải tin Telegram). Đo trên màn thật cùng ngày, gõ hai dòng
+/// vào một phiên đang bận:
+///
+/// ```text
+///   ❯ (bo qua - dong do hang cho cua hub A)
+///   ❯ (bo qua - dong do hang cho cua hub B)
+/// ──────────────────────────────────────────
+/// ❯ Press up to edit queued messages
+/// ──────────────────────────────────────────
+///   ⏵⏵ auto mode on · 2 shells · esc to interrupt · ↓ to manage
+/// ```
+///
+/// Hai hình dạng, và phải dùng CẢ HAI: dòng quảng cáo `queued message` nói
+/// *có hay không*, còn các dòng `❯` **thụt lề** nói *bao nhiêu*. Dấu nhắc của ô
+/// nhập cũng bắt đầu bằng `❯` nhưng KHÔNG thụt lề — nhầm hai cái là đếm luôn cả
+/// ô nhập, tức một hàng chờ rỗng đọc ra "còn 1" và `/clean` quay mãi.
+pub fn queued_count(screen: &str) -> usize {
+    if !screen.contains("queued message") {
+        return 0;
+    }
+    screen
+        .lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            l.starts_with(' ') && t.starts_with('❯') && t.len() > 1
+        })
+        .count()
+}
+
+/// Màn hình có ĐANG KHOÁ không — `Some(true)` = đang ở màn hình đăng nhập.
+///
+/// 🔴 Hà 2026-08-18, ngay sau khi tôi khai ảnh đen là "gần như luôn là thiếu
+/// quyền": *"Máy đang ở màn hình chờ đăng nhập không chụp được ảnh?"* — và câu
+/// ấy đúng. Đo cùng lúc: `ioreg -n Root -d1` trả
+/// `"CGSSessionScreenIsLocked"=Yes` kèm `CGSSessionScreenLockedTime`. Hai
+/// nguyên nhân cho CÙNG một tấm ảnh đen (màn khoá · chưa cấp Screen Recording),
+/// nên một câu trả lời đoán bừa một trong hai là bắt chủ máy đi kiểm hộ.
+///
+/// `None` = không đo được (không có `ioreg`, hoặc nó đổi định dạng). Không đo
+/// được phải khác "đã đo, không khoá" — đúng luật 3.
+pub fn screen_locked() -> Option<bool> {
+    let out = crate::exec::run(
+        "ioreg",
+        &["-n", "Root", "-d1"],
+        crate::exec::RunOpts {
+            timeout: Some(std::time::Duration::from_secs(10)),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    if out.code != Some(0) {
+        logging::warn(
+            "screen_lock_probe_failed",
+            json!({ "code": out.code, "why": "không hỏi được ioreg — KHÔNG kết luận là màn đang mở" }),
+        );
+        return None;
+    }
+    lock_verdict(&out.stdout)
+}
+
+/// Phần THUẦN của [`screen_locked`]: đọc verdict ra khỏi chữ `ioreg` in.
+///
+/// Tách ra để bài kiểm chạm được — chuỗi thật nằm trong `IOConsoleUsers`, một
+/// dòng dài chứa cả chục khoá, và `CGSSessionScreenIsLocked` chỉ CÓ MẶT khi
+/// phiên đã từng khoá. Vắng mặt = chưa khoá lần nào, tức đang mở.
+pub fn lock_verdict(ioreg_out: &str) -> Option<bool> {
+    if !ioreg_out.contains("IOConsoleUsers") {
+        return None;
+    }
+    Some(ioreg_out.contains("\"CGSSessionScreenIsLocked\"=Yes"))
+}
+
+/// Ảnh ra đen thì NÓI ĐÚNG VÌ SAO — hàm thuần, kiểm được cả ba ngả.
+///
+/// Ba câu khác nhau cho ba trạng thái, vì việc chủ máy phải làm khác nhau: mở
+/// khoá máy · cấp một quyền · hoặc đi kiểm hộ vì hub không đo được. Gộp cả ba
+/// thành "gần như luôn là quyền" là đúng cái tôi vừa làm sai sáng nay.
+pub fn blank_frame_reason(locked: Option<bool>) -> String {
+    match locked {
+        Some(true) => "ảnh ra ĐEN vì máy đang ở **màn hình đăng nhập** (đo: \
+             `CGSSessionScreenIsLocked=Yes`). macOS không cho chụp gì ngoài khung trống khi màn \
+             đã khoá — không phải chuyện quyền. Mở khoá máy rồi `/anh` lại. Cần biết phiên đang \
+             hiện gì ngay bây giờ thì `/shot`: chữ trên màn đọc qua Terminal, khoá màn không cản."
+            .to_string(),
+        Some(false) => "chụp được nhưng KHUNG HÌNH RỖNG — ảnh toàn đen (đo: co còn 1 điểm ảnh ⟹ \
+             #000000), mà màn **không** khoá (`CGSSessionScreenIsLocked` vắng mặt). \
+             `screencapture` vẫn trả exit 0, nên đây là cách macOS từ chối im lặng khi thiếu \
+             quyền **Screen Recording**: System Settings → Privacy & Security → Screen & System \
+             Audio Recording → `+` → ⌘⇧G → dán `~/Library/Application Support/hub/bin/hubd`, bật \
+             công tắc, rồi chạy `install_update.sh` (macOS chỉ cấp quyền mới cho tiến trình khởi \
+             động lại)."
+            .to_string(),
+        None => "ảnh ra ĐEN, và hub **không đo được** máy có đang khoá màn không (`ioreg` không \
+             trả lời). Hai khả năng, kiểm theo thứ tự: máy đang ở màn hình đăng nhập (mở khoá rồi \
+             `/anh` lại), hoặc thiếu quyền Screen Recording cho \
+             `~/Library/Application Support/hub/bin/hubd`."
+            .to_string(),
+    }
+}
+
+/// Khung hình ấy có RỖNG không — `Some(true)` = toàn một màu đen.
+///
+/// 🔴 Hà 2026-08-18: *"Chụp ảnh ra den xì"* · *"Phiên đang mở"*. Đo trên máy
+/// cùng lúc: `screencapture -x` **exit 0**, ghi ra một tệp 112 KB, ảnh
+/// 3024×1964 — và mọi điểm ảnh lấy mẫu đều bằng nhau, luma 0,0. Tức macOS
+/// KHÔNG từ chối nữa (hôm 17/08 nó còn trả *"could not create image from
+/// display"*); nó trả một khung trống. Đó là hình dạng của một lời từ chối IM
+/// LẶNG: thiếu quyền Screen Recording thì khung hình không có cửa sổ nào.
+///
+/// Không đo được thì trả `None` và GHI LOG — "không kiểm được" phải khác
+/// "kiểm rồi, ảnh ổn", nếu không thì một hôm `sips` biến mất là hub lại lặng lẽ
+/// gửi ảnh đen đi.
+///
+/// Phép đo: `sips` co ảnh còn **1 điểm** rồi ghi ra BMP (không nén, byte điểm
+/// ảnh nằm thẳng trong tệp) — không cần thư viện giải mã ảnh nào. Nó ĐỎ ĐƯỢC:
+/// cùng lệnh ấy trên `DefaultDesktop.heic` trả `93 7a 43`, còn trên tấm ảnh đen
+/// vừa chụp trả `00 00 00`.
+pub fn frame_is_blank(path: &std::path::Path) -> Option<bool> {
+    let bmp = path.with_extension("probe.bmp");
+    let out = crate::exec::run(
+        "sips",
+        &[
+            "-s",
+            "format",
+            "bmp",
+            "--resampleHeightWidth",
+            "1",
+            "1",
+            &path.display().to_string(),
+            "--out",
+            &bmp.display().to_string(),
+        ],
+        crate::exec::RunOpts {
+            timeout: Some(std::time::Duration::from_secs(10)),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let bytes = std::fs::read(&bmp).ok();
+    let _ = std::fs::remove_file(&bmp);
+    let bytes = match (out.code, bytes) {
+        (Some(0), Some(b)) if b.len() >= 4 => b,
+        (code, _) => {
+            logging::warn(
+                "screenshot_blank_check_failed",
+                json!({ "code": code, "why": "không đo được ảnh — KHÔNG kết luận là ảnh ổn" }),
+            );
+            return None;
+        }
+    };
+    // BMP xuôi từ dưới lên, một điểm ảnh: ba byte màu nằm ở cuối tệp (byte thứ
+    // tư là alpha hoặc chèn cho chẵn 4 — bỏ qua).
+    let tail = &bytes[bytes.len() - 4..];
+    let sum: u32 = tail[..3].iter().map(|b| u32::from(*b)).sum();
+    Some(sum == 0)
+}
+
 pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
     // Không đưa ra trước được thì vẫn chụp — một tấm ảnh cả màn hình còn hơn
     // không có gì, và câu trả lời sẽ nói rõ là chưa focus được.
@@ -986,9 +1146,23 @@ end tell"#
             crate::exec::truncate(out.stderr.trim(), 160)
         );
     }
+    // 🔴 Chụp được ≠ chụp thấy. Xem `frame_is_blank`: thiếu quyền thì macOS trả
+    // một khung TRỐNG với exit 0, nên không đo là gửi đi một tấm ảnh đen kèm
+    // câu "đây, màn hình của phiên".
+    let blank = frame_is_blank(path);
+    if blank == Some(true) {
+        let locked = screen_locked();
+        let _ = std::fs::remove_file(path);
+        logging::warn(
+            "screenshot_blank",
+            json!({ "window": window, "screen_locked": locked }),
+        );
+        anyhow::bail!("{}", blank_frame_reason(locked));
+    }
     logging::info(
         "screenshot_taken",
         json!({ "window": window, "focused": focused,
+                "blank_checked": blank.is_some(),
                 "bytes": std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) }),
     );
     Ok(())
@@ -1277,6 +1451,66 @@ pub fn clear_box(window: i64) -> Result<bool> {
     let after = screen_text(window)?;
     let left = input_box_text(&after).unwrap_or_default();
     Ok(left.trim().is_empty())
+}
+
+/// Trần số vòng của [`clear_queue`] — hàng chờ dài hơn thế thì nói ra, đừng quay mãi.
+const CLEAN_MAX_ROUNDS: usize = 25;
+
+/// Xoá SẠCH hàng chờ của một phiên: `(đã xoá, còn lại)`.
+///
+/// 🔴 Hà 2026-08-18: *"Thêm lệnh clean xóa hết ở chờ"*. Đường đi là cái mà chính
+/// TUI quảng cáo trên màn — *"Press up to edit queued messages"*: `↑` lấy tin
+/// cuối RA KHỎI hàng và đặt vào ô nhập, rồi xoá ô ấy đi là tin biến mất.
+///
+/// Ba điều hàm này KHÔNG làm, mỗi điều vá một cách hỏng đã trả giá ở chỗ khác:
+///
+/// - **Không tin cú bấm.** Mỗi vòng ĐỌC LẠI màn và đếm ([`queued_count`]); hàng
+///   chờ không giảm thì dừng ngay và nói ra, chứ không quay đủ 25 vòng rồi báo
+///   một câu chung chung. Cùng luật với `close_step`: phán đoán dựa trên phép
+///   đo sau mỗi bước, không dựa trên mã trả về của thứ vừa gửi đi.
+/// - **Không để cái CR của `do script` gửi tin đi lại.** Terminal kèm một CR vào
+///   cuối MỌI lượt ghi (xem `press_writes`), mà lúc ấy ô nhập vừa NHẬN nội dung
+///   tin vừa lấy ra — một CR ở đó là gửi lại đúng cái mình định xoá. Nên `↑`,
+///   dãy DEL và `ESC` đi trong **CÙNG một lượt ghi**: `ESC` cuối payload chặn
+///   được CR ở ô nhập (đo trong `clear_box`).
+/// - **Không đụng vào lượt đang chạy.** Chỉ hàng chờ; phiên vẫn chạy tiếp việc
+///   nó đang làm. Muốn cắt lượt ấy thì đó là `/key esc`, một lệnh khác.
+pub fn clear_queue(window: i64) -> Result<(usize, usize)> {
+    let mut left = queued_count(&screen_text(window)?);
+    let start = left;
+    if left == 0 {
+        return Ok((0, 0));
+    }
+    for _ in 0..CLEAN_MAX_ROUNDS {
+        // Nhiều DEL hơn hẳn một tin dài: DEL thừa vào ô trống không làm gì
+        // (cùng lý do `clear_box` bắn dư 8 cái).
+        let dels: String = std::iter::repeat_n('\u{7f}', 600).collect();
+        let payload = format!(
+            "((ASCII character 27) & \"[A\" & {} & (ASCII character 27))",
+            as_string(&dels)
+        );
+        osascript(&do_script(window, &payload))?;
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        let now = queued_count(&screen_text(window)?);
+        if now >= left {
+            // Không giảm ⟹ `↑` không lấy được tin ra. Nói ra chỗ đứng thật.
+            logging::warn(
+                "clean_queue_stuck",
+                json!({ "window": window, "left": now, "removed": start - now,
+                        "why": "hàng chờ không giảm sau một vòng ↑+xoá ô" }),
+            );
+            return Ok((start - now, now));
+        }
+        left = now;
+        if left == 0 {
+            break;
+        }
+    }
+    logging::info(
+        "clean_queue_done",
+        json!({ "window": window, "removed": start - left, "left": left }),
+    );
+    Ok((start - left, left))
 }
 
 /// Gõ chữ **và gửi đi** — một chỗ duy nhất giữ cú Enter rời.

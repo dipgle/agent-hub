@@ -180,6 +180,15 @@ pub const ROUTES: &[Route] = &[
         listed: true,
     },
     Route {
+        name: "clean",
+        aliases: &["don", "xoacho"],
+        kind: CommandKind::Clean,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Xoá sạch hàng chờ của phiên (chữ đã gõ, chưa tới lượt chạy)",
+        listed: true,
+    },
+    Route {
         name: "stop",
         aliases: &["dung"],
         kind: CommandKind::Stop,

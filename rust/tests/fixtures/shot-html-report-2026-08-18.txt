@@ -1,0 +1,35 @@
+📷 Màn của 🟥 [dwork]:
+
+Ba mục hoá ra nặng hơn báo cáo ban đầu:
+  - #1 không chỉ là "thiếu enum" — cổng gọi edit chỉ đòi bit Sửa
+  (edit.hjson:74), nên người dùng thường được cấp đúng một bit đó là tự nâng lên
+  toàn quyền.
+  - #4 BE ghi chú "already encrypted by FE" nhưng FE gửi thẳng — hợp đồng ghi 
+  trong chú thích mà đầu kia không thực hiện. Và hàm AES-GCM đã có sẵn trong 
+  framework, chỉ là không ai gọi ⇒ vá rẻ hơn tưởng.
+  - #8 tôi đo ra 35 tệp, khác cả hai luồng khảo sát (6 và 26) — và kiểm được
+  đúng thứ tự gây rò: tra bằng zid → "không tồn tại" → rồi mới kiểm thành viên →
+  "không thuộc tổ chức".
+  Một điều đáng chú ý xuyên suốt: ở 4/13 mục, bản vá đúng đã nằm sẵn trong repo
+  ở tệp khác — DCI đã vá lỗi type từ 27/07, my/certificates có select tường
+  minh, sign-pades có guard danh tính, withdraw có kiểm người tạo. Đội biết cách
+  làm đúng ở mọi trường hợp; thứ thiếu là cơ chế lan bản vá sang các cửa cùng
+  lớp — nên vá từng tệp sẽ lặp lại, cần cổng cơ học quét cả lớp.
+✻ Churned for 10m 21s
+────────────────────────────────────────────────────────────────────────────────
+❯ Vá nhóm DSign #1 #2 #3 luôn đi
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents
+
+🗣 Màn đang là đầu ra của một lệnh, không có lời nào của phiên. Lời cuối nó nói (lấy từ nhật ký):
+Đã sửa và render lại — bảng gọn hẳn, trang rút từ 6031px xuống 5880px, 0 tràn ngang ở cả 1280px lẫn 390px, biểu đồ vẽ được ở cả sáng/tối, 0 lỗi trang. Tôi đã tự mở cả hai ảnh ra xem.
+
+## Báo cáo
+
+**`~/projects/dwork/dev/docs/bao-cao/bao-cao-ra-soat-2026-08-18.html`**
+
+```
+open ~/projects/dwork/dev/docs/bao-cao/bao-cao-ra-soat-2026-08-18.html
+```
+
+Bảy phần: sổ nợ bảo mật 13 mục (mỗi mục kèm `file:line`) · CVE phụ thuộc · 4 lỗi chức năng · khối lượng còn lại theo làn · vì sao sổ sách không dùng được · quyết định đang chặn · kiến nghị thứ tự. Cuối trang ghi rõ phạm vi và giới hạn — **tất cả là đo…

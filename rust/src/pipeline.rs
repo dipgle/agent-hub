@@ -4323,6 +4323,7 @@ pub fn say_from_session_with(
     // Dò trên phần THÂN, không kể ô nhập: chữ chưa gửi thì đích chạm của nó là
     // ⏎/⌫, không phải 📎 (xem `keys::body_before_box`).
     let seen_paths = paths_not_in_commands(
+        text,
         &crate::keys::paths_on_screen(crate::keys::body_before_box(text), 4),
         &cmds,
     );
@@ -4554,10 +4555,37 @@ fn add_prose_cmds(cfg: &Config, sid: &str, text: &str, out: &mut Vec<crate::sess
 ///
 /// Một dòng, một ý định: dòng lệnh thì đích chạm là ▶️/🖥, còn 📎 dành cho tệp
 /// được nhắc tới như một tệp để đọc.
-pub fn paths_not_in_commands(paths: &[String], cmds: &[crate::sessions::Cmd]) -> Vec<String> {
+///
+/// 🔴 Và phép lọc phải hỏi theo DÒNG, không theo đường dẫn — Hà 2026-08-18, ảnh
+/// chụp một tin `/shot` của phiên dwork: *"Nội dung này có file html nhưng lại
+/// không có nút tải"*. Tin ấy nhắc tệp hai lần, đúng hình dạng mọi phiên viết
+/// xong báo cáo đều dùng:
+///
+/// ```text
+/// **`~/projects/dwork/dev/docs/bao-cao/bao-cao-ra-soat-2026-08-18.html`**  ← tệp
+/// open ~/projects/dwork/dev/docs/bao-cao/bao-cao-ra-soat-2026-08-18.html   ← lệnh
+/// ```
+///
+/// Bản đầu hỏi *"đường dẫn này có nằm trong dòng lệnh nào không"*, nên lần nhắc
+/// ĐỘC LẬP ở trên mất nút chỉ vì bên dưới có một dòng lệnh nhắc lại cùng tệp.
+/// Câu hỏi đúng là *"có dòng nào nhắc tệp này mà KHÔNG phải dòng lệnh không"* —
+/// giữ nguyên ca 16/08 (đường dẫn chỉ xuất hiện trong `rm …` thì vẫn không mọc
+/// nút tải), mà không nuốt lần nhắc kia.
+///
+/// Đo "dòng này có phải dòng lệnh không" bằng [`line_carries`], cùng cái thước
+/// `session_layout` dùng để gắn icon — hai phép đo khác nhau ở đây nghĩa là nút
+/// mọc ở dòng mà icon không mọc.
+pub fn paths_not_in_commands(
+    text: &str,
+    paths: &[String],
+    cmds: &[crate::sessions::Cmd],
+) -> Vec<String> {
     paths
         .iter()
-        .filter(|p| !cmds.iter().any(|c| c.line.contains(p.as_str())))
+        .filter(|p| {
+            text.lines()
+                .any(|l| l.contains(p.as_str()) && !cmds.iter().any(|c| line_carries(l, &c.line)))
+        })
         .cloned()
         .collect()
 }
@@ -8156,6 +8184,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // Đường dẫn nằm TRONG một dòng lệnh thì thôi — dòng ấy đã có
                     // ▶️/🖥 của nó (xem `paths_not_in_commands`).
                     let seen_paths = paths_not_in_commands(
+                        &ack,
                         &crate::keys::paths_on_screen(crate::keys::body_before_box(&ack), 4),
                         &cmds_of_text(cfg, &want, &ack),
                     );

@@ -1,5 +1,28 @@
 # active context — hub
 
+## 🎯 2026-08-18 (tối) — tệp mất nút tải vì nó được nhắc HAI lần
+
+Hà, ảnh chụp một tin `/shot` của phiên dwork: *"Nội dung này có file html nhưng
+lại không có nút tải"*. Tệp có thật (26 KB), nằm trong workspace, `sendable_file`
+không hề từ chối nó.
+
+**Gốc — `paths_not_in_commands` lọc theo ĐƯỜNG DẪN, không theo DÒNG.** Tin ấy
+nhắc tệp hai lần, đúng hình dạng mọi phiên viết xong báo cáo đều dùng: một dòng
+là **tệp** (```**`~/…/bao-cao-ra-soat-2026-08-18.html`**```), một dòng là **lệnh**
+(`open ~/…html`). Luật 16/08 (*"dòng lệnh thì đích chạm là ▶️/🖥, đừng mọc 📎 trên
+cái tệp mà dòng ấy bảo XOÁ"*) đúng cho ca của nó, nhưng hỏi sai câu: nó hỏi
+*"đường dẫn này có nằm trong dòng lệnh nào không"* ⟹ lần nhắc độc lập mất nút chỉ
+vì bên dưới có dòng lệnh nhắc lại. Câu đúng: *"có dòng nào nhắc tệp này mà KHÔNG
+phải dòng lệnh không"*.
+
+**Chẩn đoán tách hai tầng trước khi sửa** (vì cùng một triệu chứng "không có
+nút"): tầng dò `paths_on_screen` ĐỌC RA đường dẫn ✅ (dù nó nằm trong ```**` `**```),
+tầng lọc trả `[]` ❌. Đoán nhầm tầng là sửa nhầm chỗ.
+
+Fixture là NGUYÊN VĂN tin ấy lấy từ `logs/hub.log` (1964 byte,
+`tests/fixtures/shot-html-report-2026-08-18.txt`). Ca 16/08 giữ nguyên bài kiểm,
+vẫn xanh.
+
 ## 🎯 2026-08-18 (chiều muộn) — hub tự đổi tên phiên giữa chừng
 
 Hà: *"đang làm phiên onghut giờ mất luôn thành 2 phiên tfl5"*. Không phải hub

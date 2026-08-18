@@ -59,12 +59,17 @@ fn a_bare_acknowledgement_stays_an_emoji_and_never_goes_through_the_door() {
 /// cái tệp mà dòng ấy bảo xoá.
 #[test]
 fn a_path_inside_a_command_line_gets_no_download_link() {
+    // Phép lọc hỏi theo DÒNG (18/08), nên nó cần chính đoạn chữ ấy: một đường
+    // dẫn chỉ sống trong dòng lệnh thì bị bỏ, một đường dẫn được nhắc như tệp
+    // thì giữ.
+    let text = "Ghi chú ở docs/flow-boc-tach-lenh.md\n\n\
+                rm ~/projects/hub/rust/tests/probe_prompt_anchor.rs\n";
     let cmds = vec![cmd("rm ~/projects/hub/rust/tests/probe_prompt_anchor.rs")];
     let seen = vec![
         "~/projects/hub/rust/tests/probe_prompt_anchor.rs".to_string(),
         "docs/flow-boc-tach-lenh.md".to_string(),
     ];
-    let kept = paths_not_in_commands(&seen, &cmds);
+    let kept = paths_not_in_commands(text, &seen, &cmds);
     assert_eq!(kept, vec!["docs/flow-boc-tach-lenh.md".to_string()]);
 }
 

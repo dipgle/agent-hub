@@ -1,0 +1,25 @@
+
+
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ App onghut  ☒ Dung lượng  ✔ Submit  →
+
+Review your answers
+
+ ● App `a-dbe794f8-…` mà Hà đưa hoá ra là app **Codetrail** (đã kiểm trên panel: `#/apps` → `data-tid` của hàng "C |
+   Codetrail"). Panel có 12 app, không app nào là onghut/ECOS. Đẩy bundle vào đó sẽ ghi đè site Codetrail nên tôi dừng.
+   Đi tiếp thế nào?
+   → Claude tự tạo app rồi đẩy (Đề xuất)
+ ● App Codetrail đang ở gói **Demo: 1 app, 5MB/app**. Bundle onghut là **3.8MB giải nén** — vừa khít 76%, gần như không
+   còn chỗ (site còn 3.0MB ảnh chưa nén WebP). Xử lý sao?
+   → Cứ đẩy 3.8MB trước (Đề xuất)
+     
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
+
+
+
+
+
+

@@ -15,7 +15,10 @@ use std::process::Command;
 /// Cửa sổ nào cũng được — hàm chỉ dùng nó để đưa phiên ra trước khi bấm máy.
 fn any_window() -> Option<i64> {
     let out = Command::new("osascript")
-        .args(["-e", "tell application \"Terminal\" to return id of window 1"])
+        .args([
+            "-e",
+            "tell application \"Terminal\" to return id of window 1",
+        ])
         .output()
         .ok()?;
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()

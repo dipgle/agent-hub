@@ -3335,6 +3335,35 @@ pub fn html_with_command_links(
 /// `pub` để bài kiểm chạm được: hai cổng trong hàm này là thứ đứng giữa một cú
 /// bấm `⏎ Gửi` và một lựa chọn bị xác nhận nhầm, nên chúng phải đo được từ
 /// ngoài — chứ không chỉ qua đường vòng của cả một tin đã dựng.
+/// Hộp chọn trên màn có thuộc về MỘT CÂU của bảng nhiều câu không — hàm thuần.
+///
+/// 🔴 Hà 2026-08-18: *"Màn phiên onghut đang chờ chọn với nhiều tab, lấy đó làm
+/// chuẩn để test trường hợp nhiều option"*. Lấy đúng màn ấy đo ra một lỗi:
+/// bước **Review your answers** (mọi câu đã trả lời, còn mỗi
+/// `1. Submit answers · 2. Cancel`) vẫn được dựng nút bằng mã `pick_<sid>_1_<n>`
+/// — đường của bảng nhiều câu, thứ gửi *mũi tên rồi số* để đi tới câu số 1.
+/// Nhưng ở màn ấy không còn câu nào để đi tới; hai mục kia là hộp chọn ĐƠN của
+/// bước xác nhận. Bấm là gửi một dãy phím vào một màn không hiểu nó.
+///
+/// Gốc: `table` hỏi NHẬT KÝ (*"bảng này có nhiều câu không"*) rồi dùng câu trả
+/// lời ấy cho một chuyện khác hẳn (*"màn đang đứng ở đâu"*). Nhật ký trả lời
+/// đúng câu của nó, và vẫn sai chỗ này — cùng họ với `is_busy` bị hỏi hộ câu
+/// "phiên có đang chạy không" sáng nay.
+///
+/// Nên hỏi cả hai, mỗi bên một câu: nhật ký nói bảng có nhiều câu, MÀN nói còn ô
+/// trống hay không. Không đọc được thanh tab ⟹ giữ nguyên câu trả lời của nhật
+/// ký (mù không lật ngược bằng chứng đã có).
+pub fn multi_question_screen(has_more_questions: bool, screen: &str) -> bool {
+    if !has_more_questions {
+        return false;
+    }
+    match crate::keys::ask_table(screen) {
+        // Hết ô trống ⟹ đang ở bước Review/Submit, không còn câu nào để dời tới.
+        Some(t) => t.left() > 0,
+        None => true,
+    }
+}
+
 pub fn prompt_line_text(shown: &str) -> Option<String> {
     // 🔴 `❯` MANG HAI NGHĨA — Hà 2026-08-16, ảnh 11:31: hai nút ⏎/⌫ dán vào dòng
     // *"1. Đổi tên file ở gốc repo"*, rồi `/type clear` trả *"đã bấm 'clear'
@@ -6970,7 +6999,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // `k_`. Chỉ CÂU ĐANG HIỆN mới chèn được — các
                                 // câu sau chưa có mặt trên màn, nên chúng vẫn
                                 // cần khu chữ ở cuối (xem `ask_command_lines`).
-                                let table = shot_asking.as_ref().is_some_and(|a| !a.rest.is_empty());
+                                // Nhật ký nói bảng có nhiều câu; MÀN nói còn ô
+                                // trống hay đã sang bước Review — xem
+                                // `multi_question_screen`.
+                                let table = multi_question_screen(
+                                    shot_asking.as_ref().is_some_and(|a| !a.rest.is_empty()),
+                                    &rep.text,
+                                );
                                 shot_choices = rep
                                     .choices
                                     .into_iter()
@@ -7819,9 +7854,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                     .map(|(b, _)| b.clone())
                                                     .unwrap_or_default();
                                                 let opts = crate::keys::parse_choices(&screen);
-                                                let table = shot_asking
-                                                    .as_ref()
-                                                    .is_some_and(|a| !a.rest.is_empty());
+                                                // Cùng một câu hỏi, cùng một
+                                                // chỗ trả lời — xem
+                                                // `multi_question_screen`.
+                                                let table = multi_question_screen(
+                                                    shot_asking
+                                                        .as_ref()
+                                                        .is_some_and(|a| !a.rest.is_empty()),
+                                                    &screen,
+                                                );
                                                 shot_choices = opts
                                                     .iter()
                                                     .map(|(n, l)| {

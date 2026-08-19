@@ -1,5 +1,43 @@
 # active context — hub
 
+## 🎯 2026-08-19 (sáng) — trần 5 MB gửi tệp là khẩu vị của hub, không phải luật
+
+Hà: *"Sao lại có giới hạn dung lượng"* — `⚠ chưa gửi được hub.log — 21.4 MB —
+quá trần 5 MB`.
+
+**Trần ấy là của hub.** Chú thích trong mã nói thẳng lý do: *"Telegram chặn ở 50
+MB, nhưng hub chặn sớm hơn nhiều — một file 5 MB đọc trên điện thoại là chuyện
+không xảy ra"*. Tức một câu ĐOÁN HỘ, dựng thành hàng rào, áp lên đúng cái nút
+chủ máy tự bấm — thứ [[feedback_no_guardrails_on_owner_actions]] cấm. Lần thứ tư
+cùng một hình dạng trong ba ngày (cổng quét rò · `destructive` · `.docx` ·
+lần này), và lần này còn tự tố cáo mình: nó biết trần thật là 50 MB rồi vẫn tự
+đặt trần riêng thấp hơn mười lần.
+
+**Vá:** trần duy nhất còn lại là **50 MB của Telegram**, đặt tên đúng như vậy
+(`TELEGRAM_DOC_MAX`) để lần sau không ai đọc nhầm nó thành khẩu vị. Nên
+`hub.log` 21,4 MB nay đi trọn.
+
+**Trên trần thật thì đó là tường, và hub không im**: gửi **phần cuối 5 MB**, cắt
+ở dấu xuống dòng đầu tiên (không dòng cụt, và ranh giới `\n` luôn là ranh giới
+UTF-8 hợp lệ), tên tệp tự khai `phan-cuoi-<tên>`, chú thích nói rõ *"phần CUỐI
+5.0 MB / 213.4 MB — trần 50 MB là của Telegram"*, kèm log `telegram_document_tailed`.
+Đúng thứ chủ máy làm khi ngồi ở máy với một nhật ký khổng lồ: `tail`. Tệp NHỊ
+PHÂN thì không cắt — nửa cuối một `.zip` không mở được bằng gì, gửi đi là gửi
+một thứ trông như thành công.
+
+Hai chi tiết nhỏ mà bỏ qua là sai: tệp NHỎ hơn phần muốn cắt phải về nguyên vẹn
+(cắt "tới dấu xuống dòng đầu tiên" vô điều kiện là ăn mất dòng đầu — có bài kiểm
+riêng), và dòng `telegram_document_sent` nay ghi **số byte ĐÃ GỬI** kèm cỡ tệp,
+vì với một bản cắt thì hai con số khác nhau và đó là chỗ duy nhất trả lời được
+*"cái gì đã rời khỏi máy"*.
+
+**Nghiệm thu:** `461 test · clippy 0 · fmt 0`, mã thoát đọc trực tiếp. Bài kiểm
+live chạy trên chính tệp Hà chỉ tay vào: `logs/hub.log` **22 489 734 byte** →
+phần cuối **5 242 808 byte**, UTF-8 hợp lệ, mở đầu đúng bằng `{` (nhật ký
+JSON-mỗi-dòng, tức không có dòng cụt). Cài 08:08, `hubd` pid 49389
+`@2026-08-19T01:08:20Z` chữ ký `cert`.
+⚠ Chưa có lượt bấm 📎 THẬT trên Telegram — cần Hà bấm.
+
 ## 🎯 2026-08-19 (khuya) — dòng `rm` không có nút, vì cái chặn chỉ LÙI một tầng
 
 Hà, ảnh chụp `/shot` phiên `[AI/tfl5]`: *"Có lệnh nhưng lại không có nút chạy"*.

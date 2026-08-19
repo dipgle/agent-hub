@@ -150,9 +150,53 @@ pub enum AckPlan {
 /// trả lời được câu *"tệp nào đã rời máy mà chưa soi"*.
 ///
 /// Ba cửa THẬT không đổi và không nằm ở đây: phải trong cây làm việc, phải là
-/// một tệp, và trần 5 MB — xem [`Inbox::send_document`].
+/// một tệp, và trần dung lượng của Telegram — xem [`Inbox::send_document`].
 pub fn document_body(path: &std::path::Path) -> Result<(Vec<u8>, String), String> {
     let bytes = std::fs::read(path).map_err(|e| format!("không đọc được: {e}"))?;
+    Ok(scan_and_type(path, bytes))
+}
+
+/// Phần CUỐI của một tệp — đường ra khi tệp vượt trần THẬT của Telegram.
+///
+/// 🔴 Hà 2026-08-19: *"Sao lại có giới hạn dung lượng"* — `⚠ chưa gửi được
+/// hub.log — 21.4 MB — quá trần 5 MB`. Trần 5 MB ấy là của **hub**, dựng trên
+/// một câu đoán hộ (*"một file 5 MB đọc trên điện thoại là chuyện không xảy
+/// ra"*), trong khi Telegram cho tới **50 MB**. Đó là hàng rào áp lên đúng cái
+/// nút chủ máy tự bấm — thứ [[feedback_no_guardrails_on_owner_actions]] nói
+/// thẳng là không được làm. Nay trần duy nhất là trần của Telegram.
+///
+/// Trên trần ấy thì nó là tường THẬT, nên hub không im: nó làm đúng thứ chủ máy
+/// làm khi ngồi ở máy với một tệp nhật ký khổng lồ — `tail`. Cắt ở dấu xuống
+/// dòng đầu tiên, nên không có dòng cụt ở đầu và mẩu cắt chắc chắn đứng trên
+/// ranh giới UTF-8. Tệp nhị phân thì KHÔNG cắt: nửa cuối một tệp `.zip` không
+/// mở được bằng gì, và gửi nó đi là gửi một thứ trông như thành công.
+pub fn document_tail(path: &std::path::Path, want: u64) -> Result<(Vec<u8>, String), String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).map_err(|e| format!("không đọc được: {e}"))?;
+    let len = f.metadata().map_err(|e| e.to_string())?.len();
+    let from = len.saturating_sub(want);
+    f.seek(SeekFrom::Start(from))
+        .map_err(|e| format!("không nhảy tới cuối tệp được: {e}"))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)
+        .map_err(|e| format!("không đọc được phần cuối: {e}"))?;
+    // Bỏ mẩu dòng cụt ở đầu. Chỉ làm khi có cắt thật — cắt cả dòng đầu của một
+    // tệp đọc trọn là mất chữ mà không ai yêu cầu.
+    if from > 0 {
+        if let Some(i) = buf.iter().position(|b| *b == b'\n') {
+            buf.drain(..=i);
+        }
+    }
+    if std::str::from_utf8(&buf).is_err() {
+        return Err("tệp nhị phân — không cắt phần cuối được".into());
+    }
+    let (bytes, mime) = scan_and_type(path, buf);
+    Ok((bytes, mime))
+}
+
+/// Soi rò rỉ + gán MIME cho một mớ byte đã đọc. Một chỗ cho cả tệp trọn lẫn
+/// phần cuối, để nhánh nào cũng để lại đúng một dòng log.
+fn scan_and_type(path: &std::path::Path, bytes: Vec<u8>) -> (Vec<u8>, String) {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -179,7 +223,7 @@ pub fn document_body(path: &std::path::Path) -> Result<(Vec<u8>, String), String
             false
         }
     };
-    Ok((bytes, document_mime(&ext, is_text).to_string()))
+    (bytes, document_mime(&ext, is_text).to_string())
 }
 
 /// Kiểu MIME theo đuôi tệp — đủ để Telegram/điện thoại mở đúng ứng dụng.
@@ -1299,14 +1343,21 @@ impl Inbox {
     ///   thành cái vỏ của một hàng rào không còn ai gác — nó không bảo vệ gì,
     ///   chỉ chặn đúng tệp chủ máy vừa chỉ tay vào (Hà: *"Có file docx nhưng
     ///   không có nút tải"*). Nay đọc BYTE và gửi, xem [`document_body`].
-    /// * **Trần dung lượng**: Telegram chặn ở 50 MB, nhưng hub chặn sớm hơn
-    ///   nhiều — một file 5 MB đọc trên điện thoại là chuyện không xảy ra.
+    /// * **Trần dung lượng của TELEGRAM** — 50 MB, và không có trần nào của hub
+    ///   nữa. 🪦 Trần 5 MB gỡ 2026-08-19; xem [`document_tail`] cho cả lý do lẫn
+    ///   thứ thay chỗ nó khi tệp vượt trần thật.
     pub fn send_document(
         &self,
         path: &std::path::Path,
         root: &std::path::Path,
     ) -> Result<(), String> {
-        const MAX_BYTES: u64 = 5 * 1024 * 1024;
+        /// Trần THẬT của `sendDocument`. Đây là luật của Telegram, không phải
+        /// khẩu vị của hub — vượt nó thì API từ chối, hub có nới cũng vô ích.
+        const TELEGRAM_DOC_MAX: u64 = 50 * 1024 * 1024;
+        /// Vượt trần thật thì cứu bấy nhiêu byte CUỐI. Con số này không chặn
+        /// gì cả — nó chỉ nói "cứu được bao nhiêu", và câu trả lời đi kèm nói
+        /// rõ đây là phần cuối của bao nhiêu.
+        const TAIL_ON_OVERFLOW: u64 = 5 * 1024 * 1024;
 
         let real = path
             .canonicalize()
@@ -1337,15 +1388,21 @@ impl Inbox {
         if !meta.is_file() {
             return Err("không phải một tệp".into());
         }
-        if meta.len() > MAX_BYTES {
-            return Err(format!(
-                "{:.1} MB — quá trần {} MB",
-                meta.len() as f64 / 1_048_576.0,
-                MAX_BYTES / 1_048_576
-            ));
-        }
-        // Đọc BYTE, không đọc chữ — xem [`document_body`].
-        let (body, mime) = document_body(&real)?;
+        // Đọc BYTE, không đọc chữ — xem [`document_body`]. Quá trần THẬT thì
+        // gửi phần cuối, và nói ra là phần cuối của bao nhiêu; im lặng bỏ cuộc
+        // là bắt chủ máy đi bộ về chỗ cái máy để đọc chính nhật ký của mình.
+        let over = meta.len() > TELEGRAM_DOC_MAX;
+        let (body, mime) = if over {
+            document_tail(&real, TAIL_ON_OVERFLOW).map_err(|e| {
+                format!(
+                    "{:.1} MB — quá trần {} MB của Telegram, và {e}",
+                    meta.len() as f64 / 1_048_576.0,
+                    TELEGRAM_DOC_MAX / 1_048_576
+                )
+            })?
+        } else {
+            document_body(&real)?
+        };
         // 🔴 CỔNG NÀY THÔI CHẶN — nó BÁO. Hà 2026-08-16, ảnh chụp đúng lúc bấm
         // nút 📎: *"cái gì giữ lại vậy, hub là tôi yêu cầu bạn viết để tôi gửi
         // các lệnh và thực hiện mà?"*. Tệp bị giữ là
@@ -1386,26 +1443,48 @@ impl Inbox {
         // trả lời "tệp nào đã rời máy" khi cần, mà không dạy chủ máy bỏ qua một
         // dòng ⚠ nào đó mỗi lần mở tệp của mình.
 
-        let name = real
+        let stem = real
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("file")
             .to_string();
+        // Tên tệp phải TỰ KHAI là bản cắt. Gửi phần cuối dưới đúng tên gốc là
+        // thứ tệ hơn không gửi: ba tháng sau không ai phân biệt được bản này với
+        // bản đủ, và người đọc sẽ đi tìm dòng đầu tiên mà nó không hề có.
+        let name = if over {
+            format!("phan-cuoi-{stem}")
+        } else {
+            stem
+        };
+        let mut caption = real
+            .strip_prefix(&root_real)
+            .unwrap_or(&real)
+            .display()
+            .to_string();
+        if over {
+            caption.push_str(&format!(
+                "\n✂️ phần CUỐI {:.1} MB / {:.1} MB — trần {} MB là của Telegram",
+                body.len() as f64 / 1_048_576.0,
+                meta.len() as f64 / 1_048_576.0,
+                TELEGRAM_DOC_MAX / 1_048_576
+            ));
+            logging::info(
+                "telegram_document_tailed",
+                json!({ "path": real.display().to_string(), "sent": body.len(),
+                        "total": meta.len(),
+                        "why": "quá trần THẬT của Telegram — gửi phần cuối thay vì bỏ cuộc" }),
+            );
+        }
         let client = self.client().ok_or("không dựng được HTTP client")?;
         self.forget_ack_live();
+        let sent = body.len();
         let part = reqwest::blocking::multipart::Part::bytes(body)
             .file_name(name.clone())
             .mime_str(&mime)
             .map_err(|e| e.to_string())?;
         let form = reqwest::blocking::multipart::Form::new()
             .text("chat_id", self.chat_id.clone())
-            .text(
-                "caption",
-                real.strip_prefix(&root_real)
-                    .unwrap_or(&real)
-                    .display()
-                    .to_string(),
-            )
+            .text("caption", caption)
             .part("document", part);
         let r = client
             .post(self.api("sendDocument"))
@@ -1415,9 +1494,12 @@ impl Inbox {
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg, &v);
+            // Số byte ĐÃ GỬI, không phải cỡ tệp trên đĩa: với một bản cắt thì
+            // hai con số khác nhau, và dòng log này là chỗ duy nhất trả lời
+            // được "cái gì đã rời khỏi máy".
             logging::info(
                 "telegram_document_sent",
-                json!({ "name": name, "bytes": meta.len() }),
+                json!({ "name": name, "bytes": sent, "file_bytes": meta.len() }),
             );
             Ok(())
         } else {

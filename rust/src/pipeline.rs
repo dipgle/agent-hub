@@ -1856,25 +1856,18 @@ pub fn session_list_text(
         // BỐN tình trạng. "Đang hỏi" đứng trên cả "đang chạy": nó là trạng thái
         // duy nhất trong bốn cái mà người đọc PHẢI làm gì đó thì việc mới đi
         // tiếp — mà nó lại nhìn y hệt "đứng chờ" nếu không nói ra.
-        let run = match (s.host.as_str(), s.asking.is_some(), s.working) {
-            // Chấm TRẠNG THÁI, không phải ký hiệu điều khiển.
-            //
-            // 🔴 Hà 2026-08-13: *"icon biểu diễn chạy và dừng bị ngược ở danh
-            // sách phiên"*. Đo ra chỗ lẫn: `▶`/`⏸`/`⏹` là bộ ký hiệu của máy
-            // phát nhạc, mà ở đó chúng là NÚT BẤM — `▶` nghĩa "bấm để chạy",
-            // `⏸` nghĩa "bấm để dừng". hub lại dùng chúng làm TÌNH TRẠNG, nên
-            // đọc ra đúng nghĩa ngược. Và chính hub cũng đang dùng `▶` làm nút
-            // chạy lệnh thật (`remember_quick`) — một ký hiệu hai nghĩa trong
-            // cùng một tin nhắn.
-            ("dead", _, _) => "⚫ đã tắt",
-            (_, true, _) => "⚠ dừng lại HỎI",
-            // LỖI đứng trên "đang chạy": một phiên dừng vì lỗi nhìn từ xa y hệt
-            // một phiên đã xong — Hà 2026-08-13: *"vì lỗi chưa thấy cảnh báo
-            // gì"*. Đọc từ nhật ký nên không phụ thuộc việc bắt đúng nhịp.
-            _ if s.error.is_some() => "🔴 dừng vì LỖI",
-            (_, _, true) => "🟢 đang chạy",
-            _ => "🟡 đứng chờ",
-        };
+        // 🔴 MỘT CHỖ QUYẾT ĐỊNH TÌNH TRẠNG — `sessions::state_of`. Bảng `match`
+        // từng nằm ngay đây, và nó thiếu đúng một bậc: phiên đang chờ mà còn
+        // lệnh chạy NỀN thì đọc ra "đứng chờ", im về nửa còn lại (Hà 2026-08-19:
+        // *"vẫn đang có shell đang chạy nhưng danh sách nút phiên thể hiện đã
+        // dừng"*). Đưa bảng ấy xuống `sessions.rs` để tin tự phát dùng CÙNG một
+        // bộ ký hiệu — hai màn nói khác nhau về một trạng thái thì không ai đối
+        // chiếu được.
+        // 🪦 Bảng `match` bốn nhánh từng nằm ngay đây, kèm bài học 13/08 về
+        // `▶ ⏸ ⏹` — bài học ấy đi theo sang `sessions::state_of` và vẫn là ràng
+        // buộc; chỉ chỗ đứng đổi.
+        let (icon, label) = crate::sessions::state_of(s);
+        let run = format!("{icon} {label}");
         // Dự án ĐANG LÀM đứng trước tên: tên phiên do `claude` tự đặt
         // ("projects-ff") không nói được gì, còn `cwd` thì giống hệt nhau ở mọi
         // dòng trên máy này — xem `sessions::folder_from_tail`.

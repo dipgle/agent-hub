@@ -29,6 +29,10 @@ use serde_json::json;
 
 use crate::logging;
 use crate::sessions::LiveSession;
+// 🔴 CÙNG một bộ ký hiệu với danh sách phiên — Hà 2026-08-16: *"mọi thứ nhìn
+// thấy ở tele phải đồng nhất"*. Trước 19/08 hai màn tự gõ emoji của mình, nên
+// cùng một trạng thái đọc ra hai hình khác nhau tuỳ nó ra bằng cửa nào.
+use crate::sessions::{ST_ASK, ST_DEAD, ST_ERR, ST_WAIT};
 
 /// Trạng thái của một phiên, rút gọn còn đúng thứ cần để so hai lượt.
 pub const WORKING: &str = "working";
@@ -303,7 +307,7 @@ impl Change {
             // lâu — họ cần biết nó hỏng vì cái gì.
             Change::Failed { name, line, .. } => {
                 let head = format!(
-                    "🔴 {name} đang dừng vì LỖI:\n{}",
+                    "{ST_ERR} {name} đang dừng vì LỖI:\n{}",
                     crate::exec::truncate(line, 200)
                 );
                 match tail {
@@ -340,7 +344,7 @@ impl Change {
                         } else {
                             "cần bạn chọn"
                         };
-                        format!("⚠ {name} dừng lại HỎI — {how}:\n{}{more}", lines.join("\n"))
+                        format!("{ST_ASK} {name} dừng lại HỎI — {how}:\n{}{more}", lines.join("\n"))
                     }
                     // Không đọc được chữ thì nói RÕ vì sao chỉ có con số, đừng
                     // để người ta tưởng hub keo kiệt thông tin.
@@ -352,20 +356,20 @@ impl Change {
                     // osascript ngã). Một câu nói sai lý do còn tệ hơn không nói
                     // gì: nó gửi người đọc đi tìm nhầm chỗ.
                     Idle::Asking { n, .. } => format!(
-                        "⚠ {name} dừng lại HỎI ({n} lựa chọn) — hub đếm được số lựa chọn nhưng \
+                        "{ST_ASK} {name} dừng lại HỎI ({n} lựa chọn) — hub đếm được số lựa chọn nhưng \
                          không đọc được chữ trên màn. /shot để thử đọc lại"
                     ),
                     Idle::Failed { line } => format!(
-                        "🔴 {name} gặp LỖI API sau {} phút chạy:\n{}",
+                        "{ST_ERR} {name} gặp LỖI API sau {} phút chạy:\n{}",
                         ran_sec / 60,
                         crate::exec::truncate(line, 160)
                     ),
                     Idle::Prompt => format!(
-                        "🟡 {name} dừng, đang chờ bạn — sau {} phút chạy",
+                        "{ST_WAIT} {name} dừng, đang chờ bạn — sau {} phút chạy",
                         ran_sec / 60
                     ),
                     Idle::Unknown => format!(
-                        "🟡 {name} dừng sau {} phút — không đọc được màn nên chưa rõ nó chờ gì",
+                        "{ST_WAIT} {name} dừng sau {} phút — không đọc được màn nên chưa rõ nó chờ gì",
                         ran_sec / 60
                     ),
                 };
@@ -398,9 +402,9 @@ impl Change {
                     format!(" (câu 1/{})", rest.len() + 1)
                 };
                 let head = if header.is_empty() {
-                    format!("⚠ {name} dừng lại HỎI{of}")
+                    format!("{ST_ASK} {name} dừng lại HỎI{of}")
                 } else {
-                    format!("⚠ {name} dừng lại HỎI — {header}{of}")
+                    format!("{ST_ASK} {name} dừng lại HỎI — {header}{of}")
                 };
                 let list: Vec<String> = options
                     .iter()
@@ -458,7 +462,7 @@ impl Change {
                 }
                 out
             }
-            Change::Ended { name, .. } => format!("⚫ {name} — kết cục chưa xác định"),
+            Change::Ended { name, .. } => format!("{ST_DEAD} {name} — kết cục chưa xác định"),
         }
     }
 }

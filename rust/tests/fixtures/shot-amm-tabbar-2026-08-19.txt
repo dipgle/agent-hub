@@ -1,0 +1,23 @@
+📷 Màn của 🟦 [AI/tcc/amm]:
+
+Tôi đã hết việc tự quyết được. Ba thứ còn lại đều là quyết định của anh, và
+  tôi đã điều tra đủ để hỏi cho gọn:
+────────────────────────────────────────────────────────────────────────────────
+←  ☒ RPC pool  ☐ NativeAssets v3  ☐ Việc tiếp  ✔ Submit  →
+Mặt ĐỌC của native pool giờ trả 0 vĩnh viễn (không còn applier nào ghi). Giữ hay
+bỏ?
+❯ 1. Giữ, có nhãn (khuyến nghị) ✔
+     tcc_getNativePool / tcc_getNativeLpShares / verb pool + lpshares ở lại, 
+     thêm chú thích 'luôn 0 sau #13'. Không đổi API, và còn dùng được để CHỨNG 
+     MINH chain rỗng thay vì tin lời. Chi phí: ~40 dòng mã đọc không ai gọi.
+  2. Bỏ hẳn 
+     Xoá 2 JSON-RPC + 2 verb line-RPC + 
+     pool_reserves/lp_shares/lp_total/native_pool_addr. Sạch hơn, nhưng là đổi 
+     API công khai — client cũ gọi sẽ nhận method-not-found thay vì số 0.
+  3. Bỏ ghi, giữ một cái
+     Chỉ giữ tcc_getNativePool (đọc số dư địa chỉ suy ra được, nên có thể khác 0
+     ⇒ chứng minh được tiền mắc kẹt), bỏ phần LP vốn đóng cứng ở 0.
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel

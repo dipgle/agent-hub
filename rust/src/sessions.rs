@@ -147,6 +147,23 @@ pub struct LiveSession {
     /// là còn làm; đứng im quá `IDLE_AFTER_SEC` nghĩa là lượt đã xong. Không
     /// thêm một lời gọi AppleScript nào.
     pub working: bool,
+    /// Phiên ĐANG CHỜ người gõ, nhưng còn một lệnh chạy NỀN chưa xong.
+    ///
+    /// 🔴 Hà 2026-08-19: *"Tại sao phiên tfl5 vẫn đang có shell đang chạy nhưng
+    /// danh sách nút phiên thể hiện đã dừng"*. Cả hai vế đều đúng, và đó chính
+    /// là chỗ hỏng: `working` trả lời *"lượt của phiên còn chạy không"* — câu ấy
+    /// là KHÔNG, phiên đang đứng ở dấu nhắc chờ anh — trong khi màn nó ghi rõ
+    /// `· 1 shell still running`. Danh sách nói đúng một nửa rồi im về nửa kia.
+    ///
+    /// Nửa kia phải nói ra, vì nó đổi việc người đọc sắp làm: đóng sổ hay gõ
+    /// tiếp vào một phiên còn lệnh chạy dở là hai quyết định khác nhau.
+    ///
+    /// Hôm 18/08 chính con số này đi theo chiều ngược: một lệnh nền bị đọc
+    /// thành "phiên đang chạy" (*"icon biểu thị đang chạy nhưng thực ra phiên
+    /// đang dừng"*). Phép đo đã tách đúng hai ca từ hôm ấy (`shell_verdict`);
+    /// cái thiếu chỉ là ĐEM KẾT QUẢ RA MÀN — trường này là chỗ đem ra.
+    #[serde(default)]
+    pub bg_shell: bool,
     /// Phiên đang làm gì, bằng đúng chữ terminal hiện — `"Brewing… 10m43s"`.
     ///
     /// Hà 2026-08-10: *"ui chưa thể hiện được phiên đang làm gì ví dụ Brewing…;
@@ -1627,6 +1644,67 @@ pub fn shell_verdict(shell: bool, screen_busy: Option<bool>) -> bool {
         (true, Some(false)) => false,
         (true, _) => true,
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ký hiệu TÌNH TRẠNG — mỗi trạng thái một HÌNH, không phải một màu.
+//
+// 🔴 Hà 2026-08-19: *"thay icon hình tròn thành các icon khác nhau cho từng
+// trạng thái để biết nhanh"*. Bộ cũ là `🟢 🟡 🔴 ⚫` — bốn cái chấm tròn khác
+// nhau đúng ở MÀU. Trên màn 390px, giữa một danh sách đã có sẵn `🟥 🟩 🟪 🟦`
+// làm nhãn dự án, bốn chấm ấy vừa nhỏ vừa lẫn nhau vừa lẫn với nhãn.
+//
+// Nên chọn theo HÌNH, và mỗi hình tự nói nghĩa của nó — đọc được cả khi không
+// phân biệt được màu. Ràng buộc còn lại giữ nguyên từ 13/08: KHÔNG dùng
+// `▶ ⏸ ⏹` — đó là bộ ký hiệu của máy phát nhạc, ở đó chúng là NÚT BẤM
+// (`▶` = "bấm để chạy"), nên dùng làm tình trạng thì đọc ra nghĩa ngược; và
+// `▶️` đang là nút chạy lệnh thật của chính hub.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Lượt của phiên đang chạy.
+pub const ST_RUN: &str = "⚡";
+/// Đứng ở dấu nhắc, không còn gì chạy.
+pub const ST_WAIT: &str = "💤";
+/// Đứng chờ người gõ, nhưng còn một lệnh chạy NỀN.
+pub const ST_BG: &str = "🌀";
+/// Dừng lại HỎI — việc không tự đi tiếp được.
+pub const ST_ASK: &str = "❓";
+/// Dừng vì LỖI.
+pub const ST_ERR: &str = "❌";
+/// Đã tắt.
+pub const ST_DEAD: &str = "🪦";
+
+/// Tình trạng một phiên, thành `(ký hiệu, chữ)` — **một chỗ duy nhất** quyết định.
+///
+/// Danh sách phiên và tin tự phát phải nói CÙNG một thứ về cùng một trạng thái
+/// (Hà 2026-08-16: *"mọi thứ nhìn thấy ở tele phải đồng nhất"*), nên thứ tự ưu
+/// tiên nằm ở đây chứ không chép ra hai nơi.
+///
+/// Thứ tự có chủ ý, và mỗi bậc là một bài học đã trả giá:
+/// * **đã tắt** trước hết — mọi phép đo khác nói về một phiên không còn nữa.
+/// * **dừng lại HỎI** trên cả "đang chạy": đây là trạng thái DUY NHẤT mà việc
+///   không tự đi tiếp được, mà nhìn từ xa nó y hệt "đứng chờ".
+/// * **LỖI** trên "đang chạy": một phiên chết vì lỗi nhìn y hệt một phiên vừa
+///   xong (Hà 2026-08-13: *"vì lỗi chưa thấy cảnh báo gì"*).
+/// * **đang chạy** trên "lệnh nền": lượt của phiên quan trọng hơn việc nền.
+/// * **lệnh nền** trên "đứng chờ": cùng là chờ, nhưng còn thứ đang chạy dở.
+pub fn state_of(s: &LiveSession) -> (&'static str, &'static str) {
+    if s.host == "dead" {
+        return (ST_DEAD, "đã tắt");
+    }
+    if s.asking.is_some() {
+        return (ST_ASK, "dừng lại HỎI");
+    }
+    if s.error.is_some() {
+        return (ST_ERR, "dừng vì LỖI");
+    }
+    if s.working {
+        return (ST_RUN, "đang chạy");
+    }
+    if s.bg_shell {
+        return (ST_BG, "chờ bạn · lệnh nền còn chạy");
+    }
+    (ST_WAIT, "đứng chờ")
 }
 
 /// Phiên có đang làm việc không — ba nguồn, không nguồn nào cần đọc màn.
@@ -3237,6 +3315,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 .to_string();
             let mut row = LiveSession {
                 label: String::new(),
+                // Điền ở khúc đọc tiến trình bên dưới (`shell_verdict`).
+                bg_shell: false,
                 account: account.name.clone(),
                 name: s
                     .get("name")
@@ -3433,6 +3513,10 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                                     } }),
                         );
                     }
+                    // Còn shell con mà màn nói phiên đang chờ ⟹ lệnh chạy NỀN.
+                    // Ghi lại để DANH SÁCH nói ra được, thay vì chỉ dùng nó để
+                    // quyết `working` rồi bỏ đi.
+                    row.bg_shell = shell && !shell_busy && row.host != "dead";
                     row.working = row.host != "dead"
                         && (shell_busy
                             || is_working(

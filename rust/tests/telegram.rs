@@ -86,8 +86,14 @@ fn every_row_carries_the_id_the_next_command_needs() {
     assert!(text.contains("acc3"), "{text}");
     assert!(text.contains("3e9a7fd6"), "thiếu id ngắn: {text}");
     assert!(text.contains("7c2ae1a7"), "thiếu id ngắn: {text}");
-    assert!(text.contains("🟢"), "không nói phiên nào đang chạy: {text}");
-    assert!(text.contains("🟡"), "không nói phiên nào đứng chờ: {text}");
+    assert!(
+        text.contains(hub::sessions::ST_RUN),
+        "không nói phiên nào đang chạy: {text}"
+    );
+    assert!(
+        text.contains(hub::sessions::ST_WAIT),
+        "không nói phiên nào đứng chờ: {text}"
+    );
     assert!(
         text.contains("Chưa theo phiên nào"),
         "chưa theo phiên nào thì phải nói ra: {text}"
@@ -139,10 +145,14 @@ fn the_list_tells_running_waiting_and_stopped_apart() {
     // Chấm TRẠNG THÁI, không phải ký hiệu điều khiển của máy phát nhạc — Hà
     // 2026-08-13: *"icon biểu diễn chạy và dừng bị ngược"*. `▶` nay chỉ còn
     // nghĩa "bấm để chạy lệnh này" (`remember_quick`), một ký hiệu một nghĩa.
-    assert!(text.contains("🟢 đang chạy"), "{text}");
-    assert!(text.contains("🟡 đứng chờ"), "{text}");
+    // 🔄 Ghim theo HẰNG SỐ, không gõ lại emoji (2026-08-19). Gõ lại là dựng
+    // bản chép thứ hai của đúng cái bảng vừa gom về một chỗ — và bài kiểm sẽ
+    // đỏ vì bảng đổi hình, chứ không vì sản phẩm sai.
+    use hub::sessions::{ST_DEAD, ST_RUN, ST_WAIT};
+    assert!(text.contains(&format!("{ST_RUN} đang chạy")), "{text}");
+    assert!(text.contains(&format!("{ST_WAIT} đứng chờ")), "{text}");
     assert!(
-        text.contains("⚫ đã tắt"),
+        text.contains(&format!("{ST_DEAD} đã tắt")),
         "phiên đã tắt bị gộp vào 'đứng chờ': {text}"
     );
     assert!(
@@ -174,7 +184,10 @@ fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
         rest: Vec::new(),
     });
     let text = session_list_text(&[s], "", NOW);
-    assert!(text.contains("⚠ dừng lại HỎI"), "tình trạng: {text}");
+    assert!(
+        text.contains(&format!("{} dừng lại HỎI", hub::sessions::ST_ASK)),
+        "tình trạng: {text}"
+    );
     assert!(text.contains("Nửa ngày"), "nhãn câu hỏi: {text}");
     assert!(
         text.contains("NỬA NGÀY không?"),

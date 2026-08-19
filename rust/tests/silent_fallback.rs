@@ -35,7 +35,13 @@ fn the_button_and_the_line_agree_on_every_state() {
         f(&mut s);
         s
     };
-    let cases: Vec<(Box<dyn Fn(&mut LiveSession)>, &str)> = vec![
+    /// Một ca đo: cách bẻ hàng, và cái icon nó phải cho ra.
+    ///
+    /// Đặt tên cho kiểu vì `cargo clippy --all-targets -- -D warnings` gọi bản
+    /// viết thẳng là `type_complexity` — và luật của kho này là **0 warning**
+    /// (`CLAUDE.md`, mục Stack), nên cái tên này rẻ hơn một dòng `allow`.
+    type Ca = (Box<dyn Fn(&mut LiveSession)>, &'static str);
+    let cases: Vec<Ca> = vec![
         (Box::new(|s: &mut LiveSession| s.working = true), ST_RUN),
         (Box::new(|_: &mut LiveSession| {}), ST_WAIT),
         (Box::new(|s: &mut LiveSession| s.bg_shell = true), ST_BG),

@@ -41,7 +41,7 @@ const REPORT: &str = "~/projects/dwork/dev/docs/bao-cao/bao-cao-ra-soat-2026-08-
 /// nuốt cả dấu nháy ngược thì `is_file` trượt và mọi thứ sau đó vô nghĩa.
 #[test]
 fn the_path_is_seen_on_the_screen() {
-    let seen = hub::keys::paths_on_screen(hub::keys::body_before_box(&shot_text()), 4);
+    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&shot_text()), 4);
     assert!(
         seen.iter().any(|p| p == REPORT),
         "bộ dò không đọc ra đường dẫn báo cáo: {seen:?}"
@@ -52,7 +52,7 @@ fn the_path_is_seen_on_the_screen() {
 #[test]
 fn a_path_mentioned_on_its_own_line_keeps_its_button() {
     let text = shot_text();
-    let seen = hub::keys::paths_on_screen(hub::keys::body_before_box(&text), 4);
+    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&text), 4);
     let cmds = hub::keys::commands_in_report(&text, 8);
     let cmds: Vec<hub::sessions::Cmd> = cmds
         .into_iter()
@@ -74,7 +74,7 @@ fn a_path_mentioned_on_its_own_line_keeps_its_button() {
 #[test]
 fn a_path_only_inside_a_command_still_gets_no_button() {
     let text = "Dọn tệp thăm dò:\n\nrm ~/projects/hub/rust/tests/probe_prompt_anchor.rs\n";
-    let seen = hub::keys::paths_on_screen(hub::keys::body_before_box(text), 4);
+    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(text), 4);
     let cmds = vec![hub::sessions::Cmd {
         line: "rm ~/projects/hub/rust/tests/probe_prompt_anchor.rs".into(),
         cwd: String::new(),

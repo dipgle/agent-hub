@@ -46,14 +46,25 @@ fn the_appended_block_no_longer_hides_the_input_box() {
     hub::telegram::set_bot_username("hub_test_bot");
     let mixed = format!("{SCREEN}{LAST_WORDS}");
 
-    // Đo lại chính cái đã hỏng: dò trên chuỗi ĐÃ TRỘN thì **không thấy gì** —
-    // khối đóng khung cuối cùng nay là phần văn xuôi hub tự nối, và trong đó
-    // không có dòng `❯` nào. `None` ⟹ không neo ⟹ mất CẢ HAI nút, đúng con số
-    // `text_links=0` đọc được trong log.
+    // 🔄 ĐẢO CHIỀU 2026-08-19, và cái đảo chiều này là một bản vá chứ không phải
+    // một lời nhân nhượng.
+    //
+    // Câu cũ ở đây là *"dò trên chuỗi ĐÃ TRỘN thì không thấy gì"* — đúng khi neo
+    // ô nhập là *"khối đóng khung cuối cùng"* (`rfind('╭')`), vì phần văn xuôi
+    // hub nối thêm không có khung nào nên phép dò rơi về "bốn dòng cuối", tức
+    // rơi vào đúng khối văn xuôi ấy.
+    //
+    // Nay neo là VẠCH KẺ của ô nhập (bản `claude` hiện nay không vẽ khung nữa —
+    // xem `keys::box_start`), và hub không nối thêm vạch nào, nên chữ nối vào
+    // không giấu được ô nhập nữa. Phép đo hết mù ⟹ khẳng định phải đổi theo.
+    //
+    // Cái KHÔNG đổi, và là lý do phần còn lại của bài kiểm giữ nguyên: chỗ gọi
+    // vẫn phải mang theo `box_text` đo trên ảnh màn GỐC. Một phép đo hết mù nhờ
+    // hình dạng màn hôm nay không phải một lời hứa cho hình dạng màn hôm sau.
     assert_eq!(
-        prompt_line_text(&mixed),
-        None,
-        "phép đo trên chuỗi đã trộn phải mù — nếu không thì bài kiểm này đo sai chỗ"
+        prompt_line_text(&mixed).as_deref().map(str::trim),
+        Some("Đã bấm /clean rồi, không thấy phản hồi gì"),
+        "neo mới bám vạch kẻ của ô nhập nên chữ nối thêm KHÔNG che được nó nữa"
     );
 
     // …nên chỗ gọi phải mang theo chữ đã đo trên ảnh màn gốc.

@@ -135,7 +135,7 @@ fn what_does_a_full_lap_of_right_arrows_look_like() {
             answered, answered0,
             "một bước ngang đã CHỐT một câu ở bước {step}"
         );
-        hub::cgkeys::post(pid, &[dir.clone()]).expect("gửi được mũi tên");
+        hub::cgkeys::post(pid, std::slice::from_ref(&dir)).expect("gửi được mũi tên");
         std::thread::sleep(std::time::Duration::from_millis(1200));
     }
     println!("=> không có câu nào bị chốt trong cả vòng");

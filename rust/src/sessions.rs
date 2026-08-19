@@ -176,6 +176,26 @@ pub struct LiveSession {
     /// hỏi. `None` khi không đọc được màn hoặc màn có dấu hiệu bí mật — không
     /// đoán, và cũng không đưa chữ nào ra ngoài.
     pub activity: Option<String>,
+    /// VIỆC phiên đang làm, một câu — `"Tiếp tục DS04 quét mã và nhập xuất XML"`.
+    ///
+    /// 🔴 Hà 2026-08-19, nhìn danh sách nút: ba phiên `dwork` đội chung một cái
+    /// nhãn, phân biệt bằng `[dwork]·08a90086` — tám ký tự hex. Anh hỏi thẳng
+    /// cái đúng: nút phải nói **phiên ấy đang làm gì**, không phải mã của nó.
+    ///
+    /// Khác `activity` ở chỗ khác nhau nhất: `activity` là ĐỘNG TỪ đang quay
+    /// (`Brewing… 10m43s`) — nó nói phiên có bận không, và nó giống hệt nhau ở
+    /// mọi phiên đang chạy nên phân biệt được đúng số không. Trường này là CHỦ
+    /// ĐỀ, nó đứng yên suốt một mạch việc.
+    ///
+    /// Nguồn: **nhan đề tab Terminal**, thứ chính `claude` đặt và chính chủ máy
+    /// đang nhìn trên thanh tab (`keys::Tab::doing`). Nên đây không phải hub
+    /// đoán từ nhật ký — cùng hạng bằng chứng với `status` của `claude agents`,
+    /// và cùng một chữ trên hai màn hình. Đúng phép thử cầu nối.
+    ///
+    /// Rỗng = phiên không có tab (nền, editor), hoặc lượt dò Terminal hỏng, hoặc
+    /// tab chưa đặt nhan đề. Không đoán bù: chỗ gọi rơi về mã id ngắn.
+    #[serde(default)]
+    pub doing: String,
     /// The permission mode the session is running under ("auto", "dontAsk",
     /// "default"…).
     ///
@@ -516,7 +536,25 @@ fn strip_drawer(root: &Path, label: &str) -> String {
     label.to_string()
 }
 
-/// Nhãn cho CẢ ảnh chụp: bỏ ngăn kéo, rồi trùng thì thêm id ngắn.
+/// Nhãn cho CẢ ảnh chụp: bỏ ngăn kéo, rồi trùng thì thêm VIỆC ĐANG LÀM.
+///
+/// 🔴 Hà 2026-08-19: *"nhiều phiên dwork cùng nhãn `[dwork]`"* — và cái phân
+/// biệt chúng cho tới hôm ấy là `[dwork]·08a90086`, tám ký tự hex. Đo cùng lúc,
+/// ba phiên `dwork` đang chạy thật trên máy này:
+///
+/// ```text
+/// [dwork]·08a90086  →  [dwork]·Chốt mockup doc và driver
+/// [dwork]·a14bc255  →  [dwork]·Tiếp tục DS04 quét mã và nhập xuất XML
+/// [dwork]·f33ae528  →  [dwork]·Tiếp tục N7 lát 2 kiểm tra khuôn mặt
+/// ```
+///
+/// Cột trái phân biệt được — đúng nghĩa hẹp của từ ấy, hai hàng không trỏ vào
+/// nhau. Nhưng người đọc phải MỞ từng cái ra mới biết mình vừa mở cái gì, nên
+/// nó chỉ đẩy việc đọc sang một cú bấm. Cột phải trả lời ngay trên nút.
+///
+/// Chữ ấy là của chính `claude` (nhan đề tab — `keys::Tab::doing`), không phải
+/// hub đoán; và mã id KHÔNG bị vứt đi, nó vẫn là đường lùi cho hàng không có
+/// tab hoặc hai hàng cùng nhan đề.
 ///
 /// 🔴 Hà 2026-08-13, ảnh chụp Telegram: mở một phiên mới trong VS Code, gửi
 /// việc, xong thì nhận tin `[dwork]` — bấm vào lại rơi đúng phiên terminal. Đo
@@ -549,14 +587,35 @@ pub fn label_sessions(rows: &mut [LiveSession], root: &Path) {
             }
         })
         .collect();
+    // VIỆC ĐANG LÀM là thứ đứng sau dấu `·`, không phải mã id — Hà 2026-08-19.
+    //
+    // Cắt ở đây chứ không ở chỗ vẽ nút: cái nhãn này còn đi vào tin báo, vào câu
+    // hỏi *"Đóng hẳn … ?"*, vào dòng `👁 Đang theo …`. Một chỗ cắt thì mọi chỗ
+    // dùng dài như nhau; cắt ở từng chỗ vẽ là dựng lại đúng bản-chép-thứ-hai mà
+    // `session_button_label` vừa phải gỡ.
+    let doing: Vec<String> = rows
+        .iter()
+        .map(|s| crate::exec::truncate(s.doing.trim(), 34))
+        .collect();
     for (i, row) in rows.iter_mut().enumerate() {
-        let clashes = base
+        let same_base: Vec<usize> = base
             .iter()
             .enumerate()
-            .any(|(j, b)| j != i && *b == base[i]);
-        row.label = if clashes {
-            let short = row.session_id.split('-').next().unwrap_or(&row.session_id);
-            format!("{}·{short}", base[i])
+            .filter(|(j, b)| *j != i && **b == base[i])
+            .map(|(j, _)| j)
+            .collect();
+        row.label = if !same_base.is_empty() {
+            // Việc đang làm chỉ dùng được khi nó THẬT SỰ tách được hai hàng:
+            // hai phiên `dwork` cùng đọc ra `Tiếp tục DS04 …` thì cái nhãn ấy
+            // nói dối y hệt cách `[dwork]` trần đã nói dối — và lần này còn khó
+            // ngờ hơn, vì nó nghe như một câu trả lời.
+            let unique = !doing[i].is_empty() && !same_base.iter().any(|j| doing[*j] == doing[i]);
+            if unique {
+                format!("{}·{}", base[i], doing[i])
+            } else {
+                let short = row.session_id.split('-').next().unwrap_or(&row.session_id);
+                format!("{}·{short}", base[i])
+            }
         } else {
             base[i].clone()
         };
@@ -589,13 +648,62 @@ pub fn shown(s: &LiveSession) -> String {
 /// lần một ngày, và một cái nhãn đổi màu sau mỗi lần khởi động thì tệ hơn không
 /// có màu — người đọc học màu ấy rồi bị nó lừa. Băm tên là hàm thuần: cùng dự
 /// án ⟹ cùng màu trên mọi tin, mọi máy, mọi lần chạy.
+/// Bộ ô màu dự án — xem [`project_dot`]. Ở tầm mô-đun vì [`without_dot`] cũng
+/// cần đúng bộ này: hai bản chép là hai bộ sẽ lệch nhau.
+///
+/// 🔴 **ĐỎ và VÀNG đã bị lấy ra khỏi bộ này (Hà 2026-08-19)**, trên chính một
+/// dòng hub gửi đi: `⏹ Đã đóng hẳn 🟥 [dwork]·f33ae528 …` — *"sao nội dung lại
+/// thừa và mâu thuẫn nhau thế"*. Ô ấy chỉ là **nhãn dự án**, hoàn toàn vô can
+/// với việc đóng phiên; nhưng trong cùng một dòng chữ, đỏ đã có sẵn một nghĩa
+/// khác (hỏng / cần chú ý) và người đọc lấy nghĩa ấy trước. Một tin **thành
+/// công** mở đầu bằng ô đỏ thì tự cãi nhau, và không cách nào đọc khác đi.
+/// Nên hai màu MANG NGHĨA — đỏ, vàng — thôi làm màu trang trí: chúng để dành
+/// cho thứ thật sự nói về tình trạng. Năm ô còn lại đều trung tính.
+/// Đen và trắng cũng không nằm trong bộ: chúng là màu của NỀN (Telegram sáng
+/// hay tối), nên một trong hai luôn chìm ở một nửa số người đọc — và ⬜ đã có
+/// việc riêng, xem [`project_dot`].
+/// ⚠ Đổi bộ ⟹ vài dự án đổi màu **đúng một lần**. Đó là cái giá chấp nhận
+/// được, và khác hẳn cái mà [`project_dot`] cấm: màu **đổi theo mỗi lần khởi
+/// động**. Băm vẫn thuần, cùng tên vẫn ra cùng ô trên mọi máy, mọi lần chạy.
+/// Năm ô cho vài chục dự án nghĩa là CÓ trùng — chấp nhận được, vì ô màu chỉ
+/// phải tách được **mấy phiên đang mở cùng lúc** trên một màn hình, không phải
+/// đánh số toàn bộ workspace (bảng tám ô cũ cũng đã trùng).
+const DOTS: [&str; 5] = ["🟦", "🟩", "🟧", "🟪", "🟫"];
+
+/// Ô vuông [`without_dot`] phải GỠ được nhưng [`DOTS`] không phát ra.
+///
+/// Hai nguồn: ⬜ là ô "không biết dự án nào" (vẫn đang phát, xem [`project_dot`]);
+/// 🟨 và 🟥 là **bộ cũ** — sổ theo dõi (`watch::Mark::l`) và những tin đã gửi còn
+/// giữ nhãn đúc bằng chúng.
+///
+/// 🔴 Vì sao không xoá thẳng hai ô cũ: bỏ đỏ/vàng khỏi [`DOTS`] mà quên chỗ này
+/// thì [`without_dot`] thôi nhận ra ô cũ, và cái sổ ấy đẻ ra đúng lỗi nó sinh ra
+/// để chặn: `🟦 🟥 [dwork]·…` — một nhãn đeo hai ô. Danh sách này chỉ để GỠ,
+/// không bao giờ để phát; phần "bộ cũ" co lại được khi sổ đã sạch nhãn cũ.
+const DOTS_GO_THEM: [&str; 3] = ["⬜", "🟨", "🟥"];
+
+/// Bỏ ô màu đứng đầu, nếu có — để một cái nhãn không đeo hai ô.
+///
+/// Sổ theo dõi giữ nhãn ĐÃ GẮN ô màu (`watch::Mark::l` = kết quả của [`shown`]),
+/// còn [`shown`] thì tự gắn ô màu vào bất cứ nhãn nào nó nhận. Chép thẳng từ sổ
+/// sang `LiveSession::label` mà không bỏ ô cũ thì ra `🟪 🟪 [dwork]·…`.
+pub fn without_dot(label: &str) -> &str {
+    let t = label.trim_start();
+    DOTS.iter()
+        .chain(DOTS_GO_THEM.iter())
+        .find_map(|d| t.strip_prefix(*d))
+        .map(str::trim_start)
+        .unwrap_or(t)
+}
+
 pub fn project_dot(folder: &str) -> &'static str {
-    const DOTS: [&str; 8] = ["🟦", "🟩", "🟨", "🟧", "🟪", "🟫", "🟥", "⬜"];
     let key = folder.trim();
     if key.is_empty() {
+        // Ô TRẮNG cố ý nằm ngoài [`DOTS`]: nó không phải một màu dự án mà là
+        // câu "không biết dự án nào", nên không được rơi trúng một dự án thật.
         return "⬜";
     }
-    // FNV-1a 32-bit: đủ tản cho tám ô, và viết gọn trong năm dòng — không kéo
+    // FNV-1a 32-bit: đủ tản cho năm ô, và viết gọn trong năm dòng — không kéo
     // thêm một crate băm vào đây cho một việc trang trí.
     let mut h: u32 = 0x811c_9dc5;
     for b in key.as_bytes() {
@@ -655,6 +763,16 @@ pub fn window_target_from_book(book_json: &str, id: &str) -> Option<LiveSession>
     Some(LiveSession {
         session_id: id.to_string(),
         name: mark.n.clone(),
+        // 🔴 CHÉP CẢ NHÃN — Hà 2026-08-19, ảnh `/shot`: *"Thông tin đầu phiên bị
+        // thiếu mã"*. Cái nút ngay trên tin ấy đọc `[dwork]·a14bc255`, còn tiêu
+        // đề tin lại chỉ `[dwork]` — về đúng một phiên, hai cái tên, và cái tên
+        // ngắn hơn thì trỏ vào ba phiên cùng lúc.
+        //
+        // Gốc: đường NHANH dựng hàng từ sổ (thay vì trả tiền một ảnh chụp), mà
+        // hàng dựng ra bỏ trống `label` ⟹ `shown` rơi về `display_name`, thứ cố
+        // ý vứt phần phân biệt được để lấy tên dự án. Sổ thì đã nhớ nhãn từ
+        // 08-13 (`watch::Mark::l`) — chỉ là chỗ này không chép sang.
+        label: without_dot(&mark.l).to_string(),
         tty: mark.y.clone(),
         host: mark.o.clone(),
         folder: mark.d.clone(),
@@ -3143,6 +3261,27 @@ fn mark_can_type(rows: &mut [LiveSession], tabs: &[crate::keys::Tab]) {
     }
 }
 
+/// Chép VIỆC ĐANG LÀM từ nhan đề tab sang từng hàng — xem `LiveSession::doing`.
+///
+/// Cùng khuôn với `mark_can_type`, và cùng một lý do: dùng lại đúng cái danh
+/// sách tab mà ảnh chụp đã phải trả tiền một lần (`keys::terminal_screens`), nên
+/// giá cận biên của cả tính năng này bằng KHÔNG — không thêm một lời gọi
+/// `osascript` nào, không thêm một mili giây nào vào vòng chạy.
+///
+/// Không có tab thì để RỖNG, không đoán bù bằng nhật ký: một câu bịa đứng trên
+/// nút còn tệ hơn một mã hex, vì mã hex thì ai cũng biết là mình không hiểu.
+fn mark_doing(rows: &mut [LiveSession], tabs: &[crate::keys::Tab]) {
+    for r in rows.iter_mut() {
+        if r.tty.is_empty() {
+            continue;
+        }
+        r.doing = crate::keys::alive_tab(tabs, &r.tty)
+            .and_then(|t| t.doing())
+            .unwrap_or_default()
+            .to_string();
+    }
+}
+
 /// Which listed session spawned each windowless one.
 ///
 /// Only rows with no window need this — a terminal session's origin is the
@@ -3315,6 +3454,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 .to_string();
             let mut row = LiveSession {
                 label: String::new(),
+                // Chép từ nhan đề tab ở `mark_doing`, sau khi đã có đủ hàng.
+                doing: String::new(),
                 // Điền ở khúc đọc tiến trình bên dưới (`shell_verdict`).
                 bg_shell: false,
                 account: account.name.clone(),
@@ -3572,6 +3713,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     add_shell_windows(&mut out.sessions, &tabs);
     out.hidden_dead = drop_stale_dead(&mut out.sessions);
     mark_can_type(&mut out.sessions, &tabs);
+    mark_doing(&mut out.sessions, &tabs);
     link_parents(&mut out.sessions, &procs);
     // Nhãn tính SAU khi đã có đủ mọi hàng: "có trùng ai không" là một câu hỏi
     // về cả tập, không hàng nào tự trả lời được.
@@ -4579,9 +4721,18 @@ fn start_in_terminal(
     if !task.trim().is_empty() {
         match ready_to_type(window) {
             Ready::Yes => match crate::keys::type_and_send(window, task) {
-                Ok(()) => logging::info(
+                // Gõ được KHÁC gửi được: khối chữ nằm lại trong ô nhập thì đề
+                // bài chưa chạy, và một dòng `new_task_typed` trần sẽ là chỗ
+                // duy nhất người ta nhìn để kết luận là nó đã chạy.
+                Ok(crate::keys::Delivered::Gone) => logging::info(
                     "new_task_typed",
                     json!({ "session": id, "chars": task.chars().count() }),
+                ),
+                Ok(other) => logging::warn(
+                    "new_task_left_in_box",
+                    json!({ "session": id, "chars": task.chars().count(),
+                            "landed": format!("{other:?}"),
+                            "effect": "đề bài đã vào ô nhập nhưng CHƯA gửi — phiên mở ra mà đứng im" }),
                 ),
                 Err(e) => logging::error(
                     "new_task_type_failed",
@@ -4899,6 +5050,145 @@ pub fn answer_trust_dialog(tty: &str) -> Option<usize> {
                 json!({ "tty": tty, "choice": n, "err": e.to_string() }),
             );
             None
+        }
+    }
+}
+
+/// Cửa sổ đang đóng dở ĐANG VƯỚNG cái gì — bốn kết cục, không gộp.
+///
+/// Gộp chúng vào một `bool` là dựng lại đúng cái bẫy `screen_of → None` (luật
+/// 13): *"tab còn bận"* có ít nhất bốn nghĩa, và chỉ một trong bốn là cái hub
+/// vẫn nói ra.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExitBox {
+    /// Đã bấm *"thoát và dừng lệnh nền"* — kèm số đã bấm và những việc bị dừng.
+    Answered(usize, Vec<String>),
+    /// Màn có một hộp chọn KHÁC. hub không trả lời thay chủ máy, nhưng phải NÓI.
+    Other(usize),
+    /// Không có hộp nào — cửa sổ bận vì đang chạy thật.
+    None,
+    /// Không đọc được màn.
+    Blind(String),
+}
+
+/// Hộp *"Background work is running"* — và **chỉ** hộp ấy.
+///
+/// 🔴 Hà 2026-08-19, ảnh chụp một cửa sổ đứng im sau khi chuyển phiên: *"Chuyển
+/// phiên xong phiên cũ bị kẹt như này làm sao qua được"*. Đo lại nguyên chuỗi
+/// (`logs/hub.log`, phiên `3853d022`, cửa sổ 4203): hub gõ `/exit` → `claude`
+/// bật hộp *"Background work is running · The following will stop when you
+/// exit: shell · bash …/quality-gate.sh"* → tab KHÔNG rảnh vì CLI đang chờ một
+/// câu trả lời → `close_still_busy` 141s · 284s · 507s · 644s → `close_gave_up`.
+///
+/// Mười phút ấy hub không nhìn màn một lần nào, và câu nó nói lúc bỏ cuộc —
+/// *"CLI đang chạy dở một lượt"* — là một **suy đoán, và sai**: phiên không
+/// chạy dở, nó đang hỏi. Đúng hình dạng "biết mà không nói", chỉ tệ hơn: đây là
+/// không thèm biết.
+///
+/// Vì sao bấm hộ được, trong khi luật chung là KHÔNG trả lời thay chủ máy (xem
+/// `trust_dialog_choice`): hộp này không hỏi về công việc, nó hỏi **cách thi
+/// hành một mệnh lệnh chủ máy vừa ra** — chính anh bấm đóng phiên, hoặc chính
+/// anh bật tự-bàn-giao. Ba lựa chọn của nó là ba cách đóng, và *"Stay"* là
+/// không đóng, tức là bỏ mệnh lệnh.
+///
+/// Và vì sao là **1 (Exit and stop tasks)** chứ không phải 2 (*"Move to
+/// background and exit"*): ngay sau bước này hub ĐÓNG CỬA SỔ, mà đóng một cửa
+/// sổ còn tiến trình sống thì Terminal bật hộp *"terminate running
+/// processes?"* — và một hộp thoại khoá mọi lệnh tự động sau nó (luật 13,
+/// `keys::close_window`). Chọn 2 là đi thẳng vào đúng cái hố mà cả đường đóng
+/// này được dựng lên để tránh.
+///
+/// Nhận theo CHỮ, và đòi cả hai vế: nhãn có `exit` **và** `stop`. *"Move to
+/// background and exit"* có `exit` mà không có `stop`, nên nó không lọt. Câu
+/// chữ đổi ⟹ không khớp ⟹ hub rơi về nhánh nói-và-giữ-nguyên: **hỏng về phía
+/// im lặng, không phải về phía bấm bừa.**
+pub fn exit_dialog_choice(screen: &str, choices: &[(usize, String)]) -> Option<usize> {
+    if !screen.to_lowercase().contains("background work is running") {
+        return None;
+    }
+    choices.iter().find_map(|(n, label)| {
+        let l = label.trim().to_lowercase();
+        (l.contains("exit") && l.contains("stop")).then_some(*n)
+    })
+}
+
+/// Những việc nền hộp ấy khai là sẽ DỪNG — để câu báo nói ra được cái GIÁ.
+///
+/// Bấm hộ mà không kể vừa dừng cái gì là một lỗi im lặng đội lốt tiện lợi: chủ
+/// máy mất một lượt `cargo test` hai phút và không có chỗ nào ghi lại điều đó.
+pub fn exit_dialog_tasks(screen: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut listing = false;
+    for line in screen.lines() {
+        let t = line.trim();
+        if t.to_lowercase()
+            .starts_with("the following will stop when you exit")
+        {
+            listing = true;
+            continue;
+        }
+        if !listing || t.is_empty() {
+            continue;
+        }
+        // Tới hàng lựa chọn là hết danh sách — cùng luật nhận dạng với
+        // `keys::parse_choices`, để hai chỗ không đọc lệch nhau.
+        let bare = t.strip_prefix('❯').map(str::trim_start).unwrap_or(t);
+        if bare
+            .split_once('.')
+            .is_some_and(|(num, _)| num.trim().parse::<usize>().is_ok())
+        {
+            break;
+        }
+        out.push(t.to_string());
+    }
+    out
+}
+
+/// Nhìn cửa sổ đang đóng dở; kẹt ở hộp lệnh-nền thì bấm hộ — xem [`ExitBox`].
+///
+/// Nhận **id cửa sổ** chứ không phải `tty`, vì đó là thứ sổ chờ-đóng đang giữ
+/// (`pipeline::Closing::w`) và là thứ `keys::press` cần. Không dựng lại ảnh
+/// chụp nào: một lượt đọc màn cho một cửa sổ, và chỉ khi có mục trong sổ.
+pub fn answer_exit_dialog(window: i64) -> ExitBox {
+    let screen = match crate::keys::screen_text(window) {
+        Ok(s) => s,
+        Err(e) => {
+            logging::warn(
+                "exit_dialog_screen_blind",
+                json!({ "window": window, "err": crate::logging::err_chain(&e),
+                        "effect": "không biết cửa sổ đang bận vì chạy hay vì đang hỏi" }),
+            );
+            return ExitBox::Blind(e.to_string());
+        }
+    };
+    let choices = crate::keys::parse_choices(&screen);
+    let Some(n) = exit_dialog_choice(&screen, &choices) else {
+        if !choices.is_empty() {
+            logging::info(
+                "exit_dialog_other_box",
+                json!({ "window": window, "choices": choices.len(),
+                        "why": "cửa sổ đang chờ trả lời một hộp KHÁC — hub không trả lời thay chủ máy" }),
+            );
+            return ExitBox::Other(choices.len());
+        }
+        return ExitBox::None;
+    };
+    let tasks = exit_dialog_tasks(&screen);
+    match crate::keys::press(window, &n.to_string()) {
+        Ok(()) => {
+            logging::info(
+                "exit_dialog_answered",
+                json!({ "window": window, "pressed": n, "stopped": tasks,
+                        "why": "hộp lệnh-nền của chính lượt /exit hub vừa gõ — chọn 2 sẽ để lại tiến trình sống và làm Terminal bật hộp khoá mọi lệnh sau đó" }),
+            );
+            ExitBox::Answered(n, tasks)
+        }
+        Err(e) => {
+            logging::warn(
+                "exit_dialog_press_failed",
+                json!({ "window": window, "choice": n, "err": e.to_string() }),
+            );
+            ExitBox::Blind(e.to_string())
         }
     }
 }

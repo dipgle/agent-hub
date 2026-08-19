@@ -67,6 +67,28 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     // số phải nằm trong tên: `/pick_4963b95c_2_1` (18 ký tự) mang đủ phiên, câu
     // và lựa chọn; `/run_0` trỏ vào sổ lệnh thay vì chép dòng lệnh vào nhãn —
     // và đó cũng là lý do nó không thể bị cắt cụt như một cái nhãn nút.
+    /// Mẩu id trong một đích-chạm có hợp lệ không.
+    ///
+    /// 🔴 CỬA SỔ TRẦN CŨNG LÀ MỘT ĐÍCH — Hà 2026-08-19, ảnh `/shot` cửa sổ
+    /// `ttys002` đang hỏi *"Bypass Permissions mode"* với đúng hai lựa chọn, hai
+    /// dấu ☑ hiện rành rành: *"Sao khong bam chon được"*. Log trả lời trong một
+    /// dòng: `telegram_not_a_command {"head":"/start k_win-ttys_2"}`.
+    ///
+    /// Hai lỗi chồng lên nhau, và cả hai đều từ giả định *"id nào cũng là uuid"*:
+    /// `SessionData::short()` cắt 8 ký tự đầu nên `win-ttys002` thành
+    /// `win-ttys` — **mất số tty**, tức mất luôn cái phân biệt cửa sổ này với
+    /// cửa sổ khác; rồi bộ đọc đòi 8 ký tự HEX nên `win-ttys` không lọt. Kết
+    /// quả: hub VẼ RA hai cái ☑ mà không đường nào nhận chúng — đúng hình dạng
+    /// "một cái nút không dẫn vào đâu" mà luật 14 cấm.
+    ///
+    /// Nên id cửa sổ đi NGUYÊN (`win-ttys002`, 11 ký tự, vẫn thừa chỗ trong 32
+    /// ký tự tên lệnh và hợp bộ ký tự deep-link `A-Za-z0-9_-`).
+    fn sid_ok(sid: &str) -> bool {
+        if sid.is_empty() {
+            return false;
+        }
+        crate::sessions::is_shell_id(sid) || sid.chars().all(|c| c.is_ascii_hexdigit())
+    }
     if let Some(rest) = verb.strip_prefix("pick_") {
         // `pick_<8 ký tự đầu id>_<câu>_<lựa chọn>`
         let f: Vec<&str> = rest.split('_').collect();
@@ -81,7 +103,7 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     // chỉ gửi lại đúng token lệnh — chữ sau dấu cách rơi mất.
     if let Some(rest) = verb.strip_prefix("tab_") {
         if let Some((sid, n)) = rest.split_once('_') {
-            let ok_sid = !sid.is_empty() && sid.chars().all(|c| c.is_ascii_hexdigit());
+            let ok_sid = sid_ok(sid);
             let ok_n = !n.is_empty() && n.chars().all(|c| c.is_ascii_digit());
             if ok_sid && ok_n {
                 return Some((CommandKind::Tab, 0, format!("{sid} {n}")));
@@ -107,7 +129,7 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     // Nó là `/key <id> enter` viết dưới dạng CHẠM ĐƯỢC: `/key` có tham số đứng
     // sau dấu cách, mà chạm thì chỉ gửi lại token lệnh — chữ sau rơi mất.
     if let Some(sid) = verb.strip_prefix("send_") {
-        if !sid.is_empty() && sid.chars().all(|c| c.is_ascii_hexdigit()) {
+        if sid_ok(sid) {
             return Some((CommandKind::Key, 0, format!("{sid} enter")));
         }
     }
@@ -119,7 +141,7 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     // kết thì phải tự mang đủ phiên + số.
     if let Some(rest) = verb.strip_prefix("k_") {
         if let Some((sid, n)) = rest.split_once('_') {
-            let ok_sid = !sid.is_empty() && sid.chars().all(|c| c.is_ascii_hexdigit());
+            let ok_sid = sid_ok(sid);
             let ok_n = n.len() == 1 && n.chars().all(|c| c.is_ascii_digit()) && n != "0";
             if ok_sid && ok_n {
                 return Some((CommandKind::Key, 0, format!("{sid} {n}")));
@@ -139,7 +161,7 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     // trỏ: một tin cũ bấm lại vẫn phải chạm đúng phiên của nó — cùng bài học
     // với `quick_token`.
     if let Some(sid) = verb.strip_prefix("clr_") {
-        if !sid.is_empty() && sid.chars().all(|c| c.is_ascii_hexdigit()) {
+        if sid_ok(sid) {
             return Some((CommandKind::Key, 0, format!("{sid} clear")));
         }
     }

@@ -1506,6 +1506,7 @@ fn a_tab_knows_whether_a_cli_is_running_in_it() {
         busy: true,
         procs: procs.iter().map(|p| p.to_string()).collect(),
         screen: None,
+        title: String::new(),
     };
 
     // Đo thật trên máy lúc dựng: `login`, `-zsh`, rồi CLI.

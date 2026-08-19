@@ -480,6 +480,28 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     rather than showing it — so a reply must read the screen back and say WHERE
     the text landed. `osascript` returning 0 proves only that bytes reached the
     tab.
+    🔴 **Cái MÀN chỉ là bản VẼ, không phải bản LƯU** (2026-08-19, đo trên phiên
+    `[tcc/amm]` khi Hà hỏi *"làm sao đủ nội dung ngữ cảnh"*). Ba con số, đừng
+    dò lại:
+    · `contents of tab` = **26 đoạn / 1487 ký tự** — đúng khung nhìn;
+    · `history of tab` (toàn bộ cuộn lại) = **42 đoạn / 3487 ký tự**, và 16 dòng
+      thêm ấy là *"Last login…"* + câu lệnh mở phiên, **0 dòng hội thoại** — TUI
+      vẽ ĐÈ tại chỗ nên bộ đệm cuộn rỗng. **Đường này là ngõ cụt, đừng thử lại.**
+    · **Nới `number of rows` 26 → 60 ⟹ 61 đoạn**, hộp chọn hiện đủ từ `1.` tới
+      dòng chân. Đây là đường duy nhất lấy thêm được, và nó phải nới-đọc-TRẢ LẠI
+      trong **một** lượt `osascript` (`keys::screen_text_tall`), vì nửa chừng mà
+      hub chết là cửa sổ chủ máy nằm lại ở chiều lạ.
+    Bản sao đầy đủ của HỘI THOẠI thì nằm ở nhật ký `.jsonl`, không ở màn. Ngoại
+    lệ đã đo: **bảng hỏi ĐANG TREO chưa được ghi vào nhật ký** (0 lần
+    `AskUserQuestion` trong 3,6 MB nhật ký amm trong khi hộp nằm trên màn) — nên
+    hộp chọn buộc phải đọc từ màn.
+    🔴 **Ô nhập của `claude` KHÔNG còn khung** (cùng ngày): `╭` `╰` `│` đều **0
+    lần** trên màn thật; nay chỉ còn **một vạch `─` suốt bề ngang**, và ô nằm
+    GIỮA HAI vạch. Neo `rfind('╭')` vì thế trượt ở mọi lượt đọc rồi rơi âm thầm
+    về đường lùi "bốn dòng cuối" — đủ để mọi thứ trông vẫn chạy, và đã trả giá:
+    khối kết quả `▶️` nằm lại trong ô nhập **hơn một tiếng** trong khi hub báo
+    *"✅ đã dán vào phiên"*, còn `⌫` thì hai lần đều không xoá nổi. Một cái neo
+    duy nhất: `keys::box_start`.
     **Opening and closing a window** (2026-08-11). `do script "<cmd>"` makes a
     new window and returns its *tab*; `tty of` that tab is the handle that ties
     it to the `claude agents` row that appears seconds later. Closing is

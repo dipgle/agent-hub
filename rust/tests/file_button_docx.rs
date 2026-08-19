@@ -37,7 +37,7 @@ const DOCX: &str = "docs/phuong-an-trinh.docx";
 /// Tầng 1 — bộ dò phải NHÌN THẤY đường dẫn `.docx`.
 #[test]
 fn the_docx_is_seen_on_the_screen() {
-    let seen = hub::keys::paths_on_screen(hub::keys::body_before_box(&fixture()), 4);
+    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&fixture()), 4);
     assert!(
         seen.iter().any(|p| p == DOCX),
         "bộ dò bỏ qua bản in: {seen:?}"
@@ -51,7 +51,7 @@ fn the_docx_is_seen_on_the_screen() {
 #[test]
 fn the_docx_survives_the_command_filter() {
     let text = fixture();
-    let seen = hub::keys::paths_on_screen(hub::keys::body_before_box(&text), 4);
+    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&text), 4);
     let cmds: Vec<hub::sessions::Cmd> = hub::keys::commands_in_report(&text, 8)
         .into_iter()
         .map(|line| hub::sessions::Cmd {

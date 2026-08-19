@@ -52,7 +52,7 @@ fn a_remove_line_is_a_command() {
 #[test]
 fn the_file_it_deletes_gets_no_download_button() {
     let text = shot_text();
-    let seen = hub::keys::paths_on_screen(hub::keys::body_before_box(&text), 4);
+    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&text), 4);
     let cmds: Vec<hub::sessions::Cmd> = hub::keys::commands_in_report(&text, 8)
         .into_iter()
         .map(|line| hub::sessions::Cmd {

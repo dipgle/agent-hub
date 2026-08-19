@@ -1,0 +1,25 @@
+     ⇒ không ràng địa chỉ contract vào một danh sách người, không có cửa 
+     front-run `init`, KHÔNG cần fork. Khớp governance chain đã có (≥2/3 stake).
+     Đổi người = đổi validator set, không phải redeploy. Đánh đổi: validator 
+     chưa chắc là đúng người giữ chìa khoá một sàn DEX.
+  2. Bake multisig đội ngũ
+     k-of-n địa chỉ ghim trong code, xác thực bằng `tcc_verify_sig` 
+     (`vm/host.rs:522`, ML-DSA). Rõ người, tự chứng minh (ai cũng build lại kiểm
+     được). Cái giá: admin trở thành một phần danh tính contract ⇒ mỗi lần đổi 
+     người là redeploy + di trú toàn bộ LP.
+  3. Không authority — ship bất biến
+     Như Uniswap v2 core: không `pause()`, không protocol fee, vĩnh viễn. Đóng 
+     LUÔN cả #5 và #6, không nợ gì. Contract hiện đã viết đúng theo hướng này 
+     rồi (0 dòng `pause`, 0 dòng `protocol_fee`). Đánh đổi: AMM là singleton — 
+     một lỗi chạm TVL của MỌI pool và không có van khoá nào.
+  4. Lai: multisig pause, validator mở lại
+     Multisig ít người bấm pause (nhanh, lúc cháy nhà), nhưng unpause + đổi phí 
+     cần ≥2/3 stake validator; pause tự hết hạn sau N block để một multisig mất 
+     tích không đóng băng sàn vĩnh viễn. Mạnh nhất về an toàn, tốn công cài 
+     nhất, và vẫn phải bake địa chỉ multisig.
+  5. Type something.                                          
+────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+

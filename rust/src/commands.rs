@@ -344,15 +344,25 @@ pub fn for_telegram() -> Vec<(&'static str, &'static str)> {
 /// `setMyCommands`, nên "sắp xếp lại menu" chỉ là gửi lại danh sách theo thứ tự
 /// khác — một lượt HTTP, và chỉ khi thứ tự thật sự đổi.
 ///
-/// `count_of` trả số lượt đã dùng của một route. Hoà nhau thì giữ NGUYÊN thứ tự
-/// trong bảng: sắp xếp ổn định, nên menu không nhảy chỗ vì hai lệnh cùng đếm 0 —
-/// một cái menu tự đổi chỗ mỗi lượt là cái menu không ai nhớ nổi.
-pub fn for_telegram_by_usage(
-    count_of: impl Fn(&Route) -> u64,
-) -> Vec<(&'static str, &'static str)> {
-    let mut rows: Vec<&Route> = ROUTES.iter().filter(|r| r.listed).collect();
-    rows.sort_by_key(|r| std::cmp::Reverse(count_of(r)));
-    rows.into_iter().map(|r| (r.name, r.help)).collect()
+/// `score_of` trả ĐIỂM dùng của một route. Hoà nhau thì giữ NGUYÊN thứ tự trong
+/// bảng: sắp xếp ổn định, nên menu không nhảy chỗ vì hai lệnh cùng đếm 0 — một
+/// cái menu tự đổi chỗ mỗi lượt là cái menu không ai nhớ nổi.
+///
+/// 🔴 Câu ấy viết ra 17/08 và nó ĐÚNG, chỉ hụt đúng một chữ: nó lo cho hoà NHAU
+/// mà quên SÁT nhau. Hà 2026-08-19: *"menu đang theo flow nào mà tôi thấy cứ
+/// nhảy loạn"*. Nên hàm này thôi tự quyết thứ tự — nó trả về ĐIỂM kèm hàng, và
+/// chỗ gọi (`pipeline::menu_settled_order`) mới là nơi quyết có đổi chỗ hay
+/// không. Xếp hạng và HÃM xếp hạng là hai việc, tách ra mới đo được từng cái.
+pub fn for_telegram_scored(
+    score_of: impl Fn(&Route) -> u64,
+) -> Vec<(&'static str, &'static str, u64)> {
+    let mut rows: Vec<(&'static str, &'static str, u64)> = ROUTES
+        .iter()
+        .filter(|r| r.listed)
+        .map(|r| (r.name, r.help, score_of(r)))
+        .collect();
+    rows.sort_by_key(|(_, _, s)| std::cmp::Reverse(*s));
+    rows
 }
 
 /// Route nào mang `kind` này — dùng để quy một lượt chạy về đúng (các) tên lệnh.

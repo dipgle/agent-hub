@@ -4351,6 +4351,72 @@ pub fn say_from_session_with(
 /// cho lượt vừa chạy. Khai lại chỉ khi thứ tự khác lần trước: Telegram không có
 /// cách nào "sửa một dòng", mỗi lần khai là gửi cả danh sách, nên gửi mỗi lượt
 /// bấm là tốn một lượt HTTP cho một cái menu y hệt.
+/// Phải hơn kẻ đứng trên BAO NHIÊU thì mới được vượt mặt.
+///
+/// 🔴 Hà 2026-08-19: *"Sắp xếp ưu tiên menu đang theo flow nào mà tôi thấy cứ
+/// nhảy loạn lên"*. Flow thì đúng — tần suất có suy giảm theo thời gian, chính
+/// thứ anh đặt hôm 17/08 — nhưng nó thiếu cái hãm, nên **hai lệnh sát điểm nhau
+/// đổi chỗ sau MỖI lượt bấm**.
+///
+/// 📐 Đo trên sổ thật (`cursors.menu:usage`, 19/08): `Session` **257,6** ·
+/// `Shot` **241,2** — hơn nhau **6,8%**. Mà bấm một phiên là chạy `/session`
+/// rồi `/shot` liền nhau, mỗi lượt +1 cho một bên, nên hai đứa **thay nhau dẫn
+/// đầu vĩnh viễn**. Log nói đúng điều đó: 48 lượt xếp lại trong hai ngày, và
+/// riêng cặp 1↔2 lật **bốn lần trong 13 phút** (08:34:35 → 08:34:38 → 08:45:17
+/// → 08:45:21), có lần **cách nhau 3 giây**. Cặp `Type` 100,7 / `Key` 97,3
+/// (3,5%) là cặp thứ hai đang chờ tới lượt.
+///
+/// 1,25 ⟹ muốn vượt `Session` thì `Shot` phải đạt ~322 điểm, tức hơn hẳn vài
+/// chục lượt dùng chứ không phải một cú bấm. Nó KHÔNG đóng băng menu: một lệnh
+/// thật sự đang được dùng nhiều hơn vẫn leo, chỉ là leo vì đang được dùng nhiều
+/// hơn, không phải vì vừa được bấm sau.
+pub const MENU_LEAD_MARGIN: f64 = 1.25;
+
+/// Thứ tự menu ĐÃ HÃM: giữ nguyên thứ tự đang có, trừ chỗ kẻ dưới hơn hẳn kẻ trên.
+///
+/// Hàm thuần, và cố ý thế: đây là toàn bộ phần "có nên đổi chỗ không", nên nó
+/// phải kiểm được bằng đúng những con số đã làm menu nhảy — xem
+/// `tests/menu_order.rs`.
+///
+/// Đi từ thứ tự CŨ chứ không từ bảng điểm: cái người dùng đang nhớ là thứ tự cũ,
+/// nên nó là điểm xuất phát, còn điểm số chỉ được phép đẩy từng nấc. Lệnh mới
+/// (chưa từng có trong thứ tự cũ) xếp cuối theo điểm của nó — điểm 0 thì đứng
+/// cuối, đúng chỗ.
+pub fn menu_settled_order(
+    prev: &[String],
+    scored: &[(&'static str, &'static str, u64)],
+) -> Vec<(&'static str, &'static str)> {
+    let mut order: Vec<(&'static str, &'static str, u64)> = Vec::with_capacity(scored.len());
+    for name in prev {
+        if let Some(row) = scored.iter().find(|(n, _, _)| n == name) {
+            order.push(*row);
+        }
+    }
+    for row in scored {
+        if !order.iter().any(|(n, _, _)| *n == row.0) {
+            order.push(*row);
+        }
+    }
+    // Nổi bọt từng nấc một, và chỉ khi hơn đủ biên. Từng nấc là có chủ: một lệnh
+    // vừa sống lại thì leo dần, mắt còn theo kịp — nhảy tám bậc một lượt
+    // (`accounts` 12→8, đo 18/08 01:57) thì lần sau tìm nó ở đâu cũng sai.
+    let n = order.len();
+    for _ in 0..n {
+        let mut moved = false;
+        for i in 1..n {
+            let (up, down) = (order[i - 1].2 as f64, order[i].2 as f64);
+            if down > up * MENU_LEAD_MARGIN {
+                order.swap(i - 1, i);
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+    order.into_iter().map(|(n, h, _)| (n, h)).collect()
+}
+
 pub fn menu_reorder_if_needed(db: &Db, kind: CommandKind, now_ms: i64) {
     let mut book: std::collections::BTreeMap<String, (f64, i64)> = db
         .cursor_or_log(MENU_KEY)
@@ -4366,16 +4432,22 @@ pub fn menu_reorder_if_needed(db: &Db, kind: CommandKind, now_ms: i64) {
             return;
         }
     }
-    let rows = crate::commands::for_telegram_by_usage(|r| {
+    let scored = crate::commands::for_telegram_scored(|r| {
         let k = format!("{:?}", r.kind);
         let (s, t) = book.get(&k).copied().unwrap_or((0.0, now_ms));
         // Xếp bằng số nguyên để thứ tự không nhảy vì sai số dấu phẩy động; nhân
         // 1000 giữ đủ phân giải cho những điểm đã mờ gần hết.
         (decayed(s, t, now_ms, MENU_HALF_LIFE_MS) * 1000.0) as u64
     });
+    let stored = db.cursor_or_log(MENU_ORDER_KEY);
+    let prev: Vec<String> = stored
+        .as_deref()
+        .map(|s| s.split(',').map(str::to_string).collect())
+        .unwrap_or_default();
+    let rows = menu_settled_order(&prev, &scored);
     let order: Vec<&str> = rows.iter().map(|(n, _)| *n).collect();
     let joined = order.join(",");
-    if db.cursor_or_log(MENU_ORDER_KEY).as_deref() == Some(joined.as_str()) {
+    if stored.as_deref() == Some(joined.as_str()) {
         return;
     }
     let Some(tg) = crate::telegram::inbox() else {

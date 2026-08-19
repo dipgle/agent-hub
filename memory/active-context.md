@@ -1,5 +1,42 @@
 # active context — hub
 
+## 🎯 2026-08-19 (sáng, #2) — menu ☰ nhảy loạn: đúng flow, thiếu cái HÃM
+
+Hà: *"Sắp xếp ưu tiên menu đang theo flow nào mà tôi thấy cứ nhảy loạn lên"*.
+
+**Flow đúng là thứ anh đặt hôm 17/08:** tần suất **có suy giảm theo thời gian**
+(`decayed`, nửa đời 7 ngày — *"tần suất phải gắn cả thời gian thì mới phản ánh
+đúng"*), tính lại sau MỖI lệnh, khai lại với Telegram khi thứ tự đổi. Không có
+gì bí ẩn và cũng không hỏng.
+
+**Cái hỏng là so sánh TRẦN.** Sổ thật (`cursors.menu:usage`, 19/08):
+`Session` **257,6** · `Shot` **241,2** — hơn nhau **6,8%**. Mà bấm một phiên là
+chạy `/session` rồi `/shot` liền nhau, mỗi lượt +1 cho một bên ⟹ **hai đứa thay
+nhau dẫn đầu vĩnh viễn**. Log nói đúng con số: **48 lượt xếp lại trong 2 ngày**,
+riêng cặp 1↔2 lật **4 lần trong 13 phút** (08:34:35 → 08:34:38 → 08:45:17 →
+08:45:21), có lần **cách nhau 3 giây**. Cặp `Type` 100,7 / `Key` 97,3 (3,5%)
+đang chờ tới lượt. Và có lượt nhảy **8 bậc** một lần (`accounts` 12→8, 18/08
+01:57) — thứ làm mất luôn trí nhớ cơ bắp.
+
+📌 Chú thích cũ trong `commands.rs` đã viết đúng câu chốt — *"một cái menu tự đổi
+chỗ mỗi lượt là cái menu không ai nhớ nổi"* — rồi chỉ chống được HOÀ nhau (sắp
+xếp ổn định), quên mất SÁT nhau. Đúng một chữ.
+
+**Vá:** tách hai việc từng dính làm một. `commands::for_telegram_scored` chỉ
+CHẤM ĐIỂM; `pipeline::menu_settled_order` mới quyết có đổi chỗ không, đi từ thứ
+tự CŨ (thứ người dùng đang nhớ) và chỉ cho vượt mặt khi hơn **≥25%**
+(`MENU_LEAD_MARGIN`), mỗi lượt **một bậc**. Với sổ hiện tại, `/shot` phải đạt
+~322 điểm mới qua mặt `/session` — vài chục lượt dùng, không phải một cú bấm.
+Không đóng băng: lệnh dùng nhiều hơn hẳn vẫn leo, chỉ leo vì **đang được dùng
+nhiều hơn**, không vì vừa được bấm sau.
+
+**Nghiệm thu:** 6 bài kiểm mới chạy trên **chính bảng điểm thật** trong sổ, và
+**đỏ được đã kiểm tay** — hạ `MENU_LEAD_MARGIN` về 1,0 thì 2 bài đỏ, kèm tái
+hiện đúng triệu chứng (`accounts` nhảy 11→8, ba bậc). `467 test · clippy 0 ·
+fmt 0`. Cài 10:10, `hubd` pid 57874 `@2026-08-19T03:10:24Z` chữ ký `cert`.
+⚠ Chưa quan sát được một quãng dùng THẬT sau khi cài — thứ chứng minh nó là
+`menu_reordered` **thưa hẳn đi** trong log vài ngày tới, không phải bài kiểm.
+
 ## 🎯 2026-08-19 (sáng) — trần 5 MB gửi tệp là khẩu vị của hub, không phải luật
 
 Hà: *"Sao lại có giới hạn dung lượng"* — `⚠ chưa gửi được hub.log — 21.4 MB —

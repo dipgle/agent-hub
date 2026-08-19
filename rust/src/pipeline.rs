@@ -314,8 +314,22 @@ pub fn enter_button(
         crate::watch::Change::Ended { .. } => takeover?,
         _ => (id, c.name()),
     };
+    // 🔴 ĐANG THEO PHIÊN ẤY THÌ ĐỔI NÚT, ĐỪNG BỎ NÚT — Hà 2026-08-19, ảnh một
+    // tin `🟡 🟩 [tfl5] dừng, đang chờ bạn — sau 4 phút chạy`: *"Nhận được thông
+    // báo này nhưng không có nút vào phiên"*.
+    //
+    // Bản trước trả `None` ở đây, và cái lý do nghe rất hợp lý: "vào phiên" là
+    // một cú bấm KHÔNG làm gì khi anh đã ở trong phiên ấy rồi. Đúng về cái nút,
+    // sai về cái TIN: tin ấy vừa nói *"đang chờ bạn"* — tức nó vừa dựng ra đúng
+    // một việc để làm, rồi không đưa đường nào để làm việc đó. Ngồi ở máy thì
+    // anh liếc sang cửa sổ; từ điện thoại, thứ tương đương là XEM MÀN.
+    //
+    // Nên luật của rule 14 giữ nguyên (*"một cái nút phải dẫn tới chỗ có thật"*)
+    // và đọc kỹ hơn một nhịp: đích không có thật thì đổi đích, chứ đừng để tin
+    // trần. `shot:` là route đã có, cùng đường với nút `📷 Xem màn` ở chỗ khác —
+    // không đẻ lối riêng.
     if target == focused {
-        return None;
+        return Some(("📷 Xem màn".to_string(), format!("shot:{target}")));
     }
     Some((
         format!("👁 Vào phiên {}", crate::exec::truncate(name, 24)),

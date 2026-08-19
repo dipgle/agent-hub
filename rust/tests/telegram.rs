@@ -524,12 +524,39 @@ fn a_taken_over_window_sends_you_to_the_session_that_holds_it() {
     );
 }
 
-/// …và nếu phiên chiếm cửa sổ CHÍNH LÀ phiên đang theo thì cũng không cần nút.
+/// …và nếu phiên chiếm cửa sổ CHÍNH LÀ phiên đang theo thì đổi ĐÍCH, không bỏ nút.
+///
+/// 🔄 ĐẢO CHIỀU 2026-08-19. Bản cũ khoá `None`, với lý do nghe rất hợp lý: "vào
+/// phiên" là cú bấm không làm gì khi đã ở trong phiên ấy. Đúng về cái NÚT, sai
+/// về cái TIN — Hà, ảnh một tin `🟡 🟩 [tfl5] dừng, đang chờ bạn`: *"Nhận được
+/// thông báo này nhưng không có nút vào phiên"*. Tin vừa dựng ra một việc để
+/// làm rồi không đưa đường nào để làm nó.
 #[test]
-fn no_button_when_the_heir_is_already_the_followed_session() {
+fn the_heir_that_is_already_followed_gets_a_screen_button_instead() {
+    let (label, data) =
+        hub::pipeline::enter_button(&ended(DEAD, "hub-67"), DEAD, Some((HEIR, "hub-ec")), HEIR)
+            .expect("tin về phiên đang theo vẫn phải có đường bấm");
+    assert!(label.contains("Xem màn"), "{label}");
     assert_eq!(
-        hub::pipeline::enter_button(&ended(DEAD, "hub-67"), DEAD, Some((HEIR, "hub-ec")), HEIR),
-        None
+        callback_to_command(&data).as_deref(),
+        Some(format!("/shot {HEIR}").as_str())
+    );
+}
+
+/// Và ca thường gặp nhất: phiên ĐANG THEO dừng lại chờ — nút phải là 📷, vì
+/// "vào phiên" ở đó không đi tới đâu cả.
+#[test]
+fn a_waiting_followed_session_gets_the_screen_button() {
+    let c = hub::watch::Change::Finished {
+        id: SID.to_string(),
+        name: "projects-fb".to_string(),
+        ran_sec: 240,
+    };
+    let (label, data) = hub::pipeline::enter_button(&c, SID, None, SID).expect("mất nút");
+    assert!(label.contains("Xem màn"), "{label}");
+    assert_eq!(
+        callback_to_command(&data).as_deref(),
+        Some(format!("/shot {SID}").as_str())
     );
 }
 

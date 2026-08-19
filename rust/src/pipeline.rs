@@ -4267,6 +4267,21 @@ pub struct SessionData {
     /// Hà 2026-08-16: *"chưa chèn link tải file xuất hiện trong nội dung phiên
     /// gửi lên tele"*.
     pub files: Vec<(String, usize)>,
+    /// Thanh tab của bảng hỏi nhiều câu → ↪ sang tab ấy, NGAY TẠI nhãn của nó.
+    ///
+    /// `(số tab đếm từ 1, nhãn, đã trả lời chưa)`.
+    ///
+    /// 🔴 Hà 2026-08-19: *"Sao không chèn nút trực tiếp ở phần nội dung lại đi
+    /// chèn thêm nút ở cuối"*. Bản đầu của tôi ném ba cái nút xuống đáy tin, và
+    /// lý do thì thuần là lý do của MÃ: `html_with_links` gắn mỗi dòng một neo,
+    /// mà thanh tab là MỘT dòng mang ba nhãn. Nên tôi đi đường dễ — đúng thứ
+    /// `CLAUDE.md` đã cấm hai lần (*"nút chọn phải chèn ngay tại các dòng chọn"*
+    /// · *"Hạn chế dùng khối nút ở cuối tin"*).
+    ///
+    /// Cách đúng không phải là sửa bộ gắn neo cho nó gắn được nhiều neo một
+    /// dòng, mà là **bẻ thanh tab thành mỗi tab một dòng** — xem
+    /// [`split_tab_bar`]. Trên màn 390px nó vốn đã tự xuống dòng lộn xộn rồi.
+    pub tabs: Vec<(usize, String, bool)>,
 }
 
 impl SessionData {
@@ -4768,6 +4783,51 @@ struct Layout {
     rest_btns: Vec<(String, String)>,
 }
 
+/// Thanh tab MỘT dòng → mỗi tab MỘT dòng.
+///
+/// 🔴 Hà 2026-08-19: *"Sao không chèn nút trực tiếp ở phần nội dung lại đi chèn
+/// thêm nút ở cuối"*. Đích chạm phải nằm tại nhãn, mà bộ gắn neo
+/// (`html_with_links`) gắn **mỗi dòng một neo** — nên chừng nào ba nhãn còn nằm
+/// chung một dòng thì chỉ một cái bám được, và hai cái kia rơi xuống đáy tin.
+///
+/// Bẻ dòng là phép ĐỊNH DẠNG, không phải thêm nội dung: từng chữ ở đây đều là
+/// chữ TUI vẽ ra, chỉ đổi chỗ xuống dòng. Và trên màn 390px thì thanh ấy vốn đã
+/// tự gãy lung tung — `←  ☒ RPC pool  ☐ NativeAssets v3  ☐ Việc tiếp  ✔ Submit
+/// →` đọc trên điện thoại không ra hàng nào cả.
+///
+/// Hai mũi tên `←`/`→` bỏ đi cùng lúc: chúng là chỉ dẫn BÀN PHÍM (*"bấm trái
+/// phải để đi"*), đúng khi ngồi trước máy và vô nghĩa khi mỗi tab đã có một chỗ
+/// để chạm.
+fn split_tab_bar(text: &str, tabs: &[(usize, String, bool)]) -> String {
+    if tabs.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + 64);
+    for line in text.lines() {
+        let is_bar = line.contains('←')
+            && line.contains('→')
+            && tabs
+                .iter()
+                .any(|(_, label, _)| line.contains(label.as_str()));
+        if !is_bar {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        for (_, label, answered) in tabs {
+            out.push_str(if *answered { "☒ " } else { "☐ " });
+            out.push_str(label);
+            out.push('\n');
+        }
+        // Nút gửi của bảng giữ nguyên chữ `Submit` để cái neo ✅ (đọc chính chữ
+        // ấy trên màn) còn chỗ bám — xem `data.submit`.
+        if line.contains("Submit") {
+            out.push_str("✔ Submit\n");
+        }
+    }
+    out
+}
+
 fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) -> Layout {
     let cmds = &data.cmds[..];
     // 🔴 HAI KHU VỰC, và ranh giới nằm ngay trong hàm này — Hà 2026-08-16:
@@ -4815,6 +4875,9 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
         }
         t
     };
+    // Bẻ thanh tab SAU khi mọi phép đo đã xong (neo ⏎/⌫ ở trên đo trên chữ gốc)
+    // và TRƯỚC khi gắn neo — đây là bước định dạng cuối cùng.
+    let text = split_tab_bar(&text, &data.tabs);
     let text = text.as_str();
 
     let is_cmd_btn = |d: &str| d.starts_with("run:") || d == "upgrade";
@@ -4918,6 +4981,19 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
             }
         }
     }
+    // 🔴 MỖI TAB MỘT ĐÍCH CHẠM, NGAY TẠI NHÃN CỦA NÓ — Hà 2026-08-19: *"Sao
+    // không chèn nút trực tiếp ở phần nội dung lại đi chèn thêm nút ở cuối"*.
+    //
+    // Bám được là nhờ [`split_tab_bar`] vừa bẻ thanh tab thành mỗi tab một
+    // dòng; trước đó ba nhãn nằm chung một dòng nên chỉ một cái có chỗ neo.
+    if !data.tabs.is_empty() {
+        let short = data.short();
+        for (n, label, _) in &data.tabs {
+            if let Some(href) = crate::telegram::deep_link(&format!("tab_{short}_{n}")) {
+                anchors.push((label.clone(), vec![(href, "\t↪".to_string())]));
+            }
+        }
+    }
     // …và lựa chọn đã có ☑ trong chữ thì THÔI nằm ở đáy. Một việc, một chỗ bấm:
     // hai đường cho cùng một lựa chọn thì cái ở đáy chỉ mang con số trần, còn bị
     // Telegram cắt nhãn ở 52 ký tự (`☐ 1 Khô`) — đúng thứ Hà đọc được 17/08.
@@ -4931,6 +5007,12 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
         rest_btns.retain(|(_, d)| {
             !d.starts_with("key:") || d.ends_with(":enter") || d.ends_with(":clear")
         });
+    }
+    // …và tab đã có ↪ trong chữ thì THÔI nằm ở đáy. Cùng luật, cùng lý do: hai
+    // đường cho một việc thì cái ở đáy chỉ là tiếng ồn, và nhãn của nó bị
+    // Telegram cắt ở 52 ký tự.
+    if !data.tabs.is_empty() {
+        rest_btns.retain(|(_, d)| !d.starts_with("tab:"));
     }
     // ✅ NGAY TẠI DÒNG `Submit` — đường gửi của hộp CHỌN NHIỀU.
     //
@@ -8595,6 +8677,27 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // đã mang cả khu chữ hub tự nối.
                             box_text: shot_box.clone(),
                             files: shot_files.clone(),
+                            // Thanh tab đọc từ MÀN, không từ nhật ký: bảng đang
+                            // TREO chưa được ghi vào nhật ký (đo 2026-08-19 —
+                            // 3,59 MB nhật ký phiên amm có 0 lần
+                            // `AskUserQuestion` trong khi bảng nằm trên màn),
+                            // nên mọi thứ dựng trên `asking` đều mù đúng lúc
+                            // chủ máy cần nhất.
+                            tabs: crate::keys::ask_table(&ack)
+                                .map(|t| {
+                                    t.headers
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, h)| {
+                                            (
+                                                i + 1,
+                                                h.clone(),
+                                                t.answered.get(i).copied().unwrap_or(false),
+                                            )
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
                         };
                         // Lựa chọn nào đã thành ☑ trong chữ thì thôi nằm ở đáy:
                         // hai đường cho một việc, và cái ở đáy chỉ mang con số

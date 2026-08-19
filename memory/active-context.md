@@ -1,5 +1,50 @@
 # active context — hub
 
+## 🎯 2026-08-19 (chiều) — nút tab: phím rời qua CGEvent, và một cú Enter phải trả giá
+
+Hà: *"muốn chuyển tab thì bấm phím phải trái, giờ qua tele thì có nút bấm ở
+chính tab để nhận như click chuột"* → *"Làm đi"*.
+
+⚠ **Tôi lỡ trả lời hộ câu 1 của bảng amm.** Đi dò màn, chạy cả tệp
+`ask_table_live` bằng `--ignored`; bài kiểm cuối trong đó gửi Enter thật ⟹ chốt
+`☐ RPC pool` → `☒` với lựa chọn 1. Bảng chưa Submit nên đổi lại được. Dòng đầu
+tệp ghi *"Nó KHÔNG bấm gì cả: chỉ đọc"* — nên thao tác hiển nhiên nhất lại là
+thao tác nguy hiểm nhất. Đã vá: cái bấm đòi thêm `HUB_LIVE_PRESS=1`, và phép
+chấm kết quả của nó (đọc **ô nhập** trong khi màn mở **hộp chọn** — nên nó in
+*"Enter KHÔNG tác dụng"* đúng lúc thanh tab vừa lật) nay đo thẳng `ask_table`.
+
+**Hai bức tường, đo được, và cả hai đều KHÔNG phải chỗ quên làm:**
+
+1. **hub mù với bảng ĐANG TREO.** Nó đọc bảng từ nhật ký, mà nhật ký 3,59 MB của
+   phiên amm có **0** lần `AskUserQuestion` trong khi bảng nằm sờ sờ trên màn, và
+   tệp không được ghi thêm suốt quãng ấy. Tức **bảng treo thì chưa vào nhật ký**.
+   `asking: null` ⟹ không có khu *"▸ Câu 2 …"*, và **`/pick 2.1` cũng từ chối** —
+   nó cần danh sách câu để biết con trỏ đang ở đâu.
+2. **Không có phím nào chỉ DI.** `do script` kèm CR không tắt được (chính cái vừa
+   chốt hộ câu 1). Và ngay cả muốn đếm bước cũng không được: tab hiện hành vẽ
+   bằng **màu**, đọc màn về chỉ có chữ trần.
+
+**Vá — `cgkeys.rs`, tệp DUY NHẤT có `unsafe`** (Hà gỡ luật cho đúng chỗ này).
+`CGEventPostToPid` đưa phím rời thẳng vào tiến trình Terminal. Quyền Trợ năng
+bám được nhờ `hubd` đã ký chứng chỉ cố định từ 10/08.
+
+📐 **Đo trên chính bảng ấy trước khi tin** (12 lượt phím ngang, `answered` giữ
+nguyên `[true,false,false]` suốt): `→` **không quấn vòng** (6 lượt đều dừng ở
+`Review your answers`); `←` cũng không (6 lượt thì 3 lượt cuối đều là câu 1);
+thứ tự đúng như thanh tab vẽ. Nên `keys::tab_keys` **về mép trái rồi đếm** —
+không đoán con trỏ đang ở đâu. Mép nuốt lượt thừa, nên thừa một lượt là cố ý.
+
+**Nút đọc thanh tab từ MÀN, không từ nhật ký** — chính là chỗ bức tường 1 bị đi
+vòng: màn thì không mù. Nhãn mang sẵn `☐`/`☒`.
+
+**Và trust hỏi SAU khi thử.** Bản đầu hỏi trước rồi từ chối gửi — ngõ cụt:
+`hubd` là tiến trình nền, nó chỉ vào được danh sách Trợ năng khi đã THỬ một việc
+cần quyền ấy. Từ chối thử = không bao giờ được hỏi = không bao giờ được cấp.
+
+**Nghiệm thu:** `476 test · clippy 0 · fmt 0`. Cài 15:52, `hubd` pid 44602 `cert`.
+⚠ **Còn một bước của Hà**: bật Trợ năng cho `hubd`. Bấm nút tab một lần ⟹ hub
+thử ⟹ `hubd` có tên trong danh sách ⟹ bật ⟹ bấm lại. Chưa có lượt bấm THẬT nào.
+
 ## 🎯 2026-08-19 (sáng, #2) — menu ☰ nhảy loạn: đúng flow, thiếu cái HÃM
 
 Hà: *"Sắp xếp ưu tiên menu đang theo flow nào mà tôi thấy cứ nhảy loạn lên"*.

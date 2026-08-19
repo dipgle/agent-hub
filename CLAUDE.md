@@ -79,7 +79,21 @@ or drive a session from a phone?** If not, it does not belong here.
 - **Rust 2021**, crate in `rust/`, two binaries: `hub` (CLI) and `hubd` (loop).
   Deliberately **synchronous** — this process spends its life waiting on
   `claude` and a Telegram long-poll, so an async runtime would add moving parts
-  without removing a single wait. **No `unsafe` anywhere.**
+  without removing a single wait.
+  🔴 **`unsafe` sống ở ĐÚNG MỘT TỆP: `cgkeys.rs`** (Hà gỡ luật *"no unsafe
+  anywhere"* ngày 2026-08-19, cho đúng chỗ này). Vì sao phải có: mọi lượt ghi
+  qua `do script` kèm một CR không tắt được, nên trên hộp chọn hub **không có
+  phím nào chỉ DI mà không CHỐT** — một nút "sang tab bên phải" sẽ trả lời hộ
+  câu đang mở. Đo được, và trả giá bằng việc thật: một cú Enter lạc chốt
+  `☐ RPC pool` → `☒` trên bảng hỏi của phiên amm. `CGEventPostToPid` đưa phím
+  rời thẳng vào tiến trình Terminal, không qua `do script`, nên không kèm gì.
+  Đổi lại: cần quyền **Trợ năng** cấp cho `hubd` — bám được là nhờ nó đã ký
+  chứng chỉ cố định từ 10/08 (ad-hoc thì mỗi lần build là một chương trình khác
+  và quyền rụng sau đúng một `cargo build`).
+  Ba luật của tệp ấy, đọc trước khi sửa: `unsafe` không rời khỏi nó · hỏi quyền
+  SAU khi thử (tiến trình nền chỉ vào được danh sách Trợ năng khi đã THỬ, nên
+  từ chối thử = không bao giờ được cấp) · dịch hết tên phím TRƯỚC khi gửi phím
+  đầu tiên.
 - Deps: `rusqlite` (bundled), `reqwest` (blocking + rustls), `serde`/`serde_json`,
   `clap`, `regex`, `chrono`, `anyhow`, `base64`. All in the local cargo cache →
   `cargo build --offline` works.

@@ -1,5 +1,40 @@
 # active context — hub
 
+## 🎯 2026-08-19 (chiều, #2) — ba lượt chê liên tiếp, ba hình dạng khác nhau
+
+**① *"chèn nút ở cuối"* (chê hai lần).** Tôi ném ba nút tab xuống đáy tin, và lý
+do thuần là lý do của MÃ: `html_with_links` gắn **mỗi dòng một neo**, mà thanh
+tab là MỘT dòng ba nhãn. Đáng ra phải hỏi *"làm sao nhãn nào cũng có chỗ neo"*,
+tôi lại hỏi *"chèn ở đâu cho nhanh"*. Vá: `split_tab_bar` bẻ thanh tab thành mỗi
+tab một dòng (định dạng, không thêm chữ), rồi mỗi dòng mang `↪` của nó; nút ở
+đáy tự rụng theo luật đã có cho lựa chọn.
+
+📌 Lượt chê THỨ HAI (*"có đang hiểu nhầm ý của tôi không"*) thì **bản vá đã lên
+rồi** — cài 16:58, còn tin amm anh đang nhìn là tin 16:47. Bài học về cách trả
+lời: đừng cãi, đi **dựng lại đúng tin ấy bằng bản đang chạy rồi in ra**
+(`tests/tab_anchor_live_shape.rs`, chạy tay). Có ảnh thì hết đoán.
+
+**② *"bấm cũng chưa nhận"*.** Nút CÓ chạy: log 09:47:34Z ghi `/tab da29807e 2`
+tới nơi, chạy 3,8s, dừng ở đúng một chỗ — `hubd` chưa có quyền Trợ năng. Câu ấy
+hub có nói, nhưng nằm cuối một tin dài nên đọc ra thành "không ăn".
+⚠ **Vẫn đang chờ Hà bật công tắc.**
+
+**③ *"phiên tfl5 còn shell chạy mà danh sách nói đã dừng"* + *"thay icon hình
+tròn"*.** Hai lỗi cùng hình dạng **nói đúng một nửa**:
+- Phép đo đã tách đúng hai ca từ 18/08 (`shell_verdict`, hôm ấy Hà chê CHIỀU
+  NGƯỢC LẠI: lệnh nền bị đọc thành "đang chạy") — nhưng kết quả chỉ dùng để quyết
+  `working` rồi **vứt đi**. Nay nó là `LiveSession::bg_shell` và có trạng thái
+  riêng. Đo trên máy thật sau khi cài: `e72a7aaa · AI/tfl5 · working=false ·
+  bg_shell=true` ⟹ dòng ấy đọc `🌀 chờ bạn · lệnh nền còn chạy`.
+- Bộ icon đổi từ MÀU sang HÌNH: `⚡ 💤 🌀 ❓ ❌ 🪦`. Gom về **một chỗ**
+  (`sessions::state_of`), `watch.rs` dùng chung hằng số — trước đó mỗi màn tự gõ
+  emoji của mình. Ràng buộc 13/08 giữ nguyên: không dùng `▶ ⏸ ⏹`.
+
+**Nghiệm thu:** cổng chất lượng **exit 0** trên `5c57632` (fmt · clippy · test ·
+quét bí mật/hardcode/lỗi nuốt). Ba bài kiểm cũ ghim emoji gõ tay đã đổi sang ghim
+hằng số — gõ lại emoji trong bài kiểm là dựng bản chép thứ hai của đúng cái bảng
+vừa gom về một chỗ.
+
 ## 🎯 2026-08-19 (chiều) — nút tab: phím rời qua CGEvent, và một cú Enter phải trả giá
 
 Hà: *"muốn chuyển tab thì bấm phím phải trái, giờ qua tele thì có nút bấm ở

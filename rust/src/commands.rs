@@ -180,6 +180,15 @@ pub const ROUTES: &[Route] = &[
         listed: true,
     },
     Route {
+        name: "tab",
+        aliases: &["cau"],
+        kind: CommandKind::Tab,
+        arg: Arg::RestRequired,
+        usage: "<số>",
+        help: "Sang tab (câu) ấy của bảng hỏi — chỉ đi, không chọn",
+        listed: true,
+    },
+    Route {
         name: "clean",
         aliases: &["don", "xoacho"],
         kind: CommandKind::Clean,

@@ -95,6 +95,25 @@ pub enum CommandKind {
     /// (mũi tên + số) vào MỘT `do script`, nên chỉ có đúng một dấu xuống dòng,
     /// ở cuối, chỗ mình chọn.
     Pick,
+    /// `/tab <số>` — DI con trỏ sang tab ấy của bảng hỏi nhiều câu, rồi trả về
+    /// chính màn ấy. KHÔNG chọn gì cả.
+    ///
+    /// 🔴 Hà 2026-08-19: *"mặc định thao tác trên máy muốn chuyển tab thì bấm
+    /// phím phải trái, giờ qua tele thì có nút bấm ở chính tab để nhận như
+    /// click chuột"*.
+    ///
+    /// Route này không dựng được suốt ba ngày, và lý do là một bức tường thật:
+    /// mọi lượt ghi qua `do script` kèm một CR không tắt được, nên trên hộp
+    /// chọn "sang phải" luôn kèm "chốt câu đang mở". Nó đứng được từ hôm nay là
+    /// nhờ [`crate::cgkeys`] — phím rời gửi thẳng vào tiến trình Terminal, không
+    /// qua `do script`, nên không có CR nào đi kèm. Đo: 12 lượt phím ngang,
+    /// `answered` không nhúc nhích.
+    ///
+    /// Khác [`CommandKind::Pick`] ở chỗ căn bản: `Pick` **trả lời** một câu (và
+    /// vì thế cần biết con trỏ đang ở đâu — thứ chỉ nhật ký nói được, mà nhật ký
+    /// thì TRỐNG chừng nào bảng còn treo). `Tab` chỉ ĐI, và nó về mốc rồi đếm
+    /// nên không cần biết đang đứng đâu — xem `keys::tab_keys`.
+    Tab,
     /// `/clean [id]` — xoá SẠCH hàng chờ của phiên: những dòng đã gõ vào lúc nó
     /// đang bận và còn nằm đợi lượt sau.
     ///

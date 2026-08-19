@@ -5368,6 +5368,71 @@ pub fn pick_keys(from: usize, to: usize, opt: usize) -> Vec<String> {
     keys
 }
 
+/// `/tab <n>` — đưa con trỏ sang tab thứ `n` của bảng hỏi, KHÔNG chọn gì.
+///
+/// 🔴 Hà 2026-08-19: *"muốn chuyển tab thì bấm phím phải trái, giờ qua tele thì
+/// có nút bấm ở chính tab để nhận như click chuột"*.
+///
+/// Ba việc nó KHÔNG làm, mỗi việc là một cái bẫy đã đo:
+/// * **Không đi bằng `do script`.** Lượt ghi ấy kèm một CR không tắt được, và
+///   trên hộp chọn CR là một cú CHỐT — 2026-08-19 một cú Enter lạc đã chốt
+///   `☐ RPC pool` → `☒` trên đúng bảng này. Phím ngang đi bằng
+///   [`crate::cgkeys`], không kèm gì.
+/// * **Không đoán con trỏ đang ở đâu.** Tab hiện hành vẽ bằng màu, mà đọc màn về
+///   chỉ có chữ trần. Nên nó về mép trái rồi đếm — xem `keys::tab_keys`.
+/// * **Không tin là bảng có thật.** Không đọc ra thanh tab ⟹ từ chối, vì gửi
+///   mũi tên vào một màn không phải bảng hỏi là gõ vào việc của người khác.
+fn tab_move(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> Result<(), String> {
+    let name = crate::sessions::shown(s);
+    let n: usize = arg.trim().parse().map_err(|_| {
+        format!(
+            "⚠ `/tab` cần một con số, ví dụ `/tab 2` — nhận được '{}'",
+            crate::exec::truncate(arg.trim(), 40)
+        )
+    })?;
+    let body = match crate::keys::look(&s.tty, PICK_LINES) {
+        crate::keys::Look::Saw { body, .. } => body,
+        crate::keys::Look::Blind { why } => {
+            logging::warn(
+                "tab_refused_blind",
+                json!({ "session": s.session_id, "why": why }),
+            );
+            return Err(format!(
+                "⚠ Không đọc được màn của {name} ({why}) — nên tôi KHÔNG bấm gì cả."
+            ));
+        }
+    };
+    let Some(table) = crate::keys::ask_table(&body) else {
+        return Err(format!(
+            "⚠ Màn của {name} không có bảng hỏi nhiều câu nào đang mở, nên không có tab để sang."
+        ));
+    };
+    let tabs = table.answered.len();
+    if n > tabs {
+        return Err(format!(
+            "⚠ Bảng của {name} có {tabs} câu, không có câu {n}. (`/tab 0` là bước gửi.)"
+        ));
+    }
+    let keys = crate::keys::tab_keys(tabs, n);
+    if let Err(e) = crate::keys::send_bare(w, &keys) {
+        logging::warn(
+            "tab_send_failed",
+            json!({ "session": s.session_id, "keys": keys, "err": e.to_string() }),
+        );
+        return Err(format!(
+            "⚠ Không đi sang tab {n} được: {}",
+            crate::exec::truncate(&e.to_string(), 300)
+        ));
+    }
+    logging::info(
+        "tab_moved",
+        json!({ "session": s.session_id, "to": n, "tabs": tabs, "keys": keys.len() }),
+    );
+    // TUI vẽ sau khi nhận phím; đọc lại ngay là đọc màn cũ rồi báo "không đổi".
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    Ok(())
+}
+
 /// `/pick <câu>.<lựa chọn>` — trả lời MỘT câu bất kỳ của bảng hỏi nhiều câu.
 ///
 /// 🔴 Hà 2026-08-13: *"chọn option xong thì vẫn còn bước nữa nên không pass qua
@@ -6957,6 +7022,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             | CommandKind::Shot
             | CommandKind::Photo
             | CommandKind::Clean
+            | CommandKind::Tab
             | CommandKind::Pick => {
                 // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
@@ -7034,6 +7100,26 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     ),
                     Some(s) => match crate::keys::window_of(&s.tty) {
                         Ok(Some(w)) => {
+                            // 🔴 `/tab <n>` chạy TRƯỚC cả khối dưới, rồi để
+                            // nhánh `/shot` vẽ lại màn — vì thứ chứng minh nó
+                            // chạy được là chính cái màn ĐÃ ĐỔI (Hà 2026-08-19:
+                            // *"khi shot nó phải thay đổi"*), không phải một câu
+                            // "đã gửi phím".
+                            //
+                            // `typed` bị dọn về rỗng sau khi đi: nhánh `/shot`
+                            // đọc nó như SỐ DÒNG (`/shot 80`), nên để nguyên số
+                            // tab ở đó là xin một ảnh màn 2 dòng.
+                            let (typed, tab_err) = if matches!(cmd.kind, CommandKind::Tab) {
+                                match tab_move(&s, w, &typed) {
+                                    Ok(()) => (String::new(), None),
+                                    Err(e) => (String::new(), Some(e)),
+                                }
+                            } else {
+                                (typed, None)
+                            };
+                            if let Some(msg) = tab_err {
+                                msg
+                            } else
                             // 🔴 `/anh` — ẢNH THẬT, và nó cũng chỉ NHÌN.
                             //
                             // Hà 2026-08-17: *"Thêm lệnh chụp ảnh màn hình để
@@ -7104,7 +7190,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         crate::exec::truncate(&e.to_string(), 200)
                                     ),
                                 }
-                            } else if matches!(cmd.kind, CommandKind::Shot) {
+                            } else if matches!(cmd.kind, CommandKind::Shot | CommandKind::Tab) {
                                 // Nút "gửi nhanh" chỉ dựng được khi biết màn có
                                 // gì — nên đọc màn một lần, dùng cho cả hai.
                                 // `/shot 80` — xin nhiều dòng hơn khi thứ cần
@@ -8179,7 +8265,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let mut cmd_lines: Vec<String> = Vec::new();
                 // Tệp thấy trong chữ → neo cho liên kết 📎 (xem `file_anchors`).
                 let mut shot_files: Vec<(String, usize)> = Vec::new();
-                if matches!(cmd.kind, CommandKind::Shot) {
+                if matches!(cmd.kind, CommandKind::Shot | CommandKind::Tab) {
                     // 🔴 2026-08-15 — NGUỒN đổi: sổ, không phải màn.
                     //
                     // `ack` ở đây là `contents of selected tab`, tức chữ đã đi
@@ -8271,7 +8357,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // ý nội dung chat cần có cách bấm nhanh để gửi nó"*). Đi đúng
                 // route `/key <id> enter` đã có — nút chỉ là phím tắt của một
                 // đường đi sẵn, không phải một nhánh xử lý mới.
-                if matches!(cmd.kind, CommandKind::Shot) {
+                if matches!(cmd.kind, CommandKind::Shot | CommandKind::Tab) {
                     // 🔴 Hà 2026-08-14: *"Sao có 2 nút làm đi"*. Vì đúng hai
                     // khối cùng dựng nó: khối trên (`say:<n>`, cùng kho với
                     // lệnh) và khối này (`run:0`, một kho riêng). Cả hai đều
@@ -8376,6 +8462,35 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     if !nhieu_cau && !shot_sid.is_empty() {
                         for (n, _) in shot_choices.iter().take(9) {
                             quick.push((n.to_string(), format!("key:{shot_sid}:{n}")));
+                        }
+                    }
+                    // 🔴 THANH TAB → MỖI TAB MỘT NÚT (Hà 2026-08-19: *"muốn
+                    // chuyển tab thì bấm phím phải trái, giờ qua tele thì có nút
+                    // bấm ở chính tab để nhận như click chuột"*).
+                    //
+                    // Nguồn là THANH TAB đọc từ màn, không phải nhật ký — và đó
+                    // là cả điểm mấu chốt: một bảng hỏi ĐANG TREO **chưa được
+                    // ghi vào nhật ký** (đo 2026-08-19: nhật ký 3,59 MB của phiên
+                    // amm có **0** lần `AskUserQuestion` trong khi bảng nằm sờ sờ
+                    // trên màn). Nên mọi thứ dựng trên `shot_asking` đều mù đúng
+                    // lúc chủ máy cần nhất; màn thì không mù.
+                    //
+                    // Nhãn mang sẵn `☐`/`☒` để biết tab nào còn trống — chính
+                    // con số quyết định bảng có gửi đi được hay chưa.
+                    if !shot_sid.is_empty() {
+                        if let Some(t) = crate::keys::ask_table(&ack) {
+                            let short: String = shot_sid.chars().take(8).collect();
+                            for (i, h) in t.headers.iter().enumerate().take(8) {
+                                let mark = if t.answered.get(i).copied().unwrap_or(false) {
+                                    "☒"
+                                } else {
+                                    "☐"
+                                };
+                                quick.push((
+                                    format!("{mark} {}", crate::exec::truncate(h, 18)),
+                                    format!("tab:{short}:{}", i + 1),
+                                ));
+                            }
                         }
                     }
                     // 🔴 Hà 2026-08-14: *"Sao ô nhắc trống, cũng không có gợi ý

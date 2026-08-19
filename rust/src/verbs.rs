@@ -74,6 +74,20 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
             return Some((CommandKind::Pick, 0, format!("{} {}.{}", f[0], f[1], f[2])));
         }
     }
+    // `tab_<8 ký tự đầu id>_<số>` — SANG tab ấy, không chọn gì.
+    //
+    // 🔴 Hà 2026-08-19: *"có nút bấm ở chính tab để nhận như click chuột"*. Cùng
+    // khuôn với `pick_`: tham số nằm trong TÊN lệnh, vì chạm một lệnh tô sáng
+    // chỉ gửi lại đúng token lệnh — chữ sau dấu cách rơi mất.
+    if let Some(rest) = verb.strip_prefix("tab_") {
+        if let Some((sid, n)) = rest.split_once('_') {
+            let ok_sid = !sid.is_empty() && sid.chars().all(|c| c.is_ascii_hexdigit());
+            let ok_n = !n.is_empty() && n.chars().all(|c| c.is_ascii_digit());
+            if ok_sid && ok_n {
+                return Some((CommandKind::Tab, 0, format!("{sid} {n}")));
+            }
+        }
+    }
     // `/start <payload>` — đường VỀ của deep link. Bấm icon `▶️` trong chữ là
     // Telegram gửi đúng câu này, nên payload phải được cởi ra thành lệnh thật.
     // Không có nhánh này thì cái icon chỉ mở lại buồng chat rồi thôi.

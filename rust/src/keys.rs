@@ -379,6 +379,103 @@ end tell"#,
     Ok((id, tty))
 }
 
+/// PID của Terminal.app — đích của [`crate::cgkeys::post`].
+///
+/// Hỏi `ps` chứ không hỏi AppleScript: đây là câu hỏi về TIẾN TRÌNH, và
+/// osascript là thứ hub đang tìm cách đi vòng qua ở đường phím rời. Hỏi nó một
+/// câu nữa là buộc đường mới vào đúng chỗ nghẽn của đường cũ. (Hỏi System Events
+/// còn tệ hơn: nó đòi thêm một quyền Automation nữa cho một con số.)
+///
+/// 🔴 `pgrep -x Terminal` là bản đầu và nó trả RỖNG trên chính máy này (đo
+/// 2026-08-19) trong khi `ps aux` thấy tiến trình ấy rõ ràng — nên đừng đổi lại.
+/// Khớp theo ĐUÔI đường dẫn: `comm` là
+/// `/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal`.
+pub fn terminal_pid() -> Result<i32> {
+    let out = run(
+        "ps",
+        &["-Ao", "pid=,comm="],
+        RunOpts {
+            timeout: Some(OSA_TIMEOUT),
+            ..Default::default()
+        },
+    )?;
+    for line in out.stdout.lines() {
+        let Some((pid, comm)) = line.trim().split_once(char::is_whitespace) else {
+            continue;
+        };
+        // Đuôi `/Terminal` chứ không phải chuỗi con `Terminal`: `iTerm`,
+        // `Terminal Helper`, hay một tệp nào đó có chữ ấy trong đường dẫn đều
+        // KHÔNG phải cái app hub đang nói chuyện qua AppleScript.
+        if comm.trim().ends_with("/MacOS/Terminal") {
+            return pid
+                .parse::<i32>()
+                .map_err(|e| anyhow!("ps trả '{pid}', không đọc ra pid: {e}"));
+        }
+    }
+    Err(anyhow!("Terminal.app không chạy"))
+}
+
+/// Đưa cửa sổ ấy lên làm cửa sổ NHẬN PHÍM của Terminal.
+///
+/// 🔴 Phím rời đi bằng `CGEventPostToPid` tới cả TIẾN TRÌNH, không tới một cửa
+/// sổ — Terminal tự phát nó cho cửa sổ đang nhận phím của mình. Nên bước này
+/// KHÔNG phải thủ tục lịch sự: bỏ nó là gõ vào cửa sổ nào tình cờ đang được
+/// chọn, tức đúng cái lỗi "gõ vào việc của người khác" mà cả tệp này đứng ra
+/// chặn.
+///
+/// Vẫn đi bằng AppleScript, và ở đây thì đúng chỗ: nó chỉ SẮP XẾP cửa sổ, không
+/// gửi phím nào, nên cái CR của `do script` không dính dáng gì.
+pub fn focus_window(window: i64) -> Result<()> {
+    osascript(&format!(
+        "tell application \"Terminal\"\n\
+           set frontmost of window id {window} to true\n\
+         end tell"
+    ))?;
+    Ok(())
+}
+
+/// Dãy phím đưa con trỏ NGANG về đúng tab số `target` (đếm từ 1; `0` = bước
+/// `Review your answers` ở cuối).
+///
+/// 🔴 KHÔNG đếm từ chỗ đang đứng, vì hub KHÔNG BIẾT nó đang đứng đâu: tab hiện
+/// hành được vẽ bằng màu nền, mà `contents of tab` trả chữ trần nên màu không đi
+/// qua. Cách duy nhất chắc chắn là **về mốc rồi đếm từ mốc**.
+///
+/// 📐 Mốc ấy có thật, và đây là phép đo dựng nên nó (2026-08-19, bảng 3 câu của
+/// phiên `[AI/tcc/amm]`, gửi bằng [`crate::cgkeys`] nên không phím nào chốt gì):
+/// * `→` **không quấn vòng**: 6 lượt liên tiếp đều đứng lại ở `Review your
+///   answers` — bước cuối bên phải.
+/// * `←` cũng không quấn: 6 lượt thì bước 3, 4, 5 đều là *"Mặt ĐỌC của native
+///   pool…"* — tức câu số 1, mép trái.
+/// * Thứ tự đọc được đúng như thanh tab vẽ: `RPC pool` → `NativeAssets v3` →
+///   `Việc tiếp` → `Review`.
+/// * `answered` giữ nguyên `[true,false,false]` qua **cả 12 lượt** — bằng chứng
+///   phím ngang gửi kiểu này không chốt câu nào.
+///
+/// Nên: đẩy sát mép trái bằng `tabs + 1` lượt `←` (thừa một lượt cho chắc, vì
+/// mép trái nuốt lượt thừa), rồi đi sang phải `target - 1` lượt.
+pub fn tab_keys(tabs: usize, target: usize) -> Vec<String> {
+    let right = || "right".to_string();
+    // Bước Review nằm sát mép PHẢI, nên nó rẻ hơn: cứ đẩy hết sang phải.
+    if target == 0 {
+        return std::iter::repeat_n(right(), tabs + 1).collect();
+    }
+    let mut keys: Vec<String> = std::iter::repeat_n("left".to_string(), tabs + 1).collect();
+    keys.extend(std::iter::repeat_n(right(), target.saturating_sub(1)));
+    keys
+}
+
+/// Gửi một dãy phím RỜI vào cửa sổ ấy — không kèm dấu xuống dòng nào.
+///
+/// Hai bước, và bước đầu không phải thủ tục: [`focus_window`] quyết định phím
+/// rơi vào cửa sổ NÀO (xem chú thích ở đó), rồi [`crate::cgkeys::post`] mới đưa
+/// phím vào tiến trình Terminal.
+pub fn send_bare(window: i64, keys: &[String]) -> Result<()> {
+    let pid = terminal_pid()?;
+    focus_window(window)?;
+    crate::cgkeys::post(pid, keys)
+}
+
 /// Cửa sổ Terminal đang chạy `tty` này, nếu có.
 ///
 /// `Terminal` công bố `tty` của từng tab qua AppleScript (đo 2026-08-09:

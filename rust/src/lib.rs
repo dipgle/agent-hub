@@ -17,6 +17,12 @@
 //! standing between the owner and his own machine.
 
 pub mod adapters;
+/// Gửi MỘT phím vào Terminal, không kèm dấu xuống dòng — tệp DUY NHẤT có
+/// `unsafe`, và luật *"no unsafe anywhere"* được gỡ đúng cho nó (Hà 2026-08-19).
+///
+/// Vì sao phải có: `do script` kèm một CR không tắt được, nên trên hộp chọn hub
+/// không có phím nào chỉ DI mà không CHỐT. Đọc đầu `cgkeys.rs` trước khi sửa.
+pub mod cgkeys;
 pub mod commands;
 pub mod config;
 /// Xác nhận lần hai qua Telegram cho lệnh không lùi lại được.

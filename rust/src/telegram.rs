@@ -718,6 +718,17 @@ pub fn callback_to_command(data: &str) -> Option<String> {
         }
         return Some(format!("/pick {sid} {at}"));
     }
+    // `tab:<id>:<số>` — SANG tab ấy, không chọn gì (Hà 2026-08-19: *"có nút bấm
+    // ở chính tab để nhận như click chuột"*). Nút riêng chứ không gộp vào
+    // `pick:` vì hai việc khác nhau ở chỗ không lùi lại được: `pick` CHỐT một
+    // câu, `tab` chỉ ĐI.
+    if let Some(rest) = data.strip_prefix("tab:") {
+        let (sid, n) = rest.split_once(':')?;
+        if sid.is_empty() || n.is_empty() {
+            return None;
+        }
+        return Some(format!("/tab {sid} {n}"));
+    }
     // Nút "dựng lại hub". Không mang tham số nào: route `/upgrade` dựng từ MÃ
     // HIỆN TẠI trong cây nguồn, nên một dòng lệnh đi kèm chỉ tạo ảo giác là
     // bấm cái này chạy đúng chữ đang hiện trên màn.

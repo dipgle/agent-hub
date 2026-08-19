@@ -3626,6 +3626,12 @@ pub fn html_with_links(
 /// cái icon và thẻ `<a>` bọc nó.
 const TG_TEXT_MAX: usize = 3500;
 
+/// Bao nhiêu ký tự của một dòng lệnh được HIỆN ở khu "lấy từ nhật ký".
+///
+/// Không phải trần của thứ được CHẠY — nút tra dòng gốc trong sổ. 90 là cỡ hai
+/// hàng trên màn 390px: đủ để nhận ra lệnh nào, chưa đủ để thành bức tường.
+const SHOWN_CMD_MAX: usize = 90;
+
 /// Trần AN TOÀN cho một lệnh chạy nền: một giờ.
 ///
 /// Không phải "thời gian một lệnh được phép chạy" — đó là câu hỏi không ai trả
@@ -4162,11 +4168,26 @@ fn watch_new_session(job: NewSession) {
                     // Cái rào thật không nằm ở câu này mà ở `DENIED_TOOLS`
                     // (không đẩy/xoá/ssh/sudo/deploy), và nó không đổi theo
                     // việc có in dòng chữ hay không.
+                    // 🔴 ĐƯỜNG LUI PHẢI NÓI RA — Hà 2026-08-19: *"phiên lại báo
+                    // không có cửa sổ là sao"*. Lệnh của anh đúng; hub thử mở
+                    // cửa sổ, osascript hết giờ, nên nó lui về `--bg`. Câu chào
+                    // cũ chỉ đổi hai chữ (`⌨` → `🌙`) rồi im về ba thứ người
+                    // đọc cần: hub ĐÃ THỬ, vì sao trượt, và cái giá.
+                    let lui = match (s.window, s.fallback_why.as_deref()) {
+                        (false, Some(why)) => format!(
+                            "\n\n⚠ Định mở cửa sổ Terminal nhưng KHÔNG mở được ({why}) — nên nó là \
+                             phiên nền: không gõ thẳng vào được, `/shot` không có màn để chụp. \
+                             Nói tiếp bằng /tell, tắt bằng /stop. Mở lại kiểu cửa sổ thì thử /new \
+                             lần nữa khi máy đỡ bận."
+                        ),
+                        _ => String::new(),
+                    };
                     format!(
-                        "🚀 Đã mở {}{}.\nPhiên {} — đang chạy trên máy.\n\n🎯 Nay đang theo phiên này: gõ thẳng câu hỏi ở đây là vào nó. Tắt bằng /stop.",
+                        "🚀 Đã mở {}{}.\nPhiên {} — đang chạy trên máy.{}\n\n🎯 Nay đang theo phiên này: gõ thẳng câu hỏi ở đây là vào nó. Tắt bằng /stop.",
                         cua_so,
                         cho,
-                        &s.session_id[..8.min(s.session_id.len())]
+                        &s.session_id[..8.min(s.session_id.len())],
+                        lui
                     )
                 }
                 // Không cắt 200 như các ack khác: lời báo hỏng ở đây MANG THEO
@@ -4862,8 +4883,24 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     } else {
         let mut t = text.trim_end().to_string();
         t.push_str("\n\nLệnh của phiên, không thấy trên màn (lấy từ nhật ký):\n");
+        // 🔴 CẮT NGẮN CHỖ HIỆN, KHÔNG CẮT CHỖ CHẠY — Hà 2026-08-19, ảnh một
+        // `/shot` của `[dwork]`: *"Tin này hiển thị loạn thế"*.
+        //
+        // Khu này in NGUYÊN VĂN từng dòng lệnh, mà lệnh của phiên dwork là
+        // những chuỗi 200+ ký tự (`cd … && git rebase … 2>&1 | tail -15; echo
+        // "REBASE_EXIT=$?"; git status --short | head -10`). Trên màn 390px mỗi
+        // dòng ấy gãy thành sáu bảy hàng, bốn dòng lệnh thành một bức tường —
+        // và cái tin còn bị cắt làm hai phần vì quá dài.
+        //
+        // Cắt được là nhờ ĐÍCH CHẠM KHÔNG ĐỌC CHỮ NÀY: `run_<mã>` tra dòng lệnh
+        // trong SỔ (`remember_quick`), nên nút vẫn chạy trọn vẹn dòng gốc. Chữ
+        // ở đây chỉ để NHẬN RA nó là lệnh nào — và `…` là lời khai rằng còn nữa,
+        // không phải một dòng lệnh khác.
+        //
+        // ⚠ Đừng đem phép cắt này sang khu neo trong màn: ở đó chuỗi hiện RA
+        // chính là chuỗi `line_carries` đi tìm, cắt nó là neo mất chỗ bám.
         for c in &missing {
-            t.push_str(c);
+            t.push_str(&crate::exec::truncate(c, SHOWN_CMD_MAX));
             t.push('\n');
         }
         t
@@ -5927,15 +5964,13 @@ fn quiet_for(last_activity: Option<&str>, now_ms: i64) -> Option<String> {
 /// Nhãn của một cái nút phiên. Cùng ba dữ kiện với dòng chữ, gọn hơn để lọt bề
 /// ngang một cái nút.
 pub fn session_button_label(s: &crate::sessions::LiveSession) -> String {
-    // Cùng bộ chấm với `session_list_text` — xem chú thích ở đó về vì sao KHÔNG
-    // dùng `▶`/`⏸`/`⏹`.
-    let dot = match (s.host.as_str(), s.asking.is_some(), s.working) {
-        ("dead", _, _) => "⚫",
-        (_, true, _) => "⚠",
-        _ if s.error.is_some() => "🔴",
-        (_, _, true) => "🟢",
-        _ => "🟡",
-    };
+    // 🔴 CÙNG BỘ VỚI DÒNG CHỮ, và nay là cùng một HÀM — Hà 2026-08-19, ảnh danh
+    // sách sau bản vá icon: dòng chữ đã là `💤 đứng chờ` trong khi mấy cái NÚT
+    // ngay dưới vẫn `🟡`. Chú thích cũ ở đây viết *"cùng bộ chấm với
+    // `session_list_text`"* — một lời hứa bằng chữ, giữ bằng tay, và nó gãy
+    // ngay lượt đổi đầu tiên. Bản chép thứ hai của một bảng thì không bao giờ
+    // là "cùng bộ"; nó chỉ là bộ giống nhau CHO TỚI KHI ai đó sửa một bên.
+    let dot = crate::sessions::state_of(s).0;
     // Dự án trước, vì đó là thứ ngón tay đang tìm; tên phiên tự sinh chỉ để phân
     // biệt hai phiên cùng dự án.
     let what = crate::sessions::shown(s);
@@ -6133,8 +6168,29 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // là cái máy này và những phiên đang chạy trên nó.
                 let live = crate::sessions::snapshot(cfg);
                 let jobs = jobs_line().unwrap_or_else(|| "  (không có)".to_string());
+                // 🔴 QUYỀN TRỢ NĂNG PHẢI ĐỌC ĐƯỢC TỪ ĐIỆN THOẠI — Hà 2026-08-19:
+                // *"Bật trợ năng là sao, sao tin nhắn tôi không thấy chi tiết
+                // về thông tin này"*.
+                //
+                // Trước đó câu trả lời chỉ nằm trong lời từ chối của `/tab`, tức
+                // muốn biết đã cấp quyền chưa thì phải đi bấm một cái nút CẦN
+                // quyền ấy rồi đọc lỗi. Đó là bắt người ta thử cửa để biết cửa
+                // khoá — trong khi `/doctor` sinh ra đúng để trả lời "cái gì
+                // đang chạy được, cái gì không".
+                //
+                // Và nó phải hỏi ở ĐÂY: `AXIsProcessTrusted` trả lời về TIẾN
+                // TRÌNH ĐANG HỎI, mà lệnh Telegram chạy bên trong `hubd` — đúng
+                // tiến trình cần quyền. Hỏi từ `hub` (CLI) là hỏi về một chương
+                // trình khác, và nhận một câu trả lời đúng cho câu hỏi sai.
+                let keys_line = if crate::cgkeys::trusted() {
+                    "🔑 phím rời (Trợ năng): đã cấp — nút ↪ chuyển tab chạy được"
+                } else {
+                    "🔑 phím rời (Trợ năng): CHƯA cấp — Cài đặt Hệ thống ▸ \
+                     Quyền riêng tư & Bảo mật ▸ Trợ năng ▸ bật `hubd`. \
+                     Không có nó thì nút ↪ chuyển tab không đi đâu cả."
+                };
                 let probe = format!(
-                    "🩺 {} phiên đang sống{}\n⚡ lệnh chạy nền:\n{}\n📟 hubd: {}\n{}",
+                    "🩺 {} phiên đang sống{}\n⚡ lệnh chạy nền:\n{}\n📟 hubd: {}\n{keys_line}\n{}",
                     live.sessions.len(),
                     if live.blind.is_empty() {
                         String::new()

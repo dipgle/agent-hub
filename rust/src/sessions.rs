@@ -4462,6 +4462,22 @@ pub struct Started {
     /// được một sự thật.
     #[serde(default)]
     pub window: bool,
+    /// Vì sao KHÔNG mở được cửa sổ — chỉ có khi hub đã THỬ và trượt.
+    ///
+    /// 🔴 Hà 2026-08-19: *"Tôi dùng lệnh `/new acc1 tiếp social` sau đó và phiên
+    /// lại báo không có cửa sổ là sao"*. Lệnh của anh không sai gì cả; hub thử
+    /// mở cửa sổ, `osascript` hết 20 giây không trả lời, nên nó **lui về
+    /// `--bg`** — đúng đường lui đã thiết kế. Cái sai là nó lui trong IM LẶNG:
+    /// câu chào chỉ đổi hai chữ (`⌨ cửa sổ Terminal` → `🌙 phiên nền`), không
+    /// nói đã thử, không nói vì sao, không nói cái giá (không gõ vào được,
+    /// `/shot` không có màn để chụp). Lý do nằm trong log — chỗ người cầm điện
+    /// thoại không đọc được.
+    ///
+    /// Cùng luật 3 (*"không có lỗi im lặng"*) đọc ở tầng NGƯỜI: một đường lui
+    /// không nói ra thì người dùng chỉ phát hiện lúc thứ họ định làm không làm
+    /// được.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_why: Option<String>,
 }
 
 /// The session id out of `claude --bg`'s human-readable output.
@@ -4594,6 +4610,8 @@ fn start_in_terminal(
         task: task.to_string(),
         ts: crate::logging::now_iso(),
         window: true,
+        // Đường chính đi được thì không có đường lui nào để giải thích.
+        fallback_why: None,
     })
 }
 
@@ -5289,6 +5307,10 @@ pub fn start_background(
     let root = cfg.workspace_root.clone();
     let task_with_project = task_for_new(project, task);
 
+    // Lý do trượt đường chính, giữ lại để CÂU CHÀO nói ra được — xem
+    // `Started::fallback_why`.
+    let mut why: Option<String> = None;
+
     // ĐƯỜNG CHÍNH: mở một cửa sổ Terminal thật, y như chủ máy tự mở.
     //
     // Hà 2026-08-11: *"cli claude cài trên máy tôi, hub là cầu kết nối ra ui"*.
@@ -5312,10 +5334,13 @@ pub fn start_background(
             resume,
         ) {
             Ok(started) => return Ok(started),
-            Err(e) => logging::warn(
-                "new_in_terminal_failed",
-                json!({ "err": e.to_string(), "falling_back_to": "--bg" }),
-            ),
+            Err(e) => {
+                why = Some(truncate(&e.to_string(), 160));
+                logging::warn(
+                    "new_in_terminal_failed",
+                    json!({ "err": e.to_string(), "falling_back_to": "--bg" }),
+                );
+            }
         }
     }
 
@@ -5489,6 +5514,7 @@ pub fn start_background(
         task: task.to_string(),
         ts: crate::logging::now_iso(),
         window: false,
+        fallback_why: why,
     })
 }
 

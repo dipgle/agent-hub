@@ -441,11 +441,15 @@ fn a_very_short_line_never_triggers_a_stray_enter() {
 #[test]
 fn a_button_label_still_answers_which_and_whether() {
     let s = sess("aaaaaaaa-0000-0000-0000-000000000000", "hub", "acc3", true);
+    // 🔄 Ghim theo HẰNG SỐ, không gõ lại emoji (2026-08-19) — cùng lý do với
+    // `the_list_tells_running_waiting_and_stopped_apart`: nút và dòng chữ nay
+    // đọc CÙNG một bảng (`sessions::state_of`), nên bài kiểm phải ghim bảng ấy
+    // chứ không ghim một bản chép của nó.
     let label = session_button_label(&s);
-    assert!(label.starts_with('🟢'), "{label}");
+    assert!(label.starts_with(hub::sessions::ST_RUN), "{label}");
     assert!(label.contains("hub") && label.contains("acc3"), "{label}");
     let idle = session_button_label(&sess("b", "dwork", "acc1", false));
-    assert!(idle.starts_with('🟡'), "{idle}");
+    assert!(idle.starts_with(hub::sessions::ST_WAIT), "{idle}");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

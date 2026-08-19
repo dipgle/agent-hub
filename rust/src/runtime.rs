@@ -746,8 +746,21 @@ pub fn announce_boot(db: &crate::db::Db, cfg: &Config, signature: &str) {
         );
         return;
     }
+    // 🔴 QUYỀN TRỢ NĂNG NÓI NGAY Ở CÂU CHÀO — Hà 2026-08-19: *"Bật trợ năng là
+    // sao, sao tin nhắn tôi không thấy chi tiết về thông tin này"*.
+    //
+    // `hubd` ký chứng chỉ cố định nên quyền ấy SỐNG QUA mọi lần cài lại — nhưng
+    // "sống qua" chỉ là lời hứa cho tới khi có ai đo. Đây là chỗ rẻ nhất để đo:
+    // mỗi lần cài lại, câu chào tự khai luôn nó còn tay hay không. Không có
+    // dòng này thì cách duy nhất biết là đi bấm một cái nút CẦN quyền rồi đọc
+    // lỗi — bắt người ta thử cửa để biết cửa khoá.
+    let keys = if crate::cgkeys::trusted() {
+        "🔑 phím rời: có quyền"
+    } else {
+        "🔑 phím rời: CHƯA có quyền (Cài đặt Hệ thống ▸ Quyền riêng tư & Bảo mật ▸ Trợ năng ▸ bật hubd)"
+    };
     let text = format!(
-        "✅ hub đã cài lại xong và đang chạy.\nbản: {stamp} · chữ ký: {signature} · pid {}\n(bản trước: {})",
+        "✅ hub đã cài lại xong và đang chạy.\nbản: {stamp} · chữ ký: {signature} · pid {}\n{keys}\n(bản trước: {})",
         std::process::id(),
         before
             .as_deref()
@@ -757,7 +770,8 @@ pub fn announce_boot(db: &crate::db::Db, cfg: &Config, signature: &str) {
     match crate::confirm::tell(cfg, &text) {
         Ok(()) => crate::logging::info(
             "hubd_boot_announced",
-            json!({ "binary": now, "signature": signature }),
+            json!({ "binary": now, "signature": signature,
+                    "accessibility": crate::cgkeys::trusted() }),
         ),
         // Không nói được thì phải để lại dấu: đây đúng là lúc chủ máy đang ngồi
         // chờ một câu trả lời.

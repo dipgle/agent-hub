@@ -1,5 +1,96 @@
 # active context — huba
 
+## 🎯 2026-08-20 (trưa) — rà soát toàn bộ: BẢN CÀI không phải bản vừa build, và `/upgrade` tự lặp lại lỗi ấy
+
+**Đã đẩy** — `origin/main` = `b57f359`, kiểm bằng `git ls-remote` (hỏi remote, KHÔNG
+đọc ref cục bộ — bàn giao hôm qua sai đúng chỗ đó). Hai việc "phải gõ tay" của mục
+dưới nay xong cả: DB đã gộp (`lsof` pid 43125 chỉ mở `data/huba.sqlite`; bản thừa
+`data/hub.sqlite` đứng im từ 09:37:57, chốt sổ ở 0 runs / 0 spend / 7 con trỏ).
+
+### 🔴 Việc lớn hơn cả hai: daemon đang chạy binary của **19/08 22:47**
+
+Mọi phép nghiệm thu đều xanh trên nó — chữ ký `cert`, `lsof` đúng DB, mtime bản cài
+mới hơn `.rs` mới nhất — mà nội dung thì là mã tiền-đổi-tên:
+
+| chuỗi biên dịch cứng | bản đang chạy | `target/release/hubad` (09:37:55) |
+|---|---|---|
+| `logs/huba.log` · `data/huba.sqlite` | **0** · **0** | 2 · 1 |
+| `logs/hub.log` · `data/hub.sqlite` | **2** · **1** | 0 · 0 |
+| `db_created` (bẫy mới) | **0** | 1 |
+
+Bảng chuỗi của bản cài **lệch 0 dòng** so với `target/release/hubd` (build 19/08
+22:47) và lệch 855 dòng so với `hubad`; băm `__TEXT,__text` + `__cstring` trùng khít.
+Ký lại không sửa được hằng chuỗi ⟹ **bản cài là build tiền-đổi-tên**. Daemon vì thế
+thiếu đúng `1f08f47` (khử trùng 📎) và `cef91e4` (bẫy `db_created`, bảng dấu 59 ô).
+
+**Cơ chế, dựng lại được — không phải đoán.** `runtime::self_install` (đường của
+`/upgrade` và `huba self-install`) chép tệp nguồn theo TÊN gõ trong mã:
+`runtime.rs:807` — bản mới `target/release/hub`**`ad`**, bản `85cc450` là
+`target/release/hub`**`d`**. Lúc 09:37 bản ĐANG CHẠY là mã cũ, nên nó:
+`cargo build --release` dựng đúng mã mới (`hubad` 09:37:55) → rồi chép
+`target/release/hubd`, **tệp cargo không còn sinh ra nữa**, nằm im từ hôm trước →
+ký 09:37:56 → kickstart 09:37:57. `bail!` ở `runtime.rs:808` không nổ vì tệp cũ
+vẫn còn trên đĩa.
+
+⚠ **`/upgrade` KHÔNG chữa được — nó lặp lại y hệt**: bản cài vẫn là mã cũ nên vẫn đi
+tìm `hubd`. Hai đường ra:
+```
+bash ~/projects/huba/install_update.sh          # SRC=…/hubad, đúng tệp
+strings -a ~/Library/Application\ Support/hub/bin/hubd | grep -c db_created   # phải ra 1
+rm ~/projects/huba/rust/target/release/{hub,hubd}   # bỏ mồi ⟹ lần sau hỏng TO TIẾNG
+```
+📌 Cùng hình dạng với vụ hai DB sáng nay: **đổi tên một tệp dưới chân thứ đang dùng
+nó**. Lượt đổi tên đã giữ `data/hubd.lock` vì đúng lý do ấy, và bỏ sót người tiêu thụ
+thứ hai của cùng cái tên. Phép đo đáng lẽ bắt được (`runtime::stale_against_build`)
+so **mtime**, nên cài nhầm tệp vẫn "mới" — mù đúng một bước sang bên.
+
+### Ba chỗ đã vá lượt này
+
+1. **Hai câu trích của Hà bị lượt đổi tên sửa chữ** — `pipeline.rs:2802` và
+   `tests/file_button.rs:44` nay trả lại `Com.dipgle.hubd.plist` (bản `85cc450` và
+   tệp thật ở `~/Library/LaunchAgents` đều nói vậy). Sửa chú thích ⟹ test xanh không
+   chứng minh gì cho nó; bằng chứng là hai phép đối chiếu ấy.
+2. **`quick_files_filtered` thôi khai sai cớ** — tách `dup` (một tệp nhắc nhiều lần)
+   khỏi `unsendable`. Dòng log có từ trước lượt khử trùng nên nó gán một cớ duy nhất
+   cho cả hai. ⏳ Chưa có lượt THẬT nào in ra dòng mới.
+3. **`tests/file_button_one_per_file.rs`** — khoá còn thiếu của `1f08f47` (commit ấy
+   đụng đúng một tệp `pipeline.rs`, không bài kiểm nào). **RED trước, kiểm tay**: tắt
+   `da_co.contains` ⟹ ca đầu đỏ và in đúng triệu chứng (`docs/du-toan.md` + bản đường
+   tuyệt đối của chính nó thành hai neo), ca hai vẫn xanh ⟹ hai ca đo hai thứ khác
+   nhau. Ca hai khoá chiều ngược: hai `README.md` ở hai thư mục phải ra hai nút.
+
+**Cổng trên cây đã vá:** `fmt` ✅ · `clippy` ✅ · `test` ✅ **506 passed / 0 failed /
+26 ignored** trên 71 binary (`.tmp/gate-after-fix.log`). Ba dòng "bí mật lọt diff"
+biến mất sau khi push — chúng nằm trong khoảng `origin/main..HEAD` cũ, không phải
+được tha.
+
+### Sổ nói một đằng, cây mã một nẻo — bốn chỗ, đo bằng lệnh
+
+* `CLAUDE.md` khai *"Gone 2026-08-14"* cho `portal.rs`, `live.rs`, `fe/`, 19 tệp
+  `.mjs`, `console-acl.mjs` — **`git ls-files` vẫn còn đủ**. Không được biên dịch
+  (`lib.rs` không khai `mod portal`/`mod live`), nhưng lượt đổi tên vẫn sửa
+  `fe/index.html` 216 dòng, và **2/3 dương tính giả của cổng là từ mấy tệp chết ấy**.
+  Sổ 14/08 ghi đây là *"một lệnh Hà cần gõ"* (`git rm`) — treo 6 ngày.
+* Ba hàm chết bản rà soát 14/08 nói "sẽ xoá, không cần hỏi" vẫn còn:
+  `keys::capture_base64` · `exec::run_json` · `pipeline::session_folder_from_book`
+  (mỗi cái 1 lần xuất hiện = chỗ định nghĩa, 0 chỗ gọi kể cả trong test). Kèm 3 tệp
+  `huba.config.json.bak*` và `legacy-node/`.
+* `ARCHITECTURE.md` §7 còn viết *"Không cần Accessibility"* — sai từ 19/08
+  (`cgkeys.rs` cần đúng quyền ấy; log boot 09:38 ghi `accessibility:true`). Cùng tệp:
+  §2 còn công thức `workspace_root = <hub_home>/../..` (đã thay bằng
+  `find_workspace_root`), §1 còn vẽ huba trong `AI/`. Và `bin/hubad.rs:14` còn khai
+  *"no unsafe code anywhere in this crate"*.
+* `pipeline.rs` **10.121 dòng** (14/08 đo 5.427 — +87%), `sessions.rs` 6.037.
+
+### Còn treo
+
+* **Cửa so nội dung cho `install_update.sh`/`self_install`** — so băm `__TEXT` của
+  bản cài với bản vừa build, để ca trên không im lặng lần nữa. Chưa làm, chờ Hà chốt.
+* Bản thừa `data/hub.sqlite{,-shm,-wal}` + `logs/hub.log` vẫn nằm đó (⚠ `panel:msg`
+  bên bản thừa MỚI hơn; phần còn lại cũ hơn).
+* Bẫy `cd` + đường tương đối của nút ▶️ (`docs/flow-boc-tach-lenh.md`, 16/08) vẫn
+  chưa vá: sổ nút cất `cwd` của BẢN GHI, không phải thư mục dòng `cd` ngay trên nó.
+
 ## 🎯 2026-08-20 (sáng) — đóng lượt đổi tên: commit `cef91e4`, CÒN 2 VIỆC PHẢI GÕ TAY
 
 **Đã commit** (`cef91e4`, 126 tệp, cây sạch). Cổng: `clippy` ✅ · `fmt` ✅ (sau khi

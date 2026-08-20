@@ -41,7 +41,7 @@ fn a_real_file_beside_the_session_folder_still_gets_a_button() {
     );
     assert!(sendable_file(trong.to_str().unwrap(), &root, &ws).is_some());
 
-    // 🔴 Ca GỐC của cửa này (Hà 2026-08-14: *"Com.dipgle.hubad.plist đâu phải là
+    // 🔴 Ca GỐC của cửa này (Hà 2026-08-14: *"Com.dipgle.hubd.plist đâu phải là
     // file"*): một cái TÊN nhắc giữa câu văn — không có tệp nào để gửi.
     assert!(sendable_file("com.dipgle.hubd.plist", &root, &ws).is_none());
 

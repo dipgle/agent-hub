@@ -2759,13 +2759,21 @@ fn kept_paths(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<
             // Trùng nhau tính theo ĐƯỜNG ĐÃ GIẢI, không theo chuỗi: `docs/x.md`
             // và `~/projects/AI/tfl5/docs/x.md` là hai chuỗi khác nhau trỏ vào
             // đúng một tệp. Giữ lần nhắc ĐẦU để thứ tự nút vẫn theo thứ tự đọc.
+            // 🔴 ĐẾM RIÊNG HAI CỚ RỤNG. Dòng log dưới đây có từ trước lượt khử
+            // trùng (2026-08-20), nên nó khai đúng MỘT cớ — "không phải tệp có
+            // thật, hoặc ngoài workspace" — cho cả những lần rụng vì TRÙNG. Một
+            // dòng nhật ký khai sai nguyên nhân đắt hơn một dòng không có: nó
+            // gửi người đọc đi tìm một cái tệp không hề thiếu, đúng lúc họ mở
+            // log ra vì thấy ít nút hơn số tệp trong tin.
             let mut da_co: Vec<std::path::PathBuf> = Vec::new();
             let mut kept: Vec<String> = Vec::new();
+            let mut trung = 0usize;
             for p in paths {
                 let Some(that) = sendable_file(p, &root, &cfg.workspace_root) else {
                     continue;
                 };
                 if da_co.contains(&that) {
+                    trung += 1;
                     continue;
                 }
                 da_co.push(that);
@@ -2775,7 +2783,9 @@ fn kept_paths(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<
                 logging::info(
                     "quick_files_filtered",
                     json!({ "kept": kept.len(), "seen": paths.len(),
-                            "why": "không phải tệp có thật, hoặc nằm ngoài workspace" }),
+                            "dup": trung, "unsendable": paths.len() - kept.len() - trung,
+                            "why": "dup = cùng MỘT tệp được nhắc nhiều lần (một tệp một nút); \
+                                    unsendable = không phải tệp có thật, hoặc nằm ngoài workspace" }),
                 );
             }
             kept
@@ -2799,7 +2809,7 @@ pub fn remember_files(
     paths: &[String],
 ) -> Vec<(String, String)> {
     // 🔴 MỘT CÁI TÊN KHÔNG PHẢI MỘT TỆP. Hà 2026-08-14, ảnh chụp một tin có nút
-    // 📎 `com.dipgle.hubd.plist`: *"Com.dipgle.hubad.plist đâu phải là file"*.
+    // 📎 `com.dipgle.hubd.plist`: *"Com.dipgle.hubd.plist đâu phải là file"*.
     // Đúng — đó là một cái tên nhắc giữa câu văn của chính huba, và tệp thật thì
     // nằm ở `~/Library/LaunchAgents`, ngoài cây làm việc của phiên.
     //

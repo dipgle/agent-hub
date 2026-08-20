@@ -1,5 +1,75 @@
 # active context — huba
 
+## 🎯 2026-08-20 (sáng) — đóng lượt đổi tên: commit `cef91e4`, CÒN 2 VIỆC PHẢI GÕ TAY
+
+**Đã commit** (`cef91e4`, 126 tệp, cây sạch). Cổng: `clippy` ✅ · `fmt` ✅ (sau khi
+chạy `cargo fmt` — 14 tệp lệch, toàn tệp KHÔNG ai đụng tay: `hub::`→`huba::` dài
+thêm một ký tự nên rustfmt đòi ngắt dòng khác).
+
+⚠ **CHƯA CÓ một lượt full-test XANH trên cây cuối.** Lượt đầy đủ gần nhất:
+445 passed / 1 failed — cái đỏ là `a_project_always_gets_the_same_mark`, đã vá và
+chạy RIÊNG xanh; sau đó chỉ thêm `cargo fmt` (thuần định dạng). Cổng cuối đang
+chạy nền lúc đóng phiên, kết quả ghi vào **`.tmp/gate.log`** (đọc dòng
+`GATE_EXIT=`; ≠0 ⟹ chưa được nói "xong").
+
+### HAI MỆNH ĐỀ CỦA BÀN GIAO TRƯỚC ĐO RA SAI — đừng chép lại
+| bàn giao nói | đo được |
+|---|---|
+| "trạng thái sống ở cặp tên **cũ**" | sống ở `data/huba.sqlite` (12 389 runs). `lsof` pid 53130: daemon mở tệp TRƯỚC `mv` nên bám **inode**, tên đổi dưới chân mà handle không đổi |
+| "`origin/main` = `1f08f47` (**đã đẩy**)" | `git ls-remote` → remote ở `85cc450`. **Chưa đẩy.** Nay có **2** commit chờ: `1f08f47` + `cef91e4` |
+
+### GỐC CHUNG của "hai DB" và "chữ đi vào phiên khác" (mục ② + ③ bàn giao là MỘT)
+`mv data/hub.sqlite …` chạy lúc daemon đang giữ tệp. Kết nối lâu (`main.rs:96`)
+bám inode → ghi đúng bản thật. Nhưng `telegram.rs` gọi `Db::open(&cfg.db)` **mỗi
+lượt**, theo đường dẫn của cấu hình LÚC BOOT → không thấy gì → SQLite **lặng lẽ
+dựng** `data/hub.sqlite` rỗng. Từ 07:27 có hai kho trạng thái.
+
+Bằng chứng con trỏ phiên, log `logs/hub.log` 01:34 (không cần suy diễn):
+```
+01:34:40.390  bare_terminal_opened  tty=ttys004 window=5960   (/new)
+01:34:51.478  telegram_text_as_typing  session=497f72db   ← đọc: CŨ
+01:34:52.256  keys_typed  session=497f72db  window=5958
+01:34:57.086  route_target_from_focus  focus=win-ttys004   ← đọc: MỚI
+```
+Hai lần đọc CÙNG khoá `focus:session`, cách 5,6s, KHÔNG lần ghi nào ở giữa, hai
+giá trị. **Mã định tuyến không sai dòng nào** — kho bị chẻ đôi dưới chân nó.
+
+### CÒN PHẢI GÕ TAY (phiên này bị chặn `launchctl`, `rm`, `git push`)
+
+1. **Đẩy 2 commit:**
+```
+git -C ~/projects/huba push origin main
+```
+
+2. **Gộp một DB / một log** (đang là hai). Cài bản mới rồi khởi động lại daemon:
+```
+bash ~/projects/huba/install_update.sh
+```
+`install_update.sh` nay tự nghiệm thu **trạng thái** chứ không chỉ chữ ký: hỏi
+`lsof` xem tiến trình mới có mở đúng DB cấu hình gọi tên (sai ⟹ chết), rồi quét
+`data/*.sqlite` vừa bị ghi trong 5 phút để lôi bản thừa ra. Đã thử trên chính
+máy đang hỏng: phép một ĐẠT, phép hai lôi đúng `data/hub.sqlite (runs=0)`.
+
+3. **Bỏ bản thừa sau khi (2) xanh** — `data/hub.sqlite` có 0 runs / 0 spend, chỉ
+   7 con trỏ giao diện. `logs/hub.log` cũng vậy (bản thật là `logs/huba.log`).
+   ⚠ Đối chiếu trước khi xoá; `panel:msg` bên bản thừa mới hơn, phần còn lại cũ hơn.
+
+### VÁ ĐÃ VÀO (chi tiết đầy đủ trong thân commit `cef91e4`)
+* `data/hubd.lock` **giữ nguyên tên** — lượt đổi tên đổi thành `hubad.lock`, tức
+  bản mới sẽ không thấy bản cài `hubd` đang giữ lock ⟹ mất loại trừ tương hỗ
+  đúng lúc chuyển giao ⟹ hai daemon cùng `getUpdates` cướp tin của nhau.
+* `Db::open` nay kêu `db_created` (warn + đường dẫn) khi nó **dựng** thay vì tìm
+  thấy. Kèm `rust/tests/db_created_is_loud.rs`: kêu đúng một lần, mở lại tệp đã
+  có thì im.
+* `black_frame.rs` — lượt đổi tên sửa cả KỲ VỌNG bài kiểm (`hubd`→`hubad`) trong
+  khi chuỗi nguồn giữ `bin/hubd`. Nay neo `bin/hubd`.
+* **Dấu dự án**: bảng 20 → **59** ô. Bài kiểm cũ đòi "7 tên ⟹ ≥6 dấu" tức dung
+  túng sẵn một cặp trùng, và có cặp thật: `dwork`+`social` cùng 😎, đã lâu. Nay
+  đòi phân biệt ĐỦ trên 15 tên thật. **MỌI dự án đổi dấu một lần** (`% len` đổi).
+  Giới hạn ghi trong mã: băm-theo-tên không biết tên khác tồn tại; dự án thứ 16
+  vẫn có thể đụng (~25%) — lúc ấy **đừng nới ngưỡng**, gán dấu theo cả danh sách.
+
+
 ## 🎯 2026-08-19 (chiều, #2) — ba lượt chê liên tiếp, ba hình dạng khác nhau
 
 **① *"chèn nút ở cuối"* (chê hai lần).** Tôi ném ba nút tab xuống đáy tin, và lý

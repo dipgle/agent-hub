@@ -20,7 +20,7 @@ import { readFileSync, mkdirSync } from "node:fs";
 
 const HERE = new URL("./", import.meta.url).pathname;
 const env = Object.fromEntries(
-  readFileSync(HERE + "hub.env", "utf8")
+  readFileSync(HERE + "huba.env", "utf8")
     .split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])
 );

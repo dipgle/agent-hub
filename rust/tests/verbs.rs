@@ -7,7 +7,7 @@
 //!
 //! 🔴 Cùng ngày, **cổng người cũng rời khỏi đây** — và cần nói rõ vì đây từng là
 //! chỗ ghi "ranh giới an toàn thật sự". `parse_command` nhận thêm
-//! `(from_user_tid, owner_tids)` khi hub sống trong một PHÒNG CHAT: ai cũng vào
+//! `(from_user_tid, owner_tids)` khi huba sống trong một PHÒNG CHAT: ai cũng vào
 //! phòng được, nên phải hỏi thêm ai được ra lệnh. Telegram không có hình dạng
 //! ấy — cổng của nó là `chat_id`, gác ở `telegram.rs` trước khi một chữ nào tới
 //! được bộ phân tích. Giữ cả hai tầng thì tầng dưới không bao giờ từ chối được
@@ -20,7 +20,7 @@
 //!
 //! Thứ ở lại đây là phần đã luôn đúng ở mọi kênh: chữ người gõ → một route.
 
-use hub::verbs::parse_command;
+use huba::verbs::parse_command;
 
 /// `/sessions` (số nhiều) hỏi DANH SÁCH; `/session <id>` chọn một phiên.
 ///
@@ -33,7 +33,7 @@ use hub::verbs::parse_command;
 fn the_plural_asks_for_the_list_and_never_picks_a_session() {
     for line in ["/sessions", "/phiens", "/danhsach"] {
         let (kind, id, arg) = parse_command(line).expect("parsed");
-        assert_eq!(kind, hub::adapters::CommandKind::Session, "{line}");
+        assert_eq!(kind, huba::adapters::CommandKind::Session, "{line}");
         assert_eq!(id, 0, "{line}");
         assert_eq!(arg, "", "{line} phải là danh sách, không mang id");
     }
@@ -57,12 +57,12 @@ fn a_side_question_keeps_every_word_including_the_slashes() {
     // refused. It also must survive text that looks like more commands.
     let (kind, id, arg) =
         parse_command("/ask lệnh /run vừa rồi đã chạy xong chưa, còn kẹt ở đâu?").expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Ask);
+    assert_eq!(kind, huba::adapters::CommandKind::Ask);
     assert_eq!(id, 0, "the target is the focused session, never an id");
     assert_eq!(arg, "lệnh /run vừa rồi đã chạy xong chưa, còn kẹt ở đâu?");
 
     let (kind, _, arg) = parse_command("/hoi đang làm gì đấy").unwrap();
-    assert_eq!(kind, hub::adapters::CommandKind::Ask);
+    assert_eq!(kind, huba::adapters::CommandKind::Ask);
     assert_eq!(arg, "đang làm gì đấy");
 }
 
@@ -86,7 +86,7 @@ fn an_empty_side_question_never_reaches_the_wallet() {
 /// canh một hành vi nữa mà **bảo vệ một hành vi hỏng**.
 ///
 /// Cái giá đo được trong nhật ký: `/new` → `telegram_not_a_command` ba lần
-/// (13-08 13:27 · 14-08 08:13 · 14-08 22:27), mỗi lần hub đáp *"Chưa hiểu lệnh
+/// (13-08 13:27 · 14-08 08:13 · 14-08 22:27), mỗi lần huba đáp *"Chưa hiểu lệnh
 /// này"* về một động từ chính nó vừa khai với Telegram và đang hiện trong menu.
 /// Chạm vào một dòng trong menu chỉ gửi đúng token lệnh, nên với lệnh
 /// `listed: true` thì "gõ trơn" là cách dùng MẶC ĐỊNH, không phải cách dùng sai.
@@ -95,7 +95,7 @@ fn an_empty_side_question_never_reaches_the_wallet() {
 /// nó thì nó đổi phe.**
 #[test]
 fn a_bare_new_opens_a_window_because_that_is_what_tapping_the_menu_sends() {
-    use hub::adapters::CommandKind;
+    use huba::adapters::CommandKind;
 
     // Gõ trơn — đúng thứ Telegram gửi khi chạm vào `/new` trong menu.
     assert_eq!(
@@ -131,7 +131,7 @@ fn a_bare_new_opens_a_window_because_that_is_what_tapping_the_menu_sends() {
 #[test]
 fn stop_defaults_to_the_session_being_read() {
     let (kind, _, arg) = parse_command("/stop").expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Stop);
+    assert_eq!(kind, huba::adapters::CommandKind::Stop);
     assert_eq!(arg, "", "empty means: whatever /session is following");
 
     let (_, _, arg) = parse_command("/stop a3a24ccd-6ad8").unwrap();
@@ -184,7 +184,7 @@ fn ordinary_text_is_never_mistaken_for_a_command() {
 #[test]
 fn help_needs_no_decision_id() {
     let (kind, id, _) = parse_command("/help").expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::Help);
+    assert_eq!(kind, huba::adapters::CommandKind::Help);
     assert_eq!(id, 0);
 }
 
@@ -214,7 +214,7 @@ fn the_live_path_and_the_poller_agree_on_what_counts_as_a_command() {
 #[test]
 fn set_needs_both_a_key_and_a_value() {
     let (kind, _, arg) = parse_command("/set auto_handover.at_percent 70").expect("parsed");
-    assert_eq!(kind, hub::adapters::CommandKind::SetConfig);
+    assert_eq!(kind, huba::adapters::CommandKind::SetConfig);
     assert_eq!(arg, "auto_handover.at_percent 70");
     // A key with no value would blank the field — refuse it here.
     assert!(parse_command("/set auto_handover.at_percent").is_none());
@@ -230,10 +230,10 @@ fn set_needs_both_a_key_and_a_value() {
 #[test]
 fn the_cycle_verbs_take_no_id_and_ingest_is_no_longer_one_of_them() {
     for (text, want) in [
-        ("/run", hub::adapters::CommandKind::Run),
-        ("/cycle", hub::adapters::CommandKind::Run),
-        ("/doctor", hub::adapters::CommandKind::Doctor),
-        ("/health", hub::adapters::CommandKind::Doctor),
+        ("/run", huba::adapters::CommandKind::Run),
+        ("/cycle", huba::adapters::CommandKind::Run),
+        ("/doctor", huba::adapters::CommandKind::Doctor),
+        ("/health", huba::adapters::CommandKind::Doctor),
     ] {
         let (kind, id, _) = parse_command(text).expect(text);
         assert_eq!(kind, want, "sai verb cho {text}");
@@ -257,12 +257,12 @@ fn the_cycle_verbs_take_no_id_and_ingest_is_no_longer_one_of_them() {
 /// ```text
 /// 10:32:38  /session 3e9a7fd6…      ← hoãn
 /// 10:32:51  /ask Tóm tắt…           ← hoãn
-///           ack: "Hỏi bên lề phiên projects-1f"   ← SAI PHIÊN, hub gõ thật vào đó
+///           ack: "Hỏi bên lề phiên projects-1f"   ← SAI PHIÊN, huba gõ thật vào đó
 /// 10:33:42  ack: "Đang theo phiên projects-ff"    ← lệnh trước, chạy sau
 /// ```
 #[test]
 fn an_order_that_touches_a_session_carries_that_sessions_id() {
-    use hub::pipeline::split_target;
+    use huba::pipeline::split_target;
 
     let (id, rest) = split_target("3e9a7fd6-3050-4a54-ba52-0dfb24de033c Tóm tắt trong 1 câu?")
         .expect("id đứng đầu phải nhận ra được");
@@ -299,7 +299,7 @@ fn the_accounts_verb_answers_to_three_spellings() {
         let (kind, id, arg) = parse_command(text).expect(text);
         assert_eq!(
             kind,
-            hub::adapters::CommandKind::Accounts,
+            huba::adapters::CommandKind::Accounts,
             "sai verb cho {text}"
         );
         assert_eq!(id, 0, "{text} không nhận id");
@@ -315,7 +315,7 @@ fn the_accounts_verb_answers_to_three_spellings() {
 /// biết mình sắp nhận cái nào.
 #[test]
 fn close_is_its_own_verb_and_takes_an_optional_id() {
-    use hub::adapters::CommandKind;
+    use huba::adapters::CommandKind;
 
     // Trống = phiên đang theo (chỗ gọi tra con trỏ), nên arg rỗng là HỢP LỆ.
     assert_eq!(
@@ -341,7 +341,7 @@ fn close_is_its_own_verb_and_takes_an_optional_id() {
 /// ngữ cảnh lại bị mất dấu"*.
 #[test]
 fn runin_needs_both_a_session_and_a_command() {
-    use hub::adapters::CommandKind;
+    use huba::adapters::CommandKind;
 
     assert_eq!(
         parse_command("/runin 4963b95c cargo test --offline"),
@@ -371,10 +371,10 @@ fn a_deep_link_payload_round_trips_back_into_the_same_command() {
     //
     // Bản trước bài kiểm này tự chọn `run_0`, và nó xanh suốt trong khi đường
     // thật đã gãy: `quick_token` sinh **8 ký tự hex** (`d1704560`) còn bên đọc
-    // vẫn đòi chữ số. Hà bấm icon, hub đáp *"Chưa hiểu lệnh này"* — và không
+    // vẫn đòi chữ số. Hà bấm icon, huba đáp *"Chưa hiểu lệnh này"* — và không
     // bài kiểm nào đỏ, vì cả hai đầu đều đúng với hình dạng **tôi tưởng tượng**.
     // Gọi thẳng `quick_token` thì hình dạng ấy không còn là chuyện tưởng tượng.
-    let token = hub::pipeline::quick_token("4963b95c-1111-2222-3333-444455556666", "cargo test");
+    let token = huba::pipeline::quick_token("4963b95c-1111-2222-3333-444455556666", "cargo test");
     assert_eq!(token.len(), 8, "mã nút là 8 ký tự hex: {token}");
     // …và bài kiểm phải CÓ RĂNG: mã toàn chữ số thì nó xanh cả với bản cũ
     // (`is_ascii_digit`), tức lại là một phép đo không bao giờ đỏ. Chốt luôn ở
@@ -402,7 +402,7 @@ fn a_deep_link_payload_round_trips_back_into_the_same_command() {
         );
         assert!(
             parse_command(&format!("/start {payload}")).is_some(),
-            "payload {payload} rơi vào nhánh 'không phải lệnh' ⟹ hub sẽ đáp 'Chưa hiểu lệnh này'"
+            "payload {payload} rơi vào nhánh 'không phải lệnh' ⟹ huba sẽ đáp 'Chưa hiểu lệnh này'"
         );
     }
     // `/start` trống thì không phải lệnh gì cả — đừng đoán hộ.
@@ -416,7 +416,7 @@ fn a_deep_link_payload_round_trips_back_into_the_same_command() {
 /// một dòng chữ "esc" gõ thẳng vào phiên.
 #[test]
 fn a_button_typed_as_type_goes_to_the_focused_session_by_default() {
-    use hub::adapters::CommandKind;
+    use huba::adapters::CommandKind;
     // Không id ⟹ phiên đang trỏ tới (arg chỉ mang tên phím).
     for k in ["enter", "esc", "up", "down", "tab", "2", "clear"] {
         assert_eq!(
@@ -448,7 +448,7 @@ fn a_button_typed_as_type_goes_to_the_focused_session_by_default() {
 /// phải phiên con trỏ đang trỏ tới lúc bấm.
 #[test]
 fn the_enter_and_clear_links_carry_their_own_session() {
-    use hub::adapters::CommandKind;
+    use huba::adapters::CommandKind;
     assert_eq!(
         parse_command("/start send_bab47095"),
         Some((CommandKind::Key, 0, "bab47095 enter".to_string()))
@@ -468,7 +468,7 @@ fn the_enter_and_clear_links_carry_their_own_session() {
 /// và hai tên cũ vẫn nhận để nút hay thói quen cũ không gãy.
 #[test]
 fn the_terminal_verb_says_what_it_opens() {
-    use hub::adapters::CommandKind;
+    use huba::adapters::CommandKind;
     for name in ["/terminal", "/win", "/cuaso", "/tty"] {
         assert_eq!(
             parse_command(&format!("{name} sudo -v")),
@@ -486,7 +486,7 @@ fn the_terminal_verb_says_what_it_opens() {
     }
     // Và nó phải NHÌN THẤY ĐƯỢC: có trong danh sách gửi lên menu Telegram.
     assert!(
-        hub::commands::for_telegram()
+        huba::commands::for_telegram()
             .iter()
             .any(|(c, _)| *c == "terminal"),
         "route vô hình là route không ai gọi — đó là cả bài học của lần gỡ nhầm"
@@ -504,7 +504,7 @@ fn the_terminal_verb_says_what_it_opens() {
 /// Vẫn về đúng route cũ: thêm một chỗ BẤM, không thêm một đường ĐI.
 #[test]
 fn a_terminal_row_carries_its_own_two_taps() {
-    use hub::adapters::CommandKind;
+    use huba::adapters::CommandKind;
     assert_eq!(
         parse_command("/start w_ttys014"),
         Some((CommandKind::Session, 0, "win-ttys014".to_string())),

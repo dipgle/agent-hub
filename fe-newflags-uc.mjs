@@ -17,7 +17,7 @@
 import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 import { mkdirSync } from "node:fs";
 
-const [appTid, username, password, acc = "acc3", project = "hub"] = process.argv.slice(2);
+const [appTid, username, password, acc = "acc3", project = "huba"] = process.argv.slice(2);
 if (!appTid || !username || !password) {
   console.error("usage: node fe-newflags-uc.mjs <app_tid> <user> <pass> [acc] [dự án]");
   process.exit(2);
@@ -62,7 +62,7 @@ try {
   const cmd = `/new -a ${acc} -s ${project}`;
   await page.fill("#text", cmd);
   await page.press("#text", "Enter");
-  console.log(`đã gõ: ${cmd} — chờ hub mở cửa sổ (tối đa 150s)`);
+  console.log(`đã gõ: ${cmd} — chờ huba mở cửa sổ (tối đa 150s)`);
 
   const isReply = (t) => t.includes("🚀 Đã mở") || t.includes("⚠");
   await page.waitForFunction(
@@ -84,7 +84,7 @@ try {
   );
   void isReply;
 
-  check("hub trả lời lệnh có cờ", ack.length > 0, ack.slice(0, 80));
+  check("huba trả lời lệnh có cờ", ack.length > 0, ack.slice(0, 80));
   check("mở được, không phải lỗi", ack.includes("🚀 Đã mở"), ack.slice(0, 120));
   check("mở CỬA SỔ terminal thật, không phải phiên nền", ack.includes("cửa sổ terminal"));
   check(`đọc đúng cờ -s: dự án ${project}`, ack.includes(project));

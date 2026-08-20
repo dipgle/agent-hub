@@ -53,7 +53,7 @@ const MAX_BYTES: usize = 8 * 1024 * 1024;
 /// Hạng của một lời gọi: **có người đang chờ nó**, hay nó là việc vặt chạy nền.
 ///
 /// 🔴 Hà 2026-08-14: *"phải phân biệt việc gì cần xử lý nhanh chậm để chạy đúng
-/// phân loại nhân chứ"*. Đúng, và nó chỉ ra chỗ tôi vừa làm thô: sáng nay hub
+/// phân loại nhân chứ"*. Đúng, và nó chỉ ra chỗ tôi vừa làm thô: sáng nay huba
 /// khai `ProcessType Background` cho CẢ tiến trình (di sản của cái inbox đã
 /// xoá), tôi đổi thành `Interactive` cho CẢ tiến trình — hết nghẽn, nhưng lúc
 /// ấy một lượt đẩy ảnh chụp định kỳ cũng giành CPU ngang với ngón tay chủ máy.
@@ -113,11 +113,11 @@ impl Drop for LaneGuard {
 ///   điện; trên Intel không có lõi ấy nên chỉ còn hạ ưu tiên lịch biểu và
 ///   throttle I/O — nhẹ hơn, vẫn đúng hướng, không hại. Cùng một dòng mã, hai
 ///   con chip, không cần biết chip nào.
-/// * **Hệ khác** (Windows, Linux): không có `taskpolicy`, và hub chưa chạy ở đó
+/// * **Hệ khác** (Windows, Linux): không có `taskpolicy`, và huba chưa chạy ở đó
 ///   được vì nó lái Terminal.app bằng AppleScript. Nhánh này biên dịch thành
 ///   "chạy thẳng" — mất phần nhường đường, không mất chức năng nào.
 ///
-/// Không dùng `nice`: nó chỉ chỉnh ưu tiên CPU cổ điển, còn thứ đang bóp hub là
+/// Không dùng `nice`: nó chỉ chỉnh ưu tiên CPU cổ điển, còn thứ đang bóp huba là
 /// QoS của macOS — hai bộ điều khiển khác nhau, và `nice` không chạm tới cái
 /// đang siết.
 #[cfg(target_os = "macos")]
@@ -310,7 +310,7 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
     })
 }
 
-// 🔴 ĐÃ XOÁ `run_json` (2026-08-14): mọi chỗ đọc JSON của hub nay tự gọi `run`
+// 🔴 ĐÃ XOÁ `run_json` (2026-08-14): mọi chỗ đọc JSON của huba nay tự gọi `run`
 // rồi tự phân tích, vì mỗi chỗ cần một câu lỗi khác nhau — `claude agents` hỏng
 // khác hẳn `tfl5` hỏng, và câu lỗi là thứ người ta đọc lúc 2 giờ sáng. Một lớp
 // bọc chung không ai dùng thì chỉ là một đường thứ hai để quên.
@@ -336,7 +336,7 @@ mod tests {
     /// chờ. Giết con mà không giết nhóm thì `sleep` sống tiếp.
     #[test]
     fn a_timeout_kills_grandchildren_not_just_the_child() {
-        let pidfile = std::env::temp_dir().join(format!("hub-exec-{}.pid", std::process::id()));
+        let pidfile = std::env::temp_dir().join(format!("huba-exec-{}.pid", std::process::id()));
         let _ = std::fs::remove_file(&pidfile);
         let script = format!("sleep 30 & echo $! > {}; wait", pidfile.display());
 

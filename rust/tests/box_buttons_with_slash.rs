@@ -4,7 +4,7 @@
 //! có nút bấm, sao cứ update lại mất vài thứ"*. Dòng ô nhập lúc ấy là
 //! `❯ Đã bấm /clean rồi, không thấy phản hồi gì` — có chữ, không có nút.
 
-use hub::pipeline::{html_with_links, prompt_line_text, render_session_data, SessionData};
+use huba::pipeline::{html_with_links, prompt_line_text, render_session_data, SessionData};
 
 /// Màn thật rút gọn: ô nhập mang một câu CÓ `/clean` trong đó.
 const SCREEN: &str = "  ▶▶ auto mode on · 2 shells · ← 1 agent · ↓ to manage\n\
@@ -17,7 +17,7 @@ const SCREEN: &str = "  ▶▶ auto mode on · 2 shells · ← 1 agent · ↓ to
 /// liên kết rỗng và bài kiểm đỏ VÌ PHÉP ĐO chứ không vì sản phẩm — nó đã đỏ
 /// đúng như thế ở lượt chạy đầu, kể cả ca đối chứng.
 fn bot() {
-    hub::telegram::set_bot_username("hub_test_bot");
+    huba::telegram::set_bot_username("hub_test_bot");
 }
 
 fn data() -> SessionData {
@@ -27,7 +27,7 @@ fn data() -> SessionData {
     }
 }
 
-/// Bước 1 vẫn đúng: hub ĐỌC ĐƯỢC chữ trong ô nhập.
+/// Bước 1 vẫn đúng: huba ĐỌC ĐƯỢC chữ trong ô nhập.
 #[test]
 fn the_box_text_is_still_read() {
     assert_eq!(

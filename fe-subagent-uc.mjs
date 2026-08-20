@@ -11,11 +11,11 @@
 // trong `rust/tests/sessions.rs`; lúc nghiệm thu không phiên nào trên máy đang
 // chạy subagent, nên chưa ai THẤY nó vẽ ra.
 //
-// NGUỒN SỰ THẬT PHẢI ĐỘC LẬP VỚI HUB. So màn hình với `hub sessions --json` chỉ
-// chứng minh trang vẽ trung thành cái hub tính — nó không chứng minh hub đếm
+// NGUỒN SỰ THẬT PHẢI ĐỘC LẬP VỚI HUBA. So màn hình với `huba sessions --json` chỉ
+// chứng minh trang vẽ trung thành cái huba tính — nó không chứng minh huba đếm
 // đúng, vì cả hai vế cùng một mã. Nên kịch bản này tự đọc nhật ký phiên
 // (`~/.claude*/projects/*/<session_id>.jsonl`), cùng cửa sổ 256KB mà
-// `sessions.rs:41` dùng, và tự đếm lại bằng JS. `hub sessions --json` chỉ được
+// `sessions.rs:41` dùng, và tự đếm lại bằng JS. `huba sessions --json` chỉ được
 // dùng cho DANH SÁCH phiên (thứ không nằm trong phạm vi UC này).
 //
 // PHÉP ĐO ĐI HAI CHIỀU, để nó có thể ĐỎ:
@@ -33,7 +33,7 @@ import { homedir } from "node:os";
 
 const HERE = new URL("./", import.meta.url).pathname;
 const env = Object.fromEntries(
-  readFileSync(HERE + "hub.env", "utf8")
+  readFileSync(HERE + "huba.env", "utf8")
     .split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])
 );
@@ -51,11 +51,11 @@ const check = (name, ok, detail = "") => {
   if (!ok) problems.push(`${name}${detail ? `: ${detail}` : ""}`);
 };
 
-// ——— nguồn sự thật: đọc thẳng nhật ký, không hỏi hub ———
+// ——— nguồn sự thật: đọc thẳng nhật ký, không hỏi huba ———
 
 /// Nhật ký của một phiên nằm dưới thư mục cấu hình của TÀI KHOẢN chạy nó, mà
 /// máy này có nhiều tài khoản (`~/.claude`, `~/.claude-acc2`, …). Quét thay vì
-/// dựng lại đường dẫn: dựng lại là chép logic của hub, tức lại hỏi hub lần nữa.
+/// dựng lại đường dẫn: dựng lại là chép logic của huba, tức lại hỏi huba lần nữa.
 function findTranscript(sessionId) {
   const home = homedir();
   for (const dir of readdirSync(home)) {
@@ -150,7 +150,7 @@ function pendingSubagents(path) {
   return started.filter((id) => (background.has(id) ? !stopped.has(id) : !finished.has(id))).length;
 }
 
-/// Tiến trình còn sống không? Hỏi HỆ ĐIỀU HÀNH, không hỏi lại hub — nếu hub bịa
+/// Tiến trình còn sống không? Hỏi HỆ ĐIỀU HÀNH, không hỏi lại huba — nếu huba bịa
 /// trạng thái sống/chết thì `ps` sẽ cãi. Phiên đã chết thì không thể có gì
 /// "đang chạy", dù nhật ký của nó dừng lại giữa chừng ở trạng thái vừa tung.
 function alive(pid) {
@@ -161,7 +161,7 @@ function alive(pid) {
   } catch { return false; }
 }
 
-/// Ảnh chụp sự thật cho MỌI phiên đang sống. `hub sessions --json` chỉ cho danh
+/// Ảnh chụp sự thật cho MỌI phiên đang sống. `huba sessions --json` chỉ cho danh
 /// sách id — con số subagent thì tự đếm lấy.
 function truthNow(roster) {
   const out = new Map();
@@ -174,7 +174,7 @@ function truthNow(roster) {
 }
 
 const roster = JSON.parse(
-  execFileSync(HERE + "rust/target/release/hub", ["sessions", "--json"], {
+  execFileSync(HERE + "rust/target/release/huba", ["sessions", "--json"], {
     encoding: "utf8", stdio: ["ignore", "pipe", "ignore"],
   })
 ).sessions;

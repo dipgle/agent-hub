@@ -5,12 +5,12 @@
 //! của phiên `[onghut]` lúc ấy, đọc thẳng từ Terminal — không phải bản chép tay.
 //!
 //! Vì sao đúng màn này mới là phép thử: nó là bước CUỐI của một bảng nhiều câu,
-//! và nó thiếu đúng cái mà hai cổng an toàn của hub hay dựa vào —
+//! và nó thiếu đúng cái mà hai cổng an toàn của huba hay dựa vào —
 //! **không có dòng chân** `Enter to select · ↑/↓ to navigate`. Chỉ còn thanh tab
 //! (`←  ☒ App onghut  ☒ Dung lượng  ✔ Submit  →`) và một hộp chọn hai mục.
 
-use hub::keys::{ask_table, has_chooser_footer, parse_choices};
-use hub::pipeline::{multi_question_screen, prompt_line_text};
+use huba::keys::{ask_table, has_chooser_footer, parse_choices};
+use huba::pipeline::{multi_question_screen, prompt_line_text};
 
 const SCREEN: &str = include_str!("fixtures/chooser-review-2026-08-18.txt");
 
@@ -26,7 +26,7 @@ fn the_submit_box_is_read() {
 }
 
 /// 🔴 CỬA AN TOÀN. `❯ 1. Submit answers` là CON TRỎ của hộp chọn, không phải
-/// chữ trong ô nhập. Đọc nhầm thì hub dựng nút ⏎ "gửi" — và một cú Enter ở màn
+/// chữ trong ô nhập. Đọc nhầm thì huba dựng nút ⏎ "gửi" — và một cú Enter ở màn
 /// này **CHỐT luôn Submit**, tức trả lời hộ chủ máy một việc không lùi lại được.
 ///
 /// Ca này đặc biệt vì cổng thứ nhất (`has_chooser_footer`) MÙ: màn không có dòng
@@ -47,7 +47,7 @@ fn the_cursor_on_a_choice_is_not_input_box_text() {
 
 /// 🔴 Ở bước Review, hai mục trên màn KHÔNG phải lựa chọn của câu số 1.
 ///
-/// Đo trên chính màn này (18/08): hub dựng nút bằng mã `pick_<sid>_1_<n>` — tức
+/// Đo trên chính màn này (18/08): huba dựng nút bằng mã `pick_<sid>_1_<n>` — tức
 /// đường của bảng nhiều câu, thứ gửi *mũi tên rồi số* để đi tới câu 1. Nhưng ở
 /// đây không còn câu nào để đi tới; `Submit answers` / `Cancel` là hộp chọn đơn
 /// của bước xác nhận, và phải đi bằng `k_`.

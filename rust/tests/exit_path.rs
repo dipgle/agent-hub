@@ -1,7 +1,7 @@
 //! `/exit` chỉ được đi bằng MỘT đường, và đường ấy phải có cú Enter rời.
 //!
 //! 🔴 Hà 2026-08-15: *"ở phiên tfl5 có thấy lệnh exit nào đâu"*. Anh soi nhầm
-//! cửa sổ — hub nhắm `ttys004` (phiên hub tiền nhiệm), không phải phiên tfl5 —
+//! cửa sổ — huba nhắm `ttys004` (phiên huba tiền nhiệm), không phải phiên tfl5 —
 //! nhưng câu hỏi lôi ra một lỗi thật: `keys::quit_and_close` và `keys::send_exit`
 //! mỗi hàm giữ một bản chép tay của `osascript(do_script(w, "/exit"))`, **cả hai
 //! đều thiếu cú Enter rời**.

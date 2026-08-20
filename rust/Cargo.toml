@@ -1,10 +1,10 @@
 [package]
-name = "hub"
+name = "huba"
 version = "0.1.0"
 edition = "2021"
-description = "hub — quản lý các phiên Claude CLI trên máy này, điều khiển từ Telegram"
+description = "huba — quản lý các phiên Claude CLI trên máy này, điều khiển từ Telegram"
 
-# The hub is synchronous: it spends its life waiting on `claude` and a Telegram
+# The huba is synchronous: it spends its life waiting on `claude` and a Telegram
 # long-poll, so an async runtime would add moving parts without removing a wait.
 #
 # 🔴 Ba thư viện gỡ ngày 2026-08-14, cùng lượt gỡ tfl5 — cả ba đều KHÔNG còn một
@@ -12,10 +12,10 @@ description = "hub — quản lý các phiên Claude CLI trên máy này, điề
 #
 # * `tungstenite` — WebSocket `/ws/chat`, đường DUY NHẤT đăng được tin lên phòng
 #   chat tfl5. Sống trong `live.rs`, và `live.rs` đã ra khỏi `lib.rs`.
-# * `axum` + `tokio` — dựng cho bảng điều khiển web chạy tại máy (`hub web`).
+# * `axum` + `tokio` — dựng cho bảng điều khiển web chạy tại máy (`huba web`).
 #   Bảng ấy bị xoá từ 2026-08-08 (luật #12: *"trang điện thoại là UI duy nhất"*),
 #   nhưng hai thư viện thì ở lại thêm sáu ngày, kéo theo cả một runtime bất đồng
-#   bộ vào một tiến trình cố ý đồng bộ. Trang cấu hình `hub setup` KHÔNG dùng
+#   bộ vào một tiến trình cố ý đồng bộ. Trang cấu hình `huba setup` KHÔNG dùng
 #   chúng — nó là `TcpListener` của thư viện chuẩn (`setup.rs`).
 [dependencies]
 anyhow = "1"
@@ -33,12 +33,12 @@ serde_json = "1"
 tempfile = "3"
 
 [[bin]]
-name = "hub"
+name = "huba"
 path = "src/main.rs"
 
 [[bin]]
-name = "hubd"
-path = "src/bin/hubd.rs"
+name = "hubad"
+path = "src/bin/hubad.rs"
 
 [profile.release]
 strip = true

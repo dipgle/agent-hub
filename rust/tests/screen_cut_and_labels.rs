@@ -1,5 +1,5 @@
-//! Bốn chỗ hub đọc SAI thứ nó đang nhìn — Hà, bốn ảnh chụp trong một buổi tối
-//! 2026-08-19. Cả bốn cùng một họ: hub cầm đúng dữ kiện mà đọc trên một khuôn
+//! Bốn chỗ huba đọc SAI thứ nó đang nhìn — Hà, bốn ảnh chụp trong một buổi tối
+//! 2026-08-19. Cả bốn cùng một họ: huba cầm đúng dữ kiện mà đọc trên một khuôn
 //! đã cũ, rồi kết luận tự tin.
 //!
 //! 1. *"Màn có option nhưng nhận được bị thiếu và không có cách bấm chọn là
@@ -12,8 +12,8 @@
 //! 4. *"Chuyển phiên xong phiên cũ bị kẹt như này làm sao qua được"* — hộp
 //!    *"Background work is running"* của `/exit`.
 
-use hub::keys::{box_region, parse_choices, still_in_box};
-use hub::sessions::{
+use huba::keys::{box_region, parse_choices, still_in_box};
+use huba::sessions::{
     exit_dialog_choice, exit_dialog_tasks, label_sessions, shown, without_dot, LiveSession,
 };
 
@@ -78,10 +78,10 @@ fn the_input_box_sits_between_two_rules() {
 /// 🔴 Đây là bài kiểm tái hiện của lỗi Hà chụp lúc 20:12. Với luật cũ (chỉ soi
 /// 16 ký tự đầu + 16 ký tự cuối) nó ĐỎ: cả hai đầu đều không có trên màn, phép
 /// đo đọc ra "chữ đã đi", `type_and_send` không bấm Enter, và cả khối nằm lại
-/// trong ô nhập hơn một tiếng trong khi hub báo *"✅ đã dán vào phiên"*.
+/// trong ô nhập hơn một tiếng trong khi huba báo *"✅ đã dán vào phiên"*.
 #[test]
 fn a_pasted_block_is_found_by_any_chunk_still_visible() {
-    let block = "[hub chạy hộ]\n\
+    let block = "[huba chạy hộ]\n\
                  $ git status --short | grep -E \"^(UU|AA|DU|UD|AU|UA)\" || echo \"(không có)\"\n\
                  ✅ xong (0.1s)\n\
                  (không có)";
@@ -98,10 +98,10 @@ fn a_pasted_block_is_found_by_any_chunk_still_visible() {
     );
 }
 
-/// …và một ô nhập đang giữ chữ của NGƯỜI KHÁC thì không đọc thành chữ của hub.
+/// …và một ô nhập đang giữ chữ của NGƯỜI KHÁC thì không đọc thành chữ của huba.
 #[test]
 fn someone_elses_text_in_the_box_is_not_mistaken_for_the_paste() {
-    let block = "[hub chạy hộ]\n$ cargo test --offline\n✅ xong (92.4s)\n424 passed";
+    let block = "[huba chạy hộ]\n$ cargo test --offline\n✅ xong (92.4s)\n424 passed";
     let screen = "…phần hội thoại…\n\
                   ────────────────────────────────\n\
                   ❯ làm tiếp phần bảo mật của DS04 đi\n\
@@ -113,7 +113,7 @@ fn someone_elses_text_in_the_box_is_not_mistaken_for_the_paste() {
 /// …và ô đã trống thì đừng bắn thêm một cú Enter nào.
 #[test]
 fn an_empty_box_reads_as_sent() {
-    let block = "[hub chạy hộ]\n$ ls -la /tmp/khong-co-that\n❌ exit 1 (0.0s)";
+    let block = "[huba chạy hộ]\n$ ls -la /tmp/khong-co-that\n❌ exit 1 (0.0s)";
     let screen = "…phần hội thoại…\n\
                   ────────────────────────────────\n\
                   ❯ \n\
@@ -147,7 +147,7 @@ fn the_exit_dialog_is_answered_with_stop_tasks() {
     assert!(tasks[0].contains("quality-gate.sh"), "{tasks:?}");
 }
 
-/// Hộp chọn KHÁC thì hub không trả lời thay chủ máy.
+/// Hộp chọn KHÁC thì huba không trả lời thay chủ máy.
 #[test]
 fn another_dialog_is_never_answered_for_the_owner() {
     let screen = "Do you want to make this edit to billing.rs?\n\
@@ -238,8 +238,8 @@ fn two_sessions_doing_the_same_thing_fall_back_to_the_id() {
 /// tự (mất số tty) rồi bộ đọc đòi HEX nên gạt luôn.
 #[test]
 fn a_bare_window_choice_link_round_trips() {
-    use hub::adapters::CommandKind;
-    use hub::verbs::parse_command;
+    use huba::adapters::CommandKind;
+    use huba::verbs::parse_command;
 
     assert_eq!(
         parse_command("/start k_win-ttys002_2"),
@@ -279,7 +279,7 @@ fn a_label_taken_from_the_book_keeps_exactly_one_dot() {
     let out = shown(&s);
     assert_eq!(
         out,
-        format!("{} [dwork]·a14bc255", hub::sessions::project_dot("dwork")),
+        format!("{} [dwork]·a14bc255", huba::sessions::project_dot("dwork")),
         "nhãn chép từ sổ phải đeo đúng MỘT ô màu"
     );
 }

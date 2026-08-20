@@ -3,7 +3,7 @@
 //
 // The journey is a person's: log in on the deployed bundle, walk the tabs, read
 // what is on them. Nothing is faked — the snapshot must already have been
-// pushed by `hubd`, which is the point: if the push path is broken, this fails
+// pushed by `hubad`, which is the point: if the push path is broken, this fails
 // instead of quietly rendering an empty screen.
 //
 // It also pins the shape after 2026-08-08, when the inbox product was deleted:
@@ -18,7 +18,7 @@ import { readFileSync, mkdirSync } from "node:fs";
 
 const HERE = new URL("./", import.meta.url).pathname;
 const env = Object.fromEntries(
-  readFileSync(HERE + "hub.env", "utf8")
+  readFileSync(HERE + "huba.env", "utf8")
     .split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])
 );
@@ -56,7 +56,7 @@ page.on("request", (r) => {
 try {
   await page.goto(`http://${APP_TID}.test.localhost:8090`, { waitUntil: "domcontentloaded" });
   // The owner account: the room only takes orders from a trusted tid, and
-  // logging in as hub's own bot account would test a permission nobody uses.
+  // logging in as huba's own bot account would test a permission nobody uses.
   await page.fill("#u", "alice_local");
   await page.fill("#p", env.HUB_TFL5_ALICE_PASSWORD);
   await page.click("#loginBtn");
@@ -90,9 +90,9 @@ try {
     !/github|telegram|mailler|devlog/i.test(probe), probe.replace(/\s+/g, " ").slice(0, 90));
   check("nói rõ đo lúc nào (số liệu có thể cũ vài phút)", /Đo lúc/.test(probe));
 
-  // Hai cách hub chết lặng mà mọi màn khác vẫn xanh (2026-08-10):
+  // Hai cách huba chết lặng mà mọi màn khác vẫn xanh (2026-08-10):
   //  · bản cài rơi về chữ ký ad-hoc ⇒ bật máy lại là macOS không nhận ra
-  //    chương trình, hub không dậy — và không có lỗi nào để đọc;
+  //    chương trình, huba không dậy — và không có lỗi nào để đọc;
   //  · bản cài cũ hơn mã đã build ⇒ daemon chạy mã hôm qua trong khi test xanh
   //    và trang đã deploy.
   // Cả hai chỉ tồn tại dưới dạng MỘT DÒNG CHỮ trên màn này, nên phải kiểm bằng
@@ -158,13 +158,13 @@ try {
     await page.waitForSelector(`#panel-${t}:not(.hidden)`, { timeout: 5000 });
     // What the PRODUCT draws, not text it merely displays.
     //
-    // Bỏ ra hai loại nội dung KHÔNG do hub viết: (1) lịch sử phòng chat — vẫn
-    // còn nguyên các câu "$0.8735" hub trả lời hồi chưa gỡ giá, và sửa lịch sử
+    // Bỏ ra hai loại nội dung KHÔNG do huba viết: (1) lịch sử phòng chat — vẫn
+    // còn nguyên các câu "$0.8735" huba trả lời hồi chưa gỡ giá, và sửa lịch sử
     // cho phép đo xanh mới là gian; (2) chữ lấy từ chính phiên Claude (xem
     // trước, luồng sự kiện, câu trả lời fork) — một phiên đang bàn "Chi phí
     // engine" thì màn phải hiện đúng như thế. Bắt được thật ngày 2026-08-09:
-    // phép đo báo đỏ vì một dòng transcript, không phải vì hub hiện tiền.
-    // Phần còn lại là chrome do hub tự vẽ — chỗ phải sạch bóng tiền.
+    // phép đo báo đỏ vì một dòng transcript, không phải vì huba hiện tiền.
+    // Phần còn lại là chrome do huba tự vẽ — chỗ phải sạch bóng tiền.
     const txt = await page.evaluate(() => {
       const el = document.getElementById('board').cloneNode(true);
       el.querySelectorAll(
@@ -307,7 +307,7 @@ try {
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0 ? el.textContent.trim() : "(có phần tử nhưng không hiện)";
   });
-  check("bấm nút lệnh ở tab khác vẫn thấy hub trả lời", /Đã gửi|Chưa kết nối/.test(cmdSaid), cmdSaid.slice(0, 70));
+  check("bấm nút lệnh ở tab khác vẫn thấy huba trả lời", /Đã gửi|Chưa kết nối/.test(cmdSaid), cmdSaid.slice(0, 70));
 
   // ---- the room still takes orders ---------------------------------------
   await page.click('#panelTabs button[data-panel="chat"]');
@@ -350,7 +350,7 @@ try {
     );
   }
   // Màn CHI TIẾT phiên cũng phải đo — nó là màn dày nhất và có những hàng chỉ
-  // xuất hiện khi phiên do hub mở (ô "nói tiếp"). Đúng chỗ ấy có lỗi tràn thật
+  // xuất hiện khi phiên do huba mở (ô "nói tiếp"). Đúng chỗ ấy có lỗi tràn thật
   // 2026-08-09 (`div.row-flex 300 → 368px`) mà vòng quét 4 tab không thấy, vì
   // nó chỉ đứng ở danh sách.
   await page.click('#panelTabs button[data-panel="sessions"]');

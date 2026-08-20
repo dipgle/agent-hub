@@ -8,10 +8,10 @@
 //!
 //! Log lúc ấy đã kể đúng chuyện: `quick_files_filtered {"kept":0,"seen":1}`.
 
-use hub::pipeline::sendable_file;
+use huba::pipeline::sendable_file;
 
 fn tmp(name: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("hub-file-btn-{name}"));
+    let d = std::env::temp_dir().join(format!("huba-file-btn-{name}"));
     std::fs::remove_dir_all(&d).ok();
     std::fs::create_dir_all(d.join("AI/tcc/browser")).unwrap();
     d
@@ -41,12 +41,12 @@ fn a_real_file_beside_the_session_folder_still_gets_a_button() {
     );
     assert!(sendable_file(trong.to_str().unwrap(), &root, &ws).is_some());
 
-    // 🔴 Ca GỐC của cửa này (Hà 2026-08-14: *"Com.dipgle.hubd.plist đâu phải là
+    // 🔴 Ca GỐC của cửa này (Hà 2026-08-14: *"Com.dipgle.hubad.plist đâu phải là
     // file"*): một cái TÊN nhắc giữa câu văn — không có tệp nào để gửi.
     assert!(sendable_file("com.dipgle.hubd.plist", &root, &ws).is_none());
 
     // …và hàng rào thật vẫn đứng: ngoài workspace thì không gửi, dù có thật.
-    let ngoai = std::env::temp_dir().join("hub-file-btn-ngoai.txt");
+    let ngoai = std::env::temp_dir().join("huba-file-btn-ngoai.txt");
     std::fs::write(&ngoai, "bí mật").unwrap();
     assert!(
         sendable_file(ngoai.to_str().unwrap(), &root, &ws).is_none(),

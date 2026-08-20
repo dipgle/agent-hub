@@ -81,14 +81,14 @@ try {
   // Đổi ý có căn cứ (2026-08-09): dòng tổng kết KHÔNG được đếm phiên editor như
   // phiên đang sống, nhưng PHẢI nói ra là đã ẩn bao nhiêu. Bản đầu của phép đo
   // này đòi "thôi nhắc editor" — đòi đúng cái làm nên danh sách nói dối: lúc ấy
-  // hub ẩn 8 phiên mỗi vòng và chỉ ghi vào log.
+  // huba ẩn 8 phiên mỗi vòng và chỉ ghi vào log.
   check(
     "dòng tổng kết không đếm editor như phiên đang sống",
     !/—[^·]*trong editor/.test(summary),
     summary
   );
   // Con số "ẩn bao nhiêu" được đối chiếu với máy ở `fe-sessions-uc`, nơi đã có
-  // sẵn `hub sessions --json`. Ở đây chỉ giữ phần thuộc về màn này: danh sách
+  // sẵn `huba sessions --json`. Ở đây chỉ giữ phần thuộc về màn này: danh sách
   // không có dòng editor nào.
 
   // ---- 3. bấm tab thì địa chỉ đổi theo ------------------------------------

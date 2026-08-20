@@ -10,11 +10,11 @@
 //! hỏi "hàm có trả đúng danh sách không" vẫn xanh nguyên khi cái tin gửi đi đã
 //! mọc thêm một khu chữ không ai hỏi.
 
-use hub::pipeline::{
+use huba::pipeline::{
     cmds_present_in, needs_formatting, paths_not_in_commands, render_session_data,
     tail_after_command, SessionData,
 };
-use hub::sessions::Cmd;
+use huba::sessions::Cmd;
 
 /// Cửa hỏi *"tin này có mang chữ của phiên không"*, KHÔNG hỏi *"có nút không"*.
 ///
@@ -26,8 +26,8 @@ use hub::sessions::Cmd;
 #[test]
 fn a_bare_acknowledgement_stays_an_emoji_and_never_goes_through_the_door() {
     for ack in [
-        "✓ vào hàng chờ · 🟪 [hub]",
-        "✓ đã gửi · 🟪 [hub]",
+        "✓ vào hàng chờ · 🟪 [huba]",
+        "✓ đã gửi · 🟪 [huba]",
         "👁 Đang theo phiên [tfl5]",
         "⏹ đã tắt",
     ] {
@@ -37,7 +37,7 @@ fn a_bare_acknowledgement_stays_an_emoji_and_never_goes_through_the_door() {
         );
     }
     for real in [
-        "📷 Màn của 🟪 [hub]:\n\n❯ làm gì đó",
+        "📷 Màn của 🟪 [huba]:\n\n❯ làm gì đó",
         "📋 Đã đóng sổ phiên [tfl5]. Tiếp tục bằng:\ncd /x && claude --resume 1",
         // 🔴 Ack của một cú bấm trong hộp chọn mang cả BẢNG trạng thái, và nó
         // vẫn mở đầu bằng `✓` — thiếu cổng "nhiều dòng thì không phải xác nhận
@@ -63,10 +63,10 @@ fn a_path_inside_a_command_line_gets_no_download_link() {
     // dẫn chỉ sống trong dòng lệnh thì bị bỏ, một đường dẫn được nhắc như tệp
     // thì giữ.
     let text = "Ghi chú ở docs/flow-boc-tach-lenh.md\n\n\
-                rm ~/projects/hub/rust/tests/probe_prompt_anchor.rs\n";
-    let cmds = vec![cmd("rm ~/projects/hub/rust/tests/probe_prompt_anchor.rs")];
+                rm ~/projects/huba/rust/tests/probe_prompt_anchor.rs\n";
+    let cmds = vec![cmd("rm ~/projects/huba/rust/tests/probe_prompt_anchor.rs")];
     let seen = vec![
-        "~/projects/hub/rust/tests/probe_prompt_anchor.rs".to_string(),
+        "~/projects/huba/rust/tests/probe_prompt_anchor.rs".to_string(),
         "docs/flow-boc-tach-lenh.md".to_string(),
     ];
     let kept = paths_not_in_commands(text, &seen, &cmds);
@@ -87,7 +87,7 @@ fn cmd(line: &str) -> Cmd {
 /// tin ngắn sẽ mọc ra cả danh sách lệnh của lượt trước.
 #[test]
 fn the_one_door_formats_what_is_there_and_adds_nothing() {
-    let text = "▶ đang chạy — cargo test --offline\ntrong 🟪 [hub] · báo lại khi xong.";
+    let text = "▶ đang chạy — cargo test --offline\ntrong 🟪 [huba] · báo lại khi xong.";
     let from_log = vec![cmd("cargo test --offline"), cmd("rm -rf /tmp/cũ")];
 
     let kept = cmds_present_in(text, from_log.clone());
@@ -104,7 +104,7 @@ fn the_one_door_formats_what_is_there_and_adds_nothing() {
         },
     );
     // Nhãn của khu ấy đổi 2026-08-17 ("cổng quyền chặn" → "không thấy trên
-    // màn"): hub không đo được NGUYÊN NHÂN vắng mặt, nên nó thôi đoán. Bài kiểm
+    // màn"): huba không đo được NGUYÊN NHÂN vắng mặt, nên nó thôi đoán. Bài kiểm
     // bám vào phần nói được — có mọc thêm khu chữ hay không.
     assert!(
         !shown.contains("không thấy trên màn"),
@@ -142,8 +142,8 @@ fn the_one_door_formats_what_is_there_and_adds_nothing() {
 fn text_in_the_input_box_always_gets_a_send_link() {
     // Mọi liên kết giữa chữ đi qua `deep_link`, thứ trả `None` khi chưa biết
     // tên bot — không khai thì bài kiểm này đỏ vì môi trường, không vì sản phẩm.
-    hub::telegram::set_bot_username("hub_test_bot");
-    let screen = "📷 Màn của 🟪 [hub]:\n\n\
+    huba::telegram::set_bot_username("hub_test_bot");
+    let screen = "📷 Màn của 🟪 [huba]:\n\n\
         ───────────────────────\n\
         \u{276f}\u{a0}Bỏ hẳn trần cắt lệnh đi\n\
         ───────────────────────\n\
@@ -170,7 +170,7 @@ fn text_in_the_input_box_always_gets_a_send_link() {
 /// phải nằm trên cùng cột ấy; dán cuối nhãn thì mỗi dòng một chỗ khác nhau.
 #[test]
 fn a_choice_gets_its_tick_before_the_number() {
-    hub::telegram::set_bot_username("hub_test_bot");
+    huba::telegram::set_bot_username("hub_test_bot");
     let text = "⚠ [dwork] dừng lại HỎI — Xoá gì\n\n1. Không xoá gì\n2. Rác build";
     let shown = render_session_data(
         text,
@@ -214,7 +214,7 @@ test result: ok. 359 passed
 /// Không thấy dòng lệnh (màn đã cuộn, lệnh bị bẻ đôi) thì trả cả khúc đang có.
 ///
 /// Trả chuỗi rỗng ở đây là nói dối bằng im lặng: người đọc hiểu thành "lệnh
-/// chạy xong và không in ra gì", trong khi sự thật là hub không định vị được.
+/// chạy xong và không in ra gì", trong khi sự thật là huba không định vị được.
 #[test]
 fn a_command_line_that_scrolled_away_still_reports_something() {
     let screen = "dòng một\ndòng hai\nxong rồi";

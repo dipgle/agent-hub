@@ -32,7 +32,7 @@ static LEVEL: AtomicU8 = AtomicU8::new(INFO);
 /// **sai**, và sai theo kiểu tệ nhất: nghe hợp lý nên không ai kiểm.
 /// `runtime::errors_block` sống trong `runtime::snapshot`, mà hàm ấy có đúng
 /// một chỗ gọi là `portal.rs` — tệp đã chết. Tức nó không có người đọc nào.
-/// Người đọc THẬT của `runs` lúc ấy chỉ có `hub status` trên CLI. Nay `/doctor`
+/// Người đọc THẬT của `runs` lúc ấy chỉ có `huba status` trên CLI. Nay `/doctor`
 /// đọc thật, qua `pipeline::recent_errors_line`.
 ///
 /// Vì sao đo bằng NHẬT KÝ chứ không bắt từng handler trả lỗi lên: luật 3 của dự
@@ -124,7 +124,7 @@ fn emit(level: u8, level_name: &str, msg: &str, fields: Value) {
     // `redact` đã có từ 08-11, sau khi vòng đọc Telegram hỏng mạng vài lần và
     // để lại 28 dòng log mang nguyên khoá bot. Nhưng nó là thứ CHỖ GỌI phải
     // nhớ bọc — nên hôm nay, 08-14, một nhánh mới (`Inbox::react`) quên bọc, và
-    // token lại nằm nguyên trong `logs/hub.log`:
+    // token lại nằm nguyên trong `logs/huba.log`:
     //   telegram_reaction_failed err="error sending request for url
     //   (https://api.telegram.org/bot<token>/setMessageReaction)"
     // Chính tôi viết nhánh ấy sáng nay, và chính tôi đã ghi cái bài học "đặt
@@ -135,11 +135,11 @@ fn emit(level: u8, level_name: &str, msg: &str, fields: Value) {
     // có `/bot`, nên cái giá là một lần `find` cho mỗi dòng.
     let text = redact(&line.to_string());
 
-    // Every level goes to stderr: stdout is the DATA channel. `hub sessions
+    // Every level goes to stderr: stdout is the DATA channel. `huba sessions
     // --json` and `portal-push --dry-run` are meant to be piped into a parser,
     // and a stray `hub_env_loaded` line on stdout breaks them (it did, the
     // first time `--json` was piped, 2026-08-08). Nothing reads these lines
-    // from stdout — the console reads the log FILE, and hubd redirects both
+    // from stdout — the console reads the log FILE, and hubad redirects both
     // streams into one file.
     eprintln!("{text}");
 

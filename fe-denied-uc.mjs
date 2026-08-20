@@ -14,7 +14,7 @@ import { readFileSync, mkdirSync } from "node:fs";
 
 const HERE = new URL("./", import.meta.url).pathname;
 const env = Object.fromEntries(
-  readFileSync(HERE + "hub.env", "utf8")
+  readFileSync(HERE + "huba.env", "utf8")
     .split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])
 );
@@ -37,7 +37,7 @@ const owner = await browser.newPage({ viewport: { width: 1400, height: 950 } });
 const openAccessDialog = async () => {
   await owner.getByText(/Manage access/i).first().waitFor({ timeout: 15000 });
   await owner.getByText(/Manage access/i).first().click();
-  await owner.getByText("Who can use hub").waitFor({ timeout: 10000 });
+  await owner.getByText("Who can use huba").waitFor({ timeout: 10000 });
 };
 const dialogFields = () =>
   owner.evaluate(() => {
@@ -73,7 +73,7 @@ try {
   await owner.locator('input[name="username"]').fill(env.HUB_TFL5_USER);
   await owner.locator('input[type="password"]').first().fill(env.HUB_TFL5_PASSWORD);
   await owner.getByRole("button", { name: /Sign in with password/i }).click();
-  await owner.getByText("hub", { exact: true }).first().waitFor({ timeout: 20000 });
+  await owner.getByText("huba", { exact: true }).first().waitFor({ timeout: 20000 });
   await owner.getByText(/^Open$/).first().click();
 
   await openAccessDialog();

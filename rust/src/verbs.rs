@@ -78,7 +78,7 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     /// `SessionData::short()` cắt 8 ký tự đầu nên `win-ttys002` thành
     /// `win-ttys` — **mất số tty**, tức mất luôn cái phân biệt cửa sổ này với
     /// cửa sổ khác; rồi bộ đọc đòi 8 ký tự HEX nên `win-ttys` không lọt. Kết
-    /// quả: hub VẼ RA hai cái ☑ mà không đường nào nhận chúng — đúng hình dạng
+    /// quả: huba VẼ RA hai cái ☑ mà không đường nào nhận chúng — đúng hình dạng
     /// "một cái nút không dẫn vào đâu" mà luật 14 cấm.
     ///
     /// Nên id cửa sổ đi NGUYÊN (`win-ttys002`, 11 ký tự, vẫn thừa chỗ trong 32
@@ -152,9 +152,9 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     //
     // 🔴 Hà 2026-08-16: *"còn lăn tăn nó là text mờ hay tỏ thì thêm 1 nút xóa
     // bên cạnh nữa để tự thao tác"*. Đúng chỗ tôi bí: đọc màn về thì chữ mất
-    // màu, nên hub không phân biệt được **chữ chủ máy gõ** với **gợi ý mờ** TUI
+    // màu, nên huba không phân biệt được **chữ chủ máy gõ** với **gợi ý mờ** TUI
     // tự bày. Tôi đã lấy đó làm lý do để KHÔNG làm gì — mà người ngồi trước máy
-    // thì nhìn một cái là biết. Vậy đừng bắt hub đoán: đưa cả hai đường ra, ai
+    // thì nhìn một cái là biết. Vậy đừng bắt huba đoán: đưa cả hai đường ra, ai
     // nhìn thấy thì người ấy quyết.
     //
     // Mã phiên nằm TRONG chính cái liên kết (`clr_<sid>`), không lấy theo con
@@ -169,7 +169,7 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     // ra: **8 ký tự HEX** (`format!("{h:08x}")`), không phải một số thứ tự.
     //
     // 🔴 Hà 2026-08-16: *"Có mỗi vấn đề nút lệnh này làm mãi không xong"*, kèm
-    // ảnh hub đáp *"Chưa hiểu lệnh này"* cho chính cái icon nó vừa gửi. Log nói
+    // ảnh huba đáp *"Chưa hiểu lệnh này"* cho chính cái icon nó vừa gửi. Log nói
     // đúng thủ phạm trong một dòng: `telegram_not_a_command {"head":"/start
     // run_d1704560"}` — nhánh này đòi `is_ascii_digit`, mà `d1704560` có chữ
     // `d`. Nên **gần như MỌI** mã đều rớt: 8 chữ số hex mà không dính lấy một
@@ -187,14 +187,14 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
         }
     }
     // `term_<mã>` — CÙNG dòng lệnh ấy, nhưng mở một CỬA SỔ Terminal riêng và gõ
-    // nó vào đó, thay vì hub chạy rồi dán kết quả ngược vào phiên.
+    // nó vào đó, thay vì huba chạy rồi dán kết quả ngược vào phiên.
     //
     // 🔴 Hà 2026-08-16: *"kiếm 1 cái icon terminal để biết nó là bấm chạy
     // terminal riêng chứ không phải chạy xong rồi gửi ngược vào phiên, nên tách
     // thành 2 nút này để người dùng chủ động chọn"*.
     //
     // Hai cách chạy KHÁC NHAU THẬT, và trước lượt này chỉ có một: `▶️` chạy
-    // bằng `/bin/zsh -lc` của hub, chờ tới khi xong, rồi dán bản tóm tắt vào
+    // bằng `/bin/zsh -lc` của huba, chờ tới khi xong, rồi dán bản tóm tắt vào
     // phiên. Cách ấy đúng cho một lệnh ngắn có kết quả đáng đọc, và SAI cho một
     // lệnh dài, một lệnh hỏi lại, hay một lệnh chủ máy muốn ngồi nhìn — những
     // thứ mà ngồi ở máy thì người ta mở một cửa sổ. Đúng phép thử cầu nối.
@@ -390,7 +390,7 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
         // tiên còn là TÊN DỰ ÁN — nhưng luật kia đã bị bỏ ngày 2026-08-13 (Hà:
         // *"lệnh new chỉ cần tham số sử dụng acc nào và text gửi đi là gì"*),
         // còn cái cổng thì ở lại. Từ đó `/new` gõ trơn bị trả về `None`, rơi vào
-        // nhánh "không phải lệnh", và hub đáp *"Chưa hiểu lệnh này"* — về một
+        // nhánh "không phải lệnh", và huba đáp *"Chưa hiểu lệnh này"* — về một
         // động từ chính nó vừa khai với Telegram bằng `setMyCommands` và đang
         // hiện trong menu. Đo được **ba lần** trong nhật ký: 13-08 13:27,
         // 14-08 08:13, 14-08 22:27.
@@ -433,7 +433,7 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
                 .unwrap_or_default();
             (!what.is_empty()).then_some((CommandKind::Type, 0, what))
         }
-        // `/upgrade` — hub tự dựng lại chính nó từ mã hiện tại.
+        // `/upgrade` — huba tự dựng lại chính nó từ mã hiện tại.
         "upgrade" | "capnhat" => Some((CommandKind::Upgrade, 0, String::new())),
         // `/shot` — đọc màn của phiên đang theo.
         "shot" | "chup" => Some((CommandKind::Shot, 0, String::new())),

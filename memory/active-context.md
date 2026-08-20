@@ -1,4 +1,4 @@
-# active context — hub
+# active context — huba
 
 ## 🎯 2026-08-19 (chiều, #2) — ba lượt chê liên tiếp, ba hình dạng khác nhau
 
@@ -15,8 +15,8 @@ lời: đừng cãi, đi **dựng lại đúng tin ấy bằng bản đang chạ
 (`tests/tab_anchor_live_shape.rs`, chạy tay). Có ảnh thì hết đoán.
 
 **② *"bấm cũng chưa nhận"*.** Nút CÓ chạy: log 09:47:34Z ghi `/tab da29807e 2`
-tới nơi, chạy 3,8s, dừng ở đúng một chỗ — `hubd` chưa có quyền Trợ năng. Câu ấy
-hub có nói, nhưng nằm cuối một tin dài nên đọc ra thành "không ăn".
+tới nơi, chạy 3,8s, dừng ở đúng một chỗ — `hubad` chưa có quyền Trợ năng. Câu ấy
+huba có nói, nhưng nằm cuối một tin dài nên đọc ra thành "không ăn".
 ⚠ **Vẫn đang chờ Hà bật công tắc.**
 
 **③ *"phiên tfl5 còn shell chạy mà danh sách nói đã dừng"* + *"thay icon hình
@@ -50,7 +50,7 @@ chấm kết quả của nó (đọc **ô nhập** trong khi màn mở **hộp c
 
 **Hai bức tường, đo được, và cả hai đều KHÔNG phải chỗ quên làm:**
 
-1. **hub mù với bảng ĐANG TREO.** Nó đọc bảng từ nhật ký, mà nhật ký 3,59 MB của
+1. **huba mù với bảng ĐANG TREO.** Nó đọc bảng từ nhật ký, mà nhật ký 3,59 MB của
    phiên amm có **0** lần `AskUserQuestion` trong khi bảng nằm sờ sờ trên màn, và
    tệp không được ghi thêm suốt quãng ấy. Tức **bảng treo thì chưa vào nhật ký**.
    `asking: null` ⟹ không có khu *"▸ Câu 2 …"*, và **`/pick 2.1` cũng từ chối** —
@@ -61,7 +61,7 @@ chấm kết quả của nó (đọc **ô nhập** trong khi màn mở **hộp c
 
 **Vá — `cgkeys.rs`, tệp DUY NHẤT có `unsafe`** (Hà gỡ luật cho đúng chỗ này).
 `CGEventPostToPid` đưa phím rời thẳng vào tiến trình Terminal. Quyền Trợ năng
-bám được nhờ `hubd` đã ký chứng chỉ cố định từ 10/08.
+bám được nhờ `hubad` đã ký chứng chỉ cố định từ 10/08.
 
 📐 **Đo trên chính bảng ấy trước khi tin** (12 lượt phím ngang, `answered` giữ
 nguyên `[true,false,false]` suốt): `→` **không quấn vòng** (6 lượt đều dừng ở
@@ -73,12 +73,12 @@ không đoán con trỏ đang ở đâu. Mép nuốt lượt thừa, nên thừa
 vòng: màn thì không mù. Nhãn mang sẵn `☐`/`☒`.
 
 **Và trust hỏi SAU khi thử.** Bản đầu hỏi trước rồi từ chối gửi — ngõ cụt:
-`hubd` là tiến trình nền, nó chỉ vào được danh sách Trợ năng khi đã THỬ một việc
+`hubad` là tiến trình nền, nó chỉ vào được danh sách Trợ năng khi đã THỬ một việc
 cần quyền ấy. Từ chối thử = không bao giờ được hỏi = không bao giờ được cấp.
 
-**Nghiệm thu:** `476 test · clippy 0 · fmt 0`. Cài 15:52, `hubd` pid 44602 `cert`.
-⚠ **Còn một bước của Hà**: bật Trợ năng cho `hubd`. Bấm nút tab một lần ⟹ hub
-thử ⟹ `hubd` có tên trong danh sách ⟹ bật ⟹ bấm lại. Chưa có lượt bấm THẬT nào.
+**Nghiệm thu:** `476 test · clippy 0 · fmt 0`. Cài 15:52, `hubad` pid 44602 `cert`.
+⚠ **Còn một bước của Hà**: bật Trợ năng cho `hubad`. Bấm nút tab một lần ⟹ huba
+thử ⟹ `hubad` có tên trong danh sách ⟹ bật ⟹ bấm lại. Chưa có lượt bấm THẬT nào.
 
 ## 🎯 2026-08-19 (sáng, #2) — menu ☰ nhảy loạn: đúng flow, thiếu cái HÃM
 
@@ -113,17 +113,17 @@ nhiều hơn**, không vì vừa được bấm sau.
 **Nghiệm thu:** 6 bài kiểm mới chạy trên **chính bảng điểm thật** trong sổ, và
 **đỏ được đã kiểm tay** — hạ `MENU_LEAD_MARGIN` về 1,0 thì 2 bài đỏ, kèm tái
 hiện đúng triệu chứng (`accounts` nhảy 11→8, ba bậc). `467 test · clippy 0 ·
-fmt 0`. Cài 10:10, `hubd` pid 57874 `@2026-08-19T03:10:24Z` chữ ký `cert`.
+fmt 0`. Cài 10:10, `hubad` pid 57874 `@2026-08-19T03:10:24Z` chữ ký `cert`.
 ⚠ Chưa quan sát được một quãng dùng THẬT sau khi cài — thứ chứng minh nó là
 `menu_reordered` **thưa hẳn đi** trong log vài ngày tới, không phải bài kiểm.
 
-## 🎯 2026-08-19 (sáng) — trần 5 MB gửi tệp là khẩu vị của hub, không phải luật
+## 🎯 2026-08-19 (sáng) — trần 5 MB gửi tệp là khẩu vị của huba, không phải luật
 
-Hà: *"Sao lại có giới hạn dung lượng"* — `⚠ chưa gửi được hub.log — 21.4 MB —
+Hà: *"Sao lại có giới hạn dung lượng"* — `⚠ chưa gửi được huba.log — 21.4 MB —
 quá trần 5 MB`.
 
-**Trần ấy là của hub.** Chú thích trong mã nói thẳng lý do: *"Telegram chặn ở 50
-MB, nhưng hub chặn sớm hơn nhiều — một file 5 MB đọc trên điện thoại là chuyện
+**Trần ấy là của huba.** Chú thích trong mã nói thẳng lý do: *"Telegram chặn ở 50
+MB, nhưng huba chặn sớm hơn nhiều — một file 5 MB đọc trên điện thoại là chuyện
 không xảy ra"*. Tức một câu ĐOÁN HỘ, dựng thành hàng rào, áp lên đúng cái nút
 chủ máy tự bấm — thứ [[feedback_no_guardrails_on_owner_actions]] cấm. Lần thứ tư
 cùng một hình dạng trong ba ngày (cổng quét rò · `destructive` · `.docx` ·
@@ -132,9 +132,9 @@ lần này), và lần này còn tự tố cáo mình: nó biết trần thật 
 
 **Vá:** trần duy nhất còn lại là **50 MB của Telegram**, đặt tên đúng như vậy
 (`TELEGRAM_DOC_MAX`) để lần sau không ai đọc nhầm nó thành khẩu vị. Nên
-`hub.log` 21,4 MB nay đi trọn.
+`huba.log` 21,4 MB nay đi trọn.
 
-**Trên trần thật thì đó là tường, và hub không im**: gửi **phần cuối 5 MB**, cắt
+**Trên trần thật thì đó là tường, và huba không im**: gửi **phần cuối 5 MB**, cắt
 ở dấu xuống dòng đầu tiên (không dòng cụt, và ranh giới `\n` luôn là ranh giới
 UTF-8 hợp lệ), tên tệp tự khai `phan-cuoi-<tên>`, chú thích nói rõ *"phần CUỐI
 5.0 MB / 213.4 MB — trần 50 MB là của Telegram"*, kèm log `telegram_document_tailed`.
@@ -149,9 +149,9 @@ vì với một bản cắt thì hai con số khác nhau và đó là chỗ duy 
 *"cái gì đã rời khỏi máy"*.
 
 **Nghiệm thu:** `461 test · clippy 0 · fmt 0`, mã thoát đọc trực tiếp. Bài kiểm
-live chạy trên chính tệp Hà chỉ tay vào: `logs/hub.log` **22 489 734 byte** →
+live chạy trên chính tệp Hà chỉ tay vào: `logs/huba.log` **22 489 734 byte** →
 phần cuối **5 242 808 byte**, UTF-8 hợp lệ, mở đầu đúng bằng `{` (nhật ký
-JSON-mỗi-dòng, tức không có dòng cụt). Cài 08:08, `hubd` pid 49389
+JSON-mỗi-dòng, tức không có dòng cụt). Cài 08:08, `hubad` pid 49389
 `@2026-08-19T01:08:20Z` chữ ký `cert`.
 ⚠ Chưa có lượt bấm 📎 THẬT trên Telegram — cần Hà bấm.
 
@@ -182,7 +182,7 @@ thì **tự tay dựng `Cmd{line:"rm …"}`**, tức tự trả lời hộ đún
 Cả hai nay đo bằng thứ bộ bóc **thật sự trả ra**; bài cũ được **đảo chiều**,
 không xoá (cùng cách xử lý ba bài kiểm của luật 5 hôm 16/08).
 
-**Chọn động từ bằng phép đo, không kê theo trí nhớ:** quét toàn bộ `hub.log` từ
+**Chọn động từ bằng phép đo, không kê theo trí nhớ:** quét toàn bộ `huba.log` từ
 14/08, lấy mọi đoạn trong nháy ngược qua được `looks_like_prose` rồi đếm động từ
 lạ — `cat` 3 · `cp` 3 · `ps` 2 · `rm` · `lsof` · `psql`. Thêm cả họ đụng
 tệp/tiến trình một lượt. `sudo` cố ý đứng ngoài: ▶️ chạy `zsh -lc` không có tty
@@ -191,7 +191,7 @@ nên nó sẽ treo tới trần rồi chết câm.
 **Nghiệm thu:** fixture là NGUYÊN VĂN tin ấy lấy từ log (1927 byte,
 `tests/fixtures/shot-rm-line-2026-08-18.txt`); RED trước (`commands_in_report`
 trả `[]`, và 📎 mọc trên đúng tệp bị xoá) → GREEN sau. `458 test · clippy 0 ·
-fmt 0`, mã thoát đọc trực tiếp qua daemon hàng đợi. Cài lúc 00:06, `hubd` pid
+fmt 0`, mã thoát đọc trực tiếp qua daemon hàng đợi. Cài lúc 00:06, `hubad` pid
 53299 `@2026-08-18T17:06:37Z` chữ ký `cert`.
 ⚠ Còn thiếu đúng một bước: cú bấm `/shot` thật của Hà.
 
@@ -206,7 +206,7 @@ chết vì `API Error 529` trước khi trả lời.
 (`chars: 1985`, trần là `TG_TEXT_MAX = 3500`), **không phải lệnh cụt**
 (`python3 -m dhup` xuất hiện đủ 3 lần nguyên văn trong nhật ký phiên), **không
 phải nhắc hai lần** (chuỗi `python3` không có trong phần ảnh màn của tin).
-Và log nói `text_links: 8` — tức hub **đã chèn đủ 4 cặp icon**, trong khi mắt
+Và log nói `text_links: 8` — tức huba **đã chèn đủ 4 cặp icon**, trong khi mắt
 chỉ thấy 3. Chỗ mất nằm **sau** lúc đếm.
 
 Phép đo kế tiếp, khi ca ấy tái diễn: ghi cặp *chỉ số lệnh → chỉ số dòng* mà
@@ -261,13 +261,13 @@ phải dòng lệnh không"*.
 nút"): tầng dò `paths_on_screen` ĐỌC RA đường dẫn ✅ (dù nó nằm trong ```**` `**```),
 tầng lọc trả `[]` ❌. Đoán nhầm tầng là sửa nhầm chỗ.
 
-Fixture là NGUYÊN VĂN tin ấy lấy từ `logs/hub.log` (1964 byte,
+Fixture là NGUYÊN VĂN tin ấy lấy từ `logs/huba.log` (1964 byte,
 `tests/fixtures/shot-html-report-2026-08-18.txt`). Ca 16/08 giữ nguyên bài kiểm,
 vẫn xanh.
 
-## 🎯 2026-08-18 (chiều muộn) — hub tự đổi tên phiên giữa chừng
+## 🎯 2026-08-18 (chiều muộn) — huba tự đổi tên phiên giữa chừng
 
-Hà: *"đang làm phiên onghut giờ mất luôn thành 2 phiên tfl5"*. Không phải hub
+Hà: *"đang làm phiên onghut giờ mất luôn thành 2 phiên tfl5"*. Không phải huba
 nhảy phiên — **cái nhãn lật**, và hai phiên khác nhau cùng đội tên `[tfl5]`.
 
 **Gốc:** `sessions.rs::folder_from_tail` đoán dự án bằng cách đếm tên thư mục
@@ -277,7 +277,7 @@ làm một quãng đụng vào `AI/tfl5` (chỗ ghim Playwright của nó).
 **Dựng lại đúng cửa sổ ấy tại đúng lúc ấy** — byte `8508947..8771091` của nhật ký
 thật `08b1a8e8`, cắt tại `2026-08-18T08:47:47Z`: **`AI/tfl5` 43** vs
 **`onghut` 24** ⟹ census chọn tfl5. Trong khi lời cuối của chính phiên ấy mở đầu
-bằng `[onghut]`, và hub đã in nguyên tiền tố đó ra ngay dòng dưới cái nhãn sai.
+bằng `[onghut]`, và huba đã in nguyên tiền tố đó ra ngay dòng dưới cái nhãn sai.
 Đo lại lúc 15:53 thì tỉ lệ đã đảo (127 vs 5) — tức lỗi **tự đến tự đi** theo
 việc phiên đang làm, đúng loại không bao giờ bắt được bằng đọc mã.
 
@@ -287,8 +287,8 @@ việc phiên đang làm, đúng loại không bao giờ bắt được bằng �
 được** nhãn đã khai kể cả khi lời khai trôi khỏi cửa sổ đọc (`folder_label_kept`,
 có log — không im lặng).
 
-**Nghiệm thu trên máy thật** (`hub sessions --json`, bản đã cài): `08b1a8e8` →
-`onghut` · `cf2ce632` → `AI/tfl5` · `661171e5` → `hub` · `b3e8bd8f` → `dwork`.
+**Nghiệm thu trên máy thật** (`huba sessions --json`, bản đã cài): `08b1a8e8` →
+`onghut` · `cf2ce632` → `AI/tfl5` · `661171e5` → `huba` · `b3e8bd8f` → `dwork`.
 `448 test · clippy 0 · fmt 0`. Bài kiểm khoá lỗi chạy trên **fixture cắt từ chính
 nhật ký ấy** (`tests/fixtures/onghut-mislabel-2026-08-18.jsonl`), kèm ca ngược:
 không có lời khai thì phép đếm vẫn phải trả lời.
@@ -317,7 +317,7 @@ hardcode giả · lỗi bị nuốt. `CLAUDE.md` đã trỏ sang đó kèm ghi l
    chỗ nguy hiểm nhất. Nay đọc thêm `git ls-files --others`.
 
 **RED-verify (repo tạm):** ❌ cây bẩn · ❌ bí mật lọt · ❌ lỗi bị nuốt, `exit 1`.
-**Trên hub:** mọi mục cơ học ✅, `exit 0` (`442 test`).
+**Trên huba:** mọi mục cơ học ✅, `exit 0` (`442 test`).
 
 ⚠ **`~/projects` KHÔNG phải git repo** (`fatal: not a git repository`) — nên
 `CLAUDE.md` và `scripts/` ở gốc **không được version**. Ghi chú cũ trong bộ nhớ
@@ -326,20 +326,20 @@ nói ngược lại; đừng tưởng đã commit chúng.
 
 ## 🎯 2026-08-18 (trưa muộn) — nút bám nhầm dòng, và một cổng hỏi cả màn
 
-Một commit, **đã cài + push** — `68ff0d8`, `442 test · clippy 0 · fmt 0`, hubd
+Một commit, **đã cài + push** — `68ff0d8`, `442 test · clippy 0 · fmt 0`, hubad
 `@2026-08-18T03:57:59Z` cert.
 
 Hà, kèm ảnh một tin `/shot`: *"Sao lại chèn lệnh /clear vào ô chat"* — hai nút ⏎
 và `⌫ xoá ô nhập` dán vào GIỮA một câu tôi viết, ngay sau chữ `/clean`.
 
-**Cái KHÔNG xảy ra** (đo trước khi vá): hub không gõ `/clean` vào ô chat — log
+**Cái KHÔNG xảy ra** (đo trước khi vá): huba không gõ `/clean` vào ô chat — log
 không có một `keys_typed` nào của route ấy.
 
 ### 1. Neo mập mờ (`box_anchor_ambiguous`)
 
 Ô nhập chứa đúng `/clean`, neo là CHUỖI ấy, `html_with_links` duyệt từ dòng đầu
 ⟹ bám chỗ khớp ĐẦU TIÊN. Chữ ô nhập càng ngắn càng dễ trùng với chữ đang bàn về
-nó — mà phiên `[hub]` nói về lệnh của hub cả ngày. Nay khớp nhiều dòng ⟹ **không
+nó — mà phiên `[huba]` nói về lệnh của huba cả ngày. Nay khớp nhiều dòng ⟹ **không
 neo giữa chữ**, hai nút giữ ở đáy tin, và ghi log.
 
 ### 2. Cổng đếm hàng chờ hỏi cả màn — nguy hiểm hơn, chưa kịp nổ
@@ -347,7 +347,7 @@ neo giữa chữ**, hai nút giữ ở đáy tin, và ghi log.
 `queued_count` mở cổng bằng `screen.contains("queued message")`, mà câu *"Press
 up to edit queued messages"* nằm nguyên trong đoạn văn tôi viết VỀ cơ chế ấy và
 còn cuộn trên màn hàng giờ. `/clean` chạy đúng lúc đó ⟹ tưởng có hàng chờ ⟹ gửi
-`↑` ⟹ **`↑` khi hàng chờ rỗng kéo câu cũ trong lịch sử vào ô nhập**, tức hub tự
+`↑` ⟹ **`↑` khi hàng chờ rỗng kéo câu cũ trong lịch sử vào ô nhập**, tức huba tự
 chèn chữ vào chỗ chủ máy đang gõ. Nay cổng chỉ hỏi `box_region`.
 
 Mỗi bản vá kèm ca đối chứng: chữ ô nhập DUY NHẤT vẫn neo như thường; hàng chờ
@@ -357,12 +357,12 @@ THẬT vẫn đếm đủ.
 
 `/shot` phiên onghut ở bước Review ⟹ link ra **`k_08b1a8e8_1` / `k_08b1a8e8_2`**,
 đúng đường `k_`. Đọc bằng cách forward chính tin ấy về lại buồng chat rồi đọc
-`entities` (log của hub chỉ ghi SỐ LƯỢNG liên kết), xoá bản sao ngay sau đó.
+`entities` (log của huba chỉ ghi SỐ LƯỢNG liên kết), xoá bản sao ngay sau đó.
 
 
 ## 🎯 2026-08-18 (chiều) — màn onghut làm chuẩn: bước Review không phải một câu
 
-Một commit, **đã cài + push** — `5a74b24`, `439 test · clippy 0 · fmt 0`, hubd
+Một commit, **đã cài + push** — `5a74b24`, `439 test · clippy 0 · fmt 0`, hubad
 `@2026-08-18T02:18:36Z` cert.
 
 Hà: *"Màn phiên onghut đang chờ chọn với nhiều tab, lấy đó làm chuẩn để test
@@ -371,7 +371,7 @@ trường hợp nhiều option"*. Lấy nguyên văn màn ấy làm fixture
 trong một ngày.
 
 **Lỗi:** ở bước cuối (`←  ☒ App onghut  ☒ Dung lượng  ✔ Submit  →`, còn mỗi
-`1. Submit answers · 2. Cancel`), hub dựng nút bằng mã `pick_<sid>_1_<n>` — đường
+`1. Submit answers · 2. Cancel`), huba dựng nút bằng mã `pick_<sid>_1_<n>` — đường
 gửi *mũi tên rồi số* để đi tới câu 1. Nhưng màn ấy không còn câu nào để đi tới.
 
 **Gốc:** `table` hỏi NHẬT KÝ (*"bảng có nhiều câu không"*) rồi dùng câu trả lời
@@ -382,7 +382,7 @@ mỗi bên một câu, nối ở CẢ HAI chỗ quyết định (`/shot` và sau
 **Ba thứ cùng màn ấy đang đúng, nay có bài kiểm giữ:** hộp Submit đọc đủ 2 mục ·
 thanh tab ra `[☒,☒]` với `left()==0` · `❯ 1. Submit answers` KHÔNG bị đọc thành ô
 nhập — ca này đặc biệt vì màn **không có dòng chân** `Enter to select`, nên cổng
-an toàn thứ nhất mù và cổng thứ hai phải đỡ; đọc nhầm là hub dựng nút ⏎ và một
+an toàn thứ nhất mù và cổng thứ hai phải đỡ; đọc nhầm là huba dựng nút ⏎ và một
 cú bấm sẽ CHỐT Submit hộ chủ máy.
 
 **Dọn:** hai vỏ cửa sổ nháp (`3072`, `3075`) nay đã đóng hẳn — tiến trình trong
@@ -391,7 +391,7 @@ chỉ cửa sổ CÒN tiến trình mới từ chối đóng.
 
 ## 🎯 2026-08-18 (trưa) — "sao cứ update lại mất vài thứ": hai phép đo bị chuyển chỗ đứng
 
-Một commit, **đã cài + push** — `199ec93`, `435 test · clippy 0 · fmt 0`, hubd
+Một commit, **đã cài + push** — `199ec93`, `435 test · clippy 0 · fmt 0`, hubad
 `@2026-08-18T01:26:30Z` cert (log nay mang `screen_busy` + `counts_as_busy`).
 
 Câu hỏi của Hà là câu đúng, và câu trả lời đo được: **không có tính năng nào bị
@@ -399,16 +399,16 @@ gỡ**. Cả hai lần "mất", thứ hỏng là một phép đo bị đẩy san
 
 ### 1. Nút ⏎/⌫ của ô nhập biến mất (`SessionData.box_text`)
 
-Log cùng một phút: tin `/shot` của `[hub]` ra `text_links=0`, tin của `[tfl5]`
-ra `text_links=2`. Khác đúng một chỗ — phiên `[hub]` có màn chỉ là đầu ra lệnh
-nên hub **nối thêm** khối *"🗣 Lời cuối nó nói"*, mà `prompt_line_text` đọc
-*"khối đóng khung CUỐI CÙNG"*. Nối xong thì khối cuối là văn xuôi của chính hub
+Log cùng một phút: tin `/shot` của `[huba]` ra `text_links=0`, tin của `[tfl5]`
+ra `text_links=2`. Khác đúng một chỗ — phiên `[huba]` có màn chỉ là đầu ra lệnh
+nên huba **nối thêm** khối *"🗣 Lời cuối nó nói"*, mà `prompt_line_text` đọc
+*"khối đóng khung CUỐI CÙNG"*. Nối xong thì khối cuối là văn xuôi của chính huba
 ⟹ `None` ⟹ mất cả hai đích chạm, không một tiếng động.
 
 Luật *"phải đo TRƯỚC khi trộn"* đã ghi sẵn trong `session_layout` từ 16/08 —
 nhưng chỗ trộn THỨ HAI nằm ở nhánh `/shot`, nên luật không đi theo. Nay đo trên
 ảnh màn gốc rồi truyền xuống bằng `box_text` (field khai sẵn, chưa ai nối).
-Fixture của bài kiểm là **nguyên văn** tin hub gửi lúc 00:58:46Z.
+Fixture của bài kiểm là **nguyên văn** tin huba gửi lúc 00:58:46Z.
 
 ### 2. Icon "đang chạy" cho phiên đang dừng (`shell_verdict`)
 
@@ -425,13 +425,13 @@ running` — không ngoặc. Lấy nó lật ngược là xoá luôn bản vá 1
 
 ### 3. `/anh` — nghiệm thu bản vá hôm qua trên trạng thái thật
 
-Máy đang khoá (`CGSSessionScreenIsLocked=Yes`): hub **từ chối gửi**, xoá tấm ảnh
+Máy đang khoá (`CGSSessionScreenIsLocked=Yes`): huba **từ chối gửi**, xoá tấm ảnh
 rỗng, và nói đúng câu của ca khoá màn (không đổ cho quyền).
 `tests/black_frame_live.rs` chạy thật, xanh.
 
 ### 4. Đính chính của chính tôi
 
-`/clean` KHÔNG im lặng như tôi vừa nói với Hà: log cho thấy hub trả lời cả hai
+`/clean` KHÔNG im lặng như tôi vừa nói với Hà: log cho thấy huba trả lời cả hai
 lần — 23:06 *"Chưa hiểu lệnh này"* (route chưa cài lúc ấy), 00:52 *"🧹 không có
 tin nào trong hàng chờ"* (tin `4248`).
 
@@ -444,7 +444,7 @@ tin nào trong hàng chờ"* (tin `4248`).
 
 ## 🎯 2026-08-18 (sáng) — ảnh đen có HAI nguyên nhân, và `/clean` dọn hàng chờ
 
-Một commit, **đã cài + push** — `6bc944f`, `424 test · clippy 0 · fmt 0`, hubd
+Một commit, **đã cài + push** — `6bc944f`, `424 test · clippy 0 · fmt 0`, hubad
 `@2026-08-18T00:10:50Z` cert, menu lệnh Telegram **13 → 14**.
 
 ### 1. Tôi đoán sai, Hà đo đúng
@@ -457,7 +457,7 @@ một triệu chứng, câu trả lời phải PHÂN BIỆT, không được ch�
 ra trước.
 
 Đo được cái hỏng: `screencapture -x` **exit 0**, tệp 112 KB, ảnh 3024×1964 toàn
-`#000000` — hub gửi thẳng nó đi kèm câu *"đây, màn hình của phiên"*. Nay
+`#000000` — huba gửi thẳng nó đi kèm câu *"đây, màn hình của phiên"*. Nay
 `frame_is_blank` (co còn 1 điểm bằng `sips`, đọc byte BMP — không cần thư viện
 ảnh) chặn lại, và `blank_frame_reason` nói ba câu cho ba trạng thái. Bài kiểm
 khoá cả điều KHÔNG được nói: ca khoá màn không được nhắc Screen Recording.
@@ -491,9 +491,9 @@ còn bao nhiêu.
   — nhưng phải kiểm lại SAU khi mở khoá màn, vì tấm ảnh đen hôm nay giải thích
   được bằng khoá màn rồi.
 
-## 🎯 2026-08-17 (khuya) — 73 dòng chữ cho 73 cú bấm: hub xoá tin, rồi thả dấu lên chính tin ấy
+## 🎯 2026-08-17 (khuya) — 73 dòng chữ cho 73 cú bấm: huba xoá tin, rồi thả dấu lên chính tin ấy
 
-Một commit, **đã cài + push** — `ac0e4c6`, `419 test · clippy 0 · fmt 0`, hubd
+Một commit, **đã cài + push** — `ac0e4c6`, `419 test · clippy 0 · fmt 0`, hubad
 `@16:07:39Z` cert (sổ `boot:binary` xác nhận bản đang chạy là bản vừa cài), cây
 sạch, sau khi cài chỉ có đúng một dòng `warn`: `stale_lock_removed` của pid cũ.
 
@@ -537,7 +537,7 @@ bị dọn ngay. Thiếu một trong những cửa ấy là sửa một dòng đ
 tin `4125` bị **sửa tại chỗ**, `telegram_message_edited` + `telegram_ack_folded
 times=2`, và chữ Telegram trả về mang đúng `×2`. Hai tin thử đã xoá.
 ⚠ Tác dụng phụ đã biết của mọi bài kiểm live trong repo này: nó dựng một `Inbox`
-thứ hai ⟹ `telegram_poll_rejected` (Conflict) một nhịp, hubd điếc ~30 giây.
+thứ hai ⟹ `telegram_poll_rejected` (Conflict) một nhịp, hubad điếc ~30 giây.
 
 `edit_html` nay trả `Sent` chứ không `()`: "đã sửa" phải đọc được thành chữ, y
 như `send_html_report` — không suy ra từ việc không có lỗi.
@@ -549,16 +549,16 @@ như `send_html_report` — không suy ra từ việc không có lỗi.
   `telegram_reaction_failed` về 0.
 - `/anh` vẫn chờ Hà cấp Screen Recording cho `~/Library/Application Support/hub/bin/hubd`.
 - `terminal_probe_failed` (osascript quá 20s): 27 lần 16/08, 8 lần 17/08 — chưa
-  truy, hậu quả là hub tạm mù cửa sổ trong lượt ấy.
+  truy, hậu quả là huba tạm mù cửa sổ trong lượt ấy.
 
 ## 🎯 2026-08-17 (tối) — hai kết cục bị gộp làm một, đo được bằng 190 dòng warn
 
 Không có ảnh nào của Hà trong phiên này (bàn giao dặn chờ ảnh, **đừng vá mò**),
 nên chỗ đi được là chỗ CÓ SỐ ĐO: nhật ký của chính daemon đang chạy. Hai commit,
 **đã cài + push** — `bc85f0d` · `df14384`, `414 test · clippy 0 · fmt 0`,
-hubd `@14:19:35Z` cert, cây sạch.
+hubad `@14:19:35Z` cert, cây sạch.
 
-### 1. `close_check_failed` × 190 — "cửa sổ không còn" ≠ "hub mù" (`bc85f0d`)
+### 1. `close_check_failed` × 190 — "cửa sổ không còn" ≠ "huba mù" (`bc85f0d`)
 
 `~/Library/Logs/hubd.err`: **190 dòng trong 5 tiếng**, 08:44:50Z → 13:47:06Z,
 cách nhau đúng 30 giây, tất cả về `window 2131` / phiên `win-ttys002`, tất cả một
@@ -567,7 +567,7 @@ text. (-1700)"*. Sổ trong DB xác nhận: mục ấy nằm đó **5 giờ 24 p
 
 Cửa sổ đã đóng từ lâu. `selected tab` của cửa sổ 0 tab = `missing value`, ép sang
 chữ là -1700 ⟹ `tab_busy -> Result<bool>` chỉ có nhánh `Err` để đựng sự thật "không
-còn", mà `Err` nghĩa là *hub mù*, và luật với cái mù là GIỮ trong sổ. Luật đúng;
+còn", mà `Err` nghĩa là *huba mù*, và luật với cái mù là GIỮ trong sổ. Luật đúng;
 phép đo không có từ để nói "không còn".
 
 ⟹ `keys::tab_state -> TabState::{Busy,Idle,Gone}` (hỏi số tab TRƯỚC, cùng một lượt
@@ -603,7 +603,7 @@ chối `close` theo ý mình được.
 - **`/anh`**: `screencapture` bị từ chối (*"could not create image from display"*).
   Đo trong TCC.db của user: **không có một dòng `kTCCServiceScreenCapture` nào** —
   chưa app nào trên máy này được cấp Screen Recording, và cũng chưa có lời từ chối
-  nào được ghi, tức hộp xin quyền chưa từng hiện. hubd đã có `kTCCServiceAppleEvents`
+  nào được ghi, tức hộp xin quyền chưa từng hiện. hubad đã có `kTCCServiceAppleEvents`
   (đường dẫn bản cài, `auth_value=2`) nên đường Apple Event thì thông.
   Cần Hà thêm tay: System Settings → Privacy & Security → Screen & System Audio
   Recording → `+` → ⌘⇧G → `~/Library/Application Support/hub/bin/hubd`.
@@ -615,12 +615,12 @@ chối `close` theo ý mình được.
 ## 🎯 2026-08-17 (chiều) — "bấm cái nọ mất cái kia", và bốn lỗi cùng họ
 
 Cả buổi chỉ có một hình dạng lặp lại: **hai phép đo cho một câu hỏi**. Chỗ DỰNG
-chữ và chỗ THI HÀNH hỏi hai câu khác nhau về cùng một thứ, nên hub vẽ ra những
+chữ và chỗ THI HÀNH hỏi hai câu khác nhau về cùng một thứ, nên huba vẽ ra những
 đích chạm trỏ vào chỗ chính nó nói là không tồn tại — hoặc chạy một thứ khác với
 thứ nó ghi trên mình.
 
 Năm commit, tất cả **đã cài + push**: `909548b` · `0f2a0f6` · `961c817` ·
-`93283e1` · `24fcb40`. `402 test · clippy 0 · fmt 0`, hubd `@10:11:00Z`, cert.
+`93283e1` · `24fcb40`. `402 test · clippy 0 · fmt 0`, hubad `@10:11:00Z`, cert.
 
 ### 1. Bấm ô này mất dấu ô kia (`keys::press_writes`, `nav_plan`)
 
@@ -660,7 +660,7 @@ mục 2+4 rồi chốt ⟹ phiên nhận đúng `Chon muc nao? → Beta, Delta`.
 - **`/healthz` và `@update-be` bị Telegram tô thành lệnh bot / mention**: bọc
   `<code>`. Ranh giới theo đúng cái Telegram làm — `/` chỉ tính khi mở đầu một từ
   (nên `~/projects`, `http://x/healthz` không bị đụng), `@` tính sau bất kỳ ký tự
-  không-chữ-số nào (kể cả dấu nháy), trừ địa chỉ thư. Route THẬT của hub giữ
+  không-chữ-số nào (kể cả dấu nháy), trừ địa chỉ thư. Route THẬT của huba giữ
   nguyên đích chạm (`commands::lookup` là chỗ duy nhất biết cái nào thật).
 
 ### 3. Lệnh trong nội dung mà không có nút (`keys::KNOWN`, `add_prose_cmds`)
@@ -689,7 +689,7 @@ hai dòng kéo theo cả sổ lệnh của phiên (Hà: ba tin liền nhau, tin 
   trên chính chúng thì ăn. **Chưa biết vì sao** (Accessibility không cho đọc cửa
   sổ Terminal, `screencapture` bị chặn).
 - Nên: đóng không được thì **ẩn** (`set visible to false` — ăn ngay), và NÓI là
-  ẩn. `tabs_script` bỏ cửa sổ đã ẩn nên nó rời khỏi mọi danh sách của hub. Hà bấm
+  ẩn. `tabs_script` bỏ cửa sổ đã ẩn nên nó rời khỏi mọi danh sách của huba. Hà bấm
   hết: **danh sách sạch**, 6 cửa sổ còn hiện đều là phiên `claude` thật.
 
 ### 5. `/terminal`: mỗi cửa sổ MỘT dòng
@@ -716,14 +716,14 @@ không phải vì không có hộp thoại). Cả ba đều "xanh" trong khi s�
 
 ---
 
-## 🌉 2026-08-16 (tối) — hub thôi giấu, thôi chặn, và nói MỘT giọng
+## 🌉 2026-08-16 (tối) — huba thôi giấu, thôi chặn, và nói MỘT giọng
 
 Phiên trước đóng sổ với một câu hỏi treo: giữ hay trả lại năm thứ tôi tự quyết.
 Hà trả lời bằng cách gạch từng cái, và mỗi lần gạch lại lộ ra một luật rộng hơn
 cái được hỏi. Ba câu đáng chép nguyên văn, vì chúng là thước đo cho mọi lượt sau:
 
-1. *"hub là cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì phải
-   ngồi vào máy để làm vậy thì cần gì hub nữa"*
+1. *"huba là cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì phải
+   ngồi vào máy để làm vậy thì cần gì huba nữa"*
 2. *"lệnh /shot hay phản hồi tự động gửi về tele đều phải qua định dạng trước khi
    gửi → cái nhận được ở tele phải thao tác được với các lệnh link của phiên đó"*
    · *"mọi thứ nhìn thấy ở tele phải đồng nhất"* · *"dành cho nội dung lấy từ
@@ -780,7 +780,7 @@ nhất (16:57); `telegram_commands_registered` 10 route; **0 dòng `error`** k�
 lúc khởi động lại.
 
 ⚠ Tôi báo động sớm một lần: `pgrep` lúc 17:12:59 không thấy tiến trình nào và
-tôi kêu "hubd không quay lại" — thật ra đó là khoảng ~20 giây launchd đang dựng
+tôi kêu "hubad không quay lại" — thật ra đó là khoảng ~20 giây launchd đang dựng
 lại. **Kiểm hai lần trước khi kêu**, nhất là ngay sau một lượt kickstart.
 
 Còn lại chưa nghiệm thu: mọi thứ dưới đây mới chỉ CÀI, chưa có cú bấm thật nào
@@ -804,7 +804,7 @@ vì hộp này dùng `Enter to confirm · Esc to cancel`, còn hàm chỉ biết
 Hai câu trả lời khác nhau cho cùng một câu hỏi, trên cùng một màn. Cửa nó mở:
 `prompt_line_text` lấy hàm ấy làm cổng; cổng mù ⟹ nó quét ngược tìm dòng `❯`,
 và khi ô nhập trống thì dòng `❯` duy nhất là **con trỏ hộp chọn**
-(`❯ 1. Set it up`). hub đọc thành "chữ trong ô nhập", dựng nút `⏎ Gửi`, và
+(`❯ 1. Set it up`). huba đọc thành "chữ trong ô nhập", dựng nút `⏎ Gửi`, và
 Enter lúc có hộp chọn thì **XÁC NHẬN lựa chọn 1** (luật 13) — mời chủ máy bật
 auto mode trong khi anh tưởng mình đang gửi một câu.
 
@@ -815,7 +815,7 @@ thì không phải ô nhập. Bản chụp màn thật lưu ở
 `rust/tests/fixtures/screen-dwork-automode-2026-08-16.txt`, 6 test trong
 `tests/chooser_footer.rs`.
 
-### 2. Gợi ý mờ: `→` NHẬN gợi ý, không GỬI — mà hub khai "✓ đã gửi"
+### 2. Gợi ý mờ: `→` NHẬN gợi ý, không GỬI — mà huba khai "✓ đã gửi"
 
 Hà: *"ô nhập đang là gợi ý mờ, bấm nút enter nó hiện thành text xong phải bấm
 lại nút enter lần nữa nó mới gửi vào hàng đợi"*.
@@ -823,14 +823,14 @@ lại nút enter lần nữa nó mới gửi vào hàng đợi"*.
 Mã cũ có nguyên một chú thích khẳng định `press` kèm sẵn CR nên `→` *"vừa NHẬN
 gợi ý vừa gửi"*. Sai, và **luật 13 đã ghi đúng lý do từ 12/08**: chữ + dấu xuống
 dòng vào TUI trong cùng một lượt ghi thì `claude` đọc cả cụm như một cú DÁN. Rồi
-hub chấm kết quả bằng *"màn có đổi không"* — đổi thật (chữ mờ thành chữ tỏ) —
+huba chấm kết quả bằng *"màn có đổi không"* — đổi thật (chữ mờ thành chữ tỏ) —
 nên nó báo `✓ đã gửi` cho một câu còn nằm nguyên trong ô.
 
 Nay sau `→` thì đọc lại **ô nhập** (`input_box_text`), còn chữ thì bấm một Enter
 RỜI, rồi chấm bằng `still_in_box` chứ không bằng "màn có đổi". Và nhịp giữa có
 tên riêng: *"⚠ CHƯA gửi — gợi ý đã vào ô, Enter rời chưa đưa nó đi"*.
 
-### 3. Hai chỗ hub in ra một dữ kiện nó biết là không có
+### 3. Hai chỗ huba in ra một dữ kiện nó biết là không có
 
 - `/new` không khai dự án ⟹ *"Đã mở ⌨ cửa sổ Terminal cho ."* (ảnh 15:34).
 - `/close` cửa sổ trần ⟹ *"Đóng hẳn phiên ⬜ cửa sổ ttys005 ()?"* (đọc 6 lần).
@@ -839,7 +839,7 @@ Cùng một họ, vá cùng ngày: không có thì không in chỗ trống.
 
 Kèm theo, Hà: *"khi tạo phiên mới sao chèn thêm câu 'nó chạy không hỏi ai' vào
 làm gì?"* — **bỏ**. Nó đúng sự thật nhưng sai chỗ đứng: một tính chất CỐ ĐỊNH
-của mọi phiên hub mở, lặp nguyên văn mỗi lần, nói cho đúng người đã dựng ra nó.
+của mọi phiên huba mở, lặp nguyên văn mỗi lần, nói cho đúng người đã dựng ra nó.
 Cùng lý do luật 11 cấm nói TRẠNG THÁI trong một vòng lặp. Rào thật là
 `DENIED_TOOLS`, không phải dòng chữ.
 
@@ -867,11 +867,11 @@ phân**: trung vị 500–820 ms rồi nhảy thẳng lên 20.4xx ms — đụng
 | nghi phạm | phép đo | kết luận |
 |---|---|---|
 | đọc `contents` của mọi tab tốn kém | 6 lượt: 431–539 ms không-màn vs 479–533 ms có-màn | **loại** — `contents` ≈ 50 ms |
-| hub tự giành với chính nó (không có khoá nào tuần tự hoá osascript) | 4 cú dò SONG SONG: cả bốn xong trong **597 ms** | **loại** — Terminal trả lời song song |
+| huba tự giành với chính nó (không có khoá nào tuần tự hoá osascript) | 4 cú dò SONG SONG: cả bốn xong trong **597 ms** | **loại** — Terminal trả lời song song |
 | nhiều cửa sổ thì chậm | 9 hàng: 183 lượt / **0** lần hết giờ · 8 hàng: 111 lượt / 16 lần | **loại** — kích thước không giải thích |
 
 Còn lại: *"Terminal không trả lời trong một QUÃNG"*. Một lượt hỏng lúc 05:45:59Z
-có **0 sự kiện hub nào trong 60 giây trước** — nên không phải hub gây ra. 7/19
+có **0 sự kiện huba nào trong 60 giây trước** — nên không phải huba gây ra. 7/19
 lượt có `trust_tick_probe_failed` đứng cạnh (hai cú dò cùng ngã), 5/19 ngay sau
 một lượt cài lại.
 
@@ -885,10 +885,10 @@ AppleEvent thì câu hỏi ngã cùng lý do với cái nó đang điều tra).
 - **Chưa cài** ⟹ cả 4 mục trên chưa nghiệm thu trên Telegram thật.
 - `[dwork]` vẫn đang đứng ở hộp auto mode, và câu Hà gõ
   (*"làm việc 1, deploy dev rồi nghiệm thu UI"*) vẫn nằm trong ô nhập chưa gửi.
-  hub KHÔNG tự bấm hộ — chỉ hộp tin-thư-mục mới được, luật cũ giữ nguyên.
+  huba KHÔNG tự bấm hộ — chỉ hộp tin-thư-mục mới được, luật cũ giữ nguyên.
 - Chỗ cất tệp nhận từ Telegram: `<gốc workspace>/.inbox/<mã phiên>/` (Hà chốt
-  13/08, lúc gốc còn là `~/Documents/projects` và hub còn nằm trong `AI/`). Hà
-  16/08 nói đường dẫn ấy **sai** — chưa rõ ý là chuyển vào `~/projects/hub/`
+  13/08, lúc gốc còn là `~/Documents/projects` và huba còn nằm trong `AI/`). Hà
+  16/08 nói đường dẫn ấy **sai** — chưa rõ ý là chuyển vào `~/projects/huba/`
   hay chuyện khác, **đã hỏi lại, chưa sửa**. Chú thích tả sai chỗ cất thì đã sửa.
 - `rust/~/` vẫn còn (rm bị hook chặn).
 
@@ -906,15 +906,15 @@ gì**: `hold()` bật cờ trong khi vòng chính đang nằm giữa một long-
 mà không có cách nào gọi một long-poll về. Trong tối đa 20 giây, hai vòng cùng
 hỏi ⟹ Telegram từ chối một bên.
 
-📐 Đo trên `logs/hub.log` ngày 16/08, trước khi vá: **11 lượt**
+📐 Đo trên `logs/huba.log` ngày 16/08, trước khi vá: **11 lượt**
 `telegram_poll_rejected` (*"Conflict: terminated by other getUpdates request"*),
 5 lượt nằm gọn trong 10 phút Hà đóng mấy cửa sổ trần (12:25–12:29). Mỗi lượt kèm
-một giấc ngủ phạt **30 giây** của vòng đọc chính — tức 30 giây hub điếc ngay sau
-mỗi câu hỏi xác nhận. Đó là cái Hà cảm thấy là "hub chậm".
+một giấc ngủ phạt **30 giây** của vòng đọc chính — tức 30 giây huba điếc ngay sau
+mỗi câu hỏi xác nhận. Đó là cái Hà cảm thấy là "huba chậm".
 
 Và cửa nguy hiểm hơn vẫn mở: cú bấm ✅ rơi vào vòng đọc lệnh thì `handle_update`
 trả lời *"câu hỏi đã đóng sổ"* trong khi `confirm` vẫn đang chờ, rồi `confirm`
-hết hạn và hub **không làm gì**. Chưa xảy ra lần nào
+hết hạn và huba **không làm gì**. Chưa xảy ra lần nào
 (`telegram_confirm_button_late` = 0 trên cả cuốn log) — nhưng chưa xảy ra vì
 may, không vì có gì cản.
 
@@ -977,7 +977,7 @@ thì kiểm phép đo trước khi sửa mã".
 ## ⚡ 2026-08-15 (khuya) — REALTIME: ảnh chụp thôi spawn `claude`, và ba cỗ máy chết câm từ 14/08
 
 ✅ **ĐÃ CÀI 16/08 12:09 và ĐÃ NGHIỆM THU** (dòng "CHƯA CÀI" bên dưới là trạng
-thái lúc viết, giữ nguyên làm hồ sơ). Bằng chứng đọc từ `logs/hub.log`:
+thái lúc viết, giữ nguyên làm hồ sơ). Bằng chứng đọc từ `logs/huba.log`:
 `session_change` sống lại (lượt cuối 16/08 05:06:36Z, tổng 499); sổ đóng cửa sổ
 đã được ngó lại — `close_gave_up` cho `3f7d44dc` sau 5.176s và `close_done` cho
 `beabb22b` sau 57.226s, đúng hai hàng treo đã báo trước; `ms_ask_accounts` tụt
@@ -1088,7 +1088,7 @@ trường trên cả ba tài khoản:
 📌 Và bài kiểm live ấy **đỏ ngay lần đầu**, tố nguồn mới "dựng hàng ma" cho acc3
 — hoá ra **lỗi ở phép đo**: bản đầu chuyền nguyên `~/.claude-acc3` sang biến môi
 trường, CLI không nở dấu ngã nên soi một thư mục tên `~` và trả `[]`.
-`list_account_cli` của hub thì nở đúng từ trước. Đúng cái bẫy "assert đỏ thì
+`list_account_cli` của huba thì nở đúng từ trước. Đúng cái bẫy "assert đỏ thì
 kiểm PHÉP ĐO trước khi sửa mã".
 
 ### Còn dở — ghi đúng như vậy
@@ -1096,7 +1096,7 @@ kiểm PHÉP ĐO trước khi sửa mã".
 - **Chưa cài ⟹ chưa nghiệm thu gì.** Bar thật: cài xong, xem log có
   `session_change` trở lại, `close_*` chạy trên hai hàng đang treo, và
   `sessions_snapshot_ms` với `ms_ask_accounts` tụt về ~10 ms.
-- ⚠ **Ngay sau khi cài, hub sẽ xử lý hai hàng `closing:windows` đang treo** —
+- ⚠ **Ngay sau khi cài, huba sẽ xử lý hai hàng `closing:windows` đang treo** —
   một trong hai là cửa sổ `ttys004` của phiên `3f7d44dc` (vẫn đang sống). Rảnh
   thì nó đóng; bận thì nó bỏ cuộc và NÓI. Biết trước để khỏi giật mình.
 - `rust/tests/session_books_live.rs` (`#[ignore]`) so sổ với `claude agents`
@@ -1152,13 +1152,13 @@ new 12 · type 10 · close 6 · terminal 3 · ask 2 · **tell 0** · handover 0.
    Nay đếm `#skipped`, và rỗng-kèm-skipped>0 ghi log mức `error`.
 2. **`landed()` không có trạng thái "chữ vẫn trong ô".** Ba trạng thái *hàng chờ
    · đang chạy · rảnh*, mà "rảnh" mang hai nghĩa NGƯỢC NHAU — đã gửi xong và
-   chưa gửi được. Nên hub **không thể** nói sai theo hướng nào khác ngoài
+   chưa gửi được. Nên huba **không thể** nói sai theo hướng nào khác ngoài
    "thành công". Hà chụp được hậu quả: hai tin dính liền trong ô nhập
    (*"sao nội dung lại bị lặp thế này"*), vì tin trước báo `✓ đã gửi` mà chưa
    đi, tin sau nối đuôi, rồi cả hai đi làm MỘT tin. `still_in_box` đã có từ
    12-08 và làm đúng việc — **nó chỉ không được ai hỏi**. *Một hàm đúng không
    được gọi thì bằng không.*
-3. **Câu chào đi đường CHẬM in `s.name` thô** (`projects-67` thay vì `[hub]`) —
+3. **Câu chào đi đường CHẬM in `s.name` thô** (`projects-67` thay vì `[huba]`) —
    bản chép tay thứ TƯ của luật "tên để đọc".
 
 ### Và một phép tính, không phải hằng số: "sao có tới 5 cái enter?"
@@ -1243,10 +1243,10 @@ bằng **argv lúc khởi động**. Nay: mở `claude3 --permission-mode auto
 được rằng ô nhập sẵn sàng: nhật ký chỉ sinh sau khi qua hết hộp chặn) → kiểm màn
 còn hộp chọn không → `type_and_send(đề bài)`.
 
-- **`launch` khai theo tài khoản** (`claude`/`claude2`/`claude3`, `hub.config.json`),
+- **`launch` khai theo tài khoản** (`claude`/`claude2`/`claude3`, `huba.config.json`),
   vì Hà gõ đúng ba từ ấy ở terminal. Không khai thì rơi về `CLAUDE_CONFIG_DIR=…
   claude` — **không đoán** tên alias theo `accN`.
-- **Rào KHÔNG nới**: `claude3` trần không có rào nào (bài học 08-13). Nên hub gõ
+- **Rào KHÔNG nới**: `claude3` trần không có rào nào (bài học 08-13). Nên huba gõ
   `claude3` KÈM `--permission-mode auto --disallowedTools`.
 - Ngoại lệ duy nhất còn đi bằng argv: **bản bàn giao ~2 KB** — 2 KB đẩy qua
   `do script` là một cú DÁN (luật 13), khác hẳn một câu ngắn.
@@ -1270,7 +1270,7 @@ hỏng câm. Chưa sửa vì chưa chạy thật được lượt nào; đã ghi
 
 ### Hà chốt thêm một hướng lớn — CHƯA làm
 
-*"tôi muốn mọi thông tin khi đi qua hub phải là realtime chứ không phải đọc lịch
+*"tôi muốn mọi thông tin khi đi qua huba phải là realtime chứ không phải đọc lịch
 sử"* · *"đây là kênh làm việc từ xa, mà bạn lại lấy cái cũ để gửi thì còn ý nghĩa
 gì nữa"*. Đo được cái giá và đường thoát:
 
@@ -1280,11 +1280,11 @@ gì nữa"*. Đo được cái giá và đường thoát:
 | quét toàn bộ nhật ký | **85 ms** | đúng id đang sống + vừa ghi cách đây bao nhiêu giây |
 | `claude agents` ×3 | **p50 3 100 ms · p90 14 800 · max 120 000** (2891 lượt) | (thứ hai nguồn trên đã nói) |
 
-⟹ ~130 ms cho tất cả, nhanh hơn 25–100 lần, và **realtime hơn**: sổ hub đã ghi
+⟹ ~130 ms cho tất cả, nhanh hơn 25–100 lần, và **realtime hơn**: sổ huba đã ghi
 từ 12/08 rằng `claude agents` khai `status: idle` trong khi nhật ký vừa ghi 1
 giây trước. Chạy song song đã thử 12/08 và **chậm hơn 30%** — đừng thử lại.
 
-📌 Phải phân biệt: **sổ** (`watch:sessions` — ảnh chụp cũ hub tự cất, phải gỡ) và
+📌 Phải phân biệt: **sổ** (`watch:sessions` — ảnh chụp cũ huba tự cất, phải gỡ) và
 **nhật ký phiên** (`claude` đang ghi *ngay lúc này* — nguồn realtime nhất trên
 máy). Việc chính sáng nay là chuyển nút lệnh SANG nhật ký.
 
@@ -1349,16 +1349,16 @@ Chạy nguồn mới trên nhật ký thật (`tests/commands_from_log_live.rs`,
 acc1 và nhận đúng chuỗi chữ ấy làm việc. 📌 **Danh sách phiên không nói dối**:
 phiên ấy thật sự ở acc1; câu hỏi "sao xem lại thành acc1" dẫn thẳng tới cái loa
 trong khi lỗi ở cái miệng. Nay `pipeline::lift_bare_account` — và đây không phải
-nới cửa đoán: `known_accounts` là danh sách hub tự đọc từ cấu hình, so khớp cả
+nới cửa đoán: `known_accounts` là danh sách huba tự đọc từ cấu hình, so khớp cả
 chuỗi, chỉ ở TỪ ĐẦU TIÊN.
 
 **2. "Có lựa chọn nhưng không thấy nút".** Hai lỗi chồng nhau, một gốc:
 - `/shot` **chưa bao giờ** dựng nút số. Nó viết ra câu *"bấm số ở hàng phím để
   chọn"* rồi không giữ lời — đường duy nhất có nút là bảng `AskUserQuestion` đọc
   từ nhật ký, mà hộp khảo sát của CLI thì không nằm trong sổ.
-- Cửa chặn nút `⏎` hỏi `parse_choices(&ack)` — tức **đo trên chữ hub vừa viết
+- Cửa chặn nút `⏎` hỏi `parse_choices(&ack)` — tức **đo trên chữ huba vừa viết
   ra**, mà chữ ấy chép lại nguyên hộp chọn lên đầu tin ⟹ `1,2,3,4,1,2,3,4` ⟹
-  luật "liên tiếp từ 1" trả RỖNG ⟹ cửa an toàn MỞ đúng lúc phải đóng. hub tự làm
+  luật "liên tiếp từ 1" trả RỖNG ⟹ cửa an toàn MỞ đúng lúc phải đóng. huba tự làm
   mù phép đo của chính nó bằng đầu ra của chính nó — cùng họ với `??` đọc thành
   cửa sổ và `⏎ Gửi: # Lệnh thấy trên màn…`.
 
@@ -1370,7 +1370,7 @@ xếp chúng chung một hàng (tối đa 5).
 chọn, parse OK — tức phép đo trên màn gốc vẫn đúng, đúng như chẩn đoán.
 (Đo ra thêm WIN 61217 đứng ở hộp tin-thư-mục từ 02:12; Hà đã tự tắt lúc 15:2x.)
 
-**3. Câu chào gọi tên thô: `👁 Đang theo phiên projects-67` khi bấm nút `[hub]`.**
+**3. Câu chào gọi tên thô: `👁 Đang theo phiên projects-67` khi bấm nút `[huba]`.**
 Bản chép tay THỨ TƯ của luật "tên để đọc" (ba bản trước ở `screen_report`, vá
 08-13). Câu chào có hai đường: đường NHANH đọc sổ (`session_name_from_book`, trả
 nhãn đúng từ 08-12) và đường CHẬM đọc ảnh chụp — đường chậm in `s.name` thô. Cả
@@ -1380,12 +1380,12 @@ cái tên phân biệt được ÍT NHẤT trong mọi cái tên có ở đây.
 📌 Hai điều đáng nhớ hơn bản vá. Một: nó nằm trong một `format!` giữa một `match`
 sáu tầng, nên **không cửa nào bắt được** — nay là hàm `follow_ack_head` và có
 bài kiểm đỏ-được đứng canh. Hai: đường CHẬM là đường hay chạy nhất **ngay sau
-một lượt hubd khởi động lại** (sổ còn rỗng), tức lỗi hiện ra đúng lúc chủ máy
+một lượt hubad khởi động lại** (sổ còn rỗng), tức lỗi hiện ra đúng lúc chủ máy
 hay bấm nút nhất.
 
-⚠ **Đo ra khi truy lỗi này, CHƯA điều tra:** `hubd` khởi động lại lúc 08:13:40Z
+⚠ **Đo ra khi truy lỗi này, CHƯA điều tra:** `hubad` khởi động lại lúc 08:13:40Z
 kèm `stale_lock_removed` — tức bản trước chết mà không dọn khoá pid. Và sổ
-`watch:sessions` lúc 08:2xZ chỉ có 2 hàng (`4963b95c` tfl5, `d449b00c` hub),
+`watch:sessions` lúc 08:2xZ chỉ có 2 hàng (`4963b95c` tfl5, `d449b00c` huba),
 không có phiên nào trong ba phiên `/session` liệt kê lúc 02:14Z. Chưa biết là
 hậu quả của lượt khởi động lại hay là một chuyện khác. Cũng đo được:
 `telegram_poll_failed` ba lượt quanh 07:30–07:47Z.
@@ -1419,10 +1419,10 @@ chối được, một động từ không còn việc gì để làm, và ba th
    ấy: `cfg.trust.tfl5_user_tids.first()` đem so với `cfg.trust.tfl5_user_tids`.
    Một cổng cấu tạo sao cho **không bao giờ từ chối được** — trừ đúng một trường
    hợp: danh sách RỖNG, và khi ấy nó từ chối **mọi** mệnh lệnh trong im lặng.
-   Tức là gỡ `trust` khỏi `hub.config.json` mà quên cổng này thì hub câm hẳn.
+   Tức là gỡ `trust` khỏi `huba.config.json` mà quên cổng này thì huba câm hẳn.
    Nay một cổng, ở KÊNH: `telegram::update_sender` + `chat_id`.
 3. **Cả chặng hỏi vòng** (`ADAPTER_NAMES`, `adapter_enabled`, `poll_adapter`,
-   `pipeline::ingest`, route `/ingest`, `hub ingest`). Không còn kênh nào để hỏi;
+   `pipeline::ingest`, route `/ingest`, `huba ingest`). Không còn kênh nào để hỏi;
    `poll_adapter` trả `unknown adapter` cho chính cái tên duy nhất trong danh
    sách. `/ingest` chỉ còn một câu trả lời khả dĩ: *"disabled in config"*.
 4. **`tungstenite` + `axum` + `tokio`.** Không một dòng `use` nào trong `src/`,
@@ -1437,7 +1437,7 @@ khối "lỗi gần đây" (`runtime::errors_block`) đọc một bảng mãi m�
 rỗng — một phép đo **không bao giờ đỏ được**, tức phép đo mù, tệ hơn không có vì
 nó vẫn chiếm chỗ và vẫn được đọc như một lời cam đoan. Nay `run_once` ghi một
 dòng mỗi vòng (mở sổ TRƯỚC, đóng sổ SAU, `ok=NULL` giữa chừng = vòng chết giữa
-đường). `hub status` đổi nhãn "last polls" → "last cycles".
+đường). `huba status` đổi nhãn "last polls" → "last cycles".
 
 ~~⚠ Nợ: nguồn của khối ấy MỎNG hơn trước~~ → **đã vá cùng ngày** (`logging::
 error_count`). Ghi "một hàng mỗi vòng" thôi thì chưa đủ, và đây là chỗ suýt tự
@@ -1448,16 +1448,16 @@ luật 3 vốn đã bắt mọi đường lỗi phải ghi log, nên đây là c
 đầu kia. Chỉ TÊN sự kiện vào hàng, không bao giờ `fields` — chuỗi ấy lên màn qua
 `/doctor`, mà `fields` chính là chỗ khoá bot từng rò (08-11).
 
-**Đo trước khi tin** (`logs/hub.log`): 83.060 `info` · 1.626 `warn` · 120
+**Đo trước khi tin** (`logs/huba.log`): 83.060 `info` · 1.626 `warn` · 120
 `error`. Tức khối này là *lỗi*, không phải *mọi trục trặc* — phần lớn trục trặc
-của hub cố ý sống ở mức `warn`. Đã kiểm end-to-end trên bản release với cấu hình
+của huba cố ý sống ở mức `warn`. Đã kiểm end-to-end trên bản release với cấu hình
 + DB dùng một lần: một vòng sạch ghi đúng `cycle|cycle|ok=1|(không lỗi)`.
 
 🔴 **Và một lỗi trong chính báo cáo của tôi, do Hà hỏi mới lộ** (*"Lệnh doctor
 làm gì?"*). Tôi viết ở ba chỗ rằng `/doctor` đọc bảng `runs` — **sai**.
 `errors_block` sống trong `runtime::snapshot`, hàm ấy có đúng một chỗ gọi là
 `portal.rs`, tệp đã chết ⟹ khối ấy không có người đọc nào, và `/doctor` chưa
-bao giờ hiện nó. Người đọc THẬT của `runs` chỉ là `hub status` trên CLI.
+bao giờ hiện nó. Người đọc THẬT của `runs` chỉ là `huba status` trên CLI.
 Vá bằng cách **sửa mã cho khớp lời hứa**, không sửa lời hứa cho khớp mã:
 `pipeline::recent_errors_line` + một dòng thật trong câu trả lời `/doctor`, kèm
 bài kiểm canh cả phạm vi ("40 vòng gần nhất, mức `error`, `warn` không tính") —
@@ -1467,7 +1467,7 @@ vì một dòng "không có lỗi" trần trụi sẽ bị đọc thành "mọi 
 
 ### Một suýt nữa, ghi lại vì nó là đúng cái bẫy vừa mô tả
 
-Sửa `hub.config.json` (bỏ `adapters`+`trust`) trong khi daemon **cũ** đang chạy ⟹
+Sửa `huba.config.json` (bỏ `adapters`+`trust`) trong khi daemon **cũ** đang chạy ⟹
 bản cũ đọc lại cấu hình, `tfl5_user_tids` rỗng ⟹ cổng ở mục 2 chuyển sang từ chối
 **mọi** lệnh Telegram, im lặng. Kiểm bằng log: dòng `command_from_non_owner` gần
 nhất là **2026-08-08**, tức trong cửa sổ ~24 giây ấy **không có lệnh nào tới** —
@@ -1479,7 +1479,7 @@ binary phải cùng một nhịp**, đúng luật "contract + consumer ship cùn
 - **19 tệp `.mjs` + `fe/` + `ui-shots/` + `rust/src/{live,portal}.rs` vẫn trên
   đĩa và trong chỉ mục git** — không còn được biên dịch, không còn ai gọi. Lệnh
   `git rm` bị hook chặn 6 lần rồi bị từ chối quyền; **phải để Hà gõ tay**.
-- `.runner-allowlist` còn `bash ../hub ingest` (lệnh đã chết) và
+- `.runner-allowlist` còn `bash ../huba ingest` (lệnh đã chết) và
   `node ../ui-smoke.mjs`. Claude sửa allowlist = self-grant, bị chặn — Hà tự sửa.
 - ~~Mất hai chốt canh "không hiện tiền trên màn"~~ → **đã vá cùng ngày**
   (`f228d96`): `tests/no_money_on_screen.rs` soi hình dạng tuần tự hoá của
@@ -1493,7 +1493,7 @@ binary phải cùng một nhịp**, đúng luật "contract + consumer ship cùn
 
 `auto_handover` bật lúc 04:13Z, nổ lần đầu **04:23:30Z** (`projects-06`, 80%,
 rảnh 126s) — và **phiên đang viết dòng này chính là phiên nó mở ra**
-(`86fe1666`, tty `ttys001`, `fresh:true`). Tức lần đầu tiên hub tự thay cửa sổ
+(`86fe1666`, tty `ttys001`, `fresh:true`). Tức lần đầu tiên huba tự thay cửa sổ
 làm việc của Hà, và người kiểm chứng là cái phiên vừa được sinh ra.
 
 **Con số quyết định — vòng lặp 12-08 đã tắt hẳn:**
@@ -1512,8 +1512,8 @@ lượt gọi, luật 8).
 ### Ba lỗi chỉ một lượt THẬT mới thấy
 
 1. **Tin không tới Telegram** (`570f026`). Log 04:24:36 chỉ có `tfl5_chat_sent`,
-   không một dòng telegram nào — hub tự đóng cửa sổ đang làm việc của Hà rồi báo
-   vào đúng cái phòng anh không mở. Mà đây là tin DUY NHẤT trong cả hub xảy ra
+   không một dòng telegram nào — huba tự đóng cửa sổ đang làm việc của Hà rồi báo
+   vào đúng cái phòng anh không mở. Mà đây là tin DUY NHẤT trong cả huba xảy ra
    khi **không ai bấm gì**. `announce_changes` đi hai mồm từ đầu (luật 11); chỗ
    này quên.
 2. **Tin gọi tên sai phiên** (`570f026`). In `h.new_session_id` — id BẢN FORK,
@@ -1527,8 +1527,8 @@ lượt gọi, luật 8).
 
 ### Hai lỗi Hà chụp màn gửi thẳng (`2e1ca1e`)
 
-- *"Vẫn còn project-.."* — trong CÙNG một màn hình: nút `[AI/hub]`, dòng
-  `👁 Đang theo phiên [AI/hub]`, rồi `📷 Màn của projects-d2:`. `screen_report`
+- *"Vẫn còn project-.."* — trong CÙNG một màn hình: nút `[AI/huba]`, dòng
+  `👁 Đang theo phiên [AI/huba]`, rồi `📷 Màn của projects-d2:`. `screen_report`
   là chỗ sót của `display_name` (22c97e9): ba lần `s.name` thô.
 - *"Không có lệnh merge mà bấm"* — màn kết bằng đúng một lệnh để gõ, 0 nút. Gốc:
   lệnh dài hơn bề ngang cửa sổ ⟹ TUI bẻ đôi ⟹ cổng `contains('\n')` (viết 08-12)
@@ -1539,15 +1539,15 @@ lượt gọi, luật 8).
   bịa ra một lệnh khác mà nút thì bấm một cái là chạy. `gh` vào danh sách lệnh
   quen.
 
-### 🔴 Lượt thứ HAI (04:30) — hub phá cái chắc chắn để đổi lấy cái chưa chứng minh
+### 🔴 Lượt thứ HAI (04:30) — huba phá cái chắc chắn để đổi lấy cái chưa chứng minh
 
 `hanguyen-41` (acc3, 64%) → cửa sổ mới `ttys000` mở 04:31:37 với
-`handover_window_opened session:""` (**id RỖNG**), rồi 04:31:59 hub đóng cửa sổ
+`handover_window_opened session:""` (**id RỖNG**), rồi 04:31:59 huba đóng cửa sổ
 cũ **như thường lệ**. Cửa sổ mới đứng im **22 phút**; người phát hiện là Hà:
 *"mở phiên mới bị dừng giữa chừng"* + ảnh hộp *"Quick safety check … 1. Yes, I
 trust this folder"*.
 
-**Gốc nằm ngoài hub** — và nó là hoá đơn của lần dời gốc 08-12: `claude` ghi "đã
+**Gốc nằm ngoài huba** — và nó là hoá đơn của lần dời gốc 08-12: `claude` ghi "đã
 tin thư mục này" theo **từng `CLAUDE_CONFIG_DIR`**. Đo trong `.claude.json` ba
 tài khoản: acc1 có bản ghi cho `/Users/hanguyen/projects`; **acc2 + acc3 KHÔNG**
 (chỉ còn đường cũ). ⟹ cửa sổ đầu tiên dưới acc2/acc3 ở gốc mới luôn dừng ở hộp
@@ -1555,8 +1555,8 @@ hỏi ⟹ không sinh nhật ký ⟹ không có id để ghép. Dọn một lầ
 `cd ~/projects && CLAUDE_CONFIG_DIR=~/.claude-acc2 claude` → bấm `1` → `/exit`.
 (acc3 Hà đã bấm, acc2 còn chờ.)
 
-**Cái sai của hub là cái nó làm TIẾP THEO** (`65c5946`): `new_id = None` nghĩa là
-*chưa thấy phiên nào cả*, mà hub vẫn đóng cửa sổ đang làm việc của chủ máy — mù
+**Cái sai của huba là cái nó làm TIẾP THEO** (`65c5946`): `new_id = None` nghĩa là
+*chưa thấy phiên nào cả*, mà huba vẫn đóng cửa sổ đang làm việc của chủ máy — mù
 nhất thì lại mạnh tay nhất. Nay id rỗng ⟹ **giữ nguyên cửa sổ cũ** + đọc màn cửa
 sổ mới xem vướng gì + tin nói đủ ba điều (vướng cái gì · cửa sổ cũ còn nguyên ·
 KHÔNG khoe "đang chạy"). `start_fresh_after_handover` trả `FreshWindow`, vì
@@ -1564,7 +1564,7 @@ KHÔNG khoe "đang chạy"). `start_fresh_after_handover` trả `FreshWindow`, v
 
 ### ✅ Hà uỷ quyền, và bản vá CHẠY THẬT (`3805ab1`)
 
-Hà: *"bấm hộ đi, phải kiểm tra được và bấm luôn 1"*. Nay hub tự trả lời hộp
+Hà: *"bấm hộ đi, phải kiểm tra được và bấm luôn 1"*. Nay huba tự trả lời hộp
 tin-thư-mục **trên cửa sổ chính nó vừa mở** — và **chỉ hộp ấy**: nhận theo chữ
 của lựa chọn, đòi cả ba (`trust` + `folder` + không mở đầu `no`), đổi câu chữ ⟹
 không khớp ⟹ rơi về nhánh giữ-nguyên-cửa-sổ-cũ. **Hỏng thì hỏng về phía im
@@ -1574,29 +1574,29 @@ phải trả `None`; nới thành "mở đầu bằng yes" là ĐỎ ngay.
 Chạy thật dưới acc3 (`rust/tests/trust_dialog_live.rs`, `#[ignore]` vì mở cửa sổ
 Terminal thật): `new_window_opened` 05:21:32 → lượt chờ 20s **trượt** (hộp đang
 chặn) → `trust_dialog_answered pressed=1` 05:21:53 → `id = d499e9bc…` 05:22:18.
-Cửa sổ hiện `⏵⏵ auto mode on` — đúng rào của hub.
+Cửa sổ hiện `⏵⏵ auto mode on` — đúng rào của huba.
 
 📌 Hai bài học từ chính buổi thử này:
 - **Cửa sổ mở bằng `claude` TRẦN không có rào nào.** Tôi mở tay một cửa sổ để dò
   acc2 và nó lên `⏵⏵ don't ask on`, trong đúng thư mục vừa cấp trước
-  `ssh/scp/sudo`. Hà bắt ngay: *"đâu có đúng?"*. Đường của hub
+  `ssh/scp/sudo`. Hà bắt ngay: *"đâu có đúng?"*. Đường của huba
   (`terminal_command`) luôn kèm `--permission-mode auto` + `DENIED_TOOLS`; **dò
   tay thì phải đi bằng chính đường ấy**, đừng gõ `claude` trần cho nhanh.
-- **Phiên kẹt ở hộp tin-thư-mục là VÔ HÌNH với hub**: đo lúc 12:0x — tiến trình
-  `claude` sống ở `ttys002` mà `hub sessions` khai 3 phiên, không có nó. Chưa qua
+- **Phiên kẹt ở hộp tin-thư-mục là VÔ HÌNH với huba**: đo lúc 12:0x — tiến trình
+  `claude` sống ở `ttys002` mà `huba sessions` khai 3 phiên, không có nó. Chưa qua
   hộp ⟹ chưa có id ⟹ không nằm trong `claude agents`. Nên khoảnh khắc DUY NHẤT
-  hub còn nhìn thấy nó là ngay sau khi tự mở cửa sổ, lúc còn cầm `tty` — cùng
+  huba còn nhìn thấy nó là ngay sau khi tự mở cửa sổ, lúc còn cầm `tty` — cùng
   bài học với `/new` ghép bằng tty.
 
 Trạng thái tin-thư-mục sau buổi thử: acc1 ✓ `~/projects` · acc2 ✓ `~/projects`
-(bấm hộ 11:5x) · acc3 mới có `~/projects/AI/hub`, các đường khác sẽ do hub tự bấm.
+(bấm hộ 11:5x) · acc3 mới có `~/projects/AI/huba`, các đường khác sẽ do huba tự bấm.
 
 ### 📄 Chiều 13-08 — "Xem đầy đủ" tự vào phiên, và vòng khép kín đo được
 
 Hà: *"bấm xem đầy đủ thì rõ ràng nó đang ở phiên đúng rồi cần gì có nút vào phiên
 nữa"* — **sáng nay chính anh xin cái nút ấy**, chiều dùng thật thì thấy thừa. Đo
 trước khi sửa (cổng lọc CHẠY ĐÚNG: `full:21` là báo cáo `[dwork]` trong khi con
-trỏ ở `[AI/hub]`) ⟹ **thiết kế sai chứ không phải mã sai**. Nay bấm là vào luôn,
+trỏ ở `[AI/huba]`) ⟹ **thiết kế sai chứ không phải mã sai**. Nay bấm là vào luôn,
 bỏ nút; `full_report_follow_note` thuần + test ghim nhánh ghi-hỏng (`4f1474e`).
 
 Chạy thật, trọn một vòng — và nó **đóng nợ quan sát của bản vá `2e1ca1e`**:
@@ -1605,10 +1605,10 @@ Chạy thật, trọn một vòng — và nó **đóng nợ quan sát của bả
 |---|---|
 | 07:40:40 `/session` TRỐNG | 3 nút, **1,0s** (đúng: trống = `/sessions`) |
 | 07:40:57.614 → .615 | ghi sổ **rồi mới** log `focus_moved_by_full_report` |
-| | `86fe1666 [AI/hub]` → `d7173681 [AI/tfl5]`, **0 nút** kèm theo |
-| 07:42:29 bấm nút phiên | ack `👁 Đang theo phiên [AI/hub]` **870ms** (sáng nay: 48s) |
-| 07:42:32 `/shot` tự kèm | **1,9s**, đầu đề `📷 Màn của **[AI/hub]**` ✅ |
-| 07:42:56 gõ chữ trên Telegram | `telegram_text_as_typing` → `✓ đã gửi · [AI/hub]` |
+| | `86fe1666 [AI/huba]` → `d7173681 [AI/tfl5]`, **0 nút** kèm theo |
+| 07:42:29 bấm nút phiên | ack `👁 Đang theo phiên [AI/huba]` **870ms** (sáng nay: 48s) |
+| 07:42:32 `/shot` tự kèm | **1,9s**, đầu đề `📷 Màn của **[AI/huba]**` ✅ |
+| 07:42:56 gõ chữ trên Telegram | `telegram_text_as_typing` → `✓ đã gửi · [AI/huba]` |
 
 📌 Cạnh sắc của chính tính năng này, đã nói rõ với Hà: đọc báo cáo phiên nào là
 **con trỏ đi theo phiên ấy**, nên chữ gõ tiếp trên Telegram đổi đích. Một cú bấm
@@ -1617,11 +1617,11 @@ Chạy thật, trọn một vòng — và nó **đóng nợ quan sát của bả
 
 ⏳ **Chưa quan sát trên tin thật:** tin tự đóng sổ ĐI TELEGRAM và nhánh `Stalled`
 — cả hai cần một lượt đóng sổ nữa. Đã quan sát thật: `.inbox/<id ngắn>/` nhận ba
-ảnh (`d407a8d`), hub tự bấm qua hộp tin-thư-mục (`3805ab1`), đầu đề `/shot` mang
+ảnh (`d407a8d`), huba tự bấm qua hộp tin-thư-mục (`3805ab1`), đầu đề `/shot` mang
 nhãn dự án (`2e1ca1e`), và "Xem đầy đủ" tự chuyển phiên (`4f1474e`).
 
 📌 Bài học chung của cả năm lỗi: **cả năm đều nằm ở tin nhắn, không ở cơ chế.**
-Cơ chế đóng sổ chạy đúng ngay lượt đầu; thứ sai là hub kể lại việc mình vừa làm
+Cơ chế đóng sổ chạy đúng ngay lượt đầu; thứ sai là huba kể lại việc mình vừa làm
 — sai phòng, sai tên phiên, sai tên màn, và im ở đúng nhánh cần nói nhất.
 
 ---
@@ -1636,7 +1636,7 @@ tới muộn hơn sự thật.
 | Cửa tôi dựng | Đo ra nó sai ở đâu |
 |---|---|
 | "chỉ Enter khi **thấy chữ còn trong ô**" | 17:39 soi **18 giây** không thấy chữ ⟹ không Enter; `/shot` 20 giây sau: chữ nằm rõ trong ô |
-| "phiên **đang chạy** thì thôi, chữ đã vào hàng chờ" | 18:04 hub báo *"nằm ở HÀNG CHỜ"* mà chữ đứng im — dòng `queued message` trên màn là của **tin CŨ** |
+| "phiên **đang chạy** thì thôi, chữ đã vào hàng chờ" | 18:04 huba báo *"nằm ở HÀNG CHỜ"* mà chữ đứng im — dòng `queued message` trên màn là của **tin CŨ** |
 | "gõ xong Enter một phát sau 400ms" | *"gửi xong im lặng mãi, gửi lần nữa lại gộp thành 1 tin rồi enter"* — Enter bị **gộp ngược vào cú dán** |
 | "bấm lại tới khi ô trống" (có soi) | Hà: *"không hiểu soi kiểu gì… việc gì phải soi"* |
 
@@ -1654,7 +1654,7 @@ rõ: **không soi trước ⟹ nếu đúng lúc ấy màn đang có hộp chọ
 
 ### Câu trả lời cũng phải gọn (Hà: *"chỉ cần xác nhận… nếu lỗi mới cần chi tiết"*)
 
-Ack cũ ba dòng, một nửa là ruột của hub (bao nhiêu ký tự, mấy cú Enter, màn nói
+Ack cũ ba dòng, một nửa là ruột của huba (bao nhiêu ký tự, mấy cú Enter, màn nói
 gì) — và tệ nhất là nó **tự vu cho mình một lỗi không có**: `⚠ sau 3s màn KHÔNG
 thấy chữ ấy` bắn ra trong khi tin đã vào hàng chờ. *Một cảnh báo sai dạy người
 ta bỏ qua cảnh báo.* Nay: `✓ đã gửi · [amm] hanguyen-8e` hoặc `✓ vào hàng chờ ·
@@ -1735,11 +1735,11 @@ Từ đó chảy ra đúng bốn câu hỏi trên:
 ### 📌 Một giả thuyết bị bác trước khi kịp sửa 15 chỗ
 
 Đọc mã thấy `do script … in **selected tab** of window id W` và `contents of
-**selected tab**` — tức nếu một cửa sổ có nhiều tab thì hub **gõ nhầm tab**, chứ
+**selected tab**` — tức nếu một cửa sổ có nhiều tab thì huba **gõ nhầm tab**, chứ
 không chỉ chụp nhầm. Đang định đổi `window_of` sang trả `(cửa sổ, tab)` thì đo
 trước: **cả 4 cửa sổ Terminal trên máy đều đúng 1 tab**, `selected` trỏ đúng
 chỗ. ⟹ Không phải nguyên nhân của `/shot` sai, và **không sửa**. Nhưng nó là
-một cái bẫy có thật đang nằm chờ: mở tab thứ hai trong một cửa sổ là hub gõ vào
+một cái bẫy có thật đang nằm chờ: mở tab thứ hai trong một cửa sổ là huba gõ vào
 việc của người khác. Ghi vào sổ nợ.
 
 Cơ chế chụp thì ĐÚNG: đọc thẳng `contents` của win 56517 ra đúng một màn hình 27
@@ -1766,19 +1766,19 @@ cùng cách chữa: `config::looks_like_project` — một chỗ trả lời "đ
 ngăn kéo", `known_projects` cũng dùng nó (trước đó nó đo bằng marker, `folder_
 from_tail` đo bằng tên: **hai câu trả lời khác nhau cho cùng một câu hỏi**).
 
-Hai cửa giữ cho nó không đào quá tay: dừng khi thư mục **là dự án** (`AI/hub` có
-`CLAUDE.md` ⟹ không bao giờ tụt xuống `AI/hub/rust`, dù `rust/` có `Cargo.toml`
+Hai cửa giữ cho nó không đào quá tay: dừng khi thư mục **là dự án** (`AI/huba` có
+`CLAUDE.md` ⟹ không bao giờ tụt xuống `AI/huba/rust`, dù `rust/` có `Cargo.toml`
 — đây là cái bẫy thật, đã ghim bằng test), và dừng khi **không kiểm được** (thư
 mục không có trên máy này ⟹ giữ nhãn nông, đừng đoán sâu thêm).
 
 Đo trên 4 phiên đang sống sau khi cài: `hanguyen-8e` → **`AI/tcc/amm`** (trước
-là `AI/tcc`) · phiên hub → `AI/hub` · `dwork` · `AI/tfl5` — ba nhãn kia không
+là `AI/tcc`) · phiên huba → `AI/huba` · `dwork` · `AI/tfl5` — ba nhãn kia không
 đổi. 2 test mới, đã kiểm là **đỏ được** (bỏ cửa "dừng ở dự án" ⟹ đỏ).
 
 ### *"chỉ cần báo đã gõ được thôi cần gì báo đã gửi enter rời"*
 
-Đúng: cú Enter rời là **ruột của hub**, không phải việc của người đọc — họ hỏi
-*"chữ tới chưa"*, và câu trả lời không đổi dù hub phải bắn thêm mấy phím. Bỏ
+Đúng: cú Enter rời là **ruột của huba**, không phải việc của người đọc — họ hỏi
+*"chữ tới chưa"*, và câu trả lời không đổi dù huba phải bắn thêm mấy phím. Bỏ
 `(phải gửi thêm một Enter rời)` khỏi câu thành công. Giữ nguyên ở nhánh **KẸT**
 (*"chữ VẪN NẰM trong ô nhập — tôi đã gửi thêm một Enter rời mà nó chưa đi"*), vì
 ở đó nó là **lý do**, không phải khoe việc. Vẫn còn đủ trong log
@@ -1801,7 +1801,7 @@ như cú bấm nào cũng rơi trúng lượt dựng lại. *Một cái đệm h
 nó đệm chậm hơn chính cái đệm — và nó hỏng CÂM, vì con số cũ vẫn đúng ở chỗ nó
 được đo.*
 
-Mà tên với tài khoản thì hub đã nhớ sẵn: `Mark::n`, `Mark::a`, ghi mỗi vòng
+Mà tên với tài khoản thì huba đã nhớ sẵn: `Mark::n`, `Mark::a`, ghi mỗi vòng
 chính vì lúc phiên biến mất không còn chỗ nào hỏi. Nay `/session <id>` đọc SỔ
 (một lượt SQLite), đặt con trỏ, chào ngay; sổ không biết id thì mới rơi về ảnh
 chụp — nơi câu từ chối còn nói được "đang có N phiên".
@@ -1858,8 +1858,8 @@ cái nút nói dối.*
 
 ### Bug 2 — `??` bị đọc thành một cửa sổ có thật
 
-Đo cái tin Hà trích: `hub-67` và `hub-ec` đều là phiên `claude -p "/usage"` của
-**chính hub**, `tty = "??"`, `host = detached` — **không phiên nào có cửa sổ**.
+Đo cái tin Hà trích: `huba-67` và `huba-ec` đều là phiên `claude -p "/usage"` của
+**chính huba**, `tty = "??"`, `host = detached` — **không phiên nào có cửa sổ**.
 `ps` in `??` khi không có tty điều khiển, mà `??` **không rỗng**, nên cửa
 `tty.is_empty()` cho qua rồi phép so "cùng tty" khớp `??` với `??`.
 
@@ -1868,22 +1868,22 @@ cái nút nói dối.*
 `sessions::is_real_tty`. Giá của bản chép thứ tư là một câu nói dối gửi thẳng ra
 điện thoại.
 
-### Bug 3 — cái loa nói về máy móc của chính hub (nặng nhất, vì nó lặp)
+### Bug 3 — cái loa nói về máy móc của chính huba (nặng nhất, vì nó lặp)
 
 | Lúc | Tin |
 |---|---|
-| 15:59:04 | `⏹ hub-67 (033059d8) đã tắt — cửa sổ ấy nay đang chạy phiên hub-ec.` |
-| 16:11:51 | `⏹ hub-e6 (839e9ab2) đã tắt — … hub-36.` |
-| 16:16:05 | `⏹ hub-36 (f85ab23f) đã tắt — … hub-f5.` |
+| 15:59:04 | `⏹ huba-67 (033059d8) đã tắt — cửa sổ ấy nay đang chạy phiên huba-ec.` |
+| 16:11:51 | `⏹ huba-e6 (839e9ab2) đã tắt — … huba-36.` |
+| 16:16:05 | `⏹ huba-36 (f85ab23f) đã tắt — … huba-f5.` |
 
 **Năm phút một tin**, về những phiên chủ máy không mở, không thấy, không làm gì
 được. Cửa tuổi thọ `MIN_LIFE_SEC` (120s, dựng 08-12 sáng đúng cho việc này) bắt
 được phần lớn — nhưng nó **đo sai thứ**: cái khiến những cái chết ấy không phải
-tin không phải là *nó ngắn*, mà là *nó của hub*. Ca lọt lưới đo được: một phép
+tin không phải là *nó ngắn*, mà là *nó của huba*. Ca lọt lưới đo được: một phép
 dò nằm trong `claude agents` **11 phút** (lượt dò treo tới trần 60s rồi
 `usage_probe_unparsed`), qua thừa cửa 120 giây.
 
-Dấu nhận biết là `cwd`: hubd chạy với `WorkingDirectory` riêng, tiến trình con
+Dấu nhận biết là `cwd`: hubad chạy với `WorkingDirectory` riêng, tiến trình con
 thừa hưởng, và không phiên nào của người nằm ở đấy. **Hai cửa**, vì một phiên có
 thể bị lọc lúc còn sống *hoặc* đã nằm sẵn trong sổ từ trước lúc nâng cấp — bỏ
 cửa thứ hai thì đúng lượt nâng cấp đầu tiên sẽ nổ một tràng báo tử. Chỉ IM cái
@@ -1892,7 +1892,7 @@ yêu cầu).
 
 ### Nghiệm thu
 
-`cargo test` **215** (từ 207) exit 0 · clippy **0** · `install.sh` exit 0, hubd
+`cargo test` **215** (từ 207) exit 0 · clippy **0** · `install.sh` exit 0, hubad
 pid 50302 `cert`. **5 test mới, cả 5 đã kiểm là ĐỎ ĐƯỢC** bằng đột biến: trả
 `enter_button` về luật cũ ⟹ 3 đỏ; trả `??` về `tty.is_empty()` ⟹ 1 đỏ; tắt lượt
 lọc phép dò ⟹ 1 đỏ (và test "phiên THẬT sống lâu vẫn báo" vẫn xanh — luật mới
@@ -1907,7 +1907,7 @@ lối đi, không phải câu nói.*
 
 ### 📌 Và một chỗ chính tôi làm chưa đúng chuẩn của dự án này
 
-Bản đầu lọc phép dò ngay ở **đầu vào** (`now`) — gọn hơn, nhưng nó làm hub **im
+Bản đầu lọc phép dò ngay ở **đầu vào** (`now`) — gọn hơn, nhưng nó làm huba **im
 lặng bỏ qua cả một lớp phiên**: không sổ, không log, không cách nào biết luật có
 đang chạy hay không. Đúng hình dạng mà tệp `watch.rs` gọi tên ở khắp nơi, và tôi
 chỉ nhận ra khi đi tìm bằng chứng trên máy: *im lặng vì luật chạy đúng* và *im
@@ -1915,20 +1915,20 @@ lặng vì luật không chạy* đọc lên y hệt nhau.
 
 Nay cửa đặt ở **chỗ phát ngôn**: phép dò vào sổ như mọi phiên, nhưng không nói
 gì; và mỗi lần bỏ qua một cái chết thì ghi `session_end_muted why="phép dò hạn
-mức của chính hub"`. Có dòng log ấy mới **kiểm được**.
+mức của chính huba"`. Có dòng log ấy mới **kiểm được**.
 
-### 🔴 Đo được trên đường đi: chính tôi làm hub mù
+### 🔴 Đo được trên đường đi: chính tôi làm huba mù
 
 `claude agents --json` timeout **31s · 62s · 77s · 96s** và một vòng ảnh chụp
 **150 giây** — trong khi máy rảnh thì lệnh ấy chạy **0,3 giây** (đo 2 lượt). Thủ
 phạm là tải của chính phiên này: `cargo test`/`clippy`/`install.sh` bản release +
-Playwright chạy song song với vòng poll. Hệ quả thật, không phải lý thuyết: hub
+Playwright chạy song song với vòng poll. Hệ quả thật, không phải lý thuyết: huba
 báo `blind: [acc1]` rồi giữ sổ cho **hai phiên đang sống** (`session_end_unknown`
 16:20:28 và 16:21:54) — tức cửa mù dựng hôm nay đã đỡ đúng một cú.
 
 ⟹ Hai điều rút ra: (1) **cửa mù đang làm đúng việc**, và nó đỡ cho một nguyên
 nhân không ai ngờ tới; (2) khi nghiệm thu bằng Playwright/build trên chính máy
-này thì đừng đọc số đo của hub trong cùng lúc ấy — nó đang đo một cái máy đang
+này thì đừng đọc số đo của huba trong cùng lúc ấy — nó đang đo một cái máy đang
 bị mình đè.
 
 ⚠ Hai kiểm tra đỏ của `fe-board-uc` (29/31: hàng tài khoản không có số hạn mức)
@@ -1936,8 +1936,8 @@ bị mình đè.
 đây tôi đã đoán sai một lần rồi nên ghi lại cho rõ:
 
 📌 **Một kết luận của tôi bị chính phép đo tiếp theo bác bỏ.** Tôi viết "tải của
-tôi làm hub mù" — đúng cho `claude agents` (150s lúc đang build ⟶ 12s lúc rảnh),
-nhưng **sai cho `/usage`**: 16:34–16:36, máy đã rảnh, hubd vẫn hỏng **cả ba tài
+tôi làm huba mù" — đúng cho `claude agents` (150s lúc đang build ⟶ 12s lúc rảnh),
+nhưng **sai cho `/usage`**: 16:34–16:36, máy đã rảnh, hubad vẫn hỏng **cả ba tài
 khoản**, trong khi chạy tay đúng lệnh ấy ra **6,08 giây** kèm đủ số
 (`Current session: 7% · Current week: 18%`). Vậy nguyên nhân **chưa tìm ra**.
 
@@ -1948,14 +1948,14 @@ nào**, không phải chuyện đọc hiểu. Ba giả thuyết bị loại bằ
 | Nghi can | Đo | Kết |
 |---|---|---|
 | stdin không đóng ⟹ `claude` chờ EOF | `exec.rs:132` `drop(child.stdin.take())` | ❌ đã đóng |
-| hub gọi một `claude` khác | `claude_cli = claude` → `~/.npm-global/bin/claude`, đúng binary shell dùng; PATH trong plist có đường ấy | ❌ cùng một binary |
-| môi trường launchd thiếu thứ gì | chạy lại y hệt: `env -i` chỉ HOME/USER/PATH-của-plist, cwd = thư mục hubd, stdin `/dev/null` → **3,58 giây, ra đủ số** | ❌ không phải môi trường |
+| huba gọi một `claude` khác | `claude_cli = claude` → `~/.npm-global/bin/claude`, đúng binary shell dùng; PATH trong plist có đường ấy | ❌ cùng một binary |
+| môi trường launchd thiếu thứ gì | chạy lại y hệt: `env -i` chỉ HOME/USER/PATH-của-plist, cwd = thư mục hubad, stdin `/dev/null` → **3,58 giây, ra đủ số** | ❌ không phải môi trường |
 
 Và một câu hỏi khác hẳn hoá ra mới là câu đúng — **hỏng từ bao giờ?** Đếm cả
 log: **60 lần, lần đầu 2026-08-10T05:51**, đi theo từng ĐỢT (12 lần lúc
 08-11T20, 7 lần lúc 08-12T03, 11–12 lần trong hai giờ vừa rồi). ⟹ **Không phải
 do dời nhà** (10/08 sớm hơn nhiều), không phải hỏng đứt, mà là một cú **treo
-không thường xuyên** của `claude -p "/usage"` khi hubd gọi. Chưa có thủ phạm —
+không thường xuyên** của `claude -p "/usage"` khi hubad gọi. Chưa có thủ phạm —
 ghi đúng như vậy.
 
 Thay vì đoán lần hai: bắt dòng log tự khai. `RunOut` đã mang sẵn `timed_out` và
@@ -1970,8 +1970,8 @@ nó mang email tài khoản và số hạn mức.
 ## 🧭 2026-08-12 (khuya) — dọn nốt cuộc dời nhà, và một phép đo đã tắt tiếng mà không ai biết
 
 Gốc workspace dời sang `~/projects` lúc ~22:20 (TCC gác `~/Documents`). Bản
-hubd ĐANG CÀI đã được sửa tay lúc 22:13 và chạy ngon — nên nhìn từ ngoài thì
-xong. Đo vào trong thì **hub còn 50 chỗ trỏ đường cũ**, và đường cũ vẫn sống
+hubad ĐANG CÀI đã được sửa tay lúc 22:13 và chạy ngon — nên nhìn từ ngoài thì
+xong. Đo vào trong thì **huba còn 50 chỗ trỏ đường cũ**, và đường cũ vẫn sống
 dưới dạng symlink, tức **không chỗ nào gãy để mà biết**.
 
 ### Hai chỗ có giá thật, cả hai đều im lặng
@@ -1979,10 +1979,10 @@ dưới dạng symlink, tức **không chỗ nào gãy để mà biết**.
 | Chỗ | Nếu để nguyên |
 |---|---|
 | `deploy/com.dipgle.hubd.plist:60` còn `HUB_CONFIG=~/Documents/...` | bản cài đúng, repo sai ⟹ **`install.sh` lượt sau cài đè lại đường cũ**. Mà `HUB_CONFIG` quyết `hub_home` ⟹ `workspace_root` ⟹ danh sách dự án + `cwd` của mọi `/new` |
-| `runtime.rs:624` so bản cài với `~/Documents/projects/AI/hub/rust` gõ cứng | mất cây mã ⟹ hàm trả `None` ⟹ bảng sức khoẻ **thôi trả lời câu "sửa mã xong đã cài lại chưa"**. Không báo sai — nó ngừng báo. Đúng hình dạng lỗi mà dự án này viết đi viết lại: *một phép đo tắt tiếng đọc lên y hệt một phép đo nói "không sao"* |
+| `runtime.rs:624` so bản cài với `~/Documents/projects/AI/huba/rust` gõ cứng | mất cây mã ⟹ hàm trả `None` ⟹ bảng sức khoẻ **thôi trả lời câu "sửa mã xong đã cài lại chưa"**. Không báo sai — nó ngừng báo. Đúng hình dạng lỗi mà dự án này viết đi viết lại: *một phép đo tắt tiếng đọc lên y hệt một phép đo nói "không sao"* |
 
 Vá theo gốc chứ không đổi chuỗi: `runtime::source_tree(cfg)` = `<hub_home>/rust`
-— hub_home do plist quyết nên nó **đi theo hub**; không tìm thấy cây mã thì
+— hub_home do plist quyết nên nó **đi theo huba**; không tìm thấy cây mã thì
 `hubd_stale_check_no_source` ghi ra đường đã nhìn. Kịch bản `.mjs` tự định vị
 bằng `HERE`, `fe-newsession-uc` thôi so `cwd` với chuỗi cứng.
 
@@ -1992,13 +1992,13 @@ bằng `HERE`, `fe-newsession-uc` thôi so `cwd` với chuỗi cứng.
   exit 0, `hubd_boot` pid 20796 → `hubd_signature: cert` → `hub_env_loaded` 5 khoá.
 - **Phép đo sống lại và đo ĐÚNG** (đây mới là bằng chứng, không phải `stale` trả
   về một giá trị): `false` → chạm một `.rs` → **`true`** → `install.sh` → `false`.
-- `how_to_install` nay in `/Users/hanguyen/projects/...`; `hub doctor` khai
+- `how_to_install` nay in `/Users/hanguyen/projects/...`; `huba doctor` khai
   `workspace /Users/hanguyen/projects`; snapshot có **32 dự án**; `folder` của 3
-  phiên sống ra đúng `dwork · AI/hub · AI/tcc` (phiên thứ 4 là phép dò của chính
-  hub, chưa có nhật ký ⟹ rỗng, đúng).
+  phiên sống ra đúng `dwork · AI/huba · AI/tcc` (phiên thứ 4 là phép dò của chính
+  huba, chưa có nhật ký ⟹ rỗng, đúng).
 - 2 test mới, **cả hai đỏ được**: trả `source_tree` về đường cứng ⟹ đúng 2 test đỏ.
 - Test khoá nhật ký nay ghim **khoá mới** (`-Users-hanguyen-projects`) — thư mục
-  khoá mới là symlink về khoá cũ nên hai đường cùng một kho, nhưng thứ hub TÍNH
+  khoá mới là symlink về khoá cũ nên hai đường cùng một kho, nhưng thứ huba TÍNH
   RA từ `cwd` phải là khoá mới.
 
 📌 Giữ nguyên văn một chỗ: **bản chụp màn thật** của `/btw` (2026-08-11) trong
@@ -2061,8 +2061,8 @@ chân nhau ở CPU/đĩa. Đã trả lại bản nối đuôi và **giữ phép 
 
 ## 🔔 2026-08-12 (chiều muộn) — cái loa nói dối hai kiểu, và lệnh mọc cờ
 
-Hà mở phiên bằng *"tiếp hub"*, rồi ba câu hỏi nối nhau — mỗi câu lôi ra một việc
-thật. Không câu nào trả lời được bằng trí nhớ; cả ba đều đo từ log của chính hub.
+Hà mở phiên bằng *"tiếp huba"*, rồi ba câu hỏi nối nhau — mỗi câu lôi ra một việc
+thật. Không câu nào trả lời được bằng trí nhớ; cả ba đều đo từ log của chính huba.
 
 ### ⚡ Độ trễ lệnh Telegram, và cơ chế tự xoá tin
 
@@ -2079,18 +2079,18 @@ riêng, xếp hàng bằng `CMD_LOCK` đặt ở nguồn, lệnh tới giữa ch
 ghi thẳng lý do tại `pipeline.rs`.
 
 *"đã có cơ chế tự xóa tin cũ hơn 1.5 ngày chưa"* — **chưa, không chỗ nào**. Nay
-có, và nó phải nói thật về hai giới hạn KHÔNG phải của hub: bot chỉ xoá được tin
+có, và nó phải nói thật về hai giới hạn KHÔNG phải của huba: bot chỉ xoá được tin
 **của chính nó**, và chỉ trong **48 giờ**. Ngưỡng mặc định 36h chừa 12 giờ dự
 phòng — đặt sát trần là tự dựng bẫy. `message_id` được nhặt NGAY lúc gửi và ghi
-thẳng vào SQLite (không đệm trong RAM: hub khởi động lại vài lần một ngày, mỗi
+thẳng vào SQLite (không đệm trong RAM: huba khởi động lại vài lần một ngày, mỗi
 lần là một nhúm tin mất đường xoá). Tin gửi TRƯỚC 19:35 hôm nay không có id
 trong sổ nên **vĩnh viễn không xoá được** — nói đúng vậy, đừng hứa dọn sạch.
 
-🔴 **Token Telegram mới chưa tới chỗ hub đọc.** Hà nói vừa thay token bot mới,
-nhưng đo: hai tệp bí mật hub nạp (`config.rs:594`) sửa lần cuối **06/08** và
+🔴 **Token Telegram mới chưa tới chỗ huba đọc.** Hà nói vừa thay token bot mới,
+nhưng đo: hai tệp bí mật huba nạp (`config.rs:594`) sửa lần cuối **06/08** và
 **10/08 11:43**, và **không tệp môi trường nào** dưới `~/Documents/projects` đổi
 sau 15:30 hôm nay ⟹ token mới đang nằm ở chỗ khác. Thêm nữa: bot mới phải được
-bấm `/start` một lần, và hubd phải khởi động lại thì mới nạp biến mới.
+bấm `/start` một lần, và hubad phải khởi động lại thì mới nạp biến mới.
 
 ### 🔴 *"tại sao tele nhận được 'projects-d8 đã tắt cửa sổ còn mở' nhưng thực tế không còn mở"*
 
@@ -2099,28 +2099,28 @@ bấm `/start` một lần, và hubd phải khởi động lại thì mới nạ
 | | Đo được | Vá |
 |---|---|---|
 | **A — danh sách hỏng đọc thành ba cái chết** | 14:44:07 cả 3 tài khoản `claude_agents_list_failed "spawn claude failed: No such file or directory"` (npm đang ghi đè binary) ⟹ danh sách RỖNG ⟹ 3 tin `⏹ đã tắt` trong 8 giây, cả ba phiên vẫn sống (16:08 `/sessions` còn liệt kê `projects-d8 · đang chạy`) | ảnh chụp mang `blind`, sổ nhớ `Mark::a`; phiên vắng mặt của tài khoản mù thì **giữ sổ, im lặng** |
-| **B — "cửa sổ còn mở" trỏ nhầm cửa sổ** | `projects-d8` ở `ttys002` (cửa sổ mở từ 12:28:08); 16:41:16 Hà thoát CLI rồi gõ `claude` lại **ngay trong cửa sổ đó**; 16:42:33 hub hỏi tty → còn → nói "còn mở". Sổ ghi phiên mới `e27806c2` cũng `ttys002`, "thấy lần đầu 16:42:33" — đúng vòng ấy | hỏi ảnh chụp của mình trước (`window_taken_over`), nói thẳng "cửa sổ ấy nay đang chạy phiên `<tên>`" |
+| **B — "cửa sổ còn mở" trỏ nhầm cửa sổ** | `projects-d8` ở `ttys002` (cửa sổ mở từ 12:28:08); 16:41:16 Hà thoát CLI rồi gõ `claude` lại **ngay trong cửa sổ đó**; 16:42:33 huba hỏi tty → còn → nói "còn mở". Sổ ghi phiên mới `e27806c2` cũng `ttys002`, "thấy lần đầu 16:42:33" — đúng vòng ấy | hỏi ảnh chụp của mình trước (`window_taken_over`), nói thẳng "cửa sổ ấy nay đang chạy phiên `<tên>`" |
 
-📌 Hệ quả kéo theo của A, mất một lúc mới nhìn ra: báo nhầm xong hub **xoá phiên
+📌 Hệ quả kéo theo của A, mất một lúc mới nhìn ra: báo nhầm xong huba **xoá phiên
 khỏi sổ**, nên cái chết THẬT bị báo lần hai (`37e59209` 14:44 + 16:08 ·
 `69a38c64` 14:44 + 16:42). *Không phải loa lặp — sổ bị xoá.*
 
 ### 🎯 *"tôi cảm thấy có những phiên ẩn mà tôi không hề biết"* — đúng, 9 phiên
 
 Đếm thật: **9 tiến trình `claude` của extension VS Code** (con của VS Code, cwd
-`~/Documents/projects`), tuổi từ **3/8** tới 11/8. hub cố ý ẩn từ 2026-08-09 theo
+`~/Documents/projects`), tuổi từ **3/8** tới 11/8. huba cố ý ẩn từ 2026-08-09 theo
 chính lời Hà hồi đó (`sessions.rs:1491`), chỉ để lại một con số câm trên màn.
 Hà chốt lại định nghĩa: *"phiên ẩn là không hiện terminal trên màn hình, còn liên
 quan vs code thì bỏ qua luôn, ui chưa cần sửa gì vội"* ⟹ **không đụng UI**. Đo
 theo định nghĩa ấy: lúc 17:00 mọi phiên CLI đều có cửa sổ Terminal
 (`ttys000/001/002`), tức **0 phiên ẩn**. Thứ thật sự sinh ra phiên không cửa sổ
-là **phép dò hạn mức của chính hub**: 33 dòng `session_end_muted "phiên sống
+là **phép dò hạn mức của chính huba**: 33 dòng `session_end_muted "phiên sống
 chớp nhoáng"` trong ngày.
 
 ### ✅ pid 5001 đã đóng (Hà chốt) — và nó là thủ phạm của lỗi A
 
 `kill 5001` lúc 16:59: pid biến mất, 0 `npm install @anthropic-ai/claude-code`
-còn chạy, hub báo đúng `⏹ projects-71 · games (296972d4) đã tắt hẳn` (phiên nằm
+còn chạy, huba báo đúng `⏹ projects-71 · games (296972d4) đã tắt hẳn` (phiên nằm
 trong terminal tích hợp VS Code ⟹ không có cửa sổ Terminal.app ⟹ "tắt hẳn" đúng).
 
 ### 🆕 *"chưa có lệnh xem danh sách acc"* → route `/accounts`
@@ -2156,7 +2156,7 @@ Hai nguyên nhân, cả hai là LUẬT CŨ chứ không phải hỏng:
 1. luật im 08-10 (phiên terminal chủ máy vừa xong một lượt thì im) — log bắt
    đúng ba lần trên chính phiên ấy: `session_change_muted e27806c2` **16:57:47 ·
    17:53:35 · 17:58:16**;
-2. khe mù: hub chỉ NHÌN mỗi **139 giây** trung bình (đo 15 vòng: 49s–161s), nên
+2. khe mù: huba chỉ NHÌN mỗi **139 giây** trung bình (đo 15 vòng: 49s–161s), nên
    một hộp chọn sống 40 giây lọt trọn giữa hai lượt.
 
 📌 Một giả thuyết của chính tôi bị **bác bằng mã** trước khi kịp khai ra: cửa sổ
@@ -2192,7 +2192,7 @@ nhập, tức đúng phần không quyết được gì.
 ### ⚠ Mở đầu bằng một chuyện về kỷ luật, không phải về mã
 
 Nhận việc thì trong cây có sẵn một bản `key_points` chưa test — **của phiên
-khác đang chạy song song** (`37e59209`, cùng cwd `AI/hub`). Đo được, không đoán:
+khác đang chạy song song** (`37e59209`, cùng cwd `AI/huba`). Đo được, không đoán:
 `sessions.rs` đổi nội dung **hai lần trong lúc tôi đang làm** (12:37:29 thêm
 `last_prose`, 12:43:04 mất lại). Tôi dừng tay, sao lưu patch ra ngoài cây, và
 hỏi Hà ai giữ cây mã — anh đóng phiên kia. 📌 *Hai phiên một cây mã thì lần ghi
@@ -2200,7 +2200,7 @@ sau đè lần ghi trước, và cả hai bên đều tưởng mình đang tiế
 
 ### Ba con bug, cả ba chỉ lộ ra khi ĐỌC BẢN THẬT
 
-Chạy `key_points` trên 3 báo cáo thật trong ngày (`dwork` · `hub` · `projects-71`)
+Chạy `key_points` trên 3 báo cáo thật trong ngày (`dwork` · `huba` · `projects-71`)
 rồi **nhìn bằng mắt**. Đọc mã thì cả ba đều "hợp lý":
 
 | Bệnh | Vì sao chỉ bản thật mới lộ |
@@ -2211,7 +2211,7 @@ rồi **nhìn bằng mắt**. Đọc mã thì cả ba đều "hợp lý":
 
 ### 🔴 Và con bug thứ tư, chỉ CHẠY THẬT mới thấy: hai đầu đúng, nối lại thì sai
 
-Dựng đúng câu hub sẽ gửi cho 4 phiên đang sống. `key_points` giữ dòng cuối rất
+Dựng đúng câu huba sẽ gửi cho 4 phiên đang sống. `key_points` giữ dòng cuối rất
 tử tế — nhưng `last_say` đã cắt bản dài ở **2000 ký tự trước đó**, nên "dòng
 cuối" nó giữ chỉ là **chỗ bị chặt giữa câu** (`projects-71`, báo cáo 3151 byte).
 📌 *Một cái trần đặt sai chỗ đọc lên y hệt một tính năng chạy đúng.* Nay
@@ -2250,7 +2250,7 @@ mất **130 giây** rồi tự về.
 cứu được**: phiên kia mở từ **10/08 08:32**, biến môi trường chỉ đọc lúc mở
 phiên. ⟹ Đóng pid 5001 là hết cả hai chuyện (và cũng hết câu *"máy 1 phiên mà
 tele báo 2"* — phiên thứ hai chính là nó, sống trong terminal tích hợp VS Code,
-tty `ttys008`, thứ Terminal.app không giữ nên hub **không gõ vào được**).
+tty `ttys008`, thứ Terminal.app không giữ nên huba **không gõ vào được**).
 ⏳ **Chưa làm:** chưa kill — chờ Hà chốt.
 
 ---
@@ -2265,9 +2265,9 @@ và bốn trong số đó lôi ra bug thật.
 | Việc | Bằng chứng |
 |---|---|
 | **Chữ thường = gõ vào phiên** | 08:28:34 gõ 38 byte → 08:28:36 `keys_enter_sent` → câu ấy tới phiên. Lượt 08:29 phiên đang bận ⟹ vào hàng chờ, không cần Enter |
-| **Danh sách nói được dự án** | 4/4 phiên ra đúng `dwork · AI/hub · games · AI/tfl5`; bundle **v149/v150**, ảnh 390px không cắt |
+| **Danh sách nói được dự án** | 4/4 phiên ra đúng `dwork · AI/huba · games · AI/tfl5`; bundle **v149/v150**, ảnh 390px không cắt |
 | **Loa thôi kêu oan** | **26** dòng `session_end_muted` (15s · 27s · 114s) và **0** tin "đã tắt" từ 11:03 — trước đó 20 tin/4 tiếng |
-| **Phiên ma đã gỡ** | job nền `d92706eb` (kẹt từ 09-08, 1.02 triệu token) chuyển sang `jobs-off/`; `claude agents` + hub đều sạch |
+| **Phiên ma đã gỡ** | job nền `d92706eb` (kẹt từ 09-08, 1.02 triệu token) chuyển sang `jobs-off/`; `claude agents` + huba đều sạch |
 
 ### Bốn con bug, và cả bốn đều IM LẶNG
 
@@ -2279,15 +2279,15 @@ và bốn trong số đó lôi ra bug thật.
 2. **`?` trong vòng lặp làm câm cả phép đo dự án.** `strip_prefix('/')?` gặp
    `"cwd":"…/projects"` trần là thoát khỏi CẢ hàm ⟹ 2/4 phiên khai "(chưa rõ)"
    trong khi nhật ký nhắc tên dự án 4 lần.
-3. **Loa kêu vì phiên của chính hub.** 20 tin/4 tiếng, mỗi tin một id — `claude -p
+3. **Loa kêu vì phiên của chính huba.** 20 tin/4 tiếng, mỗi tin một id — `claude -p
    "/usage"` 5 phút/lượt đẻ phiên thật rồi chết. Luật "rời danh sách = kết thúc"
-   thiếu vế **sống bao lâu** ⟹ `MIN_LIFE_SEC` 120s, ngoại lệ cho phiên hub mở.
-4. **Phiên dừng lại HỎI mà Telegram im.** Hai luật ĐÚNG va nhau: hub đọc màn, mà
+   thiếu vế **sống bao lâu** ⟹ `MIN_LIFE_SEC` 120s, ngoại lệ cho phiên huba mở.
+4. **Phiên dừng lại HỎI mà Telegram im.** Hai luật ĐÚNG va nhau: huba đọc màn, mà
    `parse_choices` (08-11) đòi các mục **liền dòng nhau** để khỏi đọc nhầm văn có
    đánh số — còn bảng `AskUserQuestion` thì mỗi lựa chọn có một dòng MÔ TẢ. Nay
-   đọc từ **nhật ký** (có cấu trúc, có cả với phiên hub không đọc được màn), và
+   đọc từ **nhật ký** (có cấu trúc, có cả với phiên huba không đọc được màn), và
    "đang hỏi" thành một **trạng thái** (`watch::ASKING`) chứ không phải thứ nhìn
-   thấy tình cờ. Câu hỏi ấy treo **gần 2 tiếng** (08:53→10:52) mà hub im.
+   thấy tình cờ. Câu hỏi ấy treo **gần 2 tiếng** (08:53→10:52) mà huba im.
 
 📌 Cả bốn đều thuộc một họ: **câu trả lời sai nghe y hệt câu trả lời đúng**
 ("(chưa rõ)", "không kẹt", "đang đứng ở dấu nhắc", "đã tắt hẳn").
@@ -2369,7 +2369,7 @@ tự bật tắt theo chu kỳ của chính TCC. Ghi lại đúng như vậy đ�
 tin theo một kết luận tôi đã rút.
 
 **Hình dạng của nó** (ổn định qua ba lần đo): `stat` OK · **ghi OK** · **đọc nội
-dung + liệt kê thư mục EPERM** · `~/Desktop`, `~` bình thường · `hubd` (danh tính
+dung + liệt kê thư mục EPERM** · `~/Desktop`, `~` bình thường · `hubad` (danh tính
 chứng chỉ riêng) **không bao giờ dính**. Mất ~4 phút mỗi lượt.
 ⛔ Đường vòng `osascript → Terminal.app do script` để lấy lại quyền đã bị hook
 chặn, và chặn đúng (lách sandbox). Không gọi lại.
@@ -2384,7 +2384,7 @@ chặn, và chặn đúng (lách sandbox). Không gọi lại.
 
 ---
 
-## 🎯 2026-08-11 (chiều) — hub gõ vào NHẦM PHIÊN, và ba lời hứa nói điều chưa đo
+## 🎯 2026-08-11 (chiều) — huba gõ vào NHẦM PHIÊN, và ba lời hứa nói điều chưa đo
 
 Phiên này bắt đầu bằng việc đóng nốt ba món "CHƯA chạy thật" của buổi sáng. Đóng
 được hai, và trên đường đi lòi ra **một lỗi nặng hơn tất cả những gì đang chờ**.
@@ -2402,7 +2402,7 @@ Trace, không cãi được:
 
 `/ask` · `/tell` · `/type` · `/key` đều định vị bằng con trỏ **`focus:session`**
 — một biến toàn cục do một lệnh KHÁC đặt. Trang phải gửi hai bản ghi rời nhau
-vào phòng chat, mà **phòng chat không bảo đảm thứ tự**. Hậu quả thật: hub gõ
+vào phòng chat, mà **phòng chat không bảo đảm thứ tự**. Hậu quả thật: huba gõ
 `/btw` vào cửa sổ của một phiên đang làm việc khác; cùng đường ấy `/type` gửi
 chữ và `/key` gửi **phím** (mũi tên = vừa di vừa CHỐT) vào nhầm terminal.
 `/stop`/`/handover` miễn nhiễm vì chúng mang id ngay trong câu lệnh — và đó
@@ -2421,19 +2421,19 @@ Ba cái bẫy của đường này, mỗi cái một test khoá bằng **ảnh c
 
 | Bẫy | Vì sao sập |
 |---|---|
-| `Esc to close` **không** phải dấu "xong" | nó hiện ngay lúc bảng mới mở ⟹ hub gửi về bảng còn chạy `✳ Answering…`. Dấu đúng: chân bảng **và** hết `Answering` |
+| `Esc to close` **không** phải dấu "xong" | nó hiện ngay lúc bảng mới mở ⟹ huba gửi về bảng còn chạy `✳ Answering…`. Dấu đúng: chân bảng **và** hết `Answering` |
 | câu hỏi dài **bị ngắt dòng** | "tìm dòng chứa câu hỏi" trượt sạch ⟹ câu trả lời còn nguyên dòng `/btw …`. Neo vào chữ `/btw` claude tự vẽ |
 | bảng lượt trước **còn mở** | nuốt câu hỏi lượt này (gõ vào là bảng đóng) ⟹ hết trần rồi rơi fork. Nay dọn trước khi hỏi |
 
-### `host: "terminal"` ≠ "hub gõ vào được"
+### `host: "terminal"` ≠ "huba gõ vào được"
 
 `projects-71` khai `host: terminal`, tty `ttys008` — nhưng nó chạy trong
 **terminal tích hợp của VS Code**, Terminal.app không biết cái tty ấy. `/btw`
 lặng lẽ rơi về fork, fork hỏng, tiêu **0.53 đơn vị hạn mức**, và log **không một
-dòng** nói vì sao. Nay: `can_type` do hub **ĐO** (một lời gọi AppleScript hỏi
+dòng** nói vì sao. Nay: `can_type` do huba **ĐO** (một lời gọi AppleScript hỏi
 Terminal.app đang giữ tty nào, mỗi vòng một lần) thay cho phép suy
 `tty && host == "terminal"`; trang tách hẳn nhóm *"⌨ Terminal khác (VS Code ·
-iTerm)"* với chữ **hub không gõ vào được**; ba đường lui của `ask_via_btw` đều
+iTerm)"* với chữ **huba không gõ vào được**; ba đường lui của `ask_via_btw` đều
 có log riêng.
 
 ### Hai câu Hà hỏi giữa phiên → thành mã, đã chạy thật
@@ -2442,7 +2442,7 @@ có log riêng.
   mang **nguyên văn** từng lựa chọn (`keys::parse_choices` đã bóc được chữ từ
   08-10, mà tin chỉ mang con số). Màn có dấu hiệu bí mật thì giữ con số **và
   nói rõ vì sao**. ⚠ Kèm theo phải siết bộ nhận diện: một **đoạn văn có đánh
-  số** trong câu trả lời của phiên từng bị đọc thành hộp chọn → hub bắn `⚠ dừng
+  số** trong câu trả lời của phiên từng bị đọc thành hộp chọn → huba bắn `⚠ dừng
   lại HỎI` cho một phiên chẳng hỏi ai. Nay đòi các mục **liền dòng nhau**.
 - *"phiên con tắt cũng gửi tele, có cần không?"* → không. `Mark.p` +
   `Ended.parent` ⟹ im, có log. Giữ đúng một ngoại lệ: con tắt **lúc đang chạy
@@ -2457,7 +2457,7 @@ có log riêng.
 - **UC-S05b `/btw` 21/21** trên `projects-ff`/`ttys001`, câu trả lời sạch.
 - **UC-S05b fork 10/10** trên `projects-71` — bước gọi `claude` **BỎ QUA** đúng
   thiết kế (0.26 > trần 0.25), nói rõ chưa nghiệm thu cái gì.
-- `cargo test` **114** · clippy **0** · hubd `cert` · bundle **v147** (byte trang
+- `cargo test` **114** · clippy **0** · hubad `cert` · bundle **v147** (byte trang
   phục vụ == byte cây làm việc).
 
 ### ⚠ Còn treo
@@ -2483,7 +2483,7 @@ lại tử tế:
 | **đọc nội dung** / **liệt kê thư mục** | **EPERM** |
 | `tccd` nói gì | `service=kTCCServiceSystemPolicyDocumentsFolder` → *"Platform binary prompting is 'Deny' because: is Platform Binary"* |
 | cùng lúc, lời xin quy về Terminal (pid 28200) | `result was 1` — **được phép** |
-| `hubd` | không bao giờ dính (có danh tính chứng chỉ riêng) |
+| `hubad` | không bao giờ dính (có danh tính chứng chỉ riêng) |
 
 ⟹ Không phải TCC bị gỡ (quyền vẫn còn), mà là **lời xin không được quy về
 Terminal.app**; macOS **từ chối hỏi** cho binary hệ thống (`zsh`/`head`/`ls`/
@@ -2501,14 +2501,14 @@ rỗng vĩnh viễn khi thẻ đầu danh sách là phiên vừa mở.
 
 ---
 
-## 🌉 2026-08-11 — hub là CẦU NỐI, và cây cầu ấy loại bỏ hạng phiên `--bg`
+## 🌉 2026-08-11 — huba là CẦU NỐI, và cây cầu ấy loại bỏ hạng phiên `--bg`
 
 Hà nhắc lại ý định gốc, và nó không phải một câu mô tả mà là một **tiêu chí**:
-*"cli claude cài trên máy tôi, hub là **cầu kết nối** ra ui để tôi làm việc,
+*"cli claude cài trên máy tôi, huba là **cầu kết nối** ra ui để tôi làm việc,
 điều khiển, giao tiếp phiên"*. Nay nó nằm ở đầu `CLAUDE.md`, trước mọi luật
 khác, vì mọi việc hôm nay đều rơi ra từ nó.
 
-**Tiêu chí cắt hai chiều.** Thứ hub làm mà ở terminal không có tương đương ⟹ mùi
+**Tiêu chí cắt hai chiều.** Thứ huba làm mà ở terminal không có tương đương ⟹ mùi
 lạ. Thứ Hà làm được ở terminal mà điện thoại không làm được ⟹ lỗ hổng (còn nợ:
 nhìn màn hai phiên cùng lúc, cuộn xa hơn 16 dòng, trả lời hộp thoại của macOS).
 Bằng chứng nó trả tiền ngay: `/new` đẻ ra phiên `--bg` — **không cửa sổ ⟹ không
@@ -2516,7 +2516,7 @@ màn sống, không `/btw`, không dòng "đang làm gì", muốn nói chen vào
 nó trước**. Ba tính năng dựng hôm 08-10 đều không chạy được trên hạng phiên ấy,
 và đó chính là dấu hiệu. Chủ máy ngồi trước máy sẽ không bao giờ tạo ra nó.
 
-**Bốn lần cùng một lỗi: nói điều hub không biết.** Cả ngày là một chuỗi vá cùng
+**Bốn lần cùng một lỗi: nói điều huba không biết.** Cả ngày là một chuỗi vá cùng
 họ với "phiên đang đứng ở dấu nhắc" của đêm trước:
 
 | Câu sai | Vì sao sai | Vá |
@@ -2524,7 +2524,7 @@ họ với "phiên đang đứng ở dấu nhắc" của đêm trước:
 | "đã tắt hẳn" | *biến khỏi `claude agents`* gộp **ba** chuyện: phiên nền bị dừng · CLI thoát nhưng cửa sổ còn · cửa sổ đóng luôn | `keys::window_of(tty)` hỏi thẳng Terminal, đúng một lần, đúng lúc phiên biến mất (hiếm ⟹ rẻ). Không dò được thì **nói thẳng là chưa rõ** |
 | tin báo dài dòng | Hà: *"chỉ cần thông tin có nghĩa để biết cần làm gì hay không"* | mỗi tin trả lời đúng một câu — CÓ CẦN MÌNH LÀM GÌ KHÔNG: `⏸ dừng, đang chờ bạn` · `⚠ dừng lại HỎI (N lựa chọn)` · `⏹ đã tắt hẳn` |
 | "lệnh/động từ" | nói bằng từ vựng nội bộ (`CommandKind`) với người chỉ nhìn thấy nút — đúng cách `/new` từng bị giải thích cho người chưa gõ nó bao giờ | Hà: *"tại sao không gọi nó là route?"* → gọi là **ROUTE** trong tài liệu và hội thoại. Kèm cảnh báo: route này **không mở ra ngoài**, chỉ tid chủ máy gọi được |
-| "phiên mới ⟹ bước này đẻ ra" | phép đo quá rộng: báo đỏ vì chủ máy TỰ mở một phiên gõ `/usage` đúng lúc kịch bản chạy | chỉ tính khi phiên mang **dấu của hub** HOẶC **chính câu vừa gõ** ở lượt đầu nhật ký. Phiên lạ khác vẫn được IN RA, chỉ không tính là hỏng |
+| "phiên mới ⟹ bước này đẻ ra" | phép đo quá rộng: báo đỏ vì chủ máy TỰ mở một phiên gõ `/usage` đúng lúc kịch bản chạy | chỉ tính khi phiên mang **dấu của huba** HOẶC **chính câu vừa gõ** ở lượt đầu nhật ký. Phiên lạ khác vẫn được IN RA, chỉ không tính là hỏng |
 
 Ghi riêng một câu, vì **đỏ giả là thứ dạy người ta bỏ qua màu đỏ** — nó đắt
 ngang một phép đo mù, chỉ hỏng theo chiều ngược lại.
@@ -2532,10 +2532,10 @@ ngang một phép đo mù, chỉ hỏng theo chiều ngược lại.
 **`/new` nay mở CỬA SỔ THẬT.** `do script` sinh cửa sổ, ghép với hàng
 `claude agents` bằng **tty** — cái handle duy nhất tồn tại lúc ấy (tên do
 `claude` tự đặt, id thì chưa có). `--bg` giữ làm đường lui sau cờ
-`new_in_terminal`. **`/stop` phải theo**, nếu không cây cầu một chiều: hub mở
+`new_in_terminal`. **`/stop` phải theo**, nếu không cây cầu một chiều: huba mở
 được cửa sổ rồi từ chối đóng. Thứ tự **`/exit` trước, đóng cửa sổ sau** không
 phải phép lịch sự — đóng khi còn tiến trình sẽ bật modal *"terminate running
-processes"*, mà **một modal thì khoá mọi lệnh automation sau nó**, tức hub bị
+processes"*, mà **một modal thì khoá mọi lệnh automation sau nó**, tức huba bị
 bịt miệng. Tab còn bận sau 30 giây thì KHÔNG đóng liều.
 Nút trên trang nay đi theo **quyền sở hữu** (`started_by_hub`), không theo hạng
 phiên, chữ đổi thành "Tắt hẳn".
@@ -2558,7 +2558,7 @@ hết trần chờ thì rơi về fork chứ không bịa.
 trên vscode quản lý được các trạng thái"*): chú thích ghi "`status`/`state` VẮNG
 với phiên interactive — đo 2026-08-08". Đo lại hôm nay: `claude agents --json`
 trả `status` cho **cả** phiên interactive. Vắng chỉ còn ở hàng do extension VS
-Code nuôi, mà hub vốn ẩn. May là `is_working` đã ưu tiên `status` trước mtime nên
+Code nuôi, mà huba vốn ẩn. May là `is_working` đã ưu tiên `status` trước mtime nên
 hành vi vẫn đúng — cái sai nằm ở **sổ**, và sổ sai thì lần sau có người tin theo.
 
 **Nghiệm thu đã CHẠY THẬT:** `cargo test` **109** · clippy 0 · đã cài, daemon
@@ -2590,13 +2590,13 @@ Hà đọc Telegram: *"rõ ràng là lỗi mà sao tele tôi nhận được l�
 đứng ở dấu nhắc, chờ lượt sau"*, rồi *"toàn thông báo giống nhau"*. Cả hai đúng,
 và vế đầu là lỗi nặng của chính thứ tôi vừa dựng vài giờ trước.
 
-**Câu ấy là một KHẲNG ĐỊNH hub không hề biết.** Thứ hub biết chỉ là *"nhật ký
+**Câu ấy là một KHẲNG ĐỊNH huba không hề biết.** Thứ huba biết chỉ là *"nhật ký
 thôi lớn lên sau 3 phút"* — mà nhật ký cũng thôi lớn lên khi phiên **kẹt ở hộp
 thoại**, khi **lỗi**, khi **hết hạn mức**. Tôi đã lấy một quan sát hẹp
 ("im lặng") rồi dán lên nó một kết luận rộng ("xong việc, đang chờ lượt sau").
 Đúng cái bẫy dự án này viết đi viết lại: *không tuyên bố điều chưa nhìn thấy*.
 
-**Vá 1 — nhìn, đừng đoán.** Lúc CHUYỂN trạng thái (hiếm: vài lần một giờ) hub bỏ
+**Vá 1 — nhìn, đừng đoán.** Lúc CHUYỂN trạng thái (hiếm: vài lần một giờ) huba bỏ
 ra **đúng một lần đọc màn cho riêng phiên ấy**, rồi nói thứ nhìn thấy: `⚠ DỪNG
 LẠI HỎI (N lựa chọn)` · `✅ im sau N phút chạy` · hoặc thẳng thắn `❓ tôi không
 đọc được màn của nó`. Điều làm chuyện này rẻ: đọc màn cho MỌI phiên MỖI vòng mới
@@ -2609,7 +2609,7 @@ lúc ấy cái loa coi như không tồn tại.
 
 **Vá 3 — thôi kêu vào mặt người đang nhìn.** Đo từ log: một phiên terminal Hà
 đang ngồi gõ bắn **ba tin trong mười sáu phút**. Loa chỉ có giá trị ở phiên
-KHÔNG ai nhìn (phiên hub tự mở từ điện thoại) hoặc khi phiên KẸT — kẹt thì dù
+KHÔNG ai nhìn (phiên huba tự mở từ điện thoại) hoặc khi phiên KẸT — kẹt thì dù
 đang ngồi trước máy cũng đáng được gọi. Trường hợp im vẫn ghi
 `session_change_muted`, không im lặng giấu.
 
@@ -2644,7 +2644,7 @@ cho Hà gõ. *Guard đang làm đúng việc của nó; đi vòng qua nó mới 
 | `git fsck` | sạch |
 | việc thật trong commit `2b6ea80` | giữ nguyên **9 tệp**, chỉ mất đúng tệp bí mật |
 | tệp thật trên đĩa | còn, `chmod 600`, git chỉ theo dõi bản `*.example` |
-| hub còn đăng nhập tfl5 | `fe-smoke` exit 0, daemon vẫn đẩy ảnh chụp |
+| huba còn đăng nhập tfl5 | `fe-smoke` exit 0, daemon vẫn đẩy ảnh chụp |
 
 📌 **Ranh giới của lần dọn này, nói rõ để sau không tưởng nhầm:** repo này sạch,
 nhưng bản `.git` nào từng được sao đi nơi khác (Time Machine, một `cp -r` cũ) thì
@@ -2654,13 +2654,13 @@ của Hà đúng ngay từ đầu.
 
 ## 🕰 2026-08-10 (khuya) — UC-S09 đóng hẳn, và 7/7 xanh trên một màn hình cắt cụt
 
-Hà: *"làm đi chờ tôi làm gì"*. Tắt `hubd` thật (`bootout`, vì plist có
+Hà: *"làm đi chờ tôi làm gì"*. Tắt `hubad` thật (`bootout`, vì plist có
 `KeepAlive` nên `kill` sẽ bị dựng lại ngay), chờ qua 5 phút, chạy `fe-stale-uc`.
 
 **Lượt 1: 7/7 đạt — và màn hình đang nói dối một nửa.** Ảnh chụp 6.9 phút tuổi,
 trang gắn đúng class `stale`, đúng chữ, đúng tuổi, và vế âm (chữ "còn tươi" vắng
 mặt) cũng đúng. Nhưng mở ảnh ra nhìn thì màn chỉ hiện tới
-`⚠ hub chưa đẩy dữ liệu mới — Ảnh chụp lúc 19:50:59 1…` — **nửa sau bị cắt**, mà
+`⚠ huba chưa đẩy dữ liệu mới — Ảnh chụp lúc 19:50:59 1…` — **nửa sau bị cắt**, mà
 nửa sau (*"Số dưới đây là của lúc đó, không phải bây giờ"*) mới là phần đổi hành
 vi người đọc. Bảy assert đều đọc `textContent`, thứ có đủ chữ **kể cả khi màn
 cắt cụt**.
@@ -2671,11 +2671,11 @@ không phải cái mắt nhìn thấy.*
 gian bình thường — thứ không đọc hết cũng không sao. Cảnh báo thì ngược lại, nên
 `.stale` được xuống dòng. Thêm phép đo hỏi `scrollWidth` chứ không đọc chữ.
 
-**Lượt 2: 8/8**, ảnh chụp 6.3 phút tuổi, cảnh báo hiện trọn ba dòng. Hub bật lại
+**Lượt 2: 8/8**, ảnh chụp 6.3 phút tuổi, cảnh báo hiện trọn ba dòng. Huba bật lại
 ngay sau mỗi lượt; tổng thời gian mù ~12 phút, chia hai lần.
 
 
-## 🔔 2026-08-10 (khuya) — hub biết nói "nó xong rồi" và "nó tắt rồi"
+## 🔔 2026-08-10 (khuya) — huba biết nói "nó xong rồi" và "nó tắt rồi"
 
 Hà: *"có bắt được trường hợp đang chạy và dừng lại hoàn toàn không? nếu có thì
 thể hiện được trên ui và gửi vào tele"*.
@@ -2685,7 +2685,7 @@ thật: chấm màu trên danh sách đọc `status`/`state`, mà hai trường 
 phiên nền** (`sessions.rs:79`) — nên mọi thẻ phiên terminal mang chấm xám vĩnh
 viễn, tức nhìn danh sách không biết cái nào đang chạy. Đường đắt để sửa là đọc
 màn từng phiên, đúng thứ từng kéo một vòng **18 giây → 90 giây**. Đường rẻ thì
-hub đã đọc sẵn mỗi vòng: **mtime nhật ký**. `sessions::is_working` gộp ba nguồn
+huba đã đọc sẵn mỗi vòng: **mtime nhật ký**. `sessions::is_working` gộp ba nguồn
 — `pending_subagents > 0` (chắc nhất, và là ca mà mọi cách khác đều đọc sai),
 `status` của phiên nền, rồi mtime — thành một trường `working` cho MỌI phiên.
 
@@ -2693,7 +2693,7 @@ hub đã đọc sẵn mỗi vòng: **mtime nhật ký**. `sessions::is_working` 
 biết là "nó VỪA chuyển từ chạy sang rảnh". `watch.rs` so sổ lượt trước với ảnh
 chụp lượt này. Ba luật, mỗi luật là một cách hỏng đã lường trước: nói một lần
 (vòng chạy 10 giây/lượt, báo theo trạng thái = điện thoại rung mãi rồi bị tắt);
-**lượt đầu im** (sổ trống = hub vừa dậy, không phải mọi phiên vừa đổi); và
+**lượt đầu im** (sổ trống = huba vừa dậy, không phải mọi phiên vừa đổi); và
 **rời khỏi danh sách mới là đường chính** của "đã tắt" — `claude agents` bỏ phiên
 đã dừng sau vài giây nên phần lớn lần tắt KHÔNG đi qua `host == "dead"`.
 
@@ -2710,7 +2710,7 @@ Telegram). Chấm màu trên danh sách nay đối chiếu HAI CHIỀU với má
 `fe-sessions-uc`: 2 phiên đang chạy hiện đúng, 2 phiên không chạy không bị nhận
 nhầm.
 
-🔁 **Và loa vừa bật đã dạy một bài ngay trong 5 phút đầu:** `hub-bd` bắn "vừa
+🔁 **Và loa vừa bật đã dạy một bài ngay trong 5 phút đầu:** `huba-bd` bắn "vừa
 chạy xong" **hai lần cách nhau 75 giây**. Đo lại thì **cả hai đều ĐÚNG** — nó
 chạy hai lượt ngắn thật (mốc hoạt động nhảy tới 12:38:00). Đúng mà vẫn sai chỗ:
 phiên ấy đang có người ngồi gõ, và người ta đang nhìn thẳng vào nó. Giá trị của
@@ -2741,7 +2741,7 @@ chỗ thứ mười ba sẽ quên — cùng lối nghĩ với `stickToBottom` v�
 `pending_for_display`. Ba chỗ `get_cursor` còn lại thì Err có log hoặc thành câu
 trả lời cho người dùng, nên để nguyên.
 
-**2. `bin/hubd.rs` chết bằng `eprintln!`** ⟹ lý do chỉ nằm ở stderr của launchd,
+**2. `bin/hubad.rs` chết bằng `eprintln!`** ⟹ lý do chỉ nằm ở stderr của launchd,
 nơi không panel nào đọc. Nay `logging::error` — ghi ra CẢ stderr lẫn tệp log.
 
 **3. `sessions.rs` khẳng định "nên đã dừng lại"** kể cả khi lệnh dừng chưa chạy
@@ -2749,7 +2749,7 @@ nổi (`if let Ok(out)` nuốt luôn `Err`, không log). Nay câu trả lời ph
 thoát thật: dừng được thì nói vậy, không thì **nói thẳng phiên còn sống** kèm
 lệnh `claude stop <id>` để tự dọn; cả hai đường hỏng đều log.
 
-**4. `config.rs`** phân biệt "không có `hub.env`" (im — chuyện thường) với "có mà
+**4. `config.rs`** phân biệt "không có `huba.env`" (im — chuyện thường) với "có mà
 đọc không được" (log). Sai quyền sau một lần `chmod` trước đây hiện ra ở tận
 cuối đường dưới dạng "chưa đặt biến môi trường" — một chẩn đoán nghe hợp lý mà
 sai, không gì cãi lại được.
@@ -2827,7 +2827,7 @@ mới chỉ có 13 unit test, chưa ai THẤY nó vẽ. Dựng trạng thái th�
 🐛 **Và nó lôi ra đúng một con bug đang sống.** Subagent **chạy nền** nhận
 `tool_result` **ngay lập tức** — nội dung chỉ là "đã tung agent" — nên phép khớp
 `tool_use ↔ tool_result` báo nó xong đúng lúc nó vừa bắt đầu. Đo 14:22: hai agent
-đang chạy thật, `hub sessions` khai `pending 0`. Đau nhất là **chính chế độ nền
+đang chạy thật, `huba sessions` khai `pending 0`. Đau nhất là **chính chế độ nền
 mới là chế độ con số này sinh ra để bắt**: agent chặn thì phiên cha đang bận nhìn
 là biết; agent nền thì phiên cha rảnh tay, từ điện thoại nhìn y như treo.
 
@@ -2856,7 +2856,7 @@ hỏng. Chỉ lộ ra vì tôi chạy RED-trước. *Viết test xong phải xem
 không, đừng tin vào việc mình đã gõ.*
 
 **Con bug thứ hai, không liên quan mà lòi ra nhân tiện:** màn phiên **đứng nguyên
-"Đang dừng phiên…" vĩnh viễn** khi không ai bấm Telegram. hub trả lời đúng vào
+"Đang dừng phiên…" vĩnh viễn** khi không ai bấm Telegram. huba trả lời đúng vào
 phòng (`⌛ Hết hạn chờ xác nhận — không dừng phiên nào`, 07:54:00) nhưng bộ lọc
 dấu hiệu ở màn phiên không có `🔒`/`✋`/`⌛`. Nay có — với `🔒` là tin **giữa
 chừng** (hiện ra nhưng KHÔNG đóng lượt chờ, không thì nuốt mất kết cục ở nhịp 2),
@@ -2929,7 +2929,7 @@ không tốn hạn mức**, và không phải gõ vào cửa sổ nào của Hà
     acc3  phiên   8% · tuần 98%
 
 ⚠ **Tôi tái phạm đúng bài học ghi trong CLAUDE.md đêm trước.** Gắn phép dò vào
-vòng chạy làm một vòng vọt lên **80 giây** — mà mỗi vòng là một nhịp hub đọc lệnh
+vòng chạy làm một vòng vọt lên **80 giây** — mà mỗi vòng là một nhịp huba đọc lệnh
 từ điện thoại, nên cái giá không phải "số liệu chậm" mà là "lệnh của chủ máy nằm
 chờ hơn một phút". Đúng thứ luật tự-đóng-sổ đã học (90s → 3,2s). Sửa: hết hạn thì
 **trả bản cũ ngay rồi làm mới ở luồng riêng**, một cờ nguyên tử chặn không cho đẻ
@@ -2950,7 +2950,7 @@ tiến trình treo**.
 **Cú giật xuống cuối trang** (*"danh sách phiên bấm nút nào nó cũng kéo xuống cuối
 trang"*): phần đuôi của con bug sáng nay. `stickToBottom(thread)` ghi thẳng
 `main.scrollTop = scrollHeight` **kể cả khi tab Trao đổi đang ẩn**, mà `main` là
-khung cuộn dùng chung; bấm nút → hub trả lời trong phòng → mỗi tin mới kéo màn
+khung cuộn dùng chung; bấm nút → huba trả lời trong phòng → mỗi tin mới kéo màn
 một lần, và `sendCommand` còn làm mới thêm 8 lượt trong 40 giây. Vá một chỗ duy
 nhất: `if (!el.offsetParent) return` — không dán đáy cho thứ không ở trên màn.
 Đo: điểm xa nhất bị kéo đi **0px trong 40 giây**, và phép đo đã được chứng minh
@@ -2994,9 +2994,9 @@ tfl5** — giá trị cũ vẫn nằm trong lịch sử `.git`.
 
 🔁 **Tôi lặp lại đúng lỗi Hà vừa mắng sáng nay.** Đặt `⏹ Dừng` lên MỌI dòng, trong
 khi `sessions::stop_background` từ chối thẳng phiên terminal (*"chỉ dừng được
-phiên do hub mở"*) — tức một cái nút chỉ biết báo lỗi trên 4/5 phiên. Màn chi
+phiên do huba mở"*) — tức một cái nút chỉ biết báo lỗi trên 4/5 phiên. Màn chi
 tiết đã có luật này từ trước, ghi ngay cạnh `#sessStop`: *"một cái nút không thể
-chạy còn tệ hơn không có nút, vì nó bảo rằng hub đang nắm một thứ nó không nắm"*.
+chạy còn tệ hơn không có nút, vì nó bảo rằng huba đang nắm một thứ nó không nắm"*.
 Tôi đọc chưa hết trước khi chép. Nay nút chỉ hiện với `kind === 'background'`, và
 `fe-sessions-uc` kiểm **cả hai chiều** (có ở phiên nền, vắng ở phiên terminal).
 
@@ -3024,20 +3024,20 @@ chứng minh mã đúng: `acc1` ra `phuongdt1189@gmail.com`, khác với khi tô
 (ra `trogiup.gdk` vì shell đang set `CLAUDE_CONFIG_DIR=acc3`) — bộ thu **gỡ hẳn**
 biến môi trường cho tài khoản mặc định.
 
-**hub cũng đọc `.env`** (ngoài `hub.env`) từ bản này: bắt người dùng nhớ đúng một
-cái tên riêng của hub là bắt sai người. `hub.env` thắng khi trùng khoá, và môi
+**huba cũng đọc `.env`** (ngoài `huba.env`) từ bản này: bắt người dùng nhớ đúng một
+cái tên riêng của huba là bắt sai người. `huba.env` thắng khi trùng khoá, và môi
 trường thật vẫn thắng cả hai.
 
 **Nghiệm thu:** cargo test **81** · clippy 0 · bundle **v127** · `fe-sessions`
 25/25 · `fe-board` 27/27 · `fe-phone` 31/31 · 0 lỗi console · daemon do launchd
 sở hữu, `kind: cert`.
 
-## 🔏 2026-08-10 (sáng) — chữ ký cố định cho hubd, và ba phép đo sai của chính tôi
+## 🔏 2026-08-10 (sáng) — chữ ký cố định cho hubad, và ba phép đo sai của chính tôi
 
 **Việc:** đóng nốt món `CLAUDE.md` §12 ghi *"Durable fix (not built yet)"*.
 
 **Chẩn đoán được xác nhận bằng số, không phải bằng lý thuyết:**
-`codesign -d -r-` trên `hubd` in ra `designated => cdhash H"fea4ff94…"` — DR neo
+`codesign -d -r-` trên `hubad` in ra `designated => cdhash H"fea4ff94…"` — DR neo
 theo **vân tay byte**, nên mỗi lần `cargo build` là một chương trình khác trong
 mắt TCC. Ký bằng chứng chỉ đổi DR thành `identifier "com.dipgle.hubd" and
 certificate root = H"9de8ec03…"` — neo theo **danh tính**.
@@ -3052,7 +3052,7 @@ theo requirement. ⟹ không cần mật khẩu quản trị, không cần hộp
 | Phép đo | Nói gì | Sự thật |
 |---|---|---|
 | `touch` file rồi build lại, so cdhash | "DR ổn định ✓" | **mù** — hằng số không ai dùng bị loại khỏi binary, byte y hệt, chưa chứng minh gì |
-| ký thẳng `target/release/hubd` | "xong" | `cargo test --release` + `clippy --all-targets` **link lại rồi ký đè ad-hoc**; `hubd_signature` đọc `cert` → `adhoc` sau 20 phút |
+| ký thẳng `target/release/hubad` | "xong" | `cargo test --release` + `clippy --all-targets` **link lại rồi ký đè ad-hoc**; `hubd_signature` đọc `cert` → `adhoc` sau 20 phút |
 | `stale` = so mtime `target/` | "daemon chạy mã cũ" | **kêu oan** sau mỗi lượt test |
 | `stale` = so cdhash `target/` | "chắc ăn, build lặp lại đúng byte" | `cargo test --release` cho ra binary **khác hẳn** (`2f624e8b…` vs `bbd8ba58…`), build sau lại trả về hash cũ |
 
@@ -3076,7 +3076,7 @@ phát hiện ra. Nay tab Sức khoẻ có hai hàng: `chữ ký bản cài` (cer
 `False`**.
 
 ⚠ **Một điều hai phiên trước tin là đúng, đo lại thì SAI:** TCC **không** chặn
-bản launchd đọc `~/Documents`. Bản launchd nạp được `hub.env` và khoá pid trong
+bản launchd đọc `~/Documents`. Bản launchd nạp được `huba.env` và khoá pid trong
 đó — có dòng `hub_env_loaded` làm chứng. Cú `EX_CONFIG` (78) là do
 `StandardOutPath`, thứ **launchd tự mở** trước khi chạy chương trình; dời log
 sang `~/Library/Logs` là hết, và không có gì khác từng bị chặn. Đã sửa lại
@@ -3084,22 +3084,22 @@ sang `~/Library/Logs` là hết, và không có gì khác từng bị chặn. Đ
 
 **Nghiệm thu:** `cargo test` **78** (+2 test mới cho phép đo `stale`) · clippy 0 ·
 bundle **v124** deploy thật, so byte ĐẠT · `fe-board` **19/19**, 0 lỗi console ·
-`hubd` bản cài chạy tay in `kind: cert`.
+`hubad` bản cài chạy tay in `kind: cert`.
 
 **CHƯA xong, nói đúng như vậy:**
 - `launchctl bootstrap` bị classifier chặn (chạy được lúc 08:58, sau đó chặn;
-  allowlist daemon của hub không có `launchctl`, mà sửa allowlist là self-grant).
-  ⟹ **job chưa nạp**, hub vẫn sống bằng bản chạy tay pid 70017 (bản 03:50, mã cũ).
+  allowlist daemon của huba không có `launchctl`, mà sửa allowlist là self-grant).
+  ⟹ **job chưa nạp**, huba vẫn sống bằng bản chạy tay pid 70017 (bản 03:50, mã cũ).
   Lệnh để Hà gõ nằm ở cuối mục này.
 - Vì daemon còn là bản cũ nên **hai hàng mới ở tab Sức khoẻ chưa nhìn thấy trên
   UI thật** — mới có unit test + `portal-push --dry-run`.
-- **Chưa reboot** nên vế "bật máy lên hub có tự dậy không" vẫn chưa có bằng chứng.
+- **Chưa reboot** nên vế "bật máy lên huba có tự dậy không" vẫn chưa có bằng chứng.
 
 ```
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist && kill 70017 && sleep 12 && launchctl list | grep hubd && tail -4 ~/Library/Logs/hubd.err
 ```
 
-## ⚙️ 2026-08-10 (rạng sáng) — hub TỰ CHẠY khi bật máy, sau khi lần ra EX_CONFIG
+## ⚙️ 2026-08-10 (rạng sáng) — huba TỰ CHẠY khi bật máy, sau khi lần ra EX_CONFIG
 
 **Xong: `launchctl list` → `8111 · com.dipgle.hubd`**, tiến trình `ppid 1` do
 launchd sở hữu, vòng poll chạy ngay lúc nó dựng lên. Panel Tình trạng tự đổi từ
@@ -3108,7 +3108,7 @@ launchd sở hữu, vòng poll chạy ngay lúc nó dựng lên. Panel Tình tr�
 **Đường lần ra, vì nó sẽ còn gặp lại.** Bootstrap báo `Input/output error 5` —
 đó chỉ là nạp lại thứ đã nạp. Bệnh thật: `runs = 105`, `last exit code = 78
 (EX_CONFIG)`, và **không một dòng log nào của bản launchd** ⟹ launchd chưa spawn
-nổi, chứ không phải hubd thoát (hubd chỉ trả 70/3/1). Loại từng khả năng:
+nổi, chứ không phải hubad thoát (hubad chỉ trả 70/3/1). Loại từng khả năng:
 
 | Nghi ngờ | Kết quả |
 |---|---|
@@ -3127,15 +3127,15 @@ chạy tay. Dừng bản tay ⟹ launchd dựng lên sau **10 giây**.
 📌 *Mã thoát đổi từ 78 sang 3 chính là bằng chứng chẩn đoán đúng — không phải
 "thử cái khác rồi tự nhiên chạy".*
 
-⚠ **Tôi làm hub tắt ~70 giây** trong lúc thử (dừng bản chạy tay để nhường khoá,
+⚠ **Tôi làm huba tắt ~70 giây** trong lúc thử (dừng bản chạy tay để nhường khoá,
 lúc launchd còn chưa spawn được). Đã bật lại ngay. Lần sau: sửa plist TRƯỚC, rồi
 mới nhường khoá.
 
 **Nghiệm thu:** `fe-smoke` 15/15 · `fe-sessions` 18/18 · `fe-url` 16/16, chạy
 trên daemon do launchd sở hữu.
 
-📍 **`hub.env` nằm ở `<hub>/hub.env`** (chmod 600, đã gitignore) — hub đọc tại
-`hub_home/hub.env` (`config.rs:516`), và bản launchd đọc được vì
+📍 **`huba.env` nằm ở `<huba>/huba.env`** (chmod 600, đã gitignore) — huba đọc tại
+`hub_home/huba.env` (`config.rs:516`), và bản launchd đọc được vì
 `WorkingDirectory` trỏ đúng gốc project. Log chỉ ghi TÊN khoá.
 
 ## 📟 2026-08-09 (khuya) — bộ thu trạng thái + luồng nhìn như terminal (v96→v99)
@@ -3150,7 +3150,7 @@ cache 10 phút).
 
 📌 **Câu trả lời đầu tiên nó đưa ra là một sự thật khó chịu:** *tự chạy khi bật
 máy = **CHƯA***. `deploy/com.dipgle.hubd.plist` nằm trong repo, **chưa bao giờ
-được cài** vào `~/Library/LaunchAgents`, và `hubd` sống chỉ vì có người khởi
+được cài** vào `~/Library/LaunchAgents`, và `hubad` sống chỉ vì có người khởi
 động tay (ppid 1). Reboot là mất. Panel in luôn lệnh cài. Tôi thử cài thì
 **classifier chặn `launchctl`** — dừng, đưa lệnh cho Hà.
 
@@ -3183,9 +3183,9 @@ viền càng ngắn tức là sắp bị ẩn"*. Mỗi vòng nay đo **quãng đ
 31/31 · `fe-url` 16/16 · `fe-board` 19/19 · `fe-aside` 10/10 · `fe-smoke` 15/15 ·
 `fe-denied` 10/10 · `fe-config` 8/8 · 0 lỗi console.
 
-**Việc của Hà, 5 giây, để hub sống qua reboot:**
+**Việc của Hà, 5 giây, để huba sống qua reboot:**
 ```
-cp ~/Documents/projects/AI/hub/deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/
+cp ~/Documents/projects/AI/huba/deploy/com.dipgle.hubd.plist ~/Library/LaunchAgents/
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.dipgle.hubd.plist
 ```
 
@@ -3245,7 +3245,7 @@ không bằng vị trí — thứ tự đổi khi một phiên vừa động). �
 **2. Gộp hai ô nhập làm một** (*"mặc định là hỏi phiên nếu đó là phiên có thể gõ
 vào được, còn muốn hỏi bên lề thì tích chọn checkbox"*). Hai việc ấy loại trừ
 nhau, và với phần lớn phiên thì một trong hai **không dùng được**:
-- phiên hub quản được → tích **bỏ trống**, mở cho chọn: gửi = `/tell`;
+- phiên huba quản được → tích **bỏ trống**, mở cho chọn: gửi = `/tell`;
 - phiên khác → tích **bật sẵn + khoá**, kèm lý do trên màn: gửi = `/ask`.
 Placeholder, nhãn nút và dòng chú thích đổi theo chế độ — không thì gõ xong
 không biết câu vừa gõ sẽ CHEN VÀO phiên hay chạy trên bản sao.
@@ -3266,7 +3266,7 @@ hàng 44px trên 390px. Hai lỗi lộ ra ngay khi đo:
 "Đóng sổ" nhãn dài) nên nút rơi xuống dòng dưới, ngốn thêm 44px ngay chỗ ngón
 tay chạm. Riêng hàng nhập khoá `nowrap`.
 
-🎲 **Một phép đo đỏ vì tranh tiêu điểm, đã siết:** hub chỉ **theo được một
+🎲 **Một phép đo đỏ vì tranh tiêu điểm, đã siết:** huba chỉ **theo được một
 phiên**; chạy `fe-aside` rồi `fe-stream` liên tiếp thì kịch bản sau đọc ảnh chụp
 còn mang tiêu điểm của kịch bản trước. Chạy riêng 16/16, chạy liên tiếp đỏ 2.
 Nay `fe-stream` **chờ tiêu điểm chuyển hẳn** rồi mới đo. Lỗi ở phép đo, không ở
@@ -3290,7 +3290,7 @@ rồi mọc lại giữa hai khung hình — mắt thấy đúng một cú nhả
 đầu`, giữ nguyên node cũ, chỉ tạo node mới, gỡ node đã rụng. Đo: **65/69 node
 được giữ** qua một nhịp làm mới (trước là 0).
 ⟹ Và **neo vị trí theo DÒNG ĐANG NHÌN, không theo `scrollTop`**: cửa sổ luồng
-trượt (hub đọc 256KB cuối nhật ký) nên sự kiện cũ rụng khỏi đầu — đo được một
+trượt (huba đọc 256KB cuối nhật ký) nên sự kiện cũ rụng khỏi đầu — đo được một
 nhịp bỏ 4 dòng, trang ngắn đi **667px**. Khôi phục bằng con số `scrollTop` cũ là
 giữ đúng CON SỐ và mất đúng CHỖ ĐANG ĐỌC.
 
@@ -3391,12 +3391,12 @@ nhóm = thứ tự cần dùng: điều khiển được → chỉ xem được 
 
 ⚠ **Phép đo lạc hậu, lần thứ NĂM:** `fe-sessions-uc` đòi dòng tóm tắt kể lại
 "N terminal" — đúng thứ vừa bỏ đi. Trỏ nó về `data-count` của tiêu đề nhóm
-(nhóm `terminal` chỉ đếm phiên **không** do hub mở).
+(nhóm `terminal` chỉ đếm phiên **không** do huba mở).
 
 **Nghiệm thu (bundle v79):** `cargo clippy -D warnings` **0** · `cargo test`
 **68** · `fe-sessions` **20/20** (gồm: gộp nhóm · số mỗi nhóm khớp máy · nhóm
-"hub mở" chỉ hiện khi sổ có · phiên nền ghi rõ cha · trong mỗi nhóm vừa-động
-trước) · `fe-newsession` **20/20** (phiên mới nằm dưới đúng tiêu đề "📱 hub mở
+"huba mở" chỉ hiện khi sổ có · phiên nền ghi rõ cha · trong mỗi nhóm vừa-động
+trước) · `fe-newsession` **20/20** (phiên mới nằm dưới đúng tiêu đề "📱 huba mở
 từ điện thoại") · `fe-url` 16/16 · `fe-board` 19/19 · `fe-phone` 25/25 ·
 `fe-denied` 10/10 · `fe-config` 8/8 · `fe-smoke` 15/15 · `fe-stream` 13/13 ·
 `fe-aside` 9/9.
@@ -3408,33 +3408,33 @@ chạy build+test mà quên clippy, và gate `quality-gate` là chỗ lòi ra.
 
 Hà: *"cần một kiểu đánh dấu… nhìn qua cái là biết nó là kiểu nào ai tạo"*. Chấm
 màu cũ chỉ nói **bận hay rảnh** — nó không trả lời "ai mở cái này", mà đó mới là
-thứ quyết định **làm gì được**: phiên hub mở thì nói tiếp + dừng được; phiên ở
+thứ quyết định **làm gì được**: phiên huba mở thì nói tiếp + dừng được; phiên ở
 terminal chỉ xem + hỏi bên lề.
 
 | Huy hiệu | Khi nào | Màu |
 |---|---|---|
-| 📱 hub mở từ điện thoại | `started_by_hub` **có trong sổ** | xanh lá (accent) |
+| 📱 huba mở từ điện thoại | `started_by_hub` **có trong sổ** | xanh lá (accent) |
 | ⌨ bạn mở ở terminal | có tty | xanh dương |
-| ⚙ chạy nền | `--bg` mà hub **không nhận là của mình** | tím |
+| ⚙ chạy nền | `--bg` mà huba **không nhận là của mình** | tím |
 | ❓ không gắn cửa sổ | sống, không tty, không editor | hổ phách |
 | ⏹ đã dừng | không còn tiến trình | viền đứt, xám |
 
 🔑 **"Ai tạo" phải là SỰ THẬT CÓ SỔ, không phải suy từ `kind`.** `claude --bg` gõ
-tay cũng ra `background` y hệt phiên hub mở — nhãn đoán còn tệ hơn không nhãn.
-Nên hub **ghi lại id nó mở** (`pipeline::STARTED_KEY`, giữ 50 id gần nhất) và
-`mark_started_by_hub` dán cờ cho **cả ảnh chụp lẫn `hub sessions`**, để màn và
+tay cũng ra `background` y hệt phiên huba mở — nhãn đoán còn tệ hơn không nhãn.
+Nên huba **ghi lại id nó mở** (`pipeline::STARTED_KEY`, giữ 50 id gần nhất) và
+`mark_started_by_hub` dán cờ cho **cả ảnh chụp lẫn `huba sessions`**, để màn và
 CLI không nói khác nhau. Hai phiên nền đang chạy hiện ra **"⚙ chạy nền"** chứ
-không phải "hub mở" — đúng, vì chúng có trước khi hub biết ghi sổ.
+không phải "huba mở" — đúng, vì chúng có trước khi huba biết ghi sổ.
 
-`title` của huy hiệu nói luôn **làm gì được** ("hub mở phiên này: nói tiếp và
-dừng được từ đây" / "bạn mở ở cửa sổ terminal: hub không gõ vào được").
+`title` của huy hiệu nói luôn **làm gì được** ("huba mở phiên này: nói tiếp và
+dừng được từ đây" / "bạn mở ở cửa sổ terminal: huba không gõ vào được").
 
 **Phép đo (đối chiếu với máy, không hỏi lại trang):** mọi thẻ phải có huy hiệu ·
-huy hiệu khớp `host` · **nhãn "hub mở" chỉ được xuất hiện đúng bằng danh sách
+huy hiệu khớp `host` · **nhãn "huba mở" chỉ được xuất hiện đúng bằng danh sách
 trong sổ** (`fe-sessions-uc` 19/19). Và `fe-newsession-uc` **20/20**: phiên vừa
-mở qua UI hiện đúng **"📱 hub mở từ điện thoại"**.
+mở qua UI hiện đúng **"📱 huba mở từ điện thoại"**.
 
-Bundle **v76** · `hubd` pid 75008 · `cargo test` 68 · `fe-url` 16/16 ·
+Bundle **v76** · `hubad` pid 75008 · `cargo test` 68 · `fe-url` 16/16 ·
 `fe-board` 19/19 · `fe-phone` 25/25 · `fe-denied` 10/10 · `fe-config` 8/8 ·
 `fe-smoke` 15/15 · `fe-stream` 13/13 · `fe-aside` 9/9.
 
@@ -3456,12 +3456,12 @@ sổ") cho tiến trình còn sống mà không có tty và không phải editor
 định: `background` (kind thắng) → `editor` (đường dẫn) → có tty? `terminal` :
 `detached`.
 
-**Phép đo hỏi HỆ ĐIỀU HÀNH, không hỏi lại chính hub** (`fe-sessions-uc`, 16/16):
+**Phép đo hỏi HỆ ĐIỀU HÀNH, không hỏi lại chính huba** (`fe-sessions-uc`, 16/16):
 mỗi dòng gắn nhãn `terminal` phải có tty, và số tty **riêng biệt** phải bằng số
-dòng — nếu hub bịa nhãn thì `ps` sẽ cãi. Con số sau khi sửa không đổi (5/2/2, ẩn
+dòng — nếu huba bịa nhãn thì `ps` sẽ cãi. Con số sau khi sửa không đổi (5/2/2, ẩn
 8), tức không có hồi quy.
 
-Bundle **v75** · `hubd` pid 39839 · `cargo test` **68** · `fe-sessions` 16/16 ·
+Bundle **v75** · `hubad` pid 39839 · `cargo test` **68** · `fe-sessions` 16/16 ·
 `fe-url` 16/16 · `fe-board` 19/19 · `fe-phone` 25/25 · `fe-smoke` 15/15.
 
 ## 👀 2026-08-09 (sáng) — nhìn bằng mắt bắt được 5 lỗi mà 80 assert xanh bỏ lọt
@@ -3521,7 +3521,7 @@ Cùng họ với bẫy cũ *"deploy báo ĐẠT mà không deploy gì"*.
 - **Bỏ phiên của editor khỏi màn** (`sessions.rs::host_of` đọc `ps -o command=`
   phân biệt terminal · editor · background · dead). Giải thích được câu *"máy chỉ
   mở 3 terminal sao giao diện hiện 13 phiên?"*: 8 phiên là của VS Code/Cursor —
-  hub **không gõ vào được**, nên không đáng nằm trên màn. Dòng tổng kết nói rõ số
+  huba **không gõ vào được**, nên không đáng nằm trên màn. Dòng tổng kết nói rõ số
   bị ẩn.
 - **URL là trạng thái**: `?tab=…&session=…` qua `pushState`; F5 về đúng chỗ, Back
   đi ngược đúng thứ tự, không văng khỏi app. Bẫy đã vá: `goPanel()` lúc khởi động
@@ -3536,7 +3536,7 @@ Cùng họ với bẫy cũ *"deploy báo ĐẠT mà không deploy gì"*.
 
 🔒 **Bảo mật không đổi bởi lượt này, đã kiểm tận nơi:** `sessions.rs:680` quét
 `preview_risk` **từng sự kiện** trước khi vào ảnh chụp; sự kiện nghi có bí mật bị
-thay hẳn bằng `[hub ẩn: …]`, nên `toolLine` chỉ nhận chuỗi đã lọc (chuỗi ấy không
+thay hẳn bằng `[huba ẩn: …]`, nên `toolLine` chỉ nhận chuỗi đã lọc (chuỗi ấy không
 mở đầu bằng `{` ⇒ trả nguyên văn).
 
 **Nghiệm thu (exit code đọc trực tiếp, trên bundle v65 đang phục vụ):**
@@ -3570,7 +3570,7 @@ editor trên màn ⇒ nhánh ẩn không có đường đi qua giao diện. Tác
 đường dẫn** — thiếu vế đó thì phiên nền mở từ binary của editor sẽ bị xếp loại
 "editor" và **biến mất khỏi đúng màn có thể dừng nó**.
 
-**Nghiệm thu lượt này (bundle v69, `hubd` pid 27396 chạy binary vừa build):**
+**Nghiệm thu lượt này (bundle v69, `hubad` pid 27396 chạy binary vừa build):**
 `cargo test` **68** (+1) · 0 warning · `fe-url` 16/16 · `fe-board` 19/19 ·
 `fe-sessions` 12/12 · `fe-stream` 13/13 · `fe-aside` 9/9 · `fe-newsession` 9/9 ·
 `fe-denied` 10/10 · `fe-config` 8/8 · `fe-phone` **25/25** · `fe-smoke` 15/15 ·
@@ -3608,7 +3608,7 @@ chạm tới — vì trước nay `/new` luôn dừng ở hộp thoại MCP.
 
 **1. Màn danh sách KHÔNG BAO GIỜ tự tải lại.** Cả trang chỉ có đúng một cú
 `loadBoard()` sau **6 giây** kể từ khi gửi lệnh, mà `/new` cần tới **~14 giây**
-(hub còn rình xem phiên có kẹt không). Sau mốc 6 giây ấy không còn gì làm mới
+(huba còn rình xem phiên có kẹt không). Sau mốc 6 giây ấy không còn gì làm mới
 danh sách nữa ⟹ bấm "Mở phiên mới" xong, phiên **không hiện lên** cho tới khi
 bấm "Tải lại" hoặc F5. Vá: danh sách tự làm mới **15s/lần** khi đang mở (dừng
 khi tab ẩn, khi đang theo phiên — đường đó có vòng 4s riêng), và sau một lệnh thì
@@ -3617,7 +3617,7 @@ tài liệu tfl5 có sẵn, không gọi `claude`.
 
 **2. `/stop` hứa một đằng, `/tell` làm một nẻo.** `/stop` trả lời *"Hội thoại vẫn
 còn — nói tiếp bằng /tell"*, rồi `/tell` đáp *"không thấy phiên đang chạy nữa"*
-cho **chính phiên hub vừa cố ý dừng**. Gốc: `claude agents` **bỏ hẳn** phiên nền
+cho **chính phiên huba vừa cố ý dừng**. Gốc: `claude agents` **bỏ hẳn** phiên nền
 đã dừng khỏi danh sách trong vài giây, mà `/tell` lại gác bằng danh sách ấy —
 trong khi `--resume` **không cần tiến trình nào sống**, nó nối vào nhật ký. Và
 dừng-rồi-nói-tiếp là đường **DUY NHẤT** (claude từ chối resume phiên nền đang
@@ -3635,13 +3635,13 @@ chuỗi lỗi rẻ hơn đoán.*
 byte`, **không đẻ phiên mới**, `⏹ Đã dừng` rồi `➡️ Đã nói tiếp` đều hiện trên
 màn. `cargo test` **68** · `fe-newsession-uc` **19/19** · `fe-sessions` 12/12 ·
 `fe-url` 16/16 · `fe-board` 19/19 · `fe-phone` 25/25 · `fe-denied` 10/10 ·
-`fe-config` 8/8 · `fe-smoke` 15/15 · `hubd` pid 95660 chạy binary vừa build.
+`fe-config` 8/8 · `fe-smoke` 15/15 · `hubad` pid 95660 chạy binary vừa build.
 
 ### ⛔ Tôi báo sai hai chuyện ở lượt trước — đính chính, có bằng chứng
 
 **Sai 1: "nhánh ẩn phiên editor chưa nghiệm thu được".** Nó đang chạy thật suốt:
 `sessions_editor_hidden` có **601 lần ghi**, lần cuối **ẩn 8**. Tôi kết luận "0
-editor" từ hai chỗ đọc hỏng: `hub sessions --json` khi ấy **không có trường**
+editor" từ hai chỗ đọc hỏng: `huba sessions --json` khi ấy **không có trường**
 `hidden_editor` (probe của tôi in `None`, tôi đọc thành 0), và dòng log cuối ghi
 `09:40:37Z` mà tôi tưởng là 7 tiếng trước — **nó chính là 16:40 giờ máy, tức lúc
 ấy**. *Đúng cái bẫy UTC vừa sửa trong bảng lượt chạy sáng nay, tái phạm trong
@@ -3658,16 +3658,16 @@ là danh sách nói dối"* — rồi vẫn chỉ log. Câu hỏi gốc của H�
 hiện 13 phiên?"*) chỉ **đổi chiều**: máy chạy 15 phiên, màn liệt kê 7.
 `SessionsSnapshot.hidden_editor` → ảnh chụp → dòng tóm tắt:
 > 7 phiên đang sống — 5 terminal · 2 chạy nền · 2 đã dừng · **8 phiên trong
-> editor không hiện ở đây (hub không gõ vào được)**
+> editor không hiện ở đây (huba không gõ vào được)**
 
-`fe-sessions-uc` **đối chiếu con số ấy với `hub sessions --json`** (14/14), và
+`fe-sessions-uc` **đối chiếu con số ấy với `huba sessions --json`** (14/14), và
 `fe-url-uc` đổi phép đo: trước nó đòi dòng tóm tắt *"thôi nhắc editor"* — tức đòi
 đúng cái làm nên danh sách nói dối.
 
 ### Màn chi tiết tràn ngang 368/300 — và hai lần tôi đoán trước khi hỏi
 
 Mở rộng phép đo tràn-ngang sang **màn chi tiết phiên** (nơi có hàng chỉ hiện khi
-phiên do hub mở) thì nó đỏ ngay. Hai lần vá trượt vì đoán: (1) tưởng thủ phạm là
+phiên do huba mở) thì nó đỏ ngay. Hai lần vá trượt vì đoán: (1) tưởng thủ phạm là
 ô nhập → `flex: 1 1 auto`, không ăn vì `#board input { width: 100% }` kéo basis
 `auto` thành 300px; (2) `flex: 0 0 auto` cho nút **làm tệ hơn** — nó khoá luôn
 khả năng co. Hỏi trình duyệt phần tử đó là gì thì ra ngay: hàng chứa nút **"📋
@@ -3686,7 +3686,7 @@ hộp thoại duyệt MCP. Lượt này **đo lại tận nơi** chứ không ti
 | `--strict-mcp-config` **ghép** `--mcp-config '{"mcpServers":{}}'` (ghi chú cũ chỉ thử từng cờ) | ❌ vẫn hiện hộp thoại; phiên `1afdcc28` `state: blocked`, log in nguyên `[✔] project-agent` / `[✔] vault` |
 | `claude mcp …` có lệnh ghi lựa chọn từ chối? | ❌ chỉ có `reset-project-choices` (xoá), không có "reject" |
 | sửa `~/.claude.json` (`disabledMcpjsonServers`) | ⛔ tự sửa cấu hình Claude — **không làm**, và tệp đang bị 3 phiên khác ghi song song |
-| đặt `.mcp.json` rỗng trong `hub-act-demo` | ⛔ **classifier chặn** — mọi dạng ghi cấu hình MCP đều bị chặn |
+| đặt `.mcp.json` rỗng trong `huba-act-demo` | ⛔ **classifier chặn** — mọi dạng ghi cấu hình MCP đều bị chặn |
 
 ⚠ Và một lỗi của chính tôi trong lượt thử: phép thử đầu chạy `--bg` với
 `--disallowedTools "Bash(sudo:*)"` — tức **rút gọn `DENIED_TOOLS` xuống một
@@ -3695,17 +3695,17 @@ dòng** cho nhanh, mở đúng thứ hàng rào ấy sinh ra để chặn. Hook 
 
 ⟹ Hà đã bấm (2026-08-09 ~10:00) và `/new` chạy được ngay sau đó. Lạ ở chỗ
 `~/.claude.json` vẫn ghi `enabledMcpjsonServers: []` · `disabledMcpjsonServers:
-[]` · `hasTrustDialogAccepted: false` cho `AI/hub-act-demo` — **lựa chọn không
+[]` · `hasTrustDialogAccepted: false` cho `AI/huba-act-demo` — **lựa chọn không
 nằm ở mấy trường đó**, nên đừng lấy chúng làm phép đo "đã duyệt chưa".
 
-Bảng cũ trong `hub.sqlite` vẫn còn dữ liệu — **cố ý không xoá**.
+Bảng cũ trong `huba.sqlite` vẫn còn dữ liệu — **cố ý không xoá**.
 
 ## 💸 2026-08-09 (rạng sáng) — "bỏ mọi đường github rồi sao vẫn mất tiền thế"
 
 Hỏi lại lần thứ hai, và lần này câu trả lời **không phải github**. Sổ nói rõ:
 13 khoản chi trong ngày, **tất cả** đều `aside`/`handover` — tức fork do **bấm
 nút**; không một dòng triage nào từ lúc gỡ, `cycle_done` không còn trường tiền.
-**Vòng chạy của hub = $0.** Tiền là **của Hà**, do **tôi** tiêu: 6 lượt chạy
+**Vòng chạy của huba = $0.** Tiền là **của Hà**, do **tôi** tiêu: 6 lượt chạy
 `fe-stream-uc`/`fe-aside-uc` để nghiệm thu = **$6.75**, trong đó
 **$1.70 mất trắng** (server tfl5 restart giữa chừng) và tôi **trả hai lần cho
 cùng một bằng chứng** vì chạy lại sau mỗi bundle.
@@ -3737,7 +3737,7 @@ $0.74, lần cuối **08:25 sáng**, sau đó chạm trần nên dừng) + `/ask
 trắng** vì server tfl5 restart giữa chừng, phải chạy lại).
 ⟹ Máy tiêu tiền tự động **vẫn còn**: mỗi tin nhắn trong phòng vẫn bị gọi
 `claude` để phân loại. Đó là bộ phận cuối cùng của hộp thư, và nó bị gỡ trước
-tiên: `run_once` không còn `triage_new` + `flush`. **hub nay không tự tiêu một
+tiên: `run_once` không còn `triage_new` + `flush`. **huba nay không tự tiêu một
 đồng nào** — chỉ nút bấm của Hà mới gọi `claude`.
 
 ### Đã xoá (≈4.500 dòng), không để lại mã chết
@@ -3749,7 +3749,7 @@ tiên: `run_once` không còn `triage_new` + `flush`. **hub nay không tự tiê
 | verb `/approve` `/reject` `/close` `/reply` `/act` (cả parser lẫn enum) | session verbs + `/project` `/set` `/ingest` `/run` `/doctor` `/help` |
 | CLI `inbox show say approve reject close reply act triage flush triage-one web` | `doctor init once ingest status sessions tfl5-say tfl5-tail portal-push` |
 | config `triage` `act` `autonomy` `routing` `daily_budget_usd` `max_triage_per_cycle` `coalesce_hours` `source_*` `leak_patterns` `web` `projects[].repos/tier` | `call{max_budget_usd,timeout_sec}` `adapters.tfl5` `trust` `projects` `notify` `claude_*` |
-| tab **Hộp việc** + ô "Hỏi hub" + ô chờ "đang xử lý" + chi tiết + 4 nút duyệt | tab Phiên · Trao đổi · Sức khoẻ · Cấu hình |
+| tab **Hộp việc** + ô "Hỏi huba" + ô chờ "đang xử lý" + chi tiết + 4 nút duyệt | tab Phiên · Trao đổi · Sức khoẻ · Cấu hình |
 | 6 tệp test hộp thư + 7 kịch bản `fe-*` + `ui-smoke.mjs` | 9 kịch bản `fe-*`, tất cả chạy ở **390×844** |
 
 Hai thứ **giữ lại có chủ đích, không phải sót**: `DENIED_TOOLS` (chuyển từ
@@ -3791,7 +3791,7 @@ gõ vào `#text` trong khi đang đứng ở tab Cấu hình — textarea bị �
 ### Nghiệm thu (exit code đọc trực tiếp)
 
 `cargo test` **67** · clippy 0 · fmt sạch · build release 0 warning ·
-bundle **v55** đối chiếu byte từ URL thật · `hubd` chạy bản mới ·
+bundle **v55** đối chiếu byte từ URL thật · `hubad` chạy bản mới ·
 `fe-board-uc` **18/18** · `fe-sessions-uc` 9/9 · `fe-smoke` 15/15 ·
 `fe-config-uc` **8/8** (form → `/set` → đĩa → trả về) · `fe-denied-uc` 10/10 ·
 `fe-stream-uc` **17/17** · `fe-aside-uc` **17/17** · `fe-newsession-uc` 9/9.
@@ -3799,16 +3799,16 @@ bundle **v55** đối chiếu byte từ URL thật · `hubd` chạy bản mới 
 **CHƯA XONG, có sổ:** `fe-phone-uc` còn đỏ ở **ergonomics** — chữ 11.2px và nút
 tab cao 35px (chuẩn chạm 44px); đỏ từ trước đợt dọn, là nợ thiết kế thật.
 `/tell` + `/stop` vẫn chưa nghiệm thu qua UI (cần một phiên nền chạy được).
-Bảng cũ trong `hub.sqlite` vẫn còn dữ liệu — **cố ý không xoá**.
+Bảng cũ trong `huba.sqlite` vẫn còn dữ liệu — **cố ý không xoá**.
 
 ⚠ `PLAN-portal.md` không xoá được bằng `git rm`: hook toàn cục `SDVI-REVIEWER`
 chặn mọi dạng (đã thử 3 cách nó tự đề xuất). Đã ghi đè thành một trang bia mộ.
-Muốn xoá hẳn: `git -C ~/Documents/projects/AI/hub rm PLAN-portal.md`.
+Muốn xoá hẳn: `git -C ~/Documents/projects/AI/huba rm PLAN-portal.md`.
 
 ## 🚀 2026-08-08 (tối) — mở/dừng/nói-tiếp phiên nền, và ba bức tường có thật
 
 Làm nốt phần còn lại của sổ UC: **`/new` · `/tell` · `/stop`** + tuổi ảnh chụp
-(UC-S09) + trả nợ log. Bundle **v50**, `hubd` pid 5010, `cargo test` **171**.
+(UC-S09) + trả nợ log. Bundle **v50**, `hubad` pid 5010, `cargo test` **171**.
 
 ### Ba bức tường, đo bằng chạy thật — đừng phát hiện lại
 
@@ -3828,7 +3828,7 @@ Mọi dự án nằm dưới `~/Documents/projects/.mcp.json` ⇒ phiên nền d
 thoại duyệt MCP** (*"2 new MCP servers found…"*), `state: blocked`, **không nhật
 ký, không làm gì**, chờ một phím mà điện thoại không gõ được.
 `--strict-mcp-config` **không** gỡ; `--mcp-config '{"mcpServers":{}}'` cũng không.
-⟹ hub nay **đợi tới 14s xem trạng thái, thấy `blocked` thì dừng phiên và báo
+⟹ huba nay **đợi tới 14s xem trạng thái, thấy `blocked` thì dừng phiên và báo
 hỏng kèm cách gỡ** — thay vì báo "🚀 đã mở phiên" cho thứ chẳng bao giờ chạy.
 
 **👉 VIỆC CỦA HÀ, một lần cho mỗi dự án:**
@@ -3849,8 +3849,8 @@ Vá `noteSessionReply` làm **màn nhanh hơn ảnh chụp**, thế là hai asse
 `fe-stream-uc` hoá đỏ: nó đọc ảnh chụp ngay sau khi hộp đổi chữ. Log chứng minh
 sản phẩm làm đúng (bàn giao mới `78b74def`, focus đã xoá) — **kịch bản đọc sớm**.
 Nay chờ đúng *trạng thái*, không chờ *chữ trên màn*. Và kịch bản `/new` thôi rình
-danh sách phiên (đua với chính vòng dò 14s của hub), chuyển sang **đọc câu trả
-lời của hub**.
+danh sách phiên (đua với chính vòng dò 14s của huba), chuyển sang **đọc câu trả
+lời của huba**.
 
 **Nghiệm thu:** `cargo test` **171** · clippy 0 · fmt sạch · build 0 warning ·
 `fe-newsession-uc` **9/9** (đường KẸT) · `fe-aside-uc` 19/19 · `fe-stream-uc`
@@ -3859,7 +3859,7 @@ bundle v50 đối chiếu byte từ URL thật.
 
 **CHƯA XONG, có sổ:** `/tell` + `/stop` mới có cơ chế đo thật + unit test, **chưa
 nghiệm thu qua UI** (cần một phiên nền chạy được — xem việc của Hà ở trên).
-UC-S09 nửa "ảnh chụp đã cũ" chưa chạy (phải tắt `hubd` rồi chờ qua 5 phút).
+UC-S09 nửa "ảnh chụp đã cũ" chưa chạy (phải tắt `hubad` rồi chờ qua 5 phút).
 UC-S02b (phiên có subagent) vẫn chưa có mẫu thật.
 
 💡 Lặp lại lần thứ hai: **lượt thứ hai trên cùng phiên rẻ hơn hàng chục lần** —
@@ -3867,8 +3867,8 @@ bàn giao lần này **$0.064** so với **$0.861** lần đầu cùng phiên đ
 
 ## 💬 2026-08-08 (chiều) — UC-S05b mức 2 "hỏi bên lề" + trả nợ phép đo mù
 
-**Hỏi chen ngang mà không phá việc đang chạy** (bundle **v44**, `hubd` pid 69153).
-Ô hỏi trên màn luồng phiên → verb mới **`/ask <câu hỏi>`** → hub fork phiên đang
+**Hỏi chen ngang mà không phá việc đang chạy** (bundle **v44**, `hubad` pid 69153).
+Ô hỏi trên màn luồng phiên → verb mới **`/ask <câu hỏi>`** → huba fork phiên đang
 theo → trả lời về màn kèm nhãn *"phiên gốc không thêm lượt nào"* + giá của chính
 lần hỏi. Đích là **phiên đang theo**, không phải uuid gõ tay.
 
@@ -3900,9 +3900,9 @@ chỉ vì hai trần **tình cờ cùng kết luận từ chối**. Sửa gốc 
 **chính quyết định sản phẩm dùng**, kịch bản đọc thẳng thay vì tự suy lại luật.
 *Phép đo tự tính lại quy tắc là phép đo có thể gật gù cùng một sản phẩm đã hỏng.*
 
-🐛 **Kịch bản bắt được lỗi thật ngay lần chạy đầu (11/12):** khi hub **từ chối**,
+🐛 **Kịch bản bắt được lỗi thật ngay lần chạy đầu (11/12):** khi huba **từ chối**,
 ảnh chụp không sinh dòng nào ⇒ ô trả lời **quay mãi** — đúng con "spinner treo
-vĩnh viễn" đã trả giá 08-07. Vá: lời đáp của hub về **qua phòng chat** ngay, nên
+vĩnh viễn" đã trả giá 08-07. Vá: lời đáp của huba về **qua phòng chat** ngay, nên
 `noteSessionReply` bắt dòng đó (`💬`/`📋`/`⚠`) và đổ vào đúng ô; đổi phiên thì
 huỷ chờ, để câu trả lời của phiên này không rơi lên màn phiên khác. Vá ăn cho
 **cả `/handover`** vì cùng một khuyết tật.
@@ -3940,16 +3940,16 @@ Phiên `projects-cd` 0.47 MB: ước tính **$0.83** → thực **$0.8735** (l�
 Giá đắt là giá *lần đầu chạm vào một phiên*, không phải giá mỗi câu hỏi.
 
 🐛 **Hai lỗi thật, đều do chạy thật mới lòi ra:**
-1. Hub **từ chối** thì ảnh chụp không sinh dòng nào ⇒ ô trả lời **quay mãi** —
+1. Huba **từ chối** thì ảnh chụp không sinh dòng nào ⇒ ô trả lời **quay mãi** —
    đúng con "spinner treo vĩnh viễn" của 08-07. Vá: `noteSessionReply` bắt lời
    đáp về qua **phòng chat**; ăn cho cả `/handover`.
-2. **Đáp án CŨ vẽ đè lên chỗ "đang hỏi…"**: ảnh chụp vẫn về đều trong lúc hub
+2. **Đáp án CŨ vẽ đè lên chỗ "đang hỏi…"**: ảnh chụp vẫn về đều trong lúc huba
    nghĩ, mỗi cái mang câu trả lời trước đó ⇒ hỏi câu thứ hai là màn "trả lời"
    tức thì bằng chữ của lần trước. Vá bằng mốc thời gian (`askedAfterTs`), khoá
    theo `ts` chứ không theo cờ chờ — vì lời đáp phòng chat xoá cờ **trước** khi
    ảnh chụp kịp theo.
 ⚠ **Và chính bẫy đó bắt được kịch bản của tôi:** nó hỏi lại **đúng câu cũ**, nên
-mọi phép so chuỗi đều thoả bằng đáp án cũ → báo xanh trong khi hub còn đang
+mọi phép so chuỗi đều thoả bằng đáp án cũ → báo xanh trong khi huba còn đang
 nghĩ. Nay chờ **ảnh chụp mang `ts` MỚI**, rồi mới chờ màn hiện đúng **bản fork**
 đó. *Phép đo mà dữ liệu cũ cũng thoả thì nó không đo gì cả.*
 
@@ -3962,7 +3962,7 @@ vào nhánh từ chối vì trần. Gỡ trần xong: bản bàn giao mới, phi
 `cargo test` **166** (161 → +5) · clippy **0** · fmt sạch · build 0 warning ·
 `fe-aside-uc` **19/19** · `fe-stream-uc` **18/18** · `fe-sessions-uc` 9/9 ·
 `fe-smoke` 15/15 · `fe-board-uc` 43/43 · bundle **v46** đối chiếu byte từ URL
-thật · `hubd` pid 25230 khớp mã.
+thật · `hubad` pid 25230 khớp mã.
 Tiền cả phiên: dò cơ chế **$0.4359** + nghiệm thu thật **$1.83**.
 
 ⚠ **Còn nợ, có sổ:** dòng log `channel_command_handled` in
@@ -3970,7 +3970,7 @@ Tiền cả phiên: dò cơ chế **$0.4359** + nghiệm thu thật **$1.83**.
 phòng chat nhận đúng câu trả lời, nhưng **log nói sai sự thật**. Hành vi cũ, có
 từ trước `/ask`; chưa sửa trong lượt này.
 
-## 🧹 2026-08-08 — hub giờ CHỈ là kênh quản lý phiên Claude CLI
+## 🧹 2026-08-08 — huba giờ CHỈ là kênh quản lý phiên Claude CLI
 
 **Đã gỡ hẳn nhánh hộp thư** (commit `88398ca`, **−2.488 dòng**). Hà: *"rõ ràng loại
 bỏ github ra khỏi flow rồi mà, chỉ đơn thuần tạo kênh quản lý thôi"*.
@@ -3981,7 +3981,7 @@ Bỏ: 4 adapter `github`/`telegram`/`devlog`/`email` + toàn bộ wiring
 nhánh gửi outbound của 3 kênh, nhánh callback Telegram, khối CI-context trong
 `triage`, nhánh trust theo github/email/telegram trong `policy`, và test tương ứng.
 
-**Trước khi xoá** — hub chưa từng có git: `git init` + commit **`525beeb`** chụp
+**Trước khi xoá** — huba chưa từng có git: `git init` + commit **`525beeb`** chụp
 nguyên trạng, nhánh **`backup/inbox-adapters`**, bản sao `/tmp/adapters-backup`.
 Hook kiểm duyệt đòi đủ ba thứ đó; tôi làm theo chứ không lách.
 
@@ -4001,16 +4001,16 @@ máy · đóng sổ bàn giao**. Hộp việc + `/approve` vẫn chạy trên x�
 
 **Nghiệm thu sau khi gỡ:** `cargo test` **161** · clippy **0** · build 0 warning ·
 `fe-sessions-uc` 9/9 · `fe-stream-uc` 13/13 · `fe-smoke` 15/15 · `fe-board-uc`
-43/43 · `hubd` pid 35849 · `doctor` chỉ còn kênh `tfl5`.
+43/43 · `hubad` pid 35849 · `doctor` chỉ còn kênh `tfl5`.
 
 
 **Cập nhật:** 2026-08-08 · **Một mặt tiền duy nhất trên tfl5**: hộp việc +
 trao đổi + sức khoẻ + chi phí + cấu hình, đọc-và-ghi.
 Phương án + bằng chứng: `PLAN-portal.md`. Lịch sử cũ ở `PLAN.md`.
 
-## 🎯 2026-08-08 — ĐỔI HƯỚNG: hub là BE quản lý phiên Claude CLI, không phải hộp thư
+## 🎯 2026-08-08 — ĐỔI HƯỚNG: huba là BE quản lý phiên Claude CLI, không phải hộp thư
 
-Hà chốt: *"hub là BE quản lý các phiên làm việc claude cli, ui cung cấp giao diện
+Hà chốt: *"huba là BE quản lý các phiên làm việc claude cli, ui cung cấp giao diện
 quản lý giống như tôi đang làm trên máy qua terminal"* — **theo dõi và xử lý việc
 từ ĐIỆN THOẠI**, claude chạy ở máy local. Trước đó Hà nhận xét *"có vẻ bạn đang
 làm chưa đúng hoặc quá phức tạp"*, và số liệu cho thấy Hà đúng: 117/180 tin trong
@@ -4019,7 +4019,7 @@ email+telegram 616 dòng **chưa gọi thật lần nào**, còn "Làm" (act) �
 là *xử lý việc* — mới chạy đúng **1** lần.
 
 **Bước 1 (chỉ đọc) XONG, đã chạy thật:** `rust/src/sessions.rs` + lệnh
-`hub sessions [--json]` → **14 phiên đang sống trên 3 tài khoản** (acc1 9 · acc2 2
+`huba sessions [--json]` → **14 phiên đang sống trên 3 tài khoản** (acc1 9 · acc2 2
 · acc3 3), sắp theo vừa-động, kèm lượt hội thoại cuối của từng phiên.
 
 Bốn điều đo được quyết định thiết kế (đừng phát hiện lại):
@@ -4039,7 +4039,7 @@ Bốn điều đo được quyết định thiết kế (đừng phát hiện l�
 
 ### 🔒 Lớp quét rò rỉ chỉ biết tiếng Anh — phát hiện nhờ chạy thật
 
-Lần chạy đầu của `hub sessions` in ra một phiên **nói thẳng chuỗi đăng nhập bằng
+Lần chạy đầu của `huba sessions` in ra một phiên **nói thẳng chuỗi đăng nhập bằng
 tiếng Việt**, mà `redaction::leak_scan` báo **0 rủi ro**: mẫu `credential_word`
 chỉ có từ tiếng Anh, trong khi cả workspace này làm việc bằng tiếng Việt. Đã thêm
 mẫu tiếng Việt (kể cả bản không dấu) vào `redaction.rs` — **vá này ăn cho mọi
@@ -4066,17 +4066,17 @@ khít (shasum), 390/390px, 2 chế độ, 0 lỗi console. Hình để `min-widt
 cuộn ngang trong hộp riêng — co theo khung 390px làm chữ còn ~6px.
 
 **Hà chốt 2026-08-08: "không cần nhánh VS Code".** Điều khiển **chỉ** nhắm phiên
-do hub khởi động (`claude --bg`, `-p --resume <sessionId>`). Phiên mở sẵn trong
+do huba khởi động (`claude --bg`, `-p --resume <sessionId>`). Phiên mở sẵn trong
 VS Code vẫn nằm trong danh sách để **theo dõi**, nhưng **không** là đích điều
 khiển ⇒ bỏ hẳn nhánh "chen vào stdin", bỏ luôn nhu cầu tmux. Thiết kế còn **một
 đường duy nhất**, dùng lại hạ tầng ảnh chụp sẵn có (bundle v30).
 
 **UC-S01 XONG tới điện thoại (bundle v35).** `portal.rs` bump snapshot **schema
 2→3** thêm `sessions{list,notes}`; FE có tab **"Phiên" làm mặc định**, render bằng
-DOM chứ không `innerHTML` (tên/nội dung phiên là chữ do máy sinh). `hubd` restart
+DOM chứ không `innerHTML` (tên/nội dung phiên là chữ do máy sinh). `hubad` restart
 cùng lượt — trang cũ có guard `schema > 2` nên bump mà quên FE là **trang tự từ
 chối hiển thị**. Nghiệm thu `fe-sessions-uc.mjs` **8/8** ở 390px, đối chiếu với
-`hub sessions --json` chạy độc lập. Không hồi quy: smoke 15/15 · board 41/41 ·
+`huba sessions --json` chạy độc lập. Không hồi quy: smoke 15/15 · board 41/41 ·
 `cargo test` 169 · clippy 0.
 ⚠ **Bẫy phép đo lần 3:** assert "phiên đầu nằm trong màn đầu" xanh ở **0px** vì
 panel đang ẩn (bbox = 0). Sửa tab mặc định mới lộ số thật **570px** = 67% màn là
@@ -4084,21 +4084,21 @@ vỏ → ẩn vỏ hộp việc + bỏ app tid 38 ký tự khỏi header → **3
 trên phần tử đang ẩn là assert mù.*
 
 **UC-S02 XONG (bundle v38).** Chạm phiên → trang gửi verb mới **`/session <uuid>`**
-vào phòng chat → hub ghi cursor `focus:session` → ảnh chụp mang luồng **của riêng
+vào phòng chat → huba ghi cursor `focus:session` → ảnh chụp mang luồng **của riêng
 phiên đang theo** (đẩy hết mọi transcript mỗi cycle là megabyte cho một màn).
 `sessions::parse_stream` tách từng khối thành **say · tool · result · think**, gác
 bí mật **TỪNG KHỐI** — `tool_result` là đầu ra lệnh, nơi khoá hay lộ nhất; gác mỗi
 lượt cuối như màn danh sách là vô dụng ở đây. Cửa sổ 120 sự kiện + `older_hidden`.
 Nghiệm thu `fe-stream-uc.mjs` **11/11**: 90/90 sự kiện khớp, 36 lệnh + 37 kết quả,
-lệnh kèm tham số, quay lại thì hub thôi theo. `cargo test` **172** · clippy 0.
+lệnh kèm tham số, quay lại thì huba thôi theo. `cargo test` **172** · clippy 0.
 ⚠ **Ba bẫy:** (1) `waitForFunction(fn,{timeout})` — tham số 2 là **đối số**, không
 phải options ⇒ 180s rơi về 30s (sổ đã ghi 08-07, vẫn đạp lại). (2) So bằng số sự
 kiện trên phiên **đang chạy** sai theo cấu trúc (cửa sổ trượt: 84 vs 81) → chọn
 phiên đứng yên >30 phút. (3) **Lỗi thật:** trang chỉ `loadBoard()` **một lần** sau
-6s ⇒ phiên nào hub đẩy chậm hơn là treo vĩnh viễn → nay vòng chờ 5s, hạn 2 phút,
+6s ⇒ phiên nào huba đẩy chậm hơn là treo vĩnh viễn → nay vòng chờ 5s, hạn 2 phút,
 hết hạn nói rõ lý do.
 
-**UC-S03 XONG (bundle v39, hubd pid 91053).** Hai nửa: `hubd::follow_sleep` cắt
+**UC-S03 XONG (bundle v39, hubad pid 91053).** Hai nửa: `hubad::follow_sleep` cắt
 giấc ngủ chu kỳ thành lát **2s**, mỗi lát chỉ `stat` **mtime** của đúng tệp phiên
 đang theo — không gọi `claude`, không chạy pipeline, **không tốn tiền**; đổi thì
 đẩy ngay, **sàn 4s** để phiên bận không thành lũ đẩy; tin chat tới thì trả quyền
@@ -4126,7 +4126,7 @@ gọi** (resume nạp cả phiên 986KB) → chi hôm nay **$4.701/$3.00, vượ
 bảng **`spend`**, trần cộng cả hai (`SCHEMA_VERSION 3`); (2) gác `spent >= cap`
 chỉ chặn lần SAU → nay chặn theo **trường hợp xấu nhất** `spent + max_budget_usd
 > cap`; (3) lệnh handover thiếu `--max-budget-usd` → nay có.
-⚠ **`hubd` chết LẦN 2** cũng vì `claude` tự cập nhật (11:16 và 15:16): EPERM
+⚠ **`hubad` chết LẦN 2** cũng vì `claude` tự cập nhật (11:16 và 15:16): EPERM
 thoáng qua làm đọc lock hỏng, mà code cũ `unwrap_or(true)` coi đó là **bị chiếm
 lock** nên thoát. Nay `read_lock_pid` thử lại 3 lần/1.5s và phân biệt
 Ours/Taken/**Unreadable** — chỉ nhường khi tệp đọc được và chứa pid khác; đọc
@@ -4146,7 +4146,7 @@ vì cửa sổ 256KB không chứa bản ghi mode — hiện đúng là chưa r�
 **nhánh hộp thư đã chốt bỏ mà tôi quên chưa tắt** — rồi chính nó làm cạn trần và
 trần quay lại chặn tính năng mới. Đã sửa hai chỗ:
 1. **Tắt `adapters.github` + `adapters.devlog`** (`doctor` xác nhận `off`; chỉ còn
-   `tfl5`). Backup: `hub.config.json.bak-adapters`.
+   `tfl5`). Backup: `huba.config.json.bak-adapters`.
 2. **Tách trần**: thêm **`owner_daily_budget_usd = 2.0`**, đếm riêng từ bảng
    `spend`. `daily_budget_usd` sinh ra để ghìm **robot chạy không ai trông**; một
    cú Hà bấm trên điện thoại là **chính chủ làm việc** — chặn nó bằng ngân sách
@@ -4154,7 +4154,7 @@ trần quay lại chặn tính năng mới. Đã sửa hai chỗ:
 
 ⟹ Phần **theo dõi (S01–S04) vốn $0**: chỉ đọc `claude agents --json`, `stat` mtime
 và đọc tệp. Chỉ phần **hành động** mới tốn, và tốn **đúng bằng** làm việc đó ở
-terminal — không phải phí của hub.
+terminal — không phải phí của huba.
 
 ⚠ **Nợ có sổ:** `fe-stream-uc.mjs` vẫn đọc `snap.budget` (trần robot) để chọn
 nhánh kiểm UC-S07, trong khi sản phẩm nay dùng `owner_daily_budget_usd`. Lần chạy
@@ -4165,12 +4165,12 @@ vừa rồi xanh vì **hai trần tình cờ cùng kết luận từ chối**, k
 tín hiệu "phiên nào đang chờ Hà" (bản ghi cuối không đủ để suy, chưa hứa); bước 2
 = gõ vào phiên. Và **không gõ được vào 9 phiên đang mở**: chúng do VS Code
 extension nuôi stdin bằng `--input-format stream-json`, máy **không có tmux**
-(chỉ `screen`) — muốn điều khiển thì phiên phải do hub khởi động từ đầu.
+(chỉ `screen`) — muốn điều khiển thì phiên phải do huba khởi động từ đầu.
 
-## 2026-08-08 — CI đỏ: hub trả tiền để nói "chưa rõ nguyên nhân"
+## 2026-08-08 — CI đỏ: huba trả tiền để nói "chưa rõ nguyên nhân"
 
 **Đo trước:** 38/38 quyết định nguồn github là `ci_failure`, ngốn **$4.99 / $9.12**
-tổng chi cả đời hub (55%), và **cả 38 vẫn nằm nguyên trong hộp việc**. Nội dung
+tổng chi cả đời huba (55%), và **cả 38 vẫn nằm nguyên trong hộp việc**. Nội dung
 lặp đi lặp lại: *"chưa có log lỗi thực tế nên chưa rõ nguyên nhân"*.
 
 **Gốc, hai chỗ:** thông báo CheckSuite **không có `subject.url`** ⇒ không có lần
@@ -4188,7 +4188,7 @@ trong prompt, không im. `is_safe_ref()` chặn ref dị dạng biến thành c�
 Khối CI được **`insert(0, …)`** vì `clip(6000)` cắt đuôi.
 
 **Lỗ bảo mật do chính bản vá này mở ra — đã bịt trong cùng lượt.** Khối
-`<<<CONTEXT` được prompt khai là *"trusted — collected by hub code, not by the
+`<<<CONTEXT` được prompt khai là *"trusted — collected by huba code, not by the
 sender"*, mà `tripwire` chỉ quét subject+body (`triage.rs:435-440`). Bơm **log
 bước CI hỏng** vào đó = cho code của người khác nói chuyện với model từ **nửa
 được tin** của prompt. Nay `gather_context` trả `GatheredContext{text, tripwire}`,
@@ -4197,7 +4197,7 @@ tripwire ⇒ `policy.rs:346` ép human + tắt trí nhớ hội thoại. Prompt 
 loại phát hiện**: "untrusted body matched" (người gửi tấn công) vs "quoted CI
 output" (log in ra chuỗi giống lệnh — là *dữ liệu*), vì gộp chung sẽ vu cho người
 gửi mỗi khi build log có `sudo apt-get`. Nhãn khối context sửa lại cho đúng sự
-thật: hub *thu thập*, nhưng nội dung *trích* là của bên thứ ba.
+thật: huba *thu thập*, nhưng nội dung *trích* là của bên thứ ba.
 ⚠ Còn nợ, có sổ: `git log`/`devlog tail` trong cùng khối **chưa** được quét —
 hành vi cũ, không đổi trong lượt này.
 
@@ -4215,18 +4215,18 @@ chết ngay ở bước `actions/setup-node@v4` kèm *"unable to cache dependenc
 nó thôi đoán và nói thẳng phần còn chưa biết. Bài học: bản vá đổi *"rẻ hơn"* thành
 *"trả tiền cho thứ dùng được"*, không phải luôn rẻ hơn.
 
-`cargo test` **162 xanh** · fmt sạch · clippy không thêm cảnh báo mới · `hubd`
+`cargo test` **162 xanh** · fmt sạch · clippy không thêm cảnh báo mới · `hubad`
 restart 2 lần trong lượt (cuối: pid 23972) để binary đang chạy khớp mã — đúng cái
 bẫy "contract + consumer" đã đạp 2 lần ngày 08-07.
 
-### 🔴 Việc của Hà, ngoài phạm vi hub: CI của tfl5 chết 5 ngày vì THANH TOÁN
+### 🔴 Việc của Hà, ngoài phạm vi huba: CI của tfl5 chết 5 ngày vì THANH TOÁN
 
 `dipgle/tfl5`: **60/60 run FAIL, 0 thành công, từ 2026-08-03**. Job chết trong 2
 giây, chưa từng chạy bước nào. Annotation nguyên văn: *"The job was not started
 because recent account payments have failed or your spending limit needs to be
 increased"*. ⟹ **mọi CI đỏ của tfl5 là giả**, không phải lỗi code — kể cả run
 00:48 hôm nay của session tfl5. Mở **GitHub → Settings → Billing & plans** của
-tài khoản `dipgle`. (API billing cần scope `user`/`admin:org`, hub không đọc được.)
+tài khoản `dipgle`. (API billing cần scope `user`/`admin:org`, huba không đọc được.)
 
 `dwork-dev/dwork` cũng 50/50 fail từ 08-04 nhưng **lý do khác và là lỗi thật**:
 `Run actions/setup-node@v4` fail (Node 20 bị ép sang Node 24) + `Test
@@ -4234,7 +4234,7 @@ mobile-app-dwork` fail.
 
 ### Vì sao hộp việc không tự xử lý (Hà hỏi 08-08) — đã đo, chưa sửa
 
-Lý do hub tự ghi trong `decisions.raw.outcome.reason`, 62 mục treo:
+Lý do huba tự ghi trong `decisions.raw.outcome.reason`, 62 mục treo:
 `model set needs_human` **39** · `tier L0 (trust=trusted) drafts only` **19** ·
 `tier L0 (trust=untrusted)` **4**. Bốn khoá chồng nhau:
 1. `autonomy.default = "L0"` và **không dự án nào đặt `tier`** → mọi thứ L0
@@ -4254,7 +4254,7 @@ có ghi lý do) bên cạnh `auto_reply/await_human/ignore` (`policy.rs:33-37`).
 ### Đã mất chỗ quản lý danh sách project (Hà hỏi 08-08) — đã đo, chưa sửa
 
 Registry `config.projects` là nguồn sự thật trong mã (`policy.rs:151-161`) và
-`hub doctor` vẫn đối chiếu đủ 8/8 với thư mục thật — nhưng **không màn nào sửa
+`huba doctor` vẫn đối chiếu đủ 8/8 với thư mục thật — nhưng **không màn nào sửa
 được nó**: `grep CFG.projects rust/assets/ui.html` → **0**; board tfl5 chỉ có
 `autonomy.default` (`fe/index.html:1027`); `/set` từ chối kiểu object và **không
 thêm được trường chưa tồn tại** (kiểu suy từ giá trị đang có, `pipeline.rs:1383`)
@@ -4269,8 +4269,8 @@ mục có devlog* (19 cái), khác hẳn 8 khoá registry — giao nhau đúng `
 ## 🔚 CHỐT PHIÊN 2026-08-07/08 — đọc mục này trước
 
 **Đang chạy:** bundle **v27** (prev v26) tại
-`http://a-65dd60d3-624e-45a9-8fdf-62aa7d894d80.test.localhost:8090/` · `hubd`
-binary mới nhất · console `hub web` :9200 vẫn sống (nay chỉ còn để sửa JSON thô
+`http://a-65dd60d3-624e-45a9-8fdf-62aa7d894d80.test.localhost:8090/` · `hubad`
+binary mới nhất · console `huba web` :9200 vẫn sống (nay chỉ còn để sửa JSON thô
 + dự phòng khi tfl5 chết).
 
 **Trang tfl5 giờ làm được mọi thứ console làm**, qua 5 tab: Hộp việc · Trao đổi
@@ -4295,7 +4295,7 @@ và khung chat nói rõ lý do. `max_triage_per_cycle = 6`,
 
 Hà mở `http://a-65dd60d3….test.localhost:8090/` bằng tài khoản `administrator`
 và thấy báo mất kết nối lặp vô hạn. **Không có sự cố mạng nào**: `administrator`
-không nằm trong ACL của app hub (`readers` chỉ có alice), nên `/ws/chat` từ chối
+không nằm trong ACL của app huba (`readers` chỉ có alice), nên `/ws/chat` từ chối
 nâng cấp (Reader+, `crates/routes/src/ws_chat.rs`); WS `close` không mang mã HTTP
 nên FE hiểu nhầm thành rớt mạng và thử lại mỗi 3s mãi mãi.
 
@@ -4318,17 +4318,17 @@ nên FE hiểu nhầm thành rớt mạng và thử lại mỗi 3s mãi mãi.
   → owner trả quyền lại; ACL đối chiếu lại đúng nguyên trạng).
 - **Console 9200**: bỏ `max-width:1180px` (thừa 740px trên màn 1920) → dùng hết
   bề ngang, thêm mốc 1800px cho cột danh sách 760px. Đã build lại + khởi động lại
-  `hub web` ⇒ **token đổi, tab đang mở phải F5**.
+  `huba web` ⇒ **token đổi, tab đang mở phải F5**.
 - **Lỗi của tfl5 phát hiện kèm** (chưa báo sang session tfl5): ô Version ở màn
   Releases có `pattern="[A-Za-z0-9._-]{1,64}"` → Chrome parse bằng cờ `v` và ném
   `SyntaxError: Invalid character in character class` ⇒ **pattern mất tác dụng**
   và console log lỗi. Sửa: escape `\-` (hoặc đặt `-` ở cuối lớp ký tự).
-## 2026-08-07 — gộp console vào app hub: hubd đẩy, trang tfl5 đọc
+## 2026-08-07 — gộp console vào app huba: hubad đẩy, trang tfl5 đọc
 
-Hà chốt hướng "hubd đẩy dữ liệu lên tfl5" (không port console sang bundle,
+Hà chốt hướng "hubad đẩy dữ liệu lên tfl5" (không port console sang bundle,
 không mở CORS). Lý do đầy đủ nằm ở đầu `rust/src/portal.rs`.
 
-- **Kênh: docs, KHÔNG phải files.** Bản đầu ghi `hub-status.json` qua
+- **Kênh: docs, KHÔNG phải files.** Bản đầu ghi `huba-status.json` qua
   `/app/file/save`. Files nằm dưới public-asset tree và
   `public.rs::row_acl_evaluate` coi **ACL rỗng = ai cũng tải được** — chỉ an
   toàn chừng nào còn bundle live (mọi path khác 404), một điều kiện operator gỡ
@@ -4336,7 +4336,7 @@ không mở CORS). Lý do đầy đủ nằm ở đầu `rust/src/portal.rs`.
   đúng rosters đó nên danh sách cứng sẽ chặn luôn thành viên thêm sau. ⟹ chuyển
   sang **doc** trong resource `hub_status` (chỉ vào được qua API, gác bởi
   Reader+ của app). File cũ đã xoá trong cùng lượt đẩy.
-- Đường đi: `hub portal-push` (có `--dry-run`) + `hubd` tự đẩy sau mỗi cycle
+- Đường đi: `huba portal-push` (có `--dry-run`) + `hubad` tự đẩy sau mỗi cycle
   (lỗi được log, `Skip` khi kênh tắt, không bao giờ làm chết vòng lặp).
 - FE bundle **v5**: hai tab "Trò chuyện | Bảng điều khiển"; bảng có dải số,
   biểu đồ chi phí (**ECharts** vendored trong bundle, CSP `script-src 'self'`),
@@ -4351,9 +4351,9 @@ không mở CORS). Lý do đầy đủ nằm ở đầu `rust/src/portal.rs`.
 - Console 9200: nút "Tải lại" ở Hộp việc vỡ 2 dòng cạnh ô lọc → `white-space:
   nowrap` cho mọi `button`; đo lại 62×35px, 1 dòng, cùng hàng ở 1100/1440/1920.
 - `cargo fmt` đã format lại vài file ngoài phạm vi (web.rs, db.rs…) vì cây
-  trước đó chưa fmt-sạch; hub không có git nên không tách được diff.
+  trước đó chưa fmt-sạch; huba không có git nên không tách được diff.
 
-`hubd` đã restart sang bản có portal-push và **tự đẩy ngay trong cycle đầu**.
+`hubad` đã restart sang bản có portal-push và **tự đẩy ngay trong cycle đầu**.
 Bản cũ không dừng bằng Ctrl-C vì nó chạy nền chứ không phải foreground job —
 phải `kill <pid>` rồi khởi động lại (lock file từ chối tiến trình thứ hai, đúng
 thiết kế).
@@ -4375,8 +4375,8 @@ mục đó, tab Sức khoẻ có 6 chip + 12 lượt chạy, tab Chi phí có b�
 Cấu hình 3143 ký tự + không lộ secret + chỉ đường sang 9200 để sửa).
 
 ⚠ **Bẫy "contract + consumer phải đi cùng nhau"**: đẩy tay snapshot schema 2
-xong mà `hubd` vẫn chạy binary CŨ ⇒ cycle kế tiếp **ghi đè lại bằng schema 1**,
-test đỏ đúng 4 mục health/config. Đổi định dạng snapshot ⇒ phải restart hubd
+xong mà `hubad` vẫn chạy binary CŨ ⇒ cycle kế tiếp **ghi đè lại bằng schema 1**,
+test đỏ đúng 4 mục health/config. Đổi định dạng snapshot ⇒ phải restart hubad
 trong cùng một lượt.
 
 ### Dồn về MỘT nơi: bảng cũng ghi được (Hà chốt "dồn tất cả làm 1")
@@ -4398,7 +4398,7 @@ token màu, `.panel` bo 12px, `.split` list-trái/chi-tiết-phải, `.scroll`. 
 | | trong phòng chat | trong hộp việc |
 |---|---|---|
 | tổng | 146 dòng (83 alice · **61 hubbot** · 2 administrator) | 169 mục |
-| chỉ có ở đây | 61 dòng hub tự nói + **46 lệnh gạch chéo** | **125 mục** github/devlog/cli |
+| chỉ có ở đây | 61 dòng huba tự nói + **46 lệnh gạch chéo** | **125 mục** github/devlog/cli |
 | giao nhau | \=\=\=\= 44 câu hỏi gõ trong phòng \=\=\=\= | |
 
 ⟹ Hà chốt: **tab riêng** cạnh Hộp việc (gộp vào cột phải thì chật, đúng như Hà
@@ -4500,13 +4500,13 @@ thắng, câu trống không xoá, không rò giữa phòng, pin theo thread) +
 ### Spinner "đang xử lý" treo vĩnh viễn (Hà báo 08-07 tối) — bundle v16
 
 Gửi câu hỏi ở tab Trò chuyện xong là dòng *"đang xử lý — câu trả lời cần người
-duyệt trước khi gửi"* đứng mãi. Không phải treo kỹ thuật: ở tier **L0 hub soạn
+duyệt trước khi gửi"* đứng mãi. Không phải treo kỹ thuật: ở tier **L0 huba soạn
 NHÁP rồi dừng chờ owner**, nên **không bao giờ** có tin trả lời tự đến để tắt
 spinner. Câu chữ đúng trong ~1 phút đầu và sai từ đó trở đi.
 
 Nay trang **bám theo chính câu hỏi đó trong snapshot** (`watchPending`) và kết
 thúc ở một trong ba trạng thái thật: đang phân loại · đã gộp vào quyết định
-khác · **hub soạn xong, chờ duyệt** — kèm nút **Duyệt & gửi #<id>** ngay trong
+khác · **huba soạn xong, chờ duyệt** — kèm nút **Duyệt & gửi #<id>** ngay trong
 khung chat và nút mở Bảng điều khiển. Có hạn 8 phút; hết hạn thì tắt spinner
 kèm lý do, không im lặng.
 
@@ -4529,7 +4529,7 @@ nhóm, nay đã bù đủ (bundle **v14**):
 | console | trạng thái |
 |---|---|
 | Header: **Poll kênh**, **Chạy 1 vòng** | ✅ verb mới `/ingest`, `/run` |
-| Hộp việc: panel **Hỏi hub**, **bộ lọc trạng thái** | ✅ (hỏi = tin nhắn thường; lọc phía client trên snapshot) |
+| Hộp việc: panel **Hỏi huba**, **bộ lọc trạng thái** | ✅ (hỏi = tin nhắn thường; lọc phía client trên snapshot) |
 | Chi tiết: **Đề xuất**, **Bằng chứng**, dòng **policy**, link, **nháp SỬA ĐƯỢC** | ✅ snapshot mang thêm `evidence`+`outcome`; `/approve <id> <nội dung>` giờ dùng nội dung đã sửa (trước đó `cmd.arg` **bị nuốt** — bấm Duyệt là gửi bản của model) |
 | Sức khoẻ: nút **Kiểm tra** | ✅ verb `/doctor` → `portal::probe_now` (bỏ qua cache 10 phút) |
 | Cấu hình: **form + Lưu** | ✅ verb `/set <trường> <giá trị>`: kiểu được suy từ giá trị đang có, round-trip qua `Config` + `config::validate` + `config::save` (backup + temp-rename). Form gửi **một lệnh cho mỗi trường thực sự đổi** |
@@ -4538,7 +4538,7 @@ nhóm, nay đã bù đủ (bundle **v14**):
 BÊN TRONG một cycle (`run_once → ingest → execute_commands`), gọi lại là đệ quy.
 
 Nghiệm thu: `fe-board-uc.mjs` **41/41**, `fe-config-uc.mjs` **8/8** (đổi
-`max_triage_per_cycle`, hub xác nhận, **đọc lại tệp trên đĩa**, rồi trả về giá
+`max_triage_per_cycle`, huba xác nhận, **đọc lại tệp trên đĩa**, rồi trả về giá
 trị cũ), `fe-command-uc.mjs` 6/6, `fe-smoke` 15/15, `fe-denied` 10/10.
 
 ⚠ Ba lần liên tiếp test đỏ vì **phép đo**, không phải sản phẩm: (1) `td.num` đã
@@ -4572,38 +4572,38 @@ lại theo trí nhớ** — mỗi lần tự chế là một lần Hà phải ch
 4. Bảng tải lại thì **xoá trắng pane chi tiết** — nay giữ nguyên mục đang chọn.
 
 **Vai trò**: lệnh phải do tài khoản trong `trust.tfl5_user_tids` gửi, và **không
-thể là chính `hubbot`** (hub lọc tin của chính mình trong `select_new`, nếu
+thể là chính `hubbot`** (huba lọc tin của chính mình trong `select_new`, nếu
 không sẽ tự triage lời mình). Đã thêm `administrator`
-(`u-34d6a0c5-…`) vào trust list — gỡ bằng cách xoá khỏi `hub.config.json`
+(`u-34d6a0c5-…`) vào trust list — gỡ bằng cách xoá khỏi `huba.config.json`
 (daemon tự nạp lại theo mtime, không cần restart).
 
-**Nghiệm thu**: `fe-command-uc.mjs` **6/6** — bấm nút → hub trả lời trong phòng
+**Nghiệm thu**: `fe-command-uc.mjs` **6/6** — bấm nút → huba trả lời trong phòng
 → ảnh chụp mới cho thấy mục sang `closed`, và **số mục chứa "/close" không
 tăng** (bằng chứng không còn tốn tiền triage). Cùng lượt: fe-board 31/31,
 fe-smoke 15/15, fe-denied 10/10, `cargo test` 14 bộ xanh, fmt sạch.
-Rác thí nghiệm (#157/#160/#161/#163 — lệnh bị ingest nhầm) đã đóng bằng `hub close`.
+Rác thí nghiệm (#157/#160/#161/#163 — lệnh bị ingest nhầm) đã đóng bằng `huba close`.
 Bundle **v9**.
 
 ## Đang ở đâu (2026-08-06)
 
-hub giờ có **kênh thứ 5: `tfl5`** — một phòng chat trên tfl5, hub là *client kết
+huba giờ có **kênh thứ 5: `tfl5`** — một phòng chat trên tfl5, huba là *client kết
 nối ra*, không mở cổng nào trên máy. Người dùng gõ trên giao diện web, câu hỏi
 chạy hết pipeline, owner duyệt, câu trả lời **tự hiện lại trên trang đang mở**.
 
 - Local: tfl5 `:8090`, user `hubbot`, app `a-65dd60d3-624e-45a9-8fdf-62aa7d894d80`,
-  phòng `hub`, FE ở `http://<app_tid>.test.localhost:8090` (bundle v2).
+  phòng `huba`, FE ở `http://<app_tid>.test.localhost:8090` (bundle v2).
 - Test: `cargo test --offline` → **112/112**, 0 warning. FE: `node fe-smoke.mjs
   <app_tid> <user> <pass>` → 15/15, 0 console error.
-- Secret trong `hub.env` (chmod 600, gitignored). `HUB_TFL5_ALICE_PASSWORD` là
+- Secret trong `huba.env` (chmod 600, gitignored). `HUB_TFL5_ALICE_PASSWORD` là
   tài khoản **test** — xoá được bất cứ lúc nào.
 
-**Đã chạy thật thêm (2026-08-06 chiều):** act stage lần đầu trên `AI/hub-act-demo`
+**Đã chạy thật thêm (2026-08-06 chiều):** act stage lần đầu trên `AI/huba-act-demo`
 (repo nháp cô lập) · lệnh `/approve` `/reject` `/help` trong phòng chat, chỉ owner
 mới ra lệnh được, `/act` cố ý bị từ chối trong chat · trí nhớ hội thoại qua
 `--resume` (`source_thread_memory_hours`).
 
-**Socket thường trực:** `src/live.rs` giữ `/ws/chat` mở trong `hubd` + `Waker`
-cắt ngắn giấc ngủ của vòng lặp. Toàn bộ ở phía hub, **không sửa gì của tfl5** —
+**Socket thường trực:** `src/live.rs` giữ `/ws/chat` mở trong `hubad` + `Waker`
+cắt ngắn giấc ngủ của vòng lặp. Toàn bộ ở phía huba, **không sửa gì của tfl5** —
 server đã push sẵn. Poller giữ nguyên làm đường chắc (rớt mạng vẫn không mất tin;
 `UNIQUE(source,external_id)` lo trùng lặp).
 
@@ -4633,8 +4633,8 @@ của workspace chặn (đúng), nên nhánh đó chỉ có test, không có l�
 
 Thay cho `routing[]` + `autonomy.projects{}`; **cả hai bảng cũ vẫn được đọc**
 (có test khoá) nên config cũ không vỡ, registry thắng khi cả hai cùng khai.
-`hub doctor` in mục `projects:` đối chiếu từng tên với thư mục thật và báo **SAI**
-nếu không thấy. `hub say -p` và `/api/say` từ chối tên không có thư mục ngay tại
+`huba doctor` in mục `projects:` đối chiếu từng tên với thư mục thật và báo **SAI**
+nếu không thấy. `huba say -p` và `/api/say` từ chối tên không có thư mục ngay tại
 chỗ — trước đó `../../tmp` vẫn được **lưu vào DB** dù phân giải đã từ chối.
 
 ## Tên project phân giải thế nào (Hà chốt 2026-08-06)
@@ -4643,7 +4643,7 @@ chỗ — trước đó `../../tmp` vẫn được **lưu vào DB** dù phân gi
 (mặc định `["", "AI"]`) là danh sách thư mục tìm theo thứ tự — gốc trước, `AI/`
 sau. Dùng chung cho cả `project_dir` lẫn `devlog::discover_projects`; trước đó
 hai hàm có thứ tự riêng nên "thư mục nào chứa project" có hai câu trả lời.
-`hub doctor` in dòng `project dirs` để danh sách này hết vô hình.
+`huba doctor` in dòng `project dirs` để danh sách này hết vô hình.
 
 **`project` là TÊN, không phải đường dẫn** — `is_project_name()` chỉ nhận một
 segment. Lý do: giá trị này đến từ output của model (`decision.project`) và
@@ -4654,18 +4654,18 @@ stage ra ngoài workspace.
 
 `thread_key` của chat là **cái phòng**, không phải chủ đề. Coalescing 12h đúng
 cho một issue GitHub nhưng làm chat nuốt mất câu hỏi. Và cửa sổ gộp phải neo vào
-**lúc người ta gõ** (`messages.received_at`), không phải lúc hub xử lý — nếu neo
-vào `decisions.ts` thì hễ hub xử lý dồn là mọi câu hỏi lại dính vào nhau.
+**lúc người ta gõ** (`messages.received_at`), không phải lúc huba xử lý — nếu neo
+vào `decisions.ts` thì hễ huba xử lý dồn là mọi câu hỏi lại dính vào nhau.
 
 ## Đang ở đâu
 
-**Canonical = Rust** (`rust/`, binary `hub` + `hubd`, wrapper `./hub` tự build lần
+**Canonical = Rust** (`rust/`, binary `huba` + `hubad`, wrapper `./huba` tự build lần
 đầu). Bản Node archive ở `legacy-node/` làm oracle — xoá lúc nào cũng được, nó
 không còn trỏ vào DB thật. Test: `cd rust && cargo test --offline` → 50/50, 0
 warning, exit 0.
 
-Hub chạy được với 3 kênh không cần credential: **GitHub** (`gh`), **devlog dự
-án**, **CLI** (`hub say`). Email (mailler) + Telegram đã code ở **cả hai bản**
+Huba chạy được với 3 kênh không cần credential: **GitHub** (`gh`), **devlog dự
+án**, **CLI** (`huba say`). Email (mailler) + Telegram đã code ở **cả hai bản**
 nhưng **chưa gọi thật lần nào** vì thiếu token. Act stage (sửa code trên branch)
 đã code, cờ tắt, **chưa chạy lần nào**.
 
@@ -4676,19 +4676,19 @@ initialized", không còn tính là lỗi).
 
 ## Mặt giao tiếp (Phase 2, 2026-07-27)
 
-- `./hub web` → bảng điều khiển ở `127.0.0.1:9200`: Hộp việc (duyệt/bỏ/sửa nháp),
+- `./huba web` → bảng điều khiển ở `127.0.0.1:9200`: Hộp việc (duyệt/bỏ/sửa nháp),
   Cấu hình (form đầy đủ + JSON thô, lưu có validate + backup), Sức khoẻ, Chi phí
-  (ECharts). Auth bằng header `x-hub-token` sinh mỗi lần khởi động.
+  (ECharts). Auth bằng header `x-huba-token` sinh mỗi lần khởi động.
 - Telegram: brief chờ duyệt kèm nút ✅/🚫; bấm nút chạy đúng đường approve/reject
-  của CLI rồi sửa lại chính tin nhắn đó. `./hub telegram-link` tự ghi chat id.
+  của CLI rồi sửa lại chính tin nhắn đó. `./huba telegram-link` tự ghi chat id.
 - Test UI: `node ui-smoke.mjs http://127.0.0.1:9200` (Playwright headless, 14 case).
 
 ## Việc tiếp theo khi mở lại
 
-1. `./hub doctor` — xem kênh nào bật/tắt.
+1. `./huba doctor` — xem kênh nào bật/tắt.
 2. Nếu muốn kênh người-thật: xuất `HUB_TELEGRAM_TOKEN` (BotFather) → `doctor` in
    chat id → bật `adapters.telegram.enabled` + `allowed_chat_ids` +
-   `trust.telegram_chat_ids` → `hub once`.
+   `trust.telegram_chat_ids` → `huba once`.
 3. Nghiệm thu act stage 1 lần (mục 2 trong `PLAN.md`) trước khi tin nó.
 
 ## Điều đã học trong lúc dựng (đừng phát hiện lại)

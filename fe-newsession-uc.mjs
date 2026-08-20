@@ -14,14 +14,14 @@ import { mkdirSync, statSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-const [appTid, username, password, project = "hub-act-demo"] = process.argv.slice(2);
+const [appTid, username, password, project = "huba-act-demo"] = process.argv.slice(2);
 if (!appTid || !username || !password) {
   console.error("usage: node fe-newsession-uc.mjs <app_tid> <username> <password> [project]");
   process.exit(2);
 }
 const BASE = `http://${appTid}.test.localhost:8090`;
 const HERE = new URL("./", import.meta.url).pathname;
-// Gốc workspace TỰ ĐỊNH VỊ: `<workspace>/hub/` → `<workspace>`. Gõ cứng
+// Gốc workspace TỰ ĐỊNH VỊ: `<workspace>/huba/` → `<workspace>`. Gõ cứng
 // `~/Documents/projects` ở đây thì phép đo "phiên mở ở gốc workspace" hoá đỏ
 // ngay hôm gốc dời sang `~/projects` (2026-08-12) — đỏ vì phép đo, không vì sản
 // phẩm, và đó là loại đỏ dạy người ta bỏ qua màu đỏ.
@@ -36,9 +36,9 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "✓" : "✗"} ${name}${detail ? ` — ${detail}` : ""}`);
   if (!ok) problems.push(`${name}${detail ? `: ${detail}` : ""}`);
 };
-const hub = (args) =>
+const huba = (args) =>
   JSON.parse(
-    execFileSync(HERE + "rust/target/release/hub", args, {
+    execFileSync(HERE + "rust/target/release/huba", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     })
@@ -59,7 +59,7 @@ function transcriptOf(sessionId) {
 }
 /// Lượt NGƯỜI DÙNG đầu tiên trong nhật ký — tức đề bài đã tới phiên hay chưa.
 ///
-/// Đọc thẳng tệp thay vì hỏi `hub sessions`: hub là thứ đang được nghiệm thu,
+/// Đọc thẳng tệp thay vì hỏi `huba sessions`: huba là thứ đang được nghiệm thu,
 /// nên nó không được vừa làm vừa chấm bài của chính mình.
 function firstUserTurn(path) {
   if (!path) return "";
@@ -81,7 +81,7 @@ function firstUserTurn(path) {
 
 /// Còn cửa sổ Terminal nào đang chạy cái tty này không — hỏi CHÍNH Terminal.
 ///
-/// Không hỏi hub: hub là thứ đang bị chấm bài. Không hỏi `ps`: `ps` trả lời
+/// Không hỏi huba: huba là thứ đang bị chấm bài. Không hỏi `ps`: `ps` trả lời
 /// "còn tiến trình nào không", mà đó mới là NỬA định nghĩa "tắt hẳn" — nửa kia
 /// là cửa sổ, và ca hay gặp nhất chính là CLI thoát rồi mà cửa sổ vẫn mở.
 function ttyHasWindow(tty) {
@@ -134,7 +134,7 @@ try {
 
   // UC-S09, nửa "còn tươi": trang phải nói ảnh chụp CŨ BAO LÂU, không chỉ mấy
   // giờ mấy phút — một mốc giờ trần trụi đọc như "bây giờ" với người không ngồi
-  // trừ nhẩm, và đó đúng là lúc hub chết thì màn vẫn trông như thật.
+  // trừ nhẩm, và đó đúng là lúc huba chết thì màn vẫn trông như thật.
   const stamp0 = await page.textContent("#boardStamp");
   check("trang nói ảnh chụp cũ bao lâu", /trước\)/.test(stamp0), stamp0.trim().slice(0, 70));
   check(
@@ -143,7 +143,7 @@ try {
     stamp0.trim().slice(0, 40)
   );
 
-  const before = new Set(hub(["sessions", "--json"]).sessions.map((s) => s.session_id));
+  const before = new Set(huba(["sessions", "--json"]).sessions.map((s) => s.session_id));
 
   // ——— UC-S06: mở phiên làm việc mới ———
   await page.click("#sessNewBox summary");
@@ -156,12 +156,12 @@ try {
   await page.click("#sessNew");
   check("ô việc được dọn sau khi gửi", (await page.inputValue("#sessNewTask")) === "");
 
-  // Phiên MỚI phải hiện ra mà không cần đụng vào máy tính — HOẶC hub phải nói
+  // Phiên MỚI phải hiện ra mà không cần đụng vào máy tính — HOẶC huba phải nói
   // thẳng là nó kẹt. Trên máy này mọi dự án đều nằm dưới một `.mcp.json`, nên
   // phiên nền dựng lên sẽ dừng ở hộp thoại duyệt MCP; điều KHÔNG được phép là
-  // hub báo "đã mở phiên" cho một phiên chẳng bao giờ làm gì.
-  // Chờ CÂU TRẢ LỜI CỦA HUB trên màn, không rình danh sách phiên. Rình danh
-  // sách là đua với chính hub: nó mất ~14s để xem phiên có kẹt không rồi mới
+  // huba báo "đã mở phiên" cho một phiên chẳng bao giờ làm gì.
+  // Chờ CÂU TRẢ LỜI CỦA HUBA trên màn, không rình danh sách phiên. Rình danh
+  // sách là đua với chính huba: nó mất ~14s để xem phiên có kẹt không rồi mới
   // dừng, nên có cửa sổ mà phiên vừa hiện vừa sắp bị giết — bản trước báo
   // "phiên mới xuất hiện ✓" cho một phiên vài giây sau không còn.
   //
@@ -179,18 +179,18 @@ try {
   console.log(`\nhub trả lời: ${verdict.slice(0, 160)}\n`);
   const openedOk = /^🚀/.test(verdict);
   let fresh = openedOk
-    ? hub(["sessions", "--json"]).sessions.find((s) => !before.has(s.session_id))
+    ? huba(["sessions", "--json"]).sessions.find((s) => !before.has(s.session_id))
     : null;
   const blocked = openedOk ? "" : verdict;
 
   if (!fresh) {
-    // Đường KẸT: nghiệm thu ở đây là "hub nói đúng sự thật", không phải "có phiên".
-    check("hub KHÔNG báo mở thành công khi phiên kẹt", !/🚀/.test(blocked), blocked.slice(0, 80));
-    check("hub nói rõ kẹt vì đâu", /MCP/.test(blocked), blocked.slice(0, 160));
-    check("hub chỉ ra cách gỡ một lần trên máy", /claude/.test(blocked) && /Enter|Esc/.test(blocked));
+    // Đường KẸT: nghiệm thu ở đây là "huba nói đúng sự thật", không phải "có phiên".
+    check("huba KHÔNG báo mở thành công khi phiên kẹt", !/🚀/.test(blocked), blocked.slice(0, 80));
+    check("huba nói rõ kẹt vì đâu", /MCP/.test(blocked), blocked.slice(0, 160));
+    check("huba chỉ ra cách gỡ một lần trên máy", /claude/.test(blocked) && /Enter|Esc/.test(blocked));
     check(
       "không để lại phiên kẹt lơ lửng",
-      !hub(["sessions", "--json"]).sessions.some((s) => !before.has(s.session_id))
+      !huba(["sessions", "--json"]).sessions.some((s) => !before.has(s.session_id))
     );
     console.log("\n  · máy này chưa duyệt MCP cho dự án đó ⇒ chỉ nghiệm thu được ĐƯỜNG KẸT");
     console.log("  · duyệt một lần rồi chạy lại để kiểm đường thành công:");
@@ -200,10 +200,10 @@ try {
   check("phiên mới xuất hiện mà không cần chạm vào máy", true, fresh.session_id.slice(0, 8));
   started = fresh;
   // Từ 2026-08-11 `/new` mở CỬA SỔ THẬT, không phải phiên nền — Hà: *"cli
-  // claude cài trên máy tôi, hub là cầu kết nối ra ui"*. Phép đo đổi theo, và
+  // claude cài trên máy tôi, huba là cầu kết nối ra ui"*. Phép đo đổi theo, và
   // đổi sang thứ ĐÁNG đo: có cửa sổ thì mới có màn sống, mới `/btw` được, mới
   // hiện được "đang làm gì". `kind` một mình không đủ — một hàng `interactive`
-  // không tty là phiên hub không với tới.
+  // không tty là phiên huba không với tới.
   check(
     "phiên mới là phiên CÓ CỬA SỔ",
     fresh.kind === "interactive" && !!fresh.tty && fresh.host === "terminal",
@@ -241,7 +241,7 @@ try {
   );
   check("phiên mới hiện trên màn danh sách", true, fresh.name || "");
 
-  // Phiên vừa mở phải TỰ NÓI nó do hub mở — đó là điểm khác biệt duy nhất giữa
+  // Phiên vừa mở phải TỰ NÓI nó do huba mở — đó là điểm khác biệt duy nhất giữa
   // nó và một `claude --bg` gõ tay, và là thứ quyết định người dùng có nói tiếp
   // / dừng được từ điện thoại hay không.
   const newGroup = await page.evaluate((id) => {
@@ -251,29 +251,29 @@ try {
     while (el && !(el.classList && el.classList.contains("sess-group"))) el = el.previousElementSibling;
     return el ? { g: el.dataset.g, text: el.textContent.replace(/\s+/g, " ").trim() } : null;
   }, fresh.session_id);
-  check("phiên mới nằm dưới tiêu đề 'hub mở từ điện thoại'",
-    !!newGroup && newGroup.g === "hub" && /hub mở/.test(newGroup.text),
+  check("phiên mới nằm dưới tiêu đề 'huba mở từ điện thoại'",
+    !!newGroup && newGroup.g === "huba" && /huba mở/.test(newGroup.text),
     newGroup ? newGroup.text : "(không thấy tiêu đề nhóm)");
 
   await page.locator(`.sess[data-session="${fresh.session_id}"]`).click();
   check("mở được màn chi tiết của phiên mới", await page.locator("#sessDetail").isVisible());
-  check("phiên do hub mở thì CÓ nút Dừng", await page.locator("#sessStop").isVisible());
-  // v85 gộp hai ô làm một. Với phiên hub mở, mặc định PHẢI là "nói tiếp":
+  check("phiên do huba mở thì CÓ nút Dừng", await page.locator("#sessStop").isVisible());
+  // v85 gộp hai ô làm một. Với phiên huba mở, mặc định PHẢI là "nói tiếp":
   // ô tích "hỏi bên lề" bỏ trống và mở cho người dùng tự chọn.
-  check("phiên do hub mở thì CÓ ô nhập", await page.locator("#sessSayInput").isVisible());
+  check("phiên do huba mở thì CÓ ô nhập", await page.locator("#sessSayInput").isVisible());
   check("mặc định là NÓI TIẾP, không phải hỏi bên lề",
     (await page.locator("#sessAside").isChecked()) === false &&
       (await page.locator("#sessAside").isDisabled()) === false,
     await page.locator("#sessSayInput").getAttribute("placeholder"));
 
-  // MÀN SỐNG — thứ phân biệt "hub mở được cửa sổ" với "hub nhìn được vào cửa sổ".
+  // MÀN SỐNG — thứ phân biệt "huba mở được cửa sổ" với "huba nhìn được vào cửa sổ".
   //
   // Đây là lý do `/new` bỏ `--bg`: phiên nền không có màn để nhìn. Nếu mở cửa
   // sổ rồi mà màn vẫn trống thì việc đổi đường coi như chưa tới đích, nên nó
   // phải là một mục nghiệm thu, không phải một lần soi tay.
   //
   // Chờ có mốc: màn chỉ tới trang sau lượt đẩy ảnh chụp KẾ TIẾP lượt `/session`
-  // (hub đọc màn hình rồi mới đẩy), nên đo ngay là đo độ trễ chứ không đo sản
+  // (huba đọc màn hình rồi mới đẩy), nên đo ngay là đo độ trễ chứ không đo sản
   // phẩm. Chờ tối đa 2 phút.
   let liveScreen = false;
   for (let i = 0; i < 60 && !liveScreen; i++) {
@@ -286,7 +286,7 @@ try {
   check(
     "màn chi tiết có nội dung sống, không phải hộp trắng",
     liveScreen,
-    liveScreen ? "có" : "trống sau 2 phút — hub chưa đẩy được luồng/màn của phiên"
+    liveScreen ? "có" : "trống sau 2 phút — huba chưa đẩy được luồng/màn của phiên"
   );
 
   const file = transcriptOf(fresh.session_id);
@@ -303,7 +303,7 @@ try {
   let stopped = false;
   const sizeBefore = sizeOf(file);
   const idsBefore = new Set(
-    hub(["sessions", "--json"]).sessions.map((s) => s.session_id)
+    huba(["sessions", "--json"]).sessions.map((s) => s.session_id)
   );
   await page.fill("#sessSayInput", "Nội dung README bạn vừa đọc nói về cái gì? Trả lời một dòng.");
   await page.click("#sessSay");
@@ -346,9 +346,9 @@ try {
   // kia xanh thì phép đo này xanh theo, bất kể có đẻ ra phiên lạ hay không.
   // Nay so tập id trước/sau: chữ phải ở LẠI trên phiên cũ.
   const idsAfter = new Set(
-    hub(["sessions", "--json"]).sessions.map((s) => s.session_id)
+    huba(["sessions", "--json"]).sessions.map((s) => s.session_id)
   );
-  const moi = hub(["sessions", "--json"]).sessions.filter(
+  const moi = huba(["sessions", "--json"]).sessions.filter(
     (x) => !idsBefore.has(x.session_id) && x.session_id !== fresh.session_id
   );
   // Phiên lạ nào là DO BƯỚC NÀY đẻ ra?
@@ -356,11 +356,11 @@ try {
   // "Có phiên mới trên máy" là một phép đo quá rộng — 2026-08-11 nó báo đỏ vì
   // chủ máy tự mở một `claude` khác để gõ `/usage` trong lúc kịch bản chạy.
   // Cái cần khẳng định là "`/type` không đẻ phiên", nên bằng chứng phải buộc
-  // vào chính lượt gõ: một phiên do bước này sinh ra thì hoặc mang dấu của hub,
+  // vào chính lượt gõ: một phiên do bước này sinh ra thì hoặc mang dấu của huba,
   // hoặc mang CHÍNH câu vừa gõ ở lượt đầu nhật ký.
   //
-  // Không thu hẹp về mỗi `started_by_hub`: một phiên hub đẻ ra NGOÀI Ý MUỐN sẽ
-  // không có trong sổ của hub, nên đóng khung theo dấu ấy là bịt mắt đúng chỗ
+  // Không thu hẹp về mỗi `started_by_hub`: một phiên huba đẻ ra NGOÀI Ý MUỐN sẽ
+  // không có trong sổ của huba, nên đóng khung theo dấu ấy là bịt mắt đúng chỗ
   // phép đo sinh ra để nhìn.
   const doBuocNay = moi.filter(
     (x) =>
@@ -371,7 +371,7 @@ try {
     console.log(
       `  · ghi nhận: có ${moi.length} phiên mới trên máy trong lúc chạy ` +
       `(${moi.map((x) => `${x.session_id.slice(0, 8)} @ ${x.cwd}`).join(", ")}) — ` +
-      `không mang dấu hub và không mang câu vừa gõ, nên không phải do bước này.`
+      `không mang dấu huba và không mang câu vừa gõ, nên không phải do bước này.`
     );
   }
   check(
@@ -390,7 +390,7 @@ try {
   // bỏ lọt đúng ca hay gặp nhất — CLI thoát rồi mà cửa sổ vẫn nằm đấy.
   //
   // Bước này CẦN MỘT NGÓN TAY THẬT: `/stop` đi qua chốt xác nhận Telegram
-  // (`confirm.rs`), nên hub đứng chờ tới 90 giây một cú bấm. Không ai bấm thì
+  // (`confirm.rs`), nên huba đứng chờ tới 90 giây một cú bấm. Không ai bấm thì
   // kịch bản nói "BỎ QUA vì chưa ai xác nhận", KHÔNG tính là hỏng — sản phẩm
   // lúc ấy đang cư xử đúng.
   const nutTat = (await page.textContent("#sessStop")).trim();
@@ -416,7 +416,7 @@ try {
     check("cửa sổ terminal đã đóng", !ttyHasWindow(fresh.tty), fresh.tty);
     let left = false;
     for (let i = 0; i < 15 && !left; i++) {
-      left = !hub(["sessions", "--json"]).sessions.some((x) => x.session_id === fresh.session_id);
+      left = !huba(["sessions", "--json"]).sessions.some((x) => x.session_id === fresh.session_id);
       if (!left) await page.waitForTimeout(2000);
     }
     check("phiên rời khỏi danh sách đang chạy", left, fresh.session_id.slice(0, 8));

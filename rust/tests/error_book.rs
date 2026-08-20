@@ -10,9 +10,9 @@
 //! bắt mọi đường lỗi phải ghi một dòng ở đó, nên đây không phải một phép xấp xỉ
 //! — nó là cùng một mệnh đề, đọc từ đầu kia.
 //!
-//! 📐 **Nó đo cái gì, đo bằng số thật** (đếm trên `logs/hub.log`, 2026-08-14):
+//! 📐 **Nó đo cái gì, đo bằng số thật** (đếm trên `logs/huba.log`, 2026-08-14):
 //! 83.060 dòng `info` · **1.626 `warn`** · **120 `error`**. Tức khối này KHÔNG
-//! phải "mọi trục trặc" — phần lớn trục trặc của hub sống ở mức `warn`, và cố ý
+//! phải "mọi trục trặc" — phần lớn trục trặc của huba sống ở mức `warn`, và cố ý
 //! sống ở đó (ví dụ `claude_agents_list_failed`: không liệt kê được phiên thì đã
 //! có `blind`/`notes` và `/accounts` nói ra, không cần chuông thứ hai). Đọc một
 //! khối rỗng là "không có LỖI", không phải "không có gì đáng xem".
@@ -21,7 +21,7 @@
 //! `adapter_poll_failed` (25) — thuộc hai nhánh vừa bị xoá hôm nay. Thứ còn lại
 //! là `telegram_poll_rejected`, `telegram_ack_failed`,
 //! `session_change_telegram_failed`, `claude_call_failed`, `hubd_fatal`: đúng
-//! những thứ đáng hiện lên màn khi hub im tiếng mà không rõ vì sao.
+//! những thứ đáng hiện lên màn khi huba im tiếng mà không rõ vì sao.
 //!
 //! ⚠ Bộ đếm là TOÀN CỤC của tiến trình, nên hai bài kiểm dưới đây phải đi lần
 //! lượt: `cargo test` chạy các bài trong cùng một tệp song song, và bản nháp đầu
@@ -37,15 +37,15 @@ static SERIAL: Mutex<()> = Mutex::new(());
 fn an_error_line_is_counted_and_a_warning_is_not() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
 
-    let before = hub::logging::error_count();
-    hub::logging::error("test_loi_gia", serde_json::json!({ "vi_sao": "để đếm" }));
+    let before = huba::logging::error_count();
+    huba::logging::error("test_loi_gia", serde_json::json!({ "vi_sao": "để đếm" }));
     assert_eq!(
-        hub::logging::error_count(),
+        huba::logging::error_count(),
         before + 1,
         "một dòng error phải được đếm"
     );
     assert_eq!(
-        hub::logging::last_error_msg().as_deref(),
+        huba::logging::last_error_msg().as_deref(),
         Some("test_loi_gia"),
         "tên sự kiện gần nhất phải giữ được — nó là thứ /doctor đọc"
     );
@@ -53,10 +53,10 @@ fn an_error_line_is_counted_and_a_warning_is_not() {
     // `warn` KHÔNG phải lỗi. Nếu tính nó thì mọi vòng đều đỏ, và một bảng đỏ
     // liên tục mù y hệt một bảng xanh liên tục — chỉ khác là nó còn dạy người
     // đọc thói quen bỏ qua.
-    let before = hub::logging::error_count();
-    hub::logging::warn("test_canh_bao", serde_json::json!({}));
+    let before = huba::logging::error_count();
+    huba::logging::warn("test_canh_bao", serde_json::json!({}));
     assert_eq!(
-        hub::logging::error_count(),
+        huba::logging::error_count(),
         before,
         "warn bị tính thành error thì khối 'lỗi gần đây' thành khối 'mọi thứ'"
     );
@@ -75,14 +75,14 @@ fn an_error_line_is_counted_and_a_warning_is_not() {
 fn only_the_event_name_survives_never_the_fields() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
 
-    hub::logging::error(
+    huba::logging::error(
         "test_loi_co_bi_mat",
         serde_json::json!({
             "url": "https://api.telegram.org/bot99:AAA-token-that-must-not-travel/x",
             "path": "/Users/hanguyen/thu-muc-rieng",
         }),
     );
-    let kept = hub::logging::last_error_msg().expect("phải có tên sự kiện");
+    let kept = huba::logging::last_error_msg().expect("phải có tên sự kiện");
     assert_eq!(kept, "test_loi_co_bi_mat");
     for secret in [
         "token-that-must-not-travel",
@@ -103,15 +103,15 @@ fn only_the_event_name_survives_never_the_fields() {
 /// và hàm ấy có đúng một chỗ gọi — `portal.rs`, tệp chết cùng trang tfl5.
 ///
 /// Hai vế, và vế thứ hai mới là vế dễ mất: một dòng "không có lỗi" KHÔNG được
-/// đọc thành "mọi thứ ổn". Phần lớn trục trặc của hub sống ở mức `warn` và cố ý
+/// đọc thành "mọi thứ ổn". Phần lớn trục trặc của huba sống ở mức `warn` và cố ý
 /// không lên đây, nên câu trả lời phải tự khai phạm vi của nó.
 #[test]
 fn doctor_says_what_it_found_and_what_it_looked_at() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = hub::db::Db::open(&dir.path().join("hub.sqlite")).expect("open db");
+    let db = huba::db::Db::open(&dir.path().join("huba.sqlite")).expect("open db");
 
     // Sổ trắng: phải nói rõ soi 40 vòng, và nói rõ `warn` không tính.
-    let clean = hub::pipeline::recent_errors_line(&db);
+    let clean = huba::pipeline::recent_errors_line(&db);
     assert!(clean.contains("không có lỗi"), "{clean}");
     assert!(
         clean.contains("40") && clean.contains("warn"),
@@ -123,7 +123,7 @@ fn doctor_says_what_it_found_and_what_it_looked_at() {
     let id = db.start_run("cycle", "cycle").expect("start");
     db.finish_run(
         id,
-        hub::db::RunFinish {
+        huba::db::RunFinish {
             ok: false,
             n_new: 0,
             err: Some("2 lỗi trong vòng này, gần nhất: telegram_ack_failed".into()),
@@ -131,7 +131,7 @@ fn doctor_says_what_it_found_and_what_it_looked_at() {
         },
     )
     .expect("finish");
-    let dirty = hub::pipeline::recent_errors_line(&db);
+    let dirty = huba::pipeline::recent_errors_line(&db);
     assert!(dirty.contains("lỗi gần đây"), "{dirty}");
     assert!(
         dirty.contains("telegram_ack_failed"),
@@ -164,7 +164,7 @@ fn doctor_says_what_it_found_and_what_it_looked_at() {
 
 #[test]
 fn the_block_pasted_back_into_a_session_says_only_what_it_must() {
-    use hub::pipeline::runin_block;
+    use huba::pipeline::runin_block;
 
     let ok = runin_block(
         "git -C ~/projects/dwork/dev push origin main",
@@ -172,19 +172,19 @@ fn the_block_pasted_back_into_a_session_says_only_what_it_must() {
         false,
     );
     // Hai thứ phải còn: ai chạy, và chạy cái gì.
-    assert!(ok.starts_with("[hub chạy hộ]"), "{ok}");
+    assert!(ok.starts_with("[huba chạy hộ]"), "{ok}");
     assert!(
         ok.contains("$ git -C ~/projects/dwork/dev push origin main"),
         "{ok}"
     );
-    // …và ruột hub thì không.
+    // …và ruột huba thì không.
     for thua in [
         "cwd",
         "trên máy",
         "KHÔNG có tty",
         "/Users/hanguyen/projects/dwork,",
     ] {
-        assert!(!ok.contains(thua), "còn kể ruột hub ({thua}): {ok}");
+        assert!(!ok.contains(thua), "còn kể ruột huba ({thua}): {ok}");
     }
     assert!(
         ok.lines().next().is_some_and(|l| l.chars().count() <= 20),
@@ -202,7 +202,7 @@ fn the_block_pasted_back_into_a_session_says_only_what_it_must() {
 
 #[test]
 fn a_restart_on_the_same_binary_is_not_news() {
-    use hub::runtime::boot_is_news;
+    use huba::runtime::boot_is_news;
     let v = "/Users/hanguyen/Library/Application Support/hub/bin/hubd@2026-08-15T16:33:59Z";
 
     // Chưa từng ghi ⟹ NÓI: lượt đầu sau khi dựng cơ chế này chính là một lần cài.
@@ -212,7 +212,7 @@ fn a_restart_on_the_same_binary_is_not_news() {
         Some("/Users/hanguyen/Library/Application Support/hub/bin/hubd@2026-08-15T15:32:13Z"),
         v
     ));
-    // Lên lại ĐÚNG bản ấy ⟹ IM. hubd còn lên lại vì crash và vì `KeepAlive`;
+    // Lên lại ĐÚNG bản ấy ⟹ IM. hubad còn lên lại vì crash và vì `KeepAlive`;
     // một cái chuông ở đó là chuông kêu lúc không có tin (luật 11).
     assert!(!boot_is_news(Some(v), v));
 }

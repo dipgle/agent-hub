@@ -1,9 +1,9 @@
 // UC-S08 — gõ thẳng vào cửa sổ phiên, qua đúng UI của điện thoại.
 //
-// Vì sao có kịch bản này: 2026-08-10 hub báo "⌨ đã bấm" trong khi Hà **không
+// Vì sao có kịch bản này: 2026-08-10 huba báo "⌨ đã bấm" trong khi Hà **không
 // thấy hiện tượng gì**. Mã trả về của `osascript` bằng 0 chỉ chứng minh byte đã
 // vào tab — nó không nói `claude` bên trong làm gì với byte ấy. Nên phép đo ở
-// đây KHÔNG hỏi "hub có báo thành công không", mà hỏi **"hub có nói đúng chỗ
+// đây KHÔNG hỏi "huba có báo thành công không", mà hỏi **"huba có nói đúng chỗ
 // chữ đã tới không"**: hàng chờ, đang chạy, hay dấu nhắc.
 //
 // ⚠ Kịch bản này gõ THẬT vào một phiên THẬT của chủ máy — không có đường giả.
@@ -11,7 +11,7 @@
 import { chromium } from "/Users/hanguyen/projects/AI/sdvi/web-v2/node_modules/playwright-core/index.mjs";
 
 const [app, u, p, want] = process.argv.slice(2);
-const PROBE = "(hub tự kiểm đường gõ — bỏ qua tin này)";
+const PROBE = "(huba tự kiểm đường gõ — bỏ qua tin này)";
 
 const br = await chromium.launch();
 const pg = await br.newPage({ viewport: { width: 390, height: 844 } });
@@ -84,7 +84,7 @@ for (const q of ["#sessSay", "#sessNew", "#sessStop", "#sessHandover", "#sessBac
 await pg.fill("#sessSayInput", PROBE);
 await pg.click("#sessSay");
 
-// ── 3. Hub phải nói ĐÚNG CHỖ chữ đã tới ───────────────────────────────────
+// ── 3. Huba phải nói ĐÚNG CHỖ chữ đã tới ───────────────────────────────────
 const LANDINGS = ["HÀNG CHỜ", "bắt đầu chạy", "dấu nhắc"];
 await pg.click('#panelTabs button[data-panel="chat"]');
 // Trước khi tin vào một phép đo, kiểm xem nó có NHÌN THẤY gì không: selector
@@ -98,7 +98,7 @@ let reply = "";
 try {
   // Selector phải là thứ trang THẬT dựng ra: `.msg .body` (giống fe-smoke).
   // Bản đầu của kịch bản này hỏi `#log .msg` — một id không tồn tại — nên nó
-  // báo "hub không trả lời" trong khi hub đã trả lời đúng sau 7 giây. Phép đo
+  // báo "huba không trả lời" trong khi huba đã trả lời đúng sau 7 giây. Phép đo
   // luôn-rỗng là phép đo mù, và nó tố cáo mã sai chứ không tố cáo chính nó.
   reply = await pg.waitForFunction(() => {
     const t = [...document.querySelectorAll(".msg .body")]
@@ -108,13 +108,13 @@ try {
   }, { timeout: 45000 }).then((h) => h.jsonValue());
 } catch { /* để phép đo tự báo đỏ bên dưới */ }
 
-console.log(`\n  hub trả lời: ${reply ? reply.replace(/\s+/g, " ").slice(0, 160) : "(không có)"}\n`);
-ok(!!reply, "hub có trả lời cho lệnh gõ");
+console.log(`\n  huba trả lời: ${reply ? reply.replace(/\s+/g, " ").slice(0, 160) : "(không có)"}\n`);
+ok(!!reply, "huba có trả lời cho lệnh gõ");
 ok(!/không gõ được/.test(reply), "không dính lỗi quyền (System Events 1002)");
 const landed = LANDINGS.find((l) => reply.includes(l));
 ok(
   !!landed,
-  `hub nói RÕ chữ đã tới đâu (một trong: ${LANDINGS.join(" · ")})`,
+  `huba nói RÕ chữ đã tới đâu (một trong: ${LANDINGS.join(" · ")})`,
 );
 if (landed) console.log(`     → chữ nằm ở: ${landed}`);
 

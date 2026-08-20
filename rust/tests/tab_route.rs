@@ -13,13 +13,13 @@
 //! không (6 lượt thì 3 lượt cuối đều là câu số 1), thứ tự đúng như thanh tab
 //! vẽ, và `answered` giữ nguyên qua **cả 12 lượt**.
 
-use hub::keys::tab_keys;
+use huba::keys::tab_keys;
 
 fn count(keys: &[String], which: &str) -> usize {
     keys.iter().filter(|k| *k == which).count()
 }
 
-/// Về mép trái rồi đếm sang phải — vì hub KHÔNG biết con trỏ đang ở đâu.
+/// Về mép trái rồi đếm sang phải — vì huba KHÔNG biết con trỏ đang ở đâu.
 ///
 /// Tab hiện hành vẽ bằng màu nền, mà `contents of tab` trả chữ trần, nên "đang
 /// đứng ở tab mấy" là câu hỏi không có nguồn nào trả lời được. Đếm từ một chỗ
@@ -91,22 +91,22 @@ fn a_tab_move_never_carries_a_commit() {
 #[test]
 fn the_button_and_the_typed_command_agree() {
     assert_eq!(
-        hub::telegram::callback_to_command("tab:da29807e:2").as_deref(),
+        huba::telegram::callback_to_command("tab:da29807e:2").as_deref(),
         Some("/tab da29807e 2")
     );
     // …và liên kết chạm được trong chữ cũng vậy (`/tab_<id>_<n>`).
-    let got = hub::verbs::parse_command("/tab_da29807e_2").expect("phải phân tích được");
-    assert_eq!(got.0, hub::adapters::CommandKind::Tab);
+    let got = huba::verbs::parse_command("/tab_da29807e_2").expect("phải phân tích được");
+    assert_eq!(got.0, huba::adapters::CommandKind::Tab);
     assert_eq!(got.2, "da29807e 2");
 }
 
 /// Nút hỏng thì thôi, đừng dựng ra một route trỏ vào chỗ trống.
 #[test]
 fn a_malformed_tab_button_is_refused() {
-    assert!(hub::telegram::callback_to_command("tab:da29807e:").is_none());
-    assert!(hub::telegram::callback_to_command("tab::2").is_none());
+    assert!(huba::telegram::callback_to_command("tab:da29807e:").is_none());
+    assert!(huba::telegram::callback_to_command("tab::2").is_none());
     // Mã phiên phải là hex — `tab_xyz_2` là chữ ai đó gõ nhầm, không phải phiên.
-    assert!(hub::verbs::parse_command("/tab_xyz!_2").is_none());
+    assert!(huba::verbs::parse_command("/tab_xyz!_2").is_none());
     // …và số tab phải là số.
-    assert!(hub::verbs::parse_command("/tab_da29807e_hai").is_none());
+    assert!(huba::verbs::parse_command("/tab_da29807e_hai").is_none());
 }

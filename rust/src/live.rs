@@ -1,16 +1,16 @@
-//! Live chat listener — the room pushes, hub stops asking.
+//! Live chat listener — the room pushes, huba stops asking.
 //!
 //! WHY A HELD-OPEN SOCKET IS NOT A NAT WORKAROUND
-//! There is nothing to punch here: tfl5 already has a public address, so hub
+//! There is nothing to punch here: tfl5 already has a public address, so huba
 //! simply dials it. The connection stays open so tfl5 can push back down the
-//! same path hub opened, which is exactly what NAT, CGNAT and corporate
+//! same path huba opened, which is exactly what NAT, CGNAT and corporate
 //! firewalls all permit without any configuration. Hole punching (STUN/TURN)
 //! solves a different problem — two peers BOTH behind NAT — and would add a
-//! relay for no gain. hub still opens no port, which is its own rule
+//! relay for no gain. huba still opens no port, which is its own rule
 //! (`PLAN.md` — "không mở cổng vào máy"), independent of any of this.
 //!
 //! THE POLLER STAYS. This listener is the FAST path, not the durable one. If
-//! the socket drops, the process dies, or a burst is still buffered when hub
+//! the socket drops, the process dies, or a burst is still buffered when huba
 //! stops, `adapters::tfl5::poll` picks the messages up on the next cycle from
 //! its cursor. `UNIQUE(source, external_id)` makes the overlap free — a message
 //! delivered twice inserts once. Never remove the poller to "simplify".

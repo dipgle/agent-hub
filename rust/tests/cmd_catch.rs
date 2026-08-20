@@ -1,4 +1,4 @@
-//! Hai lệnh trong tin `[AI/mailler]` 2026-08-16 — hub bắt được cái nào, vì sao.
+//! Hai lệnh trong tin `[AI/mailler]` 2026-08-16 — huba bắt được cái nào, vì sao.
 //!
 //! 🔴 Hà: *"Tin nhắn này có 2 lệnh nhưng chưa thấy bắt được"*. Chữ dưới đây chép
 //! từ chính ảnh chụp ấy.
@@ -9,7 +9,7 @@ fn the_two_commands_in_that_mailler_message() {
                  rm -f ~/projects/AI/mailler/crates/smtp-in/src/lib.rs.bak\n\
                  git -C ~/projects/AI/mailler worktree remove --force .claude/worktrees/agent-a7032931bd987bb73 && git -C ~/projects/AI/mailler branch -D worktree-agent-a7032931bd987bb73\n\
                  Lệnh thứ hai thu lại 1,4 GB.";
-    let got = hub::keys::commands_in_report(prose, 4);
+    let got = huba::keys::commands_in_report(prose, 4);
     println!("bắt được {} lệnh:", got.len());
     for g in &got {
         println!("  · {g}");
@@ -56,7 +56,7 @@ fn a_sentence_about_passwords_does_not_kill_the_whole_turn() {
     let prose = "Còn OPEN: V12 (2FA cho IMAP/POP3/SMTP — cần app-password, là thay đổi sản phẩm).\n\
                  git -C ~/projects/AI/mailler worktree remove --force .claude/worktrees/agent-a70329\n\
                  Chạy mất vài giây.";
-    let got = hub::keys::commands_in_report(prose, 4);
+    let got = huba::keys::commands_in_report(prose, 4);
     assert_eq!(
         got.len(),
         1,
@@ -66,13 +66,14 @@ fn a_sentence_about_passwords_does_not_kill_the_whole_turn() {
     // …còn một dòng lệnh MANG bí mật thì vẫn phải bị giữ lại. Cửa ấy nay nằm ở
     // `sessions::commands_in_last_turn`, cân bằng `redaction::file_risk`.
     assert!(
-        !hub::redaction::file_risk("PGPASSWORD=hunter2 psql -h db.example.com -U admin").is_empty(),
+        !huba::redaction::file_risk("PGPASSWORD=hunter2 psql -h db.example.com -U admin")
+            .is_empty(),
         "dòng lệnh mang mật khẩu phải bị cân là có rủi ro"
     );
     // …và cân ấy KHÔNG được cắn một lệnh chỉ có đường dẫn tuyệt đối — đó là
     // hình dạng thường nhất của lệnh trong workspace này.
     assert!(
-        hub::redaction::file_risk(
+        huba::redaction::file_risk(
             "git -C /Users/hanguyen/projects/AI/mailler worktree remove --force x"
         )
         .is_empty(),

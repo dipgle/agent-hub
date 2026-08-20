@@ -1,6 +1,6 @@
 //! `/clean` chạy THẬT: dựng hàng chờ trong một cửa sổ nháp rồi dọn sạch nó.
 //!
-//! 🔴 Vì sao phải live: bài kiểm thuần (`tests/clean_queue.rs`) chỉ nói hub ĐẾM
+//! 🔴 Vì sao phải live: bài kiểm thuần (`tests/clean_queue.rs`) chỉ nói huba ĐẾM
 //! đúng hàng chờ. Nó không nói cú `↑` có lấy được tin ra khỏi hàng không, cũng
 //! không nói cái CR mà `do script` kèm sẵn có gửi tin ấy đi lại không — mà đúng
 //! hai chuyện ấy mới quyết định `/clean` là dọn hay là làm loạn.
@@ -9,7 +9,7 @@
 //! phải do chính bài kiểm mở ra, và nó tự đóng lại.
 //!
 //! ```
-//! cd ~/projects/hub/rust
+//! cd ~/projects/huba/rust
 //! cargo test --offline --test clean_queue_live -- --ignored --nocapture
 //! ```
 
@@ -31,7 +31,7 @@ fn screen(w: i64) -> String {
     ))
 }
 
-/// Gõ một dòng vào cửa sổ ấy — đúng đường `do script` mà hub dùng.
+/// Gõ một dòng vào cửa sổ ấy — đúng đường `do script` mà huba dùng.
 fn say(w: i64, line: &str) {
     osa(&format!(
         "tell application \"Terminal\" to do script \"{line}\" in selected tab of window id {w}"
@@ -41,7 +41,7 @@ fn say(w: i64, line: &str) {
 #[test]
 #[ignore = "mở một cửa sổ Terminal nháp chạy `claude` rồi đóng — chạy tay bằng --ignored"]
 fn the_queue_really_empties() {
-    let dir = std::env::var("HOME").unwrap() + "/projects/hub/.tmp/queueprobe";
+    let dir = std::env::var("HOME").unwrap() + "/projects/huba/.tmp/queueprobe";
     std::fs::create_dir_all(&dir).ok();
     let w: i64 = osa(&format!(
         "tell application \"Terminal\"
@@ -69,7 +69,7 @@ end tell"
     let mut busy = false;
     for _ in 0..40 {
         sleep(Duration::from_secs(1));
-        if hub::keys::is_busy(&screen(w)) {
+        if huba::keys::is_busy(&screen(w)) {
             busy = true;
             break;
         }
@@ -83,7 +83,7 @@ end tell"
     // TUI vẽ sau.
     let mut before = 0;
     for _ in 0..15 {
-        before = hub::keys::queued_count(&screen(w));
+        before = huba::keys::queued_count(&screen(w));
         if before >= 2 {
             break;
         }
@@ -91,8 +91,8 @@ end tell"
     }
     println!("trước khi dọn: {before} tin trong hàng chờ");
 
-    let cleaned = hub::keys::clear_queue(w);
-    let after = hub::keys::queued_count(&screen(w));
+    let cleaned = huba::keys::clear_queue(w);
+    let after = huba::keys::queued_count(&screen(w));
     println!("sau khi dọn: {after} · kết quả clear_queue = {cleaned:?}");
 
     // 🔴 DỌN TRƯỚC KHI PHÁN, và dọn theo đúng thứ tự CLI đòi. Bản trước đặt một

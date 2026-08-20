@@ -16,11 +16,11 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandKind {
     Help,
-    /// Dựng lại chính hub từ mã hiện tại (`runtime::self_install`).
+    /// Dựng lại chính huba từ mã hiện tại (`runtime::self_install`).
     ///
     /// 🔴 Hà 2026-08-13: *"tại sao không phải là luồng chạy độc lập trên rust,
     /// tức là mọi lệnh và luồng xử lý phải nằm trong binary"*. Trước route này,
-    /// mỗi bản vá của hub đều đòi một người ngồi ở máy gõ `install_update.sh` —
+    /// mỗi bản vá của huba đều đòi một người ngồi ở máy gõ `install_update.sh` —
     /// tức cây cầu tự nó có một đoạn chỉ đi được khi chủ máy đang ở nhà.
     Upgrade,
     /// Run a full cycle now (the console's "Chạy 1 vòng").
@@ -34,7 +34,7 @@ pub enum CommandKind {
     /// stream. `arg` is the session id, or "-" to stop following.
     ///
     /// Focus rather than "fetch": the page cannot call this machine, so the
-    /// only way it sees anything is what hubd pushes — and pushing every
+    /// only way it sees anything is what hubad pushes — and pushing every
     /// session's whole transcript every cycle would be megabytes for the one
     /// session being read.
     Session,
@@ -162,7 +162,7 @@ pub enum CommandKind {
     /// looking at one session's stream, and asking a person to retype a uuid
     /// there is asking them not to use the feature.
     Ask,
-    /// `/runin <id> <lệnh>` — hub chạy lệnh, rồi DÁN KẾT QUẢ vào phiên.
+    /// `/runin <id> <lệnh>` — huba chạy lệnh, rồi DÁN KẾT QUẢ vào phiên.
     ///
     /// 🔴 Hà 2026-08-13, sau khi biết dấu `!` chưa bao giờ bật chế độ bash:
     /// *"có lẽ nên gọi lệnh ở command khác rồi lấy kết quả dán gửi lại vào
@@ -172,7 +172,7 @@ pub enum CommandKind {
     /// |---|---|---|---|---|
     /// | `▶` nhờ phiên chạy | phiên (`claude`) | CÓ | không | không |
     /// | `🖥` cửa sổ mới | shell thật | không | CÓ | CÓ |
-    /// | `/runin` | **hub** | **không** | không | **không** |
+    /// | `/runin` | **huba** | **không** | không | **không** |
     ///
     /// Vì sao nó đáng có: nhờ phiên chạy là trả tiền hạn mức cho một việc
     /// `zsh -lc` làm được miễn phí, và bắt cả một lượt suy nghĩ chạy chỉ để gọi
@@ -254,7 +254,7 @@ pub enum CommandKind {
 #[derive(Debug, Clone)]
 pub struct ChannelCommand {
     pub kind: CommandKind,
-    /// Bước phụ do hub tự xếp hàng ⟹ chạy xong thì KHÔNG trả lời.
+    /// Bước phụ do huba tự xếp hàng ⟹ chạy xong thì KHÔNG trả lời.
     pub quiet: bool,
     /// The id the command acts on: a DECISION id for `Approve`/`Reject`, a
     /// MESSAGE id for `Close`/`Reply` (the two CLI verbs take message ids), and

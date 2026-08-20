@@ -1,4 +1,4 @@
-//! hub — the Claude CLI sessions running on this Mac, driven from a phone.
+//! huba — the Claude CLI sessions running on this Mac, driven from a phone.
 //!
 //! One Telegram chat carries ORDERS (`/session`, `/ask`, `/new`, `/tell`,
 //! `/stop`, `/handover`) and carries back what every session is doing. Nothing
@@ -20,7 +20,7 @@ pub mod adapters;
 /// Gửi MỘT phím vào Terminal, không kèm dấu xuống dòng — tệp DUY NHẤT có
 /// `unsafe`, và luật *"no unsafe anywhere"* được gỡ đúng cho nó (Hà 2026-08-19).
 ///
-/// Vì sao phải có: `do script` kèm một CR không tắt được, nên trên hộp chọn hub
+/// Vì sao phải có: `do script` kèm một CR không tắt được, nên trên hộp chọn huba
 /// không có phím nào chỉ DI mà không CHỐT. Đọc đầu `cgkeys.rs` trước khi sửa.
 pub mod cgkeys;
 pub mod commands;

@@ -8,12 +8,12 @@
 //! page served from tfl5 is a different origin, so wiring it to the console
 //! would mean opening CORS and moving the token somewhere a script on that
 //! origin can read — dismantling exactly that defence, and it would only ever
-//! work on the one machine running `hubd` anyway.
+//! work on the one machine running `hubad` anyway.
 //!
-//! So the data travels the other way: hub writes a snapshot into the app's own
+//! So the data travels the other way: huba writes a snapshot into the app's own
 //! storage on tfl5, and the page reads it same-origin through `/app/file/get`,
 //! which gates on the app's ACL (Reader+ plus the per-file row check). Nothing
-//! new is exposed: whoever can already read the hub room can read the
+//! new is exposed: whoever can already read the huba room can read the
 //! snapshot, and nobody else.
 //!
 //! The snapshot is **read-only by construction**. Approving, rejecting and
@@ -21,7 +21,7 @@
 //! the chat room and the console — so there is still exactly one approve path
 //! (non-negotiable #7).
 //!
-//! **Why a doc and not a file.** The first cut wrote `hub-status.json` through
+//! **Why a doc and not a file.** The first cut wrote `huba-status.json` through
 //! `/app/file/save`. Files live under the app's public asset tree, and
 //! `public.rs::row_acl_evaluate` treats an EMPTY per-file ACL as "anyone may
 //! fetch it" — safe only while a bundle is published (every other path 404s),
@@ -46,7 +46,7 @@ pub const RESOURCE_MA: &str = "hub_status";
 pub const SNAPSHOT_KEY: &str = "snapshot";
 /// Leftover from the first design (a public-tree file); removed on push so an
 /// installation that ran the earlier build does not keep serving it.
-pub const LEGACY_FILE_PATH: &str = "hub-status.json";
+pub const LEGACY_FILE_PATH: &str = "huba-status.json";
 /// How stale a channel-health probe may be before it is measured again. The
 /// probe logs into tfl5 and shells out to `claude --version`, so running it on
 /// every cycle would spend real time to redraw a panel nobody is looking at
@@ -54,7 +54,7 @@ pub const LEGACY_FILE_PATH: &str = "hub-status.json";
 const HEALTH_TTL_MS: i64 = 10 * 60 * 1000;
 
 /// Cache for the deep health probe: `(measured_at_ms, value)`. Lives for the
-/// life of the process, which is what makes it useful in `hubd` and a no-op
+/// life of the process, which is what makes it useful in `hubad` and a no-op
 /// for a one-shot CLI push.
 static HEALTH_CACHE: std::sync::OnceLock<std::sync::Mutex<Option<(i64, Value)>>> =
     std::sync::OnceLock::new();
@@ -109,7 +109,7 @@ fn build_inner(
     mut live: crate::sessions::SessionsSnapshot,
     announce: bool,
 ) -> Result<Value> {
-    // Ai mở phiên là thứ chỉ cuốn sổ của hub biết — dán nhãn trước khi gói.
+    // Ai mở phiên là thứ chỉ cuốn sổ của huba biết — dán nhãn trước khi gói.
     crate::pipeline::mark_started_by_hub(db, &mut live);
 
     // Bắt "vừa xong" / "vừa tắt" NGAY TẠI ĐÂY, không dựng thêm một ảnh chụp
@@ -372,8 +372,8 @@ pub fn push_snapshot(
         &session,
         &t.app_tid,
         RESOURCE_MA,
-        "hub status",
-        "Ảnh chụp chỉ-đọc của hộp việc / sức khoẻ / chi phí, do hubd đẩy lên",
+        "huba status",
+        "Ảnh chụp chỉ-đọc của hộp việc / sức khoẻ / chi phí, do hubad đẩy lên",
     )?;
 
     tfl5::doc_upsert(
@@ -419,7 +419,7 @@ mod tests {
 
     fn mem_db() -> Db {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("hub.sqlite");
+        let path = dir.path().join("huba.sqlite");
         // Keep the tempdir alive for the process — the handle drops here but
         // the file stays until the test binary exits, which is all we need.
         std::mem::forget(dir);
@@ -483,7 +483,7 @@ mod tests {
         ] {
             assert!(
                 snap.get(gone).is_none(),
-                "hub is a session channel, not an inbox or a meter — `{gone}` must not travel"
+                "huba is a session channel, not an inbox or a meter — `{gone}` must not travel"
             );
         }
         let as_text = snap.to_string();

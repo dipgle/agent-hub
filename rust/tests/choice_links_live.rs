@@ -7,14 +7,14 @@
 #[test]
 #[ignore = "gửi một tin thật vào buồng chat rồi xoá"]
 fn every_option_line_carries_its_own_tick() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG");
+    let cfg = huba::config::load(None).expect("HUB_CONFIG");
     let path = std::env::var("HUB_SCREEN").expect("HUB_SCREEN trỏ vào bản chụp màn");
     let man = std::fs::read_to_string(&path).expect("đọc được màn");
 
-    let choices = hub::keys::parse_choices(&man);
+    let choices = huba::keys::parse_choices(&man);
     assert_eq!(choices.len(), 5, "màn phải có 5 lựa chọn: {choices:?}");
 
-    let data = hub::pipeline::SessionData {
+    let data = huba::pipeline::SessionData {
         sid: "f168de42-5cfb-44cb-a97e-1861cbe0b49c".to_string(),
         // `parse_choices` trả `(số, nhãn)`; `SessionData` mang MÃ dạng chuỗi
         // (`"3"` cho hộp một câu, `"1.3"` cho bảng nhiều câu) — xem
@@ -25,20 +25,20 @@ fn every_option_line_carries_its_own_tick() {
             .collect(),
         ..Default::default()
     };
-    let tg = hub::telegram::Inbox::start(&cfg, None).expect("có bot token");
+    let tg = huba::telegram::Inbox::start(&cfg, None).expect("có bot token");
     // `getMe` chạy ở luồng nền; `deep_link` không có tên bot thì trả `None` —
     // đúng luật, nên bài kiểm phải CHỜ chứ không được đọc kết quả sớm.
     for _ in 0..40 {
-        if hub::telegram::deep_link("k_x_1").is_some() {
+        if huba::telegram::deep_link("k_x_1").is_some() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
     println!(
         "deep_link thử: {:?}",
-        hub::telegram::deep_link("k_f168de42_1")
+        huba::telegram::deep_link("k_f168de42_1")
     );
-    let sent = hub::pipeline::render_session_data(&man, &data);
+    let sent = huba::pipeline::render_session_data(&man, &data);
     println!(
         "html dài {} ký tự, có thẻ a: {}",
         sent.len(),

@@ -1,11 +1,11 @@
 // UC-S02 — "xem một phiên như đang ngồi máy", nghiệm thu trên UI THẬT, 390px.
 //
 // Đi trọn đường người dùng: đăng nhập → chạm vào một phiên trong danh sách →
-// hub nhận lệnh /session qua phòng chat → ảnh chụp kế tiếp mang luồng về →
+// huba nhận lệnh /session qua phòng chat → ảnh chụp kế tiếp mang luồng về →
 // màn hiện lời nói, từng lệnh và kết quả từng lệnh.
 //
 // Không goto, không gọi API dựng trạng thái. Số liệu đối chiếu lấy từ
-// `hub portal-push --dry-run` chạy độc lập, để màn phải khớp sự thật của máy
+// `huba portal-push --dry-run` chạy độc lập, để màn phải khớp sự thật của máy
 // chứ không khớp với chính nó.
 //
 // Usage: node fe-stream-uc.mjs <app_tid> <username> <password>
@@ -78,9 +78,9 @@ const affordable = (mb, what) => {
   return false;
 };
 
-const hub = (args) =>
+const huba = (args) =>
   JSON.parse(
-    execFileSync(HERE + "rust/target/release/hub", args, {
+    execFileSync(HERE + "rust/target/release/huba", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     })
@@ -112,7 +112,7 @@ try {
   // 256 KB window slides as it grows, so "count on screen == count in a later
   // read" is false by construction — the first run of this script compared 84
   // against 81 and blamed the product for a race in the measurement.
-  const truth = hub(["sessions", "--json"]);
+  const truth = huba(["sessions", "--json"]);
   const idleFor = (s) =>
     s.last_activity ? (Date.now() - Date.parse(s.last_activity)) / 60000 : Infinity;
   // Trong các phiên đứng yên, chọn phiên có NHẬT KÝ NGẮN NHẤT: bước /handover
@@ -134,7 +134,7 @@ try {
   check("chạm vào phiên thì mở màn chi tiết", await page.locator("#sessDetail").isVisible());
   check("danh sách nhường chỗ cho chi tiết", await page.locator("#sessListPanel").isHidden());
 
-  // hub has to receive /session through the room, follow it, and push. Give it
+  // huba has to receive /session through the room, follow it, and push. Give it
   // a real cycle, then read what actually arrived.
   // Playwright's second argument is the ARG passed to the function, not
   // options — passing `{timeout}` there silently falls back to the 30s default
@@ -161,7 +161,7 @@ try {
 
   // Câu trả lời của chính cái máy, đọc độc lập.
   //
-  // ⚠ Chờ, đừng đọc ngay. hub chỉ THEO ĐƯỢC MỘT phiên: kịch bản chạy trước
+  // ⚠ Chờ, đừng đọc ngay. huba chỉ THEO ĐƯỢC MỘT phiên: kịch bản chạy trước
   // (fe-aside) để lại tiêu điểm ở phiên của nó, và ảnh chụp kế tiếp vẫn mang
   // tiêu điểm cũ trong vài giây sau cú bấm. Đọc ngay là đo trúng trạng thái
   // của kịch bản khác — đỏ hai lần ngày 2026-08-09 khi chạy cả bộ liên tiếp,
@@ -169,12 +169,12 @@ try {
   let snap = null;
   let focus = null;
   for (let i = 0; i < 40; i += 1) {
-    snap = hub(["portal-push", "--dry-run"]);
+    snap = huba(["portal-push", "--dry-run"]);
     focus = snap.sessions.focus;
     if (focus && focus.session_id === target.session_id) break;
     await page.waitForTimeout(3000);
   }
-  check("hub đang theo đúng phiên vừa chạm", focus && focus.session_id === target.session_id);
+  check("huba đang theo đúng phiên vừa chạm", focus && focus.session_id === target.session_id);
   check(
     "số sự kiện trên màn khớp ảnh chụp",
     focus && shown.total === focus.events.length,
@@ -303,13 +303,13 @@ try {
 
   {
     // Chờ ảnh chụp mang bản bàn giao MỚI. Từ 08-08 màn nhận lời đáp thẳng từ
-    // phòng chat, tức nó hiện xong TRƯỚC khi hubd kịp đẩy ảnh chụp — nên "hộp
+    // phòng chat, tức nó hiện xong TRƯỚC khi hubad kịp đẩy ảnh chụp — nên "hộp
     // đã đổi chữ" không còn đồng nghĩa "trạng thái đã tới". Bản trước đọc ngay
-    // và báo đỏ trong khi hub vừa làm xong đúng việc của nó.
-    let after = hub(["portal-push", "--dry-run"]);
+    // và báo đỏ trong khi huba vừa làm xong đúng việc của nó.
+    let after = huba(["portal-push", "--dry-run"]);
     for (let i = 0; i < 40 && (after.sessions.handover?.ts || "") === handoverBefore; i++) {
       await page.waitForTimeout(3000);
-      after = hub(["portal-push", "--dry-run"]);
+      after = huba(["portal-push", "--dry-run"]);
     }
     const h = after.sessions.handover;
     check("có bản bàn giao MỚI", !!h && h.ts !== handoverBefore && h.source_id === target.session_id);
@@ -319,17 +319,17 @@ try {
   }
   }
 
-  // Quay lại phải thôi theo, không để hub gánh luồng không ai đọc.
+  // Quay lại phải thôi theo, không để huba gánh luồng không ai đọc.
   await page.click("#sessBack");
   check("quay lại thì hiện danh sách", await page.locator("#sessListPanel").isVisible());
   // Cùng lý do: chờ ảnh chụp bắt kịp thay vì đếm 9 giây rồi kết luận.
-  let after = hub(["portal-push", "--dry-run"]);
+  let after = huba(["portal-push", "--dry-run"]);
   for (let i = 0; i < 20 && after.sessions.focus; i++) {
     await page.waitForTimeout(3000);
-    after = hub(["portal-push", "--dry-run"]);
+    after = huba(["portal-push", "--dry-run"]);
   }
   check(
-    "quay lại thì hub thôi theo phiên",
+    "quay lại thì huba thôi theo phiên",
     !after.sessions.focus,
     after.sessions.focus ? `vẫn theo ${after.sessions.focus.session_id.slice(0, 8)}` : ""
   );

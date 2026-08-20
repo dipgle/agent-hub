@@ -4,9 +4,9 @@
 //! chuyện** — một mẩu tin đọc như tin lạc, một lệnh hiện ra hai lần, và một chữ
 //! không phải lệnh thì lại bấm được. Không cái nào làm `cargo test` đỏ trước
 //! đây, vì không cái nào là lỗi tính toán; chúng là lỗi của thứ CHỮ cuối cùng
-//! rời khỏi hub.
+//! rời khỏi huba.
 
-use hub::pipeline::{render_session_data, split_for_telegram, tame_auto_links, SessionData};
+use huba::pipeline::{render_session_data, split_for_telegram, tame_auto_links, SessionData};
 
 /// 🔴 *"Tin dài bị Telegram cắt làm hai mẩu, mẩu sau không có dấu nối nên đọc
 /// như tin lạc"*.
@@ -67,13 +67,13 @@ fn empty_slices_never_ship() {
 /// một lệnh, hai biến thể, hai chỗ bấm.
 #[test]
 fn a_command_the_window_broke_in_two_is_not_printed_a_second_time() {
-    hub::telegram::set_bot_username("hub_test_bot");
-    let cmd = "git -C /Users/hanguyen/projects/hub add rust/src/pipeline.rs rust/src/keys.rs";
+    huba::telegram::set_bot_username("hub_test_bot");
+    let cmd = "git -C /Users/hanguyen/projects/huba add rust/src/pipeline.rs rust/src/keys.rs";
     // Đúng hình dạng màn thật: cửa sổ 80 cột bẻ dòng lệnh làm hai, nên KHÔNG
     // dòng nào chứa trọn nó — `text.contains(cmd)` trượt, còn `line_carries`
     // vẫn bám được vào nửa đầu (nó đứng ĐẦU một dòng).
     let screen = "⏺ Đang chạy lệnh:\n\
-                  git -C /Users/hanguyen/projects/hub add rust/src/pipeline.rs\n\
+                  git -C /Users/hanguyen/projects/huba add rust/src/pipeline.rs\n\
                   rust/src/keys.rs\n\
                   ⎿ xong\n"
         .to_string();
@@ -92,7 +92,7 @@ fn a_command_the_window_broke_in_two_is_not_printed_a_second_time() {
     );
     assert_eq!(
         shown
-            .matches("git -C /Users/hanguyen/projects/hub add")
+            .matches("git -C /Users/hanguyen/projects/huba add")
             .count(),
         1,
         "đúng MỘT biến thể trong tin:\n{shown}"
@@ -101,10 +101,10 @@ fn a_command_the_window_broke_in_two_is_not_printed_a_second_time() {
 
 /// …còn lệnh thật sự KHÔNG có trên màn thì vẫn phải được viết ra — đó là dòng
 /// đáng đọc nhất của `/shot` khi cổng quyền chặn phiên in nó ra. Nhãn nay nói
-/// đúng thứ hub biết chắc (không thấy trên màn), không đoán nguyên nhân.
+/// đúng thứ huba biết chắc (không thấy trên màn), không đoán nguyên nhân.
 #[test]
 fn a_command_that_is_really_absent_still_gets_written_out() {
-    hub::telegram::set_bot_username("hub_test_bot");
+    huba::telegram::set_bot_username("hub_test_bot");
     let shown = render_session_data(
         "⏺ Phiên đang nghĩ…\n",
         &SessionData {
@@ -118,7 +118,7 @@ fn a_command_that_is_really_absent_still_gets_written_out() {
 }
 
 /// 🔴 *"`/healthz` bị Telegram tô xanh thành lệnh bot — bấm nhầm là gửi lệnh rác
-/// cho hub"*.
+/// cho huba"*.
 #[test]
 fn a_slash_word_from_the_session_is_not_left_tappable() {
     assert_eq!(
@@ -126,8 +126,8 @@ fn a_slash_word_from_the_session_is_not_left_tappable() {
         "thử <code>/healthz</code> xem sao"
     );
     assert_eq!(
-        tame_auto_links("/Users/hanguyen/projects/hub"),
-        "<code>/Users/hanguyen/projects/hub</code>",
+        tame_auto_links("/Users/hanguyen/projects/huba"),
+        "<code>/Users/hanguyen/projects/huba</code>",
         "đường dẫn tuyệt đối cũng bị Telegram tô — nó cũng phải được bọc"
     );
     assert_eq!(
@@ -145,7 +145,7 @@ fn a_url_keeps_its_shape() {
     assert_eq!(tame_auto_links(url), url);
 }
 
-/// Lệnh THẬT của hub thì giữ nguyên đích chạm — đó là thứ có ích, và bảng route
+/// Lệnh THẬT của huba thì giữ nguyên đích chạm — đó là thứ có ích, và bảng route
 /// là chỗ duy nhất biết cái nào thật.
 #[test]
 fn the_hubs_own_routes_stay_tappable() {

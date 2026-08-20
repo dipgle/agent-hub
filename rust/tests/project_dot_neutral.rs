@@ -1,11 +1,11 @@
 //! Ô màu dự án phải TRUNG TÍNH — và cái nhãn không bao giờ được đeo hai ô.
 //!
-//! 🔴 Hà 2026-08-19, đọc một dòng hub vừa gửi:
+//! 🔴 Hà 2026-08-19, đọc một dòng huba vừa gửi:
 //! `⏹ Đã đóng hẳn 🟥 [dwork]·f33ae528 — CLI chạy nốt rồi thoát, cửa sổ terminal
 //! đã đóng (chờ 67s).` — *"sao nội dung lại thừa và mâu thuẫn nhau thế"*.
 //!
 //! Ô đỏ ở đó chỉ là **nhãn dự án**, vô can với việc đóng phiên; nhưng đỏ trong
-//! mọi dòng chữ khác của hub đã có nghĩa *hỏng / cần chú ý*, nên một tin THÀNH
+//! mọi dòng chữ khác của huba đã có nghĩa *hỏng / cần chú ý*, nên một tin THÀNH
 //! CÔNG mở đầu bằng nó thì tự cãi nhau. Màu mang nghĩa không được làm màu trang
 //! trí. Bộ ô nay còn năm màu trung tính; đen/trắng cũng ra vì chúng là màu NỀN
 //! của Telegram (một trong hai luôn chìm), và ⬜ giữ việc riêng: *"không biết dự
@@ -15,12 +15,12 @@
 //! màu lần sau: **`without_dot` phải gỡ được cả ô của bộ CŨ**, vì sổ theo dõi
 //! (`watch::Mark::l`) còn giữ nhãn đúc bằng chúng.
 
-use hub::sessions::{project_dot, without_dot};
+use huba::sessions::{project_dot, without_dot};
 
 /// Những dự án thật trong workspace, cộng vài chuỗi cạnh.
 const TEN: [&str; 14] = [
     "dwork",
-    "hub",
+    "huba",
     "tfl5",
     "sdvi",
     "tcc",
@@ -56,7 +56,7 @@ fn khong_du_an_nao_deo_o_do_hay_vang() {
 }
 
 /// Cùng tên ⟹ cùng ô, mọi lần gọi, mọi tiến trình. Đây là lý do hàm băm tồn tại
-/// (phát theo thứ tự gặp thì mỗi lần hubd khởi động lại là một bảng màu khác).
+/// (phát theo thứ tự gặp thì mỗi lần hubad khởi động lại là một bảng màu khác).
 #[test]
 fn cung_ten_thi_cung_o() {
     for t in TEN {
@@ -101,7 +101,7 @@ fn go_duoc_ca_o_cua_bo_cu() {
     }
     // Không có ô thì trả nguyên, không cắt nhầm chữ đầu.
     assert_eq!(without_dot("[dwork]·f33ae528"), "[dwork]·f33ae528");
-    assert_eq!(without_dot("  [hub]"), "[hub]");
+    assert_eq!(without_dot("  [huba]"), "[huba]");
     // Gỡ đúng MỘT ô: hai ô liền nhau là dấu hiệu của một lỗi khác, đừng che nó đi.
     assert_eq!(without_dot("🟦 🟥 [dwork]"), "🟥 [dwork]");
 }

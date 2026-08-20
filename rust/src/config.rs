@@ -4,7 +4,7 @@
 //! holds them (`confirm.bot_token_env`, `confirm.chat_id_env`). Charter DoD #8.
 //!
 //! `#[serde(default)]` on every struct reproduces the prototype's deep-merge:
-//! a key absent from hub.config.json falls back to the default, and sibling
+//! a key absent from huba.config.json falls back to the default, and sibling
 //! keys inside a partially-specified table keep theirs.
 
 use std::collections::BTreeMap;
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 // `TIERS` and `ALWAYS_HUMAN_ACTIONS` lived here until 2026-08-08. They were the
 // vocabulary of `policy.rs` — how much the robot could do unattended, and the
 // five things it could never do at any tier. With no robot deciding anything,
-// there is no tier to set: hub does exactly what the owner typed, and the wall
+// there is no tier to set: huba does exactly what the owner typed, and the wall
 // that matters now is `sessions::DENIED_TOOLS`, which is enforced on the CLI
 // call itself rather than described in a config file.
 
@@ -64,22 +64,22 @@ impl Default for AutoHandoverCfg {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ConfirmCfg {
-    /// Tắt thì lệnh huỷ chạy thẳng như trước. Bật mà thiếu khoá thì hub TỪ
+    /// Tắt thì lệnh huỷ chạy thẳng như trước. Bật mà thiếu khoá thì huba TỪ
     /// CHỐI lệnh chứ không lặng lẽ bỏ qua chốt chặn — xem `confirm.rs`.
     pub enabled: bool,
     pub bot_token_env: String,
     pub chat_id_env: String,
     /// Chờ bấm nút bao lâu rồi coi như không đồng ý.
     pub timeout_sec: u64,
-    /// Tin hub gửi sang Telegram sống bao lâu rồi tự xoá. `0` = không xoá.
+    /// Tin huba gửi sang Telegram sống bao lâu rồi tự xoá. `0` = không xoá.
     ///
     /// Hà 2026-08-12: *"đã có cơ chế tự xóa tin nhắn cũ hơn 1.5 ngày chưa"* —
     /// chưa, không chỗ nào. Mặc định **36 giờ** đúng bằng con số ấy.
     ///
     /// 🔴 Trần CỨNG của Telegram là **48 giờ**: quá đó bot không xoá được tin
     /// của chính nó nữa, vĩnh viễn. Nên con số này phải nằm dưới 48 một khoảng
-    /// đủ cho một lần hub nằm im (mất mạng, máy ngủ) mà vẫn kịp quay lại xoá.
-    /// Đặt 47 là tự dựng một cái bẫy: hub tỉnh dậy sau một giấc là cả loạt tin
+    /// đủ cho một lần huba nằm im (mất mạng, máy ngủ) mà vẫn kịp quay lại xoá.
+    /// Đặt 47 là tự dựng một cái bẫy: huba tỉnh dậy sau một giấc là cả loạt tin
     /// rơi ra ngoài cửa.
     #[serde(default = "default_delete_after_hours")]
     pub delete_after_hours: u64,
@@ -104,7 +104,7 @@ impl Default for ConfirmCfg {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct CallCfg {
-    /// Ceiling for ONE `claude` call hub makes on the owner's behalf, and a
+    /// Ceiling for ONE `claude` call huba makes on the owner's behalf, and a
     /// floor under the measured per-call estimate (`sessions::fork_call`).
     ///
     /// Was `triage.max_budget_usd`, the guard on a robot classifying an inbox.
@@ -150,12 +150,12 @@ pub fn default_call_timeout() -> u64 {
 //   danh sách rồi đem so với danh sách ấy. Một cổng cấu tạo sao cho không bao
 //   giờ từ chối được — trừ đúng một trường hợp: danh sách RỖNG, và khi ấy nó từ
 //   chối **mọi** mệnh lệnh, im lặng, chỉ để lại một dòng `command_from_non_owner`
-//   trong nhật ký. Tức là gỡ tfl5 khỏi `hub.config.json` mà giữ cổng này lại thì
+//   trong nhật ký. Tức là gỡ tfl5 khỏi `huba.config.json` mà giữ cổng này lại thì
 //   Telegram câm hẳn, không ai hiểu vì sao.
 //
 // Cổng người thật nay ở đúng chỗ nó thuộc về — KÊNH: `telegram.rs` chỉ nhận tin
 // từ `chat_id` của chủ máy (`telegram.rs:1326` cho chữ, `:1731` cho nút), khoá
-// lấy từ `hub.env`. Xem `verbs::parse_command` để biết vì sao bộ phân tích lệnh
+// lấy từ `huba.env`. Xem `verbs::parse_command` để biết vì sao bộ phân tích lệnh
 // không còn nhận tham số "ai đang gõ".
 
 /// One project, registered under its FOLDER NAME — which is also the name
@@ -163,13 +163,13 @@ pub fn default_call_timeout() -> u64 {
 ///
 /// It used to carry `repos` (the GitHub repositories that routed mail to this
 /// project) and `tier` (how much the robot could answer on its own). Both were
-/// answers to questions the inbox asked. A project is now just a folder hub can
+/// answers to questions the inbox asked. A project is now just a folder huba can
 /// open a session in, so the only thing left worth storing is a note for a
-/// person — and even that, hub never reads.
+/// person — and even that, huba never reads.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(default)]
 pub struct ProjectCfg {
-    /// Free note for humans; hub never reads it.
+    /// Free note for humans; huba never reads it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -195,7 +195,7 @@ impl Default for NotifyCfg {
 pub struct Config {
     pub db: PathBuf,
     pub log_file: PathBuf,
-    /// Empty = derive from the hub directory (`<workspace>/AI/hub` → workspace).
+    /// Empty = derive from the huba directory (`<workspace>/AI/huba` → workspace).
     #[serde(skip_serializing_if = "is_empty_path")]
     pub workspace_root: PathBuf,
     /// Folders under `workspace_root` that hold projects, searched in order.
@@ -210,7 +210,7 @@ pub struct Config {
     /// `coalesce_hours`, `daily_budget_usd`, the per-source ceilings, `act`,
     /// `autonomy`, `routing`, `leak_patterns`, `web` — belonged to the inbox and
     /// went with it on 2026-08-08. An unknown key in an existing file is ignored
-    /// by serde, so an old `hub.config.json` still loads; the next save drops it.
+    /// by serde, so an old `huba.config.json` still loads; the next save drops it.
     pub call: CallCfg,
     /// Tự đóng sổ khi ngữ cảnh đầy — xem [`AutoHandoverCfg`].
     pub auto_handover: AutoHandoverCfg,
@@ -226,7 +226,7 @@ pub struct Config {
     pub claude_cli: String,
     /// Accounts to enumerate. Empty = just the ambient account, which is the
     /// only thing true on a fresh machine; this Mac has three, declared in
-    /// `hub.config.json`. Mechanism, not policy — the code must not know a
+    /// `huba.config.json`. Mechanism, not policy — the code must not know a
     /// particular person's setup.
     #[serde(default)]
     pub claude_accounts: Vec<ClaudeAccountCfg>,
@@ -253,8 +253,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            db: PathBuf::from("data/hub.sqlite"),
-            log_file: PathBuf::from("logs/hub.log"),
+            db: PathBuf::from("data/huba.sqlite"),
+            log_file: PathBuf::from("logs/huba.log"),
             workspace_root: PathBuf::new(),
             project_roots: default_project_roots(), // filled in by load(): <hub_home>/../..
             poll_interval_sec: 120,
@@ -292,12 +292,12 @@ fn absolutize(p: &Path, base: &Path) -> PathBuf {
     }
 }
 
-/// Walk up from `start` looking for hub.config.json; the hub directory is
+/// Walk up from `start` looking for huba.config.json; the huba directory is
 /// wherever that file lives (falls back to `start`).
 pub fn find_hub_home(start: &Path) -> PathBuf {
     let mut cur = Some(start);
     while let Some(dir) = cur {
-        if dir.join("hub.config.json").is_file() {
+        if dir.join("huba.config.json").is_file() {
             return dir.to_path_buf();
         }
         cur = dir.parent();
@@ -305,7 +305,7 @@ pub fn find_hub_home(start: &Path) -> PathBuf {
     start.to_path_buf()
 }
 
-/// Throws on invalid config — a hub that starts with a broken policy is worse
+/// Throws on invalid config — a huba that starts with a broken policy is worse
 /// than one that refuses to start.
 pub fn validate(cfg: &Config) -> Result<()> {
     let mut problems: Vec<String> = vec![];
@@ -322,16 +322,16 @@ pub fn validate(cfg: &Config) -> Result<()> {
     }
     // 🔴 Hai luật của phòng chat tfl5 (`app_tid` phải có, `trust.tfl5_user_tids`
     // không được rỗng) đã đi theo cái kênh, 2026-08-14. Cổng của Telegram không
-    // kiểm được ở đây: khoá của nó là BÍ MẬT (`hub.env`), không phải một trường
+    // kiểm được ở đây: khoá của nó là BÍ MẬT (`huba.env`), không phải một trường
     // trong tệp cấu hình — `telegram::Inbox::start` tự bỏ qua CÓ LOG khi thiếu
     // khoá, đúng luật #4 (thiếu bí mật là SKIP-WITH-LOG, không phải chết máy).
     if !problems.is_empty() {
-        bail!("invalid hub config:\n  - {}", problems.join("\n  - "));
+        bail!("invalid huba config:\n  - {}", problems.join("\n  - "));
     }
     Ok(())
 }
 
-/// Load config: explicit path → `HUB_CONFIG` → nearest hub.config.json walking
+/// Load config: explicit path → `HUB_CONFIG` → nearest huba.config.json walking
 /// up from the current directory. Missing file = defaults.
 pub fn load(explicit: Option<&Path>) -> Result<Config> {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -339,7 +339,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
         Some(p) => expand_home(p),
         None => match env::var_os("HUB_CONFIG") {
             Some(v) => expand_home(Path::new(&v)),
-            None => find_hub_home(&cwd).join("hub.config.json"),
+            None => find_hub_home(&cwd).join("huba.config.json"),
         },
     };
 
@@ -358,7 +358,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
 
     // BEFORE validate(): some rules read the environment (a non-loopback
     // web.bind requires a password), and under launchd those values live in
-    // hub.env. Validating first made a documented setup crash-loop with
+    // huba.env. Validating first made a documented setup crash-loop with
     // exit 70 forever.
     let loaded = load_env_file(&home);
     if !loaded.is_empty() {
@@ -380,21 +380,21 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
 /// Gốc workspace: **đi ngược lên tìm**, đừng đếm số bậc.
 ///
 /// 🔴 Dòng cũ là `home.parent().parent()` — hai bậc, gõ cứng đúng hình dạng
-/// `<workspace>/AI/hub`. Nó đúng cho tới đúng ngày hub không nằm ở đó nữa, và
+/// `<workspace>/AI/huba`. Nó đúng cho tới đúng ngày huba không nằm ở đó nữa, và
 /// nó sai **không kêu một tiếng**: `workspace_root` trỏ nhầm ⟹ danh sách dự án
 /// rỗng, `/new` mở phiên ở nhầm thư mục, bảng sức khoẻ thôi so được cây mã.
 /// Cùng một họ với `runtime.rs` từng so bản cài với `~/Documents/projects` sau
 /// khi gốc dời đi (2026-08-12): một con số viết sẵn thay cho một phép đo.
 ///
-/// Hà 2026-08-13: *"chuyển ra ngoài thư mục gốc đi"* — hub rời `AI/hub` sang
-/// `<workspace>/hub`. Thay vì sửa `2` thành `1` (đổi một hằng số sai lấy một
+/// Hà 2026-08-13: *"chuyển ra ngoài thư mục gốc đi"* — huba rời `AI/huba` sang
+/// `<workspace>/huba`. Thay vì sửa `2` thành `1` (đổi một hằng số sai lấy một
 /// hằng số sai khác), hỏi thẳng câu cần hỏi: **thư mục nào là gốc?** Gốc là
 /// thư mục có chứa các NGĂN KÉO dự án mà cấu hình đã khai (`project_roots`,
-/// ở máy này là `["", "AI"]`). Đo được, và đúng cho cả hai chỗ hub từng nằm —
+/// ở máy này là `["", "AI"]`). Đo được, và đúng cho cả hai chỗ huba từng nằm —
 /// tức lần chuyển sau nữa cũng không phải đụng vào dòng nào.
 ///
 /// Không có ngăn kéo nào tên tuổi (`project_roots` chỉ có `""`, ca của người
-/// mới kéo repo về) thì lấy thư mục cha — hub nằm thẳng trong chỗ làm việc.
+/// mới kéo repo về) thì lấy thư mục cha — huba nằm thẳng trong chỗ làm việc.
 /// Trèo tối đa 4 bậc: không tìm thấy thì dừng, đừng leo tới `/`.
 fn find_workspace_root(home: &Path, project_roots: &[String]) -> PathBuf {
     let drawers: Vec<&str> = project_roots
@@ -436,7 +436,7 @@ fn relativize(p: &Path, base: &Path) -> PathBuf {
 pub fn save(cfg: &Config) -> Result<()> {
     validate(cfg)?;
 
-    // Paths inside the hub directory go back as relative, so the file stays
+    // Paths inside the huba directory go back as relative, so the file stays
     // portable instead of being rewritten full of absolute paths.
     let mut out = cfg.clone();
     out.db = relativize(&cfg.db, &cfg.hub_home);
@@ -506,12 +506,12 @@ pub struct ClaudeAccountCfg {
     /// 🔴 Hà 2026-08-15: *"tôi có 3 tài khoản và trên terminal tôi gõ 'claude'
     /// 'claude2' 'claude3' sẽ tương ứng dùng các tài khoản khác nhau"*. Đo trên
     /// máy (`~/.zshrc:51-52`): `alias claude3='CLAUDE_CONFIG_DIR=$HOME/.claude-acc3
-    /// claude'` — tức alias giãn ra ĐÚNG thứ hub vẫn tự dựng lấy.
+    /// claude'` — tức alias giãn ra ĐÚNG thứ huba vẫn tự dựng lấy.
     ///
     /// Vậy vì sao vẫn khai? Vì phép thử CẦU NỐI: ngồi ở máy thì chủ máy gõ
-    /// `claude3`, nên cửa sổ hub mở phải mang đúng dòng ấy — anh nhìn vào là
+    /// `claude3`, nên cửa sổ huba mở phải mang đúng dòng ấy — anh nhìn vào là
     /// đọc được, và **một nguồn duy nhất** quyết tài khoản. Hôm nay có hai bản
-    /// chép: alias trong `.zshrc` và `config_dir` trong `hub.config.json`; hai
+    /// chép: alias trong `.zshrc` và `config_dir` trong `huba.config.json`; hai
     /// bản y hệt nhau cho tới ngày một bên đổi.
     ///
     /// Không khai thì rơi về cách cũ (`CLAUDE_CONFIG_DIR=<dir> claude`) — cùng
@@ -564,7 +564,7 @@ pub fn is_project_name(project: &str) -> bool {
 /// home — which is why root is searched first: a project living at the top
 /// level must never be shadowed by a same-named folder under `AI/`.
 /// Configurable via `project_roots`, because which folders hold projects is a
-/// property of the workspace, not something hub gets to hardcode.
+/// property of the workspace, not something huba gets to hardcode.
 pub fn project_dir(cfg: &Config, project: &str) -> Option<PathBuf> {
     if !is_project_name(project) {
         return None;
@@ -609,7 +609,7 @@ pub fn project_bases(cfg: &Config) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Load `<hub_home>/hub.env` (KEY=VALUE lines) into the process environment.
+/// Load `<hub_home>/huba.env` (KEY=VALUE lines) into the process environment.
 ///
 /// launchd does NOT read your shell profile, so an auto-started daemon has no
 /// `HUB_TELEGRAM_BOT_TOKEN`. Putting secrets in the plist works but spreads them
@@ -618,19 +618,19 @@ pub fn project_bases(cfg: &Config) -> Vec<PathBuf> {
 /// environment always win, so an interactive shell can still override.
 ///
 /// Returns the NAMES that were loaded — never the values.
-/// Bí mật cho bản chạy dưới launchd, đọc từ `<hub_home>/hub.env` **và**
+/// Bí mật cho bản chạy dưới launchd, đọc từ `<hub_home>/huba.env` **và**
 /// `<hub_home>/.env`.
 ///
 /// Hai file chứ không một, vì 2026-08-10 Hà để khoá Telegram vào `.env` —
 /// cái tên mà mọi công cụ khác trên máy đều dùng — rồi báo "cho vào file .env
-/// rồi", trong khi hub chỉ nhìn `hub.env` và im lặng không thấy gì. Bắt người
-/// dùng nhớ đúng một cái tên riêng của hub là bắt sai người: hub biết đọc cả hai
+/// rồi", trong khi huba chỉ nhìn `huba.env` và im lặng không thấy gì. Bắt người
+/// dùng nhớ đúng một cái tên riêng của huba là bắt sai người: huba biết đọc cả hai
 /// thì rẻ hơn nhiều so với một buổi ngồi hỏi "sao không nhận khoá".
 ///
-/// `hub.env` đọc trước nên nó thắng khi trùng khoá; và **môi trường thật luôn
+/// `huba.env` đọc trước nên nó thắng khi trùng khoá; và **môi trường thật luôn
 /// thắng cả hai** — luật cũ, giữ nguyên.
 pub fn load_env_file(hub_home: &Path) -> Vec<String> {
-    let mut loaded = load_one_env_file(&hub_home.join("hub.env"));
+    let mut loaded = load_one_env_file(&hub_home.join("huba.env"));
     loaded.extend(load_one_env_file(&hub_home.join(".env")));
     loaded
 }
@@ -639,7 +639,7 @@ fn load_one_env_file(path: &Path) -> Vec<String> {
     let path = path.to_path_buf();
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
-        // KHÔNG có tệp là chuyện thường (phần lớn máy không dùng `hub.env`) —
+        // KHÔNG có tệp là chuyện thường (phần lớn máy không dùng `huba.env`) —
         // im lặng đúng. Nhưng "có tệp mà đọc không được" là chuyện khác hẳn:
         // sai quyền sau một lần `chmod`, sai chủ sau một lần `sudo`. Bản trước
         // nuốt cả hai vào `Err(_)`, nên một tệp bí mật không đọc được sẽ hiện

@@ -1,4 +1,4 @@
-//! hub.sqlite — the little that has to survive a restart.
+//! huba.sqlite — the little that has to survive a restart.
 //!
 //!   runs     per-poll health — a failed poll leaves a row
 //!   cursors  poll watermarks, the followed session, the last handover/aside
@@ -117,12 +117,12 @@ fn drop_legacy_inbox(conn: &Connection) -> Result<()> {
     // Bốn bảng ấy tham chiếu lẫn nhau (outbox → decisions → messages), mà
     // `open()` bật `foreign_keys = ON` ngay phía trên. Bản đầu bỏ qua điều đó
     // và daemon CHẾT NGAY LÚC DỰNG LÊN: `FOREIGN KEY constraint failed`
-    // (Error 787), `last exit code = 70`, hub nằm im — đo thật 2026-08-10.
+    // (Error 787), `last exit code = 70`, huba nằm im — đo thật 2026-08-10.
     // Sửa bằng cách tắt kiểm chứ không phải xếp thứ tự xoá: thứ tự đúng hôm nay
     // là thứ tự sai vào ngày ai đó thêm một tham chiếu, còn cái này thì không.
     //
     // 📌 Con lỗi này lộ ra trong 20 giây là nhờ bản vá sáng nay cho
-    // `bin/hubd.rs`: trước đó nó chết bằng `eprintln!` và lý do sẽ chỉ nằm ở
+    // `bin/hubad.rs`: trước đó nó chết bằng `eprintln!` và lý do sẽ chỉ nằm ở
     // stderr của launchd, nơi không ai đọc.
     conn.pragma_update(None, "foreign_keys", "OFF")?;
     let out = drop_legacy_inbox_inner(conn);
@@ -163,8 +163,35 @@ impl Db {
             std::fs::create_dir_all(dir)
                 .with_context(|| format!("cannot create {}", dir.display()))?;
         }
+        // 🔴 `Connection::open` DỰNG tệp khi không thấy, và im lặng — đúng hình
+        // dạng lỗi mà điều lệ cấm. Trên máy đã chạy, một DB "mới" nghĩa là
+        // trạng thái vừa bị bỏ rơi ở đâu đó, không phải một khởi đầu sạch.
+        //
+        // Đo 2026-08-20: `data/hub.sqlite` bị đổi tên trong lúc daemon đang
+        // giữ. Kết nối lâu bám inode nên vẫn ghi đúng tệp; còn `telegram.rs`
+        // mở-mới mỗi lượt theo đường dẫn của cấu hình lúc boot, không thấy gì
+        // ở đó, và SQLite dựng một DB rỗng. Từ đó `focus:session` ghi một bên
+        // đọc một bên: `/new` trỏ cửa sổ ttys004, chữ của chủ máy đi vào phiên
+        // dwork — hai lần đọc CÙNG một khoá cách nhau 5,6 giây trả hai giá trị,
+        // không lần ghi nào ở giữa. Suốt đêm không có một dòng nào để mà grep.
+        //
+        // Một dòng ở đây không sửa được gì, nhưng nó biến một đêm truy lỗi
+        // thành một lần tìm. Lần đầu cài thật thì nó kêu đúng một lần.
+        let fresh = !path.exists();
         let conn =
             Connection::open(path).with_context(|| format!("cannot open db {}", path.display()))?;
+        if fresh {
+            crate::logging::warn(
+                "db_created",
+                serde_json::json!({
+                    "path": path.display().to_string(),
+                    "why": "không có tệp ở đường dẫn này nên SQLite vừa dựng một DB RỖNG. \
+                            Trên máy đã chạy, đây là dấu hiệu trạng thái bị bỏ rơi chỗ khác \
+                            (tệp bị đổi tên/di chuyển dưới chân, hoặc cấu hình trỏ sai) — \
+                            đối chiếu với DB mà `huba.config.json` gọi tên trước khi dùng tiếp.",
+                }),
+            );
+        }
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "busy_timeout", 5000)?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
@@ -192,7 +219,7 @@ impl Db {
     // 🔴 ĐÃ XOÁ cả bộ điều khiển giao dịch — `begin`/`commit`/`rollback`
     // (2026-08-14). Chú thích của chúng nói thẳng chúng phục vụ ai: *"decision
     // + outbox rows + message status ONE commit point"* — tức cái hộp thư đã bị
-    // xoá ngày 08-08. Không còn giao dịch nhiều bảng nào trong hub.
+    // xoá ngày 08-08. Không còn giao dịch nhiều bảng nào trong huba.
     //
     // Ghi lại một bước hụt của chính lượt dọn này, vì nó đúng loại sai đã ghi
     // ở luật 7: tôi viết "giữ `commit` lại, nó dùng trong lượt nâng cấp lược
@@ -220,7 +247,7 @@ impl Db {
     /// — khoá, tệp hỏng, hết đĩa. Gộp cả hai thành "không có" là bug đã đếm được
     /// **12 chỗ** trong mã này (9 chỗ `.ok().flatten()`, 3 chỗ `match … _ =>`),
     /// và hậu quả nhìn từ điện thoại là: bấm ⏹ Dừng trên một phiên đang mở thì
-    /// hub trả lời *"chưa theo phiên nào"* — đúng câu nó nói khi chưa ai chọn gì
+    /// huba trả lời *"chưa theo phiên nào"* — đúng câu nó nói khi chưa ai chọn gì
     /// — mà **không dòng log nào** cho biết cơ sở dữ liệu vừa không đọc được.
     ///
     /// Đặt chốt Ở ĐÂY chứ không ở từng chỗ gọi: có mười hai chỗ gọi, và chỗ thứ

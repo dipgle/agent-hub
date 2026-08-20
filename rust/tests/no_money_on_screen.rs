@@ -15,7 +15,7 @@
 //! Một câu về cách đọc: `cost_usd` **vẫn được ghi** (sổ `spend`, luật 8 — để câu
 //! hỏi ấy TRẢ LỜI ĐƯỢC nếu có ai hỏi). Thứ bị cấm là nó **đi ra ngoài**.
 
-use hub::sessions::{Aside, Handover, LiveSession, SessionsSnapshot};
+use huba::sessions::{Aside, Handover, LiveSession, SessionsSnapshot};
 
 /// Con số phải KHÁC THƯỜNG: `0.5` hay `1.0` có thể trùng một trường khác rồi
 /// làm phép đo báo đỏ oan; chuỗi này thì không thể xuất hiện vì lý do nào khác.
@@ -112,7 +112,7 @@ fn the_sessions_snapshot_carries_no_price_and_no_inbox() {
             session_id: "4963b95c-93b0-46e3-baf9-40bbfacbef2f".into(),
             name: "projects-ff".into(),
             account: "acc1".into(),
-            cwd: "/Users/hanguyen/projects/hub".into(),
+            cwd: "/Users/hanguyen/projects/huba".into(),
             host: "terminal".into(),
             working: true,
             ..Default::default()

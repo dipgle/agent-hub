@@ -2,11 +2,11 @@
 // THẬT ở 390px.
 //
 // Đi trọn đường người dùng: đăng nhập → chạm một phiên trong danh sách → gõ câu
-// hỏi vào ô trên màn phiên → bấm Hỏi → hub trả lời về màn.
+// hỏi vào ô trên màn phiên → bấm Hỏi → huba trả lời về màn.
 // Không goto, không gọi API dựng trạng thái.
 //
 // ⚠ HAI ĐƯỜNG, HAI LỜI HỨA NGƯỢC NHAU (từ 2026-08-11):
-//   · phiên CÓ cửa sổ terminal → hub gõ `/btw` thẳng vào phiên đang sống
+//   · phiên CÓ cửa sổ terminal → huba gõ `/btw` thẳng vào phiên đang sống
 //     (mức 1). Lời hứa (ĐO 2026-08-11): câu trả lời tới từ CHÍNH phiên ấy, hiện
 //     trong một BẢNG BÊN của TUI; nhật ký KHÔNG dài thêm — cái bị ăn là ngữ
 //     cảnh đang chạy, và màn phải nói đúng chừng ấy.
@@ -70,9 +70,9 @@ const affordable = (mb, what) => {
   return false;
 };
 
-const hub = (args) =>
+const huba = (args) =>
   JSON.parse(
-    execFileSync(HERE + "rust/target/release/hub", args, {
+    execFileSync(HERE + "rust/target/release/huba", args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     })
@@ -113,14 +113,14 @@ const fingerprint = (path) => {
   }
 };
 
-/// Đúng ĐIỀU KIỆN hub dùng để chọn đường, và nay là con số hub TỰ ĐO
+/// Đúng ĐIỀU KIỆN huba dùng để chọn đường, và nay là con số huba TỰ ĐO
 /// (`sessions::mark_can_type` hỏi Terminal.app đang giữ những tty nào) chứ
 /// không phải một bản sao của luật nằm trong kịch bản.
 ///
 /// Bản trước chép luật: `tty && host === "terminal"`. Nó SAI đúng ca đã tốn
 /// tiền thật ngày 2026-08-11 — phiên trong terminal tích hợp của VS Code thoả
 /// cả hai vế mà Terminal.app không biết cái tty ấy, nên kịch bản chờ `/btw`
-/// trong khi hub đi đường fork.
+/// trong khi huba đi đường fork.
 const canTypeInto = (s) => s.can_type === true;
 
 /// Những dòng nhật ký MỚI so với lúc trước khi hỏi.
@@ -160,7 +160,7 @@ try {
 
   // Một phiên ĐỨNG YÊN. Với phiên đang chạy thì "tệp không đổi" là phép đo mù:
   // nó tự đổi vì phiên vẫn làm việc, và script sẽ đổ lỗi cho tính năng.
-  const truth = hub(["sessions", "--json"]);
+  const truth = huba(["sessions", "--json"]);
   const idleFor = (s) =>
     s.last_activity ? (Date.now() - Date.parse(s.last_activity)) / 60000 : Infinity;
   // Trong các phiên đứng yên, chọn phiên NHẬT KÝ NGẮN NHẤT. `--resume` nạp cả
@@ -194,7 +194,7 @@ try {
   }
   const { s: target, file, mb } = aimed || sized[0];
   // ĐƯỜNG NÀO — chốt TRƯỚC khi bấm. Chốt sau khi có câu trả lời thì phép đo chỉ
-  // là cái gương: hub trả về gì nó cũng gật.
+  // là cái gương: huba trả về gì nó cũng gật.
   const viaBtw = canTypeInto(target);
   branchTaken = viaBtw ? "btw" : "fork";
   console.log(`chạm vào phiên: ${target.name} (${target.account}, đứng yên ${Math.round(idleFor(target))} phút)`);
@@ -222,7 +222,7 @@ try {
     await page.locator("#sessSayInput").getAttribute("placeholder"));
   // Chữ hứa hẹn phải khớp ĐƯỜNG SẮP ĐI — đây là chỗ trang từng nói hộ một điều
   // sản phẩm thôi làm: phiên có cửa sổ vẫn được hứa "phiên gốc không bị đụng"
-  // trong khi hub sắp gõ thẳng vào nó.
+  // trong khi huba sắp gõ thẳng vào nó.
   const hintText = await page.locator("#sessAskHint").textContent();
   check(
     viaBtw
@@ -234,12 +234,12 @@ try {
     hintText.slice(0, 90)
   );
 
-  // Chờ luồng về trước đã, để chắc hub đã theo đúng phiên này.
+  // Chờ luồng về trước đã, để chắc huba đã theo đúng phiên này.
   //
   // Phiên CHƯA nói lượt nào thì luồng RỖNG mãi mãi — không có sự kiện nào để
   // chờ, và đó là trạng thái đúng, không phải hỏng. Chờ cứng ở đây làm kịch bản
   // chết sau 3 phút trên đúng mục tiêu sạch nhất của đường `/btw`. Với phiên
-  // trắng, thứ chứng minh "hub đang theo đúng phiên" là **màn sống** của nó.
+  // trắng, thứ chứng minh "huba đang theo đúng phiên" là **màn sống** của nó.
   const fresh = !file;
   await page.waitForFunction(
     (empty) =>
@@ -252,7 +252,7 @@ try {
 
   // Ảnh chụp KHÔNG mang số tiền nào (gỡ 2026-08-08). Đòi vắng mặt, vì thứ này
   // đã mọc lại một lần: trần → giá.
-  const snap = hub(["portal-push", "--dry-run"]);
+  const snap = huba(["portal-push", "--dry-run"]);
   check(
     "ảnh chụp KHÔNG mang số tiền nào",
     snap.owner_spend === undefined && snap.owner_budget === undefined
@@ -292,10 +292,10 @@ try {
   ).catch(() => {});
   // Chờ câu trả lời MỚI, không chờ "có chữ trên màn". Kịch bản hỏi lại đúng câu
   // cũ, nên đáp án của lần chạy trước cũng thoả mọi phép so chuỗi — bản đầu rơi
-  // đúng bẫy đó và tưởng đã đo xong trong khi hub còn đang nghĩ.
+  // đúng bẫy đó và tưởng đã đo xong trong khi huba còn đang nghĩ.
   let after = null;
   for (let i = 0; i < 60; i++) {
-    after = hub(["portal-push", "--dry-run"]);
+    after = huba(["portal-push", "--dry-run"]);
     if ((after.sessions.aside?.ts || "") !== asideBefore) break;
     await page.waitForTimeout(3000);
   }
@@ -328,7 +328,7 @@ try {
 
   // ——— LỜI HỨA CỦA UC, đo trên tệp thật ———
   const now = fingerprint(file || transcriptOf(target.session_id));
-  const liveNow = hub(["sessions", "--json"]).sessions.find((s) => s.session_id === target.session_id);
+  const liveNow = huba(["sessions", "--json"]).sessions.find((s) => s.session_id === target.session_id);
   if (viaBtw) {
     // Đường `/btw` — LỜI HỨA ĐÃ ĐO LẠI 2026-08-11, và nó ngược với lời hứa mà
     // chính kịch bản này viết ra buổi sáng cùng ngày.

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Re-sign hubd with a STABLE identity so macOS keeps its TCC grants across rebuilds.
+# Re-sign hubad with a STABLE identity so macOS keeps its TCC grants across rebuilds.
 #
-# 🔴 Moved to the hub root 2026-08-16 together with `install_update.sh` — see the
+# 🔴 Moved to the huba root 2026-08-16 together with `install_update.sh` — see the
 # header there for why the old folder name had to go.
 #
 # WHY THIS EXISTS (measured 2026-08-10). `cargo` ad-hoc-signs every binary it
 # links, and an ad-hoc signature's designated requirement is
 #     designated => cdhash H"fea4ff94…"
 # — a hash of the bytes. TCC pins a grant to that requirement, so EVERY rebuild
-# makes hubd a different program to macOS and the launchd copy silently loses
+# makes hubad a different program to macOS and the launchd copy silently loses
 # Full Disk Access and Automation. The failure mode has no log and no exit code:
 # getcwd()/open() block forever on a dialog a background process cannot show.
 #
@@ -20,19 +20,19 @@
 # an admin password. Gatekeeper is not involved — this binary is never
 # quarantined, it is built on the machine that runs it.
 #
-# Only hubd is signed. `hub` (the CLI) runs from a terminal and inherits that
+# Only hubad is signed. `huba` (the CLI) runs from a terminal and inherits that
 # terminal's TCC responsibility; giving it its own identity would only add a
 # second program for macOS to ask about.
 #
-# Usage: sign.sh [path-to-binary]   (default: rust/target/release/hubd)
+# Usage: sign.sh [path-to-binary]   (default: rust/target/release/hubad)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BIN="${1:-$HERE/rust/target/release/hubd}"
+BIN="${1:-$HERE/rust/target/release/hubad}"
 IDENTIFIER="com.dipgle.hubd"
-CERT_CN="Hub Local Signing"
+CERT_CN="Huba Local Signing"
 STORE="$HOME/Library/Application Support/hub/signing"
-P12="$STORE/hub-codesign.p12"
+P12="$STORE/huba-codesign.p12"
 P12_PASS="hublocal"   # not a secret: it protects a local, self-signed signing key
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
@@ -52,7 +52,7 @@ sha="$(security find-identity -p codesigning 2>/dev/null \
 if [[ -z "$sha" ]]; then
   [[ -f "$P12" ]] || die "identity '$CERT_CN' is not in the keychain and $P12 is missing.
   Recreate both (this INVALIDATES existing TCC grants — you will have to re-add
-  hubd to Full Disk Access):
+  hubad to Full Disk Access):
     make-signing-cert.sh"
   echo "sign.sh: importing '$CERT_CN' from $P12" >&2
   security import "$P12" -k "$KEYCHAIN" -P "$P12_PASS" -T /usr/bin/codesign -A >&2
@@ -61,14 +61,14 @@ if [[ -z "$sha" ]]; then
   [[ -n "$sha" ]] || die "imported $P12 but '$CERT_CN' still is not a code-signing identity"
 fi
 
-# 2. Sign. --force replaces cargo's ad-hoc signature. No hardened runtime: hubd
+# 2. Sign. --force replaces cargo's ad-hoc signature. No hardened runtime: hubad
 #    spawns osascript to talk to Terminal, and the runtime flag would demand an
 #    apple-events entitlement to keep that working.
 codesign --force --sign "$sha" --identifier "$IDENTIFIER" --timestamp=none "$BIN" 2>&1 | sed 's/^/sign.sh: /' >&2
 
 # 3. Prove the requirement is the STABLE one. A signature that still says cdhash
 #    means the grant will be lost on the next build — that is a failure, not a
-#    warning, because nothing downstream would notice until hubd hangs at boot.
+#    warning, because nothing downstream would notice until hubad hangs at boot.
 dr="$(codesign -d -r- "$BIN" 2>/dev/null | grep '^designated' || true)"
 case "$dr" in
   *"certificate root"*) : ;;

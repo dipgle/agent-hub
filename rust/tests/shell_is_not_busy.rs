@@ -10,11 +10,11 @@
 //!
 //! Bài kiểm này giữ CẢ HAI đứng cùng lúc, nên bản vá sau không xoá bản vá trước.
 
-use hub::keys::{is_busy, screen_running};
-use hub::sessions::shell_verdict;
+use huba::keys::{is_busy, screen_running};
+use huba::sessions::shell_verdict;
 
 /// Màn THẬT của một phiên đang chạy. Dòng đầu là kiểu đang-chạy **không có
-/// ngoặc** — nguyên văn từ ảnh màn hub gửi đi 18/08, và chính là ca `is_busy`
+/// ngoặc** — nguyên văn từ ảnh màn huba gửi đi 18/08, và chính là ca `is_busy`
 /// đọc sai.
 const RUNNING: &str = "✻ Cogitated for 37m 51s · 2 shells still running\n\
                        ────────────\n❯ \n────────────\n\

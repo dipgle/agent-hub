@@ -1,4 +1,4 @@
-// Playwright smoke test for the hub chat FE, run against the bundle ACTUALLY
+// Playwright smoke test for the huba chat FE, run against the bundle ACTUALLY
 // DEPLOYED on tfl5 — not a local file, not a dev server. The page is fetched
 // from `<app_tid>.test.localhost:8090`, which is the same path a real user
 // takes.
@@ -45,7 +45,7 @@ try {
   // ---- 1. the page a user actually gets ---------------------------------
   const res = await page.goto(BASE, { waitUntil: "domcontentloaded" });
   check("trang tải được từ bundle đã deploy", res.status() === 200, `HTTP ${res.status()}`);
-  check("tiêu đề đúng", (await page.title()) === "hub");
+  check("tiêu đề đúng", (await page.title()) === "huba");
   check("màn đăng nhập hiện trước", await page.locator("#login").isVisible());
   check("chưa đăng nhập thì không có ô nhập tin", !(await page.locator("#foot").isVisible()));
   await page.screenshot({ path: `${SHOTS}fe-01-login.png` });

@@ -10,9 +10,9 @@
 //! `❯` là **U+00A0**, không phải dấu cách thường — chính chi tiết ấy là thứ
 //! khiến tôi nghi oan cho `prompt_line_text`.
 
-use hub::pipeline::{html_with_links, prompt_line_text};
+use huba::pipeline::{html_with_links, prompt_line_text};
 
-const SCREEN: &str = "📷 Màn của 🟪 [hub]:\n\n\
+const SCREEN: &str = "📷 Màn của 🟪 [huba]:\n\n\
     ───────────────────────\n\
     \u{276f}\u{a0}Bỏ hẳn trần cắt lệnh đi\n\
     ───────────────────────\n\

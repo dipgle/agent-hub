@@ -1,6 +1,6 @@
-# hub — operating rules
+# huba — operating rules
 
-`hub` puts the **Claude CLI sessions running on this Mac** on a phone. One
+`huba` puts the **Claude CLI sessions running on this Mac** on a phone. One
 Telegram chat carries ORDERS (`/session`, `/ask`, `/new`, `/tell`, `/stop`,
 `/handover`) and carries back what every session is doing. Nothing here reads
 mail, and nothing here spends money unless the owner presses a button.
@@ -13,19 +13,19 @@ then; the page had been dead for two days without anyone noticing. Gone with it:
 `memory/ra-soat-2026-08-14.md`.
 
 Read `README.md` for the architecture and the CLI. Read `PLAN.md` for what is
-built vs. pending. This file is the rules for working ON hub.
+built vs. pending. This file is the rules for working ON huba.
 
 ## The one test every design decision must pass
 
 Hà, 2026-08-11, restating the founding intent: *"cli claude cài trên máy tôi,
-hub là **cầu kết nối** ra ui để tôi làm việc, điều khiển, giao tiếp phiên"*.
+huba là **cầu kết nối** ra ui để tôi làm việc, điều khiển, giao tiếp phiên"*.
 
-**hub is a BRIDGE, not an owner.** The sessions belong to the CLI on this Mac;
-hub carries them to a screen he can reach and carries his hands back. That gives
+**huba is a BRIDGE, not an owner.** The sessions belong to the CLI on this Mac;
+huba carries them to a screen he can reach and carries his hands back. That gives
 one test, and it cuts both ways:
 
-- **Anything hub does that has no equivalent at the terminal is a smell.** It
-  means hub invented a way of working he cannot see, take over, or reason about.
+- **Anything huba does that has no equivalent at the terminal is a smell.** It
+  means huba invented a way of working he cannot see, take over, or reason about.
   The example that forced the rule, and the one that proves it pays: `/new` used
   to create a `--bg` session — headless, no window, no live screen, impossible
   to type into without stopping it first. He would never produce that by sitting
@@ -36,8 +36,8 @@ one test, and it cuts both ways:
   the only handle that exists at that moment (the name is auto-assigned, the id
   does not exist yet). `--bg` survives as the fallback when no window can be
   opened, or when `new_in_terminal` is off.
-  Closing had to follow, or the bridge is one-way: hub could open a window and
-  then refuse to close it. `/stop` on a hub-opened window session types `/exit`,
+  Closing had to follow, or the bridge is one-way: huba could open a window and
+  then refuse to close it. `/stop` on a huba-opened window session types `/exit`,
   waits for Terminal to report the tab idle, then closes the window — Hà's own
   definition of *tắt hẳn*.
 - **Anything he can do at the terminal but not from the phone is a gap.** Today:
@@ -50,9 +50,9 @@ one test, and it cuts both ways:
 When a choice is unclear, ask what he would do sitting at the machine, and make
 the phone do that — not something cleverer.
 
-## What hub is NOT (2026-08-08)
+## What huba is NOT (2026-08-08)
 
-hub was an inbox: GitHub notifications, project devlogs, email and Telegram fed
+huba was an inbox: GitHub notifications, project devlogs, email and Telegram fed
 one queue, a bounded `claude -p` call triaged every item, and a policy engine
 decided send-vs-ask. **That product is deleted** — adapters, triage, policy,
 redaction of outbound replies, the outbox, the act stage, the local web console,
@@ -76,18 +76,18 @@ or drive a session from a phone?** If not, it does not belong here.
 
 ## Stack
 
-- **Rust 2021**, crate in `rust/`, two binaries: `hub` (CLI) and `hubd` (loop).
+- **Rust 2021**, crate in `rust/`, two binaries: `huba` (CLI) and `hubad` (loop).
   Deliberately **synchronous** — this process spends its life waiting on
   `claude` and a Telegram long-poll, so an async runtime would add moving parts
   without removing a single wait.
   🔴 **`unsafe` sống ở ĐÚNG MỘT TỆP: `cgkeys.rs`** (Hà gỡ luật *"no unsafe
   anywhere"* ngày 2026-08-19, cho đúng chỗ này). Vì sao phải có: mọi lượt ghi
-  qua `do script` kèm một CR không tắt được, nên trên hộp chọn hub **không có
+  qua `do script` kèm một CR không tắt được, nên trên hộp chọn huba **không có
   phím nào chỉ DI mà không CHỐT** — một nút "sang tab bên phải" sẽ trả lời hộ
   câu đang mở. Đo được, và trả giá bằng việc thật: một cú Enter lạc chốt
   `☐ RPC pool` → `☒` trên bảng hỏi của phiên amm. `CGEventPostToPid` đưa phím
   rời thẳng vào tiến trình Terminal, không qua `do script`, nên không kèm gì.
-  Đổi lại: cần quyền **Trợ năng** cấp cho `hubd` — bám được là nhờ nó đã ký
+  Đổi lại: cần quyền **Trợ năng** cấp cho `hubad` — bám được là nhờ nó đã ký
   chứng chỉ cố định từ 10/08 (ad-hoc thì mỗi lần build là một chương trình khác
   và quyền rụng sau đúng một `cargo build`).
   Ba luật của tệp ấy, đọc trước khi sửa: `unsafe` không rời khỏi nó · hỏi quyền
@@ -101,9 +101,9 @@ or drive a session from a phone?** If not, it does not belong here.
   single `use` left in `src/`**, and cargo never said a word. `tungstenite` was
   the `/ws/chat` socket; `axum`+`tokio` were built for a local web console
   deleted on 2026-08-08 (rule 12) and outlived it by six days, dragging an async
-  runtime into a deliberately synchronous process. `hub setup` never used them —
+  runtime into a deliberately synchronous process. `huba setup` never used them —
   it is a std-library `TcpListener`.
-- Store: `data/hub.sqlite` (WAL). Three tables — `runs`, `cursors`, `spend`
+- Store: `data/huba.sqlite` (WAL). Three tables — `runs`, `cursors`, `spend`
   (plus `schema_meta`). The four inbox tables are GONE as of schema step 4
   (2026-08-10): they had outlived the product by two days and held 379 rows no
   query could reach. Two facts worth keeping from that migration — the four
@@ -133,12 +133,12 @@ or drive a session from a phone?** If not, it does not belong here.
   the other end, not an approximation. Only the event NAME is carried onto the
   row, never `fields`: that string reaches the phone through `/doctor`, and
   `fields` is where a bot token leaked once already.
-  📐 Measured before trusting it (`logs/hub.log`, 2026-08-14): 83,060 `info` ·
+  📐 Measured before trusting it (`logs/huba.log`, 2026-08-14): 83,060 `info` ·
   1,626 `warn` · 120 `error`. So this panel means *errors*, not *all trouble* —
-  most of hub's trouble lives at `warn` and deliberately stays there. An empty
+  most of huba's trouble lives at `warn` and deliberately stays there. An empty
   block reads "no ERRORS", never "nothing worth looking at".
 - Tests: `cd rust && cargo test --offline` → 263 tests, 0 warnings.
-- `./hub …` is a wrapper that builds on first use then execs `rust/target/release/hub`.
+- `./huba …` is a wrapper that builds on first use then execs `rust/target/release/huba`.
 
 ## Gốc workspace: `~/projects` — và đừng gõ nó vào mã (2026-08-12)
 
@@ -147,30 +147,30 @@ gác Documents bằng TCC; quyền đọc chớp tắt giữa phiên dù đã c�
 còn sống như **symlink**, nên mọi thứ vẫn chạy — đó chính là chỗ nguy hiểm: một
 đường dẫn cũ gõ trong mã KHÔNG gãy, nó chỉ đi vòng qua đúng thư mục vừa bị bỏ.
 
-hub tự biết mình ở đâu, và mọi đường dẫn phải bắt nguồn từ đó:
+huba tự biết mình ở đâu, và mọi đường dẫn phải bắt nguồn từ đó:
 `HUB_CONFIG` (trong plist) → `cfg.hub_home` → `cfg.workspace_root`
 → danh sách dự án, `cwd` của mọi `/new`, và cây mã mà bảng sức khoẻ đem ra so.
 Kịch bản `.mjs` thì tự định vị bằng `HERE`/`import.meta.url`, không hỏi `$HOME`.
 
-**hub nay nằm ở `~/projects/hub`, không còn trong `AI/` (2026-08-13.)** Hà:
-*"chuyển ra ngoài thư mục gốc đi"*, sau khi đọc nhãn `[AI/hub]` và hỏi *"hub làm
+**huba nay nằm ở `~/projects/huba`, không còn trong `AI/` (2026-08-13.)** Hà:
+*"chuyển ra ngoài thư mục gốc đi"*, sau khi đọc nhãn `[AI/huba]` và hỏi *"huba làm
 việc đâu liên quan tới ai"*. `AI/` là một ngăn kéo xếp hồ sơ, không phải chủ đề.
 
 Và đừng đếm số bậc để tìm gốc. Dòng cũ là `hub_home/../..` — gõ cứng đúng hình
-dạng `<workspace>/AI/hub`, nên lượt chuyển này làm nó tính ra `~/`, im lặng:
+dạng `<workspace>/AI/huba`, nên lượt chuyển này làm nó tính ra `~/`, im lặng:
 danh sách dự án rỗng, `/new` mở nhầm thư mục, bảng sức khoẻ thôi so được cây mã.
 Nay `config::find_workspace_root` **đi ngược lên tìm** thư mục có chứa ngăn kéo
-đã khai trong `project_roots` — đo được, và đúng ở cả hai chỗ hub từng nằm, nên
+đã khai trong `project_roots` — đo được, và đúng ở cả hai chỗ huba từng nằm, nên
 lần chuyển sau nữa không phải đụng dòng nào.
 
 📌 Cái giá đã trả, đúng hai hình dạng — cả hai đều **không kêu một tiếng nào**:
-- `runtime.rs` so bản cài với `~/Documents/projects/AI/hub/rust`. Mất cây mã ⟹
+- `runtime.rs` so bản cài với `~/Documents/projects/AI/huba/rust`. Mất cây mã ⟹
   hàm trả `None` ⟹ bảng sức khoẻ **thôi cảnh báo "daemon đang chạy mã hôm qua"**,
   tức mất đúng thứ duy nhất phát hiện ra việc quên `install.sh`. Nay bám
   `hub_home` (`runtime::source_tree`), và không tìm thấy cây mã thì **ghi log**.
 - `com.dipgle.hubd.plist` vẫn trỏ `HUB_CONFIG` vào đường cũ trong khi bản
   ĐANG CÀI đã sửa tay. Bản cài đúng, repo sai ⟹ **`install.sh` lượt sau cài đè
-  lại đường cũ**, lặng lẽ, và `workspace_root` của cả hub đi theo nó.
+  lại đường cũ**, lặng lẽ, và `workspace_root` của cả huba đi theo nó.
 
 Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong test
 (`rust/tests/sessions.rs`, `/btw` 2026-08-11) mang `~/Documents/projects` vì hôm
@@ -184,7 +184,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    ssh/scp/rsync/sudo/rm/docker/launchctl/`*deploy*`, no WebFetch/WebSearch.
    Writes inside the working tree stay allowed — that is the work. Never widen
    this list to make a feature fit.
-2. **Anything hub runs on a live session runs on a FORK, read-only.** `/ask` and
+2. **Anything huba runs on a live session runs on a FORK, read-only.** `/ask` and
    `/handover` go through `sessions::fork_call`: `--fork-session` so the original
    transcript is untouched, and `FORK_TOOLS` (`Read,Grep,Glob`) so a question
    typed on a phone has no hand to write with. Measured 2026-08-08: `--tools ""`
@@ -209,14 +209,14 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    `telegram::Inbox::start` says which key name is missing and leaves everything
    else running. (`adapters::Skip`, the error type that used to carry this
    through a run row, went with the poll stage on 2026-08-14; the rule did not.)
-   Secrets for the daemon come from `hub.env` (chmod 600), never the plist,
+   Secrets for the daemon come from `huba.env` (chmod 600), never the plist,
    never the config. Log key NAMES only. The real environment always wins.
-5. 🔴 **hub KHÔNG giấu chữ với chủ máy — quét thì ghi, không chặn** (2026-08-16).
-   Hà: *"hub là cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì
-   phải ngồi vào máy để làm vậy thì cần gì hub nữa"*.
+5. 🔴 **huba KHÔNG giấu chữ với chủ máy — quét thì ghi, không chặn** (2026-08-16).
+   Hà: *"huba là cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì
+   phải ngồi vào máy để làm vậy thì cần gì huba nữa"*.
 
    Luật cũ đọc ngược lại (*"nothing about a session leaves this Mac
-   unscanned"*), và nó sinh ra từ một lần chạy thật: `hub sessions` in ra một
+   unscanned"*), và nó sinh ra từ một lần chạy thật: `huba sessions` in ra một
    phiên có mật khẩu đăng nhập trong lượt cuối. Cái nó bỏ quên là ĐÍCH ĐẾN —
    buồng chat riêng của chính chủ máy, đúng chỗ `/shot` đã gửi nguyên màn hình
    từ 14/08. Nên nó không bảo vệ ai; nó chỉ bắt anh đi bộ về chỗ cái máy.
@@ -234,7 +234,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    (`tests/sessions.rs`), nên "vá lại cho an toàn" là làm đỏ một bài kiểm có
    chủ, không phải sửa một chỗ hở.
 
-   Cái KHÔNG đổi: luật 4 (bí mật của chính hub — token bot, `hub.env` — vẫn chỉ
+   Cái KHÔNG đổi: luật 4 (bí mật của chính huba — token bot, `huba.env` — vẫn chỉ
    log tên khoá, không log giá trị), và `redaction::file_risk` vẫn NÓI RA khi
    một tệp gửi đi có dấu hiệu. Nói ≠ giấu.
 6. **Cursors advance only after the orders they cover have run.** A crash must
@@ -242,8 +242,8 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    with the poll stage, and Telegram advances its own `offset` inside
    `getUpdates`. What is left under this rule is `focus:session`, the watch
    book, and the project pin.
-7. **hub takes ORDERS from the owner only.** The gate is `chat_id`
-   (`HUB_TELEGRAM_CHAT_ID` in `hub.env`); anyone else typing `/new` is just
+7. **huba takes ORDERS from the owner only.** The gate is `chat_id`
+   (`HUB_TELEGRAM_CHAT_ID` in `huba.env`); anyone else typing `/new` is just
    typing text, and the refusal is LOGGED, never silently dropped.
 
    🔴 **One gate, at the channel** (2026-08-14). There were two: this one, and
@@ -316,7 +316,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    must end its arm with `Some(ack)` — the fall-through that used to exist
    logged "Không tìm thấy decision #0" as the reply for every `/session` and
    `/ask` ever issued.
-8. **hub consumes nothing on its own.** There is no triage, so a cycle costs
+8. **huba consumes nothing on its own.** There is no triage, so a cycle costs
    nothing; the only calls are `/ask`, `/handover`, `/new`, `/tell` — a person
    pressing a button, at the same cost as typing it in the terminal. They are
    **counted in `spend`, never refused**.
@@ -364,7 +364,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     **A BACKGROUND subagent's `tool_result` arrives immediately** — it says
     "agent launched", not "agent finished" — so pairing `tool_use` with
     `tool_result` reports a fan-out as over the instant it starts. Measured
-    2026-08-10: two agents running, `hub sessions` said `pending 0`, and the
+    2026-08-10: two agents running, `huba sessions` said `pending 0`, and the
     background case is precisely the one the count exists for (a blocking
     subagent leaves the parent visibly busy; a background one leaves it looking
     idle). Three structural facts make the real answer reachable, none of them a
@@ -382,13 +382,13 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     a process, so `ps` will never find one. A dead session's un-notified agents
     are NOT running — the process took them with it — so liveness gates the
     count (`sessions::pending_for_display`), or the screen grows ghosts.
-11. **hub speaks only on a CHANGE, never on a state.** `watch.rs` compares this
+11. **huba speaks only on a CHANGE, never on a state.** `watch.rs` compares this
     cycle's snapshot with the previous one and announces only transitions — a
     session that finished its turn, a session that ended. Announcing a *state*
     from a loop that ticks every ~10s is a phone that buzzes forever, and a phone
     that buzzes forever gets muted, taking the messages that mattered with it.
     Three rules hold the line: say it once; say **nothing** on the first round
-    after a restart (an empty book means hub just woke up, not that everything
+    after a restart (an empty book means huba just woke up, not that everything
     just changed); and treat *leaving the list* as the main "ended" signal,
     because `claude agents` drops a stopped session within seconds and usually
     never shows it as `dead`. `IDLE_AFTER_SEC` (180s) is a promise about TRUTH,
@@ -416,7 +416,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
       tty" answers "is there a window", never "is it still THAT session's
       window". `projects-d8` lived in `ttys002` (open since 12:28); the owner
       exited the CLI and typed `claude` again in that same window at 16:41:16;
-      at 16:42:33 hub noticed the old session gone, asked about the tty, and
+      at 16:42:33 huba noticed the old session gone, asked about the tty, and
       said *"cửa sổ terminal còn mở"* — technically true, and a lie in effect,
       because the window it describes is already running something else. Ask
       your OWN snapshot first (`sessions::window_taken_over`) and name the
@@ -424,19 +424,19 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     - **`??` is not a window, and `??` == `??` is not a takeover** (2026-08-12,
       the same fix biting back). `ps` prints `??` for a process with no
       controlling terminal, and `??` is not empty — so the `tty.is_empty()` gate
-      let it through, `window_taken_over` matched `??` against `??`, and hub
-      announced `⏹ hub-67 đã tắt — cửa sổ ấy nay đang chạy phiên hub-ec.` about
+      let it through, `window_taken_over` matched `??` against `??`, and huba
+      announced `⏹ huba-67 đã tắt — cửa sổ ấy nay đang chạy phiên huba-ec.` about
       **two of its own `/usage` probes, neither of which ever had a window**.
       The rule was already written correctly in `keys::window_of` and in the
       `terminal`/`detached` labeller — three hand copies, and the fourth site
       forgot. One predicate now: **`sessions::is_real_tty`**.
-    - **hub's own machinery must never ring** (Hà, reading that message:
+    - **huba's own machinery must never ring** (Hà, reading that message:
       *"tại sao 1 phiên đã tắt mà vẫn gắn nút vào phiên"* · *"quá vô lý"*). The
       lifetime gate (`MIN_LIFE_SEC`) catches most `/usage` probes, but it
       measures the wrong thing: what makes that death not-news is not that it
-      was *short*, it is that it is *hub's*. Measured: one probe sat in
+      was *short*, it is that it is *huba's*. Measured: one probe sat in
       `claude agents` for **11 minutes** (the probe hung to its 60s ceiling),
-      walked past the 120s gate, and rang. The tell is `cwd` — hubd runs from
+      walked past the 120s gate, and rang. The tell is `cwd` — hubad runs from
       its own `WorkingDirectory` and children inherit it, and no human session
       lives there (`sessions::is_hub_own_probe`). Two gates, because a session
       can be filtered while alive *or* already sitting in the book from before
@@ -449,7 +449,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     — the latter is refused outright (*"osascript is not allowed to send
     keystrokes (1002)"*) and no amount of granting Accessibility fixes it,
     because the process asking is `/usr/bin/osascript`, a system binary. `do
-    script` needs only **Automation**, which hub already has. It **always
+    script` needs only **Automation**, which huba already has. It **always
     appends a newline** and that cannot be turned off — but read the next
     paragraph before concluding that a typed line therefore gets SENT.
     🔴 **"Appends a newline" ≠ "the TUI submits it"** (Hà, 2026-08-12: *"nhận
@@ -458,7 +458,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     **paste**: the line lands in the box and the newline goes into the content
     instead of ending it. True for a shell, false for this TUI — and the two
     behaved differently long enough for this file to state the wrong rule.
-    hub now looks before it speaks: after typing it re-reads the screen, and if
+    huba now looks before it speaks: after typing it re-reads the screen, and if
     the text is still sitting in the box it sends a **separate** Enter
     (`keys::still_in_box` + `press(w, "enter")`). Three measured conditions gate
     that extra keystroke, because a stray Enter is not undoable — the text is
@@ -466,12 +466,12 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     it WAS submitted), and no choice dialog is on screen (there Enter CONFIRMS).
     A line under 6 characters never triggers it: "2" or "ok" appears on almost
     any screen, and a false match would fire an Enter nobody asked for.
-    It also means an arrow key both MOVES and CONFIRMS, so hub sends
+    It also means an arrow key both MOVES and CONFIRMS, so huba sends
     an arrow only when it can **prove there is no choice dialog** — not merely
     when it fails to see one. That distinction is the whole gate: `screen_of`
     used to fold three outcomes into `None` (no window · osascript failed ·
     **the screen looks like it holds a secret**), and the gate read `None` as
-    "no dialog" and sent, so it failed OPEN exactly when hub was blindest —
+    "no dialog" and sent, so it failed OPEN exactly when huba was blindest —
     including the case where a password was on screen. `keys::look` now returns
     `Saw` / `Withheld` / `Blind`, and `keys::arrow_verdict` sends only on a
     proven-empty choice list. `Withheld` still decides correctly: the choice
@@ -490,7 +490,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     · **Nới `number of rows` 26 → 60 ⟹ 61 đoạn**, hộp chọn hiện đủ từ `1.` tới
       dòng chân. Đây là đường duy nhất lấy thêm được, và nó phải nới-đọc-TRẢ LẠI
       trong **một** lượt `osascript` (`keys::screen_text_tall`), vì nửa chừng mà
-      hub chết là cửa sổ chủ máy nằm lại ở chiều lạ.
+      huba chết là cửa sổ chủ máy nằm lại ở chiều lạ.
     Bản sao đầy đủ của HỘI THOẠI thì nằm ở nhật ký `.jsonl`, không ở màn. Ngoại
     lệ đã đo: **bảng hỏi ĐANG TREO chưa được ghi vào nhật ký** (0 lần
     `AskUserQuestion` trong 3,6 MB nhật ký amm trong khi hộp nằm trên màn) — nên
@@ -499,7 +499,7 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     lần** trên màn thật; nay chỉ còn **một vạch `─` suốt bề ngang**, và ô nằm
     GIỮA HAI vạch. Neo `rfind('╭')` vì thế trượt ở mọi lượt đọc rồi rơi âm thầm
     về đường lùi "bốn dòng cuối" — đủ để mọi thứ trông vẫn chạy, và đã trả giá:
-    khối kết quả `▶️` nằm lại trong ô nhập **hơn một tiếng** trong khi hub báo
+    khối kết quả `▶️` nằm lại trong ô nhập **hơn một tiếng** trong khi huba báo
     *"✅ đã dán vào phiên"*, còn `⌫` thì hai lần đều không xoá nổi. Một cái neo
     duy nhất: `keys::box_start`.
     **Opening and closing a window** (2026-08-11). `do script "<cmd>"` makes a
@@ -508,12 +508,12 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     ordered, and the order is not politeness: `/exit` first, then close, because
     closing a window with a live process raises Terminal's own *"Do you want to
     terminate running processes?"* modal — and a modal **blocks every automation
-    command after it**, so getting this backwards gags hub. Two measurements
+    command after it**, so getting this backwards gags huba. Two measurements
     pin the steps: typing `/exit` really does end the CLI (pid gone, `busy` →
     `false`), so no `kill` and no lost end-of-session bookkeeping; and the
     window does **not** close itself when the shell exits (the profile keeps it,
     showing `[Process completed]`), so the close step is required, not cosmetic.
-    If the tab is still busy after 10s, hub refuses to close — better a live
+    If the tab is still busy after 10s, huba refuses to close — better a live
     window than a modal that silences everything.
     One trap unique to this path: the command goes through a **shell**, so every
     `DENIED_TOOLS` pattern must be quoted. `Bash(git push:*)` bare is a shell
@@ -530,9 +530,9 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     lives in the login keychain, and is deliberately **not** trusted — `codesign`
     signs happily with an untrusted identity and TCC matches on the requirement,
     so nothing here needs an admin password.
-    - **Signing `target/release/hubd` in place does not hold.** The next
+    - **Signing `target/release/hubad` in place does not hold.** The next
       `cargo test --release` or `cargo clippy --all-targets` relinks and stamps
-      its own ad-hoc signature over it, silently. Caught only because `hubd`
+      its own ad-hoc signature over it, silently. Caught only because `hubad`
       prints `hubd_signature` at boot and it read `adhoc` twenty minutes after
       being signed `cert`. So launchd runs an **installed copy** at
       `~/Library/Application Support/hub/bin/hubd`, out of cargo's reach; put it
@@ -546,13 +546,13 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
       `bbd8ba58…`, and the next build flips it back), so any check reading
       `target/` cries wolf after every test run, and a warning that cries wolf
       is a warning nobody reads.
-    `hubd` prints `hubd_boot` before touching anything, then `hubd_signature`
+    `hubad` prints `hubd_boot` before touching anything, then `hubd_signature`
     (`cert` · `adhoc` · `unreadable`), so "never entered main", "will lose its
     grants at the next build" and "cannot even read itself" are three
     distinguishable lines instead of one pid sitting there.
     **What was NOT true, though the last two sessions believed it:** that TCC
     blocks the launchd copy from `~/Documents`. It does not — the launchd copy
-    loads `hub.env` and the pid lock from there, with `hub_env_loaded` as
+    loads `huba.env` and the pid lock from there, with `hub_env_loaded` as
     evidence. The `EX_CONFIG` (78) hang was `StandardOutPath`, which **launchd
     itself** opens before the program runs; moving the logs to `~/Library/Logs`
     fixed that and nothing else was ever blocked. A binary running by hand from
@@ -586,7 +586,7 @@ một câu của phiên, cùng một dòng lệnh trong đó, khi thì bấm đ�
 route). Đã nối: `/ask`, `/handover`, `/runin`, nút ▶️ (`RunQuick`), tin báo
 lệnh chạy xong (`say_back`). Hai thứ phải giữ khi nối thêm chỗ mới:
 
-- **CHỈ nội dung lấy từ phiên.** Tin thuần của hub (`/help`, danh sách tài
+- **CHỈ nội dung lấy từ phiên.** Tin thuần của huba (`/help`, danh sách tài
   khoản, *"không mở được cửa sổ"*) không có phiên nào để gắn action; gắn bừa là
   nút trỏ vào chỗ trống.
 - **Chỉ ĐỊNH DẠNG cái đang có, không thêm nội dung.** `say_from_session` lọc
@@ -603,18 +603,18 @@ lệnh chạy xong (`say_back`). Hai thứ phải giữ khi nối thêm chỗ m�
 Hà: *"lệnh chạy phải có 2 nút: 1 là chạy xong lấy kết quả đưa vào phiên, 1 nút
 là chạy terminal được kết quả gửi về tele"*.
 
-- **▶️ `run_<mã>`** — hub chạy hộ (`zsh -lc`, thư mục của chính dòng lệnh ấy),
+- **▶️ `run_<mã>`** — huba chạy hộ (`zsh -lc`, thư mục của chính dòng lệnh ấy),
   rồi **dán kết quả vào phiên** (`watch_long_job` → `type_and_send`). Phiên đọc
   được nên nó đi tiếp được.
 - **🖥 `term_<mã>`** — mở một cửa sổ Terminal riêng, gõ lệnh vào đó, rồi
   **kết quả về Telegram** (`watch_terminal_job`). Trước 16/08 nút này làm đúng
   nửa việc: mở cửa sổ rồi bỏ đó, tức chỉ dùng được khi chủ máy đang ngồi trước
-  máy — đúng lúc anh không cần hub.
+  máy — đúng lúc anh không cần huba.
 
 `watch_terminal_job` hỏi `keys::tab_busy` mỗi 3 giây (chính Terminal trả lời về
 tab của nó; `ps` biến mất trước khi shell kịp in dấu nhắc), rồi đọc màn cửa sổ
 ấy và cắt **từ dòng lệnh trở xuống**. Ba ca hỏng đều NÓI RA, không im: mất dấu
-cửa sổ, không đọc được màn, và quá `LONG_JOB_MAX_SEC` (lúc ấy nói "hub thôi
+cửa sổ, không đọc được màn, và quá `LONG_JOB_MAX_SEC` (lúc ấy nói "huba thôi
 canh", vì cửa sổ vẫn còn đó — khác hẳn "lệnh chết").
 
 ## Câu xác nhận TRƠN: một dòng sống, không phải một dòng mỗi cú bấm (2026-08-17)
@@ -632,7 +632,7 @@ luôn không cần gửi 1 tin mới"*. Ba đường ra, theo thứ tự:
 🔴 Hai sự thật phải giữ, mỗi cái đã trả giá một lần:
 
 - **Tiếng vọng `/start` không phải chỗ thả dấu.** Bấm một liên kết trong chữ ⟹
-  client gửi `/start <payload>` ⟹ hub XOÁ tin ấy ngay. Bản trước vẫn mang
+  client gửi `/start <payload>` ⟹ huba XOÁ tin ấy ngay. Bản trước vẫn mang
   `message_id` của nó sang đường trả lời: **73 lần `message to react not found`
   trong ngày 17/08**, mỗi lần một dòng chữ thừa. `telegram::ack_target` nay là
   chỗ duy nhất trả lời câu ấy.
@@ -677,13 +677,13 @@ phải gọi `forget_ack_live()` trong đó — thiếu một cửa là sửa m�
 ## Project layout
 
 ```
-hub                     wrapper script → rust/target/release/hub
-hub.config.json         config (no secrets — only env var NAMES)
-install_update.sh       build → install a SIGNED hubd where launchd runs it
+huba                     wrapper script → rust/target/release/huba
+huba.config.json         config (no secrets — only env var NAMES)
+install_update.sh       build → install a SIGNED hubad where launchd runs it
 sign.sh                 re-sign one binary with the stable identity
 make-signing-cert.sh    create that identity — ONCE, ever
 rust/src/main.rs        CLI: doctor self-install setup init once status sessions
-rust/src/bin/hubd.rs    daemon loop (pid lock, exponential backoff, local alarm)
+rust/src/bin/hubad.rs    daemon loop (pid lock, exponential backoff, local alarm)
 rust/src/{config,db}.rs config + validation + secret_from_env() · runs/cursors/spend
 rust/src/pipeline.rs    one cycle: run the orders that arrived, answer, keep books
 rust/src/telegram.rs    THE channel: getUpdates thread, buttons, files, update_sender
@@ -693,16 +693,16 @@ rust/src/sessions.rs    list · stream · fork (/ask, /handover) · background (
 rust/src/keys.rs        type into a real Terminal window, and read that window back
 rust/src/watch.rs       "vừa xong" / "vừa tắt" — so hai lượt ảnh chụp, nói MỘT lần
 rust/src/redaction.rs   leak scan, used by session previews
-rust/src/setup.rs       `hub setup`: a 127.0.0.1 page that writes hub.env (chmod 600)
+rust/src/setup.rs       `huba setup`: a 127.0.0.1 page that writes huba.env (chmod 600)
 rust/src/adapters/      what a command IS (CommandKind, ChannelCommand, Health)
 rust/tests/             integration tests + captured real fixture
-hub.env(.example)       secrets for launchd runs — chmod 600, gitignored
-com.dipgle.hubd.plist   launchd unit (runs the INSTALLED hubd, not target/)
+huba.env(.example)       secrets for launchd runs — chmod 600, gitignored
+com.dipgle.hubd.plist   launchd unit (runs the INSTALLED hubad, not target/)
 legacy-node/            archived prototype
 ```
 
 🔴 **Những tệp trên rời khỏi thư mục `deploy/` ngày 2026-08-16**, theo lệnh Hà:
-*"xóa deploy đi sửa thành /hub/install_update.sh"*. Lý do không phải thẩm mỹ —
+*"xóa deploy đi sửa thành /huba/install_update.sh"*. Lý do không phải thẩm mỹ —
 workspace **chặn mọi lệnh Bash NÊU TÊN** một tệp có chữ ấy, kể cả `ls`, `grep`
 đọc-thuần và `git mv`. Nên cái tên biến một script chỉ chép một binary vào
 `$HOME` và kickstart một launchd job thành thứ không session nào chạy hay bảo

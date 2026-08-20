@@ -1,6 +1,6 @@
 {
-  "db": "data/hub.sqlite",
-  "log_file": "logs/hub.log",
+  "db": "data/huba.sqlite",
+  "log_file": "logs/huba.log",
   "project_roots": [
     "",
     "AI"

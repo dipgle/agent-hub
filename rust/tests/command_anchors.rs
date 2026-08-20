@@ -21,7 +21,7 @@
 //! `<code>` — Telegram không tự nối liên kết bên trong `<code>`, và cái khung
 //! ấy chính là câu trả lời cho *"ăn 1 dòng hay cả 2"*.
 
-use hub::pipeline::{html_with_links, SessionData};
+use huba::pipeline::{html_with_links, SessionData};
 
 const GIT_MV: &str = "git -C ~/projects/AI/mailler mv deploy.sh update.sh";
 const SELFCHECK: &str = "bash ~/projects/AI/mailler/scripts/deploy-guard-selfcheck.sh";
@@ -155,7 +155,7 @@ fn session_data_still_renders() {
         choices: vec![("1".to_string(), "Set it up".into())],
         ..Default::default()
     };
-    let html = hub::pipeline::render_session_data("❯ 1. Set it up\n  2. Not now", &data);
+    let html = huba::pipeline::render_session_data("❯ 1. Set it up\n  2. Not now", &data);
     println!("{html}");
     // Không có tên bot trong bài kiểm ⟹ `deep_link` trả None ⟹ không có thẻ
     // `<a>`. Cái phải đúng ở đây là hàm chạy được và không bịa ra liên kết.

@@ -1,7 +1,7 @@
 mod common;
 
 use common::fresh_db;
-use hub::db::RunFinish;
+use huba::db::RunFinish;
 
 #[test]
 fn cursors_round_trip_and_runs_record_health() {
@@ -75,12 +75,12 @@ fn the_owners_own_spend_is_counted_but_never_used_to_refuse() {
     // own hand. What survives is the counting, so the price can be shown next
     // to the button that spends it.
     let (db, _dir) = fresh_db();
-    assert_eq!(hub::pipeline::owner_budget_state(&db).spent_usd, 0.0);
+    assert_eq!(huba::pipeline::owner_budget_state(&db).spent_usd, 0.0);
 
-    // Well past any ceiling hub used to enforce: it must still only REPORT.
+    // Well past any ceiling huba used to enforce: it must still only REPORT.
     db.record_spend("handover", "s-1", 1.70, "→ s-2").unwrap();
     db.record_spend("aside", "s-1", 8.00, "→ s-3").unwrap();
-    let state = hub::pipeline::owner_budget_state(&db);
+    let state = huba::pipeline::owner_budget_state(&db);
     assert!(
         (state.spent_usd - 9.70).abs() < 1e-9,
         "both owner-initiated calls must be counted, got {}",
@@ -109,7 +109,7 @@ fn a_side_question_and_a_handover_share_one_set_of_books() {
 ///
 /// Vì sao có hàm này: `get_cursor` trả `Result<Option<_>>`, và **12 chỗ** trong
 /// mã đã gộp `Err` với `Ok(None)` bằng `.ok().flatten()` hoặc `match … _ =>`.
-/// Nhìn từ điện thoại, hậu quả là bấm ⏹ Dừng trên một phiên đang mở thì hub trả
+/// Nhìn từ điện thoại, hậu quả là bấm ⏹ Dừng trên một phiên đang mở thì huba trả
 /// lời *"chưa theo phiên nào"* — đúng câu nó nói khi chưa ai chọn gì — mà không
 /// dòng log nào cho biết cơ sở dữ liệu vừa không đọc được.
 ///
@@ -170,8 +170,8 @@ fn schema_step_4_drops_the_dead_inbox_tables_and_nothing_else() {
         .unwrap();
     assert!(out.status.success(), "dựng fixture hỏng: {out:?}");
 
-    // Mở bằng chính hub — bước nâng cấp chạy ở đây.
-    let db = hub::db::Db::open(&path).unwrap();
+    // Mở bằng chính huba — bước nâng cấp chạy ở đây.
+    let db = huba::db::Db::open(&path).unwrap();
     // Dữ liệu SỐNG phải còn nguyên: dọn nhầm thứ đang dùng thì hỏng nặng hơn
     // hẳn việc để lại thứ đã chết.
     assert_eq!(db.cursor_or_log("focus:session").as_deref(), Some("abc"));
@@ -197,6 +197,6 @@ fn schema_step_4_drops_the_dead_inbox_tables_and_nothing_else() {
     }
 
     // Chạy lại lần nữa: không nổ, không làm gì thêm (phiên bản đã là 4).
-    let db = hub::db::Db::open(&path).unwrap();
+    let db = huba::db::Db::open(&path).unwrap();
     assert_eq!(db.cursor_or_log("focus:session").as_deref(), Some("abc"));
 }

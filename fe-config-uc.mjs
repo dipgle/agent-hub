@@ -1,8 +1,8 @@
 // The config form must actually WRITE, and write the right thing.
 //
 // Journey: open the board's Cấu hình tab, change one number, press Lưu, watch
-// hub confirm in the room, then reload and see the new value come back from
-// hub's own snapshot. Finally put the original value back — a test that leaves
+// huba confirm in the room, then reload and see the new value come back from
+// huba's own snapshot. Finally put the original value back — a test that leaves
 // the daemon differently configured is a test that broke production.
 //
 // The field chosen (`poll_interval_sec`) costs nothing to flip and changes no
@@ -16,7 +16,7 @@ import { readFileSync, mkdirSync } from "node:fs";
 
 const HERE = new URL("./", import.meta.url).pathname;
 const env = Object.fromEntries(
-  readFileSync(HERE + "hub.env", "utf8")
+  readFileSync(HERE + "huba.env", "utf8")
     .split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])
 );
@@ -30,7 +30,7 @@ const check = (name, ok, detail = "") => {
   checks.push({ name, ok });
   console.log(`${ok ? "✓" : "✗"} ${name}${detail ? ` — ${detail}` : ""}`);
 };
-const onDisk = () => JSON.parse(readFileSync(HERE + "hub.config.json", "utf8"))[KEY];
+const onDisk = () => JSON.parse(readFileSync(HERE + "huba.config.json", "utf8"))[KEY];
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
@@ -90,7 +90,7 @@ try {
   await page.click("#cfgSave");
   check("báo rõ đã gửi thay đổi nào", new RegExp(KEY).test(await page.locator("#cfgMsg").innerText()));
 
-  // hub confirms in the room…
+  // huba confirms in the room…
   // Match the VALUE too: an older "đã đặt <key> = …" from a previous run is
   // already in the scrollback, and keying on the name alone matched it
   // instantly — then the disk check ran before this write had happened.
@@ -100,7 +100,7 @@ try {
     [KEY, target, acksBefore],
     { timeout: 120000, polling: 1000 }
   );
-  check("hub xác nhận trong phòng chat", true, `đã đặt ${KEY} = ${target}`);
+  check("huba xác nhận trong phòng chat", true, `đã đặt ${KEY} = ${target}`);
 
   // …and the file on disk really changed.
   check("tệp cấu hình trên đĩa đã đổi", String(onDisk()) === target, `${original} → ${onDisk()}`);
@@ -143,5 +143,5 @@ try {
 
 const passed = checks.filter((c) => c.ok).length;
 console.log(`\n${passed}/${checks.length} kiểm tra qua`);
-if (!restored) console.log(`⚠ KIỂM TRA TAY: hub.config.json → ${KEY} phải là ${original}`);
+if (!restored) console.log(`⚠ KIỂM TRA TAY: huba.config.json → ${KEY} phải là ${original}`);
 process.exit(passed === checks.length ? 0 : 1);

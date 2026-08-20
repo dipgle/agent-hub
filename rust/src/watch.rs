@@ -15,9 +15,9 @@
 //! 1. **Nói một lần.** Vòng chạy lặp mỗi ~10 giây; báo theo trạng thái thay vì
 //!    theo chuyển-trạng-thái là một cái điện thoại rung mãi không thôi, và một
 //!    cái loa như thế thì người ta tắt — mất luôn cả những lần đáng nghe.
-//! 2. **Lượt đầu im.** Khi hub vừa khởi động lại, sổ trống nên MỌI phiên đều
+//! 2. **Lượt đầu im.** Khi huba vừa khởi động lại, sổ trống nên MỌI phiên đều
 //!    "mới thấy lần đầu". Báo hết là một tràng tin cho những việc xảy ra lúc
-//!    hub còn chưa chạy. Lượt đầu chỉ ghi sổ, không nói gì.
+//!    huba còn chưa chạy. Lượt đầu chỉ ghi sổ, không nói gì.
 //! 3. **Biến mất cũng là kết thúc.** `claude agents` bỏ một phiên đã dừng khỏi
 //!    danh sách sau vài giây (đã ghi ở `pipeline::STOPPED_KEY`), nên phần lớn
 //!    lần "tắt hẳn" KHÔNG đi qua trạng thái `dead` — nó chỉ đơn giản là không
@@ -41,21 +41,21 @@ pub const DEAD: &str = "dead";
 /// Đang đứng chờ MỘT CÂU của chủ máy — trạng thái đáng gọi người ta nhất.
 ///
 /// Tách khỏi `IDLE` vì hai chuyện khác hẳn nhau: "rảnh" là xong việc, còn đây
-/// là **việc đang dở và không tự đi tiếp được**. Trước 2026-08-12 hub chỉ nhận
+/// là **việc đang dở và không tự đi tiếp được**. Trước 2026-08-12 huba chỉ nhận
 /// ra nó bằng cách đọc màn đúng lúc phiên vừa im; nay nó là một trạng thái đọc
 /// từ nhật ký, nên phiên bắt đầu hỏi lúc nào cũng bắt được.
 pub const ASKING: &str = "asking";
 /// Đang đứng vì một LỖI — không phải "xong", cũng không phải "đang hỏi".
 ///
 /// 🔴 Hà 2026-08-13: *"vì lỗi chưa thấy cảnh báo gì"*. Trước đó lỗi chỉ được
-/// nhận ra nếu hub tình cờ ĐỌC MÀN đúng lúc phiên vừa im (`Idle::Failed`); lỡ
+/// nhận ra nếu huba tình cờ ĐỌC MÀN đúng lúc phiên vừa im (`Idle::Failed`); lỡ
 /// nhịp thì phiên nằm im và nhìn y hệt một phiên đã xong việc. Nay nó là một
 /// TRẠNG THÁI đọc từ nhật ký, nên vào đúng cỗ máy "so hai lượt, nói một lần".
 pub const ERRORED: &str = "errored";
 
 /// Chạy ngắn hơn chừng này thì XONG không phải là tin.
 ///
-/// Đo thật ngay lượt đầu bật loa (2026-08-10): `hub-bd` bắn "vừa chạy xong" hai
+/// Đo thật ngay lượt đầu bật loa (2026-08-10): `huba-bd` bắn "vừa chạy xong" hai
 /// lần cách nhau 75 giây, và cả hai đều ĐÚNG — nó chạy hai lượt ngắn thật. Đúng
 /// mà vẫn sai chỗ: một phiên đang có người ngồi gõ sẽ kêu một tiếng mỗi lượt,
 /// mà người ấy đang nhìn thẳng vào nó. Cái loa này có giá trị ở phiên KHÔNG ai
@@ -66,10 +66,10 @@ pub const MIN_RUN_SEC: i64 = 120;
 
 /// Sống ngắn hơn chừng này thì TẮT cũng không phải là tin.
 ///
-/// 🔴 Đo 2026-08-12 từ chính log của hub: **20 tin "đã tắt hẳn" trong 4 tiếng,
+/// 🔴 Đo 2026-08-12 từ chính log của huba: **20 tin "đã tắt hẳn" trong 4 tiếng,
 /// mỗi tin một id khác nhau**, đều đặn 7–12 phút một lần. Không phải một phiên
 /// báo lặp — là một dòng phiên sinh ra rồi chết, và thủ phạm là **phép dò hạn
-/// mức của chính hub**: `claude -p "/usage"` mỗi 5 phút đẻ ra một phiên thật,
+/// mức của chính huba**: `claude -p "/usage"` mỗi 5 phút đẻ ra một phiên thật,
 /// hiện vài giây trong `claude agents` rồi biến mất. Cái loa làm đúng luật đã
 /// viết; luật thiếu vế "sống bao lâu".
 ///
@@ -86,7 +86,7 @@ fn working_since(mark: &str) -> Option<i64> {
 ///
 /// Hà 2026-08-10: *"tắt hẳn là sao? ý chung chung thế… tắt hẳn là phải thoát
 /// khỏi cli mới đúng, tắt hẳn terminal"*. Đúng — và cùng một lỗi với câu "đang
-/// đứng ở dấu nhắc" đã vá trước đó: nói một điều hub không biết.
+/// đứng ở dấu nhắc" đã vá trước đó: nói một điều huba không biết.
 ///
 /// "Biến khỏi danh sách `claude agents`" xảy ra vì ít nhất ba lý do khác hẳn
 /// nhau: phiên NỀN bị dừng (chẳng liên quan terminal), `claude` thoát mà cửa sổ
@@ -113,12 +113,12 @@ pub struct Mark {
     /// nên quan hệ cha-con phải nằm trong sổ TỪ TRƯỚC.
     #[serde(default)]
     pub p: String,
-    /// Lần ĐẦU hub thấy phiên này (epoch giây). 0 = sổ cũ, chưa có trường này.
+    /// Lần ĐẦU huba thấy phiên này (epoch giây). 0 = sổ cũ, chưa có trường này.
     ///
     /// 🔴 Hà 2026-08-12: *"tại sao cứ báo phiên đã tắt liên tục"*. Đo log: 20
     /// tin trong 4 tiếng, **mỗi tin một id khác nhau**, đều đặn 7–12 phút một
     /// lần — tức không phải một phiên báo lặp, mà là một dòng phiên sinh ra rồi
-    /// chết. Đó chính là **phép dò hạn mức của hub**: `claude -p "/usage"` chạy
+    /// chết. Đó chính là **phép dò hạn mức của huba**: `claude -p "/usage"` chạy
     /// mỗi 5 phút, và mỗi lượt đẻ ra một phiên thật, mang một id thật, hiện ra
     /// trong `claude agents` vài giây rồi biến mất. Cái loa làm đúng luật đã
     /// viết ("rời khỏi danh sách = đã kết thúc") — luật ấy thiếu một vế.
@@ -127,7 +127,7 @@ pub struct Mark {
     /// cùng lý do `MIN_RUN_SEC` tồn tại cho "vừa chạy xong".
     #[serde(default)]
     pub f: i64,
-    /// Phiên do CHÍNH hub mở (`/new`).
+    /// Phiên do CHÍNH huba mở (`/new`).
     ///
     /// Ngoại lệ của cửa thời lượng trên: phiên chủ máy vừa mở từ điện thoại mà
     /// chết trong 30 giây là **đúng thứ phải báo** — nó chết chứ không phải nó
@@ -183,7 +183,7 @@ pub struct Mark {
     /// gõ vào ttys002 — cửa sổ ấy có thể đang là của phiên khác (đã trả giá cho
     /// đúng luật này hôm nay). Nhưng `tty` + `pid` thì đủ: hỏi `ps` xem pid ấy
     /// còn sống VÀ còn ngồi đúng tty ấy không — một lượt `ps`, vài mili giây,
-    /// KHÔNG spawn `claude`. Chết rồi thì `ps` im, và hub từ chối.
+    /// KHÔNG spawn `claude`. Chết rồi thì `ps` im, và huba từ chối.
     ///
     /// 🔴 Vì sao cần (đo 2026-08-12): mọi lệnh gõ/nhìn đều dựng lại ảnh chụp,
     /// mà một lượt dựng trên máy đang swap mất 15–92 giây — `/type` **134
@@ -194,7 +194,7 @@ pub struct Mark {
     #[serde(default)]
     pub i: i64,
     /// `terminal` · `editor` · `background` — nhớ để câu TỪ CHỐI nói đúng lý do
-    /// khi hub không gõ vào được ("host: editor"), kể cả lúc đang trả lời bằng
+    /// khi huba không gõ vào được ("host: editor"), kể cả lúc đang trả lời bằng
     /// sổ chứ không bằng ảnh chụp.
     #[serde(default)]
     pub o: String,
@@ -245,10 +245,10 @@ pub enum Change {
 /// Hà 2026-08-10, đọc tin trên Telegram: *"rõ ràng là lỗi mà sao tele tôi nhận
 /// được lại là phiên đang đứng ở dấu nhắc, chờ lượt sau"* — và *"toàn thông báo
 /// giống nhau"*. Cả hai đều đúng, và vế đầu nặng hơn: câu ấy là một KHẲNG ĐỊNH
-/// hub không hề biết. Thứ hub biết là "nhật ký thôi lớn lên"; mà nhật ký cũng
+/// huba không hề biết. Thứ huba biết là "nhật ký thôi lớn lên"; mà nhật ký cũng
 /// thôi lớn lên khi phiên kẹt ở hộp thoại, khi lỗi, khi hết hạn mức.
 ///
-/// Nên lúc CHUYỂN trạng thái — chuyện hiếm, vài lần một giờ — hub bỏ ra đúng
+/// Nên lúc CHUYỂN trạng thái — chuyện hiếm, vài lần một giờ — huba bỏ ra đúng
 /// một lần đọc màn cho riêng phiên ấy. Đọc màn cho MỌI phiên MỖI vòng mới là
 /// thứ từng kéo một vòng lên 90 giây; một lần cho một phiên lúc nó vừa im thì
 /// gần như không tốn gì, và nó đổi một câu đoán thành một câu nhìn thấy.
@@ -347,16 +347,16 @@ impl Change {
                         format!("{ST_ASK} {name} dừng lại HỎI — {how}:\n{}{more}", lines.join("\n"))
                     }
                     // Không đọc được chữ thì nói RÕ vì sao chỉ có con số, đừng
-                    // để người ta tưởng hub keo kiệt thông tin.
+                    // để người ta tưởng huba keo kiệt thông tin.
                     //
                     // 🔴 Câu cũ đổ cho "màn có dấu hiệu bí mật" — nhánh ấy CHẾT
                     // từ 2026-08-16 khi `keys::Look::Withheld` bị gỡ, nên từ đó
-                    // nó là một lời giải thích SAI cho một sự thật khác: hub
+                    // nó là một lời giải thích SAI cho một sự thật khác: huba
                     // đếm được số lựa chọn mà không đọc nổi chữ (cửa sổ đã đóng,
                     // osascript ngã). Một câu nói sai lý do còn tệ hơn không nói
                     // gì: nó gửi người đọc đi tìm nhầm chỗ.
                     Idle::Asking { n, .. } => format!(
-                        "{ST_ASK} {name} dừng lại HỎI ({n} lựa chọn) — hub đếm được số lựa chọn nhưng \
+                        "{ST_ASK} {name} dừng lại HỎI ({n} lựa chọn) — huba đếm được số lựa chọn nhưng \
                          không đọc được chữ trên màn. /shot để thử đọc lại"
                     ),
                     Idle::Failed { line } => format!(
@@ -394,7 +394,7 @@ impl Change {
             } => {
                 // Bảng mấy câu thì nói ngay ở dòng đầu. Con số này quyết định
                 // việc người đọc sắp làm: một câu thì bấm xong là xong, nhiều
-                // câu thì bấm xong VẪN CHƯA GỬI — và đó đúng là chỗ hub từng để
+                // câu thì bấm xong VẪN CHƯA GỬI — và đó đúng là chỗ huba từng để
                 // Hà bấm rồi ngồi nhìn một cái hộp không nhúc nhích.
                 let of = if rest.is_empty() {
                     String::new()
@@ -475,7 +475,7 @@ impl Change {
 /// quyết định được gì. Người đọc vẫn phải mở máy ra, và cái chuông lại chỉ báo
 /// rằng có chuyện, không nói được chuyện gì.
 ///
-/// Không gọi model để tóm tắt: hub **không tự tiêu hạn mức** (điều 8), và một
+/// Không gọi model để tóm tắt: huba **không tự tiêu hạn mức** (điều 8), và một
 /// bản tóm tắt sinh ra sau lưng thì không đối chiếu được với thứ phiên thật sự
 /// nói. Thay vào đó lọc theo **hình dạng** — thứ chính người viết đã dùng để
 /// đánh dấu điều quan trọng:
@@ -487,7 +487,7 @@ impl Change {
 /// * dòng có `⟹` ở giữa, và dòng kết thúc bằng dấu hỏi.
 ///
 /// 🔴 **Hai luật dưới đây là thứ đọc bản thật mới thấy** (đo trên 3 báo cáo có
-/// thật của phiên `dwork`/`hub`/`projects` ngày 2026-08-12, bản đầu của hàm này
+/// thật của phiên `dwork`/`huba`/`projects` ngày 2026-08-12, bản đầu của hàm này
 /// trượt cả ba):
 ///
 /// 1. **Cắt từng dòng cho ngắn.** Một đoạn văn 480 ký tự lọt lưới (nó có chữ in
@@ -730,22 +730,22 @@ pub fn changes(
     let mut out: Vec<Change> = Vec::new();
     let first_run = prev.is_empty();
 
-    // 🔴 Phép dò hạn mức của CHÍNH hub không được lên chuông (Hà 2026-08-12,
-    // đọc `⏹ hub-67 … đã tắt`: *"quá vô lý"*). Cửa TUỔI THỌ bên dưới bắt được
+    // 🔴 Phép dò hạn mức của CHÍNH huba không được lên chuông (Hà 2026-08-12,
+    // đọc `⏹ huba-67 … đã tắt`: *"quá vô lý"*). Cửa TUỔI THỌ bên dưới bắt được
     // phần lớn — `claude -p "/usage"` thường sống dưới 120 giây — nhưng nó bắt
     // sai chỗ: thứ khiến cái chết này không phải tin **không phải là nó ngắn**,
-    // mà là **nó của hub**. Đo đúng ca lọt lưới: `hub-67` nằm trong danh sách
+    // mà là **nó của huba**. Đo đúng ca lọt lưới: `huba-67` nằm trong danh sách
     // 11 phút (lượt dò treo tới trần 60s rồi `usage_probe_unparsed`), qua cửa
     // 120 giây, và bắn một tin về một phiên chủ máy không mở, không thấy, không
     // làm gì được.
     //
-    // Dấu nhận biết là `cwd`: hubd chạy với thư mục làm việc riêng của nó
+    // Dấu nhận biết là `cwd`: hubad chạy với thư mục làm việc riêng của nó
     // (plist `WorkingDirectory`), và tiến trình con thừa hưởng — không phiên
     // nào của người lại nằm ở đấy. Chỉ IM cái chuông; danh sách phiên vẫn liệt
     // kê đủ, vì giấu khỏi màn là một quyết định khác, chưa ai yêu cầu.
     //
     // 📌 Cửa đặt ở chỗ PHÁT NGÔN, không ở đầu vào. Lọc ngay từ `now` thì gọn
-    // hơn, nhưng nó làm hub im lặng bỏ qua cả một lớp phiên — không sổ, không
+    // hơn, nhưng nó làm huba im lặng bỏ qua cả một lớp phiên — không sổ, không
     // log, không cách nào kiểm là luật có đang chạy hay không; đúng hình dạng
     // mà tệp này gọi tên ở khắp nơi. Vào sổ như mọi phiên khác, và mỗi lần bỏ
     // qua một cái chết thì NÓI RA (`session_end_muted`).
@@ -806,7 +806,7 @@ pub fn changes(
         if first_run {
             continue;
         }
-        // Máy móc của chính hub: vào sổ như mọi phiên, nhưng không nói gì cả —
+        // Máy móc của chính huba: vào sổ như mọi phiên, nhưng không nói gì cả —
         // không "vừa xong", không "đang hỏi", không "đã tắt".
         if hub_own {
             continue;
@@ -863,7 +863,7 @@ pub fn changes(
             if seen.contains(&id) {
                 continue;
             }
-            // Phép dò của chính hub: im, và BỎ khỏi sổ. Không có cửa này thì
+            // Phép dò của chính huba: im, và BỎ khỏi sổ. Không có cửa này thì
             // đúng lượt nâng cấp đầu tiên, mọi phiên dò đang nằm trong sổ cũ sẽ
             // "biến khỏi danh sách" (vì lượt lọc bên trên vừa gạt chúng ra) và
             // được báo tử hàng loạt — một luật mới sinh ra để bớt tin lại đẻ ra
@@ -872,14 +872,14 @@ pub fn changes(
                 logging::info(
                     "session_end_muted",
                     json!({ "session": id, "lived_sec": epoch_sec - mark.f,
-                            "why": "phép dò hạn mức của chính hub — cái chết của nó không phải tin" }),
+                            "why": "phép dò hạn mức của chính huba — cái chết của nó không phải tin" }),
                 );
                 continue;
             }
             // Cửa EDITOR — cùng một cái bẫy, lần thứ hai, và lần này đã biết
             // trước nên phải dựng cửa TRƯỚC khi nâng cấp chứ không phải sau.
             //
-            // 2026-08-13 hub thôi liệt kê phiên VS Code (Hà: *"nếu đã không
+            // 2026-08-13 huba thôi liệt kê phiên VS Code (Hà: *"nếu đã không
             // thao tác được vào vs code thì bỏ đi"*). Lượt chạy ĐẦU TIÊN sau
             // bản này, sổ cũ còn nguyên **8 hàng editor** đang sống — chúng
             // "biến khỏi danh sách" vì lượt lọc mới vừa gạt chúng ra, và luật
@@ -889,18 +889,18 @@ pub fn changes(
             //
             // BỎ hẳn khỏi sổ, không giữ lại như cửa MÙ: ở cửa mù, giữ hàng là
             // đúng vì phiên sẽ quay lại danh sách khi tài khoản hết mù. Ở đây
-            // nó sẽ KHÔNG bao giờ quay lại — hub không nhìn phiên editor nữa —
+            // nó sẽ KHÔNG bao giờ quay lại — huba không nhìn phiên editor nữa —
             // nên giữ hàng chỉ là để sổ phình ra mãi.
             if mark.o == "editor" {
                 logging::info(
                     "session_end_muted",
                     json!({ "session": id, "host": mark.o,
-                            "why": "phiên VS Code — hub thôi liệt kê chúng, vắng mặt là do LUẬT MỚI chứ không phải nó tắt" }),
+                            "why": "phiên VS Code — huba thôi liệt kê chúng, vắng mặt là do LUẬT MỚI chứ không phải nó tắt" }),
                 );
                 continue;
             }
             // Cửa MÙ — xem `Mark::a`. Tài khoản không liệt kê được phiên thì
-            // "không có trong danh sách" chỉ có nghĩa là **hub không nhìn
+            // "không có trong danh sách" chỉ có nghĩa là **huba không nhìn
             // thấy**, không có nghĩa là phiên đã tắt.
             //
             // Sổ cũ chưa có tên tài khoản (`a` rỗng) cũng đi lối này khi có bất
@@ -919,8 +919,8 @@ pub fn changes(
                 continue;
             }
             // Cửa TUỔI THỌ — xem `Mark::f`. Phiên sống chớp nhoáng (phép dò hạn
-            // mức của chính hub, một `claude -p` bất kỳ) chết đi không phải tin;
-            // phiên do hub mở thì luôn báo, vì ở đó chết ≠ xong.
+            // mức của chính huba, một `claude -p` bất kỳ) chết đi không phải tin;
+            // phiên do huba mở thì luôn báo, vì ở đó chết ≠ xong.
             let lived = epoch_sec - mark.f;
             if mark.f > 0 && lived < MIN_LIFE_SEC && !mark.h {
                 logging::info(

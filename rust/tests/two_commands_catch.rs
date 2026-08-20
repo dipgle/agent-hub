@@ -1,4 +1,4 @@
-//! Hai dòng lệnh liền nhau — hub gắn được mấy cái nút, và vì sao không phải hai.
+//! Hai dòng lệnh liền nhau — huba gắn được mấy cái nút, và vì sao không phải hai.
 //!
 //! 🔴 Hà 2026-08-16, ảnh chụp tin của `[mailler]`: *"chỗ này tại sao chỉ rend
 //! được một lệnh, mà không biết lệnh đó ăn 1 dòng hay cả 2?"*. Trong ảnh, icon
@@ -15,12 +15,12 @@ const REPORT: &str = "chết. Tôi thử git mv hai lần, hook reviewer chặn 
 
 #[test]
 fn how_many_of_the_two_are_caught() {
-    let got = hub::keys::commands_in_report(REPORT, 4);
+    let got = huba::keys::commands_in_report(REPORT, 4);
     println!("bắt được {} lệnh:", got.len());
     for g in &got {
         println!("  · {g}");
     }
-    // Đây là phép ĐO trước đã: in ra rồi mới chốt. Cái phải đúng là hub không
+    // Đây là phép ĐO trước đã: in ra rồi mới chốt. Cái phải đúng là huba không
     // được bắt NHẦM một dòng văn xuôi thành lệnh.
     for g in &got {
         assert!(
@@ -36,7 +36,7 @@ fn how_many_of_the_two_are_caught() {
 #[test]
 fn the_git_mv_line_is_not_classed_as_destructive() {
     let cmd = "git -C ~/projects/AI/mailler mv deploy.sh update.sh";
-    let got = hub::keys::commands_in_report(cmd, 4);
+    let got = huba::keys::commands_in_report(cmd, 4);
     println!("một mình dòng git mv → {got:?}");
     assert_eq!(
         got.len(),
@@ -51,7 +51,7 @@ fn the_git_mv_line_is_not_classed_as_destructive() {
 #[test]
 fn the_bash_line_stands_alone_too() {
     let cmd = "bash ~/projects/AI/mailler/scripts/deploy-guard-selfcheck.sh";
-    let got = hub::keys::commands_in_report(cmd, 4);
+    let got = huba::keys::commands_in_report(cmd, 4);
     println!("một mình dòng bash → {got:?}");
     assert_eq!(got.len(), 1);
 }

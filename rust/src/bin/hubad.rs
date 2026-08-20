@@ -1,7 +1,7 @@
-//! hubd — the always-on loop. One process, one machine: a pid lock keeps two
+//! hubad — the always-on loop. One process, one machine: a pid lock keeps two
 //! daemons from double-replying to the same message.
 //!
-//!   hubd                                     run in the foreground
+//!   hubad                                     run in the foreground
 //!   launchctl load …com.dipgle.hubd.plist    run supervised (see README)
 //!
 //! Failures never kill the loop silently: each cycle error is logged, counted,
@@ -21,11 +21,11 @@ use std::time::Duration;
 use anyhow::Result;
 use serde_json::json;
 
-use hub::config;
-use hub::db::Db;
-use hub::exec::{run, RunOpts};
-use hub::logging;
-use hub::pipeline::run_once;
+use huba::config;
+use huba::db::Db;
+use huba::exec::{run, RunOpts};
+use huba::logging;
+use huba::pipeline::run_once;
 
 /// The one alarm that must reach a person who is not looking at the logs: a
 /// file line plus a macOS banner.
@@ -35,7 +35,7 @@ use hub::pipeline::run_once;
 /// it, because the loop can still fail five times in a row while nobody reads
 /// `hubd.out`. Errors here are returned, never swallowed — an alarm that fails
 /// quietly is worse than no alarm.
-fn notify(cfg: &hub::config::Config, subject: Option<&str>, body: &str) -> Result<()> {
+fn notify(cfg: &huba::config::Config, subject: Option<&str>, body: &str) -> Result<()> {
     use std::fs::{create_dir_all, OpenOptions};
     use std::io::Write;
 
@@ -68,7 +68,7 @@ fn notify(cfg: &hub::config::Config, subject: Option<&str>, body: &str) -> Resul
                 }
             })
             .collect();
-        let script = format!("display notification \"{text}\" with title \"hub\"");
+        let script = format!("display notification \"{text}\" with title \"huba\"");
         match run(
             "osascript",
             &["-e", &script],
@@ -79,7 +79,7 @@ fn notify(cfg: &hub::config::Config, subject: Option<&str>, body: &str) -> Resul
         ) {
             Ok(r) if r.code != Some(0) => logging::warn(
                 "osascript_notify_failed",
-                json!({ "err": hub::exec::truncate(&r.stderr, 200) }),
+                json!({ "err": huba::exec::truncate(&r.stderr, 200) }),
             ),
             Err(e) => logging::warn("osascript_notify_failed", json!({ "err": e.to_string() })),
             _ => {}
@@ -233,7 +233,7 @@ fn main() {
         // log khi tệp đã được đặt (`logging.rs`). Bản trước chỉ in stderr, mà
         // stderr của một daemon do launchd chạy thì chỉ nằm trong
         // `~/Library/Logs/hubd.err` — nơi không panel nào đọc và không ai theo
-        // dõi. Hậu quả: hubd chết lúc dựng lên (mở được DB không, ghi được khoá
+        // dõi. Hậu quả: hubad chết lúc dựng lên (mở được DB không, ghi được khoá
         // pid không) và LÝ DO không vào sổ nào cả.
         //
         // Hỏng trước khi `set_log_file` chạy thì vẫn ra stderr y như cũ — tức
@@ -249,7 +249,7 @@ fn main() {
 fn real_main() -> Result<()> {
     // Mốc khởi động: để màn nói được "chạy liên tục N phút" thay vì đoán từ
     // vòng đầu tiên.
-    hub::runtime::mark_start();
+    huba::runtime::mark_start();
     let cfg = config::load(None)?;
     logging::set_log_file(&cfg.log_file);
     if let Ok(level) = std::env::var("HUB_LOG_LEVEL") {
@@ -257,12 +257,20 @@ fn real_main() -> Result<()> {
     }
 
     // launchd does not read your shell profile, so secrets come from
-    // <hub_home>/hub.env (chmod 600). Names only in the log, never values.
+    // <hub_home>/huba.env (chmod 600). Names only in the log, never values.
     let loaded = config::load_env_file(&cfg.hub_home);
     if !loaded.is_empty() {
         logging::info("hub_env_loaded", json!({ "keys": loaded }));
     }
 
+    // The lock file keeps the OLD name on purpose. It is not a label anyone
+    // reads — it is the rendezvous token between a daemon that is running and
+    // one that is starting, so both sides have to spell it the same way. The
+    // 2026-08-20 hub→huba rename moved it to `hubad.lock`, which would have
+    // left a fresh build blind to the installed `hubd` sitting on `hubd.lock`:
+    // mutual exclusion switched off silently at the one moment it carries any
+    // weight, the changeover. Two daemons long-polling one bot with `getUpdates`
+    // take each other's messages, and each sees only half a conversation.
     let lock: PathBuf = cfg.hub_home.join("data").join("hubd.lock");
     if let Some(dir) = lock.parent() {
         fs::create_dir_all(dir)?;
@@ -280,7 +288,7 @@ fn real_main() -> Result<()> {
                 json!({ "pid": existing, "lock": lock.display().to_string() }),
             );
             eprintln!(
-                "hubd already running (pid {existing}); lock: {}",
+                "hub daemon already running (pid {existing}); lock: {}",
                 lock.display()
             );
             std::process::exit(3);
@@ -303,7 +311,7 @@ fn real_main() -> Result<()> {
             .open(&lock)
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "cannot take the lock at {} ({e}) — another hubd is starting",
+                    "cannot take the lock at {} ({e}) — another hub daemon is starting",
                     lock.display()
                 )
             })?;
@@ -319,14 +327,14 @@ fn real_main() -> Result<()> {
     // surface the owner actually uses. A second UI for the same three things is
     // a second thing to keep true.
 
-    // The room pushes instead of hub asking: one socket held open, and a wake
+    // The room pushes instead of huba asking: one socket held open, and a wake
     // so a message that lands mid-sleep does not wait out the poll interval.
     // The poller stays enabled as the durable backstop — see `live.rs`.
     // 🔴 Socket giữ mở với phòng chat tfl5 đã gỡ ngày 2026-08-14 (Hà: *"tạm
     // thời không dùng tfl5 để xem cứ xóa hết đi"*). `Waker` thì ở lại — nó là
     // đồng hồ ngủ của chính vòng này, không phải của kênh ấy; nhà mới:
     // `runtime::Waker`.
-    let waker = hub::runtime::Waker::new();
+    let waker = huba::runtime::Waker::new();
 
     // Telegram làm KÊNH RA LỆNH, không chỉ cái loa (Hà 2026-08-11: *"làm việc
     // hoàn toàn qua kênh tele"*). Vòng đọc chạy nền; thiếu khoá thì nó tự bỏ
@@ -335,7 +343,7 @@ fn real_main() -> Result<()> {
     // Cùng cái `waker` của phòng chat: lệnh gõ trên Telegram phải chạy ngay như
     // nút bấm trên trang, không nằm chờ hết giấc ngủ 120 giây của vòng (đo
     // 2026-08-11: `/help` chờ 2 phút 16 giây trước khi có cái này).
-    hub::telegram::Inbox::start(&cfg, Some(waker.clone()));
+    huba::telegram::Inbox::start(&cfg, Some(waker.clone()));
 
     logging::info(
         "hubd_started",
@@ -349,7 +357,7 @@ fn real_main() -> Result<()> {
     // …và NÓI RA khi bản vừa đổi. `/upgrade` báo trước lúc restart vì tiến
     // trình bị thay giữa câu; nửa còn lại — "bản mới đã lên" — là ở đây.
     // Xem `runtime::announce_boot`.
-    hub::runtime::announce_boot(&db, &cfg, signature_kind());
+    huba::runtime::announce_boot(&db, &cfg, signature_kind());
 
     let mut cfg = cfg;
     let mut config_seen = config_mtime(&cfg.config_file);
@@ -398,7 +406,7 @@ fn real_main() -> Result<()> {
                 if consecutive_failures == 5 {
                     if let Err(e2) = notify(
                         &cfg,
-                        Some("hubd: 5 cycles failed in a row"),
+                        Some("hubad: 5 cycles failed in a row"),
                         &format!("last error: {e}\nbacking off to {}s", delay.as_secs()),
                     ) {
                         logging::error("failure_notify_failed", json!({ "err": e2.to_string() }));
@@ -458,9 +466,9 @@ fn real_main() -> Result<()> {
 // Thứ chúng phục vụ trên Telegram thì đã có đường riêng: cái loa "vừa xong /
 // vừa tắt" (`watch.rs`) chạy trong chính vòng, và `/shot` đọc màn khi được hỏi.
 fn follow_sleep(
-    _cfg: &hub::config::Config,
+    _cfg: &huba::config::Config,
     _db: &Db,
-    waker: &hub::runtime::Waker,
+    waker: &huba::runtime::Waker,
     delay: Duration,
 ) {
     waker.sleep(delay);

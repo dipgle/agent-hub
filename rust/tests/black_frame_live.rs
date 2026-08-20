@@ -6,7 +6,7 @@
 //! thoại.
 //!
 //! ```
-//! cd ~/projects/hub/rust
+//! cd ~/projects/huba/rust
 //! cargo test --offline --test black_frame_live -- --ignored --nocapture
 //! ```
 
@@ -28,22 +28,22 @@ fn any_window() -> Option<i64> {
 #[ignore = "chụp màn hình thật — chạy tay bằng --ignored"]
 fn a_blank_frame_is_refused_with_the_right_reason() {
     let w = any_window().expect("có ít nhất một cửa sổ Terminal");
-    let path = std::env::temp_dir().join("hub-anh-live-test.png");
-    let locked = hub::keys::screen_locked();
+    let path = std::env::temp_dir().join("huba-anh-live-test.png");
+    let locked = huba::keys::screen_locked();
     println!("màn đang khoá: {locked:?}");
 
-    match hub::keys::photograph_window(w, &path) {
+    match huba::keys::photograph_window(w, &path) {
         Ok(()) => {
             // Máy đang mở khoá VÀ có quyền ⟹ ảnh thật. Phải không rỗng, và
             // `frame_is_blank` phải nói đúng như thế.
-            let blank = hub::keys::frame_is_blank(&path);
+            let blank = huba::keys::frame_is_blank(&path);
             println!("chụp được; khung rỗng: {blank:?}");
             assert_eq!(blank, Some(false), "ảnh gửi đi mà rỗng thì là ảnh vô dụng");
             let _ = std::fs::remove_file(&path);
         }
         Err(e) => {
             let msg = e.to_string();
-            println!("hub từ chối gửi, và nói:\n{msg}");
+            println!("huba từ chối gửi, và nói:\n{msg}");
             // 🔴 Điều quan trọng nhất: KHÔNG để lại tấm ảnh đen trên đĩa, và
             // câu từ chối phải khớp trạng thái ĐO ĐƯỢC — không đổ bừa cho quyền.
             assert!(!path.exists(), "ảnh rỗng phải bị xoá, không được gửi đi");

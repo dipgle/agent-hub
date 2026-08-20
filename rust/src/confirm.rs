@@ -18,7 +18,7 @@
 //! 2. **Chỉ chủ hòm mới xác nhận được.** Bấm nút mà `from.id` khác `chat_id`
 //!    trong cấu hình thì coi như không có — cùng tinh thần với luật §7 (phòng
 //!    chat chỉ nhận lệnh của chủ máy).
-//! 3. **Chặn vòng chạy trong lúc chờ.** hub cố ý đồng bộ; thêm luồng nền chỉ để
+//! 3. **Chặn vòng chạy trong lúc chờ.** huba cố ý đồng bộ; thêm luồng nền chỉ để
 //!    khỏi chờ một việc mà người dùng ĐANG ĐỨNG CHỜ là thêm mảnh chuyển động
 //!    không mua được gì. Chờ bằng long-poll của Telegram nên không quay CPU, và
 //!    câu trả lời trong phòng chat được gửi TRƯỚC khi chờ để màn không câm.
@@ -98,7 +98,7 @@ pub fn tell(cfg: &Config, text: &str) -> Result<(), String> {
             .into_iter()
             .flatten()
             .collect();
-            return Err(format!("thiếu {} trong hub.env", missing.join(" + ")));
+            return Err(format!("thiếu {} trong huba.env", missing.join(" + ")));
         }
     };
     let client = reqwest::blocking::Client::builder()
@@ -147,7 +147,7 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
             .flatten()
             .collect();
             logging::error("confirm_secret_missing", json!({ "keys": missing }));
-            return Verdict::Unavailable(format!("thiếu {} trong hub.env", missing.join(" + ")));
+            return Verdict::Unavailable(format!("thiếu {} trong huba.env", missing.join(" + ")));
         }
     };
 
@@ -172,8 +172,8 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
     // vòng nền đang nằm giữa một long-poll 20 giây, và không có cách nào gọi
     // một long-poll về. Hai vòng cùng hỏi ⟹ Telegram từ chối một bên
     // (`Conflict: terminated by other getUpdates request`) — 11 lượt trong
-    // `logs/hub.log` ngày 16/08, mỗi lượt kèm 30 giây vòng nền ngủ phạt, tức
-    // 30 giây hub điếc ngay sau mỗi câu hỏi xác nhận.
+    // `logs/huba.log` ngày 16/08, mỗi lượt kèm 30 giây vòng nền ngủ phạt, tức
+    // 30 giây huba điếc ngay sau mỗi câu hỏi xác nhận.
     //
     // Nay hàm này không hỏi Telegram câu nào: nó để lại `nonce` ở hòm thư và
     // ngồi chờ. Đăng ký TRƯỚC `sendMessage`, vì khoảng giữa "tin hiện trên điện
@@ -192,7 +192,7 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
     };
     let body = json!({
         "chat_id": chat_id,
-        "text": format!("🔒 hub xin xác nhận\n\n{what}\n\nKhông bấm gì trong {}s = không làm.", cfg.confirm.timeout_sec),
+        "text": format!("🔒 huba xin xác nhận\n\n{what}\n\nKhông bấm gì trong {}s = không làm.", cfg.confirm.timeout_sec),
         "reply_markup": {
             "inline_keyboard": [[
                 { "text": "✅ Xác nhận", "callback_data": format!("ok:{nonce}") },
@@ -247,12 +247,12 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
     };
 
     // Ghi kết cục ngay lên chính tin nhắn ấy: hòm Telegram phải đọc được là
-    // "đã bấm gì, và hub đã hiểu thế nào", chứ không để lại một câu hỏi treo.
+    // "đã bấm gì, và huba đã hiểu thế nào", chứ không để lại một câu hỏi treo.
     if let Some(mid) = message_id {
         let stamp = match &verdict {
             Verdict::Confirmed => "✅ Đã xác nhận",
             Verdict::Declined => "✖ Đã huỷ",
-            Verdict::TimedOut => "⌛ Hết hạn — hub KHÔNG làm gì",
+            Verdict::TimedOut => "⌛ Hết hạn — huba KHÔNG làm gì",
             Verdict::Unavailable(_) => "⚠ Hỏng đường hỏi",
         };
         let _ = client
@@ -278,7 +278,7 @@ pub fn ask(cfg: &Config, what: &str) -> Verdict {
 /// Đường LÙI: tự đọc `getUpdates` khi tiến trình không có hòm thư nền.
 ///
 /// Chỉ chạy khi `telegram::inbox()` là `None` — CLI một lượt, hoặc kênh tắt.
-/// Trong `hubd` thì hòm thư luôn có, nên nhánh này không bao giờ chạy song song
+/// Trong `hubad` thì hòm thư luôn có, nên nhánh này không bao giờ chạy song song
 /// với vòng đọc nào: luật 1 vẫn nguyên.
 #[allow(clippy::too_many_arguments)]
 fn confirm_poll(
@@ -400,7 +400,7 @@ mod tests {
         for v in [
             Verdict::Declined,
             Verdict::TimedOut,
-            Verdict::Unavailable("thiếu HUB_TELEGRAM_BOT_TOKEN trong hub.env".into()),
+            Verdict::Unavailable("thiếu HUB_TELEGRAM_BOT_TOKEN trong huba.env".into()),
         ] {
             for what in ["dừng phiên nào", "đóng sổ phiên nào"] {
                 let msg = v.refusal(what);

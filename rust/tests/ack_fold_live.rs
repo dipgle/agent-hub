@@ -8,16 +8,16 @@
 //! và `editMessageText` đều TRẢ VỀ đối tượng Message, nên "tin ấy giờ ghi gì"
 //! là con số đọc được từ máy này.
 //!
-//! Đo được cái nó chặn (nhật ký hubd 17/08): **73 dòng `✓ đã gửi · …`** cho 73
+//! Đo được cái nó chặn (nhật ký hubad 17/08): **73 dòng `✓ đã gửi · …`** cho 73
 //! cú bấm phím đi qua một liên kết trong chữ, mỗi dòng kèm một
 //! `telegram_reaction_failed` — vì tin sinh ra lệnh là tiếng vọng `/start`, mà
-//! hub xoá ngay tiếng vọng ấy.
+//! huba xoá ngay tiếng vọng ấy.
 //!
 //! Gắn `#[ignore]` vì nó gửi thật (và xoá thật). Chạy tay:
 //!
 //! ```
-//! cd ~/projects/hub/rust
-//! HUB_CONFIG=$HOME/projects/hub/hub.config.json \
+//! cd ~/projects/huba/rust
+//! HUB_CONFIG=$HOME/projects/huba/huba.config.json \
 //!   cargo test --offline --test ack_fold_live -- --ignored --nocapture
 //! ```
 
@@ -25,8 +25,8 @@
 #[test]
 #[ignore = "gửi một tin thật vào buồng chat rồi xoá — chạy tay bằng --ignored"]
 fn the_second_identical_ack_edits_the_first_message() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG trỏ vào hub.config.json thật");
-    let tg = hub::telegram::Inbox::start(&cfg, None).expect("có bot token + chat id");
+    let cfg = huba::config::load(None).expect("HUB_CONFIG trỏ vào huba.config.json thật");
+    let tg = huba::telegram::Inbox::start(&cfg, None).expect("có bot token + chat id");
 
     // Câu thật của đường `/key`, chỉ thêm dấu hiệu "đây là tin kiểm tra".
     let ack = "✓ đã gửi · 🧪 [kiểm tra, tin này tự xoá]";
@@ -50,7 +50,7 @@ fn the_second_identical_ack_edits_the_first_message() {
     let shown = tg
         .edit_html(
             second.message_id,
-            &hub::telegram::html_escape(&format!("{ack} ×2 (đọc lại)")),
+            &huba::telegram::html_escape(&format!("{ack} ×2 (đọc lại)")),
             &[],
         )
         .expect("đọc lại được tin sau khi sửa");
@@ -75,8 +75,8 @@ fn the_second_identical_ack_edits_the_first_message() {
 #[test]
 #[ignore = "gửi hai tin thật vào buồng chat rồi xoá — chạy tay bằng --ignored"]
 fn a_different_ack_gets_its_own_message() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG trỏ vào hub.config.json thật");
-    let tg = hub::telegram::Inbox::start(&cfg, None).expect("có bot token + chat id");
+    let cfg = huba::config::load(None).expect("HUB_CONFIG trỏ vào huba.config.json thật");
+    let tg = huba::telegram::Inbox::start(&cfg, None).expect("có bot token + chat id");
 
     tg.send_ack("✓ đã gửi · 🧪 [kiểm tra A, tự xoá]")
         .expect("tin A");

@@ -4,9 +4,9 @@
 //! thiếu quyền Screen Recording — rồi Hà hỏi lại: *"Máy đang ở màn hình chờ đăng
 //! nhập không chụp được ảnh?"*, và đo ra đúng thế
 //! (`"CGSSessionScreenIsLocked"=Yes`). Hai nguyên nhân cho cùng một tấm ảnh đen,
-//! nên câu trả lời phải PHÂN BIỆT được, không thì hub bắt chủ máy đi kiểm hộ.
+//! nên câu trả lời phải PHÂN BIỆT được, không thì huba bắt chủ máy đi kiểm hộ.
 
-use hub::keys::{blank_frame_reason, lock_verdict};
+use huba::keys::{blank_frame_reason, lock_verdict};
 
 /// Nguyên văn `ioreg -n Root -d1` trên máy này lúc màn ĐANG khoá (18/08).
 const LOCKED: &str = r#"      "IOConsoleUsers" = ({"kCGSSessionOnConsoleKey"=Yes,"kSCSecuritySessionID"=100023,"kCGSSessionSystemSafeBoot"=No,"kCGSessionLoginDoneKey"=Yes,"kCGSSessionIDKey"=257,"kCGSSessionUserNameKey"="hanguyen","CGSSessionScreenLockedTime"=1786984979,"CGSSessionScreenIsLocked"=Yes,"kCGSSessionUserIDKey"=501})"#;
@@ -19,7 +19,7 @@ fn a_locked_screen_is_read_from_ioreg_not_guessed() {
     assert_eq!(lock_verdict(LOCKED), Some(true));
     assert_eq!(lock_verdict(UNLOCKED), Some(false));
     // Không có `IOConsoleUsers` ⟹ KHÔNG đo được. Phải khác hẳn "đo rồi, không
-    // khoá" — nếu không thì một ngày `ioreg` đổi định dạng là hub lại khẳng
+    // khoá" — nếu không thì một ngày `ioreg` đổi định dạng là huba lại khẳng
     // định chắc nịch một điều nó không biết.
     assert_eq!(lock_verdict("ioreg: command not found"), None);
 }
@@ -43,7 +43,7 @@ fn each_reason_tells_the_owner_a_different_thing_to_do() {
     let no_grant = blank_frame_reason(Some(false));
     assert!(no_grant.contains("Screen Recording"), "{no_grant}");
     assert!(
-        no_grant.contains("hubd"),
+        no_grant.contains("bin/hubd"),
         "phải nói cấp cho binary NÀO: {no_grant}"
     );
 

@@ -11,8 +11,8 @@
 //! Gắn `#[ignore]` vì nó gửi thật (và xoá thật). Chạy tay:
 //!
 //! ```
-//! cd ~/projects/hub/rust
-//! HUB_CONFIG=$HOME/projects/hub/hub.config.json \
+//! cd ~/projects/huba/rust
+//! HUB_CONFIG=$HOME/projects/huba/huba.config.json \
 //!   cargo test --offline --test telegram_live -- --ignored --nocapture
 //! ```
 
@@ -25,8 +25,8 @@
 #[test]
 #[ignore = "gửi một tin thật vào buồng chat rồi xoá — chạy tay bằng --ignored"]
 fn the_two_keys_really_land_on_the_prompt_line() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG trỏ vào hub.config.json thật");
-    let tg = hub::telegram::Inbox::start(&cfg, None).expect("có bot token + chat id");
+    let cfg = huba::config::load(None).expect("HUB_CONFIG trỏ vào huba.config.json thật");
+    let tg = huba::telegram::Inbox::start(&cfg, None).expect("có bot token + chat id");
 
     let tin = "📷 (tin kiểm tra, sẽ tự xoá) Màn của [tfl5]:\n\
                ✻ Sautéed for 6m 36s\n\
@@ -49,7 +49,7 @@ fn the_two_keys_really_land_on_the_prompt_line() {
             ),
         ],
     )];
-    let (html, linked, _) = hub::pipeline::html_with_links(tin, &anchors);
+    let (html, linked, _) = huba::pipeline::html_with_links(tin, &anchors);
     assert_eq!(linked, 2);
 
     let sent = tg.send_html_report(&html, &[]).expect("Telegram nhận tin");
@@ -85,15 +85,16 @@ fn the_two_keys_really_land_on_the_prompt_line() {
 #[test]
 #[ignore = "gửi một tin thật vào buồng chat rồi xoá — chạy tay bằng --ignored"]
 fn a_command_line_really_carries_its_run_link_on_telegram() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG trỏ vào hub.config.json thật");
-    let tg = hub::telegram::Inbox::start(&cfg, None).expect("có bot token + chat id trong hub.env");
+    let cfg = huba::config::load(None).expect("HUB_CONFIG trỏ vào huba.config.json thật");
+    let tg =
+        huba::telegram::Inbox::start(&cfg, None).expect("có bot token + chat id trong huba.env");
 
     // Chuỗi đi qua ĐÚNG hàm sản phẩm, không phải một bản chép cho dễ.
     let text = "Kiểm tra đường gửi (tin này sẽ tự xoá):\n\
-                cd ~/projects/hub && ./hub doctor\n\
+                cd ~/projects/huba && ./huba doctor\n\
                 dòng sau lệnh, để xem link có bám đúng chỗ không.";
-    let cmds = vec!["cd ~/projects/hub && ./hub doctor".to_string()];
-    let (html, linked, unlinked) = hub::pipeline::html_with_command_links(text, &cmds, &|i| {
+    let cmds = vec!["cd ~/projects/huba && ./huba doctor".to_string()];
+    let (html, linked, unlinked) = huba::pipeline::html_with_command_links(text, &cmds, &|i| {
         Some((
             format!("https://t.me/hub_probe?start=run_{i}"),
             "▶️".to_string(),
@@ -141,7 +142,7 @@ fn a_command_line_really_carries_its_run_link_on_telegram() {
     //    Hà hỏi bằng mắt, hỏi lại bằng số.
     assert_eq!(
         sent.before_link(0),
-        "cd ~/projects/hub && ./hub doctor",
+        "cd ~/projects/huba && ./huba doctor",
         "link không bám vào dòng lệnh"
     );
     // 4) Cả tin là MỘT tin: dòng sau lệnh phải nằm trong chính nó.

@@ -3,7 +3,7 @@
 // Mọi thứ đi qua giao diện như người dùng: gõ vào form đăng nhập, chạm tab.
 // Không goto thẳng, không gọi API để dựng trạng thái.
 //
-// Phép đo không tự bịa chuẩn: số liệu đối chiếu lấy từ `hub sessions --json`
+// Phép đo không tự bịa chuẩn: số liệu đối chiếu lấy từ `huba sessions --json`
 // chạy độc lập, nên màn hình phải khớp với sự thật của máy chứ không khớp với
 // chính nó (bẫy đã đạp 08-07: script đọc lại đúng ô nó vừa gõ rồi báo ĐẠT).
 //
@@ -35,7 +35,7 @@ const check = (name, ok, detail = "") => {
 // Ground truth, read straight from the machine, not from the page.
 const readTruth = () =>
   JSON.parse(
-    execFileSync(HERE + "rust/target/release/hub", ["sessions", "--json"], {
+    execFileSync(HERE + "rust/target/release/huba", ["sessions", "--json"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     })
@@ -162,7 +162,7 @@ try {
   // Hỏi thật 2026-08-09: "máy chỉ mở 3 terminal sao màn hiện 13 phiên?" Cả hai
   // đều đúng — 3 terminal, 8 phiên trong VS Code/Cursor, 2 dòng đã dừng mà
   // `claude agents` vẫn liệt kê. Con số tổng không sai, nó chỉ không nói ra.
-  // Đối chiếu với SỰ THẬT trên máy (hub sessions --json), không tự suy từ màn.
+  // Đối chiếu với SỰ THẬT trên máy (huba sessions --json), không tự suy từ màn.
   const byHost = {};
   truth.sessions.forEach((x) => { byHost[x.host] = (byHost[x.host] || 0) + 1; });
   const summary = (await page.locator("#sessSummary").innerText()).trim();
@@ -272,7 +272,7 @@ try {
     headers
   );
   if (byHost.terminal) {
-    // Nhóm 'terminal' chỉ chứa phiên KHÔNG do hub mở; phiên hub mở nằm nhóm
+    // Nhóm 'terminal' chỉ chứa phiên KHÔNG do huba mở; phiên huba mở nằm nhóm
     // riêng dù nó cũng chạy trong terminal.
     const expectTerm = truth.sessions.filter((x) => x.host === "terminal" && !x.started_by_hub).length;
     check(
@@ -390,7 +390,7 @@ try {
   // nên đổi sang GỘP NHÓM: tiêu đề nói một lần cho cả cụm.
   //
   // Phép đo đối chiếu với MÁY, không hỏi lại trang: số phiên mỗi nhóm phải khớp
-  // `hub sessions --json`, và nhãn "hub mở" chỉ được xuất hiện đúng bằng sổ.
+  // `huba sessions --json`, và nhãn "huba mở" chỉ được xuất hiện đúng bằng sổ.
   const groups = await page.evaluate(() =>
     [...document.querySelectorAll("#sessList .sess-group")].map((e) => ({
       g: e.dataset.g,
@@ -408,7 +408,7 @@ try {
     !!(x.parent_session_id && onScreenIds.has(x.parent_session_id) && x.parent_session_id !== x.session_id);
   const top = truth.sessions.filter((x) => !nested(x));
   const expect = {
-    hub: top.filter((x) => x.started_by_hub && x.host !== "dead").length,
+    huba: top.filter((x) => x.started_by_hub && x.host !== "dead").length,
     terminal: top.filter((x) => x.host === "terminal" && !(x.started_by_hub)).length,
     background: top.filter((x) => x.host === "background" && !(x.started_by_hub)).length,
     detached: top.filter((x) => x.host === "detached" && !(x.started_by_hub)).length,
@@ -418,11 +418,11 @@ try {
     .filter(([g, n]) => n > 0 && (groups.find((x) => x.g === g)?.n ?? 0) !== n)
     .map(([g, n]) => `${g}: máy ${n} / màn ${groups.find((x) => x.g === g)?.n ?? 0}`);
   check("số phiên mỗi nhóm khớp với máy", mismatch.length === 0, mismatch.join(" · "));
-  const hubGroup = groups.find((g) => g.g === "hub");
+  const hubGroup = groups.find((g) => g.g === "huba");
   check(
-    "nhóm 'hub mở' chỉ xuất hiện khi sổ CÓ phiên hub mở",
-    (expect.hub > 0) === !!hubGroup,
-    `sổ ${expect.hub} · màn ${hubGroup ? hubGroup.n : "không có nhóm"}`
+    "nhóm 'huba mở' chỉ xuất hiện khi sổ CÓ phiên huba mở",
+    (expect.huba > 0) === !!hubGroup,
+    `sổ ${expect.huba} · màn ${hubGroup ? hubGroup.n : "không có nhóm"}`
   );
 
   // Phiên nền không có cửa sổ nào, nên "ở đâu ra?" phải được trả lời ngay trên
@@ -444,7 +444,7 @@ try {
   // phiên thực sự đang liệt kê terminal hay chỉ claude?"*. Nhãn ấy từng được
   // suy bằng loại trừ (không phải editor ⇒ terminal), nên một `claude` do
   // script hay cron chạy vẫn đọc là "terminal". Phép đo này hỏi HỆ ĐIỀU HÀNH,
-  // không hỏi lại chính hub: mỗi dòng gắn nhãn terminal phải có tty điều khiển.
+  // không hỏi lại chính huba: mỗi dòng gắn nhãn terminal phải có tty điều khiển.
   const ttyOf = (pid) => {
     try {
       return execFileSync("ps", ["-p", String(pid), "-o", "tty="], { encoding: "utf8" }).trim();
@@ -470,7 +470,7 @@ try {
   );
 
   // Phiên chạy trong editor bị bỏ khỏi danh sách — màn phải NÓI RA, và nói
-  // đúng số. Đo 2026-08-09: hub ẩn 8 phiên mỗi vòng suốt 601 lần ghi log, mà
+  // đúng số. Đo 2026-08-09: huba ẩn 8 phiên mỗi vòng suốt 601 lần ghi log, mà
   // màn hình không có một chữ nào về chúng; câu hỏi gốc của Hà ("3 terminal sao
   // hiện 13 phiên?") khi ấy chỉ đổi chiều chứ chưa được trả lời.
   const hiddenEditor = truth.hidden_editor || 0;
@@ -533,7 +533,7 @@ try {
     );
     const wrong = stopWhere.filter((r) => (r.kind === "background") !== r.hasStop);
     check(
-      "nút Dừng chỉ nằm trên phiên hub mở được, và nằm trên MỌI phiên như vậy",
+      "nút Dừng chỉ nằm trên phiên huba mở được, và nằm trên MỌI phiên như vậy",
       wrong.length === 0,
       stopWhere.map((r) => `${r.kind}:${r.hasStop ? "có" : "không"}`).join(" · ")
     );

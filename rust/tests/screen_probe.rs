@@ -12,19 +12,19 @@ fn read_a_real_screen() {
 
     println!(
         "có dòng chân hộp chọn: {}",
-        hub::keys::has_chooser_footer(&man)
+        huba::keys::has_chooser_footer(&man)
     );
-    let choices = hub::keys::parse_choices(&man);
+    let choices = huba::keys::parse_choices(&man);
     println!("parse_choices → {} lựa chọn", choices.len());
     for (n, s) in &choices {
         println!("  {n}. {s}");
     }
     println!("--- ô nhập ---");
-    println!("{:?}", hub::keys::input_box_text(&man));
+    println!("{:?}", huba::keys::input_box_text(&man));
     println!("--- look ---");
-    match hub::keys::look_from_screen(&man, 6) {
-        hub::keys::Look::Saw { choices, .. } => println!("Saw, {} lựa chọn", choices.len()),
+    match huba::keys::look_from_screen(&man, 6) {
+        huba::keys::Look::Saw { choices, .. } => println!("Saw, {} lựa chọn", choices.len()),
         // 🪦 Nhánh `Withheld` gỡ 2026-08-16 — xem bia mộ trong `keys::Look`.
-        hub::keys::Look::Blind { why } => println!("Blind: {why}"),
+        huba::keys::Look::Blind { why } => println!("Blind: {why}"),
     }
 }

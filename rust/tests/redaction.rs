@@ -1,4 +1,4 @@
-use hub::redaction::{compile_extra, leak_scan};
+use huba::redaction::{compile_extra, leak_scan};
 
 #[test]
 fn the_observed_real_leak_is_caught() {
@@ -90,7 +90,7 @@ fn config_patterns_compile_and_a_broken_one_is_reported_not_swallowed() {
 #[test]
 fn an_error_string_never_carries_the_bot_token() {
     let raw = "error sending request for url (https://api.telegram.org/bot1234567890:AAFakeFakeFakeFakeFakeFakeFakeFake00/getUpdates?offset=1&timeout=20)";
-    let safe = hub::logging::redact(raw);
+    let safe = huba::logging::redact(raw);
     assert!(!safe.contains("AAFakeFake"), "token còn nguyên: {safe}");
     assert!(!safe.contains("1234567890:"), "token còn nguyên: {safe}");
     // Vẫn phải đọc được là hỏng ở đâu, nếu không thì che xong hoá mù.
@@ -98,20 +98,20 @@ fn an_error_string_never_carries_the_bot_token() {
     assert!(safe.contains("<token>"), "phải nói rõ đã che: {safe}");
     // Chuỗi không có token thì giữ nguyên từng chữ.
     let plain = "không đọc được nhật ký phiên";
-    assert_eq!(hub::logging::redact(plain), plain);
+    assert_eq!(huba::logging::redact(plain), plain);
 }
 
 /// Cân cho TỆP hẹp hơn cân cho phần xem trước — và đó là chủ ý.
 ///
 /// 🔴 Hà 2026-08-13, ngay cú bấm nút 📎 đầu tiên: *"chưa gửi được
-/// hub.env.example — giữ lại: có dấu hiệu bí mật (credential_word_vi)"*. Tệp
+/// huba.env.example — giữ lại: có dấu hiệu bí mật (credential_word_vi)"*. Tệp
 /// ấy là BẢN MẪU, mọi giá trị đều rỗng; thứ khớp chỉ là chữ "Mật khẩu" trong
 /// nhãn ô nhập. Dùng cân của "thư gửi người ngoài" cho một tệp chủ máy gọi
 /// đích danh thì chặn gần hết tài liệu — và một cái cổng chặn hết là một cái
 /// cổng không ai dùng nữa.
 #[test]
 fn a_template_file_is_not_a_secret_but_a_filled_in_one_is() {
-    use hub::redaction::file_risk;
+    use huba::redaction::file_risk;
 
     // Đúng bản mẫu đã bị chặn oan: có chữ "Mật khẩu", giá trị RỖNG.
     let template = "# Mật khẩu tfl5 của tài khoản bot\nHUB_TFL5_PASSWORD=\nHUB_TFL5_USER=\n";
@@ -119,7 +119,8 @@ fn a_template_file_is_not_a_secret_but_a_filled_in_one_is() {
 
     // Tài liệu bình thường: đường dẫn máy, trích CLAUDE.md, tên host — chủ máy
     // đã có sẵn hết, gửi vào phòng chat của chính anh thì không phải rò rỉ.
-    let doc = "Xem /Users/hanguyen/projects/AI/hub/CLAUDE.md: mục vps-a, [[abc]], blocker còn treo";
+    let doc =
+        "Xem /Users/hanguyen/projects/AI/huba/CLAUDE.md: mục vps-a, [[abc]], blocker còn treo";
     assert!(file_risk(doc).is_empty(), "{:?}", file_risk(doc));
 
     // …nhưng GIÁ TRỊ thật thì chặn, cả ba hình dạng.
@@ -145,7 +146,7 @@ fn a_template_file_is_not_a_secret_but_a_filled_in_one_is() {
 /// quan.
 #[test]
 fn a_dmarc_comment_is_not_a_leaked_password() {
-    use hub::redaction::file_risk;
+    use huba::redaction::file_risk;
 
     let real = "#   The 2026-08-10 DMARC report says spf=pass, dkim=fail for a message this";
     assert!(

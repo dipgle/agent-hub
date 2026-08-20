@@ -12,8 +12,8 @@
 //! bật/tắt thừa tự triệt tiêu nhau. Xem `keys::press_writes` để có cả năm phép
 //! đo trên hộp thật.
 
-use hub::keys::{checkbox_plan, submit_plan};
-use hub::pipeline::{render_session_data, SessionData};
+use huba::keys::{checkbox_plan, submit_plan};
+use huba::pipeline::{render_session_data, SessionData};
 
 /// ✅ phải bám ngay tại dòng `Submit` — nếu không, hộp chọn nhiều không có
 /// đường gửi nào trong chữ.
@@ -23,7 +23,7 @@ use hub::pipeline::{render_session_data, SessionData};
 /// không `k_`/`pick_` nào trỏ tới nó.
 #[test]
 fn the_submit_line_gets_its_own_tap_target() {
-    hub::telegram::set_bot_username("hub_test_bot");
+    huba::telegram::set_bot_username("hub_test_bot");
     let shown = render_session_data(
         SCREEN,
         &SessionData {
@@ -146,17 +146,17 @@ fn standing_on_the_target_costs_exactly_one_write() {
 /// Ack phải nói KẾT QUẢ (mấy ô đang tick), không chỉ nói đã bấm.
 ///
 /// 🔴 Hà 2026-08-17: *"Bấm chọn hết nhưng shot lại thiếu… Phản hồi về là bấm rồi
-/// mà"*. `✓ đã bấm '3'` chỉ khai phím rời khỏi hub — nó vẫn xanh y hệt khi phím
+/// mà"*. `✓ đã bấm '3'` chỉ khai phím rời khỏi huba — nó vẫn xanh y hệt khi phím
 /// rơi vào mục khác.
 #[test]
 fn the_tick_count_is_read_from_the_screen() {
-    let none = hub::keys::ticked(SCREEN_WITH_DESCRIPTIONS);
+    let none = huba::keys::ticked(SCREEN_WITH_DESCRIPTIONS);
     assert_eq!(none, (0, 5), "5 ô, chưa tick ô nào");
 
     let two = SCREEN_WITH_DESCRIPTIONS
         .replacen("1. [ ]", "1. [\u{2713}]", 1)
         .replacen("3. [ ]", "3. [\u{2713}]", 1);
-    assert_eq!(hub::keys::ticked(&two), (2, 5));
+    assert_eq!(huba::keys::ticked(&two), (2, 5));
 }
 
 /// …nhưng TỔNG số ô bật thì mù đúng cái ca Hà bắt được, nên phải đếm ô ĐỔI DẤU.
@@ -170,19 +170,19 @@ fn two_boxes_flipping_at_once_is_visible_even_when_the_total_is_unchanged() {
     let before = SCREEN_WITH_DESCRIPTIONS.replacen("1. [ ]", "1. [\u{2713}]", 1);
     let after = SCREEN_WITH_DESCRIPTIONS.replacen("2. [ ]", "2. [\u{2713}]", 1);
     assert_eq!(
-        hub::keys::ticked(&before),
-        hub::keys::ticked(&after),
+        huba::keys::ticked(&before),
+        huba::keys::ticked(&after),
         "tổng số ô bật KHÔNG đổi — đây là chỗ phép đo cũ mù"
     );
     assert_eq!(
-        hub::keys::ticks_changed(&before, &after),
+        huba::keys::ticks_changed(&before, &after),
         vec![1, 2],
-        "mà hai ô đã đổi dấu, và hub phải gọi tên được cả hai"
+        "mà hai ô đã đổi dấu, và huba phải gọi tên được cả hai"
     );
 
     let one = SCREEN_WITH_DESCRIPTIONS.replacen("3. [ ]", "3. [\u{2713}]", 1);
     assert_eq!(
-        hub::keys::ticks_changed(SCREEN_WITH_DESCRIPTIONS, &one),
+        huba::keys::ticks_changed(SCREEN_WITH_DESCRIPTIONS, &one),
         vec![3],
         "một cú bấm lành: đúng một ô"
     );
@@ -192,7 +192,7 @@ fn two_boxes_flipping_at_once_is_visible_even_when_the_total_is_unchanged() {
 #[test]
 fn a_plain_choice_box_is_not_a_checkbox_list() {
     let screen = "\u{276f} 1. Vá ACL\n  2. Bỏ qua\nEnter to select · ↑/↓ to navigate";
-    assert!(!hub::keys::is_checkbox_list(screen));
+    assert!(!huba::keys::is_checkbox_list(screen));
     assert!(checkbox_plan(screen, 2).is_none());
 }
 

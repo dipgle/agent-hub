@@ -3,7 +3,7 @@
 //! Hà asked for it in one line (2026-08-09): *"nên tạo 1 tool chụp được tình
 //! trạng đang chạy, đã dừng, lỗi, options… liên tục để phản hồi lên ui"*. Until
 //! now the phone could see SESSIONS but nothing about the thing watching them:
-//! whether `hubd` was even alive, whether it would come back after a reboot,
+//! whether `hubad` was even alive, whether it would come back after a reboot,
 //! which of the three accounts answered, what the last error was. Every one of
 //! those questions had an answer on the machine and no way to reach a phone.
 //!
@@ -42,7 +42,7 @@ static USAGE_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
 /// thêm ba tiến trình `claude` nữa trong lúc lượt trước còn dở.
 static USAGE_REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Called once by `hubd` at boot so "how long has it been up" is a fact rather
+/// Called once by `hubad` at boot so "how long has it been up" is a fact rather
 /// than a guess from the first cycle.
 /// Cho phép một luồng nói với vòng chạy: *"có thứ vừa tới, đừng ngồi hết giấc
 /// ngủ nữa"*.
@@ -50,13 +50,13 @@ static USAGE_REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// 🔴 Chuyển từ `live.rs` sang đây ngày 2026-08-14, khi Hà chốt bỏ trang tfl5:
 /// *"tạm thời không dùng tfl5 để xem cứ xóa hết đi"*. `live.rs` là cái socket
 /// giữ mở với phòng chat tfl5 — nó đi theo kênh ấy. Nhưng `Waker` thì không:
-/// hubd dùng nó để NGỦ (`waker.sleep(slice)`) ở ba chỗ, và Telegram dùng nó để
+/// hubad dùng nó để NGỦ (`waker.sleep(slice)`) ở ba chỗ, và Telegram dùng nó để
 /// cắt giấc ngủ khi có lệnh.
 ///
 /// Vì sao cái cắt giấc ngủ ấy đáng giữ, dù `run_telegram_now` đã chạy lệnh ngay
 /// ở luồng riêng: lệnh chạy xong thì ẢNH CHỤP vẫn cũ cho tới vòng sau, nên cái
 /// loa "vừa xong / vừa tắt" và trang trạng thái đi sau thực tế tới 120 giây.
-/// Đánh thức là để phần CÒN LẠI của hub bắt kịp thứ vừa xảy ra.
+/// Đánh thức là để phần CÒN LẠI của huba bắt kịp thứ vừa xảy ra.
 #[derive(Default)]
 pub struct Waker {
     inner: std::sync::Mutex<bool>,
@@ -328,13 +328,13 @@ fn slow_block(cfg: &Config, now: i64) -> Value {
 ///
 /// Hết hạn thì trả BẢN CŨ ngay rồi cho một luồng riêng đi hỏi lại. Vì sao không
 /// hỏi tại chỗ: ba lần spawn `claude` kéo một vòng lên **80 giây** (đo
-/// 2026-08-10 ngay sau khi thêm), mà mỗi vòng là một nhịp hub đọc lệnh từ điện
+/// 2026-08-10 ngay sau khi thêm), mà mỗi vòng là một nhịp huba đọc lệnh từ điện
 /// thoại — nên cái giá không phải "số liệu chậm 30 giây" mà là "lệnh của chủ máy
 /// nằm chờ hơn một phút". Đúng bài học đã ghi trong `CLAUDE.md` đêm trước về
 /// luật tự đóng sổ (90s → 3,2s), và tôi vừa tái phạm bằng một phép dò mới.
 ///
 /// Một số liệu trễ 5 phút mà màn vẫn mượt thì tốt hơn một số liệu tươi mà cả
-/// hub khựng lại.
+/// huba khựng lại.
 fn usage_cached(cfg: &Config, now: i64) -> Value {
     let cell = USAGE_CACHE.get_or_init(|| Mutex::new(None));
     let cached = cell.lock().ok().and_then(|g| g.clone());
@@ -415,7 +415,7 @@ fn usage_block(cfg: &Config) -> Value {
                     None => {
                         // Một dòng "không đọc được" gộp hai chuyện khác hẳn
                         // nhau, và tôi đã đoán nhầm vì đúng chỗ này (đo
-                        // 2026-08-12: hubd hỏng cả ba tài khoản trong khi chạy
+                        // 2026-08-12: hubad hỏng cả ba tài khoản trong khi chạy
                         // tay thì 6 giây ra đủ số — `code: null` hoá ra là HẾT
                         // GIỜ, không phải câu trả lời khó hiểu). `RunOut` đã
                         // mang sẵn `timed_out` và `ms`; dòng log cũ vứt đi cả
@@ -579,7 +579,7 @@ fn auth_block(cfg: &Config) -> Value {
     Value::Object(map)
 }
 
-/// Will hub come back by itself after a reboot?
+/// Will huba come back by itself after a reboot?
 ///
 /// Measured 2026-08-09: the answer was NO — `com.dipgle.hubd.plist` sat
 /// in the repo, never installed, and the daemon was alive only because someone
@@ -600,7 +600,7 @@ fn autostart_state(cfg: &Config) -> Value {
         ) {
             Ok(r) if r.code == Some(0) => Some(r.stdout.contains("com.dipgle.hubd")),
             // A probe that failed is NOT a "no": say "unknown" rather than
-            // telling the owner autostart is off when hub simply could not ask.
+            // telling the owner autostart is off when huba simply could not ask.
             Ok(_) => None,
             Err(e) => {
                 crate::logging::warn("launchctl_probe_failed", json!({ "err": e.to_string() }));
@@ -621,7 +621,7 @@ fn autostart_state(cfg: &Config) -> Value {
         // gõ cứng: gốc workspace đã đổi một lần (2026-08-12), và một dòng hướng
         // dẫn cũ thì bảo chủ máy cài đè plist của thư mục cũ.
         // 🔴 Tên đổi 2026-08-16 (Hà: *"xóa deploy đi sửa thành
-        // /hub/install_update.sh"*): workspace CHẶN mọi lệnh Bash nêu một tệp
+        // /huba/install_update.sh"*): workspace CHẶN mọi lệnh Bash nêu một tệp
         // có chữ ấy trong tên, nên dòng hướng dẫn cũ là một dòng không ai gõ
         // được — kể cả chủ máy dán lại nó vào phiên.
         "how_to_install": format!(
@@ -639,7 +639,7 @@ fn autostart_state(cfg: &Config) -> Value {
 /// luồng chạy độc lập trên rust, tức là mọi lệnh và luồng xử lý phải nằm trong
 /// binary"*. Phần "logic nằm ngoài" thì không đúng — `install.sh` không xử lý
 /// nghiệp vụ gì cả. Nhưng phần LÕI của câu hỏi thì đúng, và nó là một lỗ hổng
-/// của cây cầu: **hub không tự cài được chính nó**, nên mỗi bản vá đều phải có
+/// của cây cầu: **huba không tự cài được chính nó**, nên mỗi bản vá đều phải có
 /// người ngồi ở máy gõ một dòng — đúng thứ mà cả dự án này sinh ra để bỏ đi.
 ///
 /// Ba bước dưới đây chép nguyên `install_update.sh`, và giữ nguyên hai lý do
@@ -655,12 +655,12 @@ fn autostart_state(cfg: &Config) -> Value {
 /// chỗ, xoá bản tạm, và bản đang chạy còn nguyên.
 /// Đường tới `cargo`, KHÔNG tin vào `PATH`.
 ///
-/// 🔴 Hà 2026-08-14 gõ `/upgrade` lúc 08:26 và bản cài không đổi. hub báo đúng
+/// 🔴 Hà 2026-08-14 gõ `/upgrade` lúc 08:26 và bản cài không đổi. huba báo đúng
 /// chứ không im — *"⚠ không dựng lại được (bản đang chạy GIỮ NGUYÊN): spawn
 /// cargo failed: No such file or directory"* — nhưng tin ấy trôi mất giữa mấy
 /// tin khác, nên nhìn từ điện thoại y hệt một cái lệnh không làm gì.
 ///
-/// Gốc: `hubd` chạy dưới launchd, và `PATH` của nó là dòng khai trong plist —
+/// Gốc: `hubad` chạy dưới launchd, và `PATH` của nó là dòng khai trong plist —
 /// dòng ấy liệt kê `gh`, `claude`, `git`, `sqlite3` nhưng **không có
 /// `~/.cargo/bin`**, vì route `/upgrade` (bản Rust của `install.sh`) mới ra đời
 /// 2026-08-13, sau khi dòng PATH được viết. Chạy tay ở Terminal thì thấy cargo,
@@ -686,14 +686,14 @@ pub const BOOT_BINARY_KEY: &str = "boot:binary";
 ///
 /// Tách ra vì đây là một QUYẾT ĐỊNH về việc phát ngôn, cùng họ với
 /// `pipeline::watch_book_usable`: chưa từng ghi ⟹ nói (lần đầu sau khi dựng cơ
-/// chế này chính là một lần cài); khác bản ⟹ nói; **giống hệt ⟹ im**, vì hubd
+/// chế này chính là một lần cài); khác bản ⟹ nói; **giống hệt ⟹ im**, vì hubad
 /// còn lên lại vì crash và vì `KeepAlive`, và một cái chuông kêu ở đó là chuông
 /// kêu lúc không có tin.
 pub fn boot_is_news(before: Option<&str>, now: &str) -> bool {
     before.is_none_or(|b| b != now)
 }
 
-/// Nói MỘT câu ra Telegram khi hub vừa lên bằng một bản KHÁC bản lần trước.
+/// Nói MỘT câu ra Telegram khi huba vừa lên bằng một bản KHÁC bản lần trước.
 ///
 /// 🔴 Hà 2026-08-15: *"Cài lại báo đang restart rồi đứng im, không có cơ chế
 /// xác thực cài lại xong chưa"*. Anh đúng, và đây là một lỗ hổng đúng hình dạng
@@ -704,7 +704,7 @@ pub fn boot_is_news(before: Option<&str>, now: &str) -> bool {
 /// thoại, "đang restart" rồi im lặng đọc y hệt một lần cài chết giữa đường.
 ///
 /// Hai điều nó cố ý KHÔNG làm:
-/// - **Không nói khi bản không đổi.** hubd còn khởi động lại vì crash, vì
+/// - **Không nói khi bản không đổi.** hubad còn khởi động lại vì crash, vì
 ///   `KeepAlive`, vì máy ngủ dậy. Nói mỗi lượt lên là dựng một cái chuông kêu
 ///   đúng lúc không có tin gì — thứ luật 11 sinh ra để tránh. Đổi bản mới là
 ///   tin; lên lại cùng bản chỉ là một dòng log.
@@ -749,7 +749,7 @@ pub fn announce_boot(db: &crate::db::Db, cfg: &Config, signature: &str) {
     // 🔴 QUYỀN TRỢ NĂNG NÓI NGAY Ở CÂU CHÀO — Hà 2026-08-19: *"Bật trợ năng là
     // sao, sao tin nhắn tôi không thấy chi tiết về thông tin này"*.
     //
-    // `hubd` ký chứng chỉ cố định nên quyền ấy SỐNG QUA mọi lần cài lại — nhưng
+    // `hubad` ký chứng chỉ cố định nên quyền ấy SỐNG QUA mọi lần cài lại — nhưng
     // "sống qua" chỉ là lời hứa cho tới khi có ai đo. Đây là chỗ rẻ nhất để đo:
     // mỗi lần cài lại, câu chào tự khai luôn nó còn tay hay không. Không có
     // dòng này thì cách duy nhất biết là đi bấm một cái nút CẦN quyền rồi đọc
@@ -757,10 +757,10 @@ pub fn announce_boot(db: &crate::db::Db, cfg: &Config, signature: &str) {
     let keys = if crate::cgkeys::trusted() {
         "🔑 phím rời: có quyền"
     } else {
-        "🔑 phím rời: CHƯA có quyền (Cài đặt Hệ thống ▸ Quyền riêng tư & Bảo mật ▸ Trợ năng ▸ bật hubd)"
+        "🔑 phím rời: CHƯA có quyền (Cài đặt Hệ thống ▸ Quyền riêng tư & Bảo mật ▸ Trợ năng ▸ bật hubad)"
     };
     let text = format!(
-        "✅ hub đã cài lại xong và đang chạy.\nbản: {stamp} · chữ ký: {signature} · pid {}\n{keys}\n(bản trước: {})",
+        "✅ huba đã cài lại xong và đang chạy.\nbản: {stamp} · chữ ký: {signature} · pid {}\n{keys}\n(bản trước: {})",
         std::process::id(),
         before
             .as_deref()
@@ -804,7 +804,7 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
             crate::exec::truncate(out.stderr.trim(), 300)
         );
     }
-    let src = rust_dir.join("target/release/hubd");
+    let src = rust_dir.join("target/release/hubad");
     if !src.exists() {
         anyhow::bail!("build xong mà không thấy {}", src.display());
     }
@@ -821,11 +821,11 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     let sha = ids
         .stdout
         .lines()
-        .find(|l| l.contains("\"Hub Local Signing\""))
+        .find(|l| l.contains("\"Huba Local Signing\""))
         .and_then(|l| l.split_whitespace().nth(1))
         .map(str::to_string)
         .ok_or_else(|| {
-            anyhow::anyhow!("không thấy danh tính ký 'Hub Local Signing' trong keychain")
+            anyhow::anyhow!("không thấy danh tính ký 'Huba Local Signing' trong keychain")
         })?;
     // 3. Chép ra bản TẠM rồi ký ở đó — bản đang chạy không được thấy một tệp
     //    ghi dở, và macOS từ chối ghi đè một image đang chạy.
@@ -882,7 +882,7 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     Ok(format!("đã cài {}", dest.display()))
 }
 
-/// Bảo launchd nạp lại hubd. Gọi SAU khi đã trả lời, vì nó giết chính mình.
+/// Bảo launchd nạp lại hubad. Gọi SAU khi đã trả lời, vì nó giết chính mình.
 pub fn restart_daemon() -> anyhow::Result<String> {
     let uid = run(
         "id",
@@ -903,7 +903,7 @@ pub fn restart_daemon() -> anyhow::Result<String> {
     )?;
     if !out.ok() {
         // 🔴 "Chưa nạp" KHÔNG phải "cài hỏng" — đo 2026-08-13, ngay lượt chuyển
-        // hub từ `AI/hub` sang `~/projects/hub`. Kịch bản chuyển `bootout` agent
+        // huba từ `AI/huba` sang `~/projects/huba`. Kịch bản chuyển `bootout` agent
         // TRƯỚC (bắt buộc: `KeepAlive` làm `kill` vô nghĩa), rồi gọi
         // `self-install`. Build xong, ký xong, **binary đã nằm đúng chỗ** — rồi
         // hàm này `bail!` vì `kickstart` không tìm thấy service, và `set -e`
@@ -930,14 +930,14 @@ pub fn restart_daemon() -> anyhow::Result<String> {
     Ok(target)
 }
 
-/// Đường dẫn bản hubd mà launchd chạy. KHÔNG phải bản `cargo` vừa build.
+/// Đường dẫn bản hubad mà launchd chạy. KHÔNG phải bản `cargo` vừa build.
 const INSTALLED_HUBD: &str = "~/Library/Application Support/hub/bin/hubd";
 
 /// Hai câu hỏi mà thiết kế "cài bản đã ký ra đường riêng" vừa đẻ ra, và cả hai
 /// đều im lặng nếu không ai hỏi:
 ///
 /// 1. **Bản cài có còn mang chữ ký cố định không** (`cert`)? Nếu là `adhoc` thì
-///    quyền TCC sẽ mất ở lần build kế tiếp — hub vẫn chạy ngon cho tới lúc khởi
+///    quyền TCC sẽ mất ở lần build kế tiếp — huba vẫn chạy ngon cho tới lúc khởi
 ///    động lại máy, rồi im.
 /// 2. **Bản cài có cũ hơn bản vừa build không**? Đây là cái giá của việc tách
 ///    hai file: sửa mã, `cargo build`, test xanh, deploy trang — và daemon vẫn
@@ -987,9 +987,9 @@ fn installed_binary_state(cfg: &Config) -> (Value, Value) {
 ///
 /// Hỏi **mã nguồn**, không hỏi sản phẩm build. Hai đường kia đều đã thử và đều
 /// sai (đo 2026-08-10):
-/// - *mtime của `target/release/hubd`*: `cargo test --release` link lại mỗi lượt
+/// - *mtime của `target/release/hubad`*: `cargo test --release` link lại mỗi lượt
 ///   test, mtime nhảy dù mã không đổi.
-/// - *cdhash của `target/release/hubd`*: tưởng ổn định vì build của Rust lặp
+/// - *cdhash của `target/release/hubad`*: tưởng ổn định vì build của Rust lặp
 ///   lại đúng byte, nhưng `cargo test --release` cho ra một binary KHÁC hẳn
 ///   (`2f624e8b…` so với `bbd8ba58…` của `cargo build --release`), và lệnh build
 ///   sau đó lại trả về hash cũ. Cùng một mã, hai câu trả lời.
@@ -998,8 +998,8 @@ fn installed_binary_state(cfg: &Config) -> (Value, Value) {
 /// hơn không có. Còn `.rs`/`Cargo.toml`/`Cargo.lock` thì chỉ đổi mtime khi có
 /// người thật sự sửa — đúng câu hỏi cần trả lời: *sửa mã xong đã cài lại chưa?*
 ///
-/// 📌 Cây mã hỏi ở đâu: **`<hub_home>/rust`**, tức nơi hub ĐANG chạy, không phải
-/// một đường dẫn gõ cứng. Đường cứng `~/Documents/projects/AI/hub/rust` đứng ở
+/// 📌 Cây mã hỏi ở đâu: **`<hub_home>/rust`**, tức nơi huba ĐANG chạy, không phải
+/// một đường dẫn gõ cứng. Đường cứng `~/Documents/projects/AI/huba/rust` đứng ở
 /// đây tới 2026-08-12 — ngày gốc workspace dời sang `~/projects`. Nó không kêu
 /// một tiếng nào, vì mất cây mã thì hàm này trả `None` ⟹ `null` ⟹ tấm bảng sức
 /// khoẻ **thôi cảnh báo daemon cũ**, đúng cái nó sinh ra để nói. Một phép đo tắt
@@ -1026,10 +1026,10 @@ fn stale_against_build(cfg: &Config) -> Value {
     }
 }
 
-/// Cây mã của bản hub ĐANG chạy — bám `hub_home`, không bám `$HOME`.
+/// Cây mã của bản huba ĐANG chạy — bám `hub_home`, không bám `$HOME`.
 ///
 /// Một dòng riêng vì đây đúng là chỗ đã sai: `hub_home` do `HUB_CONFIG` trong
-/// plist quyết, nên nó theo hub đi bất cứ đâu, còn một đường dẫn gõ cứng thì
+/// plist quyết, nên nó theo huba đi bất cứ đâu, còn một đường dẫn gõ cứng thì
 /// chỉ đúng cho tới lần dời thư mục kế tiếp.
 fn source_tree(cfg: &Config) -> PathBuf {
     cfg.hub_home.join("rust")
@@ -1080,7 +1080,7 @@ mod tests {
     /// sau mỗi lượt `cargo test`. Cảnh báo kêu oan là cảnh báo bị tắt.
     #[test]
     fn newest_source_mtime_counts_rust_sources_and_ignores_build_output() {
-        let root = std::env::temp_dir().join(format!("hub-rt-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("huba-rt-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("src/nested")).unwrap();
         std::fs::create_dir_all(root.join("target/release")).unwrap();
@@ -1095,7 +1095,7 @@ mod tests {
         // Rồi ghi hai thứ KHÔNG phải mã nguồn, muộn hơn: một file trong
         // `target/` (sản phẩm build — `cargo test` đụng vào nó mỗi lượt) và một
         // file không phải `.rs`. Mốc không được nhúc nhích.
-        std::fs::write(root.join("target/release/hubd.rs"), "// build output").unwrap();
+        std::fs::write(root.join("target/release/hubad.rs"), "// build output").unwrap();
         std::fs::write(root.join("src/notes.txt"), "// not code").unwrap();
         assert_eq!(
             newest_source_mtime(&root),
@@ -1106,9 +1106,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Cây mã phải đi THEO hub, không neo vào một đường dẫn gõ cứng.
+    /// Cây mã phải đi THEO huba, không neo vào một đường dẫn gõ cứng.
     ///
-    /// Đây là con bug đã xảy ra thật: `~/Documents/projects/AI/hub/rust` nằm
+    /// Đây là con bug đã xảy ra thật: `~/Documents/projects/AI/huba/rust` nằm
     /// trong mã tới 2026-08-12, ngày gốc workspace dời sang `~/projects`. Nó
     /// không làm gãy gì to tát — nó chỉ làm tấm bảng sức khoẻ **thôi trả lời**
     /// câu "sửa mã xong đã cài lại chưa", tức mất đúng thứ duy nhất phát hiện
@@ -1116,12 +1116,12 @@ mod tests {
     #[test]
     fn the_source_tree_follows_hub_home_not_a_hardcoded_path() {
         let cfg = Config {
-            hub_home: PathBuf::from("/tmp/somewhere-else/AI/hub"),
+            hub_home: PathBuf::from("/tmp/somewhere-else/AI/huba"),
             ..Default::default()
         };
         assert_eq!(
             source_tree(&cfg),
-            PathBuf::from("/tmp/somewhere-else/AI/hub/rust")
+            PathBuf::from("/tmp/somewhere-else/AI/huba/rust")
         );
         assert!(
             !source_tree(&cfg).starts_with(crate::config::expand_home(Path::new("~/Documents"))),
@@ -1136,7 +1136,7 @@ mod tests {
     #[test]
     fn a_missing_source_tree_answers_unknown_never_up_to_date() {
         let cfg = Config {
-            hub_home: std::env::temp_dir().join(format!("hub-nosrc-{}", std::process::id())),
+            hub_home: std::env::temp_dir().join(format!("huba-nosrc-{}", std::process::id())),
             ..Default::default()
         };
         assert_eq!(stale_against_build(&cfg), Value::Null);
@@ -1181,7 +1181,7 @@ mod tests {
     /// `None` — tầng trên dịch thành "không rõ", không phải "đã mới".
     #[test]
     fn newest_source_mtime_is_unknown_when_there_is_no_tree() {
-        let missing = std::env::temp_dir().join(format!("hub-rt-missing-{}", std::process::id()));
+        let missing = std::env::temp_dir().join(format!("huba-rt-missing-{}", std::process::id()));
         assert_eq!(newest_source_mtime(&missing), None);
     }
 }

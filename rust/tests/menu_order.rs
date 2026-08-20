@@ -6,7 +6,7 @@
 //! lệnh sát điểm nhau đổi chỗ sau mỗi lượt bấm.
 //!
 //! Con số trong bài kiểm này là con số THẬT, lấy từ `cursors.menu:usage` của
-//! `data/hub.sqlite` sáng 19/08 — không phải số bịa cho vừa lời kết luận.
+//! `data/huba.sqlite` sáng 19/08 — không phải số bịa cho vừa lời kết luận.
 
 /// Bảng điểm thật, chép nguyên từ sổ (điểm đã nhân 1000 như `menu_reorder_if_needed`).
 fn real_scores() -> Vec<(&'static str, &'static str, u64)> {
@@ -39,14 +39,14 @@ fn names(rows: &[(&'static str, &'static str)]) -> Vec<String> {
 /// **cách nhau 3 giây**. Sau khi hãm thì không lần nào được lật.
 #[test]
 fn two_commands_used_back_to_back_stop_trading_places() {
-    let prev: Vec<String> = names(&hub::pipeline::menu_settled_order(&[], &real_scores()));
+    let prev: Vec<String> = names(&huba::pipeline::menu_settled_order(&[], &real_scores()));
     assert_eq!(prev[0], "session", "thứ tự đầu tiên vẫn xếp theo điểm");
 
     // …rồi `/shot` được bấm thêm một lượt và vượt lên về ĐIỂM.
     let mut bumped = real_scores();
     bumped[1].2 = 258_647; // shot > session, hơn 0,4%
     bumped.sort_by_key(|(_, _, s)| std::cmp::Reverse(*s));
-    let after = names(&hub::pipeline::menu_settled_order(&prev, &bumped));
+    let after = names(&huba::pipeline::menu_settled_order(&prev, &bumped));
 
     assert_eq!(
         after, prev,
@@ -59,11 +59,11 @@ fn two_commands_used_back_to_back_stop_trading_places() {
 /// …nhưng hãm KHÔNG phải đóng băng: hơn hẳn thì vẫn phải leo.
 #[test]
 fn a_real_lead_still_moves_up() {
-    let prev: Vec<String> = names(&hub::pipeline::menu_settled_order(&[], &real_scores()));
+    let prev: Vec<String> = names(&huba::pipeline::menu_settled_order(&[], &real_scores()));
     let mut heavy = real_scores();
     heavy[1].2 = 400_000; // shot bỏ xa session (257,6) — hơn 55%
     heavy.sort_by_key(|(_, _, s)| std::cmp::Reverse(*s));
-    let after = names(&hub::pipeline::menu_settled_order(&prev, &heavy));
+    let after = names(&huba::pipeline::menu_settled_order(&prev, &heavy));
     assert_eq!(
         after[0], "shot",
         "hãm thành đóng băng: lệnh dùng nhiều hơn hẳn vẫn không lên được"
@@ -77,7 +77,7 @@ fn a_real_lead_still_moves_up() {
 /// tìm nó ở chỗ cũ là sai, mà chỗ mới thì chưa kịp nhớ.
 #[test]
 fn a_climb_is_one_step_at_a_time() {
-    let prev: Vec<String> = names(&hub::pipeline::menu_settled_order(&[], &real_scores()));
+    let prev: Vec<String> = names(&huba::pipeline::menu_settled_order(&[], &real_scores()));
     let before = prev.iter().position(|n| n == "accounts").expect("có mặt");
 
     let mut woken = real_scores();
@@ -87,7 +87,7 @@ fn a_climb_is_one_step_at_a_time() {
         }
     }
     woken.sort_by_key(|(_, _, s)| std::cmp::Reverse(*s));
-    let after = names(&hub::pipeline::menu_settled_order(&prev, &woken));
+    let after = names(&huba::pipeline::menu_settled_order(&prev, &woken));
     let now = after.iter().position(|n| n == "accounts").expect("có mặt");
 
     assert!(now < before, "điểm lên mà chỗ không lên: {before} → {now}");
@@ -103,8 +103,8 @@ fn a_climb_is_one_step_at_a_time() {
 /// `runin` và `right` trong sổ thật bằng nhau đúng đến từng phần nghìn (28 509).
 #[test]
 fn a_tie_keeps_the_order_it_had() {
-    let prev: Vec<String> = names(&hub::pipeline::menu_settled_order(&[], &real_scores()));
-    let again = names(&hub::pipeline::menu_settled_order(&prev, &real_scores()));
+    let prev: Vec<String> = names(&huba::pipeline::menu_settled_order(&[], &real_scores()));
+    let again = names(&huba::pipeline::menu_settled_order(&prev, &real_scores()));
     assert_eq!(again, prev, "cùng một bảng điểm mà ra hai thứ tự");
     let i = prev.iter().position(|n| n == "runin").unwrap();
     let j = prev.iter().position(|n| n == "right").unwrap();
@@ -114,10 +114,10 @@ fn a_tie_keeps_the_order_it_had() {
 /// Một lệnh MỚI thêm vào bảng không được xáo tung phần còn lại.
 #[test]
 fn a_new_command_lands_without_shuffling_the_rest() {
-    let prev: Vec<String> = names(&hub::pipeline::menu_settled_order(&[], &real_scores()));
+    let prev: Vec<String> = names(&huba::pipeline::menu_settled_order(&[], &real_scores()));
     let mut with_new = real_scores();
     with_new.push(("doctor", "sức khoẻ", 0));
-    let after = names(&hub::pipeline::menu_settled_order(&prev, &with_new));
+    let after = names(&huba::pipeline::menu_settled_order(&prev, &with_new));
     assert_eq!(
         after.last().unwrap(),
         "doctor",
@@ -129,12 +129,12 @@ fn a_new_command_lands_without_shuffling_the_rest() {
 /// Lệnh bị GỠ khỏi bảng thì rơi khỏi menu, không để lại chỗ trống.
 #[test]
 fn a_removed_command_leaves_the_menu() {
-    let prev: Vec<String> = names(&hub::pipeline::menu_settled_order(&[], &real_scores()));
+    let prev: Vec<String> = names(&huba::pipeline::menu_settled_order(&[], &real_scores()));
     let fewer: Vec<_> = real_scores()
         .into_iter()
         .filter(|(n, _, _)| *n != "clean")
         .collect();
-    let after = names(&hub::pipeline::menu_settled_order(&prev, &fewer));
+    let after = names(&huba::pipeline::menu_settled_order(&prev, &fewer));
     assert!(!after.iter().any(|n| n == "clean"), "{after:?}");
     assert_eq!(after.len(), prev.len() - 1);
 }

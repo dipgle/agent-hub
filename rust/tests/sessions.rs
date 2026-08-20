@@ -1,7 +1,7 @@
 //! The read-only view of the Claude CLI sessions running on this machine.
 //! Every case here came from real output on 2026-08-08, not from imagination.
 
-use hub::sessions::{
+use huba::sessions::{
     parse_stream, parse_tail, pending_for_display, preview_risk, transcript_path, transcript_slug,
 };
 use std::collections::HashSet;
@@ -16,7 +16,7 @@ fn no_background() -> HashSet<String> {
 fn cwd_maps_to_the_folder_the_cli_writes_transcripts_into() {
     // Gốc workspace đổi sang `~/projects` ngày 2026-08-12 ⟹ KHOÁ nhật ký đổi
     // theo (`~/.claude/projects/-Users-hanguyen-projects`). Thư mục khoá mới là
-    // symlink trỏ về khoá cũ, nên hai đường cùng ra một kho — nhưng thứ hub tính
+    // symlink trỏ về khoá cũ, nên hai đường cùng ra một kho — nhưng thứ huba tính
     // ra từ `cwd` phải là khoá MỚI, vì đó là cwd thật của mọi phiên từ hôm ấy.
     assert_eq!(
         transcript_slug("/Users/hanguyen/projects"),
@@ -28,8 +28,8 @@ fn cwd_maps_to_the_folder_the_cli_writes_transcripts_into() {
         "-Users-hanguyen-projects"
     );
     assert_eq!(
-        transcript_slug("/Users/hanguyen/projects/AI/hub"),
-        "-Users-hanguyen-projects-AI-hub"
+        transcript_slug("/Users/hanguyen/projects/AI/huba"),
+        "-Users-hanguyen-projects-AI-huba"
     );
     assert_eq!(transcript_slug("/"), "-");
 
@@ -152,9 +152,9 @@ fn the_stream_carries_commands_and_their_output_not_just_talk() {
 
 #[test]
 fn a_secret_in_command_output_is_flagged_but_still_shown() {
-    // 🔴 ĐẢO CHIỀU 2026-08-16 (bản cũ: `…_is_withheld_not_printed`). Hà: *"hub
+    // 🔴 ĐẢO CHIỀU 2026-08-16 (bản cũ: `…_is_withheld_not_printed`). Hà: *"huba
     // là cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì phải
-    // ngồi vào máy để làm vậy thì cần gì hub nữa"*.
+    // ngồi vào máy để làm vậy thì cần gì huba nữa"*.
     //
     // Giữ bài kiểm thay vì xoá, và giữ đúng cái nó canh — chỉ đảo kỳ vọng: đầu
     // ra của lệnh vẫn tới nơi, và cờ `withheld` ở lại làm NHÃN ("dòng này có
@@ -170,7 +170,7 @@ fn a_secret_in_command_output_is_flagged_but_still_shown() {
         e.text
     );
     assert!(
-        !e.text.contains("hub ẩn"),
+        !e.text.contains("huba ẩn"),
         "không còn câu xin lỗi thay cho nội dung: {}",
         e.text
     );
@@ -198,7 +198,7 @@ fn ordinary_development_chatter_stays_visible() {
     // is right for a reply to an outsider — but blanking them here would empty
     // the view the owner opens on his phone.
     for text in [
-        "Đã sửa /Users/hanguyen/projects/AI/hub/rust/src/db.rs:120",
+        "Đã sửa /Users/hanguyen/projects/AI/huba/rust/src/db.rs:120",
         "node RPC 46.250.231.130:41100 trả 403",
         "còn 1 blocker: CI đỏ vì billing",
         "[dùng Bash]",
@@ -212,7 +212,7 @@ fn ordinary_development_chatter_stays_visible() {
 
 #[test]
 fn the_background_id_is_the_first_token_not_the_rest_of_the_line() {
-    use hub::sessions::parse_backgrounded_id;
+    use huba::sessions::parse_backgrounded_id;
 
     // The happy line, as `claude --bg '<task>'` prints it.
     assert_eq!(
@@ -225,13 +225,13 @@ fn the_background_id_is_the_first_token_not_the_rest_of_the_line() {
     // THE ONE THAT COST A REAL RUN. A session that came up with no prompt adds
     // a sentence on the same line; taking the tail stored
     // "6514f454 (idle — send a prompt to start)" as the session id, and every
-    // later verb quietly failed to match it while hub reported success.
+    // later verb quietly failed to match it while huba reported success.
     assert_eq!(
         parse_backgrounded_id("backgrounded · 6514f454 (idle — send a prompt to start)"),
         Some("6514f454")
     );
 
-    // No marker means hub does NOT know what it started — that has to be an
+    // No marker means huba does NOT know what it started — that has to be an
     // error, not a cheerful empty id.
     assert_eq!(parse_backgrounded_id("Starting background service…"), None);
     assert_eq!(parse_backgrounded_id(""), None);
@@ -253,7 +253,7 @@ fn the_background_id_is_the_first_token_not_the_rest_of_the_line() {
 /// name is `claude` on both sides.
 #[test]
 fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
-    use hub::sessions::classify_host;
+    use huba::sessions::classify_host;
 
     let vscode = "/Users/hanguyen/.vscode/extensions/anthropic.claude-code-2.1.220-darwin-arm64/resources/native-binary/claude --output-format stream-json --verbose --input-format stream-json";
     // Editor thắng cả tty: extension có thể chạy kèm tty hay không, không đổi.
@@ -279,7 +279,7 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
     // Dòng terminal thật, chép nguyên từ `ps` trên máy này (tty ttys005).
     assert_eq!(
         classify_host(
-            "claude tiếp /Users/hanguyen/projects/AI/hub",
+            "claude tiếp /Users/hanguyen/projects/AI/huba",
             "interactive",
             "ttys005"
         ),
@@ -306,7 +306,7 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
         "detached"
     );
 
-    // `kind` thắng đường dẫn: phiên hub mở bằng `--bg` là của hub, dù binary
+    // `kind` thắng đường dẫn: phiên huba mở bằng `--bg` là của huba, dù binary
     // nào tình cờ đứng trước trong PATH. Thiếu vế này, một phiên nền mở từ
     // binary của editor sẽ bị xếp loại "editor" và biến mất khỏi đúng màn có
     // thể dừng nó.
@@ -331,7 +331,7 @@ fn a_session_belongs_to_the_editor_or_the_terminal_by_its_path() {
 /// chạy mãi trên màn.
 #[test]
 fn pending_subagents_are_counted_by_id_not_by_name() {
-    use hub::sessions::parse_tail;
+    use huba::sessions::parse_tail;
 
     let started_two = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"a1","name":"Agent","input":{}},{"type":"tool_use","id":"a2","name":"Agent","input":{}}]}}"#;
     let one_came_back = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"a1","content":"xong"}]}}"#;
@@ -360,7 +360,7 @@ fn pending_subagents_are_counted_by_id_not_by_name() {
 
 /// Subagent CHẠY NỀN: `tool_result` về ngay, nên nó KHÔNG phải dấu kết thúc.
 ///
-/// Bug thật, đo 2026-08-10 trên máy này: hai agent đang chạy mà `hub sessions`
+/// Bug thật, đo 2026-08-10 trên máy này: hai agent đang chạy mà `huba sessions`
 /// khai `pending 0`. Lý do là lệnh gọi nền nhận `tool_result` ngay lập tức —
 /// nội dung chỉ là "đã tung agent" — nên phép khớp tool_use↔tool_result tưởng
 /// nó xong. Đau nhất là chính chế độ nền mới là chế độ con số này sinh ra để
@@ -423,7 +423,7 @@ fn a_stop_notice_closes_only_the_call_it_names() {
 /// hẳn việc không có cơ chế nào.
 #[test]
 fn auto_handover_only_fires_when_the_session_is_truly_done() {
-    use hub::pipeline::{auto_handover_why, AutoWhy};
+    use huba::pipeline::{auto_handover_why, AutoWhy};
 
     // đủ đầy · có cửa sổ · không bận · không hỏi · không subagent · đã im đủ lâu
     let go = |pct, busy, asking, subs, idle| {
@@ -463,12 +463,12 @@ fn auto_handover_only_fires_when_the_session_is_truly_done() {
 /// khớp id chính xác, nên dòng ấy vô dụng theo cả hai đường.
 #[test]
 fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
-    use hub::pipeline::{auto_handover_notice, HandoverMove};
+    use huba::pipeline::{auto_handover_notice, HandoverMove};
 
     let new_id = "86fe1666-5e87-4fa9-903a-ea21bfb48208";
     let fork_id = "f0883567-7eae-426b-8643-e56468a7de6e";
     let ok = auto_handover_notice(
-        "[AI/hub]",
+        "[AI/huba]",
         80,
         126,
         &HandoverMove::Opened {
@@ -483,13 +483,13 @@ fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
     // Trên Telegram chữ thường đi vào phiên ĐANG THEO — nên tin phải nói con
     // trỏ đã sang phiên mới, không thì chủ máy gõ việc vào một phiên đã tắt.
     assert!(ok.contains("Đang theo phiên mới"), "{ok}");
-    assert!(ok.contains("[AI/hub]") && ok.contains("80%"), "{ok}");
+    assert!(ok.contains("[AI/huba]") && ok.contains("80%"), "{ok}");
     // Không có gì hỏng thì không bịa ra cảnh báo.
     assert!(!ok.contains("⚠"), "{ok}");
 
     // Cửa sổ cũ chưa đóng được: nói ra, đừng để phát hiện bằng mắt.
     let leftover = auto_handover_notice(
-        "[AI/hub]",
+        "[AI/huba]",
         80,
         126,
         &HandoverMove::Opened {
@@ -541,7 +541,7 @@ fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
 
     // Không mở được cửa sổ nào: trả lại dòng lệnh để chủ máy tự gõ.
     let failed = auto_handover_notice(
-        "[AI/hub]",
+        "[AI/huba]",
         80,
         126,
         &HandoverMove::Failed {
@@ -553,16 +553,16 @@ fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
     assert!(failed.contains("chưa mở được cửa sổ mới"), "{failed}");
 }
 
-/// hub chỉ được tự bấm ĐÚNG hộp tin-thư-mục, không phải hộp nào cũng bấm.
+/// huba chỉ được tự bấm ĐÚNG hộp tin-thư-mục, không phải hộp nào cũng bấm.
 ///
 /// Hà uỷ quyền 2026-08-13 (*"bấm hộ đi, phải kiểm tra được và bấm luôn 1"*) sau
 /// khi xem một cửa sổ đứng im 22 phút. Uỷ quyền ấy hẹp: hộp này không hỏi về
-/// CÔNG VIỆC, nó hỏi *"thư mục này có phải của anh không"* về đúng thư mục hub
+/// CÔNG VIỆC, nó hỏi *"thư mục này có phải của anh không"* về đúng thư mục huba
 /// vừa tự mở cửa sổ vào. Mọi hộp khác vẫn là câu hỏi dành cho chủ máy — bấm hộ
 /// ở đó là trả lời thay, và một cú bấm thì không có nút hoàn tác.
 #[test]
 fn only_the_trust_folder_dialog_may_be_answered_by_hub() {
-    use hub::sessions::trust_dialog_choice;
+    use huba::sessions::trust_dialog_choice;
 
     let trust = vec![
         (1usize, "Yes, I trust this folder".to_string()),
@@ -747,7 +747,7 @@ fn a_malformed_id_sequence_matches_the_javascript_twin() {
 /// Hai thứ ở đây từng làm hỏng một phiên thật, nên chúng được khoá lại bằng
 /// test chứ không bằng lời dặn trong bình luận.
 mod cua_so_moi {
-    use hub::sessions::terminal_command;
+    use huba::sessions::terminal_command;
     use std::path::Path;
 
     /// Đề bài phải đứng TRƯỚC `--disallowedTools`.
@@ -762,7 +762,7 @@ mod cua_so_moi {
         let cmd = terminal_command(
             "claude",
             Path::new("/Users/x/projects"),
-            Some("[hub] dọn nợ"),
+            Some("[huba] dọn nợ"),
         );
         let de_bai = cmd.find("dọn nợ").expect("đề bài phải có trong lệnh");
         let co = cmd.find("--disallowedTools").expect("phải có rào công cụ");
@@ -878,7 +878,8 @@ fn a_btw_answer_is_cut_out_of_the_screen_not_shipped_whole() {
       việc nào đang làm.
 
     ↑/↓ to scroll · c to copy · f to fork · Esc to close";
-    let out = hub::sessions::btw_answer(screen, "Tóm tắt trong 1 câu: phiên này đang làm việc gì?");
+    let out =
+        huba::sessions::btw_answer(screen, "Tóm tắt trong 1 câu: phiên này đang làm việc gì?");
     assert!(
         out.contains("chưa có trao đổi nào"),
         "mất câu trả lời:\n{out}"
@@ -892,7 +893,7 @@ fn a_btw_answer_is_cut_out_of_the_screen_not_shipped_whole() {
 /// chuỗi rỗng là biến "đọc không được" thành "phiên không nói gì".
 #[test]
 fn an_uncuttable_screen_still_returns_something() {
-    let out = hub::sessions::btw_answer("một màn hình lạ hoắc", "câu hỏi không có trên màn");
+    let out = huba::sessions::btw_answer("một màn hình lạ hoắc", "câu hỏi không có trên màn");
     assert_eq!(out, "một màn hình lạ hoắc");
 }
 
@@ -907,17 +908,17 @@ fn an_uncuttable_screen_still_returns_something() {
 fn a_panel_still_writing_is_not_an_answer() {
     let writing = "    /btw Tóm tắt trong 1 câu: phiên này đang làm việc gì?\n      ✳ Answering…\n    Esc to close";
     assert!(
-        !hub::sessions::btw_panel_finished(writing),
+        !huba::sessions::btw_panel_finished(writing),
         "bảng đang viết mà đã coi là xong"
     );
 
     let done = "    /btw Tóm tắt?\n\n      Phiên này chưa làm gì cả.\n\n    ↑/↓ to scroll · c to copy · f to fork · Esc to close";
     assert!(
-        hub::sessions::btw_panel_finished(done),
+        huba::sessions::btw_panel_finished(done),
         "bảng đã xong mà không nhận ra"
     );
     assert!(
-        !hub::sessions::btw_panel_finished("❯ \n  ⏵⏵ auto mode on"),
+        !huba::sessions::btw_panel_finished("❯ \n  ⏵⏵ auto mode on"),
         "màn thường không phải bảng"
     );
 }
@@ -930,7 +931,8 @@ fn a_panel_still_writing_is_not_an_answer() {
 #[test]
 fn a_wrapped_question_still_gets_cut_off_the_answer() {
     let screen = "    /btw Tóm tắt trong 1 câu: phiên này\n    đang làm việc gì?\n\n      Chưa có việc nào đang chạy.\n\n    ↑/↓ to scroll · Esc to close";
-    let out = hub::sessions::btw_answer(screen, "Tóm tắt trong 1 câu: phiên này đang làm việc gì?");
+    let out =
+        huba::sessions::btw_answer(screen, "Tóm tắt trong 1 câu: phiên này đang làm việc gì?");
     assert!(out.contains("Chưa có việc nào"), "mất câu trả lời:\n{out}");
     assert!(!out.contains("/btw"), "còn dòng lệnh vừa gõ:\n{out}");
 }
@@ -946,11 +948,11 @@ fn a_wrapped_question_still_gets_cut_off_the_answer() {
 fn a_bare_workspace_root_does_not_silence_the_whole_scan() {
     let root = "/Users/x/projects";
     let tail = r#"{"cwd":"/Users/x/projects","type":"user"}
-{"path":"/Users/x/projects/AI/hub/PLAN.md"}
-{"path":"/Users/x/projects/AI/hub/UC.md"}"#;
+{"path":"/Users/x/projects/AI/huba/PLAN.md"}
+{"path":"/Users/x/projects/AI/huba/UC.md"}"#;
     assert_eq!(
-        hub::sessions::folder_from_tail(tail, root).as_deref(),
-        Some("AI/hub")
+        huba::sessions::folder_from_tail(tail, root).as_deref(),
+        Some("AI/huba")
     );
 }
 
@@ -960,7 +962,7 @@ fn the_drawer_named_ai_is_never_the_project() {
     let root = "/Users/x/projects";
     let tail = "a /Users/x/projects/AI/sdvi/x.rs b /Users/x/projects/AI/sdvi/y.rs";
     assert_eq!(
-        hub::sessions::folder_from_tail(tail, root).as_deref(),
+        huba::sessions::folder_from_tail(tail, root).as_deref(),
         Some("AI/sdvi")
     );
 }
@@ -970,22 +972,22 @@ fn the_drawer_named_ai_is_never_the_project() {
 fn one_mention_is_not_evidence() {
     let root = "/Users/x/projects";
     let tail = "chỉ nhắc một lần /Users/x/projects/dwork/a.ts";
-    assert_eq!(hub::sessions::folder_from_tail(tail, root), None);
+    assert_eq!(huba::sessions::folder_from_tail(tail, root), None);
 }
 
 /// Phiên dừng lại HỎI thì đọc ra được câu hỏi + từng lựa chọn — từ NHẬT KÝ.
 ///
 /// 🔴 Hà 2026-08-12: *"có 1 phiên đang đưa lựa chọn nhưng không nhận được trên
-/// tele"*. Trước đó hub hỏi sai nguồn: nó đọc MÀN rồi để `keys::parse_choices`
+/// tele"*. Trước đó huba hỏi sai nguồn: nó đọc MÀN rồi để `keys::parse_choices`
 /// nhận dạng, mà hàm ấy đòi các mục liền dòng nhau (luật 08-11, sinh ra để khỏi
 /// đọc nhầm một đoạn văn có đánh số) — còn bảng `AskUserQuestion` thì mỗi lựa
 /// chọn có một dòng MÔ TẢ bên dưới. Hai luật đúng gặp nhau thành một phiên kẹt
 /// mà điện thoại không hay biết. Nhật ký thì có cấu trúc, và có cả với phiên
-/// hub không đọc được màn.
+/// huba không đọc được màn.
 #[test]
 fn a_waiting_question_is_read_with_all_its_options() {
     let tail = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"Nửa ngày","question":"Đơn vắng có khai được NỬA NGÀY không?","options":[{"label":"Thêm ô nửa ngày","description":"…"},{"label":"Luôn trọn ngày","description":"…"}]}]}}]}}"#;
-    let a = hub::sessions::pending_question(tail).expect("phải thấy câu hỏi");
+    let a = huba::sessions::pending_question(tail).expect("phải thấy câu hỏi");
     assert_eq!(a.header, "Nửa ngày");
     assert!(a.question.contains("NỬA NGÀY"));
     assert_eq!(a.options, vec!["Thêm ô nửa ngày", "Luôn trọn ngày"]);
@@ -996,12 +998,12 @@ fn a_waiting_question_is_read_with_all_its_options() {
 fn a_question_that_was_answered_is_no_longer_pending() {
     let ask = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"header":"h","question":"q","options":[{"label":"a"},{"label":"b"}]}]}}]}}"#;
     let answer = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"The user answered"}]}}"#;
-    assert!(hub::sessions::pending_question(&format!("{ask}\n{answer}")).is_none());
+    assert!(huba::sessions::pending_question(&format!("{ask}\n{answer}")).is_none());
     // Hỏi tiếp sau khi đã trả lời câu trước ⟹ câu SAU mới là câu đang chờ.
     let ask2 = ask
         .replace("toolu_1", "toolu_2")
         .replace("\"question\":\"q\"", "\"question\":\"q2\"");
-    let a = hub::sessions::pending_question(&format!("{ask}\n{answer}\n{ask2}"))
+    let a = huba::sessions::pending_question(&format!("{ask}\n{answer}\n{ask2}"))
         .expect("câu thứ hai còn treo");
     assert_eq!(a.question, "q2");
 }
@@ -1012,11 +1014,11 @@ fn a_question_that_was_answered_is_no_longer_pending() {
 /// Cổng cũ thay câu hỏi bằng *"(màn có dấu hiệu bí mật…)"* và **xoá hết lựa
 /// chọn**. Đó là chỗ nó cắn đau nhất: không còn lựa chọn thì `/pick` chẳng có
 /// gì để bấm, nên phiên đứng kẹt tới khi chủ máy về ngồi trước máy — đúng cái
-/// việc hub sinh ra để khỏi phải làm (Hà 16/08).
+/// việc huba sinh ra để khỏi phải làm (Hà 16/08).
 #[test]
 fn a_question_that_smells_of_secrets_still_reaches_the_phone() {
     let tail = r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_9","name":"AskUserQuestion","input":{"questions":[{"header":"h","question":"mật khẩu tfl5 là Abcd1234! đúng không?","options":[{"label":"đúng"},{"label":"sai"}]}]}}]}}"#;
-    let a = hub::sessions::pending_question(tail).expect("vẫn phải báo là đang kẹt");
+    let a = huba::sessions::pending_question(tail).expect("vẫn phải báo là đang kẹt");
     assert_eq!(a.options.len(), 2, "lựa chọn phải bấm được từ xa: {a:?}");
     assert!(
         a.question.contains("Abcd1234"),
@@ -1047,7 +1049,7 @@ fn a_turn_that_only_calls_a_tool_is_not_the_last_word() {
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"AskUserQuestion","input":{}}]}}"#,
     );
     assert_eq!(
-        hub::sessions::last_prose(tail, 2000).as_deref(),
+        huba::sessions::last_prose(tail, 2000).as_deref(),
         Some("Đo xong: node v24.4.0, cổng 8090 đang bận."),
     );
 }
@@ -1065,7 +1067,7 @@ fn what_the_owner_typed_is_not_read_back_to_him() {
         r#"{"type":"user","message":{"role":"user","content":"[Request interrupted by user for tool use]"}}"#,
     );
     assert_eq!(
-        hub::sessions::last_prose(tail, 2000).as_deref(),
+        huba::sessions::last_prose(tail, 2000).as_deref(),
         Some("Đã cài xong, daemon chạy lại rồi."),
     );
 }
@@ -1075,7 +1077,7 @@ fn what_the_owner_typed_is_not_read_back_to_him() {
 fn a_turn_that_speaks_while_calling_a_tool_keeps_the_speech() {
     let tail = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Chạy nốt bộ test đây."},{"type":"tool_use","id":"t2","name":"Bash","input":{}}]}}"#;
     assert_eq!(
-        hub::sessions::last_prose(tail, 2000).as_deref(),
+        huba::sessions::last_prose(tail, 2000).as_deref(),
         Some("Chạy nốt bộ test đây."),
     );
 }
@@ -1096,7 +1098,7 @@ fn the_last_word_goes_out_whole_and_is_never_an_older_one() {
         "\n",
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Mật khẩu là Abcd!2026 nhé"}]}}"#,
     );
-    let said = hub::sessions::last_prose(tail, 2000).expect("phải có lời cuối");
+    let said = huba::sessions::last_prose(tail, 2000).expect("phải có lời cuối");
     assert!(said.contains("Abcd!2026"), "chữ đi nguyên vẹn: {said}");
     assert!(
         !said.contains("và nó CŨ"),
@@ -1106,12 +1108,12 @@ fn the_last_word_goes_out_whole_and_is_never_an_older_one() {
 
 /// Không có lượt nào của phiên thì trả None, để chỗ gọi rơi về bản xem trước.
 ///
-/// Đúng hình dạng của 40 phiên dò `/usage` do chính hub đẻ ra: cả nhật ký chỉ
+/// Đúng hình dạng của 40 phiên dò `/usage` do chính huba đẻ ra: cả nhật ký chỉ
 /// có một bản ghi `user` mang `<command-name>/usage</command-name>`.
 #[test]
 fn a_transcript_with_no_assistant_turn_says_nothing() {
     let tail = r#"{"type":"user","message":{"role":"user","content":"<command-name>/usage</command-name>"}}"#;
-    assert_eq!(hub::sessions::last_prose(tail, 2000), None);
+    assert_eq!(huba::sessions::last_prose(tail, 2000), None);
 }
 
 /// Cả CHUỖI — nhật ký → lời cuối → thông tin chốt — phải giữ được câu chốt.
@@ -1140,8 +1142,8 @@ fn the_chain_from_transcript_to_message_keeps_the_closing_sentence() {
     })
     .to_string();
 
-    let said = hub::sessions::last_prose(&tail, hub::sessions::SAY_MAX).expect("phải đọc được");
-    let points = hub::watch::key_points(&said, 700);
+    let said = huba::sessions::last_prose(&tail, huba::sessions::SAY_MAX).expect("phải đọc được");
+    let points = huba::watch::key_points(&said, 700);
     assert!(
         points.contains("Nói \"dọn đi\" là mình chạy phần an toàn."),
         "câu chốt chết ở giữa đường:\n{points}"
@@ -1157,7 +1159,7 @@ fn the_chain_from_transcript_to_message_keeps_the_closing_sentence() {
 //   12:28:08  cửa sổ `ttys002` mở (login-zsh pid 39536)
 //   …         `projects-d8` (69a38c64) sống trong cửa sổ ấy
 //   16:41:16  Hà thoát CLI rồi gõ `claude` LẠI ngay trong cửa sổ đó (pid 43422)
-//   16:42:33  hub nhận ra phiên cũ đi → hỏi "tab nào mang ttys002 không?" → CÒN
+//   16:42:33  huba nhận ra phiên cũ đi → hỏi "tab nào mang ttys002 không?" → CÒN
 //             → nói "cửa sổ terminal còn mở"
 //   16:42:33  …đúng vòng ấy, sổ ghi phiên MỚI (e27806c2) cũng ở `ttys002`
 //
@@ -1165,8 +1167,8 @@ fn the_chain_from_transcript_to_message_keeps_the_closing_sentence() {
 // không" trả lời được câu "có cửa sổ", không trả lời được câu "cửa sổ CỦA AI".
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn row_at(id: &str, name: &str, tty: &str) -> hub::sessions::LiveSession {
-    hub::sessions::LiveSession {
+fn row_at(id: &str, name: &str, tty: &str) -> huba::sessions::LiveSession {
+    huba::sessions::LiveSession {
         session_id: id.to_string(),
         name: name.to_string(),
         tty: tty.to_string(),
@@ -1178,7 +1180,7 @@ fn row_at(id: &str, name: &str, tty: &str) -> hub::sessions::LiveSession {
 #[test]
 fn a_window_reused_by_the_next_session_is_not_a_window_left_open() {
     let live = vec![row_at("e27806c2", "projects-7c", "ttys002")];
-    let taken = hub::sessions::window_taken_over("69a38c64", "ttys002", &live);
+    let taken = huba::sessions::window_taken_over("69a38c64", "ttys002", &live);
     assert_eq!(
         taken.map(|s| s.name.as_str()),
         Some("projects-7c"),
@@ -1190,7 +1192,7 @@ fn a_window_reused_by_the_next_session_is_not_a_window_left_open() {
 #[test]
 fn an_empty_window_is_not_reported_as_taken_over() {
     let live = vec![row_at("khac", "projects-bb", "ttys001")];
-    assert!(hub::sessions::window_taken_over("69a38c64", "ttys002", &live).is_none());
+    assert!(huba::sessions::window_taken_over("69a38c64", "ttys002", &live).is_none());
 }
 
 /// Chính nó không tính là "phiên khác" — hàng của phiên vừa tắt có thể còn nằm
@@ -1198,26 +1200,26 @@ fn an_empty_window_is_not_reported_as_taken_over() {
 #[test]
 fn a_session_does_not_take_over_its_own_window() {
     let live = vec![row_at("69a38c64", "projects-d8", "ttys002")];
-    assert!(hub::sessions::window_taken_over("69a38c64", "ttys002", &live).is_none());
+    assert!(huba::sessions::window_taken_over("69a38c64", "ttys002", &live).is_none());
 }
 
 /// Phiên nền không gắn cửa sổ nào: tty rỗng không được khớp với tty rỗng khác.
 #[test]
 fn sessions_without_a_tty_never_match_each_other() {
     let live = vec![row_at("nen-khac", "projects-zz", "")];
-    assert!(hub::sessions::window_taken_over("nen-nay", "", &live).is_none());
+    assert!(huba::sessions::window_taken_over("nen-nay", "", &live).is_none());
 }
 
 /// `??` KHÔNG phải một cửa sổ.
 ///
-/// 🔴 Đo 2026-08-12 22:59 trên đúng cái tin Hà đọc: `⏹ hub-67 đã tắt — cửa sổ
-/// ấy nay đang chạy phiên hub-ec.` Cả hai là phiên `claude -p "/usage"` của
-/// chính hub, **không phiên nào có cửa sổ** — `ps` in `??` khi không có tty điều
+/// 🔴 Đo 2026-08-12 22:59 trên đúng cái tin Hà đọc: `⏹ huba-67 đã tắt — cửa sổ
+/// ấy nay đang chạy phiên huba-ec.` Cả hai là phiên `claude -p "/usage"` của
+/// chính huba, **không phiên nào có cửa sổ** — `ps` in `??` khi không có tty điều
 /// khiển. `??` không rỗng nên cửa `tty.is_empty()` cho qua, rồi phép so "cùng
-/// tty" khớp `??` với `??`: hub tuyên bố một cửa sổ không tồn tại đã bị chiếm.
+/// tty" khớp `??` với `??`: huba tuyên bố một cửa sổ không tồn tại đã bị chiếm.
 #[test]
 fn a_process_without_a_terminal_has_no_window_to_be_taken_over() {
-    let ghost = |id: &str, tty: &str| hub::sessions::LiveSession {
+    let ghost = |id: &str, tty: &str| huba::sessions::LiveSession {
         session_id: id.to_string(),
         name: id.to_string(),
         tty: tty.to_string(),
@@ -1227,14 +1229,14 @@ fn a_process_without_a_terminal_has_no_window_to_be_taken_over() {
     let live = vec![ghost("heir", "??")];
     for no_window in ["??", "-", ""] {
         assert!(
-            hub::sessions::window_taken_over("dead", no_window, &live).is_none(),
+            huba::sessions::window_taken_over("dead", no_window, &live).is_none(),
             "đọc {no_window:?} thành một cửa sổ có thật"
         );
     }
     // Còn tty THẬT thì vẫn phải nhận ra — luật này không được siết lan.
     let live = vec![ghost("heir", "ttys002")];
     assert_eq!(
-        hub::sessions::window_taken_over("dead", "ttys002", &live).map(|s| s.session_id.as_str()),
+        huba::sessions::window_taken_over("dead", "ttys002", &live).map(|s| s.session_id.as_str()),
         Some("heir")
     );
 }
@@ -1250,36 +1252,36 @@ fn a_process_without_a_terminal_has_no_window_to_be_taken_over() {
 /// bản giả bằng chuỗi sẽ không bao giờ phân biệt được ngăn kéo với dự án.
 #[test]
 fn a_drawer_is_opened_but_a_project_is_not_dug_into() {
-    let root = std::env::temp_dir().join(format!("hub-drawer-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("huba-drawer-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     // `AI/tcc` = ngăn kéo (không marker) · `AI/tcc/amm` = dự án (.git)
     std::fs::create_dir_all(root.join("AI/tcc/amm/.git")).unwrap();
-    // `AI/hub` = dự án (CLAUDE.md) và bên trong có `rust/` mang Cargo.toml —
+    // `AI/huba` = dự án (CLAUDE.md) và bên trong có `rust/` mang Cargo.toml —
     // đúng cái bẫy: nếu luật chỉ hỏi "có marker không" mà không dừng đúng lúc
-    // thì phiên làm hub sẽ bị khai là `AI/hub/rust`.
-    std::fs::create_dir_all(root.join("AI/hub/rust")).unwrap();
-    std::fs::write(root.join("AI/hub/CLAUDE.md"), "x").unwrap();
-    std::fs::write(root.join("AI/hub/rust/Cargo.toml"), "[package]").unwrap();
+    // thì phiên làm huba sẽ bị khai là `AI/huba/rust`.
+    std::fs::create_dir_all(root.join("AI/huba/rust")).unwrap();
+    std::fs::write(root.join("AI/huba/CLAUDE.md"), "x").unwrap();
+    std::fs::write(root.join("AI/huba/rust/Cargo.toml"), "[package]").unwrap();
     let r = root.display().to_string();
 
     let tail = format!("sửa {r}/AI/tcc/amm/src/a.rs rồi {r}/AI/tcc/amm/src/b.rs");
     assert_eq!(
-        hub::sessions::folder_from_tail(&tail, &r).as_deref(),
+        huba::sessions::folder_from_tail(&tail, &r).as_deref(),
         Some("AI/tcc/amm"),
         "ngăn kéo không mở ra"
     );
 
-    let tail = format!("đọc {r}/AI/hub/rust/src/x.rs và {r}/AI/hub/rust/src/y.rs");
+    let tail = format!("đọc {r}/AI/huba/rust/src/x.rs và {r}/AI/huba/rust/src/y.rs");
     assert_eq!(
-        hub::sessions::folder_from_tail(&tail, &r).as_deref(),
-        Some("AI/hub"),
+        huba::sessions::folder_from_tail(&tail, &r).as_deref(),
+        Some("AI/huba"),
         "đào sâu vào bên trong một dự án"
     );
 
     // Nhắc đúng MỘT lần thì không đủ để mở ngăn kéo — cùng ngưỡng ≥2 với nhãn.
     let tail = format!("{r}/AI/tcc/amm/x.rs và {r}/AI/tcc/beta3/y.rs");
     assert_eq!(
-        hub::sessions::folder_from_tail(&tail, &r).as_deref(),
+        huba::sessions::folder_from_tail(&tail, &r).as_deref(),
         Some("AI/tcc"),
         "một lần nhắc mỗi bên mà vẫn chọn bừa một bên"
     );
@@ -1288,13 +1290,13 @@ fn a_drawer_is_opened_but_a_project_is_not_dug_into() {
 }
 
 /// Không kiểm được thì GIỮ NGUYÊN nhãn: thư mục không có trên máy này (sổ cũ,
-/// máy khác) thì "ngăn kéo hay dự án" là câu hub không trả lời được — và đoán
+/// máy khác) thì "ngăn kéo hay dự án" là câu huba không trả lời được — và đoán
 /// sâu thêm một bậc là đoán.
 #[test]
 fn an_unknown_folder_keeps_the_shallow_label() {
     let tail = "/khong/co/that/AI/tcc/amm/a.rs và /khong/co/that/AI/tcc/amm/b.rs";
     assert_eq!(
-        hub::sessions::folder_from_tail(tail, "/khong/co/that").as_deref(),
+        huba::sessions::folder_from_tail(tail, "/khong/co/that").as_deref(),
         Some("AI/tcc")
     );
 }
@@ -1313,10 +1315,10 @@ fn an_unknown_folder_keeps_the_shallow_label() {
 fn a_remembered_window_must_still_belong_to_that_process() {
     let book = |pid: i64, tty: &str, name: &str| {
         format!(
-            r#"{{"sess-1":{{"s":"idle","y":"{tty}","k":"interactive","p":"","f":1786500000,"h":false,"n":"{name}","d":"AI/hub","a":"acc1","c":"/x","i":{pid},"o":"terminal"}}}}"#
+            r#"{{"sess-1":{{"s":"idle","y":"{tty}","k":"interactive","p":"","f":1786500000,"h":false,"n":"{name}","d":"AI/huba","a":"acc1","c":"/x","i":{pid},"o":"terminal"}}}}"#
         )
     };
-    let f = hub::sessions::window_target_from_book;
+    let f = huba::sessions::window_target_from_book;
 
     // Sổ cũ chưa có pid ⟹ không đủ để gõ, rơi về đường ảnh chụp.
     assert!(f(&book(0, "ttys002", "projects-fb"), "sess-1").is_none());
@@ -1337,7 +1339,7 @@ fn a_remembered_window_must_still_belong_to_that_process() {
         .output()
         .expect("ps");
     let tty = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if hub::sessions::is_real_tty(&tty) {
+    if huba::sessions::is_real_tty(&tty) {
         let got = f(&book(me, &tty, "projects-fb"), "sess-1").expect("mất cửa sổ đang sống");
         assert_eq!(got.name, "projects-fb");
         assert_eq!(got.tty, tty);
@@ -1348,14 +1350,14 @@ fn a_remembered_window_must_still_belong_to_that_process() {
 
 /// Tên phiên phải đọc ra được đang làm dự án nào — và CHỈ thế thôi.
 ///
-/// 🔴 Hà 2026-08-13: *"điều chỉnh lại các chỗ `[hub] project-06` = `[ai/hub]`
+/// 🔴 Hà 2026-08-13: *"điều chỉnh lại các chỗ `[huba] project-06` = `[ai/huba]`
 /// là được, cho dễ nhận biết"* · *"cần gì đoạn text project-xx làm gì"*. Đúng:
 /// `claude` đặt tên theo thư mục MỞ phiên, mà cả máy này mở ở gốc workspace nên
 /// mọi phiên đều `projects-xx` — một cái tên không phân biệt được gì, chiếm chỗ
 /// của thứ phân biệt được.
 #[test]
 fn a_session_name_says_which_project_it_is_working_on() {
-    let d = hub::sessions::display_name;
+    let d = huba::sessions::display_name;
     assert_eq!(d("projects-fb", "AI/tcc/amm"), "[AI/tcc/amm]");
     assert_eq!(d("projects-be", "AI/tfl5"), "[AI/tfl5]");
     assert_eq!(d("hanguyen-41", "dwork"), "[dwork]");
@@ -1376,7 +1378,7 @@ fn a_session_name_says_which_project_it_is_working_on() {
 /// ở phiên terminal nó trễ hẳn một lượt.
 #[test]
 fn a_transcript_being_written_beats_a_stale_idle_flag() {
-    let w = hub::sessions::is_working;
+    let w = huba::sessions::is_working;
     // Ca thật đo được: CLI nói idle, nhật ký vừa ghi 1 giây trước.
     assert!(
         w(Some("idle"), 0, Some(1)),
@@ -1397,7 +1399,7 @@ fn a_transcript_being_written_beats_a_stale_idle_flag() {
 
 /// "Gặp lỗi API" khác hẳn "nhắc tới lỗi API".
 ///
-/// 🔴 Đo 2026-08-13, lượt thật đầu tiên của cảnh báo lỗi: hub bắn `🔴 [AI/hub]
+/// 🔴 Đo 2026-08-13, lượt thật đầu tiên của cảnh báo lỗi: huba bắn `🔴 [AI/huba]
 /// đang dừng vì LỖI:` kèm **4 KB JSON** — bản ghi khớp chính là báo cáo của tôi,
 /// một tin NÓI VỀ lỗi API. Bản đầu quét chữ trên từng dòng thô của một tệp JSON.
 ///
@@ -1405,7 +1407,7 @@ fn a_transcript_being_written_beats_a_stale_idle_flag() {
 /// `isApiErrorMessage: true`; ba ca dương tính giả đều là tin thường.
 #[test]
 fn talking_about_an_api_error_is_not_having_one() {
-    let e = hub::sessions::transcript_error;
+    let e = huba::sessions::transcript_error;
     let real = r#"{"type":"assistant","isApiErrorMessage":true,"message":{"role":"assistant","content":"Credit balance is too low"}}"#;
     assert_eq!(e(real).as_deref(), Some("Credit balance is too low"));
 
@@ -1425,10 +1427,10 @@ fn talking_about_an_api_error_is_not_having_one() {
     assert_eq!(e("không phải json"), None);
 }
 
-/// Nhãn không được mang tên NGĂN KÉO — `AI/hub` phải đọc là `[hub]`.
+/// Nhãn không được mang tên NGĂN KÉO — `AI/huba` phải đọc là `[huba]`.
 ///
-/// 🔴 Hà 2026-08-13, đọc hai tin liền nhau `[AI/mailler]` và `[AI/hub]`: *"sao
-/// lại bị như này, hub làm việc đâu liên quan tới ai"*. `AI/` đứng trước gần
+/// 🔴 Hà 2026-08-13, đọc hai tin liền nhau `[AI/mailler]` và `[AI/huba]`: *"sao
+/// lại bị như này, huba làm việc đâu liên quan tới ai"*. `AI/` đứng trước gần
 /// như mọi dự án trên máy, nên nó phân biệt được đúng số không.
 ///
 /// Bỏ ĐÚNG MỘT bậc: Hà đã bác việc rút gọn quá tay ngày 08-12 (*"sao phiên fb
@@ -1436,21 +1438,21 @@ fn talking_about_an_api_error_is_not_having_one() {
 /// phải ở lại — chỉ vài dự án nằm trong nó, tức nó CÓ phân biệt.
 #[test]
 fn a_filing_drawer_is_not_part_of_the_name() {
-    use hub::sessions::{label_sessions, LiveSession};
+    use huba::sessions::{label_sessions, LiveSession};
 
     // Dựng đúng hình dạng đã đo trên máy: `AI` và `AI/tcc` trống trơn, còn
-    // `AI/hub` và `AI/tcc/amm` mang dấu hiệu dự án.
+    // `AI/huba` và `AI/tcc/amm` mang dấu hiệu dự án.
     let root = std::env::temp_dir().join(format!(
-        "hub-drawer-{}",
+        "huba-drawer-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0)
     ));
-    std::fs::create_dir_all(root.join("AI/hub")).unwrap();
+    std::fs::create_dir_all(root.join("AI/huba")).unwrap();
     std::fs::create_dir_all(root.join("AI/tcc/amm")).unwrap();
     std::fs::create_dir_all(root.join("dwork")).unwrap();
-    std::fs::write(root.join("AI/hub/CLAUDE.md"), "x").unwrap();
+    std::fs::write(root.join("AI/huba/CLAUDE.md"), "x").unwrap();
     std::fs::write(root.join("AI/tcc/amm/Cargo.toml"), "x").unwrap();
     std::fs::write(root.join("dwork/CLAUDE.md"), "x").unwrap();
 
@@ -1461,7 +1463,7 @@ fn a_filing_drawer_is_not_part_of_the_name() {
         ..Default::default()
     };
     let mut rows = vec![
-        row("11111111-0000-0000-0000-000000000000", "AI/hub"),
+        row("11111111-0000-0000-0000-000000000000", "AI/huba"),
         row("22222222-0000-0000-0000-000000000000", "AI/tcc/amm"),
         row("33333333-0000-0000-0000-000000000000", "dwork"),
         // Ngăn kéo không kiểm được (không có thư mục ấy) thì GIỮ NGUYÊN —
@@ -1470,7 +1472,7 @@ fn a_filing_drawer_is_not_part_of_the_name() {
     ];
     label_sessions(&mut rows, &root);
 
-    assert_eq!(rows[0].label, "[hub]", "ngăn kéo AI/ vẫn bám vào nhãn");
+    assert_eq!(rows[0].label, "[huba]", "ngăn kéo AI/ vẫn bám vào nhãn");
     assert_eq!(
         rows[1].label, "[tcc/amm]",
         "rút gọn quá tay, mất chỗ đứng của amm"
@@ -1485,9 +1487,9 @@ fn a_filing_drawer_is_not_part_of_the_name() {
     );
 
     // Và `folder` KHÔNG bị đụng: nó là một mẩu đường dẫn thật, `clean_inbox`
-    // ghép nó vào gốc workspace để tìm hòm thư cũ (`AI/hub/.inbox` có thật
+    // ghép nó vào gốc workspace để tìm hòm thư cũ (`AI/huba/.inbox` có thật
     // trên máy lúc sửa).
-    assert_eq!(rows[0].folder, "AI/hub", "nhãn ăn vào đường dẫn");
+    assert_eq!(rows[0].folder, "AI/huba", "nhãn ăn vào đường dẫn");
 
     std::fs::remove_dir_all(&root).ok();
 }
@@ -1499,7 +1501,7 @@ fn a_filing_drawer_is_not_part_of_the_name() {
 /// đo: trong danh sách tiến trình của tab, bỏ shell đi thì còn lại gì.
 #[test]
 fn a_tab_knows_whether_a_cli_is_running_in_it() {
-    use hub::keys::Tab;
+    use huba::keys::Tab;
 
     let tab = |procs: &[&str]| Tab {
         tty: "ttys004".to_string(),
@@ -1557,7 +1559,7 @@ fn a_denied_command_becomes_a_button_verbatim() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"Permission to use Bash with command git log has been denied."}]}}"#,
     );
     assert_eq!(deploy.len(), 81, "dòng chuẩn của ca này");
-    let got = hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(tail, 4));
+    let got = huba::sessions::lines_of(&huba::sessions::commands_in_last_turn(tail, 4));
     assert!(got.iter().any(|c| c == deploy), "{got:?}");
     assert!(
         got.iter()
@@ -1581,9 +1583,9 @@ fn a_command_that_merely_failed_is_not_handed_to_the_owner() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"error: 2 tests failed"}]}}"#,
     );
     assert!(
-        hub::sessions::commands_in_last_turn(tail, 4).is_empty(),
+        huba::sessions::commands_in_last_turn(tail, 4).is_empty(),
         "{:?}",
-        hub::sessions::commands_in_last_turn(tail, 4)
+        huba::sessions::commands_in_last_turn(tail, 4)
     );
 }
 
@@ -1608,7 +1610,7 @@ fn only_the_turn_since_the_owner_last_spoke_counts() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"Permission to use Bash with command bash ./deploy-moi.sh has been denied."}]}}"#,
     );
     assert_eq!(
-        hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(tail, 4)),
+        huba::sessions::lines_of(&huba::sessions::commands_in_last_turn(tail, 4)),
         vec!["bash ./deploy-moi.sh ban-0815".to_string()]
     );
 }
@@ -1617,19 +1619,19 @@ fn only_the_turn_since_the_owner_last_spoke_counts() {
 ///
 /// Bài kiểm này trước đây khoá đúng cái ngược lại (*"cửa PHÁ vẫn gác"*). Hà gỡ
 /// nó bằng một câu: *"tôi ở tele là phải gọi lệnh thao tác như ngồi máy thì
-/// chặn khác gì chặt tay, cần kênh tele để làm gì?"* · *"đã qua hub thì đừng có
+/// chặn khác gì chặt tay, cần kênh tele để làm gì?"* · *"đã qua huba thì đừng có
 /// chặn gì cả, các chỗ chặn bỏ hết cho tôi"*.
 ///
 /// Giữ bài kiểm chứ không xoá, và đảo nó: một cổng đã gỡ mà không ai canh thì
 /// lượt sau có người "vá lại cho an toàn" — đúng thứ vừa mất nửa ngày.
 ///
-/// Nhánh bị-từ-chối là nơi lệnh phá xuất hiện NHIỀU nhất (phiên hub mở chạy sau
+/// Nhánh bị-từ-chối là nơi lệnh phá xuất hiện NHIỀU nhất (phiên huba mở chạy sau
 /// `DENIED_TOOLS`, nên `rm` bị chặn là chuyện thường), nên nó cũng là chỗ chủ
-/// máy CẦN cái nút nhất: chính hub vừa nói "tôi không chạy được cái này".
+/// máy CẦN cái nút nhất: chính huba vừa nói "tôi không chạy được cái này".
 #[test]
 fn a_destructive_denied_command_now_gets_a_button() {
     for cmd in [
-        "rm -rf /Users/hanguyen/projects/hub/rust/target",
+        "rm -rf /Users/hanguyen/projects/huba/rust/target",
         "git reset --hard origin/main",
     ] {
         let tail = format!(
@@ -1643,7 +1645,7 @@ fn a_destructive_denied_command_now_gets_a_button() {
             cmd = cmd
         );
         assert_eq!(
-            hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(&tail, 4)),
+            huba::sessions::lines_of(&huba::sessions::commands_in_last_turn(&tail, 4)),
             vec![cmd.to_string()],
             "lệnh phá huỷ phải CÓ nút — cổng cũ đã gỡ, đừng dựng lại"
         );
@@ -1668,7 +1670,7 @@ fn a_denied_command_carrying_a_secret_now_gets_a_button() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command curl has been denied."}]}}"#,
     );
     assert_eq!(
-        hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(tail, 4)),
+        huba::sessions::lines_of(&huba::sessions::commands_in_last_turn(tail, 4)),
         vec![
             "curl -H \"Authorization: Bearer abc123def456\" https://example.test/v1/me".to_string()
         ],
@@ -1691,9 +1693,9 @@ fn a_multiline_denied_block_is_not_a_button() {
         r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command python3 has been denied."}]}}"#,
     );
     assert!(
-        hub::sessions::commands_in_last_turn(tail, 4).is_empty(),
+        huba::sessions::commands_in_last_turn(tail, 4).is_empty(),
         "{:?}",
-        hub::sessions::commands_in_last_turn(tail, 4)
+        huba::sessions::commands_in_last_turn(tail, 4)
     );
 }
 
@@ -1711,7 +1713,7 @@ fn what_the_session_wrote_for_the_owner_comes_out_whole() {
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Bản vá chưa lên prod. Ba commit đang chờ ở local.\n\ngit -C /Users/hanguyen/projects/AI/tfl5 push origin main\n\nbash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814\n"}]}}"#,
     );
     assert_eq!(
-        hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(tail, 4)),
+        huba::sessions::lines_of(&huba::sessions::commands_in_last_turn(tail, 4)),
         vec![
             "git -C /Users/hanguyen/projects/AI/tfl5 push origin main".to_string(),
             "bash /Users/hanguyen/projects/AI/tfl5/scripts/deploy.sh static-cache-refresh-0814"
@@ -1761,7 +1763,7 @@ fn a_destructive_clause_after_a_separator_now_gets_a_button() {
             cmd = cmd
         );
         assert_eq!(
-            hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(&tail, 4)),
+            huba::sessions::lines_of(&huba::sessions::commands_in_last_turn(&tail, 4)),
             vec![cmd.to_string()],
             "cửa `destructive` đã gỡ — dòng này phải có nút"
         );
@@ -1779,7 +1781,7 @@ fn a_destructive_clause_after_a_separator_now_gets_a_button() {
         mention = mention
     );
     assert_eq!(
-        hub::sessions::lines_of(&hub::sessions::commands_in_last_turn(&tail, 4)),
+        huba::sessions::lines_of(&huba::sessions::commands_in_last_turn(&tail, 4)),
         vec![format!(r#"grep -rn "{} -rf" scripts/"#, "rm")],
     );
 }
@@ -1793,18 +1795,18 @@ fn a_destructive_clause_after_a_separator_now_gets_a_button() {
 /// "[] acc3 dwork" --disallowedTools …`, tức nó đi tới tận argv.
 #[test]
 fn a_dropped_parameter_must_not_bite_into_the_task() {
-    assert_eq!(hub::sessions::task_for_new("", "dwork"), "dwork");
+    assert_eq!(huba::sessions::task_for_new("", "dwork"), "dwork");
     // …nhưng CÓ `-s` thì nhãn vẫn cần: phiên mở ở gốc workspace, nên câu duy
     // nhất nói nó thuộc dự án nào là đề bài.
     assert_eq!(
-        hub::sessions::task_for_new("dwork", "sửa lịch"),
+        huba::sessions::task_for_new("dwork", "sửa lịch"),
         "[dwork] sửa lịch"
     );
     // Đề bài rỗng vẫn hợp lệ trên đường mở cửa sổ — và KHÔNG được biến thành
     // một cái nhãn trần, vì lúc ấy phiên nhận đúng chữ `[dwork]` làm việc.
-    assert_eq!(hub::sessions::task_for_new("dwork", ""), "");
-    assert_eq!(hub::sessions::task_for_new("", ""), "");
-    assert_eq!(hub::sessions::task_for_new("   ", "dwork"), "dwork");
+    assert_eq!(huba::sessions::task_for_new("dwork", ""), "");
+    assert_eq!(huba::sessions::task_for_new("", ""), "");
+    assert_eq!(huba::sessions::task_for_new("   ", "dwork"), "dwork");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1824,9 +1826,9 @@ fn a_dropped_parameter_must_not_bite_into_the_task() {
 // `ps` CĂN PHẢI cột số — và một dòng đọc hụt ở đây đọc ra thành một CÁI CHẾT.
 //
 // 🔴 Hà 2026-08-15: *"tại sao vừa tạo phiên social mới đã báo như thế này"* —
-// hub trả lời *"ĐÃ TẮT: chỉ còn /handover"* về một phiên sống được vài giây,
+// huba trả lời *"ĐÃ TẮT: chỉ còn /handover"* về một phiên sống được vài giây,
 // rồi *"cũng không nhìn thấy cửa sổ đâu"*. Đo cùng lúc: `pid 5047` (`ttys010`)
-// CÓ trong `ps`, `argv[0] = claude`, mà hub khai *"không còn tiến trình"*.
+// CÓ trong `ps`, `argv[0] = claude`, mà huba khai *"không còn tiến trình"*.
 //
 // Gốc: bản đầu tách bằng `splitn(4, char::is_whitespace)` — cắt theo TỪNG ký tự
 // trắng, nên dấu cách đệm của cột căn phải sinh ra trường rỗng, `parse` hỏng,
@@ -1839,7 +1841,7 @@ fn a_padded_ps_column_must_not_read_as_a_dead_session() {
     // Nguyên văn hình dạng `ps -eo pid=,ppid=,tty=,command=` trên máy này khi
     // pid dài nhất có 5 chữ số: pid 4 chữ số được đệm thêm một dấu cách.
     let (pid, ppid, tty, cmd) =
-        hub::sessions::parse_ps_line(" 5047  4998 ttys010  claude --permission-mode auto")
+        huba::sessions::parse_ps_line(" 5047  4998 ttys010  claude --permission-mode auto")
             .expect("dòng ps có đệm vẫn phải đọc được");
     assert_eq!(pid, 5047);
     assert_eq!(ppid, 4998);
@@ -1848,7 +1850,7 @@ fn a_padded_ps_column_must_not_read_as_a_dead_session() {
 
     // …và dòng KHÔNG đệm vẫn như cũ.
     let (pid, ppid, tty, cmd) =
-        hub::sessions::parse_ps_line("85605 85592 ttys005 claude").expect("dòng thường");
+        huba::sessions::parse_ps_line("85605 85592 ttys005 claude").expect("dòng thường");
     assert_eq!(
         (pid, ppid, tty.as_str(), cmd.as_str()),
         (85605, 85592, "ttys005", "claude")
@@ -1856,15 +1858,15 @@ fn a_padded_ps_column_must_not_read_as_a_dead_session() {
 
     // Tiến trình không có cửa sổ: `ps` in `??`, và đó KHÔNG phải một cửa sổ
     // (`is_real_tty` — luật 11b).
-    let (_, _, tty, _) = hub::sessions::parse_ps_line("  123     1 ??       /usr/sbin/cupsd -l")
+    let (_, _, tty, _) = huba::sessions::parse_ps_line("  123     1 ??       /usr/sbin/cupsd -l")
         .expect("dòng không tty");
     assert_eq!(tty, "??");
-    assert!(!hub::sessions::is_real_tty(&tty));
+    assert!(!huba::sessions::is_real_tty(&tty));
 
     // Dòng cụt thì trả `None` — và chỗ gọi ĐẾM rồi ghi log, không nuốt.
-    assert!(hub::sessions::parse_ps_line("").is_none());
-    assert!(hub::sessions::parse_ps_line("5047").is_none());
-    assert!(hub::sessions::parse_ps_line("5047 4998").is_none());
+    assert!(huba::sessions::parse_ps_line("").is_none());
+    assert!(huba::sessions::parse_ps_line("5047").is_none());
+    assert!(huba::sessions::parse_ps_line("5047 4998").is_none());
 }
 
 #[test]
@@ -1879,13 +1881,13 @@ fn a_command_carries_the_folder_its_own_record_recorded() {
         "\n",
         r#"{"type":"user","cwd":"/Users/hanguyen/projects/dwork/dev","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission to use Bash with command git add has been denied."}]}}"#,
     );
-    let got = hub::sessions::commands_in_last_turn(tail, 4);
+    let got = huba::sessions::commands_in_last_turn(tail, 4);
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].line, "git add scripts/dci-build-deploy-web.sh");
     assert_eq!(
         got[0].cwd, "/Users/hanguyen/projects/dwork/dev",
         "lệnh bị chặn phải mang thư mục CỦA CHÍNH BẢN GHI ấy — đây là chỗ `git` \
-         trả 128 khi hub chạy nó ở `<workspace>/dwork`"
+         trả 128 khi huba chạy nó ở `<workspace>/dwork`"
     );
 }
 
@@ -1898,7 +1900,7 @@ fn a_command_only_mentioned_in_prose_takes_where_the_session_stands() {
         "\n",
         r#"{"type":"assistant","cwd":"/Users/hanguyen/projects/games","message":{"role":"assistant","content":[{"type":"text","text":"Còn một bước:\n\nbash tools/post-deploy-check.sh\n"}]}}"#,
     );
-    let got = hub::sessions::commands_in_last_turn(tail, 4);
+    let got = huba::sessions::commands_in_last_turn(tail, 4);
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].line, "bash tools/post-deploy-check.sh");
     assert_eq!(got[0].cwd, "/Users/hanguyen/projects/games");
@@ -1913,7 +1915,7 @@ fn a_transcript_without_cwd_leaves_the_folder_empty_not_guessed() {
         "\n",
         r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Chạy:\n\nbash ./deploy.sh ban-moi\n"}]}}"#,
     );
-    let got = hub::sessions::commands_in_last_turn(tail, 4);
+    let got = huba::sessions::commands_in_last_turn(tail, 4);
     assert_eq!(got.len(), 1, "{got:?}");
     assert_eq!(got[0].cwd, "", "không biết thì để trống, đừng đoán");
 }

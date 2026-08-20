@@ -11,7 +11,7 @@
 //! * bốn tình trạng dùng bốn chấm TRÒN khác nhau đúng ở màu, trong một danh
 //!   sách đã có sẵn `🟥 🟩 🟪 🟦` làm nhãn dự án.
 
-use hub::sessions::{LiveSession, ST_ASK, ST_BG, ST_DEAD, ST_ERR, ST_RUN, ST_WAIT};
+use huba::sessions::{LiveSession, ST_ASK, ST_BG, ST_DEAD, ST_ERR, ST_RUN, ST_WAIT};
 
 fn s() -> LiveSession {
     LiveSession {
@@ -27,7 +27,7 @@ fn a_waiting_session_with_a_background_shell_says_so() {
     let mut x = s();
     x.working = false;
     x.bg_shell = true;
-    let (icon, label) = hub::sessions::state_of(&x);
+    let (icon, label) = huba::sessions::state_of(&x);
     assert_eq!(icon, ST_BG, "{label}");
     assert!(
         label.contains("lệnh nền"),
@@ -36,7 +36,7 @@ fn a_waiting_session_with_a_background_shell_says_so() {
     // …và nó KHÁC hẳn phiên đứng chờ trơn, không chỉ khác màu.
     let mut idle = s();
     idle.bg_shell = false;
-    assert_ne!(hub::sessions::state_of(&idle).0, icon);
+    assert_ne!(huba::sessions::state_of(&idle).0, icon);
 }
 
 /// Thứ tự ưu tiên: mỗi bậc là một bài học đã trả giá, nên nó phải đo được.
@@ -48,28 +48,28 @@ fn the_priority_order_holds() {
     dead.working = true;
     dead.bg_shell = true;
     dead.error = Some("bùm".into());
-    assert_eq!(hub::sessions::state_of(&dead).0, ST_DEAD);
+    assert_eq!(huba::sessions::state_of(&dead).0, ST_DEAD);
 
     // HỎI đứng trên "đang chạy": việc không tự đi tiếp được.
     let mut ask = s();
     ask.working = true;
     ask.asking = Some(Default::default());
-    assert_eq!(hub::sessions::state_of(&ask).0, ST_ASK);
+    assert_eq!(huba::sessions::state_of(&ask).0, ST_ASK);
 
     // LỖI đứng trên "đang chạy": chết vì lỗi nhìn y hệt vừa xong.
     let mut err = s();
     err.working = true;
     err.error = Some("API 529".into());
-    assert_eq!(hub::sessions::state_of(&err).0, ST_ERR);
+    assert_eq!(huba::sessions::state_of(&err).0, ST_ERR);
 
     // đang chạy đứng trên lệnh nền: lượt của phiên quan trọng hơn việc nền.
     let mut run = s();
     run.working = true;
     run.bg_shell = true;
-    assert_eq!(hub::sessions::state_of(&run).0, ST_RUN);
+    assert_eq!(huba::sessions::state_of(&run).0, ST_RUN);
 
     // …còn lại là đứng chờ.
-    assert_eq!(hub::sessions::state_of(&s()).0, ST_WAIT);
+    assert_eq!(huba::sessions::state_of(&s()).0, ST_WAIT);
 }
 
 /// Không có hai trạng thái nào dùng chung một hình, và KHÔNG cái nào là chấm
@@ -90,7 +90,7 @@ fn every_state_has_its_own_shape() {
     }
     // 🔴 Và KHÔNG dùng bộ ký hiệu máy phát nhạc — bài học 13/08: ở đó chúng là
     // NÚT BẤM (`▶` = *bấm để chạy*) nên làm tình trạng thì đọc ra nghĩa ngược,
-    // và `▶️` đang là nút chạy lệnh thật của hub.
+    // và `▶️` đang là nút chạy lệnh thật của huba.
     for c in ["▶", "▶️", "⏸", "⏹"] {
         assert!(
             !all.contains(&c),
@@ -105,7 +105,7 @@ fn the_session_list_uses_the_same_table() {
     let mut x = s();
     x.account = "acc1".into();
     x.bg_shell = true;
-    let out = hub::pipeline::session_list_text(std::slice::from_ref(&x), "", 0);
+    let out = huba::pipeline::session_list_text(std::slice::from_ref(&x), "", 0);
     assert!(out.contains(ST_BG), "{out}");
     assert!(out.contains("lệnh nền"), "{out}");
 }

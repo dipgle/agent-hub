@@ -1,17 +1,17 @@
 //! Chạy ĐÚNG đường `/shot` vào một phiên thật rồi đếm nút — nghiệm thu, không đoán.
 //!
 //! ```
-//! HUB_CONFIG=$HOME/projects/hub/hub.config.json HUB_TTY=ttys005 \
+//! HUB_CONFIG=$HOME/projects/huba/huba.config.json HUB_TTY=ttys005 \
 //!   cargo test --offline --test shot_live -- --ignored --nocapture
 //! ```
 
 #[test]
 #[ignore = "gửi một tin thật vào buồng chat — chạy tay bằng --ignored"]
 fn shot_a_session_with_a_chooser_on_screen() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG trỏ vào hub.config.json thật");
+    let cfg = huba::config::load(None).expect("HUB_CONFIG trỏ vào huba.config.json thật");
     let tty = std::env::var("HUB_TTY").unwrap_or_else(|_| "ttys005".to_string());
 
-    let snap = hub::sessions::snapshot(&cfg);
+    let snap = huba::sessions::snapshot(&cfg);
     let s = snap
         .sessions
         .iter()
@@ -19,16 +19,16 @@ fn shot_a_session_with_a_chooser_on_screen() {
         .unwrap_or_else(|| panic!("không thấy phiên nào ở {tty}"));
     println!("phiên {} ({}) — {}", s.session_id, s.label, s.name);
 
-    // Đọc màn qua đúng đường hub đọc, rồi hỏi bộ nhận dạng.
-    let w = hub::keys::window_of(&s.tty)
+    // Đọc màn qua đúng đường huba đọc, rồi hỏi bộ nhận dạng.
+    let w = huba::keys::window_of(&s.tty)
         .expect("hỏi được Terminal")
         .expect("phiên có cửa sổ");
-    let man = hub::keys::screen_text(w).expect("đọc được màn");
-    let choices = hub::keys::parse_choices(&man);
+    let man = huba::keys::screen_text(w).expect("đọc được màn");
+    let choices = huba::keys::parse_choices(&man);
     println!("màn có {} lựa chọn: {:?}", choices.len(), choices);
     println!(
         "bảng hỏi trong nhật ký: {:?}",
-        hub::sessions::asking_of(&cfg, &s.session_id).map(|a| (
+        huba::sessions::asking_of(&cfg, &s.session_id).map(|a| (
             a.header.clone(),
             a.options.len(),
             a.rest.len()
@@ -37,12 +37,12 @@ fn shot_a_session_with_a_chooser_on_screen() {
 
     assert!(
         !choices.is_empty(),
-        "màn đang mở hộp chọn mà hub đọc ra 0 — bộ nhận dạng hỏng"
+        "màn đang mở hộp chọn mà huba đọc ra 0 — bộ nhận dạng hỏng"
     );
 
     // Và ĐẨY một lượt `/shot` thật qua kênh, để đếm nút trên tin gửi đi.
-    let tg = hub::telegram::Inbox::start(&cfg, None).expect("có bot token");
+    let tg = huba::telegram::Inbox::start(&cfg, None).expect("có bot token");
     tg.push_text(&format!("/shot {}", s.session_id));
-    hub::pipeline::run_telegram_now(&cfg);
+    huba::pipeline::run_telegram_now(&cfg);
     println!("đã đẩy /shot — xem log `telegram_buttons_sent` để đếm nút");
 }

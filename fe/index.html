@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>hub</title>
+<title>huba</title>
 <style>
   :root {
     --paper: #f2f4f2;
@@ -15,7 +15,7 @@
     --signal: #0d6a6d;
     --signal-ink: #ffffff;
     --mine: #dceceb;
-    --hub: #ffffff;
+    --huba: #ffffff;
     --warn: #8d6205;
     --bad: #a2412a;
     --ok: #2c6647;
@@ -26,7 +26,7 @@
     :root {
       --paper: #101315; --panel: #171b1d; --ink: #e3e8e5; --ink-2: #b0bab5;
       --muted: #869089; --rule: #2a3235; --signal: #4fb3b2; --signal-ink: #06211f;
-      --mine: #10312f; --hub: #1c2124; --warn: #cfa03c; --bad: #d97a5c; --ok: #63b189;
+      --mine: #10312f; --huba: #1c2124; --warn: #cfa03c; --bad: #d97a5c; --ok: #63b189;
     }
   }
   * { box-sizing: border-box; }
@@ -120,7 +120,7 @@
 
   .msg {
     border: 1px solid var(--rule); border-radius: 4px;
-    padding: .6rem .8rem; background: var(--hub);
+    padding: .6rem .8rem; background: var(--huba);
     display: flex; flex-direction: column; gap: .3rem;
     max-width: 88%;
   }
@@ -147,7 +147,7 @@
   }
   .note.bad { color: var(--bad); }
 
-  /* "hub is working on it" — the wait is the honest part of the UX: a reply
+  /* "huba is working on it" — the wait is the honest part of the UX: a reply
      goes through triage and, at L0, a human. Say so instead of faking speed. */
   #pending { display: none; align-self: flex-start; }
   #pending.on { display: flex; }
@@ -321,7 +321,7 @@
   /* Five columns of Vietnamese in a fixed-width panel overflow before they
      wrap; let the table scroll inside its own box instead of clipping. */
   /* Không còn khung nào tự cuộn: TRANG cuộn, ở mọi bề ngang. Trần `68vh/72vh`
-     sinh ra cho bố cục hai cột; hub chỉ có một cột, nên nó chỉ đẻ ra cuộn lồng
+     sinh ra cho bố cục hai cột; huba chỉ có một cột, nên nó chỉ đẻ ra cuộn lồng
      cuộn — trên điện thoại là bẫy vuốt, trên máy tính là một rừng thanh cuộn. */
   #board .scroll { max-height: none; overflow: visible; }
   /* Session cards, not a table: on a 390px phone a table forces sideways
@@ -353,7 +353,7 @@
   /* Huy hiệu LOẠI + AI TẠO. Hà 2026-08-09: *"cần một kiểu đánh dấu hoặc ghi chú
      rõ ràng hơn cho từng loại… nhìn qua cái là biết nó là kiểu nào ai tạo"*.
      Chấm màu cũ chỉ nói phiên đang bận hay rảnh — nó không trả lời "ai mở cái
-     này", mà đó mới là thứ quyết định mình LÀM GÌ được với nó: phiên hub mở thì
+     này", mà đó mới là thứ quyết định mình LÀM GÌ được với nó: phiên huba mở thì
      nói tiếp và dừng được, phiên ở terminal thì chỉ xem và hỏi bên lề. */
   .sess-kind {
     display: inline-flex; align-items: center; gap: 4px; flex: none;
@@ -365,7 +365,7 @@
   .sess[data-host="terminal"] .sess-kind {
     color: #1f5f8b; border-color: #bcd7e8; background: #eef6fb;
   }
-  .sess[data-hub="1"] .sess-kind {
+  .sess[data-huba="1"] .sess-kind {
     color: var(--accent, #2f6f4e); border-color: #b9dcc7; background: #eef8f2;
   }
   .sess[data-host="background"] .sess-kind {
@@ -391,7 +391,7 @@
   .sess-group:first-child { margin-top: 2px; }
   .sess-group .n { font-weight: 600; color: var(--muted); }
   .sess-group .what { font-weight: 500; color: var(--muted); font-size: 12px; }
-  .sess-group[data-g="hub"] { color: var(--accent, #2f6f4e); border-color: #b9dcc7; }
+  .sess-group[data-g="huba"] { color: var(--accent, #2f6f4e); border-color: #b9dcc7; }
   .sess-group[data-g="terminal"] { color: #1f5f8b; border-color: #bcd7e8; }
   .sess-group[data-g="background"] { color: #6b4fa8; border-color: #d4c9ec; }
   .sess-group[data-g="detached"] { color: #8a6100; border-color: #ead4a3; }
@@ -417,7 +417,7 @@
   }
   /* DỰ ÁN — thứ mắt tìm trước cả tên phiên, vì tên do `claude` tự đặt.
      Không cho nó to hơn tên: nó là NHÃN, tên mới là danh tính. Ở 390px một
-     dòng "AI/hub · projects-ff" vừa khít, và `overflow-wrap: anywhere` của
+     dòng "AI/huba · projects-ff" vừa khít, và `overflow-wrap: anywhere` của
      `.sess-head strong` lo phần dài hơn. */
   .sess-folder { font-weight: 600; color: var(--accent, #2f5d8a); }
   /* ĐANG HỎI — cái duy nhất trên màn này mà không ai làm gì thì việc đứng yên
@@ -453,11 +453,11 @@
      nhất là khi thứ nó nói là "có cái gì đó ĐANG chạy ngay lúc này".
      Ba lớp, rẻ và không đụng bố cục: chữ đổi màu, một chấm thở, và cả dòng
      nhấp nháy rất nhẹ. KHÔNG dùng transform/left để tránh reflow mỗi nhịp. */
-  @keyframes hub-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
-  @keyframes hub-breathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
-  .sess-act.live { color: var(--ok, #1a7f37); font-weight: 600; animation: hub-pulse 1.6s ease-in-out infinite; }
+  @keyframes huba-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .45 } }
+  @keyframes huba-breathe { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+  .sess-act.live { color: var(--ok, #1a7f37); font-weight: 600; animation: huba-pulse 1.6s ease-in-out infinite; }
   .sess-act.live .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
-    background: currentColor; margin-right: 6px; animation: hub-breathe 1.1s ease-in-out infinite; }
+    background: currentColor; margin-right: 6px; animation: huba-breathe 1.1s ease-in-out infinite; }
   /* Dải trạng thái TRONG màn một phiên. Cùng chữ với thẻ ở danh sách, nhưng ở
      đây nó là câu đầu tiên người ta nhìn thấy khi mở phiên ra. */
   #sessLive { margin: 0 0 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px;
@@ -465,7 +465,7 @@
     font-variant-numeric: tabular-nums; }
   #sessLive.live { border-color: #1a7f37; background: #eaf7ee; color: #14611f; font-weight: 600; }
   #sessLive.live .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    background: currentColor; margin-right: 7px; animation: hub-breathe 1.1s ease-in-out infinite; }
+    background: currentColor; margin-right: 7px; animation: huba-breathe 1.1s ease-in-out infinite; }
   #sessLive.idle { color: #57606a; }
   @media (prefers-reduced-motion: reduce) {
     .sess-act.live, .sess-act.live .dot, #sessLive.live .dot { animation: none; }
@@ -754,7 +754,7 @@
      dòng mốc thời gian bình thường, thứ không đọc hết cũng không sao. Câu cảnh
      báo thì ngược lại: nửa sau của nó (*"Số dưới đây là của lúc đó, không phải
      bây giờ"*) mới là phần đổi hành vi người đọc. Đo 2026-08-10 trên ảnh chụp
-     cũ THẬT: màn chỉ hiện tới `⚠ hub chưa đẩy dữ liệu mới — Ảnh chụp lúc
+     cũ THẬT: màn chỉ hiện tới `⚠ huba chưa đẩy dữ liệu mới — Ảnh chụp lúc
      19:50:59 1…`, tức đúng nửa quan trọng bị cắt. Một lời cảnh báo không đọc
      hết được thì chưa phải lời cảnh báo. */
   #board.on-sessions .boardbar #boardStamp.stale {
@@ -814,7 +814,7 @@
 <body>
 
 <header>
-  <h1>hub</h1>
+  <h1>huba</h1>
   <!-- Bốn tab sống ở đây, không phải trong thân trang: trên màn 390px, một
        hàng nav riêng + thanh công cụ + ghi chú đẩy phiên đầu tiên xuống quá
        nửa màn. Header vốn đã luôn hiện, nên đây là chỗ rẻ nhất để đặt chúng. -->
@@ -870,7 +870,7 @@
         Mỗi nút gửi đúng một lệnh vào phòng chat (<code>/session</code> ·
         <code>/new</code> · <code>/ask</code> · <code>/tell</code> ·
         <code>/stop</code> · <code>/handover</code>), nên mọi thao tác đều để
-        lại dấu vết ở nơi đọc được. Chỉ chủ máy ra lệnh được; hub bỏ qua lệnh
+        lại dấu vết ở nơi đọc được. Chỉ chủ máy ra lệnh được; huba bỏ qua lệnh
         của người khác.
       </p>
     </details>
@@ -952,7 +952,7 @@
                bên trong TUI, nhật ký không dài thêm, ăn ngữ cảnh đang chạy);
                phiên không gõ vào được thì chạy trên bản sao
              claude từ chối nối vào phiên nền đang chạy, nên "nói tiếp" chỉ mở
-             cho phiên hub quản được; phiên khác thì ô tự khoá ở chế độ bên lề
+             cho phiên huba quản được; phiên khác thì ô tự khoá ở chế độ bên lề
              và nói rõ vì sao. -->
         <p class="muted boardnote" id="sessAskHint"></p>
         <!-- Ô nhập GHIM ĐÁY, chỉ nội dung cuộn. Hà 2026-08-09: *"để phần input
@@ -981,7 +981,7 @@
                  chứ không phải nội dung để đọc. -->
             <div class="row-flex" id="sessActs">
               <button type="button" id="sessHandover" title="Đóng sổ &amp; tiếp tục ở phiên mới">📋 Đóng sổ</button>
-              <!-- Chỉ hiện với phiên do hub mở: hub không lái phiên người khác
+              <!-- Chỉ hiện với phiên do huba mở: huba không lái phiên người khác
                    mở trong terminal/VS Code (Hà chốt 08-08). -->
               <button type="button" id="sessStop" class="hidden">⏹ Dừng</button>
             </div>
@@ -1044,7 +1044,7 @@
         <h2>Trao đổi <span class="muted" id="head"></span></h2>
         <div class="wrap hidden" id="thread">
           <div class="msg" id="pending">
-            <div class="who">hub</div>
+            <div class="who">huba</div>
             <div class="body"><span class="dots"><i></i><i></i><i></i></span> đang xử lý — câu trả lời cần người duyệt trước khi gửi</div>
           </div>
         </div>
@@ -1095,7 +1095,7 @@
         <h2>Vòng chạy</h2>
         <div class="grid g3" id="cfgLoop"></div>
         <p class="muted boardnote" style="margin-top:10px">
-          hub đọc phòng theo chu kỳ này; khi đang theo một phiên thì nhanh hơn.
+          huba đọc phòng theo chu kỳ này; khi đang theo một phiên thì nhanh hơn.
         </p>
       </div>
 
@@ -1119,7 +1119,7 @@
         </div>
         <p class="muted boardnote">
           Tệp: <span id="configFile" class="mono"></span> · mỗi thay đổi đi qua phòng chat
-          dưới dạng <code>/set &lt;trường&gt; &lt;giá trị&gt;</code> và được hub kiểm tra kiểu
+          dưới dạng <code>/set &lt;trường&gt; &lt;giá trị&gt;</code> và được huba kiểm tra kiểu
           + validate trước khi ghi.
         </p>
         <!-- JSON thô GẤP LẠI: nó là bản đối chiếu khi nghi ngờ, không phải thứ
@@ -1142,7 +1142,7 @@
   // (`<app_tid>.test.localhost` / `<app_tid>.test.tafalo.com`), so the bundle
   // is not pinned to one tenant at build time.
   const appTid = location.hostname.split('.')[0];
-  const room = new URLSearchParams(location.search).get('room') || 'hub';
+  const room = new URLSearchParams(location.search).get('room') || 'huba';
 
   const $ = (id) => document.getElementById(id);
   // The panels, read off the markup instead of copied into a literal. The copy
@@ -1214,14 +1214,14 @@
     body.textContent = shown;
     el.append(body);
 
-    // Reply = "this is about that". No command to remember, and hub inherits
+    // Reply = "this is about that". No command to remember, and huba inherits
     // the project of the message being answered.
     // Nút "↩ Trả lời" trên MỌI tin đã bỏ (rà 2026-08-09).
     //
     // Nó là di sản của sản phẩm hộp thư, nơi mỗi tin là một VIỆC và trả lời
     // đúng việc nào là chuyện quan trọng. Phòng này chỉ có hai người nói: chủ
-    // máy và hub. Đo được: 51 nút trên một màn, mỗi nút một vùng chạm 35px,
-    // và không lần nào cần tới — hub thừa hưởng dự án từ tin trước đó rồi.
+    // máy và huba. Đo được: 51 nút trên một màn, mỗi nút một vùng chạm 35px,
+    // và không lần nào cần tới — huba thừa hưởng dự án từ tin trước đó rồi.
     void tid;
 
     // Một dòng bắt đầu bằng `/` và do chính chủ máy gửi là LỆNH của trang,
@@ -1280,7 +1280,7 @@
     // KHÔNG dán đáy cho thứ đang không ở trên màn. Bốn tab dùng chung khung
     // cuộn `main`, nên `stickToBottom(thread)` lúc tab Trao đổi đang ẩn sẽ kéo
     // TAB ĐANG XEM xuống đáy. Đó là điều Hà thấy 2026-08-10: *"danh sách phiên
-    // bấm nút nào nó cũng kéo xuống cuối trang"* — bấm nút gửi một lệnh, hub trả
+    // bấm nút nào nó cũng kéo xuống cuối trang"* — bấm nút gửi một lệnh, huba trả
     // lời trong phòng, mỗi tin mới gọi `scrollDown()`, và `sendCommand` còn làm
     // mới thêm 8 lượt trong 40 giây nên nó giật đi giật lại.
     //
@@ -1576,7 +1576,7 @@
 
   // ---- board: the console's read-only view, read from tfl5 ---------------
   //
-  // The data is a snapshot `hubd` writes into this app's `hub_status`
+  // The data is a snapshot `hubad` writes into this app's `hub_status`
   // resource. Reading it goes through the app's own ACL (Reader+), same
   // origin, same cookie — the loopback console at :9200 is never contacted,
   // so nothing here can drive an approval.
@@ -1610,7 +1610,7 @@
   /// Lỗi thật, bắt được 2026-08-09 khi `/new` lần đầu chạy qua được hộp thoại
   /// MCP: bấm "Mở phiên mới" xong thì phiên KHÔNG BAO GIỜ hiện lên danh sách.
   /// Lý do: cả trang chỉ có đúng một cú `loadBoard()` sau 6 giây kể từ lúc gửi
-  /// lệnh, mà hub cần tới ~14 giây mới dựng xong phiên nền (nó còn phải rình
+  /// lệnh, mà huba cần tới ~14 giây mới dựng xong phiên nền (nó còn phải rình
   /// xem phiên có kẹt ở hộp thoại không). Sau 6 giây ấy thì không còn gì làm
   /// mới danh sách nữa — người dùng phải bấm "Tải lại" hoặc F5 mới thấy.
   ///
@@ -1638,7 +1638,7 @@
   $('btnCycle').addEventListener('click', (e) => sendCommand('/run', e.target));
   $('btnDoctor').addEventListener('click', (e) => sendCommand('/doctor', e.target));
 
-  // "Hỏi hub": an ordinary message, not a command — it goes through triage
+  // "Hỏi huba": an ordinary message, not a command — it goes through triage
   // exactly like anything else typed in the room, which is the point.
   async function loadBoard() {
     const stamp = $('boardStamp');
@@ -1649,7 +1649,7 @@
       const row = (r.data || [])[0];
       snap = row && row.data && row.data.snapshot;
     } catch (ex) {
-      // A resource that does not exist yet is the "hub has never pushed"
+      // A resource that does not exist yet is the "huba has never pushed"
       // case, not a failure of this page — say which one it is.
       stamp.textContent = isDenied(ex)
         ? 'Bạn không có quyền xem bảng này.'
@@ -1657,7 +1657,7 @@
       return;
     }
     if (!snap) {
-      stamp.textContent = 'hub chưa đẩy dữ liệu lên (chạy: hub portal-push).';
+      stamp.textContent = 'huba chưa đẩy dữ liệu lên (chạy: huba portal-push).';
       return;
     }
     if (snap.schema > 4) {
@@ -1666,11 +1666,11 @@
     }
     boardLoaded = true;
     lastSnap = snap;
-    // UC-S09 — the page can only ever show what hub last pushed, so it has to
+    // UC-S09 — the page can only ever show what huba last pushed, so it has to
     // say HOW OLD that is. A timestamp alone reads as "now" to anyone not doing
-    // arithmetic, which is exactly the wrong answer when hubd is dead: the
+    // arithmetic, which is exactly the wrong answer when hubad is dead: the
     // screen would keep showing yesterday's sessions as if they were live.
-    // hubd cycles every ~120s (4s while following a session), so anything past
+    // hubad cycles every ~120s (4s while following a session), so anything past
     // 5 minutes means it is not running.
     const ageMin = (Date.now() - Date.parse(snap.generated_at)) / 60000;
     const stale = !(ageMin < 5);   // NaN (unparseable stamp) counts as stale
@@ -1682,7 +1682,7 @@
     const when = wantSession ? stampShort : stampFull;
     stamp.classList.toggle('stale', stale);
     stamp.textContent = stale
-      ? `⚠ hub chưa đẩy dữ liệu mới — ${when}. Số dưới đây là của lúc đó, không phải bây giờ.`
+      ? `⚠ huba chưa đẩy dữ liệu mới — ${when}. Số dưới đây là của lúc đó, không phải bây giờ.`
       : when;
     renderSessions(snap.sessions || {});
     renderProjectPicker((snap.config || {}).projects);
@@ -1696,7 +1696,7 @@
   // ĐỊA CHỈ LÀ TRẠNG THÁI. Trước đây tab nằm trong localStorage: URL không đổi
   // khi bấm, nút Back của trình duyệt nhảy ra khỏi app, và gửi link cho chính
   // mình thì mở ra một màn khác. Nay tab và phiên đang theo đều nằm trong query
-  // (`?room=hub&tab=phien&session=<id>`), nên F5 về đúng chỗ đang làm, Back đi
+  // (`?room=huba&tab=phien&session=<id>`), nên F5 về đúng chỗ đang làm, Back đi
   // ngược đúng thứ tự, và một cái link mở đúng cái người gửi đang nhìn.
   //
   // Query chứ không phải hash: trang này đã đọc `?room=` từ trước, giữ một quy
@@ -1722,7 +1722,7 @@
     // "Phiên" là màn Hà mở điện thoại lên để xem.
     const fromUrl = urlGet('tab');
     if (fromUrl && PANELS.includes(fromUrl)) return fromUrl;
-    try { return localStorage.getItem('hub.panel') || 'sessions'; } catch (_) { return 'sessions'; }
+    try { return localStorage.getItem('huba.panel') || 'sessions'; } catch (_) { return 'sessions'; }
   })();
   let lastSnap = null;
 
@@ -1762,7 +1762,7 @@
     if (!btn) return;
     rememberScroll(panel);
     panel = btn.dataset.panel;
-    try { localStorage.setItem('hub.panel', panel); } catch (_) { /* private mode */ }
+    try { localStorage.setItem('huba.panel', panel); } catch (_) { /* private mode */ }
     // Giữ id phiên trong địa chỉ cho tới khi trang dựng lại xong.
     //
     // Lúc mở trang, `goPanel()` bấm tab bằng mã và chạy đúng handler này — khi
@@ -1829,7 +1829,7 @@
     const byHost = {};
     rows.forEach((s) => { byHost[s.host || 'unknown'] = (byHost[s.host || 'unknown'] || 0) + 1; });
     // 'detached' = tiến trình claude còn sống nhưng KHÔNG gắn cửa sổ nào (script,
-    // cron, hoặc thứ gì đó hub không mở). Trước 2026-08-09 nó bị gộp vào
+    // cron, hoặc thứ gì đó huba không mở). Trước 2026-08-09 nó bị gộp vào
     // 'terminal' vì nhãn suy bằng loại trừ — Hà hỏi đúng chỗ đó: *"danh sách
     // phiên thực sự đang liệt kê terminal hay chỉ claude?"*
     const LABEL = {
@@ -1845,7 +1845,7 @@
     //
     // Câu hỏi gốc là "máy chỉ mở 3 terminal sao màn hiện 13 phiên?". Ẩn đi mà
     // im lặng thì dựng lên đúng câu hỏi ngược lại: lúc này máy chạy 11 phiên,
-    // màn liệt kê 3. Đo được 2026-08-09: hub ẩn 8 phiên mỗi vòng, con số ấy chỉ
+    // màn liệt kê 3. Đo được 2026-08-09: huba ẩn 8 phiên mỗi vòng, con số ấy chỉ
     // vào log — nơi không ai cầm điện thoại đọc được.
     const hiddenEditor = sessions.hidden_editor || 0;
     const hiddenNote = hiddenEditor
@@ -1872,16 +1872,16 @@
     // Thứ tự nhóm = thứ tự người ta cần: thứ ĐIỀU KHIỂN được trước, thứ chỉ xem
     // được sau, thứ cần dọn xuống cuối. Trong mỗi nhóm vẫn vừa-động-trước.
     const GROUPS = [
-      { g: 'hub',        title: '📱 hub mở từ điện thoại', what: 'điều khiển được',
+      { g: 'huba',        title: '📱 huba mở từ điện thoại', what: 'điều khiển được',
         pick: (x) => x.started_by_hub && x.host !== 'dead' },
-      // Hai nhóm, không phải một: "có tty" và "hub gõ vào được" là hai chuyện
+      // Hai nhóm, không phải một: "có tty" và "huba gõ vào được" là hai chuyện
       // khác nhau, và ngày 2026-08-11 chúng khác nhau tốn thật — một phiên
       // trong terminal tích hợp của VS Code khai `host: terminal`, trang mời
       // gõ, còn Terminal.app thì không biết cái tty ấy. `can_type` là câu trả
-      // lời ĐO ĐƯỢC (hub hỏi Terminal.app giữ những tty nào), không phải suy.
+      // lời ĐO ĐƯỢC (huba hỏi Terminal.app giữ những tty nào), không phải suy.
       { g: 'terminal',   title: '⌨ Bạn mở ở terminal',     what: 'gõ vào được',
         pick: (x) => x.host === 'terminal' && x.can_type },
-      { g: 'terminal-x', title: '⌨ Terminal khác (VS Code · iTerm)', what: 'hub không gõ vào được',
+      { g: 'terminal-x', title: '⌨ Terminal khác (VS Code · iTerm)', what: 'huba không gõ vào được',
         pick: (x) => x.host === 'terminal' && !x.can_type },
       { g: 'background', title: '⚙ Chạy nền',              what: 'không có cửa sổ',
         pick: (x) => x.host === 'background' },
@@ -1963,7 +1963,7 @@
       // đang làm dự án hay thư mục nào"*). Tên phiên do `claude` tự đặt —
       // "projects-ff" không nói được gì — còn `cwd` thì giống hệt nhau ở mọi
       // dòng trên máy này (mọi phiên mở từ thư mục cha), đó là lý do hàng phụ đã
-      // bỏ nó từ trước. `folder` là thứ khác: hub đếm đường dẫn tệp phiên thật
+      // bỏ nó từ trước. `folder` là thứ khác: huba đếm đường dẫn tệp phiên thật
       // sự đụng vào trong nhật ký (`sessions::folder_from_tail`), nên nó phân
       // biệt được. Chưa đủ bằng chứng thì trường này rỗng và dòng này chỉ còn
       // tên — không bịa một cái nhãn.
@@ -1994,7 +1994,7 @@
       // nền (`sessions.rs`) — nên mọi thẻ phiên terminal mang chấm xám vĩnh
       // viễn: nhìn danh sách không biết cái nào đang chạy, đúng câu hỏi đầu tiên
       // người ta mở điện thoại ra để hỏi. Đường đắt là đọc màn từng phiên (kéo
-      // một vòng từ ~18 giây lên 90 giây); đường rẻ là mtime nhật ký, thứ hub đã
+      // một vòng từ ~18 giây lên 90 giây); đường rẻ là mtime nhật ký, thứ huba đã
       // đọc sẵn mỗi vòng — `sessions::is_working` gộp nó với số subagent và
       // `status`.
       const work = s.working
@@ -2041,12 +2041,12 @@
         card.append(warn);
       }
       if (kid) card.dataset.subagents = String(s.pending_subagents);
-      // ĐANG LÀM GÌ — chữ terminal đang hiện, không phải chữ hub tự nghĩ ra.
+      // ĐANG LÀM GÌ — chữ terminal đang hiện, không phải chữ huba tự nghĩ ra.
       //
       // Hà 2026-08-10: *"ui chưa thể hiện được phiên đang làm gì ví dụ Brewing…;
       // Perambulating"*. Chấm màu mới trả lời CÓ/KHÔNG chạy; cái người ta nhìn
       // trên terminal là động từ đang quay cùng đồng hồ. Chỉ có ở phiên đang
-      // chạy (hub chỉ đọc màn của những phiên ấy), nên nó không ngốn dòng nào
+      // chạy (huba chỉ đọc màn của những phiên ấy), nên nó không ngốn dòng nào
       // của các thẻ đang rảnh.
       let actLine = null;
       if (s.activity) {
@@ -2078,7 +2078,7 @@
         fromLine.textContent = '↳ không truy được phiên đã mở nó';
       }
       if (s.host) card.dataset.host = s.host;
-      if (s.started_by_hub) card.dataset.hub = '1';
+      if (s.started_by_hub) card.dataset.huba = '1';
       if (work) card.dataset.work = work;
 
       card.append(head, meta);
@@ -2091,7 +2091,7 @@
       // PHIÊN ĐANG HỎI — thứ duy nhất trên màn này mà không ai làm gì thì việc
       // đứng yên mãi. Hà 2026-08-12: *"có 1 phiên đang đưa lựa chọn nhưng không
       // nhận được trên tele"*. Câu hỏi đọc từ NHẬT KÝ (`sessions::asking`) chứ
-      // không từ màn, nên nó có cả với phiên trong VS Code/iTerm — thứ hub không
+      // không từ màn, nên nó có cả với phiên trong VS Code/iTerm — thứ huba không
       // đọc được màn. Đứng TRƯỚC dòng xem trước, và thay chỗ nó: câu cuối của
       // một phiên đang hỏi chỉ là lời dẫn vào chính câu hỏi ấy.
       if (s.asking) {
@@ -2158,28 +2158,28 @@
           acts.append(b);
           return b;
         };
-        // ⏹ Dừng CHỈ hiện với phiên do hub mở. `sessions::stop_background` từ
-        // chối thẳng phiên terminal (*"chỉ dừng được phiên do hub mở"*), nên đặt
+        // ⏹ Dừng CHỈ hiện với phiên do huba mở. `sessions::stop_background` từ
+        // chối thẳng phiên terminal (*"chỉ dừng được phiên do huba mở"*), nên đặt
         // nút ấy lên mọi dòng là đặt một nút chỉ biết báo lỗi — đúng cái Hà vừa
         // mắng sáng nay. Màn chi tiết đã có luật này từ trước và tôi vẫn chép
         // thiếu; luật ghi ở `#sessStop`: *một cái nút không thể chạy còn tệ hơn
-        // không có nút, vì nó bảo rằng hub đang nắm một thứ nó không nắm*.
+        // không có nút, vì nó bảo rằng huba đang nắm một thứ nó không nắm*.
         //
-        // Dừng đi qua chốt xác nhận Telegram ở phía hub (`confirm.rs`); trang
+        // Dừng đi qua chốt xác nhận Telegram ở phía huba (`confirm.rs`); trang
         // KHÔNG tự dựng hộp thoại "chắc chưa?" — hỏi lại trên cùng cái điện
         // thoại vừa chạm nhầm thì chỉ chặn được tay nhầm, không chặn được mất máy.
         if (s.kind === 'background') {
           act('⏹ Dừng', 'danger', (e) => sendCommand(`/stop ${s.session_id}`, e.target));
         }
         // Đóng sổ chạy trên BẢN FORK nên dùng được với mọi phiên, kể cả phiên
-        // terminal hub không điều khiển.
+        // terminal huba không điều khiển.
         act('📋 Đóng sổ', '', (e) => sendCommand(`/handover ${s.session_id}`, e.target));
         card.append(acts);
       }
 
-      // Tapping asks hub to follow this session; the stream arrives with the
+      // Tapping asks huba to follow this session; the stream arrives with the
       // next snapshot. There is no direct call to the Mac — the page only ever
-      // reads what hub pushes.
+      // reads what huba pushes.
       card.addEventListener('click', () => openSession(s));
       list.append(card);
     }
@@ -2225,11 +2225,11 @@
     }
   }
 
-  /// Which projects `/new` will accept — the same list hub validates against,
+  /// Which projects `/new` will accept — the same list huba validates against,
   /// so the picker can never offer a name the command will reject.
   function renderProjectPicker(projects) {
     // Tài khoản lấy từ chính cấu hình trong ảnh chụp — không gõ cứng ở trang,
-    // vì thêm tài khoản thứ tư là việc của `hub.config.json`.
+    // vì thêm tài khoản thứ tư là việc của `huba.config.json`.
     const accSel = $('sessNewAccount');
     // `renderProjectPicker` chỉ nhận danh sách dự án, nên đọc cấu hình từ ảnh
     // chụp gần nhất — biến chung của trang, luôn là bản vừa vẽ.
@@ -2326,34 +2326,34 @@
     $('sessSayInput').value = '';
     $('sessTellBox').classList.add('hidden');
     $('sessTellBox').textContent = '';
-    // Steering is only offered for sessions hub started. Showing "Dừng phiên"
+    // Steering is only offered for sessions huba started. Showing "Dừng phiên"
     // on a terminal session would be a button that can only fail — and a
-    // button that cannot work is worse than no button, because it says hub is
+    // button that cannot work is worse than no button, because it says huba is
     // in charge of something it is not.
     const mine = s.kind === 'background';
-    // Từ 2026-08-11 `/new` mở CỬA SỔ THẬT, nên "hub mở nó" không còn đồng
+    // Từ 2026-08-11 `/new` mở CỬA SỔ THẬT, nên "huba mở nó" không còn đồng
     // nghĩa với "phiên nền". Nút Dừng đi theo QUYỀN SỞ HỮU (`started_by_hub`),
-    // không theo hạng phiên — nếu không thì hub mở được cửa sổ mà không đóng
+    // không theo hạng phiên — nếu không thì huba mở được cửa sổ mà không đóng
     // được, một cây cầu một chiều. Cửa sổ chủ máy tự mở vẫn không có nút:
-    // đóng cửa sổ của người khác không phải việc của hub.
+    // đóng cửa sổ của người khác không phải việc của huba.
     const canStop = mine || (s.started_by_hub && !!s.tty && s.host === 'terminal');
     $('sessStop').classList.toggle('hidden', !canStop);
     // Chữ trên nút phải là thứ SẮP xảy ra: phiên nền chỉ dừng lại (hội thoại
     // còn, nói tiếp được), phiên cửa sổ thì thoát CLI và đóng luôn cửa sổ.
     $('sessStop').textContent = mine ? '⏹ Dừng' : '⏹ Tắt hẳn';
-    // Phiên hub quản được: mặc định NÓI TIẾP, muốn hỏi bên lề thì tự tích.
+    // Phiên huba quản được: mặc định NÓI TIẾP, muốn hỏi bên lề thì tự tích.
     // Phiên khác: hỏi bên lề là đường DUY NHẤT, nên tích sẵn và khoá lại — cho
     // chọn một thứ chắc chắn hỏng còn tệ hơn không cho chọn.
     // BA đường, không phải hai (từ 2026-08-09):
-    //  · phiên nền hub mở  → `/tell`  (mở một lượt mới trên nhật ký)
+    //  · phiên nền huba mở  → `/tell`  (mở một lượt mới trên nhật ký)
     //  · phiên có cửa sổ   → `/type`  (gõ THẲNG vào terminal đang chạy)
     //  · còn lại           → `/ask`   (hỏi trên bản sao)
     // Phiên có cửa sổ mới là phiên trả lời được hộp chọn đang chờ, nên hàng
     // phím điều khiển chỉ hiện ở đó.
     // ĐO, không suy. Trước đây: `tty && host === 'terminal'` — thứ chỉ nói
-    // "phiên có một tty". Hub gõ được hay không lại phụ thuộc Terminal.app có
+    // "phiên có một tty". Huba gõ được hay không lại phụ thuộc Terminal.app có
     // giữ tty ấy không, và một phiên trong terminal tích hợp của VS Code trả
-    // lời KHÁC cho hai câu đó. `can_type` do hub đo mỗi vòng (một lời gọi
+    // lời KHÁC cho hai câu đó. `can_type` do huba đo mỗi vòng (một lời gọi
     // AppleScript cho cả danh sách), nên trang thôi phải đoán hộ.
     const canType = s.can_type === true;
     // Kept outside the function on purpose: what the screen PROMISES about a
@@ -2373,11 +2373,11 @@
     waitingFor = null;
     lastAsideTs = '';
     askedAfterTs = '';
-    $('sessStatus').textContent = 'Đang mở phiên — hub đọc nhật ký và đẩy về…';
+    $('sessStatus').textContent = 'Đang mở phiên — huba đọc nhật ký và đẩy về…';
     sendCommand(`/session ${s.session_id}`, $('sessBack'));
 
-    // hub answers on its own cycle, so one refresh is a coin flip: the first
-    // build reloaded once after 6s and hung forever on any session hub pushed
+    // huba answers on its own cycle, so one refresh is a coin flip: the first
+    // build reloaded once after 6s and hung forever on any session huba pushed
     // slower than that. Keep asking, with a deadline and an honest ending.
     clearInterval(streamPoll);
     const started = Date.now();
@@ -2386,13 +2386,13 @@
       if (!wantSession) { clearInterval(streamPoll); return; }
       const got = lastSnap && lastSnap.sessions && lastSnap.sessions.focus;
       if (got && got.session_id === wantSession) arrived = true;
-      // Keep refreshing while the screen is open — hub follows the file and
+      // Keep refreshing while the screen is open — huba follows the file and
       // re-publishes as it grows, so stopping at first arrival would freeze
       // the view on whatever the session was doing a minute ago.
       if (!arrived && Date.now() - started > 120000) {
         clearInterval(streamPoll);
         $('sessStatus').textContent =
-          'Quá 2 phút chưa nhận được luồng của phiên này — hub có thể đang bận hoặc đã dừng. Thử lại hoặc mở phiên trên máy.';
+          'Quá 2 phút chưa nhận được luồng của phiên này — huba có thể đang bận hoặc đã dừng. Thử lại hoặc mở phiên trên máy.';
         return;
       }
       loadBoard();
@@ -2408,7 +2408,7 @@
   }
 
   $('sessBack').addEventListener('click', () => {
-    // Stop following: otherwise hub keeps carrying a stream nobody reads.
+    // Stop following: otherwise huba keeps carrying a stream nobody reads.
     if (wantSession && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'msg', text: '/session -' }));
     }
@@ -2423,7 +2423,7 @@
   $('sessHandover').addEventListener('click', (e) => {
     if (!wantSession) return;
     $('sessHandoverBox').classList.remove('hidden');
-    $('sessHandoverBox').textContent = 'Đang xin bản bàn giao — hub hỏi chính phiên đó, mất khoảng nửa phút…';
+    $('sessHandoverBox').textContent = 'Đang xin bản bàn giao — huba hỏi chính phiên đó, mất khoảng nửa phút…';
     waitingFor = 'handover';
     sendCommand(`/handover ${wantSession}`, e.target);
   });
@@ -2439,7 +2439,7 @@
   let lastFocus = null;
   /// Phiên đang mở có cửa sổ gõ được không — quyết định đường của "hỏi bên lề".
   let sessCanType = false;
-  /// Phiên có tty nhưng hub không gõ vào được (VS Code · iTerm · tmux) — nói
+  /// Phiên có tty nhưng huba không gõ vào được (VS Code · iTerm · tmux) — nói
   /// đúng LÝ DO thay vì gộp chung với phiên nền.
   let sessHostTerminal = false;
 
@@ -2463,9 +2463,9 @@
     // màn cho tới hôm nay, tức trang hứa hộ một điều sản phẩm thôi làm.
     hint.textContent = {
       ask: sessCanType
-        ? 'Hub gõ /btw thẳng vào cửa sổ phiên — nhật ký phiên KHÔNG dài thêm, nhưng câu hỏi ăn vào ngữ cảnh đang chạy của nó.'
+        ? 'Huba gõ /btw thẳng vào cửa sổ phiên — nhật ký phiên KHÔNG dài thêm, nhưng câu hỏi ăn vào ngữ cảnh đang chạy của nó.'
         : sessHostTerminal
-        ? 'Phiên này ngồi trong cửa sổ hub không gõ vào được (VS Code · iTerm · tmux), nên câu hỏi chạy trên một bản sao — phiên gốc không bị đụng.'
+        ? 'Phiên này ngồi trong cửa sổ huba không gõ vào được (VS Code · iTerm · tmux), nên câu hỏi chạy trên một bản sao — phiên gốc không bị đụng.'
         : canTell === false
         ? 'Phiên này không gõ vào được, nên chỉ hỏi bên lề: câu hỏi chạy trên một bản sao, phiên gốc không bị đụng.'
         : 'Câu hỏi chạy trên bản sao — phiên gốc không bị đụng và không dừng lại.',
@@ -2510,7 +2510,7 @@
     waitingFor = 'tell';
     // Id ĐI CÙNG mệnh lệnh. Gửi `/session` rồi `/tell` là hai bản ghi rời
     // nhau trong phòng chat, và thứ tự KHÔNG được bảo đảm — đo 2026-08-11:
-    // một `/ask` vượt lên trước `/session` của chính nó và hub gõ vào NHẦM
+    // một `/ask` vượt lên trước `/session` của chính nó và huba gõ vào NHẦM
     // phiên đang làm việc.
     sendCommand(`/tell ${wantSession} ${text}`, e && e.target);
     input.value = '';
@@ -2529,12 +2529,12 @@
     }
     note.classList.remove('hidden');
     note.textContent = 'Đang mở phiên nền trên máy…';
-    // hub trả lời trong phòng chat. Không nhận nó về đây thì lời báo hỏng nằm
+    // huba trả lời trong phòng chat. Không nhận nó về đây thì lời báo hỏng nằm
     // ở TAB KHÁC với cái nút vừa bấm, và màn này đứng im như đang chạy tốt.
     waitingFor = 'new';
     // Tài khoản đi kèm LUÔN, kể cả tài khoản mặc định: Hà chọn acc2 mà lệnh vẫn
     // chạy `claude` là lỗi đã gặp thật (2026-08-10), và một tên viết ra rõ ràng
-    // thì hub từ chối được khi sai, còn tên bỏ trống thì lặng lẽ rơi về mặc định.
+    // thì huba từ chối được khi sai, còn tên bỏ trống thì lặng lẽ rơi về mặc định.
     const at = account ? `@${account} ` : '';
     sendCommand(`/new ${project} ${at}${task}`, e.target);
     $('sessNewTask').value = '';
@@ -2576,11 +2576,11 @@
     if (!q) { input.focus(); return; }
     $('sessAskBox').classList.remove('hidden');
     $('sessAskBox').textContent = sessCanType
-      ? 'Đang hỏi bên lề — hub gõ /btw thẳng vào cửa sổ phiên và chờ nó trả lời trong bảng bên…'
-      : 'Đang hỏi bên lề — hub mở một bản sao của phiên, mất khoảng nửa phút. Phiên gốc vẫn chạy bình thường…';
+      ? 'Đang hỏi bên lề — huba gõ /btw thẳng vào cửa sổ phiên và chờ nó trả lời trong bảng bên…'
+      : 'Đang hỏi bên lề — huba mở một bản sao của phiên, mất khoảng nửa phút. Phiên gốc vẫn chạy bình thường…';
     waitingFor = 'ask';
     // Remember which answer was already on screen. Snapshots keep arriving
-    // while hub is still thinking, and each one carries the PREVIOUS answer —
+    // while huba is still thinking, and each one carries the PREVIOUS answer —
     // repainting it over "đang hỏi…" would show a stale reply as if it were the
     // new one. Ask the same question twice and the screen would answer
     // instantly with yesterday's text.
@@ -2589,14 +2589,14 @@
     input.value = '';
   }
 
-  // Which session button is waiting for hub: 'ask' | 'handover' | null.
+  // Which session button is waiting for huba: 'ask' | 'handover' | null.
   let waitingFor = null;
   // `ts` of the answer currently on screen, and the one a pending question must
   // beat before its result may be painted.
   let lastAsideTs = '';
   let askedAfterTs = '';
 
-  /// hub answers in the ROOM, and a refusal ("hết ngân sách", "chưa mở phiên
+  /// huba answers in the ROOM, and a refusal ("hết ngân sách", "chưa mở phiên
   /// nào") never becomes a snapshot row — so a box that only listens to
   /// snapshots spins forever on exactly the cases a person most needs to read.
   /// That spinner was already paid for once on 2026-08-07; this is the same
@@ -2666,7 +2666,7 @@
     const rows = [
       ['tài khoản', s.account],
       ['nơi chạy', (WHERE[s.host] || s.host) + (s.tty && s.tty !== '??' ? ` · ${s.tty}` : '')],
-      ['mở bởi', s.started_by_hub ? 'hub (từ điện thoại)' : (s.parent_name ? `phiên «${s.parent_name}»` : 'bạn')],
+      ['mở bởi', s.started_by_hub ? 'huba (từ điện thoại)' : (s.parent_name ? `phiên «${s.parent_name}»` : 'bạn')],
       ['model', s.model || '(chưa rõ)'],
       // Ngữ cảnh là con số quyết định "khi nào nên đóng sổ", nên nó đứng đây
       // chứ không chỉ nằm trên thẻ ở danh sách.
@@ -2699,11 +2699,11 @@
   function noteSessionReply(f) {
     if (!waitingFor || f.from === me) return;
     const text = String(f.text || '');
-    // Trả lời phải KHỚP LỆNH đã hỏi, không phải "bất kỳ trả lời nào của hub".
+    // Trả lời phải KHỚP LỆNH đã hỏi, không phải "bất kỳ trả lời nào của huba".
     //
     // Bản trước nhận mọi câu bắt đầu bằng một trong sáu dấu rồi đổ vào ô đang
     // chờ — nên bấm "Đóng sổ" mà màn hiện *"🚀 Đã mở phiên nền cho
-    // hub-act-demo…"*, tức lời đáp của một lệnh KHÁC (Hà gặp 2026-08-09).
+    // huba-act-demo…"*, tức lời đáp của một lệnh KHÁC (Hà gặp 2026-08-09).
     // Mỗi loại chờ nay chỉ nhận dấu của chính nó; `⚠` thì ai cũng nhận, vì một
     // lời từ chối là câu trả lời cho đúng cái vừa hỏi.
     //
@@ -2712,7 +2712,7 @@
     //   1. `🔒 Đã gửi yêu cầu xác nhận…` — tin GIỮA CHỪNG, chưa phải kết cục;
     //   2. `✋ đã huỷ` · `⌛ hết hạn` · `⏹ đã dừng` — kết cục thật.
     // Thiếu cả hai nhóm này thì màn đứng nguyên ở "Đang dừng phiên…" **vĩnh
-    // viễn** khi không ai bấm Telegram — đo thật 2026-08-10: hub đã nói `⌛ Hết
+    // viễn** khi không ai bấm Telegram — đo thật 2026-08-10: huba đã nói `⌛ Hết
     // hạn chờ xác nhận — không dừng phiên nào` vào phòng lúc 07:54:00 mà màn
     // phiên vẫn khai đang dừng. Một màn nói "đang làm" cho việc CHẮC CHẮN không
     // xảy ra còn tệ hơn không nói gì: nó dạy người ta đừng bấm lại.
@@ -2808,7 +2808,7 @@
     ans.textContent = a.answer;
 
     // The claim that matters, stated every time — and it is not the same claim
-    // on both paths. `new_session_id === source_id` means hub typed `/btw` into
+    // on both paths. `new_session_id === source_id` means huba typed `/btw` into
     // the live window: the answer came from the session itself and that session
     // now carries one more turn. Saying "trên bản sao … không thêm lượt nào"
     // there is the page asserting something untrue about the owner's own
@@ -2846,7 +2846,7 @@
   /// One session rendered as a terminal would: say · tool · result · think.
   /// Chữ đang hiện trên cửa sổ phiên, và các lựa chọn nếu nó đang hỏi.
   ///
-  /// Không có nút "xem": hub đọc màn mỗi lần đẩy ảnh chụp, và vòng bám đẩy ngay
+  /// Không có nút "xem": huba đọc màn mỗi lần đẩy ảnh chụp, và vòng bám đẩy ngay
   /// khi chữ trên màn đổi — kể cả khi nhật ký đứng yên, vốn đúng là lúc phiên
   /// dừng lại hỏi. Bắt người ta bấm để biết có gì mới là hỏng cả ý sản phẩm.
   function renderScreen(focus) {
@@ -2924,7 +2924,7 @@
     box.classList.toggle('term', $('termMode').checked);
     const status = $('sessStatus');
     if (!focus || focus.session_id !== wantSession) {
-      status.textContent = 'Đang mở phiên — hub đọc nhật ký và đẩy về…';
+      status.textContent = 'Đang mở phiên — huba đọc nhật ký và đẩy về…';
       return;
     }
     if (focus.note) {
@@ -2952,7 +2952,7 @@
 
     // NEO theo dòng đang nhìn, không theo con số scrollTop.
     //
-    // Cửa sổ luồng trượt: hub đọc 256KB cuối nhật ký, nên phiên càng chạy thì
+    // Cửa sổ luồng trượt: huba đọc 256KB cuối nhật ký, nên phiên càng chạy thì
     // các sự kiện CŨ càng rụng khỏi ĐẦU danh sách — đo được 2026-08-09: một
     // nhịp làm mới bỏ 4 dòng, trang ngắn đi 667px. Khôi phục bằng `scrollTop`
     // cũ là giữ đúng CON SỐ và mất đúng CHỖ ĐANG ĐỌC. Nên nhớ một dòng cụ thể
@@ -3162,10 +3162,10 @@
   //
   // Same groups as the console. Each control remembers the value it was drawn
   // with; "Lưu" sends one `/set <key> <value>` per field that actually
-  // changed, so the room shows exactly what was altered and hub validates
+  // changed, so the room shows exactly what was altered and huba validates
   // each one through `Config` before writing the file.
   const CFG_FIELDS = {
-    // github · devlog · email · telegram đã bị gỡ khỏi hub ngày 2026-08-08.
+    // github · devlog · email · telegram đã bị gỡ khỏi huba ngày 2026-08-08.
     // Giữ tên chúng ở đây không phải là "an toàn": mỗi dòng chỉ vẽ ra một câu
     // "(không có trong cấu hình)" trên màn điện thoại — bảy dòng rác cho một
     // sản phẩm không còn tồn tại.
@@ -3271,7 +3271,7 @@
     }
     changed.forEach((f) => ws.send(JSON.stringify({ type: 'msg', text: `/set ${f.key} ${f.now}` })));
     $('cfgMsg').textContent =
-      `Đã gửi ${changed.length} thay đổi (${changed.map((c) => c.key).join(', ')}) — xem hub xác nhận trong phòng chat.`;
+      `Đã gửi ${changed.length} thay đổi (${changed.map((c) => c.key).join(', ')}) — xem huba xác nhận trong phòng chat.`;
     setTimeout(loadBoard, 8000);
   });
 
@@ -3347,7 +3347,7 @@
     const up = d.uptime_sec == null
       ? 'không rõ (ảnh chụp dựng từ CLI, không phải daemon)'
       : `${Math.floor(d.uptime_sec / 60)} phút · pid ${d.pid}`;
-    row('hubd đang chạy', up, d.uptime_sec == null ? 'warn' : 'ok');
+    row('hubad đang chạy', up, d.uptime_sec == null ? 'warn' : 'ok');
 
     const auto = (rt.slow || {}).autostart || {};
     if (auto.loaded === true) {
@@ -3364,7 +3364,7 @@
       row('tự chạy khi bật máy', 'chưa hỏi được launchd', 'warn');
     }
 
-    // Hai cách hub chết lặng mà mọi màn khác vẫn xanh (đo 2026-08-10):
+    // Hai cách huba chết lặng mà mọi màn khác vẫn xanh (đo 2026-08-10):
     // chữ ký rơi về ad-hoc ⇒ lần bật máy sau macOS không nhận ra chương trình;
     // bản cài cũ hơn bản build ⇒ daemon đang chạy mã của hôm qua.
     if (auto.signature === 'adhoc') {
@@ -3474,10 +3474,10 @@
     // thì chính cái lệnh phụ ấy ném lỗi và giết luôn lệnh chính.
     if (btn) btn.disabled = true;
     ws.send(JSON.stringify({ type: 'msg', text }));
-    cmdNote(`Đã gửi "${text}" — chờ hub trả lời trong phòng chat…`);
-    // hub trả lời trong phòng, còn TRẠNG THÁI thì về theo ảnh chụp kế tiếp —
+    cmdNote(`Đã gửi "${text}" — chờ huba trả lời trong phòng chat…`);
+    // huba trả lời trong phòng, còn TRẠNG THÁI thì về theo ảnh chụp kế tiếp —
     // và ảnh ấy đến muộn hơn câu trả lời. Một cú làm mới sau 6 giây là canh
-    // đúng vào lúc hub CHƯA xong: `/new` mất tới ~14 giây. Hỏi lại vài nhịp,
+    // đúng vào lúc huba CHƯA xong: `/new` mất tới ~14 giây. Hỏi lại vài nhịp,
     // có hạn, thay vì đặt cược vào một mốc thời gian.
     setTimeout(() => { if (btn) btn.disabled = false; }, 6000);
     let tries = 0;
@@ -3496,7 +3496,7 @@
 
   // Đã gỡ trong cùng ngày 2026-08-08, không để lại mã chết: tab "Chi phí" +
   // hai biểu đồ ECharts, tab "Hộp việc" (danh sách · chi tiết · Duyệt/Bỏ/Đóng/
-  // Trả lời · ô "Hỏi hub"), ô chờ "đang xử lý", và mọi con số tiền. Tất cả là
+  // Trả lời · ô "Hỏi huba"), ô chờ "đang xử lý", và mọi con số tiền. Tất cả là
   // đồ của nhánh hộp thư — trang này giờ chỉ để xem và điều khiển các phiên
   // Claude đang chạy trên máy.
 
@@ -3525,7 +3525,7 @@
     ws.send(JSON.stringify({ type: 'msg', text }));
     textEl.value = '';
     textEl.style.height = 'auto';
-    // No spinner: hub answers an ORDER in the room within a cycle, and an
+    // No spinner: huba answers an ORDER in the room within a cycle, and an
     // ordinary line is not answered at all. The old watcher followed a message
     // into a queue to report "still being sorted / waiting for you to approve"
     // — states that no longer exist.
@@ -3533,11 +3533,11 @@
 
   // ---- what happened to the question I just asked ------------------------
   //
-  // The spinner used to sit there forever, because at tier L0 hub writes a
+  // The spinner used to sit there forever, because at tier L0 huba writes a
   // DRAFT and waits for the owner — no reply ever arrives on its own. "Đang
   // xử lý" was true for about a minute and a lie after that.
   //
-  // So follow the message into hub's own snapshot and say what is actually
+  // So follow the message into huba's own snapshot and say what is actually
   // true: still being triaged, folded into an earlier question, or finished
   // and waiting for YOU to approve — with the approve button right here.
   let pendingWatch = null;

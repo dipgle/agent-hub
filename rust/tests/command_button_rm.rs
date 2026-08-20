@@ -20,7 +20,7 @@
 //! Cùng hình dạng với ca `.docx` tối nay: **gỡ một luật mà quên gỡ những thứ
 //! dựng lên để phục vụ nó.**
 //!
-//! Fixture là NGUYÊN VĂN tin ấy lấy từ `logs/hub.log`
+//! Fixture là NGUYÊN VĂN tin ấy lấy từ `logs/huba.log`
 //! (`channel_command_handled`, `kind: Shot`, 16:44:33Z, 1927 byte).
 
 use std::path::Path;
@@ -37,7 +37,7 @@ const TEST_FILE: &str = "~/projects/AI/tfl5/ide/src/__tests__/deploy_domains_by_
 /// Triệu chứng Hà đọc được: dòng ấy phải nằm trong bộ lệnh bóc ra từ tin.
 #[test]
 fn a_remove_line_is_a_command() {
-    let got = hub::keys::commands_in_report(&shot_text(), 8);
+    let got = huba::keys::commands_in_report(&shot_text(), 8);
     assert!(
         got.iter().any(|c| c == RM_LINE),
         "dòng rm không được nhận là lệnh nên mất cả ▶️ lẫn 🖥: {got:?}"
@@ -52,15 +52,15 @@ fn a_remove_line_is_a_command() {
 #[test]
 fn the_file_it_deletes_gets_no_download_button() {
     let text = shot_text();
-    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&text), 4);
-    let cmds: Vec<hub::sessions::Cmd> = hub::keys::commands_in_report(&text, 8)
+    let seen = huba::keys::paths_on_screen(&huba::keys::body_before_box(&text), 4);
+    let cmds: Vec<huba::sessions::Cmd> = huba::keys::commands_in_report(&text, 8)
         .into_iter()
-        .map(|line| hub::sessions::Cmd {
+        .map(|line| huba::sessions::Cmd {
             line,
             cwd: String::new(),
         })
         .collect();
-    let kept = hub::pipeline::paths_not_in_commands(&text, &seen, &cmds);
+    let kept = huba::pipeline::paths_not_in_commands(&text, &seen, &cmds);
     assert!(
         !kept.iter().any(|p| p.contains("deploy_domains_by_role")),
         "tệp bị lệnh rm nhắc tới lại mọc nút tải: {kept:?}"
@@ -79,7 +79,7 @@ fn the_file_it_deletes_gets_no_download_button() {
 fn prose_about_removing_is_not_a_command() {
     let prose = "Tôi đã rm mấy tệp thăm dò, giờ cây sạch rồi.\n\
                  Chưa xoá gì thêm.\n";
-    let got = hub::keys::commands_in_report(prose, 4);
+    let got = huba::keys::commands_in_report(prose, 4);
     assert!(
         got.is_empty(),
         "câu văn có chữ rm bị dựng thành nút chạy: {got:?}"
@@ -91,7 +91,7 @@ fn prose_about_removing_is_not_a_command() {
 #[test]
 fn a_blocked_remove_line_still_gets_no_button() {
     let screen = "❌ hook chặn: rm -rf ~/projects/AI/tfl5/ide/src/__tests__\n";
-    let got = hub::keys::commands_in_report(screen, 4);
+    let got = huba::keys::commands_in_report(screen, 4);
     assert!(
         got.is_empty(),
         "câu báo BỊ CHẶN lại thành nút mời chạy: {got:?}"

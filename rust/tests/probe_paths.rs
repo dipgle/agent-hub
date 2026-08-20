@@ -5,13 +5,13 @@
 //! Luật cũ chỉ nhận đường TUYỆT ĐỐI, nên mọi đường tương đối trong báo cáo của
 //! phiên đều là chữ chết trên điện thoại.
 
-use hub::keys::paths_on_screen;
-use hub::pipeline::sendable_file;
+use huba::keys::paths_on_screen;
+use huba::pipeline::sendable_file;
 
 /// Một cây tạm để đo phần "hỏi đĩa" — không mock, vì chính phép hỏi đĩa là thứ
 /// đang được kiểm.
 fn tmp_tree(tag: &str) -> std::path::PathBuf {
-    let root = std::env::temp_dir().join(format!("hub-test-{tag}-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("huba-test-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("docs/history")).unwrap();
     std::fs::create_dir_all(root.join("target/debug")).unwrap();
@@ -93,10 +93,10 @@ fn a_bare_file_name_is_a_candidate_for_the_disk_to_judge() {
 /// Đường tuyệt đối giữ nguyên đường cũ, kể cả đuôi lạ.
 #[test]
 fn absolute_paths_still_work_with_any_text_extension() {
-    let text = "xem ~/projects/hub/hub.config.json và /etc/hosts.allow nhé";
+    let text = "xem ~/projects/huba/huba.config.json và /etc/hosts.allow nhé";
     let got = paths_on_screen(text, 4);
     assert!(
-        got.contains(&"~/projects/hub/hub.config.json".to_string()),
+        got.contains(&"~/projects/huba/huba.config.json".to_string()),
         "{got:?}"
     );
 }
@@ -104,6 +104,6 @@ fn absolute_paths_still_work_with_any_text_extension() {
 /// Tệp nhị phân thì không, dù đường tuyệt đối — bấm vào cũng không gửi được.
 #[test]
 fn binary_files_never_become_buttons() {
-    let text = "ảnh ở ~/projects/hub/ui-shots/after.png";
+    let text = "ảnh ở ~/projects/huba/ui-shots/after.png";
     assert!(paths_on_screen(text, 4).is_empty());
 }

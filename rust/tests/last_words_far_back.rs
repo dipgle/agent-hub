@@ -12,7 +12,7 @@ use std::io::Write;
 
 #[test]
 fn the_last_spoken_words_are_found_under_a_pile_of_tool_turns() {
-    let dir = std::env::temp_dir().join(format!("hub-lastsay-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("huba-lastsay-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("tạo thư mục tạm");
     let path = dir.join("phien.jsonl");
     let mut f = std::fs::File::create(&path).expect("tạo tệp");
@@ -48,11 +48,11 @@ fn the_last_spoken_words_are_found_under_a_pile_of_tool_turns() {
     let whole = std::fs::read_to_string(&path).unwrap();
     let cut = whole.len() - 256 * 1024;
     assert!(
-        hub::sessions::last_prose(&whole[cut..], 600).is_none(),
+        huba::sessions::last_prose(&whole[cut..], 600).is_none(),
         "khung 256 KB cũ phải mù với ca này, nếu không thì bài kiểm vô nghĩa"
     );
 
-    let said = hub::sessions::last_prose_of_file(&path, 600)
+    let said = huba::sessions::last_prose_of_file(&path, 600)
         .expect("phải tìm ra lời cuối dù nó nằm ngoài khung 256 KB");
     assert!(said.contains("Đã dựng xong site"), "tìm nhầm chỗ: {said:?}");
 
@@ -62,7 +62,7 @@ fn the_last_spoken_words_are_found_under_a_pile_of_tool_turns() {
 /// …và phiên chưa nói câu nào thì vẫn là `None` — đừng bịa ra một câu để lấp chỗ.
 #[test]
 fn a_session_that_never_spoke_stays_silent() {
-    let dir = std::env::temp_dir().join(format!("hub-lastsay-none-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("huba-lastsay-none-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("tạo thư mục tạm");
     let path = dir.join("phien.jsonl");
     std::fs::write(
@@ -71,6 +71,6 @@ fn a_session_that_never_spoke_stays_silent() {
 "#,
     )
     .unwrap();
-    assert!(hub::sessions::last_prose_of_file(&path, 600).is_none());
+    assert!(huba::sessions::last_prose_of_file(&path, 600).is_none());
     let _ = std::fs::remove_dir_all(&dir);
 }

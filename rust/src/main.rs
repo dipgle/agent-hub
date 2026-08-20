@@ -1,24 +1,24 @@
-//! hub — CLI for the comms hub.
+//! huba — CLI for the comms huba.
 
 use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use hub::config::{self, Config};
-use hub::db::Db;
-use hub::exec::{run, truncate, RunOpts};
-use hub::logging;
-use hub::pipeline::{known_projects, run_once};
+use huba::config::{self, Config};
+use huba::db::Db;
+use huba::exec::{run, truncate, RunOpts};
+use huba::logging;
+use huba::pipeline::{known_projects, run_once};
 
 #[derive(Parser)]
 #[command(
-    name = "hub",
-    about = "hub — quản lý các phiên Claude CLI trên máy này, điều khiển từ Telegram",
+    name = "huba",
+    about = "huba — quản lý các phiên Claude CLI trên máy này, điều khiển từ Telegram",
     version
 )]
 struct Cli {
-    /// Path to hub.config.json (default: nearest one walking up from cwd)
+    /// Path to huba.config.json (default: nearest one walking up from cwd)
     #[arg(long, global = true)]
     config: Option<PathBuf>,
     /// Log every step (default: warn for interactive commands)
@@ -32,7 +32,7 @@ struct Cli {
 enum Command {
     /// Check the channel + secrets, honestly
     Doctor,
-    /// Dựng lại chính hub: build → ký → cài → khởi động lại launchd
+    /// Dựng lại chính huba: build → ký → cài → khởi động lại launchd
     ///
     /// Hà 2026-08-13: *"tại sao không phải là luồng chạy độc lập trên rust, tức
     /// là mọi lệnh và luồng xử lý phải nằm trong binary"*. Đây là bản Rust của
@@ -44,20 +44,20 @@ enum Command {
         #[arg(long)]
         no_restart: bool,
     },
-    /// Mở trang cấu hình ngay trên máy này rồi ghi hub.env (chmod 600)
+    /// Mở trang cấu hình ngay trên máy này rồi ghi huba.env (chmod 600)
     ///
-    /// Hà 2026-08-13: *"đóng gói hub thành app và cài trên máy có ui để cấu
+    /// Hà 2026-08-13: *"đóng gói huba thành app và cài trên máy có ui để cấu
     /// hình biến môi trường"*. Trang chạy ở 127.0.0.1, đóng ngay sau khi lưu.
     Setup,
-    /// Write hub.config.json + create the db
+    /// Write huba.config.json + create the db
     Init {
         #[arg(long)]
         force: bool,
     },
     /// One cycle: run the orders that arrived, then the bookkeeping
     Once,
-    // 🔴 `hub ingest` đã bỏ 2026-08-14 cùng chặng hỏi vòng: nó đọc phòng chat
-    // tfl5, và Telegram thì tự đẩy tới chứ không chờ ai hỏi. `hub once` vẫn còn
+    // 🔴 `huba ingest` đã bỏ 2026-08-14 cùng chặng hỏi vòng: nó đọc phòng chat
+    // tfl5, và Telegram thì tự đẩy tới chứ không chờ ai hỏi. `huba once` vẫn còn
     // — nó chạy nốt những gì đã tới, thứ vẫn có nghĩa.
     /// Spend hôm nay + những vòng chạy gần đây
     Status,
@@ -71,7 +71,7 @@ enum Command {
 
 fn main() {
     if let Err(e) = real_main() {
-        eprintln!("hub: {}", logging::err_chain(&e));
+        eprintln!("huba: {}", logging::err_chain(&e));
         std::process::exit(1);
     }
 }
@@ -98,15 +98,15 @@ fn real_main() -> Result<()> {
     match cli.command {
         Command::Doctor => cmd_doctor(&db, &cfg),
         Command::SelfInstall { no_restart } => {
-            println!("{}", hub::runtime::self_install(&cfg)?);
+            println!("{}", huba::runtime::self_install(&cfg)?);
             if no_restart {
                 println!("chưa khởi động lại (--no-restart)");
             } else {
-                println!("đã khởi động lại {}", hub::runtime::restart_daemon()?);
+                println!("đã khởi động lại {}", huba::runtime::restart_daemon()?);
             }
             Ok(())
         }
-        Command::Setup => hub::setup::serve(&cfg.hub_home),
+        Command::Setup => huba::setup::serve(&cfg.hub_home),
         Command::Init { force } => cmd_init(&cfg, force),
         Command::Once => {
             println!("{}", serde_json::to_string_pretty(&run_once(&db, &cfg)?)?);
@@ -119,17 +119,17 @@ fn real_main() -> Result<()> {
 
 /// What `claude` is doing on this machine right now. Read-only: this lists and
 /// reads transcripts, it never starts, stops, or types into a session.
-fn cmd_sessions(db: &hub::db::Db, cfg: &Config, as_json: bool) -> Result<()> {
-    let mut snap = hub::sessions::snapshot(cfg);
+fn cmd_sessions(db: &huba::db::Db, cfg: &Config, as_json: bool) -> Result<()> {
+    let mut snap = huba::sessions::snapshot(cfg);
     // Cùng một nguồn sự thật với ảnh chụp: màn và CLI không được nói khác nhau
     // về việc ai mở phiên nào.
-    hub::pipeline::mark_started_by_hub(db, &mut snap);
+    huba::pipeline::mark_started_by_hub(db, &mut snap);
     if as_json {
         println!("{}", serde_json::to_string_pretty(&snap)?);
         return Ok(());
     }
 
-    let counts = hub::sessions::count_by_account(&snap);
+    let counts = huba::sessions::count_by_account(&snap);
     let per = counts
         .iter()
         .map(|(a, n)| format!("{a} {n}"))
@@ -146,7 +146,7 @@ fn cmd_sessions(db: &hub::db::Db, cfg: &Config, as_json: bool) -> Result<()> {
     };
     if snap.hidden_dead > 0 {
         hidden.push_str(&format!(
-            "  · {} hàng không liệt kê (phiên tắt từ lâu, hoặc phép dò của chính hub)",
+            "  · {} hàng không liệt kê (phiên tắt từ lâu, hoặc phép dò của chính huba)",
             snap.hidden_dead
         ));
     }
@@ -221,7 +221,7 @@ fn cmd_doctor(db: &Db, cfg: &Config) -> Result<()> {
     );
 
     // The registry, checked against the folders it claims. A name with no
-    // folder used to be invisible: context came back empty and hub answered
+    // folder used to be invisible: context came back empty and huba answered
     // anyway, so a typo read exactly like a quiet project.
     if !cfg.projects.is_empty() {
         println!();
@@ -273,7 +273,7 @@ fn cmd_doctor(db: &Db, cfg: &Config) -> Result<()> {
     // Telegram đứng TRƯỚC: nó là kênh chính từ 2026-08-11, và cho tới hôm nay
     // `doctor` không kiểm nó một dòng nào — người mới làm đúng theo README vẫn
     // không biết bot nối được chưa (xem `telegram::health`).
-    let tg = hub::telegram::health(cfg);
+    let tg = huba::telegram::health(cfg);
     println!(
         "  {:<9} {}       {}",
         "telegram",
@@ -282,7 +282,7 @@ fn cmd_doctor(db: &Db, cfg: &Config) -> Result<()> {
     );
     // 🔴 Vòng dò sức khoẻ các "adapter" đã bỏ 2026-08-14: chỉ còn đúng một
     // kênh, và nó vừa được in ngay phía trên. Một vòng lặp trên danh sách rỗng
-    // in ra không dòng nào, nhưng nó để lại ấn tượng rằng hub còn nhiều kênh —
+    // in ra không dòng nào, nhưng nó để lại ấn tượng rằng huba còn nhiều kênh —
     // và cái ấn tượng ấy là thứ khiến người ta đi tìm một trang không còn tồn
     // tại.
 
@@ -317,7 +317,7 @@ fn cmd_init(cfg: &Config, force: bool) -> Result<()> {
     println!(
         "db ready at {} (schema v{})",
         cfg.db.display(),
-        hub::db::SCHEMA_VERSION
+        huba::db::SCHEMA_VERSION
     );
     Ok(())
 }
@@ -333,7 +333,7 @@ fn short(s: Option<&str>, n: usize) -> String {
 
 fn cmd_status(db: &Db) -> Result<()> {
     // No message/decision/outbox counts: those tables belonged to the inbox and
-    // nothing writes them any more. What is left is what hub actually does —
+    // nothing writes them any more. What is left is what huba actually does —
     // what the owner's own calls cost, and whether the room is being read.
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     println!("spend hôm nay  ${:.4}", db.owner_cost_on_day(&today)?);

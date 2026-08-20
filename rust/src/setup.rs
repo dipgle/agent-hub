@@ -1,14 +1,14 @@
-//! `hub setup` — trang cấu hình chạy NGAY TRÊN MÁY cài hub.
+//! `huba setup` — trang cấu hình chạy NGAY TRÊN MÁY cài huba.
 //!
 //! Hà 2026-08-13, khi bàn chuyện mở repo công khai: *"cần kiến trúc rõ ràng để
 //! ai kéo về cấu hình đơn giản là dùng được (dành cho người không rành kỹ
-//! thuật)"* → *"đóng gói hub thành app và cài trên máy có ui để cấu hình biến
+//! thuật)"* → *"đóng gói huba thành app và cài trên máy có ui để cấu hình biến
 //! môi trường"*.
 //!
 //! Tôi đã trả lời sai một lần và cần ghi lại cho khỏi lặp: tôi viện luật *"cấu
 //! hình không giữ bí mật"* để nói KHÔNG với một trang cấu hình. Hà chỉ đúng chỗ
-//! sai — *"ui là của hub để quản lý kết nối trên máy cài đặt, đâu liên quan tới
-//! bảo mật"*. Luật ấy nói về **nơi bí mật NẰM** (`hub.env`, chmod 600, không
+//! sai — *"ui là của huba để quản lý kết nối trên máy cài đặt, đâu liên quan tới
+//! bảo mật"*. Luật ấy nói về **nơi bí mật NẰM** (`huba.env`, chmod 600, không
 //! bao giờ vào git, không bao giờ vào ảnh chụp trạng thái), chứ không nói về
 //! **cái gì ghi ra nó**. Một trang chạy trên chính máy ấy là một trình soạn
 //! thảo dễ dùng hơn `vi`, không hơn không kém.
@@ -26,7 +26,7 @@
 //! * **Không bao giờ hiện lại giá trị đã lưu** — trang chỉ nói khoá ấy *đã có*
 //!   hay *chưa có*. Đọc file 600 rồi bơm ngược ra HTTP là tự tay dựng đúng cái
 //!   đường rò mà file 600 sinh ra để chặn.
-//! * **Ghi rồi mới đổi tên** (`hub.env.tmp` → `hub.env`), và đặt quyền 600
+//! * **Ghi rồi mới đổi tên** (`huba.env.tmp` → `huba.env`), và đặt quyền 600
 //!   TRƯỚC khi đổi tên, để không có một khoảnh khắc nào file mật nằm đó với
 //!   quyền mặc định.
 
@@ -55,21 +55,21 @@ struct Field {
 // 🔴 Ba ô tfl5 (`HUB_TFL5_USER`, `HUB_TFL5_PASSWORD`, `HUB_TFL5_ALICE_PASSWORD`)
 // đã bỏ 2026-08-14 cùng cái kênh. Hai ô còn lại nay là BẮT BUỘC, và đó là thay
 // đổi có nghĩa chứ không phải dọn dẹp: khi còn phòng chat thì Telegram là kênh
-// phụ, *"bỏ trống cũng chạy"*. Nay nó là kênh DUY NHẤT — thiếu khoá thì hub
+// phụ, *"bỏ trống cũng chạy"*. Nay nó là kênh DUY NHẤT — thiếu khoá thì huba
 // không có mồm nào để nghe, nên trang phải nói thẳng ngay lúc nhập, thay vì để
 // người ta lưu xong rồi ngồi đợi một con bot không bao giờ trả lời.
 const FIELDS: &[Field] = &[
     Field {
         key: "HUB_TELEGRAM_BOT_TOKEN",
         label: "Token bot Telegram",
-        hint: "Xin ở @BotFather. Đây là kênh DUY NHẤT của hub — thiếu khoá này thì không ra lệnh được từ điện thoại.",
+        hint: "Xin ở @BotFather. Đây là kênh DUY NHẤT của huba — thiếu khoá này thì không ra lệnh được từ điện thoại.",
         secret: true,
         required: true,
     },
     Field {
         key: "HUB_TELEGRAM_CHAT_ID",
         label: "Chat ID Telegram",
-        hint: "Nhắn một câu cho bot rồi mở https://api.telegram.org/bot<TOKEN>/getUpdates và đọc message.chat.id. Đây cũng là CỔNG: chỉ buồng chat này ra lệnh được cho hub.",
+        hint: "Nhắn một câu cho bot rồi mở https://api.telegram.org/bot<TOKEN>/getUpdates và đọc message.chat.id. Đây cũng là CỔNG: chỉ buồng chat này ra lệnh được cho huba.",
         secret: false,
         required: true,
     },
@@ -77,7 +77,7 @@ const FIELDS: &[Field] = &[
 
 /// Mở trang cấu hình rồi CHỜ tới khi lưu xong (hoặc chủ máy đóng bằng Ctrl-C).
 pub fn serve(hub_home: &Path) -> Result<()> {
-    let env_path = hub_home.join("hub.env");
+    let env_path = hub_home.join("huba.env");
     let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))?;
     let port = listener.local_addr()?.port();
     // Vé một lần. `SystemTime` + địa chỉ con trỏ là đủ cho một cái vé sống vài
@@ -96,7 +96,7 @@ pub fn serve(hub_home: &Path) -> Result<()> {
         "setup_started",
         json!({ "port": port, "env": env_path.display().to_string() }),
     );
-    println!("\n  Mở trang cấu hình hub:\n\n    {url}\n");
+    println!("\n  Mở trang cấu hình huba:\n\n    {url}\n");
     println!("  (chỉ máy này vào được — trang đóng ngay sau khi bạn bấm Lưu)\n");
     open_window(&url);
 
@@ -115,7 +115,7 @@ pub fn serve(hub_home: &Path) -> Result<()> {
                     json!({ "env": env_path.display().to_string() }),
                 );
                 println!("  ✅ Đã ghi {} (chmod 600).", env_path.display());
-                println!("  Kiểm tra thật:  ./hub doctor");
+                println!("  Kiểm tra thật:  ./huba doctor");
                 return Ok(());
             }
             Ok(false) => {}
@@ -234,7 +234,7 @@ fn respond(stream: &mut TcpStream, status: &str, ctype: &str, body: &[u8]) -> Re
     Ok(())
 }
 
-/// Khoá nào ĐÃ có giá trị trong `hub.env` — **chỉ tên khoá, không lấy giá trị**.
+/// Khoá nào ĐÃ có giá trị trong `huba.env` — **chỉ tên khoá, không lấy giá trị**.
 pub fn existing_keys(env_path: &Path) -> Vec<String> {
     read_env(env_path)
         .into_iter()
@@ -243,7 +243,7 @@ pub fn existing_keys(env_path: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Đọc `hub.env` thành cặp khoá–giá trị. Dòng chú thích và dòng rỗng bỏ qua.
+/// Đọc `huba.env` thành cặp khoá–giá trị. Dòng chú thích và dòng rỗng bỏ qua.
 fn read_env(env_path: &Path) -> BTreeMap<String, String> {
     let mut out = BTreeMap::new();
     let Ok(text) = std::fs::read_to_string(env_path) else {
@@ -263,7 +263,7 @@ fn read_env(env_path: &Path) -> BTreeMap<String, String> {
 
 /// Trộn giá trị mới vào file cũ rồi ghi lại — **giữ nguyên khoá lạ**.
 ///
-/// Giữ khoá lạ là có chủ ý: `hub.env` là file của CHỦ MÁY, không phải file của
+/// Giữ khoá lạ là có chủ ý: `huba.env` là file của CHỦ MÁY, không phải file của
 /// trang này. Ghi đè sạch nghĩa là một trang cấu hình biết 5 khoá sẽ lặng lẽ
 /// xoá khoá thứ 6 mà ai đó thêm tay.
 ///
@@ -281,7 +281,7 @@ fn save_env(env_path: &Path, form: &BTreeMap<String, String>) -> Result<Vec<Stri
         }
     }
     let mut text = String::from(
-        "# hub — bí mật của máy này. Ghi bởi `hub setup`.\n\
+        "# huba — bí mật của máy này. Ghi bởi `huba setup`.\n\
          # Chỉ TÊN khoá được ghi vào log, không bao giờ ghi giá trị.\n\n",
     );
     for (k, v) in &merged {
@@ -372,12 +372,12 @@ fn form_page(ticket: &str, have: &[String]) -> String {
     format!(
         "<!doctype html><html lang=\"vi\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <title>Cấu hình hub</title><style>{STYLE}</style></head><body>\
-         <h1>Cấu hình hub</h1>\
+         <title>Cấu hình huba</title><style>{STYLE}</style></head><body>\
+         <h1>Cấu hình huba</h1>\
          <p class=\"lead\">Trang này chỉ chạy trên máy của bạn. Bấm Lưu là nó ghi thẳng vào \
-         <code>hub.env</code> (chmod 600) rồi tự đóng — không có gì đi ra ngoài.</p>\
+         <code>huba.env</code> (chmod 600) rồi tự đóng — không có gì đi ra ngoài.</p>\
          <div class=\"note\"><b>Một bot Telegram cho riêng bạn.</b> Đừng dùng chung bot với người \
-         khác: tin hub gửi đi mang <i>chữ đang hiện trên màn</i> phiên của bạn, và <code>chat_id</code> \
+         khác: tin huba gửi đi mang <i>chữ đang hiện trên màn</i> phiên của bạn, và <code>chat_id</code> \
          dưới đây là cổng DUY NHẤT — đúng một phép so ấy là thứ ngăn người lạ chạy lệnh bằng shell \
          của bạn.</div>\
          <form method=\"POST\" action=\"/save?t={ticket}\">{inputs}<button>Lưu</button></form>\
@@ -404,8 +404,8 @@ fn saved_page(written: &[String]) -> String {
          <title>Đã lưu</title><style>{STYLE}</style></head><body>\
          <h1>✅ Đã lưu</h1>{list}\
          <p>Bước tiếp theo, chạy ở terminal:</p>\
-         <p><code>./hub doctor</code> — kiểm tra thật: hỏi Telegram, tìm claude CLI, đọc thư mục dự án.</p>\
-         <p><code>./hub self-install</code> — cài daemon để hub tự chạy cùng máy.</p>\
+         <p><code>./huba doctor</code> — kiểm tra thật: hỏi Telegram, tìm claude CLI, đọc thư mục dự án.</p>\
+         <p><code>./huba self-install</code> — cài daemon để huba tự chạy cùng máy.</p>\
          <p style=\"color:#666\">Đóng tab này được rồi.</p></body></html>"
     )
 }
@@ -418,7 +418,7 @@ mod tests {
     fn an_empty_box_never_wipes_a_key_that_is_already_there() {
         let dir = std::env::temp_dir().join(format!("hubsetup{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("hub.env");
+        let p = dir.join("huba.env");
         std::fs::write(
             &p,
             "HUB_TELEGRAM_CHAT_ID=8110\nHUB_TELEGRAM_BOT_TOKEN=cu\nNGUOI_KHAC_THEM=giu\n",
@@ -457,7 +457,7 @@ mod tests {
     fn the_page_never_shows_a_value_it_read_back() {
         let dir = std::env::temp_dir().join(format!("hubsetup2{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join("hub.env");
+        let p = dir.join("huba.env");
         std::fs::write(&p, "HUB_TELEGRAM_BOT_TOKEN=khoa-that-cua-ha\n").unwrap();
 
         let have = existing_keys(&p);

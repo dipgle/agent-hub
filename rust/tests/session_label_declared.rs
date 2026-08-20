@@ -42,7 +42,7 @@ fn workspace() -> String {
 /// dự án gì"*.
 #[test]
 fn the_path_census_picks_the_wrong_project_here() {
-    let got = hub::sessions::folder_from_tail(&fixture(), &workspace());
+    let got = huba::sessions::folder_from_tail(&fixture(), &workspace());
     assert_eq!(
         got.as_deref(),
         Some("AI/tfl5"),
@@ -53,7 +53,7 @@ fn the_path_census_picks_the_wrong_project_here() {
 /// Bản vá: lời phiên TỰ KHAI thắng phép đếm.
 #[test]
 fn the_session_own_prefix_wins_over_the_census() {
-    let got = hub::sessions::folder_declared(&fixture(), &workspace());
+    let got = huba::sessions::folder_declared(&fixture(), &workspace());
     assert_eq!(
         got.as_deref(),
         Some("onghut"),
@@ -65,10 +65,10 @@ fn the_session_own_prefix_wins_over_the_census() {
 #[test]
 fn the_label_the_list_shows_is_the_declared_one() {
     let ws = workspace();
-    let got = hub::sessions::folder_for_session("test-onghut-08b1a8e8", &fixture(), &ws, || None);
+    let got = huba::sessions::folder_for_session("test-onghut-08b1a8e8", &fixture(), &ws, || None);
     assert_eq!(got.as_deref(), Some("onghut"));
     assert_eq!(
-        hub::sessions::display_name("hanguyen-9c", "onghut"),
+        huba::sessions::display_name("hanguyen-9c", "onghut"),
         "[onghut]"
     );
 }
@@ -87,11 +87,12 @@ fn with_no_declaration_the_census_still_answers() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(
-        hub::sessions::folder_declared(&tail_without_prose, &ws),
+        huba::sessions::folder_declared(&tail_without_prose, &ws),
         None,
         "không có lời nào thì đừng bịa ra một lời khai"
     );
-    let got = hub::sessions::folder_for_session("test-no-prose", &tail_without_prose, &ws, || None);
+    let got =
+        huba::sessions::folder_for_session("test-no-prose", &tail_without_prose, &ws, || None);
     assert_eq!(
         got.as_deref(),
         Some("AI/tfl5"),
@@ -113,19 +114,19 @@ fn a_bracket_that_is_not_a_project_is_not_a_declaration() {
         "[Request interrupted by user]",
     ] {
         assert_eq!(
-            hub::sessions::declared_label(text, &ws),
+            huba::sessions::declared_label(text, &ws),
             None,
             "nhận nhầm một lời khai: {text}"
         );
     }
     // Còn tên thật thì nhận, kể cả khi được bọc trong dấu nháy ngược như phiên
-    // hub vẫn viết (`[hub]`), và kể cả khi nằm trong ngăn kéo `AI/`.
+    // huba vẫn viết (`[huba]`), và kể cả khi nằm trong ngăn kéo `AI/`.
     assert_eq!(
-        hub::sessions::declared_label("`[hub]` Ba việc, gọn từng cái.", &ws).as_deref(),
-        Some("hub")
+        huba::sessions::declared_label("`[huba]` Ba việc, gọn từng cái.", &ws).as_deref(),
+        Some("huba")
     );
     assert_eq!(
-        hub::sessions::declared_label("[tfl5] Con số không sai", &ws).as_deref(),
+        huba::sessions::declared_label("[tfl5] Con số không sai", &ws).as_deref(),
         Some("AI/tfl5")
     );
 }
@@ -141,7 +142,7 @@ fn the_census_may_not_overwrite_a_declared_label() {
     let sid = "test-memo-onghut";
     // Lượt đo 1: có lời khai ⟹ nhớ "onghut" kèm hạng "tự khai".
     assert_eq!(
-        hub::sessions::folder_for_session(sid, &fixture(), &ws, || None).as_deref(),
+        huba::sessions::folder_for_session(sid, &fixture(), &ws, || None).as_deref(),
         Some("onghut")
     );
     // Lượt đo 2: lời khai đã trôi mất, chỉ còn đường dẫn tfl5 ⟹ GIỮ NGUYÊN.
@@ -151,7 +152,7 @@ fn the_census_may_not_overwrite_a_declared_label() {
         .collect::<Vec<_>>()
         .join("\n");
     assert_eq!(
-        hub::sessions::folder_for_session(sid, &tail_without_prose, &ws, || None).as_deref(),
+        huba::sessions::folder_for_session(sid, &tail_without_prose, &ws, || None).as_deref(),
         Some("onghut"),
         "phép đếm đã lật cái nhãn phiên tự khai — đúng lỗi 18/08"
     );

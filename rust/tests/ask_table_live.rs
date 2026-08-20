@@ -22,21 +22,21 @@
 #[ignore = "đọc màn một cửa sổ Terminal thật — chạy tay bằng --ignored"]
 fn what_characters_does_the_question_table_actually_draw() {
     let tty = std::env::var("HUB_LIVE_TTY").unwrap_or_else(|_| "ttys007".to_string());
-    let look = hub::keys::look(&tty, 40);
+    let look = huba::keys::look(&tty, 40);
     let body = match look {
-        hub::keys::Look::Saw { body, choices } => {
+        huba::keys::Look::Saw { body, choices } => {
             println!("hộp chọn đọc được: {} mục", choices.len());
             for (n, label) in &choices {
                 println!("  {n}. {label}");
             }
             body
         }
-        // 🪦 Nhánh `Withheld` gỡ 2026-08-16 — hub thôi giấu chữ với chính nó.
-        hub::keys::Look::Blind { why } => panic!("không đọc được màn: {why}"),
+        // 🪦 Nhánh `Withheld` gỡ 2026-08-16 — huba thôi giấu chữ với chính nó.
+        huba::keys::Look::Blind { why } => panic!("không đọc được màn: {why}"),
     };
     // Phép đo phải trỏ đúng chỗ: hàm đọc bảng chạy trên MÀN THẬT, không chỉ
     // trên hằng số chép tay trong test đơn vị.
-    match hub::keys::ask_table(&body) {
+    match huba::keys::ask_table(&body) {
         Some(t) => {
             println!(
                 "bảng đọc từ màn thật: {} câu · còn trống {} · nhãn {:?}",
@@ -67,7 +67,7 @@ fn what_characters_does_the_question_table_actually_draw() {
 
 /// Phép đo: một cú Enter RỜI có submit được ô nhập đang có chữ không?
 ///
-/// 🔴 Hà 2026-08-14: *"Vậy là tôi bấm enter không có tác dụng rồi"* — hub báo
+/// 🔴 Hà 2026-08-14: *"Vậy là tôi bấm enter không có tác dụng rồi"* — huba báo
 /// *"✓ đã bấm 'enter'"* mà chữ vẫn nằm nguyên trong ô. `do script` luôn kèm một
 /// dấu xuống dòng và TUI đọc cả lượt ghi như một cú DÁN, nên "gửi mỗi newline"
 /// có thể chỉ là dán một dòng trống vào nội dung.
@@ -101,19 +101,19 @@ fn pressing_enter_actually_submits_the_input_box() {
         println!("BỎ QUA — bài kiểm này GỬI PHÍM THẬT. Đặt HUB_LIVE_PRESS=1 nếu đúng là muốn bấm.");
         return;
     }
-    let w = hub::keys::window_of(&tty)
+    let w = huba::keys::window_of(&tty)
         .expect("hỏi được Terminal")
         .expect("tty phải gắn một cửa sổ");
     let read = |tty: &str| {
-        let body = hub::keys::screen_of(tty, 40).expect("đọc được màn").0;
-        let box_text = hub::keys::input_box_text(&body);
-        let table = hub::keys::ask_table(&body);
+        let body = huba::keys::screen_of(tty, 40).expect("đọc được màn").0;
+        let box_text = huba::keys::input_box_text(&body);
+        let table = huba::keys::ask_table(&body);
         (box_text, table)
     };
     let (box_before, tab_before) = read(&tty);
     println!("ô nhập TRƯỚC: {box_before:?}");
     println!("thanh tab TRƯỚC: {tab_before:?}");
-    hub::keys::press(w, "enter").expect("gửi được phím");
+    huba::keys::press(w, "enter").expect("gửi được phím");
     std::thread::sleep(std::time::Duration::from_millis(2500));
     let (box_after, tab_after) = read(&tty);
     println!("ô nhập SAU : {box_after:?}");

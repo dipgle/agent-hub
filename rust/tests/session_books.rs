@@ -1,11 +1,11 @@
 //! Nguồn của danh sách phiên: **sổ sách của chính CLI**, không phải `claude agents`.
 //!
-//! Đổi nguồn 2026-08-15 (Hà: *"tôi muốn mọi thông tin khi đi qua hub phải là
+//! Đổi nguồn 2026-08-15 (Hà: *"tôi muốn mọi thông tin khi đi qua huba phải là
 //! realtime chứ không phải đọc lịch sử"*). Mọi ca ở đây lấy hình dạng từ tệp
 //! THẬT trên máy này — `~/.claude/sessions/<pid>.json` và
 //! `~/.claude/jobs/<id>/state.json` — chứ không phải tôi nghĩ ra.
 
-use hub::sessions::{book_updated_at, is_claude_process, list_account_books};
+use huba::sessions::{book_updated_at, is_claude_process, list_account_books};
 use serde_json::json;
 use std::fs;
 use tempfile::TempDir;

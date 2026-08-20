@@ -7,7 +7,7 @@
 //! 10:43:05  new_in_terminal_failed  err="osascript quá 20s"  falling_back_to="--bg"
 //! ```
 //!
-//! Tức hub thử mở cửa sổ, `osascript` hết 20 giây không trả lời, nên nó lui về
+//! Tức huba thử mở cửa sổ, `osascript` hết 20 giây không trả lời, nên nó lui về
 //! `--bg` — đúng đường lui đã thiết kế. Cái sai là nó lui trong IM LẶNG: câu
 //! chào chỉ đổi hai chữ (`⌨ cửa sổ Terminal` → `🌙 phiên nền`), còn lý do thì
 //! nằm trong log — chỗ người cầm điện thoại không đọc được. Anh chỉ phát hiện
@@ -15,7 +15,7 @@
 //!
 //! Luật 3 (*"không có lỗi im lặng"*) đọc ở tầng NGƯỜI.
 
-use hub::sessions::{LiveSession, ST_ASK, ST_BG, ST_DEAD, ST_ERR, ST_RUN, ST_WAIT};
+use huba::sessions::{LiveSession, ST_ASK, ST_BG, ST_DEAD, ST_ERR, ST_RUN, ST_WAIT};
 
 /// Nút phiên và dòng chữ phải dùng CÙNG MỘT bảng — không phải hai bản chép.
 ///
@@ -60,8 +60,8 @@ fn the_button_and_the_line_agree_on_every_state() {
     ];
     for (f, want) in cases {
         let s = mk(&*f);
-        let line = hub::pipeline::session_list_text(std::slice::from_ref(&s), "", 0);
-        let button = hub::pipeline::session_button_label(&s);
+        let line = huba::pipeline::session_list_text(std::slice::from_ref(&s), "", 0);
+        let button = huba::pipeline::session_button_label(&s);
         assert!(line.contains(want), "dòng chữ thiếu {want}: {line}");
         assert!(button.contains(want), "nút thiếu {want}: {button}");
     }
@@ -70,7 +70,7 @@ fn the_button_and_the_line_agree_on_every_state() {
 /// Đường lui phải mang theo LÝ DO, và câu chào phải in nó ra.
 #[test]
 fn the_fallback_carries_its_reason() {
-    let started = hub::sessions::Started {
+    let started = huba::sessions::Started {
         session_id: "ed3e3d81-99ca".into(),
         project: String::new(),
         cwd: "/Users/hanguyen/projects".into(),
@@ -84,7 +84,7 @@ fn the_fallback_carries_its_reason() {
     assert!(!started.window);
 
     // …và đường CHÍNH thì không được bịa ra lý do nào.
-    let ok = hub::sessions::Started {
+    let ok = huba::sessions::Started {
         window: true,
         fallback_why: None,
         ..started

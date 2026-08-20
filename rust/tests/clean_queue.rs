@@ -4,11 +4,11 @@
 //! của PHIÊN). Chuỗi dưới đây là màn THẬT, chụp lúc gõ hai dòng vào một phiên
 //! đang bận — kể cả mấy khoảng trắng đuôi dòng mà TUI đệm ra.
 
-use hub::keys::queued_count;
+use huba::keys::queued_count;
 
 /// Màn thật, hai tin đang xếp hàng.
-const TWO_QUEUED: &str = "  ❯ (bo qua - dong do hang cho cua hub A)                    \n\
-                          \x20 ❯ (bo qua - dong do hang cho cua hub B)                    \n\
+const TWO_QUEUED: &str = "  ❯ (bo qua - dong do hang cho cua huba A)                    \n\
+                          \x20 ❯ (bo qua - dong do hang cho cua huba B)                    \n\
                           \n\
                           ────────────────────────────────────────\n\
                           ❯ Press up to edit queued messages\n\
@@ -47,19 +47,19 @@ fn an_empty_screen_has_no_queue() {
 
 /// 🔴 Chữ `queued message` nằm trong phần HỘI THOẠI không phải hàng chờ.
 ///
-/// Hà 2026-08-18, ảnh chụp một tin `/shot` của phiên `[hub]`: *"Sao lại chèn
-/// lệnh /clear vào ô chat"*. Cùng lượt đo ra chuyện này: phiên `[hub]` bàn về
+/// Hà 2026-08-18, ảnh chụp một tin `/shot` của phiên `[huba]`: *"Sao lại chèn
+/// lệnh /clear vào ô chat"*. Cùng lượt đo ra chuyện này: phiên `[huba]` bàn về
 /// cơ chế hàng chờ suốt cả ngày, nên câu `Press up to edit queued messages` nằm
 /// nguyên trong đoạn văn đã cuộn trên màn — và cổng cũ (`screen.contains`) đọc
 /// đó thành "đang có hàng chờ".
 ///
 /// Hậu quả không dừng ở một con số sai: `/clean` sẽ gửi `↑`, mà `↑` khi hàng
-/// chờ RỖNG kéo câu cũ trong lịch sử vào ô nhập — hub tự chèn chữ vào chỗ chủ
+/// chờ RỖNG kéo câu cũ trong lịch sử vào ô nhập — huba tự chèn chữ vào chỗ chủ
 /// máy đang gõ.
 #[test]
 fn the_phrase_in_the_conversation_is_not_a_queue() {
     let talking_about_it = "⏺ Tôi vừa giải thích: TUI in `Press up to edit queued messages`\n\
-                            \x20 khi có tin xếp hàng, và hub đọc dòng ấy.\n\
+                            \x20 khi có tin xếp hàng, và huba đọc dòng ấy.\n\
                             ────────────────────────────────────────\n\
                             ❯ /clean\n\
                             ────────────────────────────────────────\n\

@@ -10,7 +10,7 @@
 //! nên nó không nói gì.
 //!
 //! ```
-//! cd ~/projects/hub/rust
+//! cd ~/projects/huba/rust
 //! HUB_DOC_LIVE=~/projects/onghut/docs/phuong-an-trinh.docx \
 //!   cargo test --offline --test document_body_live -- --ignored --nocapture
 //! ```
@@ -25,7 +25,7 @@ fn a_real_file_on_this_mac_is_read_whole_and_typed() {
         .unwrap_or_else(|e| panic!("không đọc được {}: {e}", path.display()))
         .len();
 
-    let (bytes, mime) = hub::telegram::document_body(&path).expect("hub phải gửi được tệp này");
+    let (bytes, mime) = huba::telegram::document_body(&path).expect("huba phải gửi được tệp này");
     println!(
         "{} · {} byte trên đĩa · {} byte đọc được · {mime}",
         path.display(),

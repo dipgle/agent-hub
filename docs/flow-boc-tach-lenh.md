@@ -64,7 +64,7 @@ vì cái gì — vì đó là chỗ anh cần nhìn khi thiếu nút.
         ▼
    ┌─────────────────────────────────────────────────────────────┐
    │  G. HAI ĐÍCH CHẠM cho mỗi dòng                                │
-   │  ▶️ run_<mã>   → hub chạy /bin/zsh -lc, chờ xong, dán tóm tắt │
+   │  ▶️ run_<mã>   → huba chạy /bin/zsh -lc, chờ xong, dán tóm tắt │
    │                  vào phiên                                     │
    │  🖥 term_<mã>  → mở cửa sổ Terminal, gõ lệnh vào, chuyển con   │
    │                  trỏ sang cửa sổ ấy                            │

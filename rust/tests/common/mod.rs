@@ -2,8 +2,8 @@
 //! so helpers used by only some of them are legitimately unused elsewhere.
 #![allow(dead_code)]
 
-use hub::config::{Config, NotifyCfg};
-use hub::db::Db;
+use huba::config::{Config, NotifyCfg};
+use huba::db::Db;
 use tempfile::TempDir;
 
 pub fn cfg_for_tests() -> Config {
@@ -22,6 +22,6 @@ pub fn cfg_for_tests() -> Config {
 /// A throwaway database; the TempDir must stay alive for the test's duration.
 pub fn fresh_db() -> (Db, TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let db = Db::open(&dir.path().join("hub.sqlite")).expect("open db");
+    let db = Db::open(&dir.path().join("huba.sqlite")).expect("open db");
     (db, dir)
 }

@@ -59,10 +59,10 @@ fn what_the_new_source_finds_in_real_transcripts() {
         let Ok(text) = std::fs::read_to_string(f) else {
             continue;
         };
-        // Cùng cửa sổ đuôi mà `read_tail` dùng, để con số đo được là con số hub
+        // Cùng cửa sổ đuôi mà `read_tail` dùng, để con số đo được là con số huba
         // thật sự nhìn thấy chứ không phải con số của cả tệp.
         let tail = tail_of(&text, 256 * 1024);
-        let got = hub::sessions::commands_in_last_turn(&tail, 4);
+        let got = huba::sessions::commands_in_last_turn(&tail, 4);
         if got.is_empty() {
             continue;
         }

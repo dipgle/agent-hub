@@ -1,8 +1,8 @@
 //! Tệp quá trần THẬT của Telegram thì gửi PHẦN CUỐI, không bỏ cuộc.
 //!
 //! 🔴 Hà 2026-08-19: *"Sao lại có giới hạn dung lượng"* — ảnh chụp
-//! `⚠ chưa gửi được hub.log — 21.4 MB — quá trần 5 MB`. Trần 5 MB ấy là của
-//! **hub**, viết ra từ một câu đoán hộ (*"một file 5 MB đọc trên điện thoại là
+//! `⚠ chưa gửi được huba.log — 21.4 MB — quá trần 5 MB`. Trần 5 MB ấy là của
+//! **huba**, viết ra từ một câu đoán hộ (*"một file 5 MB đọc trên điện thoại là
 //! chuyện không xảy ra"*), trong khi Telegram cho tới 50 MB. Cùng họ với ba lần
 //! trước: một hàng rào dựng trên khẩu vị, áp lên đúng cái nút chủ máy tự bấm.
 //!
@@ -12,7 +12,7 @@
 use std::io::Write;
 
 fn tmp(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join("hub-doc-tail");
+    let dir = std::env::temp_dir().join("huba-doc-tail");
     std::fs::create_dir_all(&dir).expect("dựng thư mục tạm");
     dir.join(name)
 }
@@ -32,7 +32,7 @@ fn the_tail_starts_on_a_line_and_ends_at_the_end() {
     drop(f);
     let whole = std::fs::read_to_string(&p).expect("đọc lại");
 
-    let (bytes, mime) = hub::telegram::document_tail(&p, 4096).expect("phải cắt được");
+    let (bytes, mime) = huba::telegram::document_tail(&p, 4096).expect("phải cắt được");
     let tail = String::from_utf8(bytes).expect("cắt xong vẫn phải là UTF-8 hợp lệ");
 
     assert!(tail.len() <= 4096, "cắt hụt trần: {} byte", tail.len());
@@ -57,7 +57,7 @@ fn the_tail_starts_on_a_line_and_ends_at_the_end() {
 fn a_small_file_comes_back_whole() {
     let p = tmp("nho.txt");
     std::fs::write(&p, "dòng đầu\ndòng hai\n").expect("ghi tệp thử");
-    let (bytes, _) = hub::telegram::document_tail(&p, 1024).expect("phải đọc được");
+    let (bytes, _) = huba::telegram::document_tail(&p, 1024).expect("phải đọc được");
     assert_eq!(
         String::from_utf8(bytes).unwrap(),
         "dòng đầu\ndòng hai\n",
@@ -71,18 +71,18 @@ fn a_small_file_comes_back_whole() {
 fn a_binary_file_is_not_tailed() {
     let p = tmp("anh.bin");
     std::fs::write(&p, [0x89u8, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00, 0x01]).expect("ghi tệp thử");
-    let err = hub::telegram::document_tail(&p, 4).expect_err("tệp nhị phân phải bị từ chối cắt");
+    let err = huba::telegram::document_tail(&p, 4).expect_err("tệp nhị phân phải bị từ chối cắt");
     assert!(err.contains("nhị phân"), "lý do phải đọc được: {err}");
 }
 
-/// Và phép cắt phải chạy được trên tệp THẬT đã làm Hà hỏi — `logs/hub.log`.
+/// Và phép cắt phải chạy được trên tệp THẬT đã làm Hà hỏi — `logs/huba.log`.
 ///
 /// Không mặc định, không tự bỏ qua: đòi đường dẫn qua biến môi trường, cùng
 /// khuôn với `document_body_live` (một bài kiểm im lặng trôi qua là bài kiểm
 /// luôn xanh, tức không nói gì).
 ///
 /// ```
-/// HUB_TAIL_LIVE=~/projects/hub/logs/hub.log \
+/// HUB_TAIL_LIVE=~/projects/huba/logs/huba.log \
 ///   cargo test --offline --test document_tail -- --ignored --nocapture
 /// ```
 #[test]
@@ -97,7 +97,7 @@ fn the_real_hub_log_can_be_tailed() {
         .unwrap_or_else(|e| panic!("không đọc được {}: {e}", path.display()))
         .len();
     let want = 5 * 1024 * 1024;
-    let (bytes, mime) = hub::telegram::document_tail(&path, want).expect("phải cắt được");
+    let (bytes, mime) = huba::telegram::document_tail(&path, want).expect("phải cắt được");
     println!(
         "{} · {on_disk} byte trên đĩa · {} byte phần cuối · {mime}",
         path.display(),

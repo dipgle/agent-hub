@@ -18,7 +18,7 @@
 //!    không phải UTF-8 đều rụng.
 //!
 //! Lý do của cả hai là luật 5 bản CŨ: *"thứ gì rời khỏi máy này phải soi
-//! được"*. Luật ấy đã đổi ngày 2026-08-16 (Hà: *"hub là cổng để làm việc từ xa
+//! được"*. Luật ấy đã đổi ngày 2026-08-16 (Hà: *"huba là cổng để làm việc từ xa
 //! qua tele không cần giấu gì hết"*) — cổng quét rò nay **ghi log rồi đi tiếp**,
 //! không chặn. Nên đòi hỏi "phải đọc được thành chữ" chỉ còn là cái vỏ của một
 //! hàng rào không còn ai gác: nó không bảo vệ gì, chỉ chặn đúng tệp chủ máy vừa
@@ -37,7 +37,7 @@ const DOCX: &str = "docs/phuong-an-trinh.docx";
 /// Tầng 1 — bộ dò phải NHÌN THẤY đường dẫn `.docx`.
 #[test]
 fn the_docx_is_seen_on_the_screen() {
-    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&fixture()), 4);
+    let seen = huba::keys::paths_on_screen(&huba::keys::body_before_box(&fixture()), 4);
     assert!(
         seen.iter().any(|p| p == DOCX),
         "bộ dò bỏ qua bản in: {seen:?}"
@@ -51,15 +51,15 @@ fn the_docx_is_seen_on_the_screen() {
 #[test]
 fn the_docx_survives_the_command_filter() {
     let text = fixture();
-    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&text), 4);
-    let cmds: Vec<hub::sessions::Cmd> = hub::keys::commands_in_report(&text, 8)
+    let seen = huba::keys::paths_on_screen(&huba::keys::body_before_box(&text), 4);
+    let cmds: Vec<huba::sessions::Cmd> = huba::keys::commands_in_report(&text, 8)
         .into_iter()
-        .map(|line| hub::sessions::Cmd {
+        .map(|line| huba::sessions::Cmd {
             line,
             cwd: String::new(),
         })
         .collect();
-    let kept = hub::pipeline::paths_not_in_commands(&text, &seen, &cmds);
+    let kept = huba::pipeline::paths_not_in_commands(&text, &seen, &cmds);
     assert!(kept.iter().any(|p| p == DOCX), "bản in mất nút: {kept:?}");
 }
 
@@ -70,14 +70,14 @@ fn the_docx_survives_the_command_filter() {
 /// `remember_files` đã gọi tên một lần.
 #[test]
 fn a_binary_document_is_read_and_typed_for_sending() {
-    let dir = std::env::temp_dir().join("hub-docx-send");
+    let dir = std::env::temp_dir().join("huba-docx-send");
     std::fs::create_dir_all(&dir).unwrap();
 
     // Đầu tệp thật của một `.docx`: nó là một kho ZIP (`PK\x03\x04`), và byte
     // thứ tư đã đủ làm `read_to_string` hỏng.
     let docx = dir.join("phuong-an-trinh.docx");
     std::fs::write(&docx, b"PK\x03\x04\x14\x00\x06\x00\xff\xfe binary").unwrap();
-    let (bytes, mime) = hub::telegram::document_body(&docx).expect("tệp nhị phân phải gửi được");
+    let (bytes, mime) = huba::telegram::document_body(&docx).expect("tệp nhị phân phải gửi được");
     assert_eq!(
         bytes.len() as u64,
         std::fs::metadata(&docx).unwrap().len(),
@@ -91,6 +91,6 @@ fn a_binary_document_is_read_and_typed_for_sending() {
     // Tệp chữ vẫn như cũ — không đánh đổi cái này lấy cái kia.
     let md = dir.join("phuong-an-trinh.md");
     std::fs::write(&md, "# bản đọc\n").unwrap();
-    let (_, mime) = hub::telegram::document_body(&md).expect("tệp chữ vẫn gửi được");
+    let (_, mime) = huba::telegram::document_body(&md).expect("tệp chữ vẫn gửi được");
     assert!(mime.starts_with("text/plain"), "nhận: {mime}");
 }

@@ -1,15 +1,15 @@
 //! Chữ trong ô nhập TRÙNG với chữ đang bàn về nó ⟹ đừng neo nút vào giữa văn.
 //!
-//! 🔴 Hà 2026-08-18, ảnh chụp một tin `/shot` của phiên `[hub]`: *"Sao lại chèn
+//! 🔴 Hà 2026-08-18, ảnh chụp một tin `/shot` của phiên `[huba]`: *"Sao lại chèn
 //! lệnh /clear vào ô chat"*. Trên ảnh, hai nút ⏎ và `⌫ xoá ô nhập` dán vào GIỮA
 //! một câu tôi viết — ngay sau chữ `/clean` — chứ không nằm ở dòng ô nhập dưới
 //! đáy màn.
 //!
 //! Gốc: ô nhập lúc ấy chứa đúng `/clean`, neo là CHUỖI ấy, và `html_with_links`
-//! duyệt từ dòng đầu nên bám vào chỗ khớp ĐẦU TIÊN. Phiên `[hub]` thì nói về
-//! lệnh của hub cả ngày, nên chữ ngắn trong ô nhập gần như luôn trùng.
+//! duyệt từ dòng đầu nên bám vào chỗ khớp ĐẦU TIÊN. Phiên `[huba]` thì nói về
+//! lệnh của huba cả ngày, nên chữ ngắn trong ô nhập gần như luôn trùng.
 
-use hub::pipeline::{render_session_data, SessionData};
+use huba::pipeline::{render_session_data, SessionData};
 
 /// Hình dạng thật: một câu văn có `/clean`, rồi ô nhập cũng đúng `/clean`.
 const SCREEN: &str = "⏺ Ba việc còn chờ một cú bấm của anh, giờ chỉ còn hai:\n\
@@ -32,7 +32,7 @@ fn data() -> SessionData {
 /// (đường lùi), nên chức năng không mất — chỉ đứng xa hơn một chút.
 #[test]
 fn an_ambiguous_box_text_does_not_get_linked_mid_sentence() {
-    hub::telegram::set_bot_username("hub_test_bot");
+    huba::telegram::set_bot_username("hub_test_bot");
     let html = render_session_data(SCREEN, &data());
     assert!(
         !html.contains("send_7bdb4f41"),
@@ -44,7 +44,7 @@ fn an_ambiguous_box_text_does_not_get_linked_mid_sentence() {
 /// nếu không thì bản vá này lặng lẽ gỡ mất tính năng.
 #[test]
 fn a_unique_box_text_still_gets_its_links() {
-    hub::telegram::set_bot_username("hub_test_bot");
+    huba::telegram::set_bot_username("hub_test_bot");
     let screen = SCREEN.replace("❯ /clean", "❯ dọn hàng chờ giúp tôi với");
     let mut d = data();
     d.box_text = Some("dọn hàng chờ giúp tôi với".into());

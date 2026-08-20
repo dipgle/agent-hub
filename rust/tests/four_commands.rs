@@ -1,4 +1,4 @@
-//! Bốn dòng lệnh trong một tin — hub gắn được mấy nút, và cái nào rớt.
+//! Bốn dòng lệnh trong một tin — huba gắn được mấy nút, và cái nào rớt.
 //!
 //! 🔴 Hà 2026-08-16, ảnh chụp tin `/shot` của `[AI/mailler]`: *"rõ ràng có 4
 //! dòng lệnh, nhưng chỉ có 4 nút chạy"* — trong ảnh đếm được **ba** icon ▶️ ở
@@ -27,7 +27,7 @@ const CMDS: [&str; 4] = [
 /// Trước hết ĐO: hàng rào nhận ra mấy dòng là lệnh?
 #[test]
 fn the_fence_sees_all_four() {
-    let got = hub::keys::commands_in_report(MSG, 8);
+    let got = huba::keys::commands_in_report(MSG, 8);
     println!("hàng rào bắt được {}:", got.len());
     for g in &got {
         println!("  · {g}");
@@ -53,7 +53,7 @@ fn all_four_get_an_icon_on_their_own_line() {
             )
         })
         .collect();
-    let (html, linked, unlinked) = hub::pipeline::html_with_links(MSG, &anchors);
+    let (html, linked, unlinked) = huba::pipeline::html_with_links(MSG, &anchors);
     println!("{html}");
     assert!(
         unlinked.is_empty(),
@@ -75,7 +75,7 @@ fn all_four_get_an_icon_on_their_own_line() {
 fn the_prose_that_mentions_git_mv_takes_no_slot() {
     let first_prose = MSG.lines().next().expect("dòng đầu");
     assert!(first_prose.contains("git mv") && first_prose.contains("deploy.sh"));
-    let got = hub::keys::commands_in_report(first_prose, 8);
+    let got = huba::keys::commands_in_report(first_prose, 8);
     assert!(
         got.is_empty(),
         "một câu văn kể về lệnh bị đọc thành lệnh: {got:?}"

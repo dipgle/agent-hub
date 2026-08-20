@@ -1,6 +1,6 @@
 //! The Claude CLI sessions running on this machine — read-only.
 //!
-//! This is hub's OTHER job, and the one the owner actually asked for: he runs
+//! This is huba's OTHER job, and the one the owner actually asked for: he runs
 //! `claude` in terminals on this Mac and wants to watch and drive that work
 //! from a phone. Everything here observes; nothing here starts, stops, or types
 //! into a session. Driving comes later and will be its own module, because a
@@ -74,7 +74,7 @@ pub struct LiveSession {
     /// 🔴 Hà 2026-08-13: *"cần lệnh kiểm các phiên đã xử lý xong và đang dừng,
     /// hoặc tìm phiên đang dừng do lỗi"* · *"vì lỗi chưa thấy cảnh báo gì"*.
     ///
-    /// Trước đó hub chỉ nhận ra lỗi bằng cách ĐỌC MÀN đúng lúc phiên chuyển
+    /// Trước đó huba chỉ nhận ra lỗi bằng cách ĐỌC MÀN đúng lúc phiên chuyển
     /// trạng thái (`Idle::Failed`) — tức bắt được thì bắt, lỡ nhịp thì phiên
     /// nằm đó im lìm và nhìn y hệt "đã xong". Nhật ký thì luôn còn: dòng lỗi
     /// nằm nguyên trong lượt cuối, đọc lại không tốn thêm một lần đọc đĩa nào
@@ -93,13 +93,13 @@ pub struct LiveSession {
     /// WHERE the session actually lives: `"terminal"` (has a controlling tty),
     /// `"editor"` (the VS Code / Cursor extension), `"background"`, `"detached"`
     /// (a live process with no tty and no editor path — a script, a cron, or
-    /// something hub did not start), or `"dead"` when no process is behind it
+    /// something huba did not start), or `"dead"` when no process is behind it
     /// any more.
     ///
     /// `kind` alone reads "interactive" for a terminal window and for an
     /// editor-hosted session alike, and on 2026-08-09 that cost a real
     /// question: the phone said 13 sessions while the owner had 3 terminals
-    /// open. He was right and so was hub — 3 terminals, 8 sessions inside VS
+    /// open. He was right and so was huba — 3 terminals, 8 sessions inside VS
     /// Code, 2 dead rows the CLI still reports. A screen that cannot tell those
     /// apart is a screen that gets argued with instead of read.
     pub host: String,
@@ -129,8 +129,8 @@ pub struct LiveSession {
     /// ```
     ///
     /// Absent only for the **editor-hosted** rows (the VS Code extension's own
-    /// sessions), which hub hides from the phone anyway. So an empty pair still
-    /// means "hub cannot tell", never "idle" — but it is now the rare case, not
+    /// sessions), which huba hides from the phone anyway. So an empty pair still
+    /// means "huba cannot tell", never "idle" — but it is now the rare case, not
     /// the normal one, and `is_working` prefers this field over any heuristic.
     pub status: Option<String>,
     pub state: Option<String>,
@@ -142,7 +142,7 @@ pub struct LiveSession {
     ///
     /// Đường đắt là đọc màn từng phiên — đo 2026-08-10, làm một vòng dài từ
     /// ~18 giây lên **90 giây** (`pipeline.rs`), tức lệnh từ điện thoại nằm chờ
-    /// hơn một phút. Đường rẻ thì hub đã đọc sẵn mỗi vòng: **mtime của nhật
+    /// hơn một phút. Đường rẻ thì huba đã đọc sẵn mỗi vòng: **mtime của nhật
     /// ký**. `claude` ghi vào nhật ký suốt lượt chạy, nên tệp còn lớn lên nghĩa
     /// là còn làm; đứng im quá `IDLE_AFTER_SEC` nghĩa là lượt đã xong. Không
     /// thêm một lời gọi AppleScript nào.
@@ -188,7 +188,7 @@ pub struct LiveSession {
     /// ĐỀ, nó đứng yên suốt một mạch việc.
     ///
     /// Nguồn: **nhan đề tab Terminal**, thứ chính `claude` đặt và chính chủ máy
-    /// đang nhìn trên thanh tab (`keys::Tab::doing`). Nên đây không phải hub
+    /// đang nhìn trên thanh tab (`keys::Tab::doing`). Nên đây không phải huba
     /// đoán từ nhật ký — cùng hạng bằng chứng với `status` của `claude agents`,
     /// và cùng một chữ trên hai màn hình. Đúng phép thử cầu nối.
     ///
@@ -205,12 +205,12 @@ pub struct LiveSession {
     /// asks for permission" has nothing to show; what matters on a phone is
     /// knowing a session is running unattended in the first place.
     pub permission_mode: Option<String>,
-    /// True when THIS hub started the session (`/new` from the phone).
+    /// True when THIS huba started the session (`/new` from the phone).
     ///
     /// `kind == "background"` only says "no window"; it cannot say who opened
     /// it — a `claude --bg` typed by hand looks identical. Hà asked for a label
     /// that says *ai tạo* (2026-08-09), and a badge that guessed would be worse
-    /// than no badge, so hub keeps a list of the ids it started and this field
+    /// than no badge, so huba keeps a list of the ids it started and this field
     /// is filled from that list (`pipeline::mark_started_by_hub`). Never
     /// inferred.
     #[serde(default)]
@@ -221,7 +221,7 @@ pub struct LiveSession {
     /// tty của tiến trình, hoặc rỗng. Chìa để tìm cửa sổ Terminal của phiên.
     #[serde(default)]
     pub tty: String,
-    /// Hub CÓ gõ vào được phiên này không — **đo, không suy**.
+    /// Huba CÓ gõ vào được phiên này không — **đo, không suy**.
     ///
     /// `host == "terminal"` chỉ nói "có một tty". Trang lại đọc nó thành "gõ
     /// thẳng vào cửa sổ được" và mời người ta bấm `/type`, `/btw`. Hai câu đó
@@ -229,7 +229,7 @@ pub struct LiveSession {
     /// `host: "terminal"`, tty `ttys008`, nhưng nó chạy trong **terminal tích
     /// hợp của VS Code** — Terminal.app không biết cái tty ấy, `window_of` trả
     /// rỗng, `/btw` lặng lẽ rơi về fork, fork hỏng và tiêu 0.53 đơn vị hạn mức.
-    /// Trang đã hứa một việc hub không làm được.
+    /// Trang đã hứa một việc huba không làm được.
     ///
     /// Đo bằng ĐÚNG điều kiện `keys::type_into` cần: tty này có nằm trong danh
     /// sách tab của Terminal.app không. Một lời gọi AppleScript cho CẢ danh
@@ -280,7 +280,7 @@ pub struct SessionsSnapshot {
     /// Phiên ĐÃ CHẾT từ lâu mà `claude agents` vẫn liệt kê — đã bỏ khỏi danh sách.
     ///
     /// 🔴 Hà 2026-08-13: *"Trên màn đang chỉ có 4 terminal, sao ds lại nhiều
-    /// thế"*. Đo ngay lúc ấy: Terminal khai đúng **4 cửa sổ**, hub kê **5 hàng**
+    /// thế"*. Đo ngay lúc ấy: Terminal khai đúng **4 cửa sổ**, huba kê **5 hàng**
     /// — hàng thừa là `c19b6a82`, một phiên nền `pid 0`, hoạt động lần cuối
     /// **hơn hai tiếng trước**, mà `claude agents` vẫn khai đều mỗi lượt.
     ///
@@ -310,7 +310,7 @@ pub struct SessionsSnapshot {
 /// 🔴 Hà 2026-08-12: *"tele nhận được 'projects-d8 đã tắt, cửa sổ còn mở' nhưng
 /// thực tế không còn mở nữa"*. Đo lại được cả chuỗi: `projects-d8` sống trong
 /// cửa sổ `ttys002` (mở từ 12:28:08); 16:41:16 Hà thoát CLI rồi gõ `claude` lại
-/// **ngay trong cửa sổ ấy**; 16:42:33 hub mới nhận ra phiên cũ đi, hỏi "có tab
+/// **ngay trong cửa sổ ấy**; 16:42:33 huba mới nhận ra phiên cũ đi, hỏi "có tab
 /// nào mang tty ấy không" → còn → nói *"cửa sổ terminal còn mở"*.
 ///
 /// Câu ấy đúng chữ mà sai nghĩa: cửa sổ ấy KHÔNG nằm chờ ai, nó đã là phiên
@@ -320,13 +320,13 @@ pub struct SessionsSnapshot {
 /// `tty` là một con số **được dùng lại**: cùng một `ttys002` có thể là cửa sổ
 /// cũ, cửa sổ mới, hay một cái xác (xem `keys::window_script`). Nên trước khi
 /// hỏi Terminal, hãy hỏi ảnh chụp của chính mình: phiên nào đang ngồi ở tty ấy?
-/// Thư mục làm việc của hubd — nơi launchd đặt nó (plist `WorkingDirectory`).
+/// Thư mục làm việc của hubad — nơi launchd đặt nó (plist `WorkingDirectory`).
 const HUBD_RUNTIME_DIR: &str = "~/Library/Application Support/hub";
 
-/// Phiên này có phải máy móc của CHÍNH hub không (phép dò `/usage` 5 phút/lượt).
+/// Phiên này có phải máy móc của CHÍNH huba không (phép dò `/usage` 5 phút/lượt).
 ///
-/// Đo 2026-08-12: `hub-67` · `cwd = /Users/hanguyen/Library/Application
-/// Support/hub` · `host = detached` — đúng thư mục launchd cho hubd chạy, và
+/// Đo 2026-08-12: `huba-67` · `cwd = /Users/hanguyen/Library/Application
+/// Support/huba` · `host = detached` — đúng thư mục launchd cho hubad chạy, và
 /// tiến trình con `claude -p "/usage"` thừa hưởng nó. Không phiên nào của người
 /// nằm ở đấy: chủ máy mở `claude` từ `~/projects`.
 ///
@@ -402,9 +402,9 @@ pub fn transcript_error(tail: &str) -> Option<String> {
 /// tên dự án — nên cái tên ấy giống hệt nhau ở mọi dòng, tức nó **không phân
 /// biệt được gì**, đúng lý do `cwd` đã bị bỏ khỏi màn từ trước.
 ///
-/// Thứ phân biệt được thì hub đã đo sẵn: `folder` (xem [`folder_from_tail`]).
-/// Hà 2026-08-13 chốt hình dạng: *"điều chỉnh lại các chỗ `[hub] project-06` =
-/// `[ai/hub]` là được, cho dễ nhận biết"* — tức **bỏ hẳn** cái tên tự sinh và
+/// Thứ phân biệt được thì huba đã đo sẵn: `folder` (xem [`folder_from_tail`]).
+/// Hà 2026-08-13 chốt hình dạng: *"điều chỉnh lại các chỗ `[huba] project-06` =
+/// `[ai/huba]` là được, cho dễ nhận biết"* — tức **bỏ hẳn** cái tên tự sinh và
 /// hiện ĐƯỜNG DẪN dự án đầy đủ: `projects-fb` + `AI/tcc/amm` ⟹ **`[AI/tcc/amm]`**.
 /// Đường đầy đủ chứ không phải mỗi lá cuối, vì `amm` một mình không nói được nó
 /// nằm trong `tcc`.
@@ -432,7 +432,7 @@ pub fn transcript_error(tail: &str) -> Option<String> {
 /// Bộ nhớ nằm trong tiến trình chứ không xuống đĩa: sổ `watch:sessions` đã giữ
 /// `Mark.d` để dùng sau khi khởi động lại, còn chỗ này chỉ cần vá đúng cái
 /// nhấp nháy giữa hai lượt đo trong CÙNG một lần chạy.
-/// Nhãn kèm HẠNG của nó: phiên tự khai, hay hub đếm ra.
+/// Nhãn kèm HẠNG của nó: phiên tự khai, hay huba đếm ra.
 ///
 /// 🔴 Hạng là thứ vá nửa sau của lỗi 18/08. Một lời khai có thể trôi ra khỏi cửa
 /// sổ đọc 256 KB sau một quãng dài chỉ gọi công cụ; lúc ấy phép đếm quay lại một
@@ -504,10 +504,10 @@ pub fn display_name(name: &str, folder: &str) -> String {
 /// Bỏ phiên editor khỏi danh sách (cùng ngày) làm ca `[dwork]` ấy hết, nhưng
 /// KHÔNG làm hết cả lớp: đo cùng lúc, `projects-fd` và `merge xem init-project`
 /// đều mang `AI/codetrail`. Vá ở đây là vá lớp.
-/// Bỏ tên NGĂN KÉO đứng đầu — `AI/hub` ⟹ `hub`, `AI/tcc/amm` ⟹ `tcc/amm`.
+/// Bỏ tên NGĂN KÉO đứng đầu — `AI/huba` ⟹ `huba`, `AI/tcc/amm` ⟹ `tcc/amm`.
 ///
-/// 🔴 Hà 2026-08-13, đọc hai tin liền nhau `[AI/mailler]` và `[AI/hub]`: *"sao
-/// lại bị như này, hub làm việc đâu liên quan tới ai"*. Đúng: `AI/` là tên một
+/// 🔴 Hà 2026-08-13, đọc hai tin liền nhau `[AI/mailler]` và `[AI/huba]`: *"sao
+/// lại bị như này, huba làm việc đâu liên quan tới ai"*. Đúng: `AI/` là tên một
 /// **thư mục xếp hồ sơ**, không phải một dự án và cũng không phải một chủ đề.
 /// Nó đứng trước GẦN NHƯ MỌI dự án trên máy này, nên nó phân biệt được đúng số
 /// không — cùng lý do `cwd` đã bị bỏ khỏi màn (mọi phiên đều mở ở gốc).
@@ -515,7 +515,7 @@ pub fn display_name(name: &str, folder: &str) -> String {
 /// Đo, chứ không gõ sẵn cái tên "AI": ngăn kéo là thư mục **không mang dấu
 /// hiệu dự án nào** (`config::looks_like_project` — `CLAUDE.md`, `.git`,
 /// `Cargo.toml`, `package.json`, `logs/devlog.sqlite`). Đo trên máy lúc sửa:
-/// `AI/` trống trơn, `AI/hub` có `.git` + `CLAUDE.md`, `AI/tcc` trống,
+/// `AI/` trống trơn, `AI/huba` có `.git` + `CLAUDE.md`, `AI/tcc` trống,
 /// `AI/tcc/amm` có `.git`.
 ///
 /// **Bỏ đúng MỘT bậc.** Bỏ hết mọi ngăn kéo thì `AI/tcc/amm` rơi về `amm`, mà
@@ -553,7 +553,7 @@ fn strip_drawer(root: &Path, label: &str) -> String {
 /// nó chỉ đẩy việc đọc sang một cú bấm. Cột phải trả lời ngay trên nút.
 ///
 /// Chữ ấy là của chính `claude` (nhan đề tab — `keys::Tab::doing`), không phải
-/// hub đoán; và mã id KHÔNG bị vứt đi, nó vẫn là đường lùi cho hàng không có
+/// huba đoán; và mã id KHÔNG bị vứt đi, nó vẫn là đường lùi cho hàng không có
 /// tab hoặc hai hàng cùng nhan đề.
 ///
 /// 🔴 Hà 2026-08-13, ảnh chụp Telegram: mở một phiên mới trong VS Code, gửi
@@ -644,7 +644,7 @@ pub fn shown(s: &LiveSession) -> String {
 /// mục *HTML style*). Thứ mang được màu vào một dòng chữ là **emoji**, nên nhãn
 /// dự án đi kèm một ô vuông màu.
 ///
-/// Màu phải suy TỪ TÊN chứ không phát theo thứ tự gặp: hub khởi động lại vài
+/// Màu phải suy TỪ TÊN chứ không phát theo thứ tự gặp: huba khởi động lại vài
 /// lần một ngày, và một cái nhãn đổi màu sau mỗi lần khởi động thì tệ hơn không
 /// có màu — người đọc học màu ấy rồi bị nó lừa. Băm tên là hàm thuần: cùng dự
 /// án ⟹ cùng màu trên mọi tin, mọi máy, mọi lần chạy.
@@ -652,7 +652,7 @@ pub fn shown(s: &LiveSession) -> String {
 /// cần đúng bộ này: hai bản chép là hai bộ sẽ lệch nhau.
 ///
 /// 🔴 **ĐỎ và VÀNG đã bị lấy ra khỏi bộ này (Hà 2026-08-19)**, trên chính một
-/// dòng hub gửi đi: `⏹ Đã đóng hẳn 🟥 [dwork]·f33ae528 …` — *"sao nội dung lại
+/// dòng huba gửi đi: `⏹ Đã đóng hẳn 🟥 [dwork]·f33ae528 …` — *"sao nội dung lại
 /// thừa và mâu thuẫn nhau thế"*. Ô ấy chỉ là **nhãn dự án**, hoàn toàn vô can
 /// với việc đóng phiên; nhưng trong cùng một dòng chữ, đỏ đã có sẵn một nghĩa
 /// khác (hỏng / cần chú ý) và người đọc lấy nghĩa ấy trước. Một tin **thành
@@ -784,12 +784,12 @@ pub fn window_target_from_book(book_json: &str, id: &str) -> Option<LiveSession>
 
 /// `tty` này có phải một cửa sổ THẬT không.
 ///
-/// 🔴 Đo 2026-08-12 22:59, trên đúng cái tin Hà đọc được: `⏹ hub-67 (033059d8)
-/// đã tắt — cửa sổ ấy nay đang chạy phiên hub-ec.` Cả hai đều là phiên `claude
-/// -p "/usage"` của CHÍNH hub, **không phiên nào có cửa sổ** — `ps` in `??` cho
+/// 🔴 Đo 2026-08-12 22:59, trên đúng cái tin Hà đọc được: `⏹ huba-67 (033059d8)
+/// đã tắt — cửa sổ ấy nay đang chạy phiên huba-ec.` Cả hai đều là phiên `claude
+/// -p "/usage"` của CHÍNH huba, **không phiên nào có cửa sổ** — `ps` in `??` cho
 /// tiến trình không có tty điều khiển. Mà `??` **không rỗng**, nên cửa
 /// `tty.is_empty()` cho nó đi qua, rồi phép so "cùng tty" khớp `??` với `??` và
-/// hub tuyên bố một cửa sổ không tồn tại đã bị chiếm.
+/// huba tuyên bố một cửa sổ không tồn tại đã bị chiếm.
 ///
 /// Luật này đã được viết đúng ở `keys::window_of` và ở chỗ đặt nhãn
 /// `terminal`/`detached` — ba chỗ, ba bản chép tay, và chỗ thứ tư quên. Nay một
@@ -872,7 +872,7 @@ fn text_of(record: &Value) -> Option<String> {
 /// blank the whole view and teach the owner to ignore it. These three are the
 /// ones where being wrong is unrecoverable.
 ///
-/// Not hypothetical: the first real run of `hub sessions` (2026-08-08) printed
+/// Not hypothetical: the first real run of `huba sessions` (2026-08-08) printed
 /// a session whose latest turn stated a login password in plain text. The CLI
 /// runs on the owner's own machine, so that is his business — but the portal
 /// snapshot lands in a tfl5 doc on a server, which `redaction.rs` itself counts
@@ -884,7 +884,7 @@ const SECRET_LABELS: [&str; 4] = [
     "private_key_block",
 ];
 
-/// Tools a session hub starts (`/new`) or continues (`/tell`) may never reach.
+/// Tools a session huba starts (`/new`) or continues (`/tell`) may never reach.
 ///
 /// Lived in `act.rs` until 2026-08-08; that module was the inbox's "implement
 /// the approved change" branch and went with the inbox, but the list itself is
@@ -899,7 +899,7 @@ const SECRET_LABELS: [&str; 4] = [
 /// tôi một hàm (2026-08-13). Tôi viết `denied_for_session` để định tuyến nút
 /// lệnh sang `/cmd` khi lệnh nằm trong danh sách này, lý lẽ nghe rất xuôi: *nút
 /// gõ `!git push` vào phiên sẽ bị chặn, nên phải đi đường khác*. Hà chặn đúng
-/// lúc: *"vô lý việc gõ vào phiên là hub làm mà"* · *"sao lại chặn được"*.
+/// lúc: *"vô lý việc gõ vào phiên là huba làm mà"* · *"sao lại chặn được"*.
 ///
 /// Anh đúng. `--disallowedTools` gác **lời gọi công cụ của agent**. Còn
 /// `!<lệnh>` là chế độ bash của chính TUI — đúng cái ngón tay chủ máy gõ, không
@@ -1015,7 +1015,7 @@ impl Procs {
     /// việc" suy từ **nhật ký vừa lớn lên chưa** — mà một phiên đang chờ một
     /// lệnh 12 phút thì **không ghi một dòng nào** trong suốt 12 phút ấy. Nó
     /// càng bận thì trông càng rảnh. Và cửa đọc-màn (`activity_cached`) thì đặt
-    /// SAU `row.working`, nên nó không bao giờ tới lượt: hub không hỏi màn vì
+    /// SAU `row.working`, nên nó không bao giờ tới lượt: huba không hỏi màn vì
     /// nó đã tự kết luận là phiên rảnh.
     ///
     /// Dấu hiệu đo được, miễn phí (bảng `ps` đã đọc sẵn): công cụ Bash của
@@ -1075,7 +1075,7 @@ impl Procs {
 /// Một dòng `ps -eo pid=,ppid=,tty=,command=` → `(pid, Proc)`.
 ///
 /// 🔴 Hà 2026-08-15, ảnh chụp phiên `social` vừa mở: *"tại sao vừa tạo phiên
-/// social mới đã báo như thế này"* — hub trả lời *"ĐÃ TẮT: chỉ còn /handover"*
+/// social mới đã báo như thế này"* — huba trả lời *"ĐÃ TẮT: chỉ còn /handover"*
 /// về một phiên sống được vài giây, và `/shot` cũng *"không nhìn thấy cửa sổ
 /// đâu"*.
 ///
@@ -1084,11 +1084,11 @@ impl Procs {
 /// nằm cạnh pid 5 chữ số thì cột ấy được đệm thêm dấu cách — và `splitn` cắt
 /// theo TỪNG ký tự trắng, nên dấu cách thừa sinh ra một trường RỖNG, `parse`
 /// hỏng, cả dòng bị bỏ. Đo đúng lúc Hà hỏi: `pid 5047` (`ttys010`) có trong
-/// `ps`, `argv[0] = claude`, mà hub khai *"không còn tiến trình"* — trong khi
+/// `ps`, `argv[0] = claude`, mà huba khai *"không còn tiến trình"* — trong khi
 /// những phiên pid 5 chữ số cùng lượt thì đọc bình thường.
 ///
 /// Hai điều đáng nhớ hơn bản vá. Một: **một phép đo hụt ở đây đọc ra thành một
-/// cái chết** — hub không mất thông tin, nó bịa ra một sự kiện. Hai: nó chỉ cắn
+/// cái chết** — huba không mất thông tin, nó bịa ra một sự kiện. Hai: nó chỉ cắn
 /// những pid ngắn hơn pid dài nhất trên máy, nên nó **im lặng phần lớn thời
 /// gian** rồi cắn đúng phiên vừa mở.
 pub fn parse_ps_line(line: &str) -> Option<(i64, i64, String, String)> {
@@ -1135,7 +1135,7 @@ pub fn is_claude_process(cmd: &str) -> bool {
 /// `ps` call and the pid-is-gone answer; this owns only "given this command
 /// line, whose session is it".
 pub fn classify_host(cmd: &str, kind: &str, tty: &str) -> &'static str {
-    // A background session hub started is `--bg`, never an editor's, whatever
+    // A background session huba started is `--bg`, never an editor's, whatever
     // binary is on the path — the kind is the stronger signal, so it wins.
     if kind == "background" {
         return "background";
@@ -1175,11 +1175,11 @@ pub fn preview_risk(text: &str) -> Vec<String> {
 
 /// Ghi dấu hiệu bí mật vào log rồi ĐI TIẾP — chữ vẫn đi về điện thoại.
 ///
-/// 🔴 Hà 2026-08-16: *"hub là cổng để làm việc từ xa qua tele không cần giấu gì
-/// hết, giấu thì phải ngồi vào máy để làm vậy thì cần gì hub nữa"*. Trước đó
+/// 🔴 Hà 2026-08-16: *"huba là cổng để làm việc từ xa qua tele không cần giấu gì
+/// hết, giấu thì phải ngồi vào máy để làm vậy thì cần gì huba nữa"*. Trước đó
 /// sáu chỗ trong tệp này đọc `preview_risk` rồi **thay chữ bằng một câu xin
-/// lỗi** ("mở phiên trên máy để đọc") — mỗi chỗ là một lần hub bắt chủ máy đi
-/// bộ về chỗ cái máy, tức bắt anh làm đúng cái việc hub sinh ra để khỏi phải
+/// lỗi** ("mở phiên trên máy để đọc") — mỗi chỗ là một lần huba bắt chủ máy đi
+/// bộ về chỗ cái máy, tức bắt anh làm đúng cái việc huba sinh ra để khỏi phải
 /// làm. Cái nó bảo vệ thì chính chủ máy đã tự cân: buồng chat riêng của anh,
 /// tự xoá, không ai khác đọc được (cùng lý do `/shot` gửi nguyên màn từ 14/08).
 ///
@@ -1311,8 +1311,8 @@ pub fn folder_from_tail(tail: &str, workspace_root: &str) -> Option<String> {
 /// tên viết sẵn, nên nó đúng cho tới đúng cái thư mục không ai nghĩ tới.
 ///
 /// Hai cửa giữ cho nó không đi quá tay:
-/// - dừng ngay khi thư mục hiện tại **là dự án** (`AI/hub` có `CLAUDE.md` ⟹
-///   không bao giờ tụt xuống `AI/hub/rust`, dù `rust/` có `Cargo.toml`);
+/// - dừng ngay khi thư mục hiện tại **là dự án** (`AI/huba` có `CLAUDE.md` ⟹
+///   không bao giờ tụt xuống `AI/huba/rust`, dù `rust/` có `Cargo.toml`);
 /// - dừng khi **không kiểm được** (thư mục không tồn tại — sổ cũ, máy khác):
 ///   không biết thì giữ nguyên nhãn, đừng đoán sâu thêm.
 fn open_drawer(
@@ -1350,7 +1350,7 @@ fn open_drawer(
 /// Phép đếm không hỏng; nó trả lời đúng câu hỏi *"phiên này đụng vào thư mục nào
 /// nhiều nhất"*. Chỉ có điều đó không phải câu hỏi *"phiên này là dự án gì"* —
 /// và câu ấy phiên đã tự trả lời sẵn ở đầu mỗi lượt nói, theo đúng luật của
-/// `CLAUDE.md` workspace: *"Mọi response prefix `[<name>]`"*. Hub vốn đã in
+/// `CLAUDE.md` workspace: *"Mọi response prefix `[<name>]`"*. Huba vốn đã in
 /// nguyên cái tiền tố ấy ra danh sách (`💬 [onghut] Đã viết lại kế hoạch…`) —
 /// tức sự thật nằm ngay cạnh cái nhãn sai, chỉ là chưa ai đọc nó.
 ///
@@ -1380,7 +1380,7 @@ pub fn folder_declared(tail: &str, workspace_root: &str) -> Option<String> {
 /// Hai cổng giữ cho nó không nhận bừa, vì ngoặc vuông là dấu câu chứ không phải
 /// chữ ký:
 /// - phải nằm ở **đầu** lượt nói (bỏ qua ``` ` ```/`*`/`#`/`>` bọc ngoài — phiên
-///   hub viết `` `[hub]` ``), nên một câu văn nhắc `[BUG-02]` giữa dòng không
+///   huba viết `` `[huba]` ``), nên một câu văn nhắc `[BUG-02]` giữa dòng không
 ///   tính; và tên không được chứa khoảng trắng, thứ loại luôn `[dùng Bash]` mà
 ///   [`text_of`] dựng cho lượt chỉ-gọi-công-cụ;
 /// - phải là **thư mục có thật** trong workspace. Đây là cổng rẻ nhất chặn được
@@ -1431,7 +1431,7 @@ pub fn folder_for_session(
     };
     if let Some(declared) = recall_declared(session_id) {
         if declared != counted {
-            // KHÔNG im lặng: hub vừa bỏ qua một phép đo, và lần sau đọc log phải
+            // KHÔNG im lặng: huba vừa bỏ qua một phép đo, và lần sau đọc log phải
             // thấy được nó đã bỏ qua cái gì.
             logging::info(
                 "folder_label_kept",
@@ -1567,7 +1567,7 @@ fn background_agent_calls(transcript: &Path) -> HashSet<String> {
 /// `toolu_01C7bc…` khớp cả hai đầu) — nên đường khớp vẫn là khớp theo ID, cùng
 /// kỷ luật với phần trên, không phải đếm theo tên.
 ///
-/// Một agent nền có thể được đánh thức lại sau khi đã báo xong; lúc ấy hub đọc
+/// Một agent nền có thể được đánh thức lại sau khi đã báo xong; lúc ấy huba đọc
 /// là "không còn chạy". Cố ý: thà thiếu còn hơn để một subagent ma chạy mãi
 /// trên màn — cùng lựa chọn với thứ rơi ra ngoài cửa sổ 256KB.
 fn stopped_background_calls(tail: &str) -> HashSet<String> {
@@ -1689,8 +1689,8 @@ fn stopped_background_calls(tail: &str) -> HashSet<String> {
 ///
 /// Cả hai lý do biến mất cùng lúc: chữ của MỌI tab nay về trong đúng một lượt
 /// dò mà ảnh chụp vốn đã phải trả (`keys::terminal_screens`), nên giá cận biên
-/// của dòng này bằng KHÔNG. Và bỏ cache là bỏ luôn một chỗ hub kể chuyện cũ —
-/// đúng câu Hà chốt 2026-08-15: *"mọi thông tin khi đi qua hub phải là
+/// của dòng này bằng KHÔNG. Và bỏ cache là bỏ luôn một chỗ huba kể chuyện cũ —
+/// đúng câu Hà chốt 2026-08-15: *"mọi thông tin khi đi qua huba phải là
 /// realtime"*. Cái đệm không sai; nó chỉ đắt hơn thứ nó đệm, sau khi nguồn đổi.
 fn tab_activity(tabs: &[crate::keys::Tab], tty: &str) -> Option<String> {
     let tab = crate::keys::alive_tab(tabs, tty)?;
@@ -1776,7 +1776,7 @@ pub fn shell_verdict(shell: bool, screen_busy: Option<bool>) -> bool {
 // phân biệt được màu. Ràng buộc còn lại giữ nguyên từ 13/08: KHÔNG dùng
 // `▶ ⏸ ⏹` — đó là bộ ký hiệu của máy phát nhạc, ở đó chúng là NÚT BẤM
 // (`▶` = "bấm để chạy"), nên dùng làm tình trạng thì đọc ra nghĩa ngược; và
-// `▶️` đang là nút chạy lệnh thật của chính hub.
+// `▶️` đang là nút chạy lệnh thật của chính huba.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Lượt của phiên đang chạy.
@@ -1912,7 +1912,7 @@ pub const SAY_MAX: usize = 12_000;
 /// Chỉ đọc khi có chuyện đáng nói (một lượt chuyển trạng thái, vài lần một giờ)
 /// — cùng lối nghĩ với việc đọc màn: rẻ vì hiếm. Không nhét vào ảnh chụp mỗi
 /// vòng, vì ảnh chụp đi lên mạng 10 giây một lần còn thứ này chỉ cần đúng lúc
-/// hub sắp mở miệng.
+/// huba sắp mở miệng.
 pub fn last_say(cfg: &Config, session: &LiveSession, max_chars: usize) -> Option<String> {
     let path = transcript_path(
         &cfg.claude_transcript_root(),
@@ -1980,8 +1980,8 @@ pub fn last_prose_of_file(path: &Path, max_chars: usize) -> Option<String> {
 /// | phiên | lượt cuối kiểu cũ (mọi lượt hội thoại) | lời cuối phiên NÓI |
 /// |---|---|---|
 /// | `69a38c64` | `[dùng Bash]` | *"Hà đã đóng phiên kia — cây mã đứng yên…"* |
-/// | `37e59209` | `[Request interrupted by user for tool use]` | *"[hub] Tôi phải báo một chuyện…"* |
-/// | 40 phiên dò `/usage` của chính hub | `<command-name>/usage</command-name>` | (không có) |
+/// | `37e59209` | `[Request interrupted by user for tool use]` | *"[huba] Tôi phải báo một chuyện…"* |
+/// | 40 phiên dò `/usage` của chính huba | `<command-name>/usage</command-name>` | (không có) |
 ///
 /// Và ca đắt nhất chính là ca tin này sinh ra để phục vụ: lượt cuối của một
 /// phiên **đang HỎI** chỉ có mỗi khối `tool_use`, nên `text_of` dựng nó thành
@@ -1993,9 +1993,9 @@ pub fn last_prose_of_file(path: &Path, max_chars: usize) -> Option<String> {
 /// hoặc một dòng máy tự chèn (`[Request interrupted…]`) — đọc ngược nó về điện
 /// thoại của chính anh ấy thì không nói thêm điều gì.
 ///
-/// 🔴 Cổng "có dấu hiệu bí mật thì trả `None`" **gỡ 2026-08-16**, Hà: *"hub là
+/// 🔴 Cổng "có dấu hiệu bí mật thì trả `None`" **gỡ 2026-08-16**, Hà: *"huba là
 /// cổng để làm việc từ xa qua tele không cần giấu gì hết, giấu thì phải ngồi
-/// vào máy để làm vậy thì cần gì hub nữa"*. Nó biến đúng những tin đáng đọc
+/// vào máy để làm vậy thì cần gì huba nữa"*. Nó biến đúng những tin đáng đọc
 /// nhất thành tin cụt, ở đúng lúc chủ máy không ngồi trước máy. Dấu hiệu vẫn
 /// được GHI (`preview_risk_noted`) — một dữ kiện đáng biết thì nói ra, không
 /// dựng thành cánh cửa.
@@ -2073,7 +2073,7 @@ pub fn task_for_new(project: &str, task: &str) -> String {
 ///
 /// 🔴 2026-08-15, và đây là một lượt đổi NGUỒN chứ không phải một bản vá.
 ///
-/// Cho tới hôm nay hub dựng nút lệnh bằng cách **soi chữ trên màn**: bóc dấu
+/// Cho tới hôm nay huba dựng nút lệnh bằng cách **soi chữ trên màn**: bóc dấu
 /// nhắc, đối chiếu một danh sách động từ quen, đo bề ngang cửa sổ rồi đoán xem
 /// dòng có bị bẻ đôi không để nối lại. Bảy cửa, và sáu trong bảy là phép đoán
 /// trên một tấm chữ ĐÃ ĐI QUA một cái cửa sổ — bẻ theo bề ngang, cắt bằng `…`,
@@ -2112,7 +2112,7 @@ pub fn commands_of(cfg: &Config, session_id: &str, max: usize) -> Vec<Cmd> {
     }
     let Some(path) = find_transcript(&cfg.claude_transcript_root(), session_id) else {
         // KHÔNG rơi về màn: màn là thứ vừa bị thay. Nhưng cũng không im — "0
-        // nút vì phiên chưa nói gì" và "0 nút vì hub không tìm ra sổ" đọc lên y
+        // nút vì phiên chưa nói gì" và "0 nút vì huba không tìm ra sổ" đọc lên y
         // hệt nhau nếu chỗ này không ghi một dòng (luật 3).
         logging::info("cmd_source_no_transcript", json!({ "session": session_id }));
         return Vec::new();
@@ -2172,7 +2172,7 @@ fn result_says_denied(block: &Value) -> bool {
 /// BỐN cửa còn lại, và cả bốn là CHÍNH SÁCH chứ không phải phép đoán.
 ///
 /// Nguồn `tool_use` không phải hỏi *"đây có phải một lệnh không"* — chính CLI
-/// đã trả lời rồi. Còn lại đúng những câu hub phải tự trả lời dù nguồn chắc tới
+/// đã trả lời rồi. Còn lại đúng những câu huba phải tự trả lời dù nguồn chắc tới
 /// đâu:
 ///   1. **một dòng** — nút này gõ vào một TUI, mà một khối nhiều dòng gõ vào đó
 ///      là một cú dán, không phải một lệnh (đo: 70/571 lệnh bị từ chối là khối
@@ -2182,7 +2182,7 @@ fn result_says_denied(block: &Value) -> bool {
 ///      Hai điều kiện ấy là CHÍNH SÁCH, không phải nhận dạng, và không ai yêu
 ///      cầu chúng. Xem ghi chú ngay dưới.
 ///
-/// 🔴 Hà 2026-08-16: *"đã qua hub thì đừng có chặn gì cả, các chỗ chặn bỏ hết
+/// 🔴 Hà 2026-08-16: *"đã qua huba thì đừng có chặn gì cả, các chỗ chặn bỏ hết
 /// cho tôi"* · *"tôi ở tele là phải gọi lệnh thao tác như ngồi máy thì chặn
 /// khác gì chặt tay, cần kênh tele để làm gì?"*.
 ///
@@ -2190,7 +2190,7 @@ fn result_says_denied(block: &Value) -> bool {
 /// dạng: `destructive` (rm, git reset --hard, kill…) và `preview_risk` (dòng
 /// trông như mang bí mật). Chúng đứng đây từ trước và chưa bao giờ do chủ máy
 /// yêu cầu; hậu quả đo được là những dòng lệnh hiện ra trên điện thoại mà
-/// không có đường bấm, và hub thì im — nhìn y hệt "hub không nhận ra đây là
+/// không có đường bấm, và huba thì im — nhìn y hệt "huba không nhận ra đây là
 /// lệnh". Hôm nay anh hỏi thẳng: *"cái này thằng nào tạo ra, thằng nào chặn
 /// thế, tôi có yêu cầu vậy à"*.
 ///
@@ -2359,8 +2359,8 @@ pub fn commands_in_last_turn(tail: &str, max: usize) -> Vec<Cmd> {
         // (`PGPASSWORD=hunter2`, `sk-…`, khối khoá riêng).
         // 🔴 GHI, KHÔNG CHẶN — Hà 2026-08-16: *"tôi ở tele là phải gọi lệnh
         // thao tác như ngồi máy thì chặn khác gì chặt tay, cần kênh tele để làm
-        // gì?"*. Đó là phép thử cầu nối, phát biểu ngược lại: hub tồn tại để
-        // mang bàn tay chủ máy tới cái máy này, nên mỗi thứ hub từ chối làm mà
+        // gì?"*. Đó là phép thử cầu nối, phát biểu ngược lại: huba tồn tại để
+        // mang bàn tay chủ máy tới cái máy này, nên mỗi thứ huba từ chối làm mà
         // ngồi ở máy làm được là một ngón tay bị chặt.
         //
         // Cân này vẫn có ích như một DẤU HIỆU (một dòng `PGPASSWORD=… psql …`
@@ -2419,7 +2419,7 @@ pub struct Asking {
     /// Câu hỏi cho CHỌN NHIỀU — bấm một số là **bật/tắt** một mục, chưa gửi.
     ///
     /// 🔴 Hà 2026-08-13, ảnh chụp hộp hỏi của phiên `[codetrail]`: *"option này
-    /// chọn nhiều chứ không phải chọn 1"*. hub dựng 4 lựa chọn thành 4 cái nút
+    /// chọn nhiều chứ không phải chọn 1"*. huba dựng 4 lựa chọn thành 4 cái nút
     /// bấm-một-phát, tức nó khai sai bản chất câu hỏi: bấm một cái rồi ngồi chờ
     /// một việc sẽ không xảy ra, vì phiên vẫn đang đợi dấu Enter.
     ///
@@ -2457,8 +2457,8 @@ pub struct Question {
 /// Câu hỏi phiên ĐANG CHỜ người trả lời — đọc từ NHẬT KÝ, không phải từ màn.
 ///
 /// 🔴 Hà 2026-08-12: *"có 1 phiên đang đưa lựa chọn nhưng không nhận được trên
-/// tele"*. Đo: `projects-11` có lượt cuối là `AskUserQuestion`, mà hub im, log
-/// ghi `session_change_muted … "không kẹt"`. Gốc nằm ở chỗ hub hỏi SAI NGUỒN:
+/// tele"*. Đo: `projects-11` có lượt cuối là `AskUserQuestion`, mà huba im, log
+/// ghi `session_change_muted … "không kẹt"`. Gốc nằm ở chỗ huba hỏi SAI NGUỒN:
 /// nó đọc màn rồi để `keys::parse_choices` nhận dạng, mà hàm ấy (từ 08-11) đòi
 /// các mục **liền dòng nhau** để khỏi đọc nhầm một đoạn văn có đánh số. Bảng
 /// `AskUserQuestion` thì mỗi lựa chọn có một dòng **mô tả** bên dưới — đúng cái
@@ -2466,7 +2466,7 @@ pub struct Question {
 /// điện thoại không hay biết.
 ///
 /// Nguồn đúng là nhật ký: lời gọi `AskUserQuestion` nằm đó **có cấu trúc** —
-/// câu hỏi, nhãn, mô tả — và nó có mặt cả với phiên hub KHÔNG đọc được màn
+/// câu hỏi, nhãn, mô tả — và nó có mặt cả với phiên huba KHÔNG đọc được màn
 /// (VS Code, iTerm, phiên nền). Cách nhận biết "chưa trả lời" thì dùng lại đúng
 /// khuôn của bộ đếm subagent: `tool_use` nào chưa có `tool_result` mang id ấy.
 /// Bảng hỏi đang treo của MỘT phiên, tra thẳng theo id.
@@ -2545,8 +2545,8 @@ pub fn pending_question(tail: &str) -> Option<Asking> {
     // 🔴 GỠ 2026-08-16 cổng "câu hỏi có dấu hiệu bí mật thì thay bằng một câu
     // xin lỗi và XOÁ HẾT LỰA CHỌN". Đây là chỗ nó cắn đau nhất: mất lựa chọn
     // thì `/pick` không còn gì để bấm, tức phiên đứng kẹt cho tới khi chủ máy
-    // về ngồi trước máy — đúng thứ hub sinh ra để khỏi phải làm. Hà: *"không
-    // cần giấu gì hết, giấu thì phải ngồi vào máy để làm vậy thì cần gì hub
+    // về ngồi trước máy — đúng thứ huba sinh ra để khỏi phải làm. Hà: *"không
+    // cần giấu gì hết, giấu thì phải ngồi vào máy để làm vậy thì cần gì huba
     // nữa"*. Dấu hiệu vẫn được ghi, chữ vẫn đi.
     note_preview_risk("pending_question", &asking.question);
     Some(asking)
@@ -2778,7 +2778,7 @@ const BG_ENDED: [&str; 3] = ["done", "stopped", "failed"];
 
 /// Phiên đang sống của một tài khoản, đọc từ SỔ SÁCH CỦA CHÍNH CLI.
 ///
-/// 🔴 Hà 2026-08-15: *"tôi muốn mọi thông tin khi đi qua hub phải là realtime
+/// 🔴 Hà 2026-08-15: *"tôi muốn mọi thông tin khi đi qua huba phải là realtime
 /// chứ không phải đọc lịch sử"*. Đường cũ là `claude agents --json` — một lượt
 /// dựng binary **279 MB** cho MỖI tài khoản, đo trên 2.891 lượt thật:
 /// **p50 3,1 giây · p90 14,8 · max 120**. Ba tài khoản ⟹ gần như mọi cú bấm
@@ -2795,7 +2795,7 @@ const BG_ENDED: [&str; 3] = ["done", "stopped", "failed"];
 ///
 /// Đây KHÔNG phải "đọc lịch sử": mấy tệp này là thứ CLI đang ghi *ngay lúc
 /// này* (`updatedAt` nhích theo từng lượt), cùng họ với nhật ký phiên — chứ
-/// không phải ảnh chụp hub tự cất như sổ `watch:sessions`.
+/// không phải ảnh chụp huba tự cất như sổ `watch:sessions`.
 ///
 /// Hình dạng trả về giữ nguyên như `claude agents --json` để chỗ đọc
 /// (`snapshot`) không phải biết nguồn nào; `host_of` vẫn là chỗ duy nhất quyết
@@ -2911,7 +2911,7 @@ pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
 ///
 /// Đường hỏi CLI còn lại đúng một lý do: bản CLI cũ chưa ghi `sessions/`. Nó
 /// **ghi log khi chạy**, vì rơi về đường 3 giây mà không ai biết là đúng kiểu
-/// hỏng câm mà tệp CLAUDE.md của hub liệt ra.
+/// hỏng câm mà tệp CLAUDE.md của huba liệt ra.
 fn list_account(account: &ClaudeAccountCfg, cli: &str) -> Result<Vec<Value>> {
     let dir = account_book_dir(account);
     if dir.join("sessions").is_dir() {
@@ -3037,7 +3037,7 @@ pub fn refresh_activity(rows: &mut [LiveSession]) -> bool {
 /// đứng trên một giả định sai về ai đang bấm: đây là **chủ máy** bấm ⏹ trên
 /// đúng cái cửa sổ anh vừa đọc dòng "đang chạy gì" của nó, tức anh đã biết mình
 /// đóng cái gì trước khi chạm. Hỏi lại chỉ là bắt xác nhận một điều vừa đọc —
-/// đúng hình dạng *"đã qua hub thì đừng có chặn gì cả"*.
+/// đúng hình dạng *"đã qua huba thì đừng có chặn gì cả"*.
 ///
 /// Phiên CLI thì LUÔN hỏi, kể cả lúc rảnh, và đó không phải nửa vời: nó giữ cả
 /// một hội thoại — thứ không dựng lại được — chứ không phải một dấu nhắc.
@@ -3099,13 +3099,13 @@ fn terminal_process_alive() -> Option<bool> {
 /// thường như đang gõ ở terminal là được rồi"*, và *"còn phiên đang chạy cli
 /// rồi thì vẫn như cũ (gửi text; file)"*.
 ///
-/// Cho tới nay hub đi MỘT chiều: `claude agents` liệt kê phiên, rồi tìm cửa sổ
-/// theo tty. Một cửa sổ không chạy CLI vì thế là thứ hub không có cách nào biết
+/// Cho tới nay huba đi MỘT chiều: `claude agents` liệt kê phiên, rồi tìm cửa sổ
+/// theo tty. Một cửa sổ không chạy CLI vì thế là thứ huba không có cách nào biết
 /// là tồn tại — trong khi ngồi trước máy thì nó nằm ngay đó, mở sẵn, gõ được.
 /// Đúng định nghĩa lỗ hổng của cây cầu.
 ///
 /// Đo lúc dựng (5 cửa sổ, mỗi cửa sổ 1 tab, cả 5 đang chạy `claude`): ghép 1-1
-/// sạch với 5 phiên hub thấy — tức mô hình cửa-sổ-là-phiên khớp máy này, và
+/// sạch với 5 phiên huba thấy — tức mô hình cửa-sổ-là-phiên khớp máy này, và
 /// hàng thêm ra ở đây chỉ xuất hiện khi có cửa sổ THẬT SỰ rảnh.
 ///
 /// Ba chỗ cố tình làm khác hàng phiên `claude`:
@@ -3162,7 +3162,7 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>, tabs: &[crate::keys::Tab]) {
 /// và nó có một nguyên nhân đã biết chứ không phải giả thuyết: một phiên đứng ở
 /// hộp **"Do you trust this folder"** thì CHƯA có `sessionId`, nên chưa có sổ
 /// nào để đọc — đo lúc 12:0x ngày 2026-08-13, `claude` sống ở `ttys002` mà
-/// `hub sessions` khai 3 phiên, không có nó.
+/// `huba sessions` khai 3 phiên, không có nó.
 ///
 /// Chỉ GHI LOG, không dựng hàng: một hàng không có id thì `/type` `/shot`
 /// `/stop` đều không địa chỉ hoá được — dựng nó lên là dựng đúng thứ luật 14
@@ -3208,14 +3208,14 @@ fn drop_stale_dead(rows: &mut Vec<LiveSession>) -> usize {
     let now = chrono::Utc::now().timestamp();
     let before = rows.len();
     rows.retain(|r| {
-        // MÁY MÓC CỦA CHÍNH HUB không lên danh sách. `claude -p "/usage"` chạy
+        // MÁY MÓC CỦA CHÍNH HUBA không lên danh sách. `claude -p "/usage"` chạy
         // mỗi 5 phút, đẻ ra một phiên thật mang id thật, không cửa sổ, không
         // nhật ký — và nó ngồi trong `claude agents` tới cả chục phút.
         //
         // Luật 11b đã cấm nó GÕ CHUÔNG, nhưng chỉ chặn ở khâu nói; nó vẫn hiện
         // trên danh sách, và đó đúng là hàng làm Hà đếm ra 5 khi màn có 4 cửa
-        // sổ. Cùng một câu trả lời: cái đó là ruột của hub, không phải việc của
-        // người dùng. Dấu nhận là `cwd` — hubd chạy từ `WorkingDirectory` riêng
+        // sổ. Cùng một câu trả lời: cái đó là ruột của huba, không phải việc của
+        // người dùng. Dấu nhận là `cwd` — hubad chạy từ `WorkingDirectory` riêng
         // và con nó thừa hưởng, không phiên người nào sống ở đó.
         if is_hub_own_probe(r) {
             return false;
@@ -3237,13 +3237,13 @@ fn drop_stale_dead(rows: &mut Vec<LiveSession>) -> usize {
         logging::info(
             "stale_rows_hidden",
             json!({ "count": dropped,
-                    "why": "phiên đã tắt từ lâu (claude agents vẫn khai) hoặc phép dò của chính hub — hàng không dẫn vào đâu" }),
+                    "why": "phiên đã tắt từ lâu (claude agents vẫn khai) hoặc phép dò của chính huba — hàng không dẫn vào đâu" }),
         );
     }
     dropped
 }
 
-/// Đánh dấu những phiên hub THẬT SỰ gõ vào được — xem `LiveSession::can_type`.
+/// Đánh dấu những phiên huba THẬT SỰ gõ vào được — xem `LiveSession::can_type`.
 ///
 /// Không hỏi Terminal lần nào: tra trong danh sách tab mà cả ảnh chụp dùng
 /// chung (`keys::alive_tab`). Trước 2026-08-16 hàm này tự đi hỏi lấy một lượt
@@ -3334,15 +3334,15 @@ fn link_parents(rows: &mut [LiveSession], procs: &Procs) {
 // Đệm 20 giây kéo cú bấm ấy về **1,5s**, đo ngay hôm đó.
 //
 // 🔴 Hà 2026-08-15 gỡ nó bằng một câu ở tầng cao hơn: *"tôi muốn mọi thông tin
-// khi đi qua hub phải là realtime chứ không phải đọc lịch sử"* · *"đây là kênh
+// khi đi qua huba phải là realtime chứ không phải đọc lịch sử"* · *"đây là kênh
 // làm việc từ xa, mà bạn lại lấy cái cũ để gửi thì còn ý nghĩa gì nữa"*.
 //
 // Và đây là chỗ đáng nhớ: **cái đệm không sai, nó chỉ là câu trả lời cho một
 // câu hỏi sai.** Câu hỏi đúng là *"vì sao một phép đo về cái máy này lại tốn 10
-// giây"*, và câu trả lời hoá ra là hub đang hỏi bằng cách **dựng lại một binary
+// giây"*, và câu trả lời hoá ra là huba đang hỏi bằng cách **dựng lại một binary
 // 279 MB ba lần** (`claude agents`) để đọc thứ mà CLI đã ghi sẵn ra tệp. Đổi
 // nguồn (xem `list_account_books`) thì cái giá biến mất, nên cái đệm mất luôn
-// lý do tồn tại — chứ không phải hub chấp nhận chậm để đổi lấy tươi.
+// lý do tồn tại — chứ không phải huba chấp nhận chậm để đổi lấy tươi.
 //
 // 📌 Nó cũng đã HỎNG CÂM một lần và đó là bài học kèm theo: khi máy swap, một
 // lượt dựng ảnh chụp lên 15–92 giây, tức **lâu hơn chính cái đệm**, nên đệm
@@ -3383,7 +3383,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
             // 🔴 Và nói thêm HAI dữ kiện, vì lượt truy 16/08 tắc đúng ở chỗ
             // thiếu chúng. Đã loại được ba nghi phạm bằng đo thật
             // (`tests/probe_timing_live.rs`): đọc `contents` chỉ tốn ~50 ms;
-            // bốn cú dò song song xong trong 597 ms nên hub KHÔNG tự giành với
+            // bốn cú dò song song xong trong 597 ms nên huba KHÔNG tự giành với
             // chính nó; và số cửa sổ không giải thích được (9 hàng: 183 lượt,
             // 0 lần hết giờ · 8 hàng: 111 lượt, 16 lần). Còn lại giả thuyết
             // "Terminal không trả lời trong một QUÃNG", mà quãng thì phải đo
@@ -3706,7 +3706,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     // lời được bằng `sessions_snapshot_ms`, thứ chỉ in một con số tổng. Và đo
     // ngoài thì mọi thành phần đều rẻ: `claude agents --json` 0,3s mỗi tài
     // khoản (cả ba ~1s), `osascript` liệt kê tab 0,13s, `ps` 0,04s, cả lệnh
-    // `hub sessions` 3,0s — trong khi daemon in 12–24s. Một con số tổng không
+    // `huba sessions` 3,0s — trong khi daemon in 12–24s. Một con số tổng không
     // nói được khúc nào ăn mất mười mấy giây, nên nó không dẫn tới chỗ nào cả.
     let after_loop = snap_started.elapsed();
     unlisted_claude_processes(&out.sessions, &procs);
@@ -4148,7 +4148,7 @@ fn fork_call(cfg: &Config, session: &LiveSession, prompt: &str) -> Result<ForkRe
     );
     let per_call = cap.to_string();
     // Pin the working directory to the session's own, so `Read`/`Grep` resolve
-    // against the work being asked about rather than wherever `hubd` was
+    // against the work being asked about rather than wherever `hubad` was
     // started from.
     let cwd = crate::config::expand_home(Path::new(&session.cwd));
     let out = run(
@@ -4337,7 +4337,7 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
     // DỌN BẢNG CŨ trước đã.
     //
     // Đo 2026-08-11: một bảng `/btw` còn mở từ lượt trước NUỐT luôn câu hỏi của
-    // lượt này — gõ vào thì bảng đóng lại chứ không mở bảng mới, hub chờ hết 60
+    // lượt này — gõ vào thì bảng đóng lại chứ không mở bảng mới, huba chờ hết 60
     // giây rồi rơi về fork (và fork chết vì phiên ấy chưa có nhật ký). Một lượt
     // hỏng vì rác của lượt trước là thứ chắc chắn tái diễn vào ngày có người hỏi
     // hai câu liền nhau, nên dọn ngay ở đây — đừng trông vào việc lượt trước đã
@@ -4391,7 +4391,7 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
     // vẽ một bảng bên trong TUI, và trong lúc nó đang viết, màn ĐÃ đổi
     // (`body != before`) còn `is_busy` thì KHÔNG bắt được — đồng hồ
     // `(2m 5s · ↓ …)` là của một lượt chạy bình thường, bảng `/btw` không có nó.
-    // Kết quả: hub tóm cả màn hình lúc còn `· Answering…` rồi gửi về điện thoại
+    // Kết quả: huba tóm cả màn hình lúc còn `· Answering…` rồi gửi về điện thoại
     // như thể đó là câu trả lời — kèm nguyên cái logo `Claude Code v2.1.227`.
     //
     // Thứ `claude` bảo đảm là CHÂN BẢNG: `Esc to close` chỉ hiện khi bảng đã
@@ -4407,7 +4407,7 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
         }
         let answer = btw_answer(&body, question);
         // Đóng bảng lại. Bỏ bước này là để lại một bảng chắn ngang phiên của
-        // người khác — hub mở ra thì hub phải dọn, y như `/stop` phải đóng được
+        // người khác — huba mở ra thì huba phải dọn, y như `/stop` phải đóng được
         // cái cửa sổ mà `/new` mở ra.
         if let Err(e) = crate::keys::press(window, "esc") {
             logging::warn(
@@ -4443,7 +4443,7 @@ const BTW_PANEL_DONE: &str = "Esc to close";
 /// Chữ `claude` in trong lúc bảng còn đang viết câu trả lời.
 const BTW_ANSWERING: &str = "Answering";
 
-/// Dòng lệnh chính hub vừa gõ, `claude` vẽ lại ở đầu bảng.
+/// Dòng lệnh chính huba vừa gõ, `claude` vẽ lại ở đầu bảng.
 const BTW_ECHO: &str = "/btw";
 
 /// Bảng đã viết XONG chưa.
@@ -4469,7 +4469,7 @@ pub fn btw_panel_finished(screen: &str) -> bool {
 ///
 /// Màn mang cả logo khởi động, cả dòng `/btw <câu hỏi>` vừa gõ, cả chân bảng
 /// hướng dẫn phím. Gửi nguyên màn về điện thoại thì người đọc phải tự lọc — mà
-/// hub đọc được thì hub lọc được. Cắt theo hai mốc `claude` tự vẽ: dòng chứa
+/// huba đọc được thì huba lọc được. Cắt theo hai mốc `claude` tự vẽ: dòng chứa
 /// câu hỏi vừa gõ, và chân bảng.
 pub fn btw_answer(screen: &str, question: &str) -> String {
     let lines: Vec<&str> = screen.lines().collect();
@@ -4585,10 +4585,10 @@ pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<
 
 // 🪦 `gate_preview(text, hidden)` — gỡ 2026-08-16. Nó thay cả khúc chữ bằng
 // một câu xin lỗi khi thấy dấu hiệu bí mật, ở ba chỗ: bản bàn giao, câu trả lời
-// bên lề, và màn đọc lại. Hà: *"hub là cổng để làm việc từ xa qua tele không
+// bên lề, và màn đọc lại. Hà: *"huba là cổng để làm việc từ xa qua tele không
 // cần giấu gì hết"*. Thay bằng `note_preview_risk` — ghi vào log, chữ đi tiếp.
 
-/// A session hub started, and how to find it again.
+/// A session huba started, and how to find it again.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Started {
     pub session_id: String,
@@ -4604,10 +4604,10 @@ pub struct Started {
     /// được một sự thật.
     #[serde(default)]
     pub window: bool,
-    /// Vì sao KHÔNG mở được cửa sổ — chỉ có khi hub đã THỬ và trượt.
+    /// Vì sao KHÔNG mở được cửa sổ — chỉ có khi huba đã THỬ và trượt.
     ///
     /// 🔴 Hà 2026-08-19: *"Tôi dùng lệnh `/new acc1 tiếp social` sau đó và phiên
-    /// lại báo không có cửa sổ là sao"*. Lệnh của anh không sai gì cả; hub thử
+    /// lại báo không có cửa sổ là sao"*. Lệnh của anh không sai gì cả; huba thử
     /// mở cửa sổ, `osascript` hết 20 giây không trả lời, nên nó **lui về
     /// `--bg`** — đúng đường lui đã thiết kế. Cái sai là nó lui trong IM LẶNG:
     /// câu chào chỉ đổi hai chữ (`⌨ cửa sổ Terminal` → `🌙 phiên nền`), không
@@ -4629,7 +4629,7 @@ pub struct Started {
 /// `backgrounded · 6514f454 (idle — send a prompt to start)`, and taking the
 /// whole tail stored that entire sentence as the session id — after which
 /// `/session`, `/ask`, `/tell` and `/stop` all silently failed to match it,
-/// while hub reported the session as started. Pure so the shape can be pinned
+/// while huba reported the session as started. Pure so the shape can be pinned
 /// by a test instead of by another live run.
 pub fn parse_backgrounded_id(stdout: &str) -> Option<&str> {
     stdout
@@ -4650,8 +4650,8 @@ pub fn parse_backgrounded_id(stdout: &str) -> Option<&str> {
 ///   no push/merge/reset, no ssh/scp/sudo/rm, no curl. The human approval step
 ///   non-negotiable #1 asks for is the owner typing the task and pressing the
 ///   button.
-/// - hub cannot tell what it costs. The transcript records no price and
-///   `claude agents` reports none, so there is nothing to add up. What hub can
+/// - huba cannot tell what it costs. The transcript records no price and
+///   `claude agents` reports none, so there is nothing to add up. What huba can
 ///   do is show that it is running and offer a stop — control and visibility
 ///   instead of a number that would be invented.
 ///
@@ -4666,7 +4666,7 @@ pub fn parse_backgrounded_id(stdout: &str) -> Option<&str> {
 /// Mở phiên trong một CỬA SỔ TERMINAL THẬT, rồi ghép nó với hàng `claude agents`.
 ///
 /// Ghép bằng **tty**, không bằng tên: tên phiên do `claude` tự đặt (`projects-31`)
-/// nên hub không đoán trước được, còn `sessionId` thì chưa tồn tại lúc vừa gõ
+/// nên huba không đoán trước được, còn `sessionId` thì chưa tồn tại lúc vừa gõ
 /// lệnh. `tty` thì Terminal trả về ngay khi dựng cửa sổ, và `claude agents` khai
 /// đúng nó — hai đầu gặp nhau ở đó.
 ///
@@ -4877,7 +4877,7 @@ fn wait_for_new_session_id(
         //
         // Đo trên log, ba lượt `/new` liên tiếp và **cả ba ghép nhầm sang phiên
         // mở TRƯỚC đó**:
-        //   15:54:58 mở ttys000 → ghép `ac94ff19` (phiên hub, ttys005)
+        //   15:54:58 mở ttys000 → ghép `ac94ff19` (phiên huba, ttys005)
         //   16:02:04 mở ttys008 → ghép `8291e5ac` (phiên ttys000)
         //   16:05:17 mở ttys009 → ghép `724de1ff` (phiên ttys008)
         //
@@ -4965,16 +4965,16 @@ fn wait_for_new_session_id(
 /// Thuần, để cái ranh giới hẹp này kiểm được mà không cần một cửa sổ Terminal.
 ///
 /// Vì sao hẹp đến thế: bấm một con số vào hộp chọn là **trả lời thay chủ máy**,
-/// việc hub không được phép làm. Hộp này là ngoại lệ có căn cứ, và căn cứ nằm ở
+/// việc huba không được phép làm. Hộp này là ngoại lệ có căn cứ, và căn cứ nằm ở
 /// chỗ nó KHÔNG hỏi về công việc — nó hỏi *"thư mục này có phải của anh không"*
-/// về đúng thư mục **hub vừa tự mở cửa sổ vào**, dưới **tài khoản của chính chủ
+/// về đúng thư mục **huba vừa tự mở cửa sổ vào**, dưới **tài khoản của chính chủ
 /// máy**, ở đúng chỗ phiên trước đang làm việc. Câu trả lời đã được chủ máy nói
 /// ra từ trước bằng hành động, chỉ là `claude` ghi "đã tin" theo từng cặp
 /// (`CLAUDE_CONFIG_DIR`, đường tuyệt đối) nên nó hỏi lại mỗi khi gặp cặp mới.
 ///
 /// Nhận theo CHỮ của lựa chọn, và đòi cả ba: có `trust`, có `folder`, và KHÔNG
 /// mở đầu bằng `no` (hộp có sẵn một lựa chọn *"No, exit"*). Câu chữ đổi ⟹ không
-/// khớp ⟹ hub rơi về nhánh báo-và-giữ-nguyên, tức **hỏng thì hỏng về phía im
+/// khớp ⟹ huba rơi về nhánh báo-và-giữ-nguyên, tức **hỏng thì hỏng về phía im
 /// lặng**, không phải về phía bấm bừa.
 pub fn trust_dialog_choice(choices: &[(usize, String)]) -> Option<usize> {
     choices.iter().find_map(|(n, label)| {
@@ -4983,12 +4983,12 @@ pub fn trust_dialog_choice(choices: &[(usize, String)]) -> Option<usize> {
     })
 }
 
-/// Nhìn cửa sổ hub vừa mở; kẹt ở hộp tin-thư-mục thì bấm hộ. Trả về số đã bấm.
+/// Nhìn cửa sổ huba vừa mở; kẹt ở hộp tin-thư-mục thì bấm hộ. Trả về số đã bấm.
 ///
 /// 🔴 Hà 2026-08-13, sau khi xem tận mắt một cửa sổ đứng im 22 phút: *"bấm hộ
 /// đi, phải kiểm tra được và bấm luôn 1"*.
 ///
-/// Chỉ gọi cho cửa sổ **hub vừa tự mở** và chỉ khi phiên **chưa chào đời** —
+/// Chỉ gọi cho cửa sổ **huba vừa tự mở** và chỉ khi phiên **chưa chào đời** —
 /// hai điều kiện ấy không nằm trong hàm này mà nằm ở chỗ gọi, vì chúng là lý do
 /// việc bấm hộ chấp nhận được.
 pub fn answer_trust_dialog(tty: &str) -> Option<usize> {
@@ -5018,7 +5018,7 @@ pub fn answer_trust_dialog(tty: &str) -> Option<usize> {
             logging::info(
                 "trust_dialog_not_this_box",
                 json!({ "tty": tty, "choices": choices.len(),
-                        "why": "có hộp chọn nhưng không phải hộp tin-thư-mục — hub không trả lời thay chủ máy" }),
+                        "why": "có hộp chọn nhưng không phải hộp tin-thư-mục — huba không trả lời thay chủ máy" }),
             );
         }
         return None;
@@ -5040,7 +5040,7 @@ pub fn answer_trust_dialog(tty: &str) -> Option<usize> {
             logging::info(
                 "trust_dialog_answered",
                 json!({ "tty": tty, "pressed": n,
-                        "why": "hộp tin-thư-mục trên cửa sổ CHÍNH HUB vừa mở — Hà uỷ quyền 2026-08-13" }),
+                        "why": "hộp tin-thư-mục trên cửa sổ CHÍNH HUBA vừa mở — Hà uỷ quyền 2026-08-13" }),
             );
             Some(n)
         }
@@ -5057,13 +5057,13 @@ pub fn answer_trust_dialog(tty: &str) -> Option<usize> {
 /// Cửa sổ đang đóng dở ĐANG VƯỚNG cái gì — bốn kết cục, không gộp.
 ///
 /// Gộp chúng vào một `bool` là dựng lại đúng cái bẫy `screen_of → None` (luật
-/// 13): *"tab còn bận"* có ít nhất bốn nghĩa, và chỉ một trong bốn là cái hub
+/// 13): *"tab còn bận"* có ít nhất bốn nghĩa, và chỉ một trong bốn là cái huba
 /// vẫn nói ra.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExitBox {
     /// Đã bấm *"thoát và dừng lệnh nền"* — kèm số đã bấm và những việc bị dừng.
     Answered(usize, Vec<String>),
-    /// Màn có một hộp chọn KHÁC. hub không trả lời thay chủ máy, nhưng phải NÓI.
+    /// Màn có một hộp chọn KHÁC. huba không trả lời thay chủ máy, nhưng phải NÓI.
     Other(usize),
     /// Không có hộp nào — cửa sổ bận vì đang chạy thật.
     None,
@@ -5075,12 +5075,12 @@ pub enum ExitBox {
 ///
 /// 🔴 Hà 2026-08-19, ảnh chụp một cửa sổ đứng im sau khi chuyển phiên: *"Chuyển
 /// phiên xong phiên cũ bị kẹt như này làm sao qua được"*. Đo lại nguyên chuỗi
-/// (`logs/hub.log`, phiên `3853d022`, cửa sổ 4203): hub gõ `/exit` → `claude`
+/// (`logs/huba.log`, phiên `3853d022`, cửa sổ 4203): huba gõ `/exit` → `claude`
 /// bật hộp *"Background work is running · The following will stop when you
 /// exit: shell · bash …/quality-gate.sh"* → tab KHÔNG rảnh vì CLI đang chờ một
 /// câu trả lời → `close_still_busy` 141s · 284s · 507s · 644s → `close_gave_up`.
 ///
-/// Mười phút ấy hub không nhìn màn một lần nào, và câu nó nói lúc bỏ cuộc —
+/// Mười phút ấy huba không nhìn màn một lần nào, và câu nó nói lúc bỏ cuộc —
 /// *"CLI đang chạy dở một lượt"* — là một **suy đoán, và sai**: phiên không
 /// chạy dở, nó đang hỏi. Đúng hình dạng "biết mà không nói", chỉ tệ hơn: đây là
 /// không thèm biết.
@@ -5092,7 +5092,7 @@ pub enum ExitBox {
 /// không đóng, tức là bỏ mệnh lệnh.
 ///
 /// Và vì sao là **1 (Exit and stop tasks)** chứ không phải 2 (*"Move to
-/// background and exit"*): ngay sau bước này hub ĐÓNG CỬA SỔ, mà đóng một cửa
+/// background and exit"*): ngay sau bước này huba ĐÓNG CỬA SỔ, mà đóng một cửa
 /// sổ còn tiến trình sống thì Terminal bật hộp *"terminate running
 /// processes?"* — và một hộp thoại khoá mọi lệnh tự động sau nó (luật 13,
 /// `keys::close_window`). Chọn 2 là đi thẳng vào đúng cái hố mà cả đường đóng
@@ -5100,7 +5100,7 @@ pub enum ExitBox {
 ///
 /// Nhận theo CHỮ, và đòi cả hai vế: nhãn có `exit` **và** `stop`. *"Move to
 /// background and exit"* có `exit` mà không có `stop`, nên nó không lọt. Câu
-/// chữ đổi ⟹ không khớp ⟹ hub rơi về nhánh nói-và-giữ-nguyên: **hỏng về phía
+/// chữ đổi ⟹ không khớp ⟹ huba rơi về nhánh nói-và-giữ-nguyên: **hỏng về phía
 /// im lặng, không phải về phía bấm bừa.**
 pub fn exit_dialog_choice(screen: &str, choices: &[(usize, String)]) -> Option<usize> {
     if !screen.to_lowercase().contains("background work is running") {
@@ -5167,7 +5167,7 @@ pub fn answer_exit_dialog(window: i64) -> ExitBox {
             logging::info(
                 "exit_dialog_other_box",
                 json!({ "window": window, "choices": choices.len(),
-                        "why": "cửa sổ đang chờ trả lời một hộp KHÁC — hub không trả lời thay chủ máy" }),
+                        "why": "cửa sổ đang chờ trả lời một hộp KHÁC — huba không trả lời thay chủ máy" }),
             );
             return ExitBox::Other(choices.len());
         }
@@ -5179,7 +5179,7 @@ pub fn answer_exit_dialog(window: i64) -> ExitBox {
             logging::info(
                 "exit_dialog_answered",
                 json!({ "window": window, "pressed": n, "stopped": tasks,
-                        "why": "hộp lệnh-nền của chính lượt /exit hub vừa gõ — chọn 2 sẽ để lại tiến trình sống và làm Terminal bật hộp khoá mọi lệnh sau đó" }),
+                        "why": "hộp lệnh-nền của chính lượt /exit huba vừa gõ — chọn 2 sẽ để lại tiến trình sống và làm Terminal bật hộp khoá mọi lệnh sau đó" }),
             );
             ExitBox::Answered(n, tasks)
         }
@@ -5195,7 +5195,7 @@ pub fn answer_exit_dialog(window: i64) -> ExitBox {
 
 /// Nhật ký phiên MỚI NHẤT sinh ra sau mốc `since`, trong thư mục khoá của `cwd`.
 ///
-/// Tên tệp chính là `session_id` — đó là cả mẹo: hub biết id mà không phải hỏi
+/// Tên tệp chính là `session_id` — đó là cả mẹo: huba biết id mà không phải hỏi
 /// `claude agents` (ba lần spawn một binary 279 MB). Chỉ nhận tệp sinh SAU lúc
 /// mở cửa sổ, nên phiên cũ trong cùng thư mục không lọt vào.
 fn newest_transcript_since(
@@ -5241,7 +5241,7 @@ fn newest_transcript_since(
 /// ngữ cảnh** ngay lúc 00:12:44, vì `--resume` nối tiếp bản fork nên nó vác
 /// nguyên lịch sử cũ sang. Đóng sổ mà ngữ cảnh không giảm thì không đóng được
 /// cái gì; tệ hơn, phiên mới lập tức đủ điều kiện đóng sổ lần nữa ⟹ **vòng
-/// lặp**: cứ rảnh là hub lại thay một cửa sổ. Hà bắt đúng lúc: *"sao lại reset
+/// lặp**: cứ rảnh là huba lại thay một cửa sổ. Hà bắt đúng lúc: *"sao lại reset
 /// 1 loạt tất cả các phiên thế, đã vượt 60% context đâu"*.
 ///
 /// Đúng ý ngay từ đầu (*"tự chủ động đóng phiên rồi mở phiên MỚI luôn"*): phiên
@@ -5272,7 +5272,7 @@ pub fn start_fresh_after_handover(
     checkpoint: &str,
 ) -> Result<FreshWindow> {
     let task = format!(
-        "Tiếp quản phiên trước (phiên cũ đã đầy ngữ cảnh nên hub đóng sổ và mở phiên này). \
+        "Tiếp quản phiên trước (phiên cũ đã đầy ngữ cảnh nên huba đóng sổ và mở phiên này). \
          BÀN GIAO:\n\n{checkpoint}\n\nĐọc xong thì làm tiếp việc kế tiếp trong bàn giao."
     );
     let cwd = Path::new(&session.cwd);
@@ -5308,20 +5308,20 @@ pub fn start_fresh_after_handover(
     //
     // Trả giá thật 2026-08-13 04:30, lượt tự đóng sổ thứ hai: `hanguyen-41`
     // (acc3, 64%) → cửa sổ mới mở ở `ttys000` lúc 04:31:37 với
-    // `handover_window_opened session:""` — id RỖNG — rồi 04:31:59 hub đóng cửa
+    // `handover_window_opened session:""` — id RỖNG — rồi 04:31:59 huba đóng cửa
     // sổ cũ như thường lệ. Cửa sổ mới ấy **đứng im 22 phút**, và Hà là người
     // phát hiện: *"mở phiên mới bị dừng giữa chừng"*, kèm ảnh chụp hộp *"Quick
     // safety check: … 1. Yes, I trust this folder"*.
     //
-    // Gốc KHÔNG nằm ở hub: gốc dời `~/Documents/projects` → `~/projects` hôm
+    // Gốc KHÔNG nằm ở huba: gốc dời `~/Documents/projects` → `~/projects` hôm
     // 08-12, mà `claude` ghi "đã tin thư mục này" theo **từng CLAUDE_CONFIG_DIR**
     // — đo trong `.claude.json` của ba tài khoản: acc1 có bản ghi cho
     // `/Users/hanguyen/projects`, **acc2 và acc3 KHÔNG có** (chỉ còn đường cũ).
     // Nên cửa sổ đầu tiên mở dưới acc2/acc3 ở gốc mới luôn dừng ở hộp hỏi ⟹
     // không có nhật ký ⟹ không có id để ghép.
     //
-    // Cái sai của hub là **cái nó làm tiếp theo**: id rỗng nghĩa là "chưa thấy
-    // phiên nào cả", mà hub vẫn đóng cửa sổ đang làm việc của chủ máy — tức nó
+    // Cái sai của huba là **cái nó làm tiếp theo**: id rỗng nghĩa là "chưa thấy
+    // phiên nào cả", mà huba vẫn đóng cửa sổ đang làm việc của chủ máy — tức nó
     // phá cái chắc chắn để đổi lấy cái chưa chứng minh, đúng lúc mù nhất. Nay
     // id rỗng ⟹ **giữ nguyên cửa sổ cũ** và đọc màn cửa sổ mới xem nó vướng gì.
     // Hai cửa sổ thì chủ máy đóng bớt được; một phiên đang làm dở bị đóng thì
@@ -5372,7 +5372,7 @@ pub fn start_fresh_after_handover(
     })
 }
 
-/// Bước MỘT của mọi thứ hub mở: một cửa sổ Terminal TRẦN, ở gốc workspace.
+/// Bước MỘT của mọi thứ huba mở: một cửa sổ Terminal TRẦN, ở gốc workspace.
 ///
 /// 🔴 Hà 2026-08-15: *"nếu `/new` để trống thì nó sẽ chỉ khởi tạo terminal, như
 /// vậy không cần lệnh terminal nữa"*. Đây là bước một; `/new <acc>` đi tiếp một
@@ -5472,12 +5472,12 @@ pub fn account_launch(cfg: &Config, account: Option<&str>) -> String {
 /// không có chỗ nào để một cặp ngoặc rỗng bám vào.
 ///
 /// ⚠ Rào KHÔNG nới, và đây là chỗ chọi phải nói rõ: `claude3` TRẦN không có rào
-/// nào (bài học 08-13, Hà: *"đâu có đúng?"*). Nên hub gõ `claude3` **kèm**
+/// nào (bài học 08-13, Hà: *"đâu có đúng?"*). Nên huba gõ `claude3` **kèm**
 /// `--permission-mode auto` + `--disallowedTools`: vẫn là từ chủ máy vẫn gõ,
 /// vẫn đủ rào, và bước "chuyển auto mode on" tự xong ngay lúc mở.
 ///
 /// `prompt` gần như luôn là `None` — đó là đường của `/new`. Ngoại lệ DUY NHẤT
-/// là lượt tự bàn giao: bản bàn giao dài ~2 KB do chính hub soạn, và 2 KB đẩy
+/// là lượt tự bàn giao: bản bàn giao dài ~2 KB do chính huba soạn, và 2 KB đẩy
 /// qua `do script` thì TUI đọc thành một cú DÁN (luật 13), tức đúng chỗ hỏng đã
 /// trả giá cả một tối 12/08. Chỗ ấy không có chủ máy nào gõ nhầm để mà bảo vệ,
 /// nên nó giữ argv — và khác nhau ở đâu thì nói ra ở đó.
@@ -5515,7 +5515,7 @@ pub fn terminal_command_resuming(
     // `--permission-mode auto` — đúng chế độ chủ máy vẫn ngồi làm việc.
     //
     // 🔴 Hà 2026-08-12: *"khi dùng lệnh new mở được phiên rồi nhưng chưa chuyển
-    // tự động sang auto mode on"*. Phiên hub mở ra ở chế độ mặc định, tức mỗi
+    // tự động sang auto mode on"*. Phiên huba mở ra ở chế độ mặc định, tức mỗi
     // lần chạm công cụ là một hộp thoại xin phép — mà **người mở đang ở trên
     // điện thoại**: hộp thoại ấy hiện trên một cái màn hình không ai nhìn, và
     // phiên đứng im cho tới lúc có người ngồi vào máy. Đúng phép thử CẦU NỐI:
@@ -5550,7 +5550,7 @@ pub fn terminal_command_resuming(
     )
 }
 
-/// Bọc một chuỗi cho shell — chỉ dùng cho lệnh hub tự dựng, không cho chữ ngoài.
+/// Bọc một chuỗi cho shell — chỉ dùng cho lệnh huba tự dựng, không cho chữ ngoài.
 pub(crate) fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
@@ -5581,7 +5581,7 @@ pub fn start_background(
     // `--disallowedTools` is VARIADIC, so a prompt placed after it is eaten as
     // one more tool pattern. The first real `/new` did exactly that: the agent
     // came up with no task at all, reporting itself as
-    // "idle — send a prompt to start", and hub cheerfully called it started.
+    // "idle — send a prompt to start", and huba cheerfully called it started.
     // Prompt first, variadic last.
     // Mở ở GỐC WORKSPACE, không phải trong thư mục dự án.
     //
@@ -5603,7 +5603,7 @@ pub fn start_background(
 
     // ĐƯỜNG CHÍNH: mở một cửa sổ Terminal thật, y như chủ máy tự mở.
     //
-    // Hà 2026-08-11: *"cli claude cài trên máy tôi, hub là cầu kết nối ra ui"*.
+    // Hà 2026-08-11: *"cli claude cài trên máy tôi, huba là cầu kết nối ra ui"*.
     // Một phiên `--bg` là hạng phiên ông ấy KHÔNG bao giờ tự tạo khi ngồi trước
     // máy: không cửa sổ ⟹ không màn sống, không `/btw`, không dòng "đang làm
     // gì", và muốn nói chen vào phải DỪNG nó trước. Ba tính năng dựng ngày
@@ -5635,7 +5635,7 @@ pub fn start_background(
     }
 
     // Đường lui `--bg` KHÔNG có cửa sổ nào để gõ vào, nên đề bài rỗng ở đây là
-    // một phiên nằm chết mà hub lại báo "đã mở".
+    // một phiên nằm chết mà huba lại báo "đã mở".
     if task_with_project.is_empty() {
         anyhow::bail!(
             "không mở được cửa sổ terminal, mà phiên nền thì phải có đề bài ngay từ đầu \
@@ -5665,7 +5665,7 @@ pub fn start_background(
     }
     // Human-readable output, not JSON — the id is on the "backgrounded · <id>"
     // line. Parse defensively: a silent miss here would report success while
-    // hub has no idea which session it just started (and cannot stop it).
+    // huba has no idea which session it just started (and cannot stop it).
     let short = parse_backgrounded_id(&out.stdout)
         .map(str::to_string)
         .ok_or_else(|| {
@@ -5693,7 +5693,7 @@ pub fn start_background(
     }
     let full = full.unwrap_or_else(|| {
         // Say it rather than quietly handing back a prefix: the session IS
-        // running, the owner should know hub lost track of its full id.
+        // running, the owner should know huba lost track of its full id.
         logging::warn(
             "background_session_id_unresolved",
             json!({ "short": short, "effect": "focus cursor holds a prefix; /session may not match" }),
@@ -5813,7 +5813,7 @@ pub fn start_background(
 /// `claude agents` reports both: `id` is 8 characters, `sessionId` is the full
 /// uuid. `stop` only matches the short form and answers a full uuid with
 /// *"No job matching '…'. Run 'claude agents' to list running sessions."* —
-/// which hub logged as a warning while telling the owner the session had
+/// which huba logged as a warning while telling the owner the session had
 /// stopped. Everything else here keys on the full id, so the narrowing happens
 /// at the one call that needs it.
 fn short_id(session_id: &str) -> &str {
@@ -5832,7 +5832,7 @@ fn short_id(session_id: &str) -> &str {
 /// hẳn nhau về mức mất mát, và người bấm không có cách nào biết mình sắp nhận
 /// cái nào. Nay tách: `/stop` chỉ dừng, `/close` mới đóng.
 ///
-/// **Không hỏi ai mở cửa sổ.** Luật cũ chỉ cho đóng phiên do chính hub mở
+/// **Không hỏi ai mở cửa sổ.** Luật cũ chỉ cho đóng phiên do chính huba mở
 /// (`started_by_hub`), lý do viết là *"cửa sổ chủ máy tự mở là việc của chủ
 /// máy"*. Nghe hợp lý mà đọc ngược phép thử của dự án: gần như mọi cửa sổ trên
 /// máy này do chủ máy tự mở, nên luật ấy làm lệnh đóng vô dụng **đúng ở chỗ hay
@@ -5859,7 +5859,7 @@ pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Closing> {
     );
     // 🔴 ĐÓNG thì phải nhìn thấy được cả tab ĐÃ CHẾT — xem `keys::window_of_any`.
     // Hàng `/terminal` được dựng từ MỌI tab, kể cả tab `[Process completed]`;
-    // nếu chỗ thi hành lại lọc mất đúng những tab ấy thì hub vẽ ra một cái nút
+    // nếu chỗ thi hành lại lọc mất đúng những tab ấy thì huba vẽ ra một cái nút
     // trỏ vào chỗ chính nó nói là không tồn tại (Hà 17/08, `ttys014`).
     let window = crate::keys::window_of_any(&session.tty)
         .map_err(|e| anyhow::anyhow!("không dò được cửa sổ terminal của phiên: {e}"))?
@@ -5878,13 +5878,13 @@ pub fn close_session(cfg: &Config, session: &LiveSession) -> Result<Closing> {
     //
     // Cửa sổ RẢNH thoát bằng `exit` của shell, không phải `/exit` của TUI: gõ
     // `/exit` vào một dấu nhắc zsh ra `zsh: no such file or directory: /exit`
-    // rồi cửa sổ nằm nguyên đó — hub báo "đang đóng" cho một việc không bao
+    // rồi cửa sổ nằm nguyên đó — huba báo "đang đóng" cho một việc không bao
     // giờ xảy ra.
     if session.host == "shell" {
         // 🔴 Tab đã chết thì KHÔNG có gì để thoát. Gõ `exit` vào một tab
         // `[Process completed]` là gõ vào chỗ không ai đọc, rồi vòng chạy ngồi
         // canh một cú thoát không bao giờ tới — cửa sổ nằm đó tới hết ngày còn
-        // hub thì báo "đang đóng". Đóng thẳng, và `close_window` tự kiểm.
+        // huba thì báo "đang đóng". Đóng thẳng, và `close_window` tự kiểm.
         if crate::keys::tab_proc_count(window).unwrap_or(1) == 0 {
             logging::info(
                 "close_dead_tab_directly",
@@ -5917,7 +5917,7 @@ pub enum Closing {
     /// Phiên NỀN: đã dừng, không có cửa sổ nào để đóng.
     Background,
     /// `close` không ăn nhưng ẩn được — cửa sổ khuất mắt và rời khỏi mọi danh
-    /// sách của hub, mà vẫn còn trong menu Window của Terminal.
+    /// sách của huba, mà vẫn còn trong menu Window của Terminal.
     Hidden(i64),
     /// Cửa sổ đã đóng XONG ngay trong lượt này (và `close_window` đã kiểm).
     Closed(i64),
@@ -6023,8 +6023,8 @@ mod folder_memo_tests {
         );
 
         // Đo được dự án KHÁC thì đổi — phiên có thể chuyển thư mục thật.
-        remember_folder_ranked(id, "AI/hub", false);
-        assert_eq!(recall_folder(id).as_deref(), Some("AI/hub"));
+        remember_folder_ranked(id, "AI/huba", false);
+        assert_eq!(recall_folder(id).as_deref(), Some("AI/huba"));
 
         // Và cái nhãn ấy phải đi tới tận câu chữ người đọc thấy.
         assert_eq!(display_name("hanguyen-53", "dwork"), "[dwork]");

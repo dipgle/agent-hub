@@ -6,11 +6,11 @@
 //! chính lúc ấy đang nằm giữa một long-poll 20 giây và không ai gọi nó về — nên
 //! trong tối đa 20 giây, hai vòng cùng hỏi.
 //!
-//! Đo trên `logs/hub.log` ngày 2026-08-16, TRƯỚC khi vá: **11 lượt**
+//! Đo trên `logs/huba.log` ngày 2026-08-16, TRƯỚC khi vá: **11 lượt**
 //! `telegram_poll_rejected` (*"Conflict: terminated by other getUpdates
 //! request"*), 5 trong số đó nằm gọn trong 10 phút Hà đóng mấy cửa sổ trần từ
 //! điện thoại. Mỗi lượt kèm một giấc ngủ phạt 30 giây của vòng đọc chính, tức
-//! 30 giây hub điếc ngay sau mỗi câu hỏi xác nhận.
+//! 30 giây huba điếc ngay sau mỗi câu hỏi xác nhận.
 //!
 //! Đó là bằng chứng ĐỎ của bài kiểm này, và nó đến từ máy thật chứ không từ một
 //! bản dựng: hành vi "hai tiến trình giành nhau một long-poll" không quan sát
@@ -27,7 +27,7 @@ fn src(name: &str) -> String {
 const READERS: [(&str, &str); 2] = [
     (
         "telegram.rs",
-        "vòng đọc DUY NHẤT của hub (`Inbox::read_forever`)",
+        "vòng đọc DUY NHẤT của huba (`Inbox::read_forever`)",
     ),
     (
         "confirm.rs",
@@ -118,6 +118,6 @@ fn the_fallback_reads_a_refusal_as_a_refusal() {
     assert!(
         cf.contains("poll_rejected(&resp)"),
         "đường lùi không kiểm `poll_rejected` ⟹ Conflict/token sai đọc ra thành \
-         'không ai bấm', và hub im lặng không làm gì"
+         'không ai bấm', và huba im lặng không làm gì"
     );
 }

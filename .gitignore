@@ -3,11 +3,11 @@ logs/
 rust/target/
 node_modules/
 ui-shots/
-hub.env
+huba.env
 # Hà để khoá Telegram ở đây 2026-08-10 và nó CHƯA từng được bỏ qua — một dòng
 # `git add -A` là token vào repo. Bịt trước, rồi mới bàn chuyện đọc nó ở đâu.
 .env
-hub.config.json.bak*
+huba.config.json.bak*
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
@@ -21,3 +21,4 @@ hub.config.json.bak*
 scripts/.cmd-results/
 .runner-allowlist
 .runner-allowlist.bak*
+hub.config.json

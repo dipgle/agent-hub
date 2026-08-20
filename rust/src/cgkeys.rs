@@ -5,7 +5,7 @@
 //! đủ hai bức tường đã đo được.
 //!
 //! **Bức tường:** mọi lượt ghi qua `do script` của Terminal kèm một CR không tắt
-//! được (`keys::press_writes`). Trên một hộp chọn, CR là một cú CHỐT. Nên hub
+//! được (`keys::press_writes`). Trên một hộp chọn, CR là một cú CHỐT. Nên huba
 //! không có phím nào chỉ *di chuyển*: một cái nút "sang tab bên phải" sẽ trả lời
 //! hộ câu đang mở trước khi kịp sang. Không phải suy luận — đo được, và cái giá
 //! trả bằng việc thật: 2026-08-19, một cú Enter lạc vào bảng hỏi của phiên
@@ -14,9 +14,9 @@
 //! **Đường vòng:** `CGEventPostToPid` đưa thẳng một sự kiện bàn phím vào tiến
 //! trình Terminal. Phím rời là phím rời — không có CR nào đi kèm, vì không có
 //! `do script` nào cả. Đổi lại: cần quyền **Accessibility** cấp cho đúng bản
-//! `hubd` đang chạy, và cần `unsafe` để gọi vào CoreGraphics.
+//! `hubad` đang chạy, và cần `unsafe` để gọi vào CoreGraphics.
 //!
-//! Quyền ấy bám được là nhờ việc đã làm 2026-08-10: `hubd` ký bằng chứng chỉ cố
+//! Quyền ấy bám được là nhờ việc đã làm 2026-08-10: `hubad` ký bằng chứng chỉ cố
 //! định nên macOS nhận ra nó là CÙNG một chương trình qua mọi lần dựng lại (xem
 //! `install_update.sh`). Ad-hoc thì mỗi lần build là một chương trình khác, và
 //! quyền sẽ rụng sau đúng một `cargo build`.
@@ -31,7 +31,7 @@
 //!    ngoài thành một câu đọc được.
 //!
 //!    🔴 Nhưng hỏi TRƯỚC rồi từ chối gửi là một ngõ cụt, và bản đầu của tệp này
-//!    mắc đúng vào đó: `hubd` là một tiến trình nền không giao diện, nên nó
+//!    mắc đúng vào đó: `hubad` là một tiến trình nền không giao diện, nên nó
 //!    **không bao giờ xuất hiện trong danh sách Trợ năng** cho tới khi nó thật
 //!    sự THỬ làm một việc cần quyền ấy. Từ chối thử = không bao giờ được hỏi =
 //!    không bao giờ được cấp. Nên thứ tự là: gửi (vô hại nếu chưa có quyền —
@@ -71,11 +71,11 @@ extern "C" {
     fn CFRelease(cf: CfRef);
 }
 
-/// `hubd` (hay tiến trình đang gọi) đã được cấp quyền Accessibility chưa.
+/// `hubad` (hay tiến trình đang gọi) đã được cấp quyền Accessibility chưa.
 ///
 /// Không hỏi kèm hộp thoại xin quyền: `AXIsProcessTrustedWithOptions` bật được
 /// một hộp thoại hệ thống, mà hộp ấy hiện ra trên MÀN HÌNH của cái máy — đúng
-/// thứ hub sinh ra để khỏi phải ngồi trước. Nên hub chỉ ĐỌC trạng thái rồi nói
+/// thứ huba sinh ra để khỏi phải ngồi trước. Nên huba chỉ ĐỌC trạng thái rồi nói
 /// ra; việc cấp quyền là một câu chỉ dẫn gửi về điện thoại.
 pub fn trusted() -> bool {
     unsafe { AXIsProcessTrusted() }
@@ -84,7 +84,7 @@ pub fn trusted() -> bool {
 /// Tên phím → mã phím ảo của bàn phím ANSI.
 ///
 /// Danh sách hẹp có chủ ý, cùng lý do với `keys::KNOWN`: đây là hàng rào, không
-/// phải bảng tra. Mỗi phím ở đây là một phím hub thật sự cần để lái một hộp
+/// phải bảng tra. Mỗi phím ở đây là một phím huba thật sự cần để lái một hộp
 /// chọn — mũi tên để đi, số để chọn, `enter` để chốt, `escape` để thoát,
 /// `tab` vì chính TUI khai nó ở dòng chân (*"Tab/Arrow keys to navigate"*).
 pub fn keycode(name: &str) -> Option<u16> {
@@ -155,14 +155,14 @@ pub fn post(pid: i32, keys: &[String]) -> Result<()> {
             CFRelease(source);
         }
     }
-    // Hỏi SAU khi đã thử: lượt thử là thứ đưa `hubd` vào danh sách Trợ năng, và
+    // Hỏi SAU khi đã thử: lượt thử là thứ đưa `hubad` vào danh sách Trợ năng, và
     // câu trả lời này là thứ duy nhất phân biệt "phím đã tới" với "phím rơi vào
     // hư không" — hệ thống không nói gì cả.
     if !trusted() {
         bail!(
-            "hubd chưa có quyền Trợ năng nên phím KHÔNG tới nơi (macOS không báo lỗi cho việc \
+            "hubad chưa có quyền Trợ năng nên phím KHÔNG tới nơi (macOS không báo lỗi cho việc \
              này — nên đây là chỗ duy nhất nói ra). Mở Cài đặt Hệ thống ▸ Quyền riêng tư & Bảo \
-             mật ▸ Trợ năng rồi bật cho `hubd`; vừa rồi hub đã thử một lần nên nó phải có tên \
+             mật ▸ Trợ năng rồi bật cho `hubad`; vừa rồi huba đã thử một lần nên nó phải có tên \
              trong danh sách. Không thấy thì bấm ➕ và trỏ vào \
              ~/Library/Application Support/hub/bin/hubd"
         );

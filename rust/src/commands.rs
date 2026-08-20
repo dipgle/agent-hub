@@ -11,14 +11,14 @@
 //! sáng nay, hoạt động ngay, và `/help` không hề nhắc tới nó cho tới khi tôi
 //! nhớ ra phải sửa tay dòng thứ 27.
 //!
-//! Cái thứ tư còn tệ hơn, vì nó chưa từng tồn tại: **`setMyCommands`**. hub
+//! Cái thứ tư còn tệ hơn, vì nó chưa từng tồn tại: **`setMyCommands`**. huba
 //! chưa bao giờ khai lệnh của mình với Telegram, nên gõ `/` trong buồng chat
 //! không gợi ý gì và menu ☰ trống trơn — cả một tầng giao diện có sẵn, miễn
 //! phí, bỏ không suốt từ đầu.
 //!
 //! Bảng này giữ đúng những gì Telegram ràng buộc, và test khoá lại: tên lệnh
 //! **≤32 ký tự**, chỉ **chữ Latin thường, số, gạch dưới** (tài liệu Bot API,
-//! mục *Commands*) — luật ấy không phải sở thích của hub mà là điều kiện để
+//! mục *Commands*) — luật ấy không phải sở thích của huba mà là điều kiện để
 //! Telegram chịu tô sáng cái tên ấy trong một tin nhắn.
 
 use crate::adapters::CommandKind;
@@ -239,7 +239,7 @@ pub const ROUTES: &[Route] = &[
         kind: CommandKind::Upgrade,
         arg: Arg::None,
         usage: "",
-        help: "Dựng lại hub từ mã hiện tại rồi khởi động lại",
+        help: "Dựng lại huba từ mã hiện tại rồi khởi động lại",
         listed: true,
     },
     Route {
@@ -332,7 +332,7 @@ pub fn help_text() -> String {
     out.push_str(
         "\nChọn phiên xong thì CHỮ THƯỜNG gõ ở đây đi thẳng vào phiên ấy.\n\
          Lệnh dạng /pick_<id>_<câu>_<lựa chọn> và /run_<n> là chữ chạm-được \
-         hub tự chèn vào tin — chạm là chạy.",
+         huba tự chèn vào tin — chạm là chạy.",
     );
     out
 }
@@ -383,9 +383,9 @@ pub fn routes_of_kind(kind: CommandKind) -> impl Iterator<Item = &'static Route>
 mod tests {
     use super::*;
 
-    /// Luật của Telegram, không phải sở thích của hub: tên lệnh ≤32 ký tự, chỉ
+    /// Luật của Telegram, không phải sở thích của huba: tên lệnh ≤32 ký tự, chỉ
     /// chữ thường Latin + số + gạch dưới. Sai luật thì Telegram thôi tô sáng nó
-    /// trong tin — mà tô sáng chính là cách hub cho bấm từ trong chữ.
+    /// trong tin — mà tô sáng chính là cách huba cho bấm từ trong chữ.
     #[test]
     fn every_command_name_is_one_telegram_will_highlight() {
         for r in ROUTES {

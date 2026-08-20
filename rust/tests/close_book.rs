@@ -12,15 +12,15 @@
 //! Cửa sổ ấy đã đóng từ lâu. `selected tab` của một cửa sổ không còn tab trả về
 //! `missing value`, ép sang chữ thì -1700 — nên phép đo cũ (`tab_busy ->
 //! Result<bool>`) chỉ có một chỗ để đặt sự thật "không còn": nhánh `Err`. Mà
-//! `Err` ở đây có nghĩa là *hub mù*, và luật của hub với cái mù là GIỮ NGUYÊN
+//! `Err` ở đây có nghĩa là *huba mù*, và luật của huba với cái mù là GIỮ NGUYÊN
 //! trong sổ. Luật không sai; phép đo mới sai — nó không biết nói "không còn".
 //!
 //! Cùng một họ với `keys::look` gộp ba kết cục vào `None`, và với
 //! `keys::window_gone` phải đo bằng số tab + `visible` thay vì `id of every
 //! window`: **một câu hỏi, một phép đo, và phép đo phải trỏ đúng chỗ.**
 
-use hub::keys::TabState;
-use hub::pipeline::{close_step, hidden_next, CloseStep, HiddenNext};
+use huba::keys::TabState;
+use huba::pipeline::{close_step, hidden_next, CloseStep, HiddenNext};
 
 /// Trần bỏ cuộc trong `pipeline` là 600 giây; bài kiểm không đọc được hằng số
 /// riêng tư nên nó dùng hai mốc nằm hẳn hai bên (5 phút · 20 phút).
@@ -72,7 +72,7 @@ fn a_busy_tab_waits_then_gives_up_out_loud() {
 // ── Cửa sổ ẩn: đo được rằng lời từ chối là NHẤT THỜI ────────────────────────
 //
 // 17/08 lúc 10:20Z, năm cửa sổ từ chối `close` (chạy êm, trả 0, cửa sổ đứng
-// nguyên) nên hub ẩn chúng đi. Gần bốn tiếng sau, gọi tay lên ĐÚNG những cửa sổ
+// nguyên) nên huba ẩn chúng đi. Gần bốn tiếng sau, gọi tay lên ĐÚNG những cửa sổ
 // ấy, ĐÚNG lệnh ấy, khi chúng vẫn đang ẩn: `2151` · `2153` · `2156` đều đóng
 // ngay lượt đầu (`1/false` → `0/false`). Phép thử A/B ấy bác luôn giả thuyết
 // "cửa sổ ẩn không nhận close" mà tôi vừa nêu ra trước đó — nên cái đúng để làm
@@ -92,7 +92,7 @@ fn a_freshly_hidden_window_waits_out_the_first_gap() {
 }
 
 /// Nhịp đếm từ lần thử GẦN NHẤT, không phải từ lúc ẩn — nếu không thì sau lần
-/// thử đầu, mọi lượt sau đều "tới hạn" và hub thử lại mỗi vòng chạy.
+/// thử đầu, mọi lượt sau đều "tới hạn" và huba thử lại mỗi vòng chạy.
 #[test]
 fn the_gap_is_measured_from_the_last_attempt() {
     let r = HID + 500;
@@ -125,7 +125,7 @@ fn an_entry_that_was_never_hidden_says_so() {
 #[test]
 fn an_old_book_row_still_parses() {
     let old = r#"{"win-ttys002":{"w":2131,"n":"⬜ cửa sổ ttys002","t":1786955814,"c":1786975251}}"#;
-    let book: std::collections::BTreeMap<String, hub::pipeline::Closing> =
+    let book: std::collections::BTreeMap<String, huba::pipeline::Closing> =
         serde_json::from_str(old).expect("sổ cũ phải đọc được bằng mã mới");
     let c = &book["win-ttys002"];
     assert_eq!(c.w, 2131);

@@ -1,7 +1,7 @@
 //! Cú dò Terminal tốn bao lâu, và tiền nằm ở đâu — đo trên máy thật.
 //!
 //! 🔴 Vì sao có tệp này. `terminal_probe_failed` xuất hiện **19 lượt ngày
-//! 2026-08-16** (`logs/hub.log`), 0 lượt mọi ngày trước đó. Phân bố thời gian
+//! 2026-08-16** (`logs/huba.log`), 0 lượt mọi ngày trước đó. Phân bố thời gian
 //! dò không phải "chậm dần" mà **nhị phân**: trung vị 500–820 ms, rồi nhảy
 //! thẳng lên đúng 20.4xx ms — tức đụng trần `OSA_TIMEOUT`, không phải bò tới
 //! đó. Và kích thước KHÔNG giải thích được: 9 hàng có 183 lượt và 0 lần hết
@@ -16,7 +16,7 @@
 //! Chênh lệch giữa hai cột là giá của `contents`. Chạy tay:
 //!
 //! ```
-//! cd ~/projects/hub/rust
+//! cd ~/projects/huba/rust
 //! cargo test --offline --test probe_timing_live -- --ignored --nocapture
 //! ```
 
@@ -32,11 +32,11 @@ fn where_the_probe_spends_its_time() {
 
     for i in 0..ROUNDS {
         let t = Instant::now();
-        let bare = hub::keys::terminal_tabs();
+        let bare = huba::keys::terminal_tabs();
         let ms_bare = t.elapsed().as_millis();
 
         let t = Instant::now();
-        let full = hub::keys::terminal_screens();
+        let full = huba::keys::terminal_screens();
         let ms_full = t.elapsed().as_millis();
 
         let n_bare = bare.as_ref().map(|v| v.len());
@@ -85,7 +85,7 @@ fn where_the_probe_spends_its_time() {
     );
 }
 
-/// Nhiều cú dò CÙNG LÚC — hub không có khoá nào tuần tự hoá `osascript`, mà
+/// Nhiều cú dò CÙNG LÚC — huba không có khoá nào tuần tự hoá `osascript`, mà
 /// trong một vòng chạy có ít nhất ba chỗ hỏi Terminal (`trust_dialog_tick`,
 /// ảnh chụp phiên, và handler của lệnh đang chạy). Trên 19 lượt hỏng ngày
 /// 16/08, **7 lượt** có `trust_tick_probe_failed` đứng ngay cạnh — tức hai cú
@@ -99,7 +99,7 @@ fn what_four_probes_at_once_cost() {
         .map(|i| {
             std::thread::spawn(move || {
                 let t = Instant::now();
-                let r = hub::keys::terminal_screens();
+                let r = huba::keys::terminal_screens();
                 (i, t.elapsed().as_millis(), r.is_ok())
             })
         })

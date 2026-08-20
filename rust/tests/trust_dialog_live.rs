@@ -1,4 +1,4 @@
-//! Phép thử CHẠY THẬT cho việc hub tự trả lời hộp tin-thư-mục.
+//! Phép thử CHẠY THẬT cho việc huba tự trả lời hộp tin-thư-mục.
 //!
 //! Gắn `#[ignore]` vì nó **mở một cửa sổ Terminal thật** trên máy này — không
 //! phải thứ được chạy kèm `cargo test`. Gọi tay:
@@ -23,18 +23,18 @@ use std::path::Path;
 #[test]
 #[ignore = "mở một cửa sổ Terminal thật — chạy tay bằng --ignored"]
 fn a_new_window_gets_past_the_trust_dialog_on_its_own() {
-    let cfg = hub::config::load(Some(Path::new(concat!(
+    let cfg = huba::config::load(Some(Path::new(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../hub.config.json"
+        "/../huba.config.json"
     ))))
-    .expect("nạp hub.config.json");
+    .expect("nạp huba.config.json");
 
     let account = std::env::var("HUB_LIVE_ACCOUNT").unwrap_or_else(|_| "acc3".to_string());
     let dir = cfg.workspace_root.clone();
     println!("mở phiên trống: account={account} dir={}", dir.display());
 
     let started =
-        hub::sessions::start_background(&cfg, "live-probe", &dir, "", Some(&account), None)
+        huba::sessions::start_background(&cfg, "live-probe", &dir, "", Some(&account), None)
             .expect("phiên mới phải chào đời — nếu hỏng ở đây, cửa sổ đang kẹt ở một hộp thoại");
 
     println!("id phiên mới = {}", started.session_id);

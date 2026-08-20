@@ -1,11 +1,11 @@
 //! Cỗ máy chạy mỗi vòng phải CÓ NGƯỜI GỌI — bài kiểm cho một lỗi trình dịch
 //! không bao giờ bắt được.
 //!
-//! 🔴 Vì sao có tệp này. Ngày 2026-08-14 hub gỡ trang tfl5: `lib.rs` bỏ
+//! 🔴 Vì sao có tệp này. Ngày 2026-08-14 huba gỡ trang tfl5: `lib.rs` bỏ
 //! `mod portal`, và **ba** hàm chạy-mỗi-vòng mất chỗ gọi DUY NHẤT của chúng
 //! (`announce_changes`, `close_pending_tick`, `trust_dialog_tick`). Không một
 //! cảnh báo nào — `pub fn` trong `pub mod` thì `dead_code` im, `cargo test`
-//! xanh 263/263, `cargo clippy` 0. Hậu quả đo được trên `logs/hub.log`:
+//! xanh 263/263, `cargo clippy` 0. Hậu quả đo được trên `logs/huba.log`:
 //! `session_change` **439 lượt, lần cuối 14/08 13:10:40**, rồi im hơn một
 //! ngày; sổ `closing:windows` giữ hai hàng `c: 0` (chưa từng được ngó lại);
 //! và Hà nhìn thấy hậu quả bằng mắt: *"tại sao chuyển phiên mới rồi mà phiên cũ
@@ -43,7 +43,7 @@ fn every_per_cycle_machine_is_called_from_run_once() {
     for (call, what_dies) in [
         (
             "execute_telegram_commands(",
-            "mọi mệnh lệnh gõ trên Telegram (hub thành câm hoàn toàn)",
+            "mọi mệnh lệnh gõ trên Telegram (huba thành câm hoàn toàn)",
         ),
         (
             "announce_changes(",

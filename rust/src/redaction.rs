@@ -50,7 +50,7 @@ const PATTERNS: [(&str, &str); 10] = [
 /// Cổng riêng cho MỘT TỆP chủ máy tự tay xin — hẹp hơn, và có lý do.
 ///
 /// 🔴 Hà 2026-08-13, ngay lần bấm nút 📎 đầu tiên: *"chưa gửi được
-/// hub.env.example — giữ lại: có dấu hiệu bí mật (credential_word_vi)"*. Tệp
+/// huba.env.example — giữ lại: có dấu hiệu bí mật (credential_word_vi)"*. Tệp
 /// ấy là **bản mẫu**, mọi giá trị đều rỗng; thứ khớp chỉ là chữ *"Mật khẩu"*
 /// trong nhãn ô nhập.
 ///
@@ -63,7 +63,7 @@ const PATTERNS: [(&str, &str); 10] = [
 /// dính `credential_word`. Một cái cổng chặn hết thì không ai dùng cửa ấy nữa.
 ///
 /// Chỗ khác nhau nằm ở NGƯỜI NHẬN và ở AI CHỌN:
-/// * Phần xem trước là **mảnh chữ hub tự chọn gửi** — không ai nhìn trước, nên
+/// * Phần xem trước là **mảnh chữ huba tự chọn gửi** — không ai nhìn trước, nên
 ///   phải ngờ cả những chữ chỉ *gợi ý* có bí mật.
 /// * Tệp này là thứ **chủ máy gọi đích danh**, gửi vào **phòng chat của chính
 ///   anh** (gác bằng `chat_id`). Đường dẫn máy anh, ghi chú của anh, tên host
@@ -74,7 +74,7 @@ const PATTERNS: [(&str, &str); 10] = [
 /// * `credential_literal` — token có hình dạng nhận ra được.
 /// * `private_key_block` — khối khoá riêng.
 /// * `secret_assignment` — `MẬT_KHẨU = <có gì đó>`; **rỗng thì không tính**,
-///   và đó đúng là chỗ `hub.env.example` khác `hub.env`.
+///   và đó đúng là chỗ `huba.env.example` khác `huba.env`.
 pub fn file_risk(text: &str) -> Vec<String> {
     let mut hits: Vec<String> = leak_scan(text, &[])
         .into_iter()
@@ -107,9 +107,9 @@ fn secret_assignment() -> &'static Regex {
             //
             // Hai vế còn lại giữ chặt: giá trị phải nằm CÙNG DÒNG (`[ \t]*`
             // không nuốt được xuống dòng) và phải KHÁC RỖNG — đó đúng là chỗ
-            // `hub.env.example` khác `hub.env`.
+            // `huba.env.example` khác `huba.env`.
             //
-            // 🔴 Hà 2026-08-13, bấm nút 📎: *"Chưa lấy được file"* — hub trả
+            // 🔴 Hà 2026-08-13, bấm nút 📎: *"Chưa lấy được file"* — huba trả
             // *"giữ lại: có dấu hiệu bí mật (secret_assignment)"* cho
             // `mailler/scripts/dkim-doctor.sh`. Đo ra đúng một dòng, và nó là
             // một dòng CHÚ THÍCH:

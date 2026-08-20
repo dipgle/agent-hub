@@ -5,7 +5,7 @@
 //! không"*. Hai lần liên tiếp cùng một lời chê thì thứ phải kiểm không phải mã,
 //! mà là **tin đã dựng xong** — nên bài kiểm này in nó ra.
 //!
-//! Fixture là nguyên văn tin của phiên `[AI/tcc/amm]` lấy từ `logs/hub.log`.
+//! Fixture là nguyên văn tin của phiên `[AI/tcc/amm]` lấy từ `logs/huba.log`.
 //!
 //! ```text
 //! cargo test --offline --test tab_anchor_live_shape -- --ignored --nocapture
@@ -22,8 +22,8 @@ fn ack() -> String {
 #[test]
 #[ignore = "in ra để NHÌN — chạy tay bằng --ignored --nocapture"]
 fn show_me_the_message_as_telegram_gets_it() {
-    hub::telegram::set_bot_username("hub_test_bot");
-    let data = hub::pipeline::SessionData {
+    huba::telegram::set_bot_username("hub_test_bot");
+    let data = huba::pipeline::SessionData {
         sid: "da29807e".into(),
         tabs: vec![
             (1, "RPC pool".into(), true),
@@ -33,7 +33,7 @@ fn show_me_the_message_as_telegram_gets_it() {
         submit: true,
         ..Default::default()
     };
-    let out = hub::pipeline::render_session_data(&ack(), &data);
+    let out = huba::pipeline::render_session_data(&ack(), &data);
     for (i, l) in out.lines().enumerate() {
         println!("{i:>3} | {l}");
     }

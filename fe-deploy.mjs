@@ -19,7 +19,7 @@ if (!version || !/^[A-Za-z0-9._-]{1,64}$/.test(version)) {
 
 const HERE = new URL("./", import.meta.url).pathname;
 const env = Object.fromEntries(
-  readFileSync(HERE + "hub.env", "utf8")
+  readFileSync(HERE + "huba.env", "utf8")
     .split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])
 );
@@ -32,7 +32,7 @@ const source = readFileSync(HERE + "fe/index.html", "utf8");
 
 const TMP = HERE + ".tmp/";
 mkdirSync(TMP, { recursive: true });
-const zipPath = `${TMP}hub-fe-${version}.zip`;
+const zipPath = `${TMP}huba-fe-${version}.zip`;
 rmSync(zipPath, { force: true });
 // -j flattens: every file in fe/ lands at the bundle root, which is where
 // index.html has to be and where the page expects echarts.min.js.
@@ -52,7 +52,7 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 1100 } });
 // These come from tfl5's OWN admin console, not from the bundle being
 // shipped, so they are reported but do not fail the deploy. (Known one:
 // the Releases form's `pattern` attribute is invalid under Chrome's `v`
-// flag — a tfl5 bug, logged in hub's active-context.)
+// flag — a tfl5 bug, logged in huba's active-context.)
 const hostErrors = [];
 page.on("console", (m) => { if (m.type() === "error") hostErrors.push(m.text().slice(0, 200)); });
 page.on("pageerror", (e) => hostErrors.push(`uncaught: ${e.message.slice(0, 200)}`));
@@ -70,7 +70,7 @@ try {
   await page.locator('input[name="username"]').fill(env.HUB_TFL5_USER);
   await page.locator('input[type="password"]').first().fill(env.HUB_TFL5_PASSWORD);
   await page.getByRole("button", { name: /Sign in with password/i }).click();
-  await page.getByText("hub", { exact: true }).first().waitFor({ timeout: 20000 });
+  await page.getByText("huba", { exact: true }).first().waitFor({ timeout: 20000 });
   await page.getByText(/^Open$/).first().click();
   await page.getByText(/Manage access/i).first().waitFor({ timeout: 15000 });
 
@@ -175,7 +175,7 @@ try {
 }
 
 if (hostErrors.length) {
-  console.log("\nGHI CHÚ — lỗi console của chính trang admin tfl5 (không phải bundle hub):");
+  console.log("\nGHI CHÚ — lỗi console của chính trang admin tfl5 (không phải bundle huba):");
   [...new Set(hostErrors)].forEach((h) => console.log("  · " + h));
 }
 if (problems.length) {

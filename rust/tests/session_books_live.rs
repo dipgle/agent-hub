@@ -4,8 +4,8 @@
 //! (đúng thứ đường mới sinh ra để khỏi phải làm). Chạy tay:
 //!
 //! ```
-//! cd ~/projects/hub/rust
-//! HUB_CONFIG=$HOME/projects/hub/hub.config.json \
+//! cd ~/projects/huba/rust
+//! HUB_CONFIG=$HOME/projects/huba/huba.config.json \
 //!   cargo test --offline --test session_books_live -- --ignored --nocapture
 //! ```
 //!
@@ -54,14 +54,14 @@ fn by_id(rows: &[serde_json::Value]) -> BTreeMap<String, serde_json::Value> {
 #[test]
 #[ignore = "đọc sổ thật + spawn `claude agents` thật — chạy tay bằng --ignored"]
 fn the_books_answer_exactly_what_claude_agents_answers() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG trỏ vào hub.config.json thật");
+    let cfg = huba::config::load(None).expect("HUB_CONFIG trỏ vào huba.config.json thật");
     let accounts = cfg.claude_accounts_or_ambient();
     assert!(!accounts.is_empty());
 
     let mut checked = 0usize;
     for acc in &accounts {
         let dir = match acc.config_dir.as_deref().filter(|d| !d.is_empty()) {
-            Some(d) => hub::config::expand_home(std::path::Path::new(d)),
+            Some(d) => huba::config::expand_home(std::path::Path::new(d)),
             None => std::path::PathBuf::from(std::env::var("HOME").unwrap()).join(".claude"),
         };
         if !dir.join("sessions").is_dir() {
@@ -70,7 +70,7 @@ fn the_books_answer_exactly_what_claude_agents_answers() {
         }
 
         let t0 = Instant::now();
-        let books = hub::sessions::list_account_books(&dir).expect("đọc được sổ");
+        let books = huba::sessions::list_account_books(&dir).expect("đọc được sổ");
         let ms_books = t0.elapsed().as_millis();
 
         let t1 = Instant::now();
@@ -78,7 +78,7 @@ fn the_books_answer_exactly_what_claude_agents_answers() {
         // nguyên `~/.claude-acc3` từ cấu hình sang biến môi trường, CLI không
         // nở dấu ngã ⟹ nó soi một thư mục tên `~` ⟹ trả `[]` ⟹ bài kiểm tố
         // nguồn mới "dựng hàng ma" cho một phiên đang sống thật (pid 49394,
-        // ttys006). Chính `list_account_cli` của hub thì nở đúng — tức lỗi nằm
+        // ttys006). Chính `list_account_cli` của huba thì nở đúng — tức lỗi nằm
         // ở phép đo, không ở vật được đo. Ghi lại vì đây đúng cái bẫy
         // `feedback_verify_measurement_points_right` nói tới.
         let agents = agents_rows(
@@ -155,18 +155,18 @@ fn the_books_answer_exactly_what_claude_agents_answers() {
 #[test]
 #[ignore = "đọc ps + sổ thật trên máy này"]
 fn every_live_window_maps_to_the_session_actually_sitting_in_it() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG trỏ vào hub.config.json thật");
-    let snap = hub::sessions::snapshot(&cfg);
+    let cfg = huba::config::load(None).expect("HUB_CONFIG trỏ vào huba.config.json thật");
+    let snap = huba::sessions::snapshot(&cfg);
 
     let mut checked = 0usize;
     for s in &snap.sessions {
-        if s.tty.is_empty() || !hub::sessions::is_real_tty(&s.tty) || s.session_id.is_empty() {
+        if s.tty.is_empty() || !huba::sessions::is_real_tty(&s.tty) || s.session_id.is_empty() {
             continue;
         }
-        if hub::sessions::is_shell_id(&s.session_id) {
+        if huba::sessions::is_shell_id(&s.session_id) {
             continue;
         }
-        let got = hub::sessions::session_on_tty(&cfg, &s.tty);
+        let got = huba::sessions::session_on_tty(&cfg, &s.tty);
         assert_eq!(
             got.as_deref(),
             Some(s.session_id.as_str()),
@@ -197,7 +197,7 @@ fn every_live_window_maps_to_the_session_actually_sitting_in_it() {
 #[test]
 #[ignore = "hỏi Terminal thật, cả hai đường, rồi so từng cặp"]
 fn one_shared_probe_reads_the_same_screens_as_asking_each_window_alone() {
-    let tabs = hub::keys::terminal_screens().expect("hỏi được Terminal");
+    let tabs = huba::keys::terminal_screens().expect("hỏi được Terminal");
     assert!(!tabs.is_empty(), "máy không mở cửa sổ Terminal nào để so");
 
     let mut checked = 0usize;
@@ -209,19 +209,19 @@ fn one_shared_probe_reads_the_same_screens_as_asking_each_window_alone() {
         // Tab này có phải cái mà phép tra chọn cho tty ấy không: một tty có thể
         // ứng với nhiều tab, và chỉ khi hai bên chọn CÙNG một tab thì so mới có
         // nghĩa.
-        if hub::keys::alive_tab(&tabs, &tab.tty) != Some(tab) {
+        if huba::keys::alive_tab(&tabs, &tab.tty) != Some(tab) {
             continue;
         }
-        let chung = hub::keys::look_from_screen(tab.screen.as_deref().unwrap(), 6);
-        let riêng = hub::keys::look(&tab.tty, 6);
+        let chung = huba::keys::look_from_screen(tab.screen.as_deref().unwrap(), 6);
+        let riêng = huba::keys::look(&tab.tty, 6);
 
-        let verb = |l: &hub::keys::Look| -> (Option<Option<String>>, Option<usize>) {
+        let verb = |l: &huba::keys::Look| -> (Option<Option<String>>, Option<usize>) {
             match l {
-                hub::keys::Look::Saw { body, .. } => {
-                    (Some(hub::keys::activity(body).map(|a| a.verb)), None)
+                huba::keys::Look::Saw { body, .. } => {
+                    (Some(huba::keys::activity(body).map(|a| a.verb)), None)
                 }
                 // 🪦 Nhánh `Withheld` gỡ 2026-08-16 — xem bia mộ `keys::Look`.
-                hub::keys::Look::Blind { .. } => (None, None),
+                huba::keys::Look::Blind { .. } => (None, None),
             }
         };
         let (a, b) = (verb(&chung), verb(&riêng));
@@ -245,13 +245,13 @@ fn one_shared_probe_reads_the_same_screens_as_asking_each_window_alone() {
 #[test]
 #[ignore = "dựng ảnh chụp thật (đọc nhật ký của mọi phiên đang sống)"]
 fn a_snapshot_lists_every_live_claude_window_and_nothing_dead() {
-    let cfg = hub::config::load(None).expect("HUB_CONFIG trỏ vào hub.config.json thật");
+    let cfg = huba::config::load(None).expect("HUB_CONFIG trỏ vào huba.config.json thật");
 
     let mut times = Vec::new();
     let mut snap = None;
     for _ in 0..3 {
         let t = Instant::now();
-        snap = Some(hub::sessions::snapshot(&cfg));
+        snap = Some(huba::sessions::snapshot(&cfg));
         times.push(t.elapsed().as_millis());
     }
     let snap = snap.unwrap();
@@ -277,10 +277,10 @@ fn a_snapshot_lists_every_live_claude_window_and_nothing_dead() {
         let Ok(pid) = pid.parse::<i64>() else {
             continue;
         };
-        if !hub::sessions::is_real_tty(tty) || !hub::sessions::is_claude_process(cmd) {
+        if !huba::sessions::is_real_tty(tty) || !huba::sessions::is_claude_process(cmd) {
             continue;
         }
-        if hub::sessions::classify_host(cmd, "interactive", tty) == "editor" {
+        if huba::sessions::classify_host(cmd, "interactive", tty) == "editor" {
             continue;
         }
         live_windows += 1;

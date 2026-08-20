@@ -3,11 +3,11 @@
 // form is the clearer statement of "everything default EXCEPT this".
 #![allow(clippy::field_reassign_with_default)]
 
-use hub::config::{self, CallCfg, Config};
+use huba::config::{self, CallCfg, Config};
 
 fn write_config(json: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let file = dir.path().join("hub.config.json");
+    let file = dir.path().join("huba.config.json");
     std::fs::write(&file, json).unwrap();
     (dir, file)
 }
@@ -18,7 +18,7 @@ fn defaults_are_bounded_and_dial_nothing_on_their_own() {
     // 🔴 Hai dòng "chưa nối kênh nào" (`adapters.tfl5.enabled`,
     // `trust.tfl5_user_tids`) đi cùng tfl5 ngày 2026-08-14. Câu hỏi ấy nay
     // không trả lời được từ tệp cấu hình: kênh duy nhất là Telegram, và nó bật
-    // hay tắt là do có KHOÁ trong `hub.env` hay không — một bí mật, cố ý không
+    // hay tắt là do có KHOÁ trong `huba.env` hay không — một bí mật, cố ý không
     // nằm trong tệp này. Thứ còn kiểm được ở đây là tên biến, không phải giá trị.
     assert_eq!(d.confirm.bot_token_env, "HUB_TELEGRAM_BOT_TOKEN");
     assert_eq!(d.confirm.chat_id_env, "HUB_TELEGRAM_CHAT_ID");
@@ -46,18 +46,18 @@ fn config_file_overrides_merge_deeply_and_paths_become_absolute() {
 /// A config file left over from the inbox era must still LOAD. Every key that
 /// went away on 2026-08-08 (`triage`, `act`, `autonomy`, `routing`,
 /// `daily_budget_usd`, `max_triage_per_cycle`, `web`, `leak_patterns`) is
-/// simply unknown to serde now — a hub that refused to start because of a stale
-/// key would be a hub that cannot be upgraded without hand-editing json first.
+/// simply unknown to serde now — a huba that refused to start because of a stale
+/// key would be a huba that cannot be upgraded without hand-editing json first.
 ///
 /// 🔴 `adapters` và `trust` vào cùng danh sách ấy ngày 2026-08-14, và lượt này
-/// KHÔNG phải giả thiết: `hub.config.json` thật trên máy đang mang cả hai, với
-/// một `app_tid` thật và hai `user_tid` thật. Nếu chúng làm hub từ chối khởi
+/// KHÔNG phải giả thiết: `huba.config.json` thật trên máy đang mang cả hai, với
+/// một `app_tid` thật và hai `user_tid` thật. Nếu chúng làm huba từ chối khởi
 /// động thì chủ máy mất kênh duy nhất của mình vì một tệp cũ.
 #[test]
 fn a_config_from_the_inbox_era_still_loads_and_its_dead_keys_are_ignored() {
     let (_dir, file) = write_config(
         r#"{
-            "adapters": { "tfl5": { "enabled": true, "room": "hub", "app_tid": "a-1234" } },
+            "adapters": { "tfl5": { "enabled": true, "room": "huba", "app_tid": "a-1234" } },
             "trust": { "tfl5_user_tids": ["u-owner"], "trusted_sources": ["cli"] },
             "triage": { "model": "sonnet", "max_budget_usd": 0.5 },
             "act": { "enabled": true },
@@ -102,7 +102,7 @@ fn a_malformed_config_file_fails_fast_instead_of_running_with_defaults() {
 fn an_invalid_config_file_is_rejected_at_load_time() {
     let (_dir, file) = write_config(r#"{ "poll_interval_sec": 1 }"#);
     let err = config::load(Some(&file)).unwrap_err().to_string();
-    assert!(err.contains("invalid hub config"), "{err}");
+    assert!(err.contains("invalid huba config"), "{err}");
 }
 
 // 🔴 `a_room_with_no_owner_and_no_app_is_refused_at_startup` đã bỏ 2026-08-14.
@@ -110,7 +110,7 @@ fn an_invalid_config_file_is_rejected_at_load_time() {
 // thì danh sách chủ không được rỗng"), và cả hai đi cùng cái phòng.
 //
 // Câu hỏi tương đương của Telegram — "có khoá chưa" — cố ý KHÔNG trả lời được
-// ở đây: khoá là bí mật trong `hub.env`, không phải một trường trong tệp cấu
+// ở đây: khoá là bí mật trong `huba.env`, không phải một trường trong tệp cấu
 // hình, nên `validate()` không nhìn thấy nó và không được giả vờ nhìn thấy.
 // Chỗ canh đúng là `telegram::Inbox::start`: thiếu khoá thì không dựng luồng và
 // NÓI RA (luật #4 — thiếu bí mật là SKIP-WITH-LOG, không phải chết máy).
@@ -172,20 +172,20 @@ fn secrets_come_from_the_environment_never_the_config_file() {
 // mặc định. Màn phải nói ra điều đó, vì hậu quả (tuần cạn hạn mức) chỉ lộ về sau.
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn acc_cfg() -> hub::config::Config {
-    let mut c = hub::config::Config::default();
+fn acc_cfg() -> huba::config::Config {
+    let mut c = huba::config::Config::default();
     c.claude_accounts = vec![
-        hub::config::ClaudeAccountCfg {
+        huba::config::ClaudeAccountCfg {
             name: "acc1".into(),
             config_dir: None,
             launch: Some("claude".into()),
         },
-        hub::config::ClaudeAccountCfg {
+        huba::config::ClaudeAccountCfg {
             name: "acc2".into(),
             config_dir: Some("~/.claude-acc2".into()),
             launch: Some("claude2".into()),
         },
-        hub::config::ClaudeAccountCfg {
+        huba::config::ClaudeAccountCfg {
             name: "acc3".into(),
             config_dir: Some("~/.claude-acc3".into()),
             launch: Some("claude3".into()),
@@ -194,15 +194,15 @@ fn acc_cfg() -> hub::config::Config {
     c
 }
 
-fn snap_with(sessions: Vec<hub::sessions::LiveSession>) -> hub::sessions::SessionsSnapshot {
-    hub::sessions::SessionsSnapshot {
+fn snap_with(sessions: Vec<huba::sessions::LiveSession>) -> huba::sessions::SessionsSnapshot {
+    huba::sessions::SessionsSnapshot {
         sessions,
         ..Default::default()
     }
 }
 
-fn row(account: &str, name: &str) -> hub::sessions::LiveSession {
-    hub::sessions::LiveSession {
+fn row(account: &str, name: &str) -> huba::sessions::LiveSession {
+    huba::sessions::LiveSession {
         account: account.to_string(),
         name: name.to_string(),
         session_id: format!("{account}-{name}"),
@@ -214,7 +214,7 @@ fn row(account: &str, name: &str) -> hub::sessions::LiveSession {
 #[test]
 fn the_accounts_list_names_the_one_that_new_lands_on() {
     let live = snap_with(vec![row("acc1", "projects-7c")]);
-    let said = hub::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}));
+    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}));
     let line = said
         .lines()
         .find(|l| l.starts_with("acc1"))
@@ -245,7 +245,7 @@ fn a_blind_account_says_its_zero_is_not_trustworthy() {
     live.blind.push("acc2".into());
     live.notes
         .push("acc2: spawn claude failed: No such file or directory".into());
-    let said = hub::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}));
+    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}));
     assert!(
         said.contains("KHÔNG liệt kê được"),
         "không cảnh báo tài khoản mù:\n{said}"
@@ -261,7 +261,7 @@ fn a_blind_account_says_its_zero_is_not_trustworthy() {
 fn usage_still_being_measured_says_so_instead_of_showing_zero() {
     let live = snap_with(vec![]);
     let said =
-        hub::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({ "pending": true }));
+        huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({ "pending": true }));
     assert!(said.contains("đang đo"), "phải nói đang đo:\n{said}");
     assert!(!said.contains("0%"), "không được bịa 0%:\n{said}");
 }
@@ -269,7 +269,7 @@ fn usage_still_being_measured_says_so_instead_of_showing_zero() {
 #[test]
 fn measured_quota_reaches_the_line() {
     let live = snap_with(vec![]);
-    let said = hub::runtime::accounts_text(
+    let said = huba::runtime::accounts_text(
         &acc_cfg(),
         &live,
         &serde_json::json!({ "accounts": { "acc1": { "week_pct": 98, "session_pct": 6 } } }),
@@ -291,13 +291,13 @@ const NEW_FLAGS: &[&str] = &["a", "acc", "account", "s", "p", "project", "duan",
 
 #[test]
 fn flags_are_read_wherever_they_sit() {
-    let (f, rest) = hub::pipeline::split_flags("-a acc2 -s dwork sửa lịch làm việc", NEW_FLAGS);
+    let (f, rest) = huba::pipeline::split_flags("-a acc2 -s dwork sửa lịch làm việc", NEW_FLAGS);
     assert_eq!(f.get("a").map(String::as_str), Some("acc2"));
     assert_eq!(f.get("s").map(String::as_str), Some("dwork"));
     assert_eq!(rest, "sửa lịch làm việc");
 
     // …kể cả khi đứng SAU đề bài.
-    let (f2, rest2) = hub::pipeline::split_flags("sửa lịch làm việc -s dwork -a acc2", NEW_FLAGS);
+    let (f2, rest2) = huba::pipeline::split_flags("sửa lịch làm việc -s dwork -a acc2", NEW_FLAGS);
     assert_eq!(f2.get("s").map(String::as_str), Some("dwork"));
     assert_eq!(rest2, "sửa lịch làm việc");
 }
@@ -305,7 +305,7 @@ fn flags_are_read_wherever_they_sit() {
 /// Đúng ví dụ Hà gõ: không có đề bài, chỉ mở phiên.
 #[test]
 fn the_example_from_the_owner_parses_to_account_project_and_no_task() {
-    let (f, rest) = hub::pipeline::split_flags("-a acc2 -s dwork", NEW_FLAGS);
+    let (f, rest) = huba::pipeline::split_flags("-a acc2 -s dwork", NEW_FLAGS);
     assert_eq!(f.get("a").map(String::as_str), Some("acc2"));
     assert_eq!(f.get("s").map(String::as_str), Some("dwork"));
     assert!(
@@ -320,15 +320,15 @@ fn the_example_from_the_owner_parses_to_account_project_and_no_task() {
 /// vẫn chạy — chỉ là chạy một đề bài khác với đề bài đã gõ.
 #[test]
 fn unknown_flags_stay_in_the_text_body() {
-    let (f, rest) = hub::pipeline::split_flags("-s hub sửa cờ -x của script", NEW_FLAGS);
-    assert_eq!(f.get("s").map(String::as_str), Some("hub"));
+    let (f, rest) = huba::pipeline::split_flags("-s huba sửa cờ -x của script", NEW_FLAGS);
+    assert_eq!(f.get("s").map(String::as_str), Some("huba"));
     assert_eq!(rest, "sửa cờ -x của script");
 }
 
 /// Cờ bỏ trống (`-a` rồi tới cờ khác) không được nuốt cờ kế tiếp.
 #[test]
 fn an_empty_flag_does_not_eat_the_next_one() {
-    let (f, _) = hub::pipeline::split_flags("-a -s dwork", NEW_FLAGS);
+    let (f, _) = huba::pipeline::split_flags("-a -s dwork", NEW_FLAGS);
     assert_eq!(
         f.get("a").map(String::as_str),
         Some(""),
@@ -341,7 +341,7 @@ fn an_empty_flag_does_not_eat_the_next_one() {
 /// chủ máy và trong các nút Telegram đã gửi đi.
 #[test]
 fn the_old_positional_form_is_untouched() {
-    let (f, rest) = hub::pipeline::split_flags("dwork @acc2 sửa lịch", NEW_FLAGS);
+    let (f, rest) = huba::pipeline::split_flags("dwork @acc2 sửa lịch", NEW_FLAGS);
     assert!(f.is_empty(), "không có cờ nào mà lại bóc ra: {f:?}");
     assert_eq!(rest, "dwork @acc2 sửa lịch");
 }
@@ -359,11 +359,14 @@ fn the_old_positional_form_is_untouched() {
 #[test]
 fn a_new_window_opens_with_the_word_the_owner_would_type_and_no_task_in_argv() {
     let cfg = acc_cfg();
-    assert_eq!(hub::sessions::account_launch(&cfg, Some("acc3")), "claude3");
-    assert_eq!(hub::sessions::account_launch(&cfg, Some("acc1")), "claude");
+    assert_eq!(
+        huba::sessions::account_launch(&cfg, Some("acc3")),
+        "claude3"
+    );
+    assert_eq!(huba::sessions::account_launch(&cfg, Some("acc1")), "claude");
 
-    let cmd = hub::sessions::terminal_command(
-        &hub::sessions::account_launch(&cfg, Some("acc3")),
+    let cmd = huba::sessions::terminal_command(
+        &huba::sessions::account_launch(&cfg, Some("acc3")),
         std::path::Path::new("/Users/x/projects"),
         None,
     );
@@ -388,13 +391,13 @@ fn a_new_window_opens_with_the_word_the_owner_would_type_and_no_task_in_argv() {
 /// Không khai `launch` thì rơi về cách cũ — cùng kết quả, KHÔNG đoán tên alias.
 #[test]
 fn an_account_without_a_declared_launch_word_falls_back_not_guesses() {
-    let mut cfg = hub::config::Config::default();
-    cfg.claude_accounts = vec![hub::config::ClaudeAccountCfg {
+    let mut cfg = huba::config::Config::default();
+    cfg.claude_accounts = vec![huba::config::ClaudeAccountCfg {
         name: "accX".into(),
         config_dir: Some("~/.claude-accX".into()),
         launch: None,
     }];
-    let got = hub::sessions::account_launch(&cfg, Some("accX"));
+    let got = huba::sessions::account_launch(&cfg, Some("accX"));
     assert!(got.starts_with("CLAUDE_CONFIG_DIR="), "{got}");
     assert!(got.contains(".claude-accX"), "{got}");
     // KHÔNG được bịa ra `claudeX` từ tên tài khoản.
@@ -409,7 +412,7 @@ fn an_account_without_a_declared_launch_word_falls_back_not_guesses() {
 #[test]
 fn an_unknown_account_name_does_not_silently_become_the_default() {
     let cfg = acc_cfg();
-    let got = hub::sessions::account_launch(&cfg, Some("acc9"));
+    let got = huba::sessions::account_launch(&cfg, Some("acc9"));
     // Rơi về mặc định là hành vi đúng; ĐIỀU KIỆN là nó có kêu. Ở đây chốt phần
     // đo được của mã: nó KHÔNG được trả về từ của một tài khoản có thật khác.
     assert!(
@@ -418,10 +421,10 @@ fn an_unknown_account_name_does_not_silently_become_the_default() {
     );
 }
 
-/// Ngoại lệ DUY NHẤT còn đi bằng argv: bản bàn giao ~2 KB do hub tự soạn.
+/// Ngoại lệ DUY NHẤT còn đi bằng argv: bản bàn giao ~2 KB do huba tự soạn.
 #[test]
 fn only_the_handover_payload_still_travels_as_argv() {
-    let with = hub::sessions::terminal_command(
+    let with = huba::sessions::terminal_command(
         "claude",
         std::path::Path::new("/Users/x/projects"),
         Some("BÀN GIAO: …"),
@@ -438,14 +441,14 @@ fn only_the_handover_payload_still_travels_as_argv() {
 // — con trỏ đang theo trỏ vào một phiên vừa tắt lúc 16:08. Ngồi trước máy thì
 // câu ấy vẫn hỏi được (`claude --resume <id>` chạy trên NHẬT KÝ, không cần tiến
 // trình), nên phía điện thoại không làm được là một KHOẢNG TRỐNG — đúng phép
-// thử "hub là cầu nối" trong CLAUDE.md.
+// thử "huba là cầu nối" trong CLAUDE.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const T_NOW: i64 = 1_800_000_000;
 
-fn ended(id: &str, at: i64) -> (hub::sessions::LiveSession, i64) {
+fn ended(id: &str, at: i64) -> (huba::sessions::LiveSession, i64) {
     (
-        hub::sessions::LiveSession {
+        huba::sessions::LiveSession {
             session_id: id.to_string(),
             name: "projects-d8".into(),
             account: "acc1".into(),
@@ -459,7 +462,7 @@ fn ended(id: &str, at: i64) -> (hub::sessions::LiveSession, i64) {
 #[test]
 fn a_session_that_just_ended_is_still_askable() {
     let book = [ended("69a38c64", T_NOW - 600)];
-    let got = hub::pipeline::pick_ended(&book, "69a38c64", T_NOW).expect("mất phiên vừa tắt");
+    let got = huba::pipeline::pick_ended(&book, "69a38c64", T_NOW).expect("mất phiên vừa tắt");
     // Ba thứ `--resume` cần, và cả ba chỉ còn ở cuốn sổ: id, tài khoản, thư mục.
     assert_eq!(got.account, "acc1");
     assert!(!got.cwd.is_empty(), "thiếu cwd thì không tìm ra nhật ký");
@@ -471,22 +474,22 @@ fn a_session_that_just_ended_is_still_askable() {
 fn an_old_ended_session_is_not_resurrected() {
     let book = [ended(
         "cu-lam-roi",
-        T_NOW - hub::pipeline::ENDED_KEEP_SEC - 1,
+        T_NOW - huba::pipeline::ENDED_KEEP_SEC - 1,
     )];
-    assert!(hub::pipeline::pick_ended(&book, "cu-lam-roi", T_NOW).is_none());
+    assert!(huba::pipeline::pick_ended(&book, "cu-lam-roi", T_NOW).is_none());
 }
 
 #[test]
 fn an_unknown_id_stays_unknown() {
     let book = [ended("69a38c64", T_NOW - 60)];
-    assert!(hub::pipeline::pick_ended(&book, "khong-co", T_NOW).is_none());
+    assert!(huba::pipeline::pick_ended(&book, "khong-co", T_NOW).is_none());
 }
 
 /// Sổ giữ ĐÚNG 24 giờ — con số này là lời hứa in ra màn ("giữ 24 giờ"), nên nó
 /// không được trôi mà câu chữ đứng yên.
 #[test]
 fn the_promise_on_screen_matches_the_constant() {
-    assert_eq!(hub::pipeline::ENDED_KEEP_SEC, 24 * 3600);
+    assert_eq!(huba::pipeline::ENDED_KEEP_SEC, 24 * 3600);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -495,8 +498,8 @@ fn the_promise_on_screen_matches_the_constant() {
 
 #[test]
 fn a_failing_command_never_reads_like_a_successful_one() {
-    let ok = hub::pipeline::cmd_report(Some(0), false, "hai dòng\nđây", "", 1200);
-    let bad = hub::pipeline::cmd_report(Some(1), false, "", "không thấy tệp", 300);
+    let ok = huba::pipeline::cmd_report(Some(0), false, "hai dòng\nđây", "", 1200);
+    let bad = huba::pipeline::cmd_report(Some(1), false, "", "không thấy tệp", 300);
     assert!(ok.starts_with("✅"), "{ok}");
     assert!(bad.starts_with("❌") && bad.contains("exit 1"), "{bad}");
     assert!(bad.contains("không thấy tệp"), "stderr phải tới nơi: {bad}");
@@ -505,13 +508,13 @@ fn a_failing_command_never_reads_like_a_successful_one() {
 /// "Không in ra gì" KHÁC "chưa chạy được" — nói thẳng, đừng trả một câu rỗng.
 #[test]
 fn a_silent_command_says_it_was_silent() {
-    let out = hub::pipeline::cmd_report(Some(0), false, "   ", "", 40);
+    let out = huba::pipeline::cmd_report(Some(0), false, "   ", "", 40);
     assert!(out.contains("không in ra gì"), "{out}");
 }
 
 #[test]
 fn a_timeout_is_its_own_answer() {
-    let out = hub::pipeline::cmd_report(None, true, "", "", 120_000);
+    let out = huba::pipeline::cmd_report(None, true, "", "", 120_000);
     assert!(out.contains("quá giờ"), "{out}");
 }
 
@@ -519,8 +522,8 @@ fn a_timeout_is_its_own_answer() {
 /// lệnh chạy xong sớm.
 #[test]
 fn a_truncated_output_says_how_much_is_missing() {
-    let big = "x".repeat(hub::pipeline::CMD_OUT_MAX + 250);
-    let out = hub::pipeline::cmd_report(Some(0), false, &big, "", 10);
+    let big = "x".repeat(huba::pipeline::CMD_OUT_MAX + 250);
+    let out = huba::pipeline::cmd_report(Some(0), false, &big, "", 10);
     assert!(
         out.contains("còn 250 ký tự"),
         "{}",
@@ -540,8 +543,11 @@ fn a_truncated_output_says_how_much_is_missing() {
 #[test]
 fn a_bare_window_opens_at_home_and_a_cli_session_at_the_workspace_root() {
     // Phiên CLI: `cd <gốc workspace>` rồi mới tới từ mở.
-    let cli =
-        hub::sessions::terminal_command("claude3", std::path::Path::new("/Users/x/projects"), None);
+    let cli = huba::sessions::terminal_command(
+        "claude3",
+        std::path::Path::new("/Users/x/projects"),
+        None,
+    );
     assert!(
         cli.starts_with("cd '/Users/x/projects' && claude3 "),
         "{cli}"
@@ -549,7 +555,7 @@ fn a_bare_window_opens_at_home_and_a_cli_session_at_the_workspace_root() {
 
     // Cửa sổ trần: đọc CHÍNH hằng số mã dùng, không phải một chuỗi chép lại vào
     // test — chép lại thì bài kiểm tự khẳng định điều nó định kiểm.
-    let bare = hub::sessions::BARE_TERMINAL_CMD;
+    let bare = huba::sessions::BARE_TERMINAL_CMD;
     assert_eq!(bare, "cd ~/");
     // Dấu ngã KHÔNG được bọc nháy: trong shell `'~'` là một thư mục TÊN dấu
     // ngã, không phải nhà. Lỗi này IM LẶNG — cửa sổ vẫn mở, chỉ là mở nhầm chỗ.
@@ -576,18 +582,18 @@ fn a_bare_window_opens_at_home_and_a_cli_session_at_the_workspace_root() {
 #[test]
 fn a_bare_window_is_a_target_on_the_same_route_as_a_session() {
     // Nút của `/terminal` phải đi đúng route `/session`, không đẻ callback mới.
-    let id = format!("{}ttys006", hub::sessions::SHELL_ID_PREFIX);
+    let id = format!("{}ttys006", huba::sessions::SHELL_ID_PREFIX);
     assert_eq!(
-        hub::telegram::callback_to_command(&format!("sess:{id}")).as_deref(),
+        huba::telegram::callback_to_command(&format!("sess:{id}")).as_deref(),
         Some("/session win-ttys006")
     );
     // Và `same_session` phải nhận nguyên id ấy — nó không phải uuid 8 ký tự.
-    assert!(hub::pipeline::same_session(&id, &id));
-    assert!(!hub::pipeline::same_session("win-ttys007", &id));
+    assert!(huba::pipeline::same_session(&id, &id));
+    assert!(!huba::pipeline::same_session("win-ttys007", &id));
 
     // Phân hạng đọc từ MỘT chỗ, không mỗi nơi tự so chuỗi.
-    assert!(hub::sessions::is_shell_id(&id));
-    assert!(!hub::sessions::is_shell_id(
+    assert!(huba::sessions::is_shell_id(&id));
+    assert!(!huba::sessions::is_shell_id(
         "dda2aa85-0000-0000-0000-000000000000"
     ));
 }
@@ -605,17 +611,17 @@ fn a_bare_window_is_a_target_on_the_same_route_as_a_session() {
 #[test]
 fn a_bare_window_id_is_recognised_as_a_target_not_typed_as_text() {
     assert_eq!(
-        hub::pipeline::split_target("win-ttys002 ls -la"),
+        huba::pipeline::split_target("win-ttys002 ls -la"),
         Some(("win-ttys002".to_string(), "ls -la".to_string()))
     );
     // Trơn thì KHÔNG phải mệnh lệnh nhắm vào cửa sổ — cùng luật với id ngắn:
     // `/type win-ttys002` là chữ gõ vào phiên đang theo.
-    assert_eq!(hub::pipeline::split_target("win-ttys002"), None);
+    assert_eq!(huba::pipeline::split_target("win-ttys002"), None);
     // Và một câu văn mở đầu bằng chữ `win-` thì không được nuốt mất từ đầu.
-    assert_eq!(hub::pipeline::split_target("win-win thế nào rồi"), None);
+    assert_eq!(huba::pipeline::split_target("win-win thế nào rồi"), None);
     // uuid + id ngắn vẫn nguyên.
     assert_eq!(
-        hub::pipeline::split_target("dda2aa85 chạy test đi"),
+        huba::pipeline::split_target("dda2aa85 chạy test đi"),
         Some(("dda2aa85".to_string(), "chạy test đi".to_string()))
     );
 }
@@ -648,7 +654,7 @@ fn an_empty_tab_list_must_be_distinguishable_from_a_blind_one() {
                 /dev/ttys001\ttrue\tlogin|-zsh|claude|project-agent|node\t0\n\
                 /dev/ttys005\ttrue\tlogin|-zsh|claude|project-agent|node|caffeinate\t0\n\
                 #skipped\t1\n";
-    let (tabs, skipped) = hub::keys::parse_tabs(real, false);
+    let (tabs, skipped) = huba::keys::parse_tabs(real, false);
     assert_eq!(tabs.len(), 6, "{tabs:?}");
     assert_eq!(
         skipped, 1,
@@ -671,19 +677,19 @@ fn an_empty_tab_list_must_be_distinguishable_from_a_blind_one() {
     // 🔴 Chốt của cả bài: MÙ khác RỖNG. Mọi cửa sổ đều ném lỗi thì `tabs` rỗng
     // *và* `skipped` > 0 — chỗ gọi phải phân biệt được, không thì nó lại báo
     // "máy không có cửa sổ nào" trên một cái máy đang mở sáu cửa sổ.
-    let (blind, blind_skipped) = hub::keys::parse_tabs("#skipped\t6\n", false);
+    let (blind, blind_skipped) = huba::keys::parse_tabs("#skipped\t6\n", false);
     assert!(blind.is_empty());
     assert_eq!(blind_skipped, 6);
 
     // …còn máy KHÔNG có cửa sổ nào thật thì cả hai bằng 0.
-    let (none, none_skipped) = hub::keys::parse_tabs("#skipped\t0\n", false);
+    let (none, none_skipped) = huba::keys::parse_tabs("#skipped\t0\n", false);
     assert!(none.is_empty());
     assert_eq!(none_skipped, 0);
 }
 
 /// Chữ trên màn về cùng danh sách tab — và KHUNG phải chịu được chữ của người khác.
 ///
-/// Vì sao đếm dòng chứ không cắt theo dấu phân cách: chữ trên màn là chữ hub
+/// Vì sao đếm dòng chứ không cắt theo dấu phân cách: chữ trên màn là chữ huba
 /// không viết. Bất cứ dấu nào chọn làm ranh giới cũng có ngày nằm sẵn trên một
 /// màn nào đó — và hôm ấy phép đọc lệch mà không ai biết, vì một danh sách tab
 /// lệch vẫn trông hoàn toàn hợp lý. Bài này cố tình đặt một dòng **giống hệt
@@ -703,7 +709,7 @@ fn screens_are_framed_by_line_count_so_screen_text_cannot_break_the_frame() {
                 ✻ Đang nghĩ… (2m 14s · 1.2k tokens)\n\
                 ╭─────────────╮\n\
                 #skipped\t1\n";
-    let (tabs, skipped) = hub::keys::parse_tabs(real, true);
+    let (tabs, skipped) = huba::keys::parse_tabs(real, true);
 
     assert_eq!(skipped, 1);
     assert_eq!(
@@ -721,14 +727,14 @@ fn screens_are_framed_by_line_count_so_screen_text_cannot_break_the_frame() {
     assert!(tabs[1].screen.as_deref().unwrap().contains("2m 14s"));
 
     // Và dòng "đang làm gì" đọc được từ đúng chữ ấy, không hỏi Terminal lần nào.
-    let seen = hub::keys::alive_tab(&tabs, "/dev/ttys001").expect("tab còn tiến trình");
-    let hub::keys::Look::Saw { body, .. } =
-        hub::keys::look_from_screen(seen.screen.as_deref().unwrap(), 6)
+    let seen = huba::keys::alive_tab(&tabs, "/dev/ttys001").expect("tab còn tiến trình");
+    let huba::keys::Look::Saw { body, .. } =
+        huba::keys::look_from_screen(seen.screen.as_deref().unwrap(), 6)
     else {
         panic!("màn không có bí mật ⟹ phải nhìn rõ");
     };
     assert_eq!(
-        hub::keys::activity(&body).map(|a| a.verb),
+        huba::keys::activity(&body).map(|a| a.verb),
         Some("Đang nghĩ".to_string())
     );
 
@@ -736,7 +742,7 @@ fn screens_are_framed_by_line_count_so_screen_text_cannot_break_the_frame() {
     // thành "màn trống": đọc thiếu bao nhiêu dòng thì trả bấy nhiêu, và chỗ dò
     // đã ghi log — nhưng tuyệt đối không dựng thêm tab từ phần thiếu.
     let cut = "/dev/ttys001\ttrue\tlogin|-zsh|claude\t5\nmột dòng\n";
-    let (short, _) = hub::keys::parse_tabs(cut, true);
+    let (short, _) = huba::keys::parse_tabs(cut, true);
     assert_eq!(short.len(), 1);
     assert_eq!(short[0].screen.as_deref(), Some("một dòng"));
 }
@@ -755,20 +761,20 @@ fn a_recycled_tty_must_resolve_to_the_live_tab_not_a_corpse() {
                 /dev/ttys005\ttrue\tlogin|-zsh|claude\t1\n\
                 ✻ Đang chạy… (0m 3s)\n\
                 #skipped\t0\n";
-    let (tabs, _) = hub::keys::parse_tabs(real, true);
+    let (tabs, _) = huba::keys::parse_tabs(real, true);
     assert_eq!(tabs.len(), 3);
 
-    let got = hub::keys::alive_tab(&tabs, "ttys005").expect("có tab sống");
+    let got = huba::keys::alive_tab(&tabs, "ttys005").expect("có tab sống");
     assert!(
         got.busy && got.screen.as_deref().unwrap().contains("Đang chạy"),
         "phải chọn tab ĐANG CHẠY, không phải cái xác đứng đầu danh sách: {got:?}"
     );
     // Chấp cả hai cách gọi tên — `ps` trả `/dev/ttysNNN`, Terminal trả `ttysNNN`.
-    assert_eq!(hub::keys::alive_tab(&tabs, "/dev/ttys005"), Some(got));
-    // Không có tab nào mang tty ấy ⟹ hub KHÔNG có tay nào chạm tới.
-    assert!(hub::keys::alive_tab(&tabs, "ttys042").is_none());
+    assert_eq!(huba::keys::alive_tab(&tabs, "/dev/ttys005"), Some(got));
+    // Không có tab nào mang tty ấy ⟹ huba KHÔNG có tay nào chạm tới.
+    assert!(huba::keys::alive_tab(&tabs, "ttys042").is_none());
     // Chỉ còn cái xác (không tiến trình nào) thì cũng vậy: một tab đã chết
     // không phải một cửa sổ gõ vào được.
-    let (dead, _) = hub::keys::parse_tabs("/dev/ttys005\tfalse\t\t0\n#skipped\t0\n", true);
-    assert!(hub::keys::alive_tab(&dead, "ttys005").is_none());
+    let (dead, _) = huba::keys::parse_tabs("/dev/ttys005\tfalse\t\t0\n#skipped\t0\n", true);
+    assert!(huba::keys::alive_tab(&dead, "ttys005").is_none());
 }

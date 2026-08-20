@@ -1,4 +1,4 @@
-//! Hộp chọn trên màn `[AI/mailler]` 2026-08-16 — hub có đọc ra lựa chọn không?
+//! Hộp chọn trên màn `[AI/mailler]` 2026-08-16 — huba có đọc ra lựa chọn không?
 //!
 //! 🔴 Hà: *"Màn có option nhưng không có bảng chọn"*. Chữ dưới đây chép từ chính
 //! ảnh chụp ấy, giữ nguyên thụt lề và dấu `❯` ở dòng đang trỏ.
@@ -17,7 +17,7 @@ fn the_five_options_on_that_screen_are_read() {
                \x20  5. Chat about this\n\
                Enter to select · ↑/↓ to navigate · Esc to cancel";
 
-    let got = hub::keys::parse_choices(man);
+    let got = huba::keys::parse_choices(man);
     println!("đọc ra {} lựa chọn:", got.len());
     for (n, s) in &got {
         println!("  {n}. {s}");

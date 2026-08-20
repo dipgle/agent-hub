@@ -1,4 +1,4 @@
-// Set who can use the hub chat app — through the tfl5 console UI, the same
+// Set who can use the huba chat app — through the tfl5 console UI, the same
 // path a person takes: sign in as the app owner, open the app, "Manage
 // access", edit the buckets, Save.
 //
@@ -22,7 +22,7 @@ if (!TARGET || !TARGET.startsWith("u-")) {
 }
 
 const env = Object.fromEntries(
-  readFileSync(new URL("./hub.env", import.meta.url), "utf8")
+  readFileSync(new URL("./huba.env", import.meta.url), "utf8")
     .split("\n")
     .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => [l.slice(0, l.indexOf("=")).trim(), l.slice(l.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "")])
@@ -60,7 +60,7 @@ const dumpDialog = () =>
 const openAccessDialog = async () => {
   await page.getByText(/Manage access/i).first().waitFor({ timeout: 15000 });
   await page.getByText(/Manage access/i).first().click();
-  await page.getByText("Who can use hub").waitFor({ timeout: 10000 });
+  await page.getByText("Who can use huba").waitFor({ timeout: 10000 });
 };
 
 // The summary the app renders from the SAVED row — our independent check.
@@ -74,7 +74,7 @@ try {
   await page.locator('input[name="username"]').fill(env.HUB_TFL5_USER);
   await page.locator('input[type="password"]').first().fill(env.HUB_TFL5_PASSWORD);
   await page.getByRole("button", { name: /Sign in with password/i }).click();
-  await page.getByText("hub", { exact: true }).first().waitFor({ timeout: 20000 });
+  await page.getByText("huba", { exact: true }).first().waitFor({ timeout: 20000 });
   await page.getByText(/^Open$/).first().click();
 
   const before = (await summary()).trim();

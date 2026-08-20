@@ -23,8 +23,8 @@
 #[test]
 #[ignore = "hỏi trạng thái quyền của máy này — chạy tay"]
 fn permission_status_of_this_process() {
-    println!("AXIsProcessTrusted() = {}", hub::cgkeys::trusted());
-    match hub::keys::terminal_pid() {
+    println!("AXIsProcessTrusted() = {}", huba::cgkeys::trusted());
+    match huba::keys::terminal_pid() {
         Ok(pid) => println!("Terminal.app pid = {pid}"),
         Err(e) => println!("không tìm được pid Terminal: {e}"),
     }
@@ -43,14 +43,14 @@ fn an_arrow_moves_the_tab_without_answering() {
         println!("BỎ QUA — bài kiểm này GỬI PHÍM THẬT. Đặt HUB_LIVE_PRESS=1 nếu đúng là muốn bấm.");
         return;
     }
-    let pid = hub::keys::terminal_pid().expect("Terminal phải đang chạy");
-    let w = hub::keys::window_of(&tty)
+    let pid = huba::keys::terminal_pid().expect("Terminal phải đang chạy");
+    let w = huba::keys::window_of(&tty)
         .expect("hỏi được Terminal")
         .expect("tty phải gắn một cửa sổ");
 
     let read = || {
-        let body = hub::keys::screen_of(&tty, 40).expect("đọc được màn").0;
-        let table = hub::keys::ask_table(&body);
+        let body = huba::keys::screen_of(&tty, 40).expect("đọc được màn").0;
+        let table = huba::keys::ask_table(&body);
         // Câu đang mở = dòng ngay dưới thanh tab. Lấy 60 ký tự làm dấu vân tay:
         // đủ để biết đã sang câu khác, không phụ thuộc bề ngang cửa sổ.
         let open: String = body
@@ -68,8 +68,8 @@ fn an_arrow_moves_the_tab_without_answering() {
     println!("thanh tab TRƯỚC : {tab_before:?}");
     println!("câu đang mở TRƯỚC: {open_before:?}");
 
-    hub::keys::focus_window(w).expect("đưa cửa sổ lên nhận phím");
-    hub::cgkeys::post(pid, &["right".to_string()]).expect("gửi được mũi tên");
+    huba::keys::focus_window(w).expect("đưa cửa sổ lên nhận phím");
+    huba::cgkeys::post(pid, &["right".to_string()]).expect("gửi được mũi tên");
     std::thread::sleep(std::time::Duration::from_millis(2500));
 
     let (tab_after, open_after) = read();
@@ -95,7 +95,7 @@ fn an_arrow_moves_the_tab_without_answering() {
 
 /// VÒNG ĐI của con trỏ ngang: đi hết một vòng `→` rồi in ra từng chỗ nó dừng.
 ///
-/// Cần đo vì cả phép "về đúng tab số n" đứng trên nó: hub không đọc được tab
+/// Cần đo vì cả phép "về đúng tab số n" đứng trên nó: huba không đọc được tab
 /// nào đang mở (tab hiện hành vẽ bằng MÀU, mà đọc màn về chỉ có chữ trần), nên
 /// nó phải **về một mốc biết chắc** rồi đếm bước từ đó. Mốc ứng viên là bước
 /// `Review your answers`. Vòng có quấn lại không, và quấn về đâu — đo, đừng đoán.
@@ -107,14 +107,14 @@ fn what_does_a_full_lap_of_right_arrows_look_like() {
         println!("BỎ QUA — bài kiểm này GỬI PHÍM THẬT. Đặt HUB_LIVE_PRESS=1 nếu đúng là muốn bấm.");
         return;
     }
-    let pid = hub::keys::terminal_pid().expect("Terminal phải đang chạy");
-    let w = hub::keys::window_of(&tty)
+    let pid = huba::keys::terminal_pid().expect("Terminal phải đang chạy");
+    let w = huba::keys::window_of(&tty)
         .expect("hỏi được Terminal")
         .expect("tty phải gắn một cửa sổ");
-    hub::keys::focus_window(w).expect("đưa cửa sổ lên nhận phím");
+    huba::keys::focus_window(w).expect("đưa cửa sổ lên nhận phím");
 
     let read = || {
-        let body = hub::keys::screen_of(&tty, 40).expect("đọc được màn").0;
+        let body = huba::keys::screen_of(&tty, 40).expect("đọc được màn").0;
         let open: String = body
             .lines()
             .skip_while(|l| !(l.contains('←') && l.contains('→')))
@@ -123,7 +123,7 @@ fn what_does_a_full_lap_of_right_arrows_look_like() {
             .chars()
             .take(50)
             .collect();
-        (hub::keys::ask_table(&body).map(|t| t.answered), open)
+        (huba::keys::ask_table(&body).map(|t| t.answered), open)
     };
 
     let dir = std::env::var("HUB_LIVE_DIR").unwrap_or_else(|_| "right".to_string());
@@ -135,7 +135,7 @@ fn what_does_a_full_lap_of_right_arrows_look_like() {
             answered, answered0,
             "một bước ngang đã CHỐT một câu ở bước {step}"
         );
-        hub::cgkeys::post(pid, std::slice::from_ref(&dir)).expect("gửi được mũi tên");
+        huba::cgkeys::post(pid, std::slice::from_ref(&dir)).expect("gửi được mũi tên");
         std::thread::sleep(std::time::Duration::from_millis(1200));
     }
     println!("=> không có câu nào bị chốt trong cả vòng");

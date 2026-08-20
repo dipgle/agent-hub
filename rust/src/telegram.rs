@@ -8,7 +8,7 @@
 //! xác nhận, còn tin nhắn chữ thì bị bỏ qua hoàn toàn. Tức Telegram là cái loa
 //! có đúng hai cái nút, mọi mệnh lệnh vẫn phải đi qua phòng chat tfl5.
 //!
-//! Kèm theo là lỗ hổng thứ hai, cùng gốc: phiên **dừng lại hỏi** thì hub bắn
+//! Kèm theo là lỗ hổng thứ hai, cùng gốc: phiên **dừng lại hỏi** thì huba bắn
 //! một tin `⚠ … cần bạn chọn` — mà từ Telegram **không chọn được**. Người ta
 //! phải mở trang ra bấm. Nay từng lựa chọn thành một cái nút.
 //!
@@ -27,8 +27,8 @@
 //!    đọc lúc ấy **đang nằm giữa một long-poll 20 giây** và không ai gọi nó về.
 //!    Nên trong tối đa 20 giây, hai vòng cùng hỏi — Telegram trả `Conflict:
 //!    terminated by other getUpdates request` cho một trong hai. Đo trên
-//!    `logs/hub.log` ngày 16/08: **11 lượt** `telegram_poll_rejected`, mỗi lượt
-//!    kèm một giấc ngủ 30 giây của vòng đọc, tức 30 giây hub điếc sau mỗi câu
+//!    `logs/huba.log` ngày 16/08: **11 lượt** `telegram_poll_rejected`, mỗi lượt
+//!    kèm một giấc ngủ 30 giây của vòng đọc, tức 30 giây huba điếc sau mỗi câu
 //!    hỏi xác nhận. Và cửa nguy hiểm hơn vẫn mở: cú bấm ✅ rơi vào vòng đọc lệnh
 //!    thì nó trả lời *"câu hỏi đã đóng sổ"* trong khi `confirm` vẫn đang chờ —
 //!    chưa xảy ra lần nào (`telegram_confirm_button_late` = 0), nhưng nó chưa
@@ -40,7 +40,7 @@
 //!    hai nào gọi `getUpdates` — trừ đường lùi trong `confirm.rs` cho lúc KHÔNG
 //!    có hòm thư (CLI một lượt), và đường ấy nay tự đọc `poll_rejected` thay vì
 //!    coi một lời từ chối là "không ai bấm".
-//! 2. **Chỉ chủ máy ra lệnh được.** Cổng là `chat_id` trong `hub.env` — cùng
+//! 2. **Chỉ chủ máy ra lệnh được.** Cổng là `chat_id` trong `huba.env` — cùng
 //!    luật với `trust.tfl5_user_tids` của phòng chat: được ở trong phòng là
 //!    chuyện của Telegram, còn lái cái máy này là chuyện của chủ máy. Tin từ
 //!    người khác được LOG rồi bỏ, không im lặng.
@@ -71,16 +71,16 @@ pub struct Incoming {
     ///
     /// 🔴 Hà 2026-08-14: *"Có thể đổi cách phản hồi tin đã gửi bằng 1 emoji
     /// trực tiếp vào tin nhắn cho gọn"*. Gõ một câu vào phiên hiện nay tốn HAI
-    /// tin trong buồng chat: câu của chủ máy, rồi `✓ đã gửi · [tên]` của hub —
+    /// tin trong buồng chat: câu của chủ máy, rồi `✓ đã gửi · [tên]` của huba —
     /// mà tin thứ hai không mang thông tin nào ngoài "đã nhận". Thả 👍 lên
     /// chính tin ấy nói đúng chừng ấy, và không chiếm dòng nào.
     pub msg_id: Option<i64>,
-    /// Lệnh do CHÍNH hub xếp hàng làm bước phụ ⟹ chạy xong thì im.
+    /// Lệnh do CHÍNH huba xếp hàng làm bước phụ ⟹ chạy xong thì im.
     ///
     /// 🔴 Hà 2026-08-13: *"1 thao tác gửi 2 thông báo để làm gì"*. Nút
     /// `⏎ Gửi` xếp hàng hai lệnh (Esc xoá ô, rồi gõ chữ) và mỗi lệnh tự trả
     /// lời một câu — nên một cú bấm ra `✓ đã bấm 'esc'` rồi `✓ đã gửi`. Cú Esc
-    /// là RUỘT của hub, không phải việc của người đọc; đúng cùng lý do đã bỏ
+    /// là RUỘT của huba, không phải việc của người đọc; đúng cùng lý do đã bỏ
     /// dòng "(phải gửi thêm một Enter rời)" hôm qua.
     pub quiet: bool,
 }
@@ -88,7 +88,7 @@ pub struct Incoming {
 /// Hàng update chờ thợ, kèm mốc NHẬN của từng cái (để đo thời gian nằm chờ).
 type Inflight = (Mutex<VecDeque<(Value, std::time::Instant)>>, Condvar);
 
-/// Câu xác nhận TRƠN đang là tin cuối cùng hub gửi — chỗ để gộp câu kế tiếp.
+/// Câu xác nhận TRƠN đang là tin cuối cùng huba gửi — chỗ để gộp câu kế tiếp.
 ///
 /// Chỉ tồn tại khi tin ấy còn ở đáy buồng chat: bất cứ tin nào khác đi ra (hoặc
 /// một tin của chủ máy còn nằm lại) đều xoá sổ này, vì lúc ấy sửa nó là sửa một
@@ -125,7 +125,7 @@ pub enum AckPlan {
 ///
 /// Đo trên `hubd.err` ngày 17/08: **73 dòng `✓ đã gửi · …`** cho 73 cú bấm phím,
 /// mỗi dòng kèm một `telegram_reaction_failed` — vì tin sinh ra lệnh là tiếng
-/// vọng `/start`, mà hub XOÁ ngay tiếng vọng ấy, nên cái dấu không có chỗ để
+/// vọng `/start`, mà huba XOÁ ngay tiếng vọng ấy, nên cái dấu không có chỗ để
 /// thả. Hai chuyện tách bạch: dấu thả lên tin của chủ máy (còn nguyên), còn
 /// đường này thì gộp.
 ///
@@ -159,13 +159,13 @@ pub fn document_body(path: &std::path::Path) -> Result<(Vec<u8>, String), String
 /// Phần CUỐI của một tệp — đường ra khi tệp vượt trần THẬT của Telegram.
 ///
 /// 🔴 Hà 2026-08-19: *"Sao lại có giới hạn dung lượng"* — `⚠ chưa gửi được
-/// hub.log — 21.4 MB — quá trần 5 MB`. Trần 5 MB ấy là của **hub**, dựng trên
+/// huba.log — 21.4 MB — quá trần 5 MB`. Trần 5 MB ấy là của **huba**, dựng trên
 /// một câu đoán hộ (*"một file 5 MB đọc trên điện thoại là chuyện không xảy
 /// ra"*), trong khi Telegram cho tới **50 MB**. Đó là hàng rào áp lên đúng cái
 /// nút chủ máy tự bấm — thứ [[feedback_no_guardrails_on_owner_actions]] nói
 /// thẳng là không được làm. Nay trần duy nhất là trần của Telegram.
 ///
-/// Trên trần ấy thì nó là tường THẬT, nên hub không im: nó làm đúng thứ chủ máy
+/// Trên trần ấy thì nó là tường THẬT, nên huba không im: nó làm đúng thứ chủ máy
 /// làm khi ngồi ở máy với một tệp nhật ký khổng lồ — `tail`. Cắt ở dấu xuống
 /// dòng đầu tiên, nên không có dòng cụt ở đầu và mẩu cắt chắc chắn đứng trên
 /// ranh giới UTF-8. Tệp nhị phân thì KHÔNG cắt: nửa cuối một tệp `.zip` không
@@ -263,7 +263,7 @@ pub fn fold_ack(prev: Option<&AckLive>, text: &str) -> AckPlan {
     }
 }
 
-/// Tin nào còn lại để thả dấu lên — `None` cho tiếng vọng `/start`, vì hub dọn
+/// Tin nào còn lại để thả dấu lên — `None` cho tiếng vọng `/start`, vì huba dọn
 /// chính nó ngay sau đó.
 ///
 /// 🔴 Một sự thật, hai chỗ đọc. Bản trước xếp lệnh vào hàng KÈM `message_id`
@@ -313,7 +313,7 @@ pub struct Inbox {
     /// Update đã NHẬN nhưng chưa xử lý: vòng đọc đẩy vào, luồng thợ lấy ra.
     ///
     /// Vì sao phải có, và vì sao đúng MỘT thợ (2026-08-14): đường đọc
-    /// `getUpdates` là đường DUY NHẤT hub nghe được điện thoại (luật 1 của tệp
+    /// `getUpdates` là đường DUY NHẤT huba nghe được điện thoại (luật 1 của tệp
     /// này), nên mọi giây tiêu ở đó là một giây điếc. Mà `handle_update` có
     /// nhánh tiêu giây thật: tải một tệp đính kèm mất **3,8s và 5,0s** trong
     /// hai lượt đo được của ngày 08-14 (`telegram_update_slow`), chưa kể
@@ -338,7 +338,7 @@ pub struct Inbox {
     ///
     /// 🔴 Nhà cũ của nó là `live.rs`, cái socket của phòng chat tfl5, gỡ ngày
     /// 2026-08-14. Nó sinh ra vì một phép
-    // đo thật: 2026-08-11, gõ `/help` lúc 21:31:34, hub chạy lúc 21:33:50 — hai
+    // đo thật: 2026-08-11, gõ `/help` lúc 21:31:34, huba chạy lúc 21:33:50 — hai
     // phút mười sáu giây, vì lệnh tới ngay sau lúc vòng 120 giây vừa đọc hàng
     /// đợi. Phòng chat tfl5 không dính nhờ socket `/ws/chat` gọi `wake()`.
     ///
@@ -350,7 +350,7 @@ pub struct Inbox {
     ///
     /// Trong bộ nhớ chứ không phải trong sổ SQLite, và đó là chủ ý: sổ này chỉ
     /// đúng chừng nào tin ấy vẫn là tin CUỐI, mà "cuối" là chuyện của phiên
-    /// chạy hiện tại. hubd khởi động lại thì câu kế tiếp đi tin mới — đúng, vì
+    /// chạy hiện tại. hubad khởi động lại thì câu kế tiếp đi tin mới — đúng, vì
     /// lúc ấy không ai biết buồng chat đã trôi thêm những gì.
     ack_live: Arc<Mutex<Option<AckLive>>>,
 }
@@ -368,14 +368,14 @@ pub struct Inbox {
 ///
 /// `ok:`/`no:` (nút xác nhận) KHÔNG thuộc về đây: chúng chỉ có nghĩa trong lúc
 /// `confirm::ask` đang chờ, và trả `None` là cách nói "cái này không phải lệnh".
-/// Sổ những tin hub đã gửi sang Telegram, để sau này XOÁ được chúng.
+/// Sổ những tin huba đã gửi sang Telegram, để sau này XOÁ được chúng.
 ///
 /// Hà 2026-08-12: *"đã có cơ chế tự xóa tin nhắn cũ hơn 1.5 ngày chưa"* — chưa.
 /// Muốn xoá thì phải có `message_id`, mà `message_id` chỉ tồn tại đúng một lần:
 /// trong câu trả lời của `sendMessage`. Không nhặt ngay lúc ấy thì tin đã gửi
 /// nằm ngoài tầm với vĩnh viễn.
 ///
-/// Ghi thẳng vào sổ (một cursor trong SQLite) chứ không giữ trong bộ nhớ: hub
+/// Ghi thẳng vào sổ (một cursor trong SQLite) chứ không giữ trong bộ nhớ: huba
 /// khởi động lại vài lần một ngày, và một bộ đệm trong RAM nghĩa là mỗi lần
 /// khởi động lại là một nhúm tin không bao giờ xoá được nữa — đúng loại lỗ hổng
 /// im lặng mà một tính năng dọn dẹp không được phép có.
@@ -433,9 +433,9 @@ pub fn remember_sent(cfg: &Config, resp: &Value) {
 
 /// Trần CỨNG của Telegram: quá 48 giờ thì bot không xoá được tin của chính nó.
 ///
-/// Không phải một lựa chọn của hub — API trả `message can't be deleted`. Nên
+/// Không phải một lựa chọn của huba — API trả `message can't be deleted`. Nên
 /// mọi tin quá hạn này bị **bỏ khỏi sổ** kèm một dòng log, chứ không nằm lại
-/// làm hub thử đi thử lại một việc không bao giờ xong.
+/// làm huba thử đi thử lại một việc không bao giờ xong.
 pub const TELEGRAM_DELETE_WINDOW_SEC: i64 = 48 * 3600;
 
 /// Telegram trả lời nhưng TỪ CHỐI — trả về lý do, `None` nếu bình thường.
@@ -480,7 +480,7 @@ pub fn due_for_delete(list: &[SentMsg], now: i64, after_hours: u64) -> (Vec<i64>
     (due, gone)
 }
 
-/// Xoá những tin hub gửi đã quá hạn — chạy mỗi vòng, rẻ khi không có gì để xoá.
+/// Xoá những tin huba gửi đã quá hạn — chạy mỗi vòng, rẻ khi không có gì để xoá.
 ///
 /// Hai điều phải nói thẳng vì chúng là giới hạn thật, không phải thiếu sót:
 /// * **Chỉ xoá được tin của CHÍNH BOT.** Trong buồng chat riêng, Telegram không
@@ -627,7 +627,7 @@ pub fn choice_buttons(
 /// rào khối hiện nguyên ba dấu nháy ngược, và một dòng lệnh nằm trong nháy
 /// ngược thì bị mấy ký tự ấy cắt vụn ngay giữa.
 ///
-/// Gốc: hub gửi `sendMessage` **không kèm `parse_mode`**, tức chữ thuần. Mà
+/// Gốc: huba gửi `sendMessage` **không kèm `parse_mode`**, tức chữ thuần. Mà
 /// nguồn chữ là báo cáo của một phiên `claude` — thứ viết bằng Markdown theo
 /// bản năng. Hai bên đều đúng phần mình, và người đọc lãnh đủ.
 ///
@@ -675,7 +675,7 @@ pub fn strip_markdown(text: &str) -> String {
 ///
 /// 🔴 Tách ra thành hàm thuần ngày 2026-08-14, khi cổng người thứ hai
 /// (`trust.tfl5_user_tids`, kiểm trong `verbs::parse_command`) đi cùng phòng
-/// chat tfl5. Từ đây `chat_id` là **cổng người DUY NHẤT** của hub — cái gì gác
+/// chat tfl5. Từ đây `chat_id` là **cổng người DUY NHẤT** của huba — cái gì gác
 /// một mình thì phải kiểm được một mình.
 ///
 /// Hai hình dạng đọc ở hai chỗ khác nhau, và sự bất đối xứng ấy là cố ý:
@@ -686,7 +686,7 @@ pub fn strip_markdown(text: &str) -> String {
 /// * **Chữ** hỏi BUỒNG (`message.chat.id`), không hỏi người gửi. Đọc nhầm sang
 ///   `from.id` ở nhánh này là một lỗi rất khó thấy: trong buồng riêng hai số ấy
 ///   BẰNG NHAU, nên mọi thử nghiệm tay đều xanh — chỉ tới khi bot bị kéo vào
-///   một nhóm thì hub mới bắt đầu nhận lệnh từ cả nhóm, hoặc từ chối chính chủ.
+///   một nhóm thì huba mới bắt đầu nhận lệnh từ cả nhóm, hoặc từ chối chính chủ.
 ///
 /// `None` = không đọc ra được ⟹ chỗ gọi từ chối. Fail closed.
 pub fn update_sender(u: &Value) -> Option<String> {
@@ -729,7 +729,7 @@ pub fn callback_to_command(data: &str) -> Option<String> {
         }
         return Some(format!("/tab {sid} {n}"));
     }
-    // Nút "dựng lại hub". Không mang tham số nào: route `/upgrade` dựng từ MÃ
+    // Nút "dựng lại huba". Không mang tham số nào: route `/upgrade` dựng từ MÃ
     // HIỆN TẠI trong cây nguồn, nên một dòng lệnh đi kèm chỉ tạo ảo giác là
     // bấm cái này chạy đúng chữ đang hiện trên màn.
     if data == "upgrade" {
@@ -872,7 +872,7 @@ impl Sent {
             .to_string();
         // ⚠ `offset`/`length` của Telegram đếm bằng **đơn vị mã UTF-16**, không
         // phải ký tự và không phải byte (Bot API, mục MessageEntity). Cắt bằng
-        // `chars()` sẽ lệch ngay khi tin có emoji — mà tin nào của hub cũng có
+        // `chars()` sẽ lệch ngay khi tin có emoji — mà tin nào của huba cũng có
         // emoji. Nên cắt trên chính UTF-16 rồi dựng chuỗi lại.
         let u: Vec<u16> = text.encode_utf16().collect();
         let mut links = Vec::new();
@@ -936,7 +936,7 @@ impl Sent {
 /// Chữ thường → chữ an toàn cho `parse_mode=HTML`.
 ///
 /// Telegram chỉ đòi ba ký tự này (tài liệu Bot API, mục *HTML style*) — nhẹ hơn
-/// hẳn MarkdownV2, thứ bắt escape MỌI ký tự mã 1–126. Đó cũng là lý do hub gột
+/// hẳn MarkdownV2, thứ bắt escape MỌI ký tự mã 1–126. Đó cũng là lý do huba gột
 /// Markdown suốt từ đầu thay vì bật nó lên.
 pub fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -997,7 +997,7 @@ impl Inbox {
             .spawn(move || hand.work_forever())
         {
             // Không nuốt: mất thợ thì mọi update chạy ngay trong vòng đọc, tức
-            // hub điếc đúng bằng thời gian xử lý. Nói ra, rồi vẫn chạy.
+            // huba điếc đúng bằng thời gian xử lý. Nói ra, rồi vẫn chạy.
             inbox.inline.store(true, Ordering::SeqCst);
             logging::error(
                 "telegram_worker_spawn_failed",
@@ -1248,7 +1248,7 @@ impl Inbox {
     }
 }
 
-/// `hub doctor` cho KÊNH CHÍNH — dò thật, không đọc cấu hình rồi đoán.
+/// `huba doctor` cho KÊNH CHÍNH — dò thật, không đọc cấu hình rồi đoán.
 ///
 /// 🔴 Hà 2026-08-13: *"nội dung readme.md chưa đúng lắm, bây giờ chủ yếu là kênh
 /// telegram"*. Sửa README thì lòi ra chỗ này: `doctor` in mục `channels:` mà
@@ -1282,7 +1282,7 @@ pub fn health(cfg: &Config) -> crate::adapters::Health {
             .collect();
             return crate::adapters::Health {
                 ok: false,
-                detail: format!("thiếu bí mật trong hub.env: {}", missing.join(", ")),
+                detail: format!("thiếu bí mật trong huba.env: {}", missing.join(", ")),
             };
         }
     };
@@ -1341,7 +1341,7 @@ impl Inbox {
     ///
     /// 🔴 Hà 2026-08-13: *"các nội dung có path file thì nên cho click vào nhận
     /// được file để mở trực tiếp trên tele"*. Trước đó cây cầu tệp đi một
-    /// chiều: hub nhận được tệp từ Telegram nhưng không gửi ra được cái nào,
+    /// chiều: huba nhận được tệp từ Telegram nhưng không gửi ra được cái nào,
     /// nên mọi báo cáo nhắc tới một file đều nhắc tới thứ không mở nổi.
     ///
     /// Ba cửa, và cả ba đều là luật đã có chứ không phải luật mới:
@@ -1354,7 +1354,7 @@ impl Inbox {
     ///   thành cái vỏ của một hàng rào không còn ai gác — nó không bảo vệ gì,
     ///   chỉ chặn đúng tệp chủ máy vừa chỉ tay vào (Hà: *"Có file docx nhưng
     ///   không có nút tải"*). Nay đọc BYTE và gửi, xem [`document_body`].
-    /// * **Trần dung lượng của TELEGRAM** — 50 MB, và không có trần nào của hub
+    /// * **Trần dung lượng của TELEGRAM** — 50 MB, và không có trần nào của huba
     ///   nữa. 🪦 Trần 5 MB gỡ 2026-08-19; xem [`document_tail`] cho cả lý do lẫn
     ///   thứ thay chỗ nó khi tệp vượt trần thật.
     pub fn send_document(
@@ -1363,7 +1363,7 @@ impl Inbox {
         root: &std::path::Path,
     ) -> Result<(), String> {
         /// Trần THẬT của `sendDocument`. Đây là luật của Telegram, không phải
-        /// khẩu vị của hub — vượt nó thì API từ chối, hub có nới cũng vô ích.
+        /// khẩu vị của huba — vượt nó thì API từ chối, huba có nới cũng vô ích.
         const TELEGRAM_DOC_MAX: u64 = 50 * 1024 * 1024;
         /// Vượt trần thật thì cứu bấy nhiêu byte CUỐI. Con số này không chặn
         /// gì cả — nó chỉ nói "cứu được bao nhiêu", và câu trả lời đi kèm nói
@@ -1390,7 +1390,7 @@ impl Inbox {
             .unwrap_or_else(|_| self.cfg.workspace_root.clone());
         if !real.starts_with(&root_real) && !real.starts_with(&ws) {
             return Err(format!(
-                "nằm ngoài chỗ làm việc ({} · {}) — hub không gửi",
+                "nằm ngoài chỗ làm việc ({} · {}) — huba không gửi",
                 root_real.display(),
                 ws.display()
             ));
@@ -1415,14 +1415,14 @@ impl Inbox {
             document_body(&real)?
         };
         // 🔴 CỔNG NÀY THÔI CHẶN — nó BÁO. Hà 2026-08-16, ảnh chụp đúng lúc bấm
-        // nút 📎: *"cái gì giữ lại vậy, hub là tôi yêu cầu bạn viết để tôi gửi
+        // nút 📎: *"cái gì giữ lại vậy, huba là tôi yêu cầu bạn viết để tôi gửi
         // các lệnh và thực hiện mà?"*. Tệp bị giữ là
         // `~/projects/AI/tcc/danh-gia-tccbrowser.html` — một bản báo cáo, dính
         // `secret_assignment` vì trong đó có một dòng trông như gán mật khẩu.
         //
         // Đây là LẦN THỨ HAI cùng một câu, cùng một người. Lần đầu 14/08, cổng
-        // quét rò trên `/shot`: *"Tại sao lại bị chặn, hub là cổng làm việc của
-        // tôi mà"* → *"Trong tele có thiết lập tự xoá lịch sử tin rồi nên hub
+        // quét rò trên `/shot`: *"Tại sao lại bị chặn, huba là cổng làm việc của
+        // tôi mà"* → *"Trong tele có thiết lập tự xoá lịch sử tin rồi nên huba
         // không cần tính năng này nữa"*. Cổng ấy đã gỡ hôm đó, và lý do gỡ áp
         // nguyên vào đây: đích đến là buồng chat RIÊNG của chủ máy, có tự xoá;
         // hàng rào ở tầng dưới do chính anh dựng.
@@ -1528,11 +1528,11 @@ impl Inbox {
     /// 🔴 KHÔNG đi qua `send_document`, và đây là chỗ dễ chép nhầm nhất: cửa của
     /// `send_document` đòi tệp phải nằm trong cây làm việc VÀ đọc được thành chữ
     /// UTF-8 (cổng quét rò). Cả hai đều đúng cho một tệp của dự án, và cả hai
-    /// đều sai cho một ảnh: nó là byte nhị phân, nằm trong thư mục tạm của hub,
+    /// đều sai cho một ảnh: nó là byte nhị phân, nằm trong thư mục tạm của huba,
     /// và chính chủ máy vừa bấm để xin nó.
     ///
     /// Ảnh KHÔNG qua cổng quét rò được — không có chữ để quét. Nên luật ở đây là
-    /// luật của luật 5 (hub không giấu chữ với chủ máy) đọc tới cùng: ảnh chỉ đi
+    /// luật của luật 5 (huba không giấu chữ với chủ máy) đọc tới cùng: ảnh chỉ đi
     /// về ĐÚNG buồng chat của chủ máy, và chỉ khi anh gõ lệnh xin nó.
     pub fn send_photo(&self, path: &std::path::Path, caption: &str) -> Result<(), String> {
         const MAX_BYTES: u64 = 10 * 1024 * 1024;
@@ -1649,7 +1649,7 @@ impl Inbox {
         self.push_inner(text, false, msg_id);
     }
 
-    /// Xếp hàng một lệnh PHỤ của chính hub — chạy xong không trả lời gì.
+    /// Xếp hàng một lệnh PHỤ của chính huba — chạy xong không trả lời gì.
     pub fn push_text_quiet(&self, text: &str) {
         self.push_inner(text, true, None);
     }
@@ -1671,7 +1671,7 @@ impl Inbox {
             "telegram_command_queued",
             json!({ "head": crate::exec::truncate(t, 40) }),
         );
-        // Đánh thức NGAY để phần CÒN LẠI của hub bắt kịp (xem `waker`).
+        // Đánh thức NGAY để phần CÒN LẠI của huba bắt kịp (xem `waker`).
         if let Some(w) = &self.waker {
             w.wake();
         }
@@ -1707,7 +1707,7 @@ impl Inbox {
 
     fn read_forever(&self) {
         let Some(client) = self.client() else { return };
-        // NÓI RA đang cầm bot nào. Không có dòng này thì câu hỏi "hub đã nhận
+        // NÓI RA đang cầm bot nào. Không có dòng này thì câu hỏi "huba đã nhận
         // token mới chưa" không trả lời được từ bên ngoài — đúng chỗ Hà mắc
         // 2026-08-12 khi đổi bot: gõ `/start` mà im, và mọi giả thuyết (token
         // sai · chưa khởi động lại · chat_id lệch) đều nghe hợp lý như nhau.
@@ -1751,10 +1751,10 @@ impl Inbox {
         //
         // Bản cũ mở đầu bằng `getUpdates?offset=-1`, tức bảo Telegram "coi như
         // tôi đã nhận hết", rồi vứt sạch mọi thứ tồn đọng. Lý do viết ra thì
-        // đúng — *"hub vừa khởi động lại mà chạy luôn mấy lệnh gõ từ hôm qua là
+        // đúng — *"huba vừa khởi động lại mà chạy luôn mấy lệnh gõ từ hôm qua là
         // một kiểu bất ngờ tệ"* — nhưng cách làm quá thô: nó không phân biệt
-        // một câu gõ từ hôm qua với một câu gõ CÁCH ĐÂY BỐN GIÂY, trong lúc hub
-        // đang khởi động lại. Mà hub khởi động lại nhiều lần mỗi ngày, mỗi lần
+        // một câu gõ từ hôm qua với một câu gõ CÁCH ĐÂY BỐN GIÂY, trong lúc huba
+        // đang khởi động lại. Mà huba khởi động lại nhiều lần mỗi ngày, mỗi lần
         // là một cửa sổ vài giây nuốt trọn mọi thứ rơi vào đó, im lặng.
         //
         // Nay con dấu giữ nguyên (Telegram còn giữ update chưa nhận), và cái
@@ -1848,7 +1848,7 @@ impl Inbox {
         let _lane = crate::exec::urgent();
         let Some(client) = self.client() else {
             // Thợ không có tay thì trả việc lại cho vòng đọc, đừng đứng im ôm
-            // hàng — đó là kiểu hỏng mà từ điện thoại nhìn ra là "hub chết".
+            // hàng — đó là kiểu hỏng mà từ điện thoại nhìn ra là "huba chết".
             self.inline.store(true, Ordering::SeqCst);
             logging::error(
                 "telegram_worker_inline",
@@ -1868,15 +1868,15 @@ impl Inbox {
                 }
             };
             // 🔴 Phép đo THAY CHO `telegram_update_lag` ở nhánh nút bấm: hai mốc
-            // này là đồng hồ của chính hub (nhận → cầm), nên nó đo đúng cái câu
-            // hỏi "hub có bị dồn không" mà không phải mượn một dấu thời gian của
+            // này là đồng hồ của chính huba (nhận → cầm), nên nó đo đúng cái câu
+            // hỏi "huba có bị dồn không" mà không phải mượn một dấu thời gian của
             // Telegram rồi đọc sai ý nghĩa của nó.
             let waited = at.elapsed();
             if waited.as_millis() > 2000 {
                 logging::warn(
                     "telegram_update_wait",
                     json!({ "ms": waited.as_millis(),
-                            "why": "update nằm trong hàng của hub chừng ấy trước khi tới lượt" }),
+                            "why": "update nằm trong hàng của huba chừng ấy trước khi tới lượt" }),
                 );
             }
             self.handle_update(&client, &u);
@@ -1884,15 +1884,15 @@ impl Inbox {
     }
 
     fn handle_update(&self, client: &reqwest::blocking::Client, u: &Value) {
-        // 🔴 Hà 2026-08-14: *"Gửi 1 lúc hub mới nhận được"* · *"sao tự nhiên
+        // 🔴 Hà 2026-08-14: *"Gửi 1 lúc huba mới nhận được"* · *"sao tự nhiên
         // phản hồi rất chậm với tele"*. Trước dòng này, câu ấy KHÔNG trả lời
-        // được bằng log: hub chỉ ghi lúc nó xếp lệnh vào hàng, không ghi tin
+        // được bằng log: huba chỉ ghi lúc nó xếp lệnh vào hàng, không ghi tin
         // được gõ lúc nào — nên "chậm" có thể nằm ở Telegram, ở vòng đọc, ở
         // hàng chờ, hay ở chính lượt làm việc của phiên, và cả bốn nghe hợp lý
         // như nhau. Đúng cái bẫy đã trả giá với `/upgrade` sáng nay.
         //
         // `message.date` là giây UNIX Telegram đóng dấu lúc NHẬN tin, nên hiệu
-        // số này đo đúng quãng "gõ xong → hub cầm được", không lẫn phần sau.
+        // số này đo đúng quãng "gõ xong → huba cầm được", không lẫn phần sau.
         // Chỉ kêu khi quá 3 giây: dưới ngưỡng ấy là long-poll chạy đúng, và một
         // dòng log cho mỗi tin nhắn là tự dựng rác cho mình.
         //
@@ -1906,20 +1906,20 @@ impl Inbox {
         // Tức mỗi cú bấm vào một tin cũ tự sinh ra một "độ trễ" bằng đúng tuổi
         // của tin đó.
         //
-        // Bằng chứng, từ `logs/hub.log` cùng ngày — 16/17 dòng `..._lag` là ảo,
+        // Bằng chứng, từ `logs/huba.log` cùng ngày — 16/17 dòng `..._lag` là ảo,
         // mỗi dòng quy đúng về một lượt `telegram_buttons_sent`:
         //   190s @08:03:30 · 239s @08:04:19 · 304s @08:05:24 → **cùng một mốc
-        //   08:00:20**, là lúc hub gửi danh sách 4 phiên (`buttons_sent 4`).
+        //   08:00:20**, là lúc huba gửi danh sách 4 phiên (`buttons_sent 4`).
         //   Ba lần bấm vào cùng một danh sách, và "trễ" leo 190→239→304 chỉ vì
-        //   cái danh sách mỗi lúc một cũ. Trong quãng ấy hub vẫn nhận và chạy
+        //   cái danh sách mỗi lúc một cũ. Trong quãng ấy huba vẫn nhận và chạy
         //   6 update khác — nó không hề đứng.
         // Không một tin CHỮ nào của ngày hôm ấy vượt ngưỡng 3 giây.
         //
         // Cái đo được cho một cú bấm nằm ở `telegram_update_wait` (thời gian
-        // nằm trong hàng đợi của chính hub) và ở `command_done` — hai mốc hub
+        // nằm trong hàng đợi của chính huba) và ở `command_done` — hai mốc huba
         // tự cầm đồng hồ, không phải một mốc mượn của Telegram rồi đọc sai.
         let started = std::time::Instant::now();
-        // Tin CHỮ cũ hơn chừng này thì hub bỏ, có ghi log: đó là câu gõ từ một
+        // Tin CHỮ cũ hơn chừng này thì huba bỏ, có ghi log: đó là câu gõ từ một
         // lần chạy trước, không phải việc đang cần làm. Mười lăm phút rộng hơn
         // hẳn mọi lượt cài lại (vài giây tới một phút) và hẹp hơn hẳn một buổi
         // máy tắt — chỗ giữa ấy không có ca nào mơ hồ.
@@ -1943,11 +1943,11 @@ impl Inbox {
                 logging::warn(
                     "telegram_update_lag",
                     json!({ "sec": lag,
-                            "why": "quãng từ lúc Telegram nhận TIN CHỮ tới lúc hub cầm được nó" }),
+                            "why": "quãng từ lúc Telegram nhận TIN CHỮ tới lúc huba cầm được nó" }),
                 );
             }
         }
-        // Đo luôn phần hub tự tiêu: một update nặng (tải ảnh đính kèm) giữ luồng
+        // Đo luôn phần huba tự tiêu: một update nặng (tải ảnh đính kèm) giữ luồng
         // thợ, nên update tới sau phải xếp hàng sau nó — nhưng KHÔNG còn chặn
         // đường đọc `getUpdates` (xem `hand_off`).
         let _guard = UpdateTimer(started);
@@ -2001,7 +2001,7 @@ impl Inbox {
                     json!({ "why": "câu hỏi đã đóng (hết hạn hoặc đã trả lời)" }),
                 );
                 let _ = self.send_text(
-                    "⌛ Nút này thuộc một câu hỏi đã đóng sổ — hub không làm gì. Gửi lại lệnh nếu vẫn cần.",
+                    "⌛ Nút này thuộc một câu hỏi đã đóng sổ — huba không làm gì. Gửi lại lệnh nếu vẫn cần.",
                 );
                 return;
             }
@@ -2067,7 +2067,7 @@ impl Inbox {
                         //
                         // 🔴 Tôi đã suýt định tuyến nhánh này sang `/cmd` cho
                         // các lệnh nằm trong `DENIED_TOOLS`, và Hà chặn đúng
-                        // lúc: *"vô lý việc gõ vào phiên là hub làm mà"* ·
+                        // lúc: *"vô lý việc gõ vào phiên là huba làm mà"* ·
                         // *"sao lại chặn được"*. Anh đúng — `--disallowedTools`
                         // gác **lời gọi công cụ của AI**, còn `!<lệnh>` là chế
                         // độ bash của chính TUI, tức đúng cái ngón tay chủ máy
@@ -2085,7 +2085,7 @@ impl Inbox {
                         // điều tệp này đã ghi từ 08-12 cho chuyện dấu Enter.
                         // Chế độ bash của TUI chỉ bật khi `!` tới như một PHÍM
                         // GÕ đầu tiên vào ô trống; `!` trong một cú dán chỉ là
-                        // một ký tự. Tức quy ước `!<lệnh>` của hub **chưa bao
+                        // một ký tự. Tức quy ước `!<lệnh>` của huba **chưa bao
                         // giờ chạy** theo cách nó tự mô tả.
                         //
                         // Và nó không vô hại: nếu có lượt nào `!` bật được chế
@@ -2102,7 +2102,7 @@ impl Inbox {
                         // và bằng chứng rơi thẳng vào cuộc trò chuyện: nút
                         // `▶ bash scripts/verify-acl-2026-08-13.sh` của `[tfl5]`
                         // bấm ra dòng `!bash scripts/verify-acl-…` chạy trong
-                        // phiên `[hub]`. Tệp ấy nằm ở `AI/tfl5/scripts/`, hub
+                        // phiên `[huba]`. Tệp ấy nằm ở `AI/tfl5/scripts/`, huba
                         // không có nó.
                         //
                         // `/type` không mang id thì rơi về con trỏ focus
@@ -2130,7 +2130,7 @@ impl Inbox {
             //
             // 🔴 Hà 2026-08-13: *"nên chỗ gợi ý đó cần thao tác bấm là gửi luôn
             // text đó tới phiên"*. Hai bước, một cú bấm: **Esc** xoá ô trước,
-            // rồi gõ lại nguyên chữ ấy. Xoá trước là bắt buộc vì hub KHÔNG phân
+            // rồi gõ lại nguyên chữ ấy. Xoá trước là bắt buộc vì huba KHÔNG phân
             // biệt được "gợi ý mờ" (ô rỗng thật) với "chữ đã gõ" (ô có chữ) —
             // màn đọc về không mang màu. Không xoá thì ca thứ hai thành
             // `pushpush`.
@@ -2211,7 +2211,7 @@ impl Inbox {
                 match full {
                     Some((sid, sname, text)) => {
                         // Đọc xong một báo cáo dài thì việc kế tiếp gần như luôn
-                        // là ĐI VÀO chính phiên ấy — nên hub ĐI LUÔN, không đưa
+                        // là ĐI VÀO chính phiên ấy — nên huba ĐI LUÔN, không đưa
                         // thêm một cái nút nữa.
                         //
                         // 🔴 Hà 2026-08-13: *"khi bấm xem đầy đủ thì rõ ràng nó
@@ -2352,7 +2352,7 @@ impl Inbox {
                     }
                     None => {
                         if let Err(e) = self
-                            .send_text("⚠ bản đầy đủ ấy cũ quá rồi (hub chỉ giữ 8 bản gần nhất).")
+                            .send_text("⚠ bản đầy đủ ấy cũ quá rồi (huba chỉ giữ 8 bản gần nhất).")
                         {
                             logging::error("telegram_ack_failed", json!({ "err": e }));
                         }
@@ -2373,7 +2373,7 @@ impl Inbox {
         // nhận đính kèm file vào tin nhắn"*).
         //
         // Cùng cổng với chữ: chỉ nhận từ đúng `chat_id` của chủ máy. Tệp về
-        // `<gốc workspace>/.inbox/<mã phiên đang theo>/`, rồi hub gõ MỘT DÒNG
+        // `<gốc workspace>/.inbox/<mã phiên đang theo>/`, rồi huba gõ MỘT DÒNG
         // vào phiên nói đường dẫn — tức đi đúng con đường chữ thường đã có,
         // không đẻ lối riêng cho phiên phải học.
         //
@@ -2487,13 +2487,13 @@ impl Inbox {
                             },
                             None => Some(format!(
                                 "⚠ chưa gửi được {p} — không tìm thấy tệp ấy trong cây làm việc \
-                                 của phiên (hoặc có hai tệp trùng tên, hub không đoán)."
+                                 của phiên (hoặc có hai tệp trùng tên, huba không đoán)."
                             )),
                         }
                     }
                     None => Some(format!(
                         "⚠ chưa gửi được {p} — không biết phiên ấy làm ở thư mục nào, \
-                         mà hub chỉ gửi file NẰM TRONG thư mục của chính phiên đó."
+                         mà huba chỉ gửi file NẰM TRONG thư mục của chính phiên đó."
                     )),
                 }
             }
@@ -2941,7 +2941,7 @@ impl Inbox {
 /// Hàm thuần, tách ra để kiểm được: đây là chỗ một phép đo đã nói dối suốt
 /// ngày 2026-08-14 (xem `handle_update`). Một cú bấm nút KHÔNG có mốc nào —
 /// `callback_query.message.date` là tuổi của tin chứa cái nút, và trả nó ra ở
-/// đây là biến "bấm vào một tin cũ" thành "hub trễ 5 phút".
+/// đây là biến "bấm vào một tin cũ" thành "huba trễ 5 phút".
 pub fn text_sent_at(u: &Value) -> Option<i64> {
     u.pointer("/message/date")
         .or_else(|| u.pointer("/edited_message/date"))

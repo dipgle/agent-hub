@@ -21,7 +21,7 @@
 //! nhắc lại cùng tệp — mà "nhắc lại cùng tệp" chính là hình dạng thường gặp
 //! nhất: phiên nào viết xong báo cáo cũng đưa đường dẫn rồi đưa lệnh mở.
 //!
-//! Fixture là NGUYÊN VĂN tin ấy, lấy từ `logs/hub.log` (`channel_command_handled`,
+//! Fixture là NGUYÊN VĂN tin ấy, lấy từ `logs/huba.log` (`channel_command_handled`,
 //! `kind: Shot`, 1964 byte).
 
 use std::path::Path;
@@ -34,14 +34,14 @@ fn shot_text() -> String {
 
 const REPORT: &str = "~/projects/dwork/dev/docs/bao-cao/bao-cao-ra-soat-2026-08-18.html";
 
-/// Tầng 1 — hub CÓ nhìn thấy đường dẫn ấy trên màn.
+/// Tầng 1 — huba CÓ nhìn thấy đường dẫn ấy trên màn.
 ///
 /// Tách riêng vì hai tầng hỏng cho ra cùng một triệu chứng ("không có nút"), và
 /// đoán nhầm tầng là sửa nhầm chỗ: đường dẫn nằm trong `**`…`**`, nên nếu bộ dò
 /// nuốt cả dấu nháy ngược thì `is_file` trượt và mọi thứ sau đó vô nghĩa.
 #[test]
 fn the_path_is_seen_on_the_screen() {
-    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&shot_text()), 4);
+    let seen = huba::keys::paths_on_screen(&huba::keys::body_before_box(&shot_text()), 4);
     assert!(
         seen.iter().any(|p| p == REPORT),
         "bộ dò không đọc ra đường dẫn báo cáo: {seen:?}"
@@ -52,16 +52,16 @@ fn the_path_is_seen_on_the_screen() {
 #[test]
 fn a_path_mentioned_on_its_own_line_keeps_its_button() {
     let text = shot_text();
-    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(&text), 4);
-    let cmds = hub::keys::commands_in_report(&text, 8);
-    let cmds: Vec<hub::sessions::Cmd> = cmds
+    let seen = huba::keys::paths_on_screen(&huba::keys::body_before_box(&text), 4);
+    let cmds = huba::keys::commands_in_report(&text, 8);
+    let cmds: Vec<huba::sessions::Cmd> = cmds
         .into_iter()
-        .map(|line| hub::sessions::Cmd {
+        .map(|line| huba::sessions::Cmd {
             line,
             cwd: String::new(),
         })
         .collect();
-    let kept = hub::pipeline::paths_not_in_commands(&text, &seen, &cmds);
+    let kept = huba::pipeline::paths_not_in_commands(&text, &seen, &cmds);
     assert!(
         kept.iter().any(|p| p == REPORT),
         "tệp được nhắc riêng một dòng vẫn mất nút tải: {kept:?}"
@@ -73,13 +73,13 @@ fn a_path_mentioned_on_its_own_line_keeps_its_button() {
 /// đúng cái tệp vừa được bảo xoá.
 #[test]
 fn a_path_only_inside_a_command_still_gets_no_button() {
-    let text = "Dọn tệp thăm dò:\n\nrm ~/projects/hub/rust/tests/probe_prompt_anchor.rs\n";
-    let seen = hub::keys::paths_on_screen(&hub::keys::body_before_box(text), 4);
-    let cmds = vec![hub::sessions::Cmd {
-        line: "rm ~/projects/hub/rust/tests/probe_prompt_anchor.rs".into(),
+    let text = "Dọn tệp thăm dò:\n\nrm ~/projects/huba/rust/tests/probe_prompt_anchor.rs\n";
+    let seen = huba::keys::paths_on_screen(&huba::keys::body_before_box(text), 4);
+    let cmds = vec![huba::sessions::Cmd {
+        line: "rm ~/projects/huba/rust/tests/probe_prompt_anchor.rs".into(),
         cwd: String::new(),
     }];
-    let kept = hub::pipeline::paths_not_in_commands(text, &seen, &cmds);
+    let kept = huba::pipeline::paths_not_in_commands(text, &seen, &cmds);
     assert!(
         kept.is_empty(),
         "dòng lệnh lại mọc nút tải file — đúng thứ Hà chê 16/08: {kept:?}"

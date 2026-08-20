@@ -15,9 +15,9 @@
 //!    người ta chưa đọc — không lùi lại được, nên nó phải nằm chỗ test nhìn
 //!    thấy chứ không lẫn trong hàm cần Terminal thật.
 
-use hub::pipeline::pick_keys;
-use hub::sessions::pending_question;
-use hub::watch::{Change, Idle};
+use huba::pipeline::pick_keys;
+use huba::sessions::pending_question;
+use huba::watch::{Change, Idle};
 
 /// Đúng hình dạng `claude` ghi vào nhật ký: một `tool_use` mang cả bảng.
 fn tail_with_two_questions() -> String {
@@ -146,19 +146,19 @@ fn walking_to_another_question_counts_the_arrows_and_never_overshoots() {
 fn the_send_command_carries_its_id_inside_the_name() {
     // `/key <id> enter` KHÔNG chạm được: Telegram gửi lại mỗi `/key`, tham số
     // sau dấu cách rơi mất — đúng cái Hà gặp lúc 09:06 (*"Chưa hiểu lệnh này"*).
-    let a = hub::sessions::Asking {
+    let a = huba::sessions::Asking {
         header: "Vá ACL".into(),
         question: "Server nên xử sao?".into(),
         options: vec!["Từ chối".into()],
         multi: false,
-        rest: vec![hub::sessions::Question {
+        rest: vec![huba::sessions::Question {
             header: "Đăng nhập".into(),
             question: "Phân biệt hoa thường?".into(),
             options: vec!["Không".into()],
             multi: false,
         }],
     };
-    let txt = hub::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, false);
+    let txt = huba::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, false);
     assert!(
         txt.contains("/send_4963b95c"),
         "phải là lệnh chạm được: {txt}"

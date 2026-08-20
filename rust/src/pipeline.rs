@@ -2748,11 +2748,29 @@ pub fn decayed(score: f64, last_ms: i64, now_ms: i64, half_life_ms: i64) -> f64 
 fn kept_paths(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<String> {
     match session_root(db, cfg, session_id) {
         Some(root) => {
-            let kept: Vec<String> = paths
-                .iter()
-                .filter(|p| sendable_file(p, &root, &cfg.workspace_root).is_some())
-                .cloned()
-                .collect();
+            // 🔴 MỘT TỆP MỘT NÚT — Hà 2026-08-19, ảnh tin `[tfl5]` có **hai** nút
+            // `📎 docs/du-toan.md` giống hệt nhau: *"Sao lịch sử lẫn lộn các
+            // phiên thế"*. Cùng một tệp được nhắc hai lần trong một tin (một
+            // lần trong câu văn, một lần trong dòng lệnh `mv`) là chuyện
+            // thường; hai cái nút đưa về CÙNG một tệp thì cái thứ hai không nói
+            // thêm gì, chỉ tốn một hàng bàn phím và làm người đọc tưởng có hai
+            // tệp khác nhau.
+            //
+            // Trùng nhau tính theo ĐƯỜNG ĐÃ GIẢI, không theo chuỗi: `docs/x.md`
+            // và `~/projects/AI/tfl5/docs/x.md` là hai chuỗi khác nhau trỏ vào
+            // đúng một tệp. Giữ lần nhắc ĐẦU để thứ tự nút vẫn theo thứ tự đọc.
+            let mut da_co: Vec<std::path::PathBuf> = Vec::new();
+            let mut kept: Vec<String> = Vec::new();
+            for p in paths {
+                let Some(that) = sendable_file(p, &root, &cfg.workspace_root) else {
+                    continue;
+                };
+                if da_co.contains(&that) {
+                    continue;
+                }
+                da_co.push(that);
+                kept.push(p.clone());
+            }
             if kept.len() < paths.len() {
                 logging::info(
                     "quick_files_filtered",

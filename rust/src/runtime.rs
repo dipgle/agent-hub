@@ -782,6 +782,64 @@ pub fn announce_boot(db: &crate::db::Db, cfg: &Config, signature: &str) {
     }
 }
 
+/// Bỏ dòng ĐẦU của `otool -s`: dòng ấy là ĐƯỜNG DẪN của tệp. Giữ nó lại thì hai
+/// bản chép của cùng một binary luôn "khác nhau", và cái cổng so nội dung sẽ kêu
+/// oan ở MỌI lượt cài — tệ ngang với việc nó không bao giờ kêu.
+fn otool_body(stdout: &str) -> &str {
+    match stdout.find('\n') {
+        Some(i) => &stdout[i + 1..],
+        None => "",
+    }
+}
+
+/// Vân tay NỘI DUNG của một Mach-O, độc lập với chữ ký.
+///
+/// 🔴 Vì sao có, và nó đã chạy sai một lần THẬT (đo 2026-08-20). Lượt cài lúc
+/// 09:37 báo thành công ở cả ba phép nghiệm thu đang có — chữ ký `cert`, `lsof`
+/// mở đúng DB, mtime bản cài mới hơn `.rs` mới nhất — trong khi thứ nằm ở đích
+/// là build của HÔM TRƯỚC. Thủ phạm là chính hàm [`self_install`] ở bản
+/// tiền-đổi-tên: nó chép `target/release/hubd`, cái tên `cargo` KHÔNG còn sinh
+/// ra sau khi bin đổi thành `hubad`, mà tệp cũ thì vẫn nằm trên đĩa nên không
+/// có gì để `bail`. Ba phép đo cũ đều trả lời đúng câu hỏi CỦA CHÚNG; không câu
+/// nào hỏi *"bản cài có phải thứ cây mã này vừa sinh ra không"*.
+///
+/// Đọc `__TEXT` chứ không băm cả tệp: `codesign` viết lại khối chữ ký trong
+/// `__LINKEDIT`, nên so cả tệp thì bản ĐÃ KÝ luôn khác bản vừa build — một phép
+/// đo luôn báo lệch cũng vô dụng y như một phép đo luôn báo khớp. Đo hai chiều
+/// trên máy này trước khi tin: bản cài (đã ký) và `target/release/hubd` (chưa
+/// ký, cùng build) ra CÙNG một vân tay; một build khác thì ra khác.
+fn text_id(bin: &Path) -> anyhow::Result<String> {
+    let mut out = String::new();
+    for sect in ["__text", "__cstring"] {
+        let r = run(
+            "otool",
+            &["-s", "__TEXT", sect, &bin.display().to_string()],
+            RunOpts {
+                timeout: Some(Duration::from_secs(60)),
+                ..Default::default()
+            },
+        )?;
+        if !r.ok() {
+            anyhow::bail!(
+                "otool -s __TEXT {sect} hỏng trên {}: {}",
+                bin.display(),
+                crate::exec::truncate(r.stderr.trim(), 120)
+            );
+        }
+        out.push_str(otool_body(&r.stdout));
+    }
+    // Không đo được thì phải NÓI. Trả chuỗi rỗng là để hai tệp cùng "rỗng" khớp
+    // nhau, tức biến cổng này thành một dấu ✅ vô điều kiện — đúng hình dạng
+    // phép đo mù mà nó sinh ra để chặn.
+    if out.trim().is_empty() {
+        anyhow::bail!(
+            "không đọc được __TEXT của {} — không dám kết luận",
+            bin.display()
+        );
+    }
+    Ok(out)
+}
+
 pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     let rust_dir = source_tree(cfg);
     if !rust_dir.is_dir() {
@@ -807,6 +865,34 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     let src = rust_dir.join("target/release/hubad");
     if !src.exists() {
         anyhow::bail!("build xong mà không thấy {}", src.display());
+    }
+    // 🔴 NGUỒN PHẢI TƯƠI HƠN CÂY MÃ, và câu hỏi này phải đứng TRƯỚC cú chép:
+    // cửa "so nội dung" ở bước 5 chỉ chứng minh ta chép đúng một tệp, nó không
+    // chứng minh tệp ấy là sản phẩm của cây mã này. Ca 20/08 nằm gọn ở đây —
+    // bin đổi tên `hubd`→`hubad`, bản cũ ở lại trên đĩa, và chính chỗ này chép
+    // nó đi cài trong khi `cargo` vừa dựng ra một cái tên khác.
+    match (mtime(&src), newest_source_mtime(&rust_dir)) {
+        (Some(built_at), Some(changed_at)) if changed_at > built_at => {
+            anyhow::bail!(
+                "{} CŨ HƠN cây mã — nó không phải thứ lượt build vừa sinh ra, \
+                 nên không cài. Xem cargo vừa dựng ra cái tên gì: ls -lat {}/target/release/",
+                src.display(),
+                rust_dir.display()
+            );
+        }
+        (a, b) => {
+            // Mù thì nói ra rồi đi tiếp — cửa so nội dung vẫn đứng. Im lặng ở
+            // đây là để một lượt KHÔNG được gác đọc lên y hệt một lượt đã gác.
+            if a.is_none() || b.is_none() {
+                crate::logging::warn(
+                    "self_install_freshness_unknown",
+                    json!({ "bin": src.display().to_string(),
+                            "src_tree": rust_dir.display().to_string(),
+                            "why": "không đọc được mtime của bản build hoặc của cây mã — \
+                                    cửa TƯƠI không gác được lượt này" }),
+                );
+            }
+        }
     }
     // 2. Danh tính ký — TÌM, tuyệt đối không tự tạo cái mới: một chứng chỉ mới
     //    là một `designated requirement` mới, tức mọi quyền TCC mất sạch.
@@ -876,6 +962,27 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     if !dr_text.contains("certificate root") {
         return Err(fail(anyhow::anyhow!(
             "ký xong mà designated requirement không phải certificate root — bản đang cài GIỮ NGUYÊN"
+        )));
+    }
+    // 5. Và thứ sắp đặt xuống có ĐÚNG là thứ vừa build không. Hỏi TRƯỚC khi
+    //    `rename`, cùng luật với bốn bước trên: hỏng ở bất kỳ đâu thì bản đang
+    //    cài GIỮ NGUYÊN. Cửa này bắt phần cửa "tươi" không thấy — một cú chép
+    //    cụt, hoặc `cargo` link lại `src` xen vào giữa chép và ký (bài học
+    //    10/08: `cargo test --release` ký đè ad-hoc lên chính tệp ấy).
+    let id_src = match text_id(&src) {
+        Ok(v) => v,
+        Err(e) => return Err(fail(e)),
+    };
+    let id_tmp = match text_id(&tmp) {
+        Ok(v) => v,
+        Err(e) => return Err(fail(e)),
+    };
+    if id_src != id_tmp {
+        return Err(fail(anyhow::anyhow!(
+            "bản vừa ký KHÔNG khớp nội dung bản vừa build ({} vs {} byte __TEXT) — \
+             bản đang cài GIỮ NGUYÊN",
+            id_src.len(),
+            id_tmp.len()
         )));
     }
     std::fs::rename(&tmp, &dest)?;
@@ -1074,6 +1181,33 @@ fn newest_source_mtime(rust_dir: &Path) -> Option<std::time::SystemTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Dòng đầu của `otool -s` là ĐƯỜNG DẪN tệp, và hai thứ đem so nhau ở
+    /// [`self_install`] nằm ở hai đường khác nhau (bản build vs bản sắp cài).
+    /// Giữ dòng ấy lại thì mọi lượt cài đều đọc ra "lệch" — một cổng kêu oan
+    /// mỗi lần là một cổng bị tắt, y như một cổng không bao giờ kêu.
+    #[test]
+    fn otool_body_bo_dong_duong_dan_nen_hai_ban_chep_van_khop() {
+        let build = "/Users/ai/rust/target/release/hubad:\n\
+                     Contents of (__TEXT,__text) section\n0001 aa bb\n";
+        let cai = "/Users/ai/Library/Application Support/hub/bin/hubd:\n\
+                   Contents of (__TEXT,__text) section\n0001 aa bb\n";
+        assert_eq!(
+            otool_body(build),
+            otool_body(cai),
+            "cùng nội dung, khác đường dẫn ⟹ phải KHỚP"
+        );
+        assert!(otool_body(build).starts_with("Contents of"));
+
+        // …và cửa không được nuốt luôn cả sự khác biệt thật.
+        let khac = "/x:\nContents of (__TEXT,__text) section\n0001 aa cc\n";
+        assert_ne!(otool_body(build), otool_body(khac));
+
+        // Không có thân thì trả RỖNG — `text_id` biến chuỗi rỗng thành một câu
+        // từ chối, chứ không phải thành một dấu ✅ vô điều kiện.
+        assert_eq!(otool_body("chỉ một dòng, không có \\n"), "");
+        assert_eq!(otool_body(""), "");
+    }
 
     /// Cái bẫy mà phép đo này sinh ra để tránh: đếm nhầm một file KHÔNG PHẢI mã
     /// nguồn (sản phẩm build, ghi chú) thành "mã vừa đổi", rồi báo daemon đã cũ

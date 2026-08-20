@@ -127,23 +127,29 @@ tmp="$DEST.new"
 cp "$SRC" "$tmp"
 chmod 755 "$tmp"
 "$HERE/sign.sh" "$tmp"
+# mtime chỉ trả lời được câu "cài lúc nào", không trả lời "cài cái gì" — cài nhầm
+# tệp thì mtime vẫn mới tinh. Nên hỏi nốt câu thứ hai: thứ sắp đặt xuống có đúng
+# là thứ vừa build không. Nó bắt cả những thứ cửa "nguồn tươi" không thấy: một cú
+# `cp` cụt, hoặc `cargo` link lại `$SRC` xen vào giữa `cp` và `sign` (bài học
+# 10/08 — `cargo test --release` ký đè ad-hoc lên chính tệp ấy).
+#
+# 🔴 Hỏi TRƯỚC `mv`. Bản đầu của cửa này (viết cùng ngày) hỏi SAU, nên lúc phát
+# hiện ra thì bản hỏng ĐÃ nằm ở đích — trái đúng cái luật cả tệp này đi theo:
+# hỏng ở bất kỳ bước nào thì bản đang cài GIỮ NGUYÊN.
+h_src="$(text_hash "$SRC")"
+h_tmp="$(text_hash "$tmp")"
+if [[ "$h_src" != "$h_tmp" ]]; then
+  rm -f "$tmp"
+  die "bản vừa ký KHÔNG khớp nội dung bản vừa build:
+  build  $SRC  $h_src
+  vừa ký $tmp  $h_tmp
+  Bản đang cài GIỮ NGUYÊN — chạy lại lượt cài."
+fi
+
 mv -f "$tmp" "$DEST"
 # The health panel reads this file's mtime to answer "is the daemon running
 # today's code?", by comparing it against the newest .rs in rust/src. Nothing
 # else records the install time, so the move above IS the record.
-
-# …và mtime chỉ trả lời được câu "cài lúc nào", không trả lời "cài cái gì" — cài
-# nhầm tệp thì mtime vẫn mới tinh. Nên hỏi nốt câu thứ hai: thứ vừa đặt xuống có
-# đúng là thứ vừa chép lên không. Rẻ, và nó bắt được cả những thứ cửa "nguồn
-# tươi" không thấy: một cú `cp` cụt, hoặc `cargo` link lại `$SRC` xen vào giữa
-# `cp` và `mv` (bài học 10/08 — `cargo test --release` ký đè ad-hoc lên chính
-# tệp ấy trong lúc mình đang dùng nó).
-h_src="$(text_hash "$SRC")"
-h_dest="$(text_hash "$DEST")"
-[[ "$h_src" == "$h_dest" ]] || die "bản cài KHÔNG khớp nội dung bản vừa build:
-  build $SRC  $h_src
-  cài   $DEST  $h_dest
-  Đừng khởi động lại daemon bằng nó — chạy lại lượt cài."
 
 # Signing survives the move (the signature lives inside the file), but say so
 # out loud rather than assume it — this is the one fact the whole script exists

@@ -84,8 +84,26 @@ biến mất sau khi push — chúng nằm trong khoảng `origin/main..HEAD` c�
 
 ### Còn treo
 
-* **Cửa so nội dung cho `install_update.sh`/`self_install`** — so băm `__TEXT` của
-  bản cài với bản vừa build, để ca trên không im lặng lần nữa. Chưa làm, chờ Hà chốt.
+* ~~**Cửa so nội dung cho `install_update.sh`**~~ → **đã vá cùng ngày.** Ba cửa:
+  ① nguồn phải TƯƠI hơn cây mã (`find -newer` trên `rust/src` + `Cargo.*`, hỏi trước
+  khi chép — hỏi `-newer` chứ không so mốc bắt đầu build, vì `cargo` không chạm tệp
+  khi chẳng có gì đổi và cửa sẽ kêu oan ở lượt cài thứ hai liên tiếp); ② sau `mv`, so
+  **nội dung** bản cài với bản vừa chép; ③ `--verify` chỉ-đọc, hỏi được bất cứ lúc nào.
+  Phép đo là băm `__TEXT,__text` + `__cstring`, KHÔNG băm cả tệp — `codesign` viết lại
+  khối chữ ký trong `__LINKEDIT` nên băm cả tệp luôn lệch, mà một phép đo luôn báo
+  lệch cũng vô dụng y như một phép đo luôn báo khớp.
+  **Bốn phép kiểm đã chạy thật:** bắt được ca thật (`--verify` → ❌ LỆCH, exit 1:
+  build `c60610ff…` vs cài `82b04f7a…`) · không kêu oan (bản cài ĐÃ ký và
+  `release/hubd` chưa ký, cùng build ⟹ **cùng** băm) · mù thì CHẾT (dựng một `otool`
+  hỏng ⟹ *"không dám kết luận"*, exit 1, KHÔNG báo "KHỚP") · cửa ① chặn đúng trên
+  trạng thái thật (`hubad` 09:37 vs `pipeline.rs` 12:41).
+  ⚠ Bài kiểm thứ ba suýt mù: bản đầu tiêm `otool` bằng hàm shell `export -f` —
+  **không tới được tiến trình con**, cổng vẫn in băm thật, tức bài kiểm chưa hề dựng
+  được điều kiện nó định đo. Phải là một tệp `otool` hỏng THẬT trên `PATH`.
+* **`runtime::self_install` vẫn chưa có cửa nào trong ba cửa ấy** — mà đó mới là chỗ
+  bug sống (đường của `/upgrade`). Nên: `bash install_update.sh` an toàn; `/upgrade`
+  vẫn là cái vòng cũ cho tới khi một lượt cài ĐÚNG lên máy. Việc riêng, và nó chỉ có
+  hiệu lực SAU lượt cài đúng đầu tiên.
 * Bản thừa `data/hub.sqlite{,-shm,-wal}` + `logs/hub.log` vẫn nằm đó (⚠ `panel:msg`
   bên bản thừa MỚI hơn; phần còn lại cũ hơn).
 * Bẫy `cd` + đường tương đối của nút ▶️ (`docs/flow-boc-tach-lenh.md`, 16/08) vẫn

@@ -28,6 +28,7 @@
 # Usage:
 #   install_update.sh            build, install, sign, restart the launchd job
 #   install_update.sh --no-build use the release binary already built
+#   install_update.sh --verify   CHỈ ĐỌC: bản cài có phải bản vừa build không
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,10 +44,80 @@ LABEL="com.dipgle.hubd"
 
 die() { echo "install_update.sh: $*" >&2; exit 1; }
 
+# ── BẢN CÀI CÓ PHẢI BẢN VỪA BUILD KHÔNG — hỏi NỘI DUNG, không hỏi cái tên ────
+#
+# 🔴 Vì sao có mục này, và nó đã chạy sai một lần THẬT (đo 2026-08-20). Lượt cài
+# lúc 09:37 báo thành công ở cả ba phép nghiệm thu đang có — chữ ký `cert`,
+# `lsof` mở đúng DB, mtime bản cài mới hơn `.rs` mới nhất — trong khi thứ nằm ở
+# `$DEST` là build của **hôm trước**. Gốc: `runtime::self_install` (đường của
+# `/upgrade`) gõ TÊN tệp nguồn vào mã, mà bản đang chạy lúc ấy là mã tiền-đổi-
+# tên nên nó chép `target/release/hubd` — cái tên `cargo` KHÔNG còn sinh ra nữa
+# sau khi bin đổi thành `hubad`. Tệp cũ vẫn nằm trên đĩa, nên không có gì để
+# `die`, và daemon chạy mã cũ suốt buổi mà mọi dấu hiệu đều xanh.
+#
+# Ba phép đo cũ đều trả lời ĐÚNG câu hỏi của chúng. Không câu nào hỏi *"bản cài
+# có phải thứ cây mã này vừa sinh ra không"*. Đây là câu ấy.
+#
+# Băm phần MÃ + hằng chuỗi chứ không băm cả tệp: `codesign` viết lại khối chữ ký
+# trong `__LINKEDIT`, nên `shasum` cả tệp luôn khác giữa bản đã ký và bản vừa
+# build — một phép đo LUÔN báo lệch cũng vô dụng y như một phép đo luôn báo
+# khớp. Đo thật hai chiều trên máy này trước khi tin: bản cài (đã ký) và
+# `target/release/hubd` (chưa ký, cùng build) ra CÙNG một băm; `hubad` (build
+# khác) ra băm khác.
+text_id() {
+  otool -s __TEXT __text "$1" 2>/dev/null | tail -n +2
+  otool -s __TEXT __cstring "$1" 2>/dev/null | tail -n +2
+}
+text_hash() { # text_hash <mach-o> → 40 hex, hoặc CHẾT hẳn nếu không đo được
+  local out
+  out="$(text_id "$1")"
+  # Không đo được thì phải NÓI. Trả chuỗi rỗng là để hai tệp cùng "rỗng" khớp
+  # nhau, tức biến cái cổng này thành một dấu ✅ vô điều kiện — đúng hình dạng
+  # phép đo mù mà nó sinh ra để chặn.
+  [[ -n "$out" ]] || die "không đọc được __TEXT của $1 (otool hỏng?) — không dám kết luận"
+  printf '%s' "$out" | shasum | cut -d' ' -f1
+}
+
+# Hỏi mà không đụng vào gì: dùng được bất cứ lúc nào, kể cả khi daemon đang chạy.
+if [[ "${1:-}" == "--verify" ]]; then
+  [[ -f "$SRC" ]] || die "chưa có bản build ở $SRC — chạy install_update.sh trước"
+  [[ -f "$DEST" ]] || die "chưa có bản cài ở $DEST"
+  vs="$(text_hash "$SRC")"
+  vd="$(text_hash "$DEST")"
+  if [[ "$vs" == "$vd" ]]; then
+    echo "install_update.sh: KHỚP — bản cài là bản build hiện có ($vs)"
+    exit 0
+  fi
+  {
+    echo "install_update.sh: ❌ LỆCH — bản cài KHÔNG phải bản build hiện có"
+    echo "    build: $SRC"
+    echo "           $vs"
+    echo "    cài  : $DEST"
+    echo "           $vd"
+    echo "    Chữa: bash $HERE/install_update.sh"
+  } >&2
+  exit 1
+fi
+
 if [[ "${1:-}" != "--no-build" ]]; then
   ( cd "$HERE/rust" && cargo build --release --offline )
 fi
 [[ -f "$SRC" ]] || die "no binary at $SRC"
+
+# 🔴 NGUỒN PHẢI TƯƠI HƠN CÂY MÃ — nếu không, "so nội dung" ở dưới chỉ chứng minh
+# ta chép đúng một tệp SAI. Có một tệp `.rs`/`Cargo.*` mới hơn `$SRC` nghĩa là
+# `$SRC` không phải sản phẩm của cây mã này: hoặc `cargo` vừa dựng ra một cái
+# TÊN KHÁC (đúng ca 20/08), hoặc build vừa hỏng mà không ai đọc mã thoát.
+#
+# Hỏi bằng `find -newer` chứ không so với mốc bắt đầu build: `cargo` KHÔNG chạm
+# vào tệp khi chẳng có gì đổi, nên "phải mới hơn lúc build" sẽ kêu oan ngay ở
+# lượt cài thứ hai liên tiếp — mà một cảnh báo kêu oan là một cảnh báo bị phớt
+# lờ, tức tệ hơn không có.
+moi_hon="$(find "$HERE/rust/src" "$HERE/rust/Cargo.toml" "$HERE/rust/Cargo.lock" \
+             -type f -newer "$SRC" -print -quit 2>/dev/null || true)"
+[[ -z "$moi_hon" ]] || die "$SRC CŨ HƠN cây mã ($moi_hon mới hơn nó).
+  Tức nó không phải thứ lượt build vừa sinh ra — đừng cài một bản không của cây mã này.
+  Nhìn xem cargo vừa dựng ra cái gì:  ls -lat $HERE/rust/target/release/ | head"
 
 mkdir -p "$DEST_DIR"
 
@@ -60,6 +131,19 @@ mv -f "$tmp" "$DEST"
 # The health panel reads this file's mtime to answer "is the daemon running
 # today's code?", by comparing it against the newest .rs in rust/src. Nothing
 # else records the install time, so the move above IS the record.
+
+# …và mtime chỉ trả lời được câu "cài lúc nào", không trả lời "cài cái gì" — cài
+# nhầm tệp thì mtime vẫn mới tinh. Nên hỏi nốt câu thứ hai: thứ vừa đặt xuống có
+# đúng là thứ vừa chép lên không. Rẻ, và nó bắt được cả những thứ cửa "nguồn
+# tươi" không thấy: một cú `cp` cụt, hoặc `cargo` link lại `$SRC` xen vào giữa
+# `cp` và `mv` (bài học 10/08 — `cargo test --release` ký đè ad-hoc lên chính
+# tệp ấy trong lúc mình đang dùng nó).
+h_src="$(text_hash "$SRC")"
+h_dest="$(text_hash "$DEST")"
+[[ "$h_src" == "$h_dest" ]] || die "bản cài KHÔNG khớp nội dung bản vừa build:
+  build $SRC  $h_src
+  cài   $DEST  $h_dest
+  Đừng khởi động lại daemon bằng nó — chạy lại lượt cài."
 
 # Signing survives the move (the signature lives inside the file), but say so
 # out loud rather than assume it — this is the one fact the whole script exists

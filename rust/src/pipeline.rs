@@ -6014,6 +6014,49 @@ pub fn screen_report(
                     ),
                 }
             }
+            // 🔴 NỚI RỒI MÀ VĂN XUÔI VẪN THIẾU ⟹ CUỘN. Hà 2026-08-20: *"Chỉ cần
+            // focus tới cửa sổ di chuột tới khung nhìn cuộn chuột là được"*.
+            //
+            // Đứng SAU cửa nới, không thay nó, vì hai thứ lấy hai kiểu: nới là
+            // MỘT lượt đọc rẻ, đụng trần 61×206 rồi thôi; cuộn thì đi ngược bao
+            // xa tuỳ ý nhưng tốn một lượt đọc mỗi nấc và động vào cửa sổ chủ máy
+            // đang nhìn. Rẻ trước, đắt sau — và ca thường gặp (lượt trả lời hơi
+            // dài hơn khung) đã xong ở cửa trên rồi.
+            //
+            // KHÔNG cuộn khi có hộp chọn: bánh xe không chốt được gì, nhưng cuộn
+            // một hộp đang treo ra khỏi khung thì `parse_choices` đọc trượt, và
+            // tin sẽ mất đúng thứ đáng bấm.
+            if !grew && prose_cut && choices.is_empty() {
+                // Trần THẤP có chủ ý (10 nấc ≈ 80 dòng ngược). Đo 20/08: mỗi nấc tốn
+                // ~4 giây khi TUI đang vẽ, nên 24 nấc là một phút rưỡi cho người
+                // đang cầm điện thoại. Cuộn lo phần MÀN, nhật ký lo phần đuôi —
+                // và nhật ký thì không có trần nào.
+                match crate::keys::screen_scrollback(window, 10, |du| {
+                    said.is_some_and(|t| crate::sessions::said_shown_on_screen(t, du))
+                }) {
+                    Ok(du) if du.chars().count() > screen.chars().count() => {
+                        logging::info(
+                            "shot_scrolled",
+                            json!({ "window": window,
+                                    "chars_before": screen.chars().count(),
+                                    "chars_after": du.chars().count(),
+                                    "why": "nới hết cỡ rồi vẫn thiếu lời cuối — cuộn ngược" }),
+                        );
+                        screen = du;
+                        grew = true;
+                    }
+                    Ok(_) => logging::warn(
+                        "shot_scroll_no_gain",
+                        json!({ "window": window,
+                                "effect": "cuộn xong không thêm chữ nào — giữ bản đọc cũ" }),
+                    ),
+                    Err(e) => logging::warn(
+                        "shot_scroll_failed",
+                        json!({ "window": window, "err": crate::logging::err_chain(&e),
+                                "effect": "không cuộn được — tin vẫn đi, phần trên vẫn thiếu" }),
+                    ),
+                }
+            }
             // Nới cửa sổ xong mà vẫn cắt theo trần cũ (40 dòng) thì công cốc:
             // bản rộng đọc ra 61 đoạn, `SHOT_LINES` là 40, và phần bị cắt lại
             // đúng là phần vừa lấy được. Đọc rộng ⟹ lấy trọn, trần vẫn là

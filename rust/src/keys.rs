@@ -590,6 +590,139 @@ pub fn send_bare(window: i64, keys: &[String]) -> Result<()> {
     crate::cgkeys::post(pid, keys)
 }
 
+/// Mỗi lượt cuộn bao nhiêu dòng, và cuộn tối đa mấy lượt — xem [`screen_scrollback`].
+///
+/// Nhỏ hơn chiều cao khung một chút để hai khung liên tiếp CHỒNG NHAU: chỗ ghép
+/// cần phần chồng ấy để biết nối vào đâu. Bằng đúng chiều cao là hai khung khít
+/// nhau, và một dòng rớt giữa hai lượt vẽ thì không gì phát hiện được.
+const SCROLL_STEP: i32 = 8;
+/// Trần lượt cuộn: 40 × 8 = 320 dòng ngược. Có trần vì đây là cửa sổ chủ máy
+/// đang nhìn, và mỗi lượt tốn ~0,1 giây cộng một lượt đọc màn.
+const SCROLL_MAX_STEPS: usize = 40;
+
+/// Ghép một khung CŨ HƠN vào phía trên phần đã có.
+///
+/// Hai khung liên tiếp chồng nhau, nên phép ghép là: tìm đoạn chồng dài nhất
+/// giữa ĐUÔI khung cũ và ĐẦU phần đã có, rồi nối phần không chồng lên trước.
+/// Không tìm được chỗ chồng thì nối thẳng — thà thừa một khung còn hơn mất một
+/// đoạn, và chỗ nối vẫn đọc được.
+///
+/// So bằng dòng đã cắt khoảng trắng: TUI vẽ lại có thể đổi phần đệm bên phải
+/// giữa hai lượt, mà một dấu cách thừa không được phép biến hai bản sao của
+/// cùng một dòng thành hai dòng khác nhau.
+fn merge_above(older: &[String], have: &[String]) -> Vec<String> {
+    let key = |s: &String| s.trim_end().to_string();
+    let max = older.len().min(have.len());
+    for n in (1..=max).rev() {
+        let tail = &older[older.len() - n..];
+        let head = &have[..n];
+        if tail.iter().map(key).eq(head.iter().map(key)) {
+            let mut out: Vec<String> = older[..older.len() - n].to_vec();
+            out.extend_from_slice(have);
+            return out;
+        }
+    }
+    let mut out = older.to_vec();
+    out.extend_from_slice(have);
+    out
+}
+
+/// Đọc NGƯỢC lịch sử phiên bằng cách cuộn chuột, rồi trả màn về đáy.
+///
+/// 🔴 Hà 2026-08-20: *"Chỉ cần focus tới cửa sổ di chuột tới khung nhìn cuộn
+/// chuột là được"* — sau khi vặn đúng chỗ tôi nói hớ: *"một phiên chạy tầm 50%
+/// context thì nó phải dài ít nhất 10 trang màn hình"*.
+///
+/// Anh đúng. Ba đường trước đều KHÔNG lấy được 10 trang ấy, và mỗi đường hỏng
+/// một kiểu (đo cùng ngày, đừng dò lại):
+/// * `history of tab` — bộ đệm cuộn của Terminal chạy tốt (shell thường: 504
+///   dòng cho 500 dòng in ra), nhưng `claude` không đẩy dòng nào vào đó. Đọc 4
+///   lần cách nhau nhiều phút vẫn đúng 43 dòng, đóng băng ở phần trước lúc CLI
+///   khởi động.
+/// * Menu `View ▸ Scroll to Top` — click được (`MENU-OK`), `contents` không đổi
+///   một ký tự. Đó là cuộn của Terminal, và Terminal chẳng giữ gì để cuộn.
+/// * Nới cửa sổ hết cỡ ([`screen_text_tall`]) — lấy thêm thật, nhưng đụng trần
+///   cứng 61×206 của màn hình.
+///
+/// Bánh xe thì đi thẳng vào TUI, và TUI có sẵn cả lịch sử trong bộ nhớ nó: đo
+/// được 934 → 1391 ký tự sau 10 lượt, đầu khung lùi về một đoạn đã trôi.
+///
+/// Ba điều hàm này giữ:
+/// * **luôn trả màn về đáy**, kể cả khi đọc hỏng giữa chừng — cửa sổ này là cửa
+///   sổ chủ máy đang nhìn, bỏ nó ở lưng chừng quá khứ là một lỗi thấy được;
+/// * cuộn xuống DƯ (`+4` lượt) chứ không đếm cho khít: đáy nuốt lượt thừa, còn
+///   thiếu một lượt là màn nằm lại lưng chừng;
+/// * **dừng sớm khi không lấy thêm được gì** — hai lượt liên tiếp không thêm
+///   dòng nào nghĩa là đã tới đầu lịch sử, và cuộn tiếp chỉ tốn thời gian của
+///   người đang chờ trên điện thoại.
+pub fn screen_scrollback(window: i64, steps: usize, du: impl Fn(&str) -> bool) -> Result<String> {
+    let steps = steps.min(SCROLL_MAX_STEPS);
+    // 🔴 LÀN GẤP, và đây không phải tinh chỉnh cho vui — đo 2026-08-20: vòng
+    // cuộn-rồi-đọc mất **6,3 giây mỗi nấc** trong mã, trong khi đúng hai lệnh ấy
+    // gõ từ shell mất **0,20 giây**. Gấp ba mươi lần, và thủ phạm là
+    // `exec::lane_wrap`: nó bọc mọi lệnh bằng `taskpolicy -b`, tức QoS NỀN —
+    // đúng cho vòng quét định kỳ, sai hẳn cho một cú `/shot` có người đang cầm
+    // điện thoại chờ. 12 nấc vì thế thành 76 giây.
+    let _lane = crate::exec::urgent();
+    let pid = terminal_pid()?;
+    focus_window(window)?;
+
+    let lines_of = |s: &str| -> Vec<String> { s.lines().map(str::to_string).collect() };
+    let mut have = lines_of(&screen_text(window)?);
+    let mut dry = 0;
+    let mut used = 0;
+
+    for _ in 0..steps {
+        if let Err(e) = crate::cgkeys::scroll(pid, SCROLL_STEP, 1) {
+            // Không cuộn được thì thôi cuộn — nhưng vẫn phải trả màn về đáy,
+            // nên đừng `?` ở đây.
+            crate::logging::warn(
+                "scroll_read_stopped",
+                serde_json::json!({ "window": window, "err": e.to_string(),
+                                    "effect": "trả về phần đọc được tới lúc này" }),
+            );
+            break;
+        }
+        used += 1;
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        let Ok(frame) = screen_text(window) else {
+            break;
+        };
+        let before = have.len();
+        have = merge_above(&lines_of(&frame), &have);
+        // ĐỦ RỒI THÌ DỪNG. Chỗ gọi biết "đủ" nghĩa là gì (thường: lời cuối theo
+        // nhật ký đã nằm trọn trong đây), và cuộn thêm sau khi đủ là kéo cửa sổ
+        // của chủ máy đi xa hơn mức cần, cho một người đang chờ trên điện thoại.
+        if du(&have.join("\n")) {
+            break;
+        }
+        if have.len() == before {
+            dry += 1;
+            if dry >= 2 {
+                break;
+            }
+        } else {
+            dry = 0;
+        }
+    }
+
+    // Trả về đáy — dư mấy lượt cho chắc. Đây là bước KHÔNG được bỏ qua.
+    if used > 0 {
+        if let Err(e) = crate::cgkeys::scroll(pid, -SCROLL_STEP, used + 4) {
+            crate::logging::error(
+                "scroll_restore_failed",
+                serde_json::json!({ "window": window, "err": e.to_string(),
+                                    "effect": "MÀN CỦA CHỦ MÁY CÒN Ở LƯNG CHỪNG QUÁ KHỨ" }),
+            );
+        }
+    }
+    crate::logging::info(
+        "scroll_read",
+        serde_json::json!({ "window": window, "steps": used, "lines": have.len() }),
+    );
+    Ok(have.join("\n"))
+}
+
 /// Cửa sổ Terminal đang chạy `tty` này, nếu có.
 ///
 /// `Terminal` công bố `tty` của từng tab qua AppleScript (đo 2026-08-09:
@@ -3766,6 +3899,60 @@ pub fn api_error(screen: &str) -> Option<String> {
         .map(str::trim)
         .find(|l| l.contains("API Error") || l.contains("Request timed out"))
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod merge_above_tests {
+    use super::merge_above;
+
+    fn v(s: &[&str]) -> Vec<String> {
+        s.iter().map(|x| x.to_string()).collect()
+    }
+
+    /// Hai khung liên tiếp CHỒNG nhau — đó là lý do [`SCROLL_STEP`] nhỏ hơn
+    /// chiều cao khung. Ghép phải nối đúng chỗ chồng, không chép lại nó.
+    #[test]
+    fn cho_chong_thi_noi_dung_cho_khong_chep_lai() {
+        let cu = v(&["một", "hai", "ba", "bốn"]);
+        let dang_co = v(&["ba", "bốn", "năm"]);
+        assert_eq!(
+            merge_above(&cu, &dang_co),
+            v(&["một", "hai", "ba", "bốn", "năm"])
+        );
+    }
+
+    /// TUI vẽ lại có thể đổi phần đệm bên phải giữa hai lượt. Một dấu cách thừa
+    /// KHÔNG được biến hai bản sao của cùng một dòng thành hai dòng khác nhau —
+    /// nếu không, mỗi lượt cuộn lại nhân đôi một khung.
+    #[test]
+    fn khoang_trang_cuoi_dong_khong_pha_cho_ghep() {
+        let cu = v(&["một", "hai  ", "ba   "]);
+        let dang_co = v(&["hai", "ba", "bốn"]);
+        assert_eq!(merge_above(&cu, &dang_co), v(&["một", "hai", "ba", "bốn"]));
+    }
+
+    /// Không tìm ra chỗ chồng (cuộn quá nhanh, hoặc màn vừa đổi hẳn) thì nối
+    /// thẳng: thà thừa một khung còn hơn NUỐT một đoạn — mất chữ là thứ người
+    /// đọc không thể tự phát hiện.
+    #[test]
+    fn khong_co_cho_chong_thi_noi_thang_chu_khong_nuot() {
+        let cu = v(&["một", "hai"]);
+        let dang_co = v(&["chín", "mười"]);
+        assert_eq!(
+            merge_above(&cu, &dang_co),
+            v(&["một", "hai", "chín", "mười"])
+        );
+    }
+
+    /// Khung cũ nằm TRỌN trong phần đã có (cuộn không ra thêm gì) ⟹ không thêm
+    /// dòng nào. Đây chính là điều kiện dừng `dry` của `screen_scrollback`: nếu
+    /// phép ghép ở đây trả về dài hơn, vòng cuộn sẽ không bao giờ tự dừng.
+    #[test]
+    fn khung_khong_moi_thi_khong_dai_them() {
+        let dang_co = v(&["một", "hai", "ba"]);
+        let cu = v(&["một", "hai"]);
+        assert_eq!(merge_above(&cu, &dang_co), dang_co);
+    }
 }
 
 #[cfg(test)]

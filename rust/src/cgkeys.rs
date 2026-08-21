@@ -58,6 +58,13 @@ extern "C" {
     /// bàn phím thật, tức phím đi ra mang đúng trạng thái modifier hệ thống.
     fn CGEventSourceCreate(state_id: i32) -> CfRef;
     fn CGEventCreateKeyboardEvent(source: CfRef, key: u16, key_down: bool) -> CfRef;
+    /// Bánh xe chuột — xem [`scroll`].
+    ///
+    /// ⚠ Hàm này VARIADIC (`wheel_count` nói có mấy trục theo sau). Trên
+    /// aarch64-apple-darwin tham số variadic đi trên STACK chứ không trong thanh
+    /// ghi, nên khai báo nó thành hàm tham số cố định là sai ABI và đối số rơi
+    /// vào chỗ khác. Giữ `...`.
+    fn CGEventCreateScrollWheelEvent(source: CfRef, units: u32, wheel_count: u32, ...) -> CfRef;
     /// Đưa sự kiện vào ĐÚNG tiến trình ấy, không qua vòi HID chung.
     ///
     /// Khác `CGEventPost` ở chỗ quyết định: `CGEventPost` bắn vào bất kỳ cửa sổ
@@ -165,6 +172,69 @@ pub fn post(pid: i32, keys: &[String]) -> Result<()> {
              mật ▸ Trợ năng rồi bật cho `hubad`; vừa rồi huba đã thử một lần nên nó phải có tên \
              trong danh sách. Không thấy thì bấm ➕ và trỏ vào \
              ~/Library/Application Support/hub/bin/hubd"
+        );
+    }
+    Ok(())
+}
+
+/// `kCGScrollEventUnitLine` — đếm bằng DÒNG, đúng đơn vị một TUI hiểu.
+const UNIT_LINE: u32 = 1;
+
+/// Cuộn bánh xe trong cửa sổ đang focus của `pid`. Dương = LÊN (về quá khứ).
+///
+/// 🔴 Hà 2026-08-20: *"Chỉ cần focus tới cửa sổ di chuột tới khung nhìn cuộn
+/// chuột là được"*. Đúng, và nó mở ra thứ hai đường trước không lấy được:
+/// **toàn bộ** lịch sử phiên, không vướng trần nào.
+///
+/// Vì sao đây là đường DUY NHẤT còn lại, đo 2026-08-20:
+/// * bộ đệm cuộn của Terminal giữ tốt 504/500 dòng của một shell thường, nhưng
+///   `claude` không đẩy dòng nào vào đó — `history` của cửa sổ phiên đọc 4 lần
+///   cách nhau nhiều phút vẫn đúng 43 dòng, đóng băng ở phần trước lúc CLI chạy;
+/// * cuộn bằng MENU của Terminal (`Scroll to Top`) click được nhưng `contents`
+///   không đổi một ký tự — đó là cuộn của Terminal, không phải của TUI;
+/// * gửi bánh xe vào tiến trình thì TUI TỰ CUỘN và `contents` đọc ra phần cũ:
+///   934 → **1391** ký tự, đầu khung lùi về một đoạn văn đã trôi.
+///
+/// Bánh xe an toàn hơn hẳn phím, và đó là lý do dám thử nó trên cửa sổ thật:
+/// nó KHÔNG chốt được gì. Một Enter lạc vào hộp chọn trả lời hộ chủ máy (đã trả
+/// giá 19/08); một cú cuộn lạc chỉ làm màn trôi, và cuộn xuống là về chỗ cũ.
+///
+/// ⚠ Cửa sổ phải được FOCUS trước: sự kiện đi tới tiến trình rồi tiến trình đưa
+/// nó cho cửa sổ đang nhận phím. Không focus đúng cửa sổ là cuộn nhầm cửa sổ —
+/// vô hại, nhưng đọc ra màn của phiên khác.
+pub fn scroll(pid: i32, lines: i32, times: usize) -> Result<()> {
+    if times == 0 || lines == 0 {
+        bail!("cuộn 0 dòng hoặc 0 lượt thì đừng gọi");
+    }
+    // SAFETY: cùng khuôn với `post` — mọi con trỏ dựng ra đều được giải phóng
+    // trong hàm, không con trỏ nào rời khỏi nó, và NULL được kiểm trước khi
+    // dùng vì `CGEventPostToPid(NULL)` là hành vi không xác định.
+    unsafe {
+        let source = CGEventSourceCreate(1);
+        for sent in 0..times {
+            let ev = CGEventCreateScrollWheelEvent(source, UNIT_LINE, 1u32, lines);
+            if ev.is_null() {
+                if !source.is_null() {
+                    CFRelease(source);
+                }
+                bail!("không dựng được sự kiện bánh xe (gửi được {sent}/{times} lượt)");
+            }
+            CGEventPostToPid(pid, ev);
+            CFRelease(ev);
+            std::thread::sleep(std::time::Duration::from_millis(GAP_MS));
+        }
+        if !source.is_null() {
+            CFRelease(source);
+        }
+    }
+    // Hỏi SAU khi thử, cùng lý do với `post`: lượt thử là thứ đưa `hubad` vào
+    // danh sách Trợ năng, và không có nó thì "đã cuộn" với "rơi vào hư không"
+    // đọc lên y hệt nhau.
+    if !trusted() {
+        bail!(
+            "hubad chưa có quyền Trợ năng nên cú cuộn KHÔNG tới nơi (macOS không báo lỗi cho \
+             việc này). Mở Cài đặt Hệ thống ▸ Quyền riêng tư & Bảo mật ▸ Trợ năng rồi bật cho \
+             `hubad`; vừa rồi huba đã thử một lần nên nó phải có tên trong danh sách."
         );
     }
     Ok(())

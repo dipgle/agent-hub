@@ -194,7 +194,12 @@ if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
   if [[ -n "$want_db" ]]; then
     lock="$HERE/data/hubd.lock"
     pid=""
-    for _ in $(seq 1 30); do
+    # 🔴 90 GIÂY, KHÔNG PHẢI 30 — đo 2026-08-21: một lượt cài ĐÚNG bị báo đỏ vì
+    # daemon ghi khoá lúc 22:26:19 trong khi hạn 30s đã hết trước đó. `--verify`
+    # ngay sau đấy trả KHỚP và pid trong khoá vẫn sống, tức lời báo động ấy sai
+    # hoàn toàn về một lượt cài thành công. Một cảnh báo kêu oan là một cảnh báo
+    # bị lướt qua — đúng thứ luật của repo này cấm.
+    for _ in $(seq 1 90); do
       sleep 1
       [[ -f "$lock" ]] || continue
       pid="$(tr -d '[:space:]' < "$lock")"
@@ -202,7 +207,17 @@ if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
       pid=""
     done
     if [[ -z "$pid" ]]; then
-      die "restarted, but no live pid in $lock after 30s — check ~/Library/Logs/hubd.err"
+      # Hết giờ mà vẫn phải PHÂN BIỆT hai chuyện khác hẳn nhau: daemon CHẾT, hay
+      # nó đang chạy mà chưa kịp ghi khoá. Bản cũ gộp cả hai thành một câu
+      # "no live pid", và câu ấy gửi người đọc đi tìm một sự cố không có.
+      dang_chay="$(pgrep -f "$DEST" | head -1 || true)"
+      if [[ -n "$dang_chay" ]]; then
+        echo "install_update.sh: ⚠ pid $dang_chay đang chạy $DEST nhưng chưa ghi $lock sau 90s."
+        echo "  Bản cài ĐÃ vào đúng chỗ (kiểm lại bằng: bash $HERE/install_update.sh --verify)."
+        echo "  Xem ~/Library/Logs/hubd.err nếu nó vẫn không ghi khoá."
+      else
+        die "restarted, but no live pid in $lock after 90s, và KHÔNG có tiến trình nào chạy $DEST — check ~/Library/Logs/hubd.err"
+      fi
     fi
     # `lsof` in trọn đường dẫn ĐÃ GIẢI của mọi tệp tiến trình đang mở, nên nó
     # trả lời được cả ca đổi tên dưới chân: hỏi inode, không hỏi cái tên.

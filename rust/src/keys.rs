@@ -2135,12 +2135,21 @@ end tell"#
     osascript(&script)
 }
 
-/// Bao nhiêu dòng là "đủ cao" để đọc trọn một hộp chọn — xem [`screen_text_tall`].
+/// Xin HẾT CỠ — Terminal tự kẹp lại cho vừa màn hình.
 ///
-/// Đo 2026-08-19 trên hộp sáu lựa chọn của phiên `[tcc/amm]`: 26 dòng đọc ra 26
-/// đoạn và MẤT lựa chọn `1.`; 60 dòng đọc ra **61 đoạn**, có đủ `1.` lẫn dòng
-/// chân. Để dư chứ không vừa khít: hộp sau có thể dài hơn hộp này.
-pub const TALL_ROWS: usize = 60;
+/// 🔴 Hà 2026-08-20: *"Sao không mở rộng cửa sổ ra hết cỡ"*. Số cũ là 60, gõ
+/// cứng từ một phép đo trên MỘT màn hình — nên nó vừa bỏ phí một dòng ở đây
+/// (trần thật là 61), vừa bỏ phí bao nhiêu tuỳ màn ở máy khác. Đo 20/08 trên
+/// chính cửa sổ này: xin `999` ⟹ Terminal trả về **61**, không một lỗi nào.
+/// Nó KẸP giùm, nên "hết cỡ" là một con số đúng ở mọi màn hình, còn một con số
+/// đo được thì chỉ đúng ở cái màn đã đo.
+///
+/// Dùng cho CẢ hai chiều: chiều ngang cũng nới, và đó không phải phần thêm cho
+/// đẹp — cột rộng thì dòng dài thôi bị bẻ, nên cùng 61 dòng chứa nhiều chữ hơn
+/// hẳn. Đo cùng lượt: 24×80 ⟹ 1081 ký tự · nới cao ⟹ 2689 · nới cả ngang
+/// (206 cột) ⟹ **3943**. Gấp 3,6 lần bản gốc, và một phần ba số ấy là nhờ
+/// chiều ngang.
+pub const GROW_ASK: usize = 999;
 
 /// Đọc màn sau khi NỚI CAO cửa sổ, rồi trả lại đúng chiều cũ.
 ///
@@ -2157,32 +2166,43 @@ pub const TALL_ROWS: usize = 60;
 ///   dòng hội thoại nào**. Vì TUI vẽ ĐÈ tại chỗ chứ không đẩy chữ ra khỏi màn,
 ///   nên bộ đệm cuộn của Terminal không giữ gì cả. Đừng thử lại đường này.
 ///
-/// Đường đi được là đường một người ngồi trước máy sẽ làm: **kéo cửa sổ cao
-/// lên**, để chính CLI vẽ lại đủ, đọc, rồi trả lại như cũ. Đo trên cửa sổ thật
-/// của `[tcc/amm]`: 26 → 60 dòng ⟹ 61 đoạn, hộp chọn hiện đủ từ `1.` tới dòng
-/// chân; trả về 26 ngay sau đó.
+/// Đường đi được là đường một người ngồi trước máy sẽ làm: **kéo cửa sổ ra hết
+/// cỡ**, để chính CLI vẽ lại đủ, đọc, rồi trả lại như cũ.
 ///
-/// Ba điều hàm này giữ, và cả ba đều ở TRONG một lượt `osascript` — vì nửa
-/// chừng mà huba chết thì cửa sổ của chủ máy nằm lại ở chiều cao lạ:
-/// * nhớ chiều cũ TRƯỚC khi đổi;
+/// 🔴 Hà 2026-08-20: *"Sao không mở rộng cửa sổ ra hết cỡ"* — và cả hai chiều,
+/// không riêng chiều cao. Đo trên cửa sổ thật cùng ngày:
+/// `24×80 ⟹ 1081 ký tự` · `nới cao ⟹ 61 dòng, 2689` · `nới cả ngang ⟹ 206 cột,
+/// 3943`. Chiều ngang đáng một phần ba số ấy, vì cột rộng thì dòng dài thôi bị
+/// bẻ — cùng 61 dòng mà chứa nhiều chữ hơn hẳn.
+///
+/// Xin [`GROW_ASK`] chứ không xin một con số đo được: Terminal KẸP giùm cho vừa
+/// màn hình (xin 999, nhận 61×206, không lỗi), nên cùng một dòng mã lấy đúng
+/// tối đa ở mọi màn hình — kể cả cái màn chưa ai đo.
+///
+/// Bốn điều hàm này giữ, và cả bốn đều ở TRONG một lượt `osascript` — vì nửa
+/// chừng mà huba chết thì cửa sổ của chủ máy nằm lại ở chiều lạ:
+/// * nhớ CẢ HAI chiều cũ TRƯỚC khi đổi;
 /// * `try` bọc đúng khúc đọc, nên lỗi đọc không cướp mất bước trả lại;
-/// * trả lại chiều cũ trên MỌI đường ra.
-pub fn screen_text_tall(window: i64, rows: usize) -> Result<String> {
+/// * trả lại trên MỌI đường ra;
+/// * trả **cột trước, dòng sau** — đúng thứ tự đã đo là về lại đúng `24×80`.
+pub fn screen_text_tall(window: i64, ask: usize) -> Result<String> {
     let script = format!(
         // ⚠ ĐỊA CHỈ ĐẦY ĐỦ mỗi lần, không gán `tb` rồi `contents of tb`:
         // `contents of <tham chiếu>` là toán tử giải-tham-chiếu của AppleScript,
         // nó trả về chính cái tab chứ không phải chữ trên màn (bẫy đã trả giá
         // 2026-08-16, xem chú thích ở `tabs_script`).
         r#"tell application "Terminal"
-  set cu to number of rows of selected tab of window id {window}
-  if cu >= {rows} then return contents of selected tab of window id {window}
+  set cr to number of rows of selected tab of window id {window}
+  set cc to number of columns of selected tab of window id {window}
   set doc to ""
   try
-    set number of rows of selected tab of window id {window} to {rows}
+    set number of rows of selected tab of window id {window} to {ask}
+    set number of columns of selected tab of window id {window} to {ask}
     delay 1.2
     set doc to contents of selected tab of window id {window}
   end try
-  set number of rows of selected tab of window id {window} to cu
+  set number of columns of selected tab of window id {window} to cc
+  set number of rows of selected tab of window id {window} to cr
   return doc
 end tell"#
     );

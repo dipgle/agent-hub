@@ -5968,12 +5968,12 @@ pub fn screen_report(
             //
             // Thước đo là NHẬT KÝ — hỏi `said_shown_on_screen` xem chữ phiên
             // vừa nói có nằm trên màn không. Đo thật trên cửa sổ phiên `[huba]`
-            // 20/08: 24 dòng ⟹ 937 ký tự, nới lên 60 ⟹ **2940** ký tự và đầu
-            // màn lùi về phần đã trôi. Cuộn lên được thật, gấp ba.
+            // 20/08: 24×80 ⟹ 1081 ký tự, nới HẾT CỠ ⟹ 61×206 và **3943** ký
+            // tự, đầu màn lùi về phần đã trôi. Cuộn lên được thật, gấp 3,6 lần.
             let prose_cut =
                 said.is_some_and(|t| !crate::sessions::said_shown_on_screen(t, &screen));
             if choices_cut || prose_cut {
-                match crate::keys::screen_text_tall(window, crate::keys::TALL_ROWS) {
+                match crate::keys::screen_text_tall(window, crate::keys::GROW_ASK) {
                     Ok(rong) if !rong.trim().is_empty() => {
                         let them = crate::keys::parse_choices(&rong);
                         // Chỉ nhận bản rộng khi nó THẬT SỰ hơn: nới xong mà vẫn
@@ -5988,7 +5988,7 @@ pub fn screen_report(
                         let dai_hon = rong.chars().count() > screen.chars().count();
                         logging::info(
                             "shot_grew_window",
-                            json!({ "window": window, "rows": crate::keys::TALL_ROWS,
+                            json!({ "window": window, "xin": crate::keys::GROW_ASK,
                                     "choices_before": choices.len(), "choices_after": them.len(),
                                     "chars_before": screen.chars().count(),
                                     "chars_after": rong.chars().count(),
@@ -7566,8 +7566,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // nó vừa là thước đo "màn hiện trọn chưa" (để
                                 // `screen_report` quyết định có nới cửa sổ
                                 // không), vừa là đường lùi khi nới hết cỡ vẫn
-                                // thiếu — trần cứng đo được trên máy này là 61
-                                // dòng, xin 160 cũng chỉ được 61.
+                                // thiếu — và "hết cỡ" là có thật: Terminal kẹp
+                                // ở 61×206 trên máy này, xin 999 cũng chừng ấy.
+                                // Một lượt dài hơn khung ấy thì chỉ nhật ký mới
+                                // giữ được trọn.
                                 let said = crate::sessions::last_say_by_id(
                                     cfg,
                                     &shot_sid,

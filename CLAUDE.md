@@ -487,10 +487,28 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     · `history of tab` (toàn bộ cuộn lại) = **42 đoạn / 3487 ký tự**, và 16 dòng
       thêm ấy là *"Last login…"* + câu lệnh mở phiên, **0 dòng hội thoại** — TUI
       vẽ ĐÈ tại chỗ nên bộ đệm cuộn rỗng. **Đường này là ngõ cụt, đừng thử lại.**
-    · **Nới `number of rows` 26 → 60 ⟹ 61 đoạn**, hộp chọn hiện đủ từ `1.` tới
-      dòng chân. Đây là đường duy nhất lấy thêm được, và nó phải nới-đọc-TRẢ LẠI
-      trong **một** lượt `osascript` (`keys::screen_text_tall`), vì nửa chừng mà
-      huba chết là cửa sổ chủ máy nằm lại ở chiều lạ.
+    · **Nới cửa sổ ra HẾT CỠ** — đường duy nhất lấy thêm được, và nó phải
+      nới-đọc-TRẢ LẠI trong **một** lượt `osascript` (`keys::screen_text_tall`),
+      vì nửa chừng mà huba chết là cửa sổ chủ máy nằm lại ở chiều lạ. Trả **cột
+      trước, dòng sau**.
+    🔴 **Cả HAI chiều, và xin `999` chứ đừng gõ một con số đo được** (Hà
+    2026-08-20: *"Sao không mở rộng cửa sổ ra hết cỡ"*). Terminal **kẹp giùm**
+    cho vừa màn hình — xin 999 nhận về 61×206, không một lỗi nào — nên một dòng
+    mã lấy đúng tối đa ở MỌI màn hình, kể cả cái chưa ai đo. Bản trước gõ cứng
+    `60` từ một phép đo trên một màn, nên vừa hụt một dòng ở đây vừa hụt bao
+    nhiêu tuỳ máy ở nơi khác. Đo cùng ngày, trên cửa sổ thật:
+    `24×80 ⟹ 1081 ký tự` · `nới cao ⟹ 2689` · `nới cả ngang ⟹ **3943**` —
+    một phần ba số ấy là nhờ chiều NGANG, vì cột rộng thì dòng dài thôi bị bẻ,
+    nên cùng 61 dòng chứa nhiều chữ hơn hẳn.
+    ⚠ `61×206` là trần CỨNG của màn hình này: một lượt dài hơn khung ấy thì màn
+    không có cách nào lấy trọn — nhật ký mới giữ được, xem dưới.
+    🔴 **Và đừng hỏi màn "có lời nào của phiên không"** (cùng ngày, ảnh `/shot`
+    của chính phiên `[huba]`): phép đo cũ đếm ký tự `⏺`, mà `⏺` đứng ở ĐẦU lượt
+    — đúng thứ cuộn khỏi khung nhìn trước nhất. Nó khai *"màn không có lời nào
+    của phiên"* trong khi màn toàn là lời của phiên, rồi dán lại 600 ký tự đầu
+    của chính lượt ấy. Hỏi NHẬT KÝ rồi đối chiếu với màn
+    (`sessions::said_shown_on_screen`), và chỉ bù khi nới hết cỡ rồi vẫn thiếu —
+    lúc bù thì bù NGUYÊN VĂN, `split_for_telegram` đã lo phần cắt.
     Bản sao đầy đủ của HỘI THOẠI thì nằm ở nhật ký `.jsonl`, không ở màn. Ngoại
     lệ đã đo: **bảng hỏi ĐANG TREO chưa được ghi vào nhật ký** (0 lần
     `AskUserQuestion` trong 3,6 MB nhật ký amm trong khi hộp nằm trên màn) — nên

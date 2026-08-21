@@ -1907,6 +1907,56 @@ pub fn pending_for_display(host: &str, counted: usize) -> usize {
 /// kéo dài một vòng.
 pub const SAY_MAX: usize = 12_000;
 
+/// Bao nhiêu ký tự ĐẦU của lời cuối đem đi dò trên màn — xem
+/// [`said_shown_on_screen`]. Đủ dài để không đụng phải một câu mở đầu quen
+/// thuộc nằm sẵn đâu đó trên màn, đủ ngắn để nằm gọn trong vài dòng đầu.
+pub const SAID_PROBE: usize = 80;
+
+/// Ngắn hơn chừng này thì phép dò không đủ đặc trưng để tin — xem
+/// [`said_shown_on_screen`].
+pub const SAID_PROBE_MIN: usize = 24;
+
+/// Chỉ giữ chữ và số, viết thường: khử MỌI thứ khác nhau giữa hai nguồn.
+///
+/// Màn và nhật ký nói cùng một câu bằng hai hình dạng, và cả ba khác biệt đều
+/// nằm ở đây: cửa sổ **bẻ dòng giữa từ** (nên bỏ khoảng trắng, không chỉ bỏ
+/// xuống dòng), TUI **vẽ markdown thành đậm/nghiêng** trong khi nhật ký giữ
+/// `**` và `` ` `` nguyên con, và `claude` in dấu `⏺` trước mỗi câu nó nói.
+fn letters_only(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// Lời cuối ấy có đang hiện TRỌN trên màn không.
+///
+/// 🔴 Hà 2026-08-20, ảnh một tin `/shot` của chính phiên `[huba]`: màn **toàn
+/// là lời của phiên**, vậy mà huba vẫn nối câu *"Màn đang là đầu ra của một
+/// lệnh, không có lời nào của phiên"*. Phép đo cũ hỏi màn có ký tự `⏺` không —
+/// mà `⏺` đứng ở ĐẦU lượt, tức đúng thứ đã cuộn khỏi khung nhìn. Nó hỏi một
+/// câu mà khung nhìn không đủ tư cách trả lời, rồi bù bằng 600 ký tự đầu của
+/// chính lượt ấy: dán lại một mẩu đã có, kèm một lời khai ngược với sự thật.
+///
+/// Nay hỏi thẳng thứ cần biết — *chữ trong nhật ký có nằm trên màn không* — nên
+/// nó đúng cho cả hai ca, vốn là một ca: màn không có lời nào (17/08, `/shot`
+/// `[AI/onghut]` ra nguyên tệp mã) và màn có lời nhưng mất phần đầu (20/08).
+///
+/// Dò bằng ĐẦU chứ không bằng đuôi: đuôi của lượt gần như luôn còn trên màn kể
+/// cả khi phần trên đã trôi mất, nên dò đuôi là một phép đo gần như luôn xanh.
+///
+/// Quá ngắn thì trả `true` — "coi như đã hiện, đừng bù". Nghiêng về phía KHÔNG
+/// chép lại thứ đang nằm ngay trên màn, đúng luật đã trả giá hai lần trong một
+/// ngày ở chỗ gọi.
+pub fn said_shown_on_screen(said: &str, screen: &str) -> bool {
+    let said = letters_only(said);
+    if said.chars().count() < SAID_PROBE_MIN {
+        return true;
+    }
+    let probe: String = said.chars().take(SAID_PROBE).collect();
+    letters_only(screen).contains(&probe)
+}
+
 /// Lượt cuối phiên nói ra, **dài hơn hẳn** phần xem trước 240 ký tự.
 ///
 /// Chỉ đọc khi có chuyện đáng nói (một lượt chuyển trạng thái, vài lần một giờ)
@@ -5994,6 +6044,74 @@ pub fn count_by_account(snap: &SessionsSnapshot) -> BTreeMap<String, usize> {
         *counts.entry(s.account.clone()).or_insert(0) += 1;
     }
     counts
+}
+
+#[cfg(test)]
+mod said_on_screen_tests {
+    use super::*;
+
+    /// Màn và nhật ký nói CÙNG một câu bằng hai hình dạng — và cả ba khác biệt
+    /// phải bị khử, nếu không phép đo báo "thiếu" ở mọi lượt và huba chép lại
+    /// nguyên lượt xuống dưới mỗi tin.
+    ///
+    /// Ca này ĐỎ ĐƯỢC: bỏ `letters_only` (so chuỗi thô) là nó đỏ ngay ở cả ba
+    /// chỗ — `**` của markdown, chỗ cửa sổ bẻ dòng GIỮA TỪ, và dấu `⏺`.
+    #[test]
+    fn cung_mot_cau_qua_hai_nguon_thi_phai_khop() {
+        let nhat_ky =
+            "**Xong.** Trạng thái đo được, không suy đoán: bản cài chưa phải bản vừa build.";
+        let man = "⏺ Xong. Trạng thái đo được, không suy đo\
+                   án: bản cài chưa phải bản vừa build.";
+        assert!(
+            said_shown_on_screen(nhat_ky, man),
+            "cùng một câu, khác hình dạng ⟹ phải coi là ĐÃ hiện"
+        );
+    }
+
+    /// Ca 20/08: khung nhìn giữ được đuôi, phần đầu đã trôi. Đây là ca mà phép
+    /// đo cũ (`màn có ký tự ⏺ không`) trả lời ngược, vì `⏺` trôi trước nhất.
+    #[test]
+    fn mat_phan_dau_thi_phai_bao_thieu() {
+        let nhat_ky = "Xong. Trạng thái đo được, không suy đoán: cổng chất lượng xanh, \
+                       507 test qua, và bản cài vẫn chưa phải bản vừa build.";
+        let man = "chưa chứa hai cửa vừa commit. Script tự cargo build --release rồi tự \
+                   launchctl kickstart, nên đủ một lệnh.";
+        assert!(
+            !said_shown_on_screen(nhat_ky, man),
+            "đầu lượt đã cuộn khỏi khung nhìn ⟹ phải bù từ nhật ký"
+        );
+    }
+
+    /// Ca 17/08 (`[AI/onghut]` in nguyên một tệp mã): màn không có lời nào của
+    /// phiên. Cùng một phép đo phải phủ luôn ca này — nó vốn là một ca.
+    #[test]
+    fn man_toan_ma_nguon_thi_cung_bao_thieu() {
+        let nhat_ky = "Đã sửa xong hàm dựng bảng giá, giờ chạy lại kiểm thử để chắc.";
+        let man = "  42 +    let total = items.iter().map(|i| i.price).sum::<u64>();\n\
+                   … +35 lines";
+        assert!(!said_shown_on_screen(nhat_ky, man));
+    }
+
+    /// Quá ngắn thì KHÔNG đủ đặc trưng để kết luận, và phép đo phải nghiêng về
+    /// phía im lặng: chép lại một câu đang nằm ngay trên màn là lỗi đã trả giá
+    /// hai lần trong một ngày (17/08).
+    #[test]
+    fn loi_qua_ngan_thi_khong_bu() {
+        assert!(said_shown_on_screen("Xong.", "màn chẳng liên quan gì"));
+        assert!(said_shown_on_screen("", ""));
+    }
+
+    /// …nhưng "ngắn" phải đo bằng CHỮ, không bằng độ dài thô: một câu toàn dấu
+    /// và khoảng trắng dài 90 ký tự vẫn là một câu không đo được.
+    #[test]
+    fn dai_bang_dau_cham_khong_phai_la_dac_trung() {
+        let toan_dau = "— … — … — … — … — … — … — … — … — … — … — … — … — …";
+        assert!(toan_dau.chars().count() > SAID_PROBE_MIN);
+        assert!(
+            said_shown_on_screen(toan_dau, "màn chẳng liên quan"),
+            "bỏ hết dấu thì còn dưới ngưỡng ⟹ không đủ căn cứ để bù"
+        );
+    }
 }
 
 #[cfg(test)]

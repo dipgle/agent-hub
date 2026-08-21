@@ -5895,7 +5895,15 @@ pub struct ScreenReport {
     pub choices: Vec<(usize, String)>,
 }
 
-pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize) -> ScreenReport {
+/// `said` = lời cuối theo NHẬT KÝ, nếu chỗ gọi có. Nó không đi vào tin; nó là
+/// cái thước để biết màn có đang thiếu chữ không, và chỉ khi thiếu mới nới cửa
+/// sổ của chủ máy lên (đụng vào cửa sổ ai đó đang nhìn thì phải có cớ).
+pub fn screen_report(
+    s: &crate::sessions::LiveSession,
+    window: i64,
+    lines: usize,
+    said: Option<&str>,
+) -> ScreenReport {
     // Tên để ĐỌC. 🔴 Hà 2026-08-13, ảnh chụp Telegram: nút và dòng "Đang theo
     // phiên" đã là `[AI/huba]` trong khi ngay dưới nó `/shot` còn in `📷 Màn của
     // projects-d2:` — cùng một phiên, hai cái tên, trong CÙNG một màn hình.
@@ -5951,20 +5959,44 @@ pub fn screen_report(s: &crate::sessions::LiveSession, window: i64, lines: usize
             let mut screen = screen;
             let mut choices = crate::keys::parse_choices(&screen);
             let mut grew = false;
-            if choices.first().is_some_and(|(n, _)| *n > 1) {
+            let choices_cut = choices.first().is_some_and(|(n, _)| *n > 1);
+            // 🔴 VĂN XUÔI CŨNG BỊ MÉP CẮT, và cho tới 20/08 không có gì nhận ra
+            // — Hà: *"Tốt nhất là tự kiểm và cuộn lên để lấy đầy đủ và đúng
+            // nhất"*. Cửa nới cũ chỉ mở cho hộp chọn, vì hộp chọn có một dấu
+            // hiệu tự tố cáo (số đầu không phải 1). Một câu trả lời dài thì
+            // không có dấu hiệu nào cả: nó chỉ đơn giản bắt đầu giữa câu.
+            //
+            // Thước đo là NHẬT KÝ — hỏi `said_shown_on_screen` xem chữ phiên
+            // vừa nói có nằm trên màn không. Đo thật trên cửa sổ phiên `[huba]`
+            // 20/08: 24 dòng ⟹ 937 ký tự, nới lên 60 ⟹ **2940** ký tự và đầu
+            // màn lùi về phần đã trôi. Cuộn lên được thật, gấp ba.
+            let prose_cut =
+                said.is_some_and(|t| !crate::sessions::said_shown_on_screen(t, &screen));
+            if choices_cut || prose_cut {
                 match crate::keys::screen_text_tall(window, crate::keys::TALL_ROWS) {
                     Ok(rong) if !rong.trim().is_empty() => {
                         let them = crate::keys::parse_choices(&rong);
+                        // Chỉ nhận bản rộng khi nó THẬT SỰ hơn: nới xong mà vẫn
+                        // cụt (hộp dài hơn cả 60 dòng) thì đừng đổi lấy một bản
+                        // đọc khác cũng cụt.
+                        //
+                        // Hai ca hỏi hai câu khác nhau, vì "hơn" ở hai ca là hai
+                        // thứ: hộp chọn hơn khi đã thấy lựa chọn `1.`, còn văn
+                        // xuôi hơn khi đọc ra NHIỀU CHỮ HƠN — nó không có mốc
+                        // nào để mà "đủ".
+                        let het_cut = them.first().is_some_and(|(n, _)| *n == 1);
+                        let dai_hon = rong.chars().count() > screen.chars().count();
                         logging::info(
                             "shot_grew_window",
                             json!({ "window": window, "rows": crate::keys::TALL_ROWS,
                                     "choices_before": choices.len(), "choices_after": them.len(),
-                                    "why": "hộp chọn bị mép màn cắt — nới cao, đọc, rồi trả lại chiều cũ" }),
+                                    "chars_before": screen.chars().count(),
+                                    "chars_after": rong.chars().count(),
+                                    "why": if choices_cut { "hộp chọn bị mép màn cắt" }
+                                           else { "lời cuối của phiên không hiện trọn trên màn" },
+                                    "taken": (choices_cut && het_cut) || (prose_cut && dai_hon) }),
                         );
-                        // Chỉ nhận bản rộng khi nó THẬT SỰ hơn: nới xong mà vẫn
-                        // cụt (hộp dài hơn cả 60 dòng) thì đừng đổi lấy một bản
-                        // đọc khác cũng cụt.
-                        if them.first().is_some_and(|(n, _)| *n == 1) {
+                        if (choices_cut && het_cut) || (prose_cut && dai_hon) {
                             screen = rong;
                             choices = them;
                             grew = true;
@@ -7530,7 +7562,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     .trim()
                                     .parse::<usize>()
                                     .unwrap_or(SHOT_LINES);
-                                let rep = screen_report(&s, w, n);
+                                // Lời cuối theo nhật ký, lấy TRƯỚC khi đọc màn:
+                                // nó vừa là thước đo "màn hiện trọn chưa" (để
+                                // `screen_report` quyết định có nới cửa sổ
+                                // không), vừa là đường lùi khi nới hết cỡ vẫn
+                                // thiếu — trần cứng đo được trên máy này là 61
+                                // dòng, xin 160 cũng chỉ được 61.
+                                let said = crate::sessions::last_say_by_id(
+                                    cfg,
+                                    &shot_sid,
+                                    crate::sessions::SAY_MAX,
+                                )
+                                .map(|t| t.trim().to_string())
+                                .filter(|t| !t.is_empty());
+                                let rep = screen_report(&s, w, n, said.as_deref());
                                 // 🔴 ☑ CHÈN THẲNG VÀO DÒNG LỰA CHỌN — Hà
                                 // 2026-08-17: *"Sao không chèn trực tiếp vào văn
                                 // bản lại đi chèn thêm xuống cuối"*.
@@ -7594,20 +7639,36 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // `SessionData.box_text` vốn đã khai sẵn cho
                                 // đúng việc này mà chưa ai nối vào.
                                 shot_box = prompt_line_text(&crate::telegram::strip_markdown(&out));
-                                let screen_has_prose =
-                                    out.contains('\u{23fa}') || !shot_choices.is_empty();
-                                if !screen_has_prose {
-                                    if let Some(said) = crate::sessions::last_say_by_id(
-                                        cfg,
-                                        &shot_sid,
-                                        crate::sessions::SAY_MAX,
-                                    ) {
-                                        let said = said.trim();
-                                        if !said.is_empty() {
+                                // 🔴 HỎI NHẬT KÝ TRƯỚC, RỒI ĐỐI CHIẾU VỚI MÀN —
+                                // không hỏi màn xem nó "có lời nào không".
+                                // Phép cũ (`out.contains('⏺')`) đọc một dấu
+                                // hiệu nằm ở ĐẦU lượt, tức đúng thứ cuộn đi
+                                // trước nhất; xem `sessions::said_shown_on_screen`
+                                // cho ảnh chụp 20/08 nơi nó khai ngược sự thật.
+                                //
+                                // Hộp chọn thì vẫn KHÔNG bù: lúc ấy việc của
+                                // tin là để bấm, mà lời cuối trong nhật ký
+                                // thường là câu TRƯỚC câu hỏi (câu hỏi đi bằng
+                                // `tool_use`, không phải văn xuôi) — bù vào là
+                                // đẩy thứ đáng bấm xuống dưới một đoạn cũ.
+                                if shot_choices.is_empty() {
+                                    if let Some(said) = said.as_deref() {
+                                        // Hỏi LẠI trên chuỗi CUỐI CÙNG, tức bản
+                                        // đã nới nếu có nới: chỉ bù khi cuộn hết
+                                        // cỡ rồi màn vẫn thiếu. Không có bước
+                                        // này thì mọi lượt nới thành công vẫn
+                                        // kèm một bản chép — đúng cái đã gỡ đi
+                                        // hai lần trong ngày 17/08.
+                                        if !crate::sessions::said_shown_on_screen(said, &out) {
+                                            // NGUYÊN VĂN, không cắt 600. Đường
+                                            // gửi đã cắt theo dòng cho vừa trần
+                                            // Telegram (`split_for_telegram`),
+                                            // nên cắt thêm ở đây chỉ để mất chữ
+                                            // — mà mất chữ đúng lúc màn đã mất
+                                            // chữ là mất hai lần.
                                             out.push_str(&format!(
-                                                "\n\n🗣 Màn đang là đầu ra của một lệnh, không có lời nào của phiên. \
-                                                 Lời cuối nó nói (lấy từ nhật ký):\n{}",
-                                                crate::exec::truncate(said, 600)
+                                                "\n\n🗣 Lời cuối của phiên không hiện trọn trên màn \
+                                                 (phần trên đã cuộn qua). Nguyên văn lấy từ nhật ký:\n{said}"
                                             ));
                                         }
                                     }

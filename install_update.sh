@@ -126,7 +126,9 @@ mkdir -p "$DEST_DIR"
 tmp="$DEST.new"
 cp "$SRC" "$tmp"
 chmod 755 "$tmp"
-"$HERE/sign.sh" "$tmp"
+# Không để `set -e` giết lượt cài trong im lặng: `sign.sh` hỏng là chuyện phải
+# NÓI RA, kèm chỗ đọc chi tiết. Ca 21/08 chết đúng ở đây và cả hai tệp cùng câm.
+"$HERE/sign.sh" "$tmp" || { rm -f "$tmp"; die "ký hỏng — bản đang cài GIỮ NGUYÊN. Chạy \`bash $HERE/sign.sh $tmp\` để đọc lý do."; }
 # mtime chỉ trả lời được câu "cài lúc nào", không trả lời "cài cái gì" — cài nhầm
 # tệp thì mtime vẫn mới tinh. Nên hỏi nốt câu thứ hai: thứ sắp đặt xuống có đúng
 # là thứ vừa build không. Nó bắt cả những thứ cửa "nguồn tươi" không thấy: một cú

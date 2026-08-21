@@ -12,40 +12,40 @@
 # why this script refuses to overwrite an existing key.
 #
 # The key never leaves this machine and is not in git. Back up
-#   ~/Library/Application Support/hub/signing/huba-codesign.p12
+#   ~/Library/Application Support/hub/signing/hub-codesign.p12
 # if you care about surviving a disk wipe without re-granting Full Disk Access.
 set -euo pipefail
 
 STORE="$HOME/Library/Application Support/hub/signing"
-CERT_CN="Huba Local Signing"
+CERT_CN="Hub Local Signing"
 P12_PASS="hublocal"   # not a secret: it protects a local, self-signed signing key
 
 die() { echo "make-signing-cert.sh: $*" >&2; exit 1; }
 
 mkdir -p "$STORE"; chmod 700 "$STORE"
 
-if [[ -f "$STORE/huba-codesign.p12" ]]; then
-  die "$STORE/huba-codesign.p12 already exists — that is the identity in use.
+if [[ -f "$STORE/hub-codesign.p12" ]]; then
+  die "$STORE/hub-codesign.p12 already exists — that is the identity in use.
   To re-import it into a fresh keychain, just run sign.sh.
   To deliberately start over, move the old files aside first and be ready to
   re-add hubad to Full Disk Access afterwards."
 fi
 
 openssl req -x509 -newkey rsa:2048 \
-  -keyout "$STORE/huba-codesign-priv" -out "$STORE/huba-codesign.crt" \
+  -keyout "$STORE/hub-codesign-priv" -out "$STORE/hub-codesign.crt" \
   -days 3650 -nodes \
   -subj "/CN=$CERT_CN/O=huba/C=VN" \
   -addext "basicConstraints=critical,CA:false" \
   -addext "keyUsage=critical,digitalSignature" \
   -addext "extendedKeyUsage=critical,codeSigning"
-chmod 600 "$STORE/huba-codesign-priv"
+chmod 600 "$STORE/hub-codesign-priv"
 
 openssl pkcs12 -export \
-  -inkey "$STORE/huba-codesign-priv" -in "$STORE/huba-codesign.crt" \
-  -name "$CERT_CN" -out "$STORE/huba-codesign.p12" -passout "pass:$P12_PASS"
-chmod 600 "$STORE/huba-codesign.p12"
+  -inkey "$STORE/hub-codesign-priv" -in "$STORE/hub-codesign.crt" \
+  -name "$CERT_CN" -out "$STORE/hub-codesign.p12" -passout "pass:$P12_PASS"
+chmod 600 "$STORE/hub-codesign.p12"
 
-security import "$STORE/huba-codesign.p12" \
+security import "$STORE/hub-codesign.p12" \
   -k "$HOME/Library/Keychains/login.keychain-db" -P "$P12_PASS" \
   -T /usr/bin/codesign -A
 

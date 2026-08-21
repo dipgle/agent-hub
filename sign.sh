@@ -30,9 +30,9 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="${1:-$HERE/rust/target/release/hubad}"
 IDENTIFIER="com.dipgle.hubd"
-CERT_CN="Huba Local Signing"
+CERT_CN="Hub Local Signing"
 STORE="$HOME/Library/Application Support/hub/signing"
-P12="$STORE/huba-codesign.p12"
+P12="$STORE/hub-codesign.p12"
 P12_PASS="hublocal"   # not a secret: it protects a local, self-signed signing key
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
@@ -46,8 +46,15 @@ die() { echo "sign.sh: $*" >&2; exit 1; }
 # `find-identity` prints:  1) <40-hex> "Common Name" (CSSMERR_TP_NOT_TRUSTED)
 # Match on the quoted name, not on a field index — the name has spaces in it,
 # and awk $3 lands in the middle of it.
+# 🔴 `|| true` KHÔNG phải để nuốt lỗi — nó là thứ cho `die` ở dưới cơ hội chạy.
+# Tệp này bật `set -euo pipefail`, nên khi `grep` không khớp (đúng ca 21/08:
+# chứng chỉ tên "Hub Local Signing" còn script đi tìm "Huba Local Signing"), cả
+# pipeline trả 1 và shell CHẾT NGAY TẠI ĐÂY — trước khi tới nhánh `[[ -z "$sha" ]]`
+# vốn đã có sẵn một câu giải thích tử tế. Kết quả: `sign.sh` thoát 1 mà không in
+# một chữ, `install_update.sh` chết theo cũng không in một chữ, và người chạy chỉ
+# thấy dòng `Finished release profile` — trông y như cài xong.
 sha="$(security find-identity -p codesigning 2>/dev/null \
-       | grep -F "\"$CERT_CN\"" | head -1 | awk '{ print $2 }')"
+       | grep -F "\"$CERT_CN\"" | head -1 | awk '{ print $2 }' || true)"
 
 if [[ -z "$sha" ]]; then
   [[ -f "$P12" ]] || die "identity '$CERT_CN' is not in the keychain and $P12 is missing.

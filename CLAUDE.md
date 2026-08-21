@@ -487,12 +487,23 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     · `history of tab` (toàn bộ cuộn lại) = **42 đoạn / 3487 ký tự**, và 16 dòng
       thêm ấy là *"Last login…"* + câu lệnh mở phiên, **0 dòng hội thoại** — TUI
       vẽ ĐÈ tại chỗ nên bộ đệm cuộn rỗng. **Đường này là ngõ cụt, đừng thử lại.**
-      🔴 **ĐO LẠI 2026-08-20** khi Hà hỏi *"Tại sao không dùng thanh cuộn để lấy
-      thêm thông tin nếu dài hơn khung nhìn"* — kết luận cũ ĐỨNG VỮNG, và nay có
-      phép đo dứt điểm: rút một mốc 40 ký tự từ **lượt nói thứ 3** của phiên
-      (lấy từ `.jsonl`, chắc chắn đã trôi khỏi màn), nó vắng ở **CẢ** `contents`
-      **LẪN** `history`. Số cùng lượt: 25 dòng/969 ký tự vs 43 dòng/3020 — toàn
-      bộ 2051 ký tự chênh là `Last login…` + câu lệnh mở phiên, 0 dòng hội thoại.
+      🔴 **ĐO LẠI 2026-08-20** khi Hà hỏi *"Tại sao không dùng thanh cuộn"* rồi
+      vặn tiếp *"một phiên chạy tầm 50% context thì nó phải dài ít nhất 10 trang
+      màn hình"* — câu vặn ấy đúng, và nó lôi ra chỗ câu chữ cũ nói hớ.
+      **Thanh cuộn KHÔNG hỏng, và Terminal KHÔNG hề bỏ lưu.** Cửa sổ thử, shell
+      thường in 500 dòng: khung nhìn 25 dòng, `history` **504 dòng**, có cả dòng
+      ĐẦU đã cuộn mất. AppleScript đọc scrollback tốt.
+      Thứ vắng mặt là hội thoại của `claude`: mốc 40 ký tự rút từ **lượt nói thứ
+      3** của phiên (lấy từ `.jsonl`) vắng ở **CẢ** `contents` **LẪN** `history`;
+      và `history` của cửa sổ ấy đọc **4 lần cách nhau nhiều phút vẫn đúng 43
+      dòng** trong khi hội thoại chạy hàng chục lượt — nó đóng băng ở phần trước
+      lúc `claude` khởi động (2051 ký tự chênh = `Last login…` + câu lệnh mở
+      phiên, 0 dòng hội thoại).
+      ⟹ Nói cho đúng: **10 trang lịch sử ấy nằm trong bộ nhớ của chính `claude`**,
+      TUI tự vẽ lại khi chủ máy cuộn; Terminal không giữ bản sao nào, nên
+      AppleScript không có gì để với tới. Muốn lấy nó phải bắt TUI VẼ LẠI (nới
+      cửa sổ — đang làm), hoặc bắt TUI TỰ CUỘN (cần phím cuộn trong `cgkeys`,
+      chưa dịch, và chỉ bản `hubad` ĐÃ KÝ mới gửi phím được).
       ⚠ **Bẫy đo, cắn ba lượt liên tiếp trước khi ra được số trên:** TUI in DÒNG
       LỆNH đang chạy lên chính cái màn đang đo, nên một mốc viết vào argv (hay
       vào lệnh sinh ra nó) tự xuất hiện trên màn ⟹ phép đo trả "CÓ" ở mọi ô, tự

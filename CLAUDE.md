@@ -487,6 +487,17 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
     · `history of tab` (toàn bộ cuộn lại) = **42 đoạn / 3487 ký tự**, và 16 dòng
       thêm ấy là *"Last login…"* + câu lệnh mở phiên, **0 dòng hội thoại** — TUI
       vẽ ĐÈ tại chỗ nên bộ đệm cuộn rỗng. **Đường này là ngõ cụt, đừng thử lại.**
+      🔴 **ĐO LẠI 2026-08-20** khi Hà hỏi *"Tại sao không dùng thanh cuộn để lấy
+      thêm thông tin nếu dài hơn khung nhìn"* — kết luận cũ ĐỨNG VỮNG, và nay có
+      phép đo dứt điểm: rút một mốc 40 ký tự từ **lượt nói thứ 3** của phiên
+      (lấy từ `.jsonl`, chắc chắn đã trôi khỏi màn), nó vắng ở **CẢ** `contents`
+      **LẪN** `history`. Số cùng lượt: 25 dòng/969 ký tự vs 43 dòng/3020 — toàn
+      bộ 2051 ký tự chênh là `Last login…` + câu lệnh mở phiên, 0 dòng hội thoại.
+      ⚠ **Bẫy đo, cắn ba lượt liên tiếp trước khi ra được số trên:** TUI in DÒNG
+      LỆNH đang chạy lên chính cái màn đang đo, nên một mốc viết vào argv (hay
+      vào lệnh sinh ra nó) tự xuất hiện trên màn ⟹ phép đo trả "CÓ" ở mọi ô, tự
+      khớp chính nó. Mốc phải rút từ NHẬT KÝ và không bao giờ đi qua dòng lệnh.
+      Cùng họ với `pgrep -f 'cargo test…'` khớp đúng argv của chính watcher.
     · **Nới cửa sổ ra HẾT CỠ** — đường duy nhất lấy thêm được, và nó phải
       nới-đọc-TRẢ LẠI trong **một** lượt `osascript` (`keys::screen_text_tall`),
       vì nửa chừng mà huba chết là cửa sổ chủ máy nằm lại ở chiều lạ. Trả **cột

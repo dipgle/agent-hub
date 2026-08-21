@@ -3408,8 +3408,42 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
     // — bấm `2` vẫn tới đúng lựa chọn 2 dù `1.` không còn trên màn. Không có
     // dòng chân thì giữ nguyên luật cũ, vì lúc ấy "bắt đầu từ 1" là thứ duy nhất
     // ngăn một đoạn văn đánh số bị đọc thành hộp chọn.
+    // 🔴 DÒNG CHÂN LÀ CỬA, cho MỌI hộp — sửa 2026-08-21 sau ảnh `/shot` của
+    // `[tfl5]`: huba gắn ☑ vào ba dòng `1.` `2.` `3.` của một ĐOẠN VĂN, rồi khi
+    // Hà bấm thì báo *"đã gửi '2' mà bảng vẫn còn nguyên 2 lựa chọn"* và tự đoán
+    // *"hộp này có thể không nhận phím số"*. Không phải hộp nào không nhận phím
+    // — không có hộp nào cả.
+    //
+    // Luật cũ đòi dòng chân CHỈ khi số không bắt đầu từ 1, nên một đoạn văn
+    // liệt kê ba việc đi thẳng qua cửa. Mà "bắt đầu từ 1" không phân biệt được
+    // hộp chọn với văn xuôi — chỉ dòng chân mới là thứ duy nhất CLI vẽ ra và
+    // văn xuôi không thể có.
+    //
+    // Đánh đổi, nói thẳng: một hộp thật mà dòng chân bị mép màn cắt sẽ mất nút.
+    // Chấp nhận, vì hướng hỏng của hai bên không cân nhau — mất nút thì `/shot`
+    // vẫn đọc được và `/key` vẫn gõ được; còn gắn nút vào văn xuôi thì một con
+    // số rơi vào màn KHÔNG có hộp chọn, và nó có thể đi làm một lượt chat trong
+    // phiên của chủ máy. Vả lại dòng chân nằm ở ĐÁY hộp, tức phần sống sót lâu
+    // nhất khi màn cuộn, và nay còn có cửa nới-hết-cỡ + cuộn đứng sau.
+    // Con trỏ `❯` đứng ngay trước một dòng đánh số: dấu hiệu thứ hai mà CLI vẽ
+    // ra và văn xuôi không có. Cần nó vì dòng chân nằm dưới đáy hộp nên hay bị
+    // mép màn cắt — đo trên log thật: trong 214 màn có dòng đánh số mà THIẾU
+    // dòng chân, **21** vẫn có con trỏ (hộp thật bị cắt) và **193** thì không
+    // (văn xuôi). Đòi mỗi dòng chân là giết 21 hộp thật ấy.
+    let co_tro = screen.lines().any(|l| {
+        let t = l.trim_start();
+        t.strip_prefix('❯')
+            .map(str::trim_start)
+            .and_then(|r| r.split_once('.'))
+            .is_some_and(|(n, rest)| {
+                n.trim()
+                    .parse::<usize>()
+                    .is_ok_and(|n| (1..=9).contains(&n))
+                    && !rest.trim().is_empty()
+            })
+    });
     let footer = has_chooser_footer(screen);
-    if out.is_empty() || (!footer && out[0].0 != 1) {
+    if out.is_empty() || (!footer && (!co_tro || out[0].0 != 1)) {
         return Vec::new();
     }
     let first = out[0].0;
@@ -3899,6 +3933,48 @@ pub fn api_error(screen: &str) -> Option<String> {
         .map(str::trim)
         .find(|l| l.contains("API Error") || l.contains("Request timed out"))
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod numbered_prose_tests {
+    use super::parse_choices;
+
+    /// Một DANH SÁCH ĐÁNH SỐ trong câu trả lời của phiên KHÔNG phải hộp chọn.
+    ///
+    /// 🔴 Hà 2026-08-21, ảnh `/shot` phiên `[tfl5]`: huba gắn ☑ vào ba dòng
+    /// `1.` `2.` `3.` của một đoạn văn, rồi khi Hà bấm thì báo *"đã gửi '2' mà
+    /// bảng vẫn còn nguyên 2 lựa chọn"* và tự đoán *"hộp này có thể không nhận
+    /// phím số"*. Không phải hộp nào không nhận phím — **không có hộp nào cả**.
+    ///
+    /// Luật cũ chỉ đòi "số liên tiếp bắt đầu từ 1", mà một đoạn văn liệt kê ba
+    /// việc thì thoả đúng điều đó. Cửa thật phải là DÒNG CHÂN của hộp chọn: nó
+    /// là thứ duy nhất chỉ CLI mới vẽ ra.
+    ///
+    /// Hậu quả không chỉ là một cái nút thừa: bấm nó gửi một con số vào phiên,
+    /// và một con số rơi vào màn không có hộp chọn có thể đi làm một lượt chat.
+    #[test]
+    fn danh_sach_danh_so_trong_van_xuoi_khong_phai_hop_chon() {
+        let man = "  Ba việc còn chờ Hà, đều không phải việc mã:\n\
+                   \x20 1. Secret ba cổng thanh toán (B4) — không mã nào thay được.\n\
+                   \x20 2. Ngày admin.js thôi là đường chính thức.\n\
+                   \x20 3. Tenant tự mint token — đã mở khoá.\n\
+                   \x20 ⏵⏵ auto mode on · 2 shells · ← 2 agents · ↓ to manage\n";
+        assert!(
+            parse_choices(man).is_empty(),
+            "đoạn văn đánh số bị đọc thành hộp chọn: {:?}",
+            parse_choices(man)
+        );
+    }
+
+    /// …và cửa mới KHÔNG được giết hộp chọn thật: có dòng chân thì vẫn đọc ra đủ.
+    #[test]
+    fn hop_chon_that_van_doc_duoc() {
+        let man = "❯ 1. Vá ACL trước\n\
+                   \x20 2. Đăng nhập lại\n\
+                   \x20 Enter to select · ↑/↓ to navigate · Esc to cancel\n";
+        let c = parse_choices(man);
+        assert_eq!(c.len(), 2, "hộp thật phải đọc ra 2 lựa chọn, đọc ra: {c:?}");
+    }
 }
 
 #[cfg(test)]

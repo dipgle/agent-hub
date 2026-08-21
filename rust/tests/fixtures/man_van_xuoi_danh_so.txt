@@ -1,0 +1,34 @@
+
+~/projects/scripts/quality-gate.sh, kèm đoạn nói thẳng vì sao từng có hai bản;
+  description sửa ~/Documents/projects → ~/projects (harness đã nạp lại bản
+  mới). Marker ~/.claude/.quality-gate-passed bỏ — không nơi nào đọc nó, và nó
+  nằm ngoài ~/projects. CLAUDE.md có thêm mục "GỘP MỘT MỐI 2026-08-20".
+  Phép thử lại bắt lỗi trong chính bản vá — lần thứ hai trong phiên này. Mẫu
+  -----BEGIN… bắt đầu bằng -, grep đọc nó thành option, phép quét chết lặng và
+  mục "khoá riêng" in ✅ trên mọi repo. Sửa bằng grep -e, và ghi lý do cạnh dòng
+  đó. Trước đó là _env nuốt load_environment(...). Cả hai đều thuộc loại chỉ lộ
+  khi có ca thử phải-nổ; không có bộ thử thì cả hai đã đi thẳng vào cổng dưới
+  danh nghĩa "đã vá". Bộ cũ chạy lại không hồi quy (6/6 + 7/7).
+  Còn tồn, theo thứ tự tôi thấy đáng làm: MEMORY.md tự mâu thuẫn (dòng 71 vẫn
+  ~/Documents/projects, 43 tệp memory + skill fe-atomic-render cùng lỗi) · MCP
+  router chỉ phủ AI/ trong khi 7 project chủ lực đã ra ngoài · hướng dẫn cài
+  hook trỏ sai tệp settings · quality-gate.sh thiếu bit thực thi · 18 tệp
+  .bak-premove · và pro.dwork.runner vẫn quay vòng, chờ launchctl bootout.
+✻ Worked for 6m 9s
+────────────────────────────────────────────────────────────────────────────────
+❯ sửa nốt memory với đường dẫn cũ
+────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents
+
+🗣 Màn đang là đầu ra của một lệnh, không có lời nào của phiên. Lời cuối nó nói (lấy từ nhật ký):
+[workspace] Gộp xong — một cổng, một định nghĩa "xong".
+
+**Port trước, gộp sau.** Bản cũ có 4 thứ mà cổng chính thiếu; nếu gộp trước thì "hợp nhất" hoá ra là âm thầm bỏ bớt kiểm tra. Mỗi thứ port sang đều có một ca thử phải nổ:
+
+```
+1. khoá riêng (-----BEGIN … PRIVATE KEY)        ❌ bắt
+2. cargo test | tail  (nuốt mã thoát)           ❌ bắt
+3. ls | head          (vô hại)                  ✅ không đỏ oan — bản cũ đỏ cả cái này
+4. catch {} rỗng                                ❌ bắt
+5. dự án pyproject → ruff + pytest              chạy (trước: "không nhận ra hệ build")
+6. dự án go.mod → build/vet/test…

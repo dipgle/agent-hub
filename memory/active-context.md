@@ -1,5 +1,59 @@
 # active context — huba
 
+## 🎯 2026-08-22 (sáng) — hai bản vá về việc huba KHAI SAI thay vì khai "không biết"
+
+**Đã đẩy** — `origin/main` = `fcde7e8`, hỏi remote bằng `git ls-remote` chứ không
+đọc ref cục bộ. Hai commit: `00df400` (phiên chữ hoa) · `fcde7e8` (thanh tab).
+
+### `00df400` — một chữ HOA làm mất hai phiên khỏi điện thoại
+
+Hà 21/08: *"trên màn hình có 7 tab terminal và đều đang chạy cli, vậy tại sao
+danh sách phiên chỉ có 5"*. Đo bằng `ps -Ao pid,ppid,tty,comm`: ttys002 (pid
+72976) và ttys004 (pid 40513) chạy tiến trình tên **`Claude` chữ hoa**, năm tab
+kia tên `claude` chữ thường. `is_claude_process` so `starts_with("claude")`
+phân biệt hoa-thường ⟹ `host_of` đọc thành *pid bị dùng lại* ⟹ trả `dead`.
+
+Cái giá không phải "thiếu hai hàng": huba **không** nói *"không đọc được"*, nó
+nói *"đã tắt"* — khai một điều sai về thế giới, và người cầm điện thoại không có
+cách nào biết. Nhật ký làm chứng suốt đêm 21–22/08: `session_pid_reused pid=72976
+cmd="Claude"`.
+
+Cửa nới ra thì nhận thêm `/Applications/Claude.app/…/MacOS/Claude`. Đã soi cả ba
+chỗ dùng: hai chỗ dựng danh sách (`unlisted_claude_processes:3237`,
+`session_on_tty:4871`) gác thêm `is_real_tty` mà app ấy chạy tty `??`; chỗ thứ ba
+(`host_of:1060`) chỉ hỏi về pid đã có trong sổ.
+
+### `fcde7e8` — nút dựng từ bản đọc RỘNG, cú bấm chấm trên bản đọc HẸP
+
+Ảnh chụp nới cửa sổ khi màn bị mép cắt rồi mới đọc (`pipeline.rs:5976`), và nút
+tab dựng từ bản rộng ấy (`:8967`, `:9076`). `/tab` (`:5623`) và `/pick` (`:5710`,
+`:5775`) đọc bằng `keys::look` → `keys::screen_text`, **không nới**. Hai đường,
+hai con số, cùng một cái bảng — cách nhau 3 giây trong log 22/08 trên cùng cửa sổ
+6936: `tab_moved tabs=2` lúc 00:00:09, rồi `shot_grew_window chars 1567 → 8947`
+lúc 00:00:12.
+
+Vá bằng `keys::ask_table_wide`, và `want` lấy lớn hơn giữa sổ phiên với **chính
+con số chủ máy vừa bấm** — vì nguồn sổ hay vắng: bảng ĐANG TREO chưa được ghi vào
+nhật ký (đo 19/08, 3,59 MB nhật ký amm có 0 lần `AskUserQuestion`). Cửa nới chỉ
+mua thêm một lần NHÌN; nới ra vẫn 2 câu thì vẫn từ chối như cũ.
+
+### Còn nợ, ghi rõ để đừng ai đọc thành "đã xong"
+
+* **Chưa đo được một thanh tab THẬT đọc hụt ở cửa sổ hẹp.** Lúc vá không cửa sổ
+  nào đang mở bảng hỏi (dò read-only cả 7 tab: 0 dòng `←…→` dạng thanh tab). Có
+  bảng thì chạy:
+  `HUB_LIVE_TTY=ttysNNN cargo test --offline --test ask_table_live -- --ignored narrow --nocapture`
+* **Chưa chạy thật trong buồng Telegram** — đúng cái bar mà `CLAUDE.md` đặt ra.
+* Daemon còn chạy binary cũ tới khi Hà gõ `bash ~/projects/huba/install_update.sh`.
+
+### Một số đo về chính bộ kiểm, để lần sau đừng tưởng nó treo
+
+`cargo test` của repo này mất **~20 phút** dù mã đã biên dịch xong: 69 test
+binary, mỗi lượt `exec` tốn ~14 giây tường (0,02s CPU — chờ, không tính). Đo
+riêng `cmd_catch`: 14,2s tường / 0,02s CPU cho 2 bài kiểm chạy hết 0,02s. Nên
+chạy nền và đọc `TEST_EXIT` từ tệp, đừng để một cửa sổ 10 phút cắt ngang rồi
+tưởng có bài kiểm treo.
+
 ## 🎯 2026-08-20 (trưa) — rà soát toàn bộ: BẢN CÀI không phải bản vừa build, và `/upgrade` tự lặp lại lỗi ấy
 
 **Đã đẩy** — `origin/main` = `b57f359`, kiểm bằng `git ls-remote` (hỏi remote, KHÔNG

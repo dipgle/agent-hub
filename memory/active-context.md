@@ -37,6 +37,27 @@ con số chủ máy vừa bấm** — vì nguồn sổ hay vắng: bảng ĐANG 
 nhật ký (đo 19/08, 3,59 MB nhật ký amm có 0 lần `AskUserQuestion`). Cửa nới chỉ
 mua thêm một lần NHÌN; nới ra vẫn 2 câu thì vẫn từ chối như cũ.
 
+### `7418f8c` — `/upgrade` chết vì lượt đổi tên chỉ vá được NỬA
+
+Hà bấm `/upgrade` ba lần (09:31 · 09:33 · 09:33) và ba lần nhận *"không thấy danh
+tính ký 'Huba Local Signing' trong keychain"*. Chứng chỉ **có**, và có từ 10/08 —
+`security find-identity -p codesigning` in
+`9DE8EC03… "Hub Local Signing" (CSSMERR_TP_NOT_TRUSTED)`.
+
+Lệch một chữ, và lệch từ lượt đổi tên `hub` → `huba`: nó sửa cả chuỗi ĐẶT TÊN
+MỘT VẬT THỂ ĐÃ TỒN TẠI. Ngày 21/08 đã vá — `sign.sh` + `make-signing-cert.sh` —
+nhưng bỏ sót bản Rust. Hai đường đi khác nhau nên không gì đỏ:
+`install_update.sh:131` → `sign.sh` chạy được, `/upgrade` → `runtime::self_install`
+thì chết.
+
+Vá bằng một hằng `SIGNING_CN`, khoá vào chính hai tệp shell kia
+(`runtime::tests::the_signing_name_matches_the_shell_scripts` — đọc `CERT_CN=`
+từ hai tệp ấy, không tự soi mình). RED-verify: đặt lại tên sai ⟹ exit 101.
+
+📌 **`CSSMERR_TP_NOT_TRUSTED` là ĐÚNG, không phải hỏng.** Chứng chỉ tự ký và cố ý
+không được tin, nên `find-identity -v` trả `0 valid identities` — câu lệnh phải
+là `-p codesigning` KHÔNG kèm `-v`. Đừng "sửa" chỗ này.
+
 ### Còn nợ, ghi rõ để đừng ai đọc thành "đã xong"
 
 * **Chưa đo được một thanh tab THẬT đọc hụt ở cửa sổ hẹp.** Lúc vá không cửa sổ
@@ -45,6 +66,21 @@ mua thêm một lần NHÌN; nới ra vẫn 2 câu thì vẫn từ chối như c
   `HUB_LIVE_TTY=ttysNNN cargo test --offline --test ask_table_live -- --ignored narrow --nocapture`
 * **Chưa chạy thật trong buồng Telegram** — đúng cái bar mà `CLAUDE.md` đặt ra.
 * Daemon còn chạy binary cũ tới khi Hà gõ `bash ~/projects/huba/install_update.sh`.
+* **Chưa chạy trọn một lượt `/upgrade`** để nghiệm thu `7418f8c`: nó khởi động
+  lại launchd job, mà classifier chặn `launchctl` ở phiên Claude. Phần đo được
+  thì đã đo: chuỗi mới khớp đúng dòng `security find-identity` in ra trên máy.
+
+### Bản vá `00df400` đã nghiệm thu trên MÁY THẬT, không chỉ trên test
+
+Hai bản chạy cách nhau 16 giây, cùng một máy:
+
+| | lúc | kết quả |
+|---|---|---|
+| daemon (bản cài 21/08 22:25) | 02:28:05Z | `sessions: 6` + `session_pid_reused cmd="Claude"` pid 40513 & 72976 |
+| `rust/target/release/huba` vừa build | 02:28:21Z | **`sessions: 8`** — có `hanguyen-e9` (72976) và `hanguyen-04` (40513) |
+
+Ảnh Hà gửi 09:2x cho thấy nguồn của ca ấy: `hanguyen@Has-MacBook-Pro ~ % Claude`
+— gõ CHỮ HOA để mở CLI.
 
 ### Một số đo về chính bộ kiểm, để lần sau đừng tưởng nó treo
 

@@ -3595,6 +3595,101 @@ pub fn ask_table(screen: &str) -> Option<AskTable> {
     None
 }
 
+/// Bản đọc HẸP này có dấu hiệu THIẾU tab không.
+///
+/// 🔴 Cùng một cái bảng, huba đọc ra hai con số khác nhau tuỳ đường đi — và
+/// đường dựng NÚT nhìn rộng hơn đường THI HÀNH cú bấm:
+/// * `/shot` nới cửa sổ hết cỡ khi màn bị mép cắt rồi mới đọc
+///   (`pipeline.rs`, nhật ký `shot_grew_window`), và nút tab dựng từ **bản rộng**
+///   ấy;
+/// * `/tab` với `/pick` đọc bằng [`look`] → [`screen_text`], **không nới lần
+///   nào**.
+///
+/// Nên cái nút `tab 3` đi ra điện thoại từ một bản đọc thấy 3 tab, còn cú bấm
+/// vào chính nó lại chấm trên một bản đọc chỉ thấy 2 — và câu trả lời là *"bảng
+/// chỉ có 2 câu, không có câu 3"* về đúng cái nút huba vừa tự dựng ra. Cửa sổ
+/// hẹp còn một dạng tệ hơn: thanh tab bị BẺ DÒNG thì `←` và `→` thôi chung một
+/// dòng, [`ask_table`] trả `None`, và một bảng nhiều câu đọc thành bảng một câu.
+///
+/// `want` là con số đến từ nguồn KHÁC màn — sổ phiên, hoặc chính số tab chủ máy
+/// vừa bấm. Con số thứ hai không phải số bịa: cái nút ấy do huba dựng.
+pub fn tab_bar_cut(near: Option<&AskTable>, want: usize) -> bool {
+    match near {
+        Some(t) => t.answered.len() < want,
+        // Không thấy thanh tab nào mà nguồn khác nói bảng có từ 2 câu ⟹ nhiều
+        // khả năng thanh tab bị bẻ dòng. Bảng MỘT câu thì đúng là không vẽ
+        // thanh tab, nên đừng lấy nó làm cớ đụng vào cửa sổ chủ máy.
+        None => want >= 2,
+    }
+}
+
+/// Hai lần đọc cùng một thanh tab: bản RỘNG chỉ thắng khi nó thật sự thấy
+/// nhiều tab hơn.
+///
+/// "Rộng hơn" không tự động là "đúng hơn": nới xong mà TUI chưa vẽ lại kịp thì
+/// bản rộng đọc ra ÍT hơn, và lấy nó là đổi một bản đọc đủ lấy một bản đọc cụt.
+/// Cùng đúng luật `shot_grew_window` đang giữ — chỉ nhận bản rộng khi nó THẬT
+/// SỰ hơn.
+pub fn wider_table(near: Option<AskTable>, far: Option<AskTable>) -> (Option<AskTable>, bool) {
+    let n = near.as_ref().map(|t| t.answered.len()).unwrap_or(0);
+    let f = far.as_ref().map(|t| t.answered.len()).unwrap_or(0);
+    if f > n {
+        (far, true)
+    } else {
+        (near, false)
+    }
+}
+
+/// Thanh tab đọc từ chữ ĐÃ CÓ; thiếu tab so với `want` thì NỚI CỬA SỔ đọc lại.
+///
+/// Trả `(bảng, chữ của bản đọc rộng nếu đã nhận nó)` — chỗ gọi cần cả chữ, vì
+/// [`cursor_on`] phải chấm trên đúng cái màn mà bảng vừa đọc ra: đếm ô trống
+/// trên bản rộng rồi tìm con trỏ trên bản hẹp là hỏi hai cái màn khác nhau.
+///
+/// Nới là đụng vào cửa sổ chủ máy và tốn thêm ~1,5 giây, nên chỉ nới khi
+/// [`tab_bar_cut`] nói có dấu hiệu thiếu — không nới phòng xa.
+pub fn ask_table_wide(body: &str, window: i64, want: usize) -> (Option<AskTable>, Option<String>) {
+    let near = ask_table(body);
+    if !tab_bar_cut(near.as_ref(), want) {
+        return (near, None);
+    }
+    let rong = match screen_text_tall(window, GROW_ASK) {
+        Ok(r) if !r.trim().is_empty() => r,
+        Ok(_) => {
+            logging::warn(
+                "tab_bar_grow_empty",
+                json!({ "window": window, "want": want,
+                        "effect": "nới cửa sổ xong đọc ra rỗng — chấm trên bản đọc hẹp" }),
+            );
+            return (near, None);
+        }
+        Err(e) => {
+            logging::warn(
+                "tab_bar_grow_failed",
+                json!({ "window": window, "want": want, "err": logging::err_chain(&e),
+                        "effect": "không nới được cửa sổ — chấm trên bản đọc hẹp, có thể thiếu tab" }),
+            );
+            return (near, None);
+        }
+    };
+    let far = ask_table(&rong);
+    let (before, after) = (
+        near.as_ref().map(|t| t.answered.len()).unwrap_or(0),
+        far.as_ref().map(|t| t.answered.len()).unwrap_or(0),
+    );
+    let (table, lay_rong) = wider_table(near, far);
+    logging::info(
+        "tab_bar_regrown",
+        json!({ "window": window, "xin": GROW_ASK, "want": want,
+                "tabs_before": before, "tabs_after": after, "taken": lay_rong }),
+    );
+    if lay_rong {
+        (table, Some(rong))
+    } else {
+        (table, None)
+    }
+}
+
 /// Bảng đang đứng ở CÂU NÀO, ghép bằng chữ chứ không bằng màu.
 ///
 /// Tab đang chọn được vẽ bằng nền tím, mà `contents of tab` trả chữ TRẦN — màu
@@ -4209,6 +4304,72 @@ mod tests {
         assert_eq!(t.headers, vec!["Vá ACL", "Đăng nhập"]);
         // `✔ Submit` là nút gửi, KHÔNG phải câu thứ ba.
         assert_eq!(t.left(), 1, "còn đúng một ô trống");
+    }
+
+    /// 🔴 CÙNG MỘT BẢNG, HAI CON SỐ — và cái nút đi ra điện thoại từ bản đọc
+    /// RỘNG còn cú bấm vào nó chấm trên bản đọc HẸP.
+    ///
+    /// `/shot` nới cửa sổ khi màn bị mép cắt rồi dựng nút tab từ bản rộng ấy
+    /// (`pipeline.rs`, `shot_grew_window`); `/tab` và `/pick` thì đọc bằng
+    /// `look` → `screen_text`, không nới. Nên huba có thể trả lời *"bảng chỉ có
+    /// 2 câu, không có câu 3"* về đúng cái nút chính nó vừa dựng.
+    #[test]
+    fn doc_ra_it_tab_hon_so_la_dau_hieu_bi_cat() {
+        let t = super::ask_table(REAL_TAB_BAR).expect("thanh tab thật phải đọc được");
+        assert_eq!(t.answered.len(), 2, "bản đọc hẹp thấy 2 tab");
+        // Nguồn khác màn nói 3 câu ⟹ nới cửa sổ nhìn lại trước khi từ chối.
+        assert!(super::tab_bar_cut(Some(&t), 3));
+        // Khớp rồi thì thôi: nới là đụng vào cửa sổ chủ máy, không làm phòng xa.
+        assert!(!super::tab_bar_cut(Some(&t), 2));
+        assert!(!super::tab_bar_cut(Some(&t), 0));
+    }
+
+    /// Cửa sổ hẹp BẺ ĐÔI thanh tab ⟹ `ask_table` trả `None`, tức bảng nhiều câu
+    /// đọc thành bảng một câu. Đây là dạng cắt tệ hơn dạng thiếu vài tab: nó
+    /// không thiếu một phần, nó mất hẳn cả cái bảng.
+    #[test]
+    fn thanh_tab_bi_be_dong_thi_khong_doc_ra_bang_nao() {
+        let be = "←  ☒ Vá ACL  ☐ Đăng nhập\n  ☐ RPC pool  ✔ Submit  →";
+        assert!(
+            super::ask_table(be).is_none(),
+            "`←` và `→` khác dòng ⟹ không phải một thanh tab đọc được"
+        );
+        assert!(
+            super::tab_bar_cut(None, 3),
+            "sổ nói 3 câu mà không thấy tab nào ⟹ nới rồi nhìn lại"
+        );
+        // Bảng MỘT câu thì đúng là không có thanh tab — không phải cớ để nới.
+        assert!(!super::tab_bar_cut(None, 1));
+        assert!(!super::tab_bar_cut(None, 0));
+    }
+
+    /// Bản rộng chỉ THẮNG khi nó thật sự thấy nhiều tab hơn — nới xong mà TUI
+    /// chưa vẽ lại kịp thì giữ nguyên bản hẹp, đừng đổi một bản đọc đủ lấy một
+    /// bản đọc cụt.
+    #[test]
+    fn ban_rong_chi_thang_khi_that_su_hon() {
+        let hep = super::ask_table(REAL_TAB_BAR);
+        let rong = super::ask_table("←  ☒ Vá ACL  ☐ Đăng nhập  ☐ RPC pool  ✔ Submit  →");
+        assert_eq!(rong.as_ref().unwrap().answered.len(), 3);
+
+        let (lay, doi) = super::wider_table(hep.clone(), rong.clone());
+        assert!(doi, "2 → 3 tab thì phải nhận bản rộng");
+        assert_eq!(lay.unwrap().answered.len(), 3);
+
+        let (lay, doi) = super::wider_table(rong.clone(), hep.clone());
+        assert!(!doi, "bản rộng đọc ra ÍT hơn ⟹ giữ bản cũ");
+        assert_eq!(lay.unwrap().answered.len(), 3);
+
+        let (lay, doi) = super::wider_table(hep.clone(), None);
+        assert!(!doi, "nới xong không thấy bảng nào ⟹ giữ bản cũ");
+        assert_eq!(lay.unwrap().answered.len(), 2);
+
+        // Thanh tab bị bẻ dòng ở bản hẹp, nới ra thì đọc được: đúng ca cứu được.
+        let (lay, doi) = super::wider_table(None, rong);
+        assert!(doi);
+        assert_eq!(lay.unwrap().answered.len(), 3);
+
+        assert_eq!(super::wider_table(None, None), (None, false));
     }
 
     #[test]

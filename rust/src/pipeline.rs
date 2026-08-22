@@ -5632,7 +5632,16 @@ fn tab_move(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> Result<(), S
             ));
         }
     };
-    let Some(table) = crate::keys::ask_table(&body) else {
+    // 🔴 ĐỌC CÙNG BỀ NGANG VỚI LÚC DỰNG NÚT. Cái nút `tab n` đi ra điện thoại
+    // từ ảnh chụp, mà ảnh chụp NỚI cửa sổ khi màn bị mép cắt (`shot_grew_window`
+    // ngay dưới); đường này thì đọc bằng `look` → `screen_text`, không nới. Nên
+    // chấm cú bấm trên bản đọc hẹp là có ngày trả lời *"bảng chỉ có 2 câu, không
+    // có câu 3"* về đúng cái nút huba vừa tự dựng ra.
+    //
+    // `want` lấy con số lớn hơn giữa sổ phiên và chính số tab vừa bấm — cả hai
+    // đều là mệnh đề của huba, không phải số bịa. Xem `keys::tab_bar_cut`.
+    let tu_so = s.asking.as_ref().map(|a| a.rest.len() + 1).unwrap_or(0);
+    let Some(table) = crate::keys::ask_table_wide(&body, w, tu_so.max(n)).0 else {
         return Err(format!(
             "⚠ Màn của {name} không có bảng hỏi nhiều câu nào đang mở, nên không có tab để sang."
         ));
@@ -5721,7 +5730,14 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
         }
     };
 
-    let table = crate::keys::ask_table(&body);
+    // Cùng cửa nới với `/tab`: bản đọc hẹp có thể cắt mất tab, và ở đây cái giá
+    // là từ chối một cú bấm hợp lệ bằng câu *"bảng chỉ có N câu"*. `want` lấy
+    // con số lớn hơn giữa sổ phiên và chính câu vừa bấm — xem `keys::tab_bar_cut`.
+    let (table, rong) = crate::keys::ask_table_wide(&body, w, questions.len().max(q));
+    // Nới rồi thì chấm con trỏ trên CHÍNH cái màn vừa đọc ra bảng: đếm ô trống
+    // trên bản rộng mà tìm con trỏ trên bản hẹp là hỏi hai cái màn khác nhau.
+    let da_noi = rong.is_some();
+    let body = rong.unwrap_or(body);
     let total = table.as_ref().map(|t| t.answered.len()).unwrap_or(1);
     if q > total {
         return format!(
@@ -5772,7 +5788,19 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
     let mut seen_body = String::new();
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(900));
-        if let crate::keys::Look::Saw { body, .. } = crate::keys::look(&s.tty, PICK_LINES) {
+        // Đọc lại BẰNG ĐÚNG BỀ NGANG của lần đọc trước. `before` đếm trên bản
+        // rộng mà `after` đếm trên bản hẹp là so hai cái màn khác nhau: số ô
+        // trống lệch đi rồi rơi vào nhánh *"bảng KHÔNG đổi"* hoặc *"bảng biến
+        // mất"* — một câu sai, tự tin, về đúng cú bấm vừa rồi.
+        let doc = if da_noi {
+            crate::keys::screen_text_tall(w, crate::keys::GROW_ASK).ok()
+        } else {
+            match crate::keys::look(&s.tty, PICK_LINES) {
+                crate::keys::Look::Saw { body, .. } => Some(body),
+                crate::keys::Look::Blind { .. } => None,
+            }
+        };
+        if let Some(body) = doc {
             let t = crate::keys::ask_table(&body);
             seen_body = body;
             if t.as_ref().map(|t| t.left()) != before {

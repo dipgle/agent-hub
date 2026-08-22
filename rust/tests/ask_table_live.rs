@@ -65,6 +65,80 @@ fn what_characters_does_the_question_table_actually_draw() {
     }
 }
 
+/// Phép đo: cửa sổ HẸP có cắt mất tab của thanh tab không, và nới thì lấy lại
+/// được bao nhiêu?
+///
+/// 🔴 Vì sao phép đo này phải có: `/shot` nới cửa sổ khi màn bị mép cắt rồi
+/// dựng nút tab từ **bản rộng** (`pipeline.rs`, nhật ký `shot_grew_window`),
+/// còn `/tab` với `/pick` đọc bằng `keys::look` → `keys::screen_text`, **không
+/// nới**. Hai bề ngang, hai con số, cho cùng một cái bảng — nên huba có thể trả
+/// lời *"bảng chỉ có 2 câu, không có câu 3"* về đúng cái nút chính nó vừa dựng.
+///
+/// `keys::ask_table_wide` vá chỗ ấy, và bài kiểm đơn vị của nó chỉ chấm được
+/// phần QUYẾT ĐỊNH (chuỗi vào, chuỗi ra). Phần còn lại — *"cửa sổ hẹp thật sự
+/// cắt cái gì"* — chỉ đo được trên một cửa sổ thật đang mở một bảng thật. Đây
+/// là chỗ đo, và nó chỉ ĐỌC: hai lượt đọc, không một phím nào.
+///
+/// ⚠ Nó CÓ đổi kích thước cửa sổ (rồi trả lại) — đúng thứ `screen_text_tall`
+/// làm mỗi lần `/shot` gặp màn bị cắt.
+///
+/// ```text
+/// HUB_LIVE_TTY=ttysNNN cargo test --offline --test ask_table_live -- --ignored narrow --nocapture
+/// ```
+#[test]
+#[ignore = "đọc màn một cửa sổ Terminal thật, hai lần, có đổi kích thước — chạy tay bằng --ignored"]
+fn a_narrow_window_cuts_the_tab_bar() {
+    let tty = std::env::var("HUB_LIVE_TTY").expect("cần HUB_LIVE_TTY");
+    let w = huba::keys::window_of(&tty)
+        .expect("hỏi được Terminal")
+        .expect("tty phải gắn một cửa sổ");
+
+    let hep = huba::keys::screen_text(w).expect("đọc được màn");
+    let t_hep = huba::keys::ask_table(&hep);
+    let rong = huba::keys::screen_text_tall(w, huba::keys::GROW_ASK).expect("nới được cửa sổ");
+    let t_rong = huba::keys::ask_table(&rong);
+
+    let dem = |t: &Option<huba::keys::AskTable>| t.as_ref().map(|t| t.answered.len()).unwrap_or(0);
+    println!(
+        "HẸP : {} ký tự · {} tab · nhãn {:?}",
+        hep.chars().count(),
+        dem(&t_hep),
+        t_hep.as_ref().map(|t| t.headers.clone())
+    );
+    println!(
+        "RỘNG: {} ký tự · {} tab · nhãn {:?}",
+        rong.chars().count(),
+        dem(&t_rong),
+        t_rong.as_ref().map(|t| t.headers.clone())
+    );
+    // In nguyên văn dòng mang mũi tên ở CẢ HAI bản — đây mới là bằng chứng, chứ
+    // con số đếm ra thì đã đi qua chính cái hàm đang cần kiểm.
+    for (ten, doc) in [("HẸP", &hep), ("RỘNG", &rong)] {
+        for line in doc.lines().filter(|l| l.contains('←') || l.contains('→')) {
+            println!("{ten} ⟶ {line}");
+        }
+    }
+
+    let (lay, doi) = huba::keys::wider_table(t_hep.clone(), t_rong.clone());
+    println!(
+        "=> nới {} · chốt lại {} tab",
+        if doi { "LẤY LẠI ĐƯỢC tab" } else { "không thêm gì" },
+        dem(&lay)
+    );
+    if dem(&t_hep) == 0 && dem(&t_rong) == 0 {
+        println!("(cửa sổ này không có bảng hỏi nhiều câu nào đang mở — phép đo chưa nói gì)");
+    }
+    // Không assert số tab: cửa sổ thật có thể đang không mở bảng nào. Thứ DUY
+    // NHẤT bài kiểm này khoá được mà không cần biết trên màn có gì: nới rồi thì
+    // không được đọc ra ÍT chữ hơn — nếu có, cửa nới đang làm hỏng bản đọc.
+    assert!(
+        rong.chars().count() >= hep.chars().count(),
+        "nới cửa sổ mà đọc ra ÍT chữ hơn ({} < {}) — cửa nới đang phá bản đọc",
+        rong.chars().count(),
+        hep.chars().count()
+    );
+}
+
 /// Phép đo: một cú Enter RỜI có submit được ô nhập đang có chữ không?
 ///
 /// 🔴 Hà 2026-08-14: *"Vậy là tôi bấm enter không có tác dụng rồi"* — huba báo

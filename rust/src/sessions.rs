@@ -1117,6 +1117,20 @@ fn parse_ps_row(line: &str) -> Option<(i64, Proc)> {
 /// `classify_host`) mà là **loại một pid đã thuộc về tiến trình khác hẳn**, nên
 /// nó chỉ cần đủ chặt để một con pid ngẫu nhiên không lọt.
 pub fn is_claude_process(cmd: &str) -> bool {
+    // 🔴 KHÔNG phân biệt hoa-thường — Hà 2026-08-21: *"trên màn hình có 7 tab
+    // terminal và đều đang chạy cli, vậy tại sao danh sách phiên chỉ có 5"*.
+    // Hai tab `ttys002`/`ttys004` chạy `login → -zsh → Claude`, CLI thật, tiền
+    // cảnh; bản trước so `starts_with("claude")` chữ thường nên trả `false`,
+    // `host_of` đọc thành **pid bị dùng lại** và trả `dead`. Một chữ hoa làm mất
+    // hai phiên khỏi điện thoại — và mất theo kiểu tệ nhất: huba không nói
+    // "không đọc được", nó nói "đã tắt", tức khai sai về thế giới.
+    //
+    // Cửa nới ra thì nhận thêm cả `/Applications/Claude.app/…/MacOS/Claude` —
+    // ứng dụng để bàn, cũng đang chạy trên máy này. Không sao: cả hai chỗ DỰNG
+    // DANH SÁCH đều gác thêm `is_real_tty` (`unlisted_claude_processes`,
+    // `session_on_tty`) mà ứng dụng ấy chạy với tty `??`, nên nó không lên hàng
+    // nào. Chỗ thứ ba (`host_of`) chỉ hỏi về một pid ĐÃ CÓ TRONG SỔ phiên.
+    let cmd = cmd.to_lowercase();
     if cmd.contains("claude-code") {
         return true;
     }
@@ -6044,6 +6058,49 @@ pub fn count_by_account(snap: &SessionsSnapshot) -> BTreeMap<String, usize> {
         *counts.entry(s.account.clone()).or_insert(0) += 1;
     }
     counts
+}
+
+#[cfg(test)]
+mod is_claude_process_tests {
+    use super::is_claude_process;
+
+    /// 🔴 Hà 2026-08-21: *"trên màn hình có 7 tab terminal và đều đang chạy cli,
+    /// vậy tại sao danh sách phiên chỉ có 5"*. Đo được ngay: hai tab `ttys002`
+    /// và `ttys004` chạy `login → -zsh → Claude` — CLI thật, foreground — mà
+    /// huba ghi `session_pid_reused` rồi coi như đã tắt.
+    ///
+    /// Gốc: phép kiểm này so `starts_with("claude")` CHỮ THƯỜNG, trong khi tiến
+    /// trình ấy tên **`Claude`** chữ hoa. Một chữ hoa làm mất hai phiên khỏi
+    /// điện thoại — và mất theo kiểu tệ nhất: huba không nói "không đọc được",
+    /// nó nói "đã tắt", tức khai một điều SAI về thế giới.
+    #[test]
+    fn ten_tien_trinh_viet_hoa_van_la_cli() {
+        assert!(
+            is_claude_process("Claude"),
+            "ca thật đo trên ttys002/ttys004"
+        );
+        assert!(is_claude_process("/usr/local/bin/Claude --resume abc"));
+    }
+
+    /// …và cửa không được nới tới mức nhận nhầm thứ khác.
+    #[test]
+    fn thu_khac_van_bi_loai() {
+        assert!(!is_claude_process("node server.js"));
+        assert!(!is_claude_process(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        ));
+        assert!(!is_claude_process("-zsh"));
+        assert!(!is_claude_process("login -pf hanguyen"));
+    }
+
+    /// Dạng vẫn đang dùng hằng ngày phải giữ nguyên.
+    #[test]
+    fn dang_cu_van_nhan_ra() {
+        assert!(is_claude_process("claude --permission-mode auto 'việc'"));
+        assert!(is_claude_process(
+            "/Users/x/.vscode/extensions/anthropic.claude-code-2.1/claude"
+        ));
+    }
 }
 
 #[cfg(test)]

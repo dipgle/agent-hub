@@ -1842,10 +1842,46 @@ pub fn session_list_text(
     if sessions.is_empty() {
         return "Không có phiên nào đang sống.".to_string();
     }
-    let mut out = format!("📋 {} phiên đang sống:\n", sessions.len());
-    for s in sessions.iter().take(MAX_SESSION_BUTTONS) {
+    // 🔴 GOM MỖI PHIÊN THÀNH MỘT KHỐI — Hà 2026-08-22: *"chỉnh lại nội dung
+    // lệnh session cho gọn đi, gom lại thành 1 khối thôi"*.
+    //
+    // Bản trước tiêu **ba dòng** cho một phiên: hàng đầu, rồi hai hàng phụ thụt
+    // vào bốn dấu cách. Bảy phiên ⟹ 22 dòng, và trên màn 390px thì phiên cuối
+    // nằm ngoài tầm nhìn — đúng thứ `MAX_SESSION_BUTTONS` sinh ra để tránh, mà
+    // lại tự gây ra bằng chiều dọc thay vì bằng số hàng.
+    //
+    // Ba phép cắt, và cả ba đều đo được chứ không phải gu thẩm mỹ:
+    // ① hàng phụ *tình trạng* gộp thẳng vào hàng đầu — nó vốn là phần tiếp của
+    //    cùng một câu, tách ra chỉ tốn một dòng và bốn dấu cách;
+    // ② chế độ quyền lên ĐẦU DANH SÁCH khi cả danh sách giống nhau (đo 22/08:
+    //    **7/8 phiên cùng `auto`**) — xem `session_meta`;
+    // ③ bỏ thụt đầu dòng: nó là thứ chia một phiên thành ba khối con, đúng cái
+    //    Hà bảo gom lại.
+    //
+    // KHÔNG cắt: nhãn tình trạng (Hà 12/08 — bốn tình trạng phải phân biệt
+    // được, và một cái icon trần thì phải học thuộc mới đọc nổi), động từ đang
+    // chạy (Hà 10/08 — *"ui chưa thể hiện được phiên đang làm gì"*), câu cuối
+    // 💬 (thứ nói phiên nào ĐÁNG mở ra), và dấu 👁.
+    //
+    // Chế độ quyền chỉ gom lên đầu khi MỌI phiên có khai chế độ đều khai giống
+    // nhau. Hàng không khai gì (cửa sổ Terminal trần) vẫn không in gì — nó
+    // không có chế độ, chứ không phải thiếu dữ liệu.
+    let shown_rows: Vec<&crate::sessions::LiveSession> =
+        sessions.iter().take(MAX_SESSION_BUTTONS).collect();
+    let modes: std::collections::BTreeSet<&str> = shown_rows
+        .iter()
+        .map(|s| permission_label(s))
+        .filter(|m| !m.is_empty())
+        .collect();
+    let one_mode = (modes.len() == 1).then(|| *modes.iter().next().unwrap());
+    let mut out = format!(
+        "📋 {} phiên đang sống{}\n",
+        sessions.len(),
+        one_mode.map(|m| format!(" · đều {m}")).unwrap_or_default()
+    );
+    for s in shown_rows {
         let eye = if !focus.is_empty() && s.session_id == focus {
-            "👁 "
+            "👁"
         } else {
             ""
         };
@@ -1873,29 +1909,34 @@ pub fn session_list_text(
         // dòng trên máy này — xem `sessions::folder_from_tail`.
         // Nhãn dự án thay cho tên tự sinh — xem `sessions::display_name`.
         let what = crate::sessions::shown(s);
-        out.push_str(&format!(
-            "{}{} {} · {} · {} · {}\n",
-            eye,
-            source_icon(&s.host),
-            what,
-            s.account,
+        // Thứ tự đọc: ai · làm gì · rồi mới tới hai cái khoá tra cứu (tài khoản,
+        // id) — chúng chỉ được đọc lúc sắp GÕ một lệnh nữa, nên đứng cuối.
+        let meta = session_meta(s, now_ms, one_mode.is_none());
+        // Ghép bằng cách LỌC rồi `join`, không nối chuỗi tay: một cửa sổ
+        // Terminal trần không có tài khoản, và bản nối tay in ra
+        // `💤 đứng chờ ·  · win` — hai dấu chấm ôm khoảng trắng, đúng thứ
+        // "gọn" vừa đi ra để dẹp.
+        let row = [
+            format!("{}{} {}", eye, source_icon(&s.host), what),
             run,
-            short_id(&s.session_id)
+            meta,
+            s.account.clone(),
+            short_id(&s.session_id).to_string(),
+        ];
+        out.push_str(&format!(
+            "{}\n",
+            row.iter()
+                .filter(|p| !p.trim().is_empty())
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" · ")
         ));
-        // Hai dòng phụ, và chúng trả lời hai câu khác nhau: *tình trạng* (còn
-        // gõ tiếp được không, im bao lâu rồi) và *nội dung* (nó vừa nói gì).
-        // Thiếu vế sau thì danh sách chỉ nói phiên nào TỒN TẠI, không nói phiên
-        // nào ĐÁNG mở ra — mà đó mới là việc người ta cầm điện thoại lên để làm.
-        let meta = session_meta(s, now_ms);
-        if !meta.is_empty() {
-            out.push_str(&format!("    {meta}\n"));
-        }
         // Phiên đang hỏi thì CÂU HỎI thay chỗ câu cuối: câu cuối của nó chính là
         // lời dẫn vào câu hỏi, còn thứ người đọc cần là hỏi gì và chọn được gì.
         if let Some(a) = &s.asking {
             let head = if a.header.is_empty() { "" } else { &a.header };
             out.push_str(&format!(
-                "    ⚠ {}{}\n",
+                "⚠ {}{}\n",
                 if head.is_empty() {
                     String::new()
                 } else {
@@ -1904,11 +1945,7 @@ pub fn session_list_text(
                 crate::exec::truncate(&a.question, 120)
             ));
             for (i, o) in a.options.iter().take(9).enumerate() {
-                out.push_str(&format!(
-                    "      {}. {}\n",
-                    i + 1,
-                    crate::exec::truncate(o, 60)
-                ));
+                out.push_str(&format!("  {}. {}\n", i + 1, crate::exec::truncate(o, 60)));
             }
             continue;
         }
@@ -1916,7 +1953,7 @@ pub fn session_list_text(
             let said = said.replace(['\n', '\r'], " ");
             let said = said.trim();
             if !said.is_empty() {
-                out.push_str(&format!("    💬 {}\n", crate::exec::truncate(said, 70)));
+                out.push_str(&format!("💬 {}\n", crate::exec::truncate(said, 74)));
             }
         }
     }
@@ -6168,14 +6205,29 @@ pub fn screen_report(
 ///
 /// `im N phút` chỉ hiện với phiên KHÔNG chạy: với phiên đang chạy, "im" là câu
 /// sai — nhật ký của nó đứng yên suốt một lượt `cargo test` hai phút.
-fn session_meta(s: &crate::sessions::LiveSession, now_ms: i64) -> String {
-    let mode = match s.permission_mode.as_deref() {
+/// Chế độ quyền của một phiên, thành chữ. `""` = phiên không khai chế độ nào
+/// (cửa sổ Terminal trần chẳng hạn — nó không có chế độ, chứ không phải thiếu
+/// dữ liệu).
+fn permission_label(s: &crate::sessions::LiveSession) -> &'static str {
+    match s.permission_mode.as_deref() {
         Some("auto") => "tự duyệt",
         Some("dontAsk") => "không hỏi",
         Some("default") => "hỏi trước",
-        Some(other) => other,
+        Some(_) => "khác",
         None => "",
-    };
+    }
+}
+
+/// `mode_inline` = có in chế độ quyền vào ngay hàng này không.
+///
+/// 🔴 Đo 2026-08-22 trên máy thật: **7/8 phiên cùng `auto`**, nên `· tự duyệt`
+/// in ở gần như mọi hàng và không phân biệt được gì — nó chỉ đẩy phiên cuối
+/// danh sách ra khỏi màn (cùng lý do `quiet_for` không nói "im 0 phút"). Khi cả
+/// danh sách chung một chế độ thì [`session_list_text`] nói MỘT LẦN ở đầu; chỉ
+/// khi các phiên khác nhau chế độ thì con chữ ấy mới mang tin, và lúc ấy nó
+/// quay lại từng hàng.
+fn session_meta(s: &crate::sessions::LiveSession, now_ms: i64, mode_inline: bool) -> String {
+    let mode = if mode_inline { permission_label(s) } else { "" };
     let kid = if s.pending_subagents > 0 {
         format!("{} subagent", s.pending_subagents)
     } else {
@@ -6192,8 +6244,11 @@ fn session_meta(s: &crate::sessions::LiveSession, now_ms: i64) -> String {
     } else {
         0
     };
+    // `%` không cần chú thích: nó đứng cạnh tên phiên và một con số phần trăm
+    // trong danh sách phiên chỉ có thể là ngữ cảnh. Chín ký tự × mỗi hàng là
+    // một phiên bị đẩy khỏi màn điện thoại.
     let ctx = if pct > 0 {
-        format!("ngữ cảnh {pct}%")
+        format!("{pct}%")
     } else {
         String::new()
     };

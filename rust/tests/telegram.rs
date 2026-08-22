@@ -303,13 +303,49 @@ fn each_row_carries_the_same_facts_as_the_card_on_the_page() {
     s.last_activity = Some("2026-08-11T15:18:00+00:00".into());
     s.last_text = Some("Đã sửa xong\nphần redaction, chờ xác nhận".into());
     let text = session_list_text(&[s], "", NOW);
-    assert!(text.contains("ngữ cảnh 46%"), "{text}");
-    assert!(text.contains("tự duyệt"), "chế độ quyền: {text}");
+    // 🔄 ĐỔI CHỮ, KHÔNG BỎ DỮ KIỆN — 2026-08-22, Hà: *"chỉnh lại nội dung lệnh
+    // session cho gọn đi, gom lại thành 1 khối thôi"*. Con số phần trăm đứng
+    // cạnh tên phiên chỉ có thể là ngữ cảnh, nên chín ký tự `ngữ cảnh ` đi ra;
+    // dữ kiện thì ở lại, và bài kiểm ghim luôn nó là MỘT Ô trong hàng (`· 46% ·`)
+    // chứ không phải một con số lạc giữa câu.
+    assert!(text.contains("· 46% ·"), "cỡ ngữ cảnh: {text}");
+    assert!(
+        !text.contains("ngữ cảnh 46%"),
+        "chữ 'ngữ cảnh' quay lại chiếm chỗ: {text}"
+    );
+    // Chế độ quyền vẫn phải NÓI RA, nhưng nói MỘT LẦN ở đầu danh sách thay vì
+    // lặp ở mọi hàng (đo 22/08: 7/8 phiên cùng `auto`). Hàng thì thôi mang nó.
+    let (dau, than) = text.split_once('\n').expect("phải có hàng đầu");
+    assert!(dau.contains("tự duyệt"), "chế độ quyền ở hàng đầu: {dau}");
+    assert!(
+        !than.contains("tự duyệt"),
+        "chế độ quyền vẫn lặp ở từng hàng: {than}"
+    );
     assert!(text.contains("2 subagent"), "{text}");
     assert!(text.contains("im 12 phút"), "{text}");
     assert!(
         text.contains("💬 Đã sửa xong phần redaction"),
         "câu cuối: {text}"
+    );
+    // 🔴 MỘT PHIÊN = MỘT KHỐI. Bản trước tiêu ba dòng cho một phiên (hàng đầu +
+    // hai hàng phụ thụt vào bốn dấu cách); bảy phiên là 22 dòng, và trên màn
+    // 390px thì phiên cuối nằm ngoài tầm nhìn. Ghim cả hai vế, vì bỏ một vế là
+    // để nó mọc lại: KHÔNG quá hai dòng cho một phiên (kể cả dòng tiêu đề), và
+    // KHÔNG dòng nào thụt đầu.
+    // Đếm đúng THÂN của phiên: bỏ hàng đầu (`📋 …`) và dòng chân (`Chưa theo
+    // phiên nào…`) ra, phần còn lại là một phiên và nó không được quá hai dòng.
+    // Đếm cả tin thì con số phụ thuộc hai dòng khung, và bài kiểm sẽ đỏ vì đổi
+    // lời dòng chân chứ không vì bố cục vỡ.
+    let lines: Vec<&str> = text.lines().collect();
+    let body = &lines[1..lines.len() - 1];
+    assert!(
+        body.len() <= 2,
+        "một phiên phải gọn trong 2 dòng, đang {}:\n{text}",
+        body.len()
+    );
+    assert!(
+        !text.lines().any(|l| l.starts_with(' ')),
+        "còn dòng thụt đầu — một phiên lại vỡ thành nhiều khối con: {text}"
     );
     // Xuống dòng trong câu cuối phải bị dẹp: một dòng 💬 vỡ làm ba dòng thì
     // danh sách năm phiên trông như mười lăm.

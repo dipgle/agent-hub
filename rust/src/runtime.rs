@@ -907,12 +907,10 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     let sha = ids
         .stdout
         .lines()
-        .find(|l| l.contains("\"Huba Local Signing\""))
+        .find(|l| l.contains(&format!("\"{SIGNING_CN}\"")))
         .and_then(|l| l.split_whitespace().nth(1))
         .map(str::to_string)
-        .ok_or_else(|| {
-            anyhow::anyhow!("không thấy danh tính ký 'Huba Local Signing' trong keychain")
-        })?;
+        .ok_or_else(|| anyhow::anyhow!("không thấy danh tính ký '{SIGNING_CN}' trong keychain"))?;
     // 3. Chép ra bản TẠM rồi ký ở đó — bản đang chạy không được thấy một tệp
     //    ghi dở, và macOS từ chối ghi đè một image đang chạy.
     let dest = crate::config::expand_home(Path::new(INSTALLED_HUBD));
@@ -1039,6 +1037,31 @@ pub fn restart_daemon() -> anyhow::Result<String> {
 
 /// Đường dẫn bản hubad mà launchd chạy. KHÔNG phải bản `cargo` vừa build.
 const INSTALLED_HUBD: &str = "~/Library/Application Support/hub/bin/hubd";
+
+/// Tên chứng chỉ ký, đúng như nó nằm trong keychain — **`Hub`, không phải
+/// `Huba`**.
+///
+/// 🔴 Lượt đổi tên `hub` → `huba` (2026-08-20) sửa cả những chuỗi đặt tên một
+/// vật thể ĐÃ TỒN TẠI, và chứng chỉ là một trong số đó. Nó không đổi tên theo
+/// được: đổi là sinh một `designated requirement` mới, tức mọi quyền TCC của
+/// `hubad` rụng sạch — đúng thứ chứng chỉ cố định này sinh ra để tránh.
+///
+/// Ngày 21/08 chỗ này được vá **một nửa**: `sign.sh` và `make-signing-cert.sh`
+/// trả về `Hub Local Signing`, còn bản Rust ở đây thì không — mà `/upgrade` đi
+/// đúng đường Rust. Nên `install_update.sh` chạy được, `/upgrade` thì trả
+/// *"không thấy danh tính ký 'Huba Local Signing' trong keychain"*, trong khi
+/// `security find-identity -p codesigning` in ra rõ ràng
+/// `9DE8EC03… "Hub Local Signing" (CSSMERR_TP_NOT_TRUSTED)`. Hà bấm ba lần
+/// (09:31 · 09:33 · 09:33 ngày 22/08) và ba lần nhận cùng một câu.
+///
+/// Bài học không phải "gõ đúng tên" mà là **hai bản chép thì hai bản sẽ lệch**,
+/// và lệch âm thầm vì hai đường đi khác nhau. Hằng số này bị khoá vào chính hai
+/// tệp shell kia bằng `the_signing_name_matches_the_shell_scripts`.
+///
+/// `CSSMERR_TP_NOT_TRUSTED` là ĐÚNG, không phải hỏng: chứng chỉ tự ký và cố ý
+/// không được tin, nên `find-identity -v` (chỉ liệt kê "valid") trả 0 — vì thế
+/// câu lệnh ở trên phải là `-p codesigning` KHÔNG kèm `-v`.
+const SIGNING_CN: &str = "Hub Local Signing";
 
 /// Hai câu hỏi mà thiết kế "cài bản đã ký ra đường riêng" vừa đẻ ra, và cả hai
 /// đều im lặng nếu không ai hỏi:
@@ -1207,6 +1230,51 @@ mod tests {
         // từ chối, chứ không phải thành một dấu ✅ vô điều kiện.
         assert_eq!(otool_body("chỉ một dòng, không có \\n"), "");
         assert_eq!(otool_body(""), "");
+    }
+
+    /// Ba nơi gọi tên MỘT chứng chỉ phải gọi cùng một tên.
+    ///
+    /// 🔴 Bài kiểm này sinh ra từ ca 22/08: `sign.sh` và `make-signing-cert.sh`
+    /// nói `Hub Local Signing`, `runtime.rs` nói `Huba Local Signing`, và không
+    /// có gì đỏ — vì hai bên chạy ở hai đường khác nhau (`install_update.sh` vs
+    /// `/upgrade`). Người dùng là chỗ duy nhất phát hiện ra, sau ba lần bấm.
+    ///
+    /// Nó đọc HAI TỆP KHÁC, không tự soi mình: một bài kiểm quét chính nó tìm
+    /// một cái tên thì luôn tự khớp, và đó là phép đo mù
+    /// (`OPERATING-CHARTER.md` §2d).
+    #[test]
+    fn the_signing_name_matches_the_shell_scripts() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("rust/ phải có thư mục cha là gốc repo")
+            .to_path_buf();
+        // Đọc `CERT_CN="…"` từ một tệp shell. Trả `None` khi không thấy, để
+        // nhánh assert dưới phân biệt được "lệch tên" với "tệp đã đổi hình
+        // dạng" — hai chuyện phải sửa theo hai cách khác nhau.
+        let cn_of = |ten: &str| -> Option<String> {
+            let doc = std::fs::read_to_string(repo.join(ten)).ok()?;
+            doc.lines()
+                .find_map(|l| l.trim().strip_prefix("CERT_CN="))
+                .map(|v| v.trim().trim_matches('"').to_string())
+        };
+        for ten in ["sign.sh", "make-signing-cert.sh"] {
+            let got = cn_of(ten).unwrap_or_else(|| {
+                panic!(
+                    "không đọc được `CERT_CN=` trong {ten} — bài kiểm này mất chỗ đối chiếu, \
+                     nên nó KHÔNG được xanh: sửa phép đọc, đừng bỏ bài kiểm"
+                )
+            });
+            assert!(
+                !got.is_empty(),
+                "{ten} khai `CERT_CN` rỗng — không có gì để đối chiếu"
+            );
+            assert_eq!(
+                got, SIGNING_CN,
+                "{ten} gọi chứng chỉ là {got:?} còn runtime.rs gọi {SIGNING_CN:?}. \
+                 Hai bản chép thì hai bản sẽ lệch, và lệch âm thầm vì `install_update.sh` \
+                 với `/upgrade` đi hai đường khác nhau."
+            );
+        }
     }
 
     /// Cái bẫy mà phép đo này sinh ra để tránh: đếm nhầm một file KHÔNG PHẢI mã

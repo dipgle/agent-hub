@@ -96,6 +96,43 @@ là chuyện `/focus`: huba CÓ soạn câu *"Chưa hiểu lệnh này"* (`pipel
 nhưng `telegram_ack_failed` lúc `03:37:38` — 40 giây sau — nên Hà thấy im lặng.
 Cùng họ `SIGNING_CN`: một luật đã học, áp cho một bản chép mà quên bản kia.
 
+### `23d8577` — trần output không CẮT lệnh, nó GIẾT lệnh
+
+Hà 17:48: *"Lâu lắm rồi không chạy được lệnh"*. `/upgrade` trả *"otool -s __TEXT
+__text hỏng trên …:"*, cụt sau dấu hai chấm.
+
+`otool` chưa bao giờ hỏng. `hubad` 8.255.392 byte ⟹ `otool -s __TEXT __text` in
+**19.059.912 byte** (hex, gấp 2,3 lần), mà `exec.rs` chặn ở 8.388.608 — và chặn
+bằng `out.take(cap).read_to_end()`, tức **thôi đọc** ⟹ đầu đọc của ống đóng ⟹
+lượt `write` của con hỏng. Dựng lại đúng hình dạng ấy trên chính `otool`:
+**exit 1 · stderr RỖNG · 0,07 giây**.
+
+⚠ Tôi đoán sai lần đầu ("kẹt ở write, chết vì hết giờ"); RED-verify bác ngay.
+Nó chết NHANH và IM — khó lần hơn một cái treo. Chú thích đã sửa theo phép đo.
+
+Vá ba lớp: `drain_capped` đọc tới EOF · `RunOut.cut_bytes` + log
+`exec_output_cut` (bản CỤT không được đem so — hai tệp khác nhau cùng cắt ở 8 MB
+đầu ra vân tay giống hệt) · `RunOpts.max_bytes` (text_id khai 64 MB). Câu lỗi
+tách làm ba và IN RA mã trả về.
+
+### `4cc69f2` — một cửa gửi có thử lại, và nhãn phiên lấy tên phiên tự đặt
+
+**`post_retry`**: vòng thử lại vốn chỉ có trong `react()` (từ 14/08), nay là cửa
+chung cho `send_text` · `send_html` · `send_buttons` · `edit_html`, và `react`
+bỏ vòng riêng. Đúng một vòng trong tệp, khoá bằng `tests/one_retry_loop.rs`.
+Cái giá của bản chép thiếu: câu trả lời cho `/focus` chết trên đường đi
+(`telegram_ack_failed` 03:37:38), 5 lần riêng ngày 22/08.
+
+**Làn phiên**: `declared_parts` tách `[dwork/A-DSIGN]` thành dự án `dwork` +
+làn `A-DSIGN`. Cửa "phải là thư mục thật" vẫn đứng, chỉ đứng ở PHẦN ĐẦU. `folder`
+ở lại là thư mục thật (ô màu + `clean_inbox` bám nó), `lane` chỉ để hiện.
+
+📌 **Ba cửa tìm làn KHÔNG phủ hết — số đo, đừng phát hiện lại.** Đuôi 256 KB ·
+sổ nhớ trong tiến trình · đầu 64 KB. Nhật ký `218d3cd4` nặng 8.099.033 byte, hai
+lời khai `[dwork/A-DDOC]` ở byte 2.800.503 và 3.299.843 (**34,6% · 40,7%**, giữa
+tệp) ⟹ không cửa nào với tới, hàng ấy vẫn hiện `[dwork]·Làm ddoc`. Không quét cả
+8 MB: ảnh chụp chạy mỗi vòng, bảy phiên một lượt. Sổ nhớ tự chữa dần.
+
 ### Còn nợ, ghi rõ để đừng ai đọc thành "đã xong"
 
 * **Chưa đo được một thanh tab THẬT đọc hụt ở cửa sổ hẹp.** Lúc vá không cửa sổ

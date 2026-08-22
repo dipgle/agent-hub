@@ -58,6 +58,44 @@ từ hai tệp ấy, không tự soi mình). RED-verify: đặt lại tên sai �
 không được tin, nên `find-identity -v` trả `0 valid identities` — câu lệnh phải
 là `-p codesigning` KHÔNG kèm `-v`. Đừng "sửa" chỗ này.
 
+### `92bebb1` — `/front`, và vì sao `/focus` rơi vào hư không
+
+Hà gõ `/focus` trên điện thoại lúc `03:36:46.760Z`, nhật ký trả
+`telegram_not_a_command` 12 giây sau. Không có route nào tên thế — và đường duy
+nhất để NHÌN một cửa sổ bằng mắt thật là `/anh`, tức trả giá một tấm PNG qua
+Telegram + quyền Screen Recording, chỉ để làm cái việc mà ngồi ở máy là một cú
+click. Đúng "gap" theo phép thử cầu nối.
+
+`keys::bring_to_front` tách ra từ `photograph_window` (MỘT hàm, hai người gọi) +
+`keys::front_window` để chấm bài. Khác `focus_window` ở chỗ quyết định:
+`focus_window` chỉ đặt `frontmost` của một cửa sổ — trả lời *"phím rơi vào đâu"*;
+`/front` phải `activate` cả Terminal — trả lời *"con người có nhìn thấy không"*.
+
+Nghiệm thu THẬT: `7223` đang trước → gọi `7137` → Terminal xác nhận `7137` →
+trả về `7223`. Và phép đo tự chứng minh không mù: gọi `7223` đọc `7223`, gọi
+`7555` đọc `7555` (`tests/front_window_live.rs`).
+
+### 📐 Vì sao "thi thoảng phản hồi rất chậm" — số đo, từ 19/08
+
+Hàng chờ **không** phải thủ phạm: Telegram có luồng long-poll riêng, không đợi
+vòng chạy. Bấm → bắt đầu chạy: **p50 0.00s · p90 0.89s · p99 4.9s** (n=1243),
+chỉ 0.9% chờ ≥5s. (Khoảng cách giữa hai `cycle_done` là p50 **125s** — con số ấy
+KHÔNG phải độ trễ lệnh, đừng đọc nhầm.)
+
+| nguồn chậm | số đo |
+|---|---|
+| `Key` p50 **8.4s** · `Type` 3.5s · `Shot` 2.1s · `Session` 1.0s | giá của việc ĐỌC LẠI màn thay vì tin mã thoát (1200ms `tab_move`, 3×900ms `pick_answer`) |
+| `sessions_snapshot` p50 1.34s nhưng **p99 10.5s · max 21.2s** | gần như toàn bộ ở `terminal_probe` (một lượt `osascript` quét mọi cửa sổ) |
+| `ack_sent_ms` p50 1.0s · p99 12.7s · **max 40.012s** | trần `.timeout(40s)` ở `telegram.rs:1702` — 31 lượt ≥10s |
+| `telegram_ack_failed` **5 lần riêng 22/08** | `error sending request … sendMessage` |
+
+🔴 **Nợ đã có thủ phạm, chưa vá:** `react()` (`telegram.rs:2697`) thử lại 3 lần
+khi lỗi MẠNG — chú thích ngay đó ghi *"một cú trượt mạng đủ để phá cả quy ước"*.
+`send_text()` (`:2793`) thì **không**: một `.send()`, hỏng là mất tin. Đó chính
+là chuyện `/focus`: huba CÓ soạn câu *"Chưa hiểu lệnh này"* (`pipeline.rs:9703`),
+nhưng `telegram_ack_failed` lúc `03:37:38` — 40 giây sau — nên Hà thấy im lặng.
+Cùng họ `SIGNING_CN`: một luật đã học, áp cho một bản chép mà quên bản kia.
+
 ### Còn nợ, ghi rõ để đừng ai đọc thành "đã xong"
 
 * **Chưa đo được một thanh tab THẬT đọc hụt ở cửa sổ hẹp.** Lúc vá không cửa sổ

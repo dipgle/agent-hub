@@ -79,6 +79,20 @@ pub enum CommandKind {
     /// đúng vai: đường phụ, chỉ chạy khi chủ máy gõ, và gửi PNG thật qua
     /// `sendPhoto` chứ không nhồi base64 vào chữ.
     Photo,
+    /// `/front [id]` — đưa cửa sổ Terminal của phiên ấy ra TRƯỚC MẶT. Không
+    /// chụp, không gõ, không gửi phím nào.
+    ///
+    /// 🔴 Hà 2026-08-22, sau khi gõ `/focus` trên điện thoại và không thấy gì:
+    /// *"vậy muốn một phiên nổi lên thì làm thế nào"*. Trước route này câu trả
+    /// lời là *"gõ `/anh`"* — tức muốn nhìn cửa sổ bằng MẮT THẬT thì phải trả
+    /// giá bằng một tấm PNG đi qua Telegram, và phải có quyền Screen Recording.
+    ///
+    /// Đúng phép thử cầu nối trong `CLAUDE.md`: ngồi ở máy thì chỉ cần bấm vào
+    /// cửa sổ. Cái gì làm được ở máy mà điện thoại không làm được là một GAP,
+    /// và gap này đóng bằng đúng một lời gọi AppleScript.
+    ///
+    /// `focus` là một alias có chủ ý — đó là từ chủ máy gõ ra khi cần việc này.
+    Front,
     /// `/key <tên phím>` — một phím điều khiển: up · down · enter · esc · tab ·
     /// space · 1-9. Hộp chọn của `claude` đi bằng mũi tên, gửi chữ "xuống" vào
     /// đó thì nó gõ ra chữ chứ không di chuyển.

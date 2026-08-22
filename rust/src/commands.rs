@@ -98,6 +98,20 @@ pub const ROUTES: &[Route] = &[
         listed: true,
     },
     Route {
+        // 🔴 `focus` là alias, không phải tên chính — nhưng nó là từ chủ máy
+        // thật sự gõ. Đo được: `telegram_command_queued {"head":"/focus"}` lúc
+        // 2026-08-22T03:36:46Z, rồi `telegram_not_a_command` 12 giây sau. Tên
+        // chính để `front` vì nó nói ĐÚNG việc (đưa ra trước mặt), còn alias
+        // nhận lấy cái từ người ta với tay tới.
+        name: "front",
+        aliases: &["focus", "truoc"],
+        kind: CommandKind::Front,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Đưa cửa sổ của phiên ra trước mặt (không chụp, không gõ gì)",
+        listed: true,
+    },
+    Route {
         name: "anh",
         aliases: &["photo", "screenshot"],
         kind: CommandKind::Photo,
@@ -403,6 +417,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// 🔴 Cái từ chủ máy GÕ RA phải dẫn tới đâu đó.
+    ///
+    /// Đo được, không suy: `telegram_command_queued {"head":"/focus"}` lúc
+    /// 2026-08-22T03:36:46Z, rồi `telegram_not_a_command` 12 giây sau. Hà gõ
+    /// `/focus` trên điện thoại vì đó là từ tự nhiên cho việc *"đưa phiên ấy nổi
+    /// lên"*, và huba không có route nào tên thế.
+    ///
+    /// Bài kiểm khoá CẢ HAI tên: `front` (tên chính, nói đúng việc) và `focus`
+    /// (từ người ta với tay tới). Bỏ alias đi là làm đỏ một bài kiểm CÓ CHỦ,
+    /// không phải dọn một dòng thừa.
+    #[test]
+    fn front_and_focus_both_lead_somewhere() {
+        for name in ["front", "focus"] {
+            let r = lookup(name).unwrap_or_else(|| {
+                panic!("`/{name}` không dẫn tới route nào — đúng ca 22/08, xem chú thích")
+            });
+            assert_eq!(r.kind, CommandKind::Front, "`/{name}` phải là route Front");
+            assert_eq!(r.arg, Arg::Rest, "`/{name} [id]` — id được phép rỗng");
+        }
+        // Và nó phải VÀO MENU: một route `listed: false` thì chủ máy không có
+        // cách nào biết nó tồn tại — đúng bài học đã trả giá với `win`
+        // (0 lượt dùng suốt 3 tuần vì vô hình, không vì vô dụng).
+        assert!(
+            lookup("front").is_some_and(|r| r.listed),
+            "`/front` phải nằm trong menu ☰"
+        );
     }
 
     #[test]

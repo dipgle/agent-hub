@@ -1559,16 +1559,52 @@ pub fn frame_is_blank(path: &std::path::Path) -> Option<bool> {
     Some(sum == 0)
 }
 
-pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
-    // Không đưa ra trước được thì vẫn chụp — một tấm ảnh cả màn hình còn hơn
-    // không có gì, và câu trả lời sẽ nói rõ là chưa focus được.
-    let focused = osascript(&format!(
+/// Đưa cửa sổ ấy ra TRƯỚC MẶT — trước cả trong Terminal lẫn trước các ứng dụng
+/// khác.
+///
+/// 🔴 Khác [`focus_window`], và khác ở chỗ quyết định: `focus_window` chỉ đặt
+/// `frontmost` của MỘT CỬA SỔ, tức nó trả lời câu *"phím sắp gửi rơi vào cửa sổ
+/// nào"*. Hàm này trả lời câu KHÁC — *"con người có nhìn thấy cửa sổ ấy không"*
+/// — nên nó phải `activate` chính Terminal: sắp đúng thứ tự trong Terminal mà
+/// Terminal vẫn nằm sau Chrome thì trên màn hình **không có gì xảy ra cả**.
+///
+/// Công thức lấy nguyên từ [`photograph_window`], nơi nó đã chạy thật từ 17/08
+/// (ảnh gửi về Telegram đúng cửa sổ phiên). Không viết lại bằng cách khác:
+/// hôm nay đã trả giá một lần cho việc có hai bản chép của cùng một phép
+/// (`runtime::SIGNING_CN`), nên chỗ này là MỘT hàm, hai người gọi.
+pub fn bring_to_front(window: i64) -> Result<()> {
+    osascript(&format!(
         r#"tell application "Terminal"
   set index of window id {window} to 1
   activate
 end tell"#
-    ))
-    .is_ok();
+    ))?;
+    Ok(())
+}
+
+/// Cửa sổ nào của Terminal đang đứng trước — để KIỂM, không để đoán.
+///
+/// `osascript` trả 0 chỉ chứng minh câu lệnh chạy xong, không chứng minh cửa sổ
+/// đã ra trước (điều 4 của charter: đừng đọc mã thoát của thứ chỉ khởi chạy).
+/// Nên [`bring_to_front`] phải có người chấm bài, và người ấy hỏi lại chính
+/// Terminal.
+///
+/// `None` = Terminal không có cửa sổ nào — một câu trả lời thật, khác hẳn
+/// `Err` (không hỏi được).
+pub fn front_window() -> Result<Option<i64>> {
+    let out = osascript(
+        r#"tell application "Terminal"
+  if (count of windows) is 0 then return ""
+  return id of front window as text
+end tell"#,
+    )?;
+    Ok(out.trim().parse::<i64>().ok())
+}
+
+pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
+    // Không đưa ra trước được thì vẫn chụp — một tấm ảnh cả màn hình còn hơn
+    // không có gì, và câu trả lời sẽ nói rõ là chưa focus được.
+    let focused = bring_to_front(window).is_ok();
     if focused {
         std::thread::sleep(std::time::Duration::from_millis(700));
     }

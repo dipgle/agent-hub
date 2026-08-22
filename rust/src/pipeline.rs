@@ -7455,6 +7455,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             | CommandKind::Key
             | CommandKind::Shot
             | CommandKind::Photo
+            | CommandKind::Front
             | CommandKind::Clean
             | CommandKind::Tab
             | CommandKind::Pick => {
@@ -7623,6 +7624,78 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         "⚠ không dọn được hàng chờ: {}",
                                         crate::exec::truncate(&e.to_string(), 200)
                                     ),
+                                }
+                            } else if matches!(cmd.kind, CommandKind::Front) {
+                                // 🔴 `/front` — chỉ ĐƯA RA TRƯỚC MẶT. Không
+                                // chụp, không gõ, không gửi phím nào.
+                                //
+                                // Hà 2026-08-22: *"vậy muốn một phiên nổi lên
+                                // thì làm thế nào"*, sau khi gõ `/focus` và
+                                // không thấy gì. Trước route này đường duy nhất
+                                // là `/anh` — tức phải trả giá một tấm PNG qua
+                                // Telegram và cần quyền Screen Recording, chỉ để
+                                // làm cái việc mà ngồi ở máy là một cú click.
+                                //
+                                // KHÔNG tin mã thoát của `osascript`: nó trả 0
+                                // khi câu lệnh chạy xong, không khi cửa sổ đã ra
+                                // trước. Hỏi lại chính Terminal xem ai đang
+                                // đứng trước, rồi mới nói.
+                                match crate::keys::bring_to_front(w) {
+                                    Ok(()) => {
+                                        // TUI + WindowServer cần một nhịp mới
+                                        // sắp xong; đọc ngay là đọc thứ tự cũ
+                                        // rồi báo hỏng cho một lượt ĐÚNG.
+                                        std::thread::sleep(
+                                            std::time::Duration::from_millis(400),
+                                        );
+                                        let front = crate::keys::front_window();
+                                        logging::info(
+                                            "front_window_raised",
+                                            json!({ "session": s.session_id, "window": w,
+                                                    "front": front.as_ref().ok().and_then(|f| *f) }),
+                                        );
+                                        match front {
+                                            Ok(Some(f)) if f == w => format!(
+                                                "🪟 {} đã ra trước mặt.",
+                                                crate::sessions::shown(&s)
+                                            ),
+                                            // Đổi rồi mà không phải cửa sổ mình
+                                            // xin ⟹ nói ra, đừng gắn dấu ✅ lên
+                                            // một việc chưa chắc.
+                                            Ok(Some(f)) => format!(
+                                                "⚠ đã gọi cửa sổ của {} ra trước, nhưng Terminal nói \
+                                                 cửa sổ đang đứng trước là {f} chứ không phải {w}. \
+                                                 Có thể một hộp thoại của macOS đang đè lên.",
+                                                crate::sessions::shown(&s)
+                                            ),
+                                            Ok(None) => format!(
+                                                "⚠ đã gọi cửa sổ của {} ra trước, nhưng Terminal báo \
+                                                 KHÔNG có cửa sổ nào — nên tôi chưa xác nhận được.",
+                                                crate::sessions::shown(&s)
+                                            ),
+                                            // Hỏi lại không được thì việc kia
+                                            // vẫn có thể đã xong — nói đúng thế,
+                                            // không nói "hỏng".
+                                            Err(e) => format!(
+                                                "🪟 đã gọi cửa sổ của {} ra trước, nhưng KHÔNG kiểm lại được ({}) \
+                                                 — nhìn màn hình giúp tôi.",
+                                                crate::sessions::shown(&s),
+                                                crate::exec::truncate(&e.to_string(), 120)
+                                            ),
+                                        }
+                                    }
+                                    Err(e) => {
+                                        logging::warn(
+                                            "front_window_failed",
+                                            json!({ "session": s.session_id, "window": w,
+                                                    "err": crate::logging::err_chain(&e) }),
+                                        );
+                                        format!(
+                                            "⚠ không đưa được cửa sổ của {} ra trước: {}",
+                                            crate::sessions::shown(&s),
+                                            crate::exec::truncate(&e.to_string(), 200)
+                                        )
+                                    }
                                 }
                             } else if matches!(cmd.kind, CommandKind::Shot | CommandKind::Tab) {
                                 // Nút "gửi nhanh" chỉ dựng được khi biết màn có

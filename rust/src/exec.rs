@@ -17,6 +17,12 @@ pub struct RunOut {
     pub stderr: String,
     pub timed_out: bool,
     pub ms: u128,
+    /// Bao nhiêu byte output bị VỨT vì quá trần. `0` = giữ trọn.
+    ///
+    /// 🔴 Nó phải đi ra ngoài, không được nằm im trong log: chỗ gọi nào so hai
+    /// bản output với nhau (`runtime::text_id`) thì một bản bị cắt là một câu
+    /// trả lời SAI, không phải một câu trả lời ngắn.
+    pub cut_bytes: u64,
 }
 
 impl RunOut {
@@ -45,10 +51,64 @@ pub struct RunOpts<'a> {
     ///
     /// Không dùng thì để `None`: đường cũ không đổi một chữ.
     pub pid_out: Option<mpsc::Sender<u32>>,
+    /// Trần output RIÊNG cho lời gọi này. `None` = dùng `MAX_BYTES` (8 MB).
+    ///
+    /// Có mặt vì một lệnh CÓ THỂ in nhiều hơn thế một cách hợp lệ:
+    /// `otool -s __TEXT __text` trên `hubad` in 19 MB. Trần chung giữ nguyên —
+    /// nó gác những lệnh in bừa; chỗ nào biết mình xin một biển chữ thì khai ra.
+    pub max_bytes: Option<usize>,
 }
 
 const POLL: Duration = Duration::from_millis(50);
 const MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// Đọc HẾT ống, giữ lại nhiều nhất `cap` byte, đếm phần đã vứt.
+///
+/// 🔴 Bản trước là `out.take(cap).read_to_end(&mut buf)` — và `take` không cắt
+/// output, nó **thôi đọc**. Luồng đọc kết thúc, `ChildStdout` rời tầm, đầu đọc
+/// của ống ĐÓNG — và lượt `write` tiếp theo của tiến trình con hỏng. Nên một
+/// cái trần trông như "giữ 8 MB đầu" thật ra là **"giết mọi lệnh in nhiều hơn
+/// 8 MB"**.
+///
+/// Đã trả giá thật, và trả lâu (Hà 2026-08-22: *"Lâu lắm rồi không chạy được
+/// lệnh"*): `runtime::text_id` chạy `otool -s __TEXT __text` trên `hubad`, mà
+/// output ấy **19.015.353 byte** cho một binary 8.238.928 byte — bản kết xuất
+/// hex to gấp 2,3 lần.
+///
+/// Đo lại đúng hình dạng cũ trên chính `otool` ấy (đọc 8 MB rồi đóng đầu đọc):
+/// **exit 1 · stderr RỖNG · 0,07 giây**. Ba con số ấy giải thích trọn câu Hà
+/// nhận — *"otool -s __TEXT __text hỏng trên …:"*, cụt ngay sau dấu hai chấm,
+/// vì `stderr` chẳng có gì để in. Một câu đổ oan cho `otool`, về một lệnh chưa
+/// bao giờ hỏng; và nó chặn MỌI bản vá của huba, vì `self_install` dừng ở đó.
+///
+/// ⚠ Không phải "treo tới hết giờ" — tôi đã đoán thế lúc đầu và phép đo bác
+/// ngay. Nó chết NHANH và IM, thứ khó lần hơn một cái treo.
+///
+/// Hai điều hàm này giữ: **luôn đọc tới EOF** (đầu đọc không bao giờ đóng sớm,
+/// nên tiến trình con luôn được viết cho hết), và **đếm phần vứt đi** để chỗ
+/// gọi biết mình đang cầm một bản cụt. Cắt mà im thì phép so hai output biến
+/// thành phép so hai đoạn đầu.
+fn drain_capped(mut r: impl Read, cap: usize) -> (String, u64) {
+    let mut kept: Vec<u8> = Vec::new();
+    let mut cut: u64 = 0;
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        match r.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                let room = cap.saturating_sub(kept.len());
+                if room > 0 {
+                    kept.extend_from_slice(&chunk[..n.min(room)]);
+                }
+                cut += (n.saturating_sub(room)) as u64;
+            }
+            // Đọc hỏng thì dừng — nhưng KHÔNG im: phần chưa đọc tính là đã vứt,
+            // nên chỗ gọi vẫn thấy bản này không trọn.
+            Err(_) => break,
+        }
+    }
+    (String::from_utf8_lossy(&kept).to_string(), cut)
+}
 
 /// Hạng của một lời gọi: **có người đang chờ nó**, hay nó là việc vặt chạy nền.
 ///
@@ -245,25 +305,22 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
         drop(child.stdin.take());
     }
 
-    let (tx_out, rx_out) = mpsc::channel::<String>();
-    let (tx_err, rx_err) = mpsc::channel::<String>();
+    let (tx_out, rx_out) = mpsc::channel::<(String, u64)>();
+    let (tx_err, rx_err) = mpsc::channel::<(String, u64)>();
 
     // Reader threads: a read error (or a send onto a dropped receiver after the
     // grace period) can only mean truncated capture, and the caller sees that
     // as an unparseable/short output plus the process exit code — never as a
     // silent success.
+    let cap = opts.max_bytes.unwrap_or(MAX_BYTES);
     if let Some(out) = child.stdout.take() {
         thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = out.take(MAX_BYTES as u64).read_to_end(&mut buf);
-            let _ = tx_out.send(String::from_utf8_lossy(&buf).to_string());
+            let _ = tx_out.send(drain_capped(out, cap));
         });
     }
     if let Some(err) = child.stderr.take() {
         thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = err.take(MAX_BYTES as u64).read_to_end(&mut buf);
-            let _ = tx_err.send(String::from_utf8_lossy(&buf).to_string());
+            let _ = tx_err.send(drain_capped(err, cap));
         });
     }
 
@@ -291,6 +348,7 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
                     stderr: format!("wait failed: {e}"),
                     timed_out: false,
                     ms: started.elapsed().as_millis(),
+                    cut_bytes: 0,
                 })
             }
         }
@@ -298,8 +356,17 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
 
     // Readers finish once the pipes close (kill closes them too).
     let grace = Duration::from_secs(5);
-    let stdout = rx_out.recv_timeout(grace).unwrap_or_default();
-    let stderr = rx_err.recv_timeout(grace).unwrap_or_default();
+    let (stdout, cut_out) = rx_out.recv_timeout(grace).unwrap_or_default();
+    let (stderr, cut_err) = rx_err.recv_timeout(grace).unwrap_or_default();
+    let cut_bytes = cut_out + cut_err;
+    if cut_bytes > 0 {
+        // Cắt mà im là biến một bản đọc cụt thành một bản đọc trông như đủ.
+        crate::logging::warn(
+            "exec_output_cut",
+            serde_json::json!({ "prog": cmd, "cap": cap, "cut_bytes": cut_bytes,
+                                "effect": "chỗ gọi đang cầm bản CỤT — mọi phép so trên nó đều sai" }),
+        );
+    }
 
     Ok(RunOut {
         code: status.and_then(|s| s.code()),
@@ -307,6 +374,7 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
         stderr,
         timed_out,
         ms: started.elapsed().as_millis(),
+        cut_bytes,
     })
 }
 

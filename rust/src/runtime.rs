@@ -816,14 +816,48 @@ fn text_id(bin: &Path) -> anyhow::Result<String> {
             &["-s", "__TEXT", sect, &bin.display().to_string()],
             RunOpts {
                 timeout: Some(Duration::from_secs(60)),
+                // 🔴 `otool -s` in ra bản kết xuất HEX, to gấp ~2,3 lần chính
+                // cái binary: đo 22/08 trên `hubad` 8.238.928 byte ⟹
+                // **19.015.353 byte**. Trần chung 8 MB không phải là "giữ 8 MB
+                // đầu" mà là "treo lệnh" (xem `exec::drain_capped`), nên chỗ
+                // này phải khai thẳng nó xin một biển chữ.
+                //
+                // 64 MB: gấp ~3,4 lần chỗ đang cần, tức còn chỗ cho binary lớn
+                // gấp ba. Không bỏ trần hẳn — một `otool` chạy vào tệp sai vẫn
+                // phải dừng ở đâu đó thay vì nuốt hết RAM.
+                max_bytes: Some(64 * 1024 * 1024),
                 ..Default::default()
             },
         )?;
+        // 🔴 BA KIỂU HỎNG, BA CÂU KHÁC NHAU. Bản trước gộp cả ba vào một câu
+        // *"otool … hỏng"* — và khi thủ phạm là hết giờ thì `stderr` RỖNG, nên
+        // câu ấy đọc lên thành "otool hỏng" về một lệnh chưa bao giờ hỏng. Hà
+        // nhận đúng câu ấy nhiều lần, suốt nhiều ngày, và nó chặn mọi bản vá
+        // của huba: *"Lâu lắm rồi không chạy được lệnh"*.
+        if r.timed_out {
+            anyhow::bail!(
+                "otool -s __TEXT {sect} KHÔNG XONG trong 60 giây trên {} — \
+                 không phải otool hỏng. Nhìn log `exec_output_cut` xem output có bị chặn không.",
+                bin.display()
+            );
+        }
         if !r.ok() {
             anyhow::bail!(
-                "otool -s __TEXT {sect} hỏng trên {}: {}",
+                "otool -s __TEXT {sect} trả mã {} trên {}: {}",
+                r.code.map(|c| c.to_string()).unwrap_or_else(|| "?".into()),
                 bin.display(),
                 crate::exec::truncate(r.stderr.trim(), 120)
+            );
+        }
+        // Bản CỤT không được đem đi so: hai tệp khác nhau mà cùng bị cắt ở
+        // 8 MB đầu thì vân tay giống hệt nhau, và cổng "bản cài có đúng mã
+        // này không" biến thành một dấu ✅ vô điều kiện.
+        if r.cut_bytes > 0 {
+            anyhow::bail!(
+                "output của otool -s __TEXT {sect} trên {} bị cắt mất {} byte — \
+                 vân tay dựng từ bản cụt thì hai tệp khác nhau vẫn khớp nhau. Nới `max_bytes`.",
+                bin.display(),
+                r.cut_bytes
             );
         }
         out.push_str(otool_body(&r.stdout));

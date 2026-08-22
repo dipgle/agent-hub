@@ -122,7 +122,11 @@ fn a_narrow_window_cuts_the_tab_bar() {
     let (lay, doi) = huba::keys::wider_table(t_hep.clone(), t_rong.clone());
     println!(
         "=> nới {} · chốt lại {} tab",
-        if doi { "LẤY LẠI ĐƯỢC tab" } else { "không thêm gì" },
+        if doi {
+            "LẤY LẠI ĐƯỢC tab"
+        } else {
+            "không thêm gì"
+        },
         dem(&lay)
     );
     if dem(&t_hep) == 0 && dem(&t_rong) == 0 {

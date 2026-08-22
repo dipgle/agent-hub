@@ -157,3 +157,84 @@ fn the_census_may_not_overwrite_a_declared_label() {
         "phép đếm đã lật cái nhãn phiên tự khai — đúng lỗi 18/08"
     );
 }
+
+/// 🔴 `[dwork/A-DSIGN]` — dự án THẬT kèm một LÀN không phải thư mục.
+///
+/// Hà 2026-08-22, ảnh chụp một tin có cả hai cái tên trong đúng một khung: huba
+/// viết `[dwork]·Quét GitHub làm design`, phiên tự xưng `[dwork/A-DSIGN]` —
+/// *"Sao cái tên phiên ở trên không làm giống ở dưới vừa gọn vừa dễ hiểu"*.
+///
+/// Cửa cũ đòi CẢ chuỗi phải là thư mục có thật, nên lời khai bị loại và
+/// `label_sessions` phải tự dựng lại phần phân biệt bằng tên việc cắt ở 34 ký
+/// tự. Cửa mới đứng ở phần ĐẦU; phần sau là chuyện nội bộ của dự án ấy.
+#[test]
+fn a_declared_lane_keeps_the_project_and_carries_the_lane() {
+    let ws = workspace();
+    let p = std::path::Path::new(&ws);
+    // Điều kiện của bài kiểm, KHAI RA thay vì giả định — hai đường này quyết
+    // định câu trả lời, nên sai một cái là bài kiểm đo nhầm thứ khác.
+    assert!(p.join("dwork").is_dir(), "cần {ws}/dwork là thư mục thật");
+    assert!(
+        !p.join("dwork/A-DSIGN").is_dir(),
+        "ca này chỉ có nghĩa khi làn KHÔNG phải thư mục"
+    );
+
+    assert_eq!(
+        huba::sessions::declared_parts("[dwork/A-DSIGN] đã đóng", &ws),
+        Some(("dwork".to_string(), "A-DSIGN".to_string()))
+    );
+    // Nhãn DỰ ÁN không đổi một chữ: ô màu băm từ nó, `clean_inbox` ghép đường
+    // dẫn từ nó, và cả hai phải tiếp tục trỏ vào thư mục thật.
+    assert_eq!(
+        huba::sessions::declared_label("[dwork/A-DSIGN] đã đóng", &ws).as_deref(),
+        Some("dwork")
+    );
+    // Không khai làn ⟹ làn rỗng, đường cũ nguyên vẹn.
+    assert_eq!(
+        huba::sessions::declared_parts("[huba] ok", &ws),
+        Some(("huba".to_string(), String::new()))
+    );
+    // Cửa vẫn đứng: đầu không phải dự án thì từ chối CẢ cụm, không nhận bừa
+    // phần đuôi.
+    assert_eq!(
+        huba::sessions::declared_parts("[khong-co-du-an-nao-ten-nay/LANE] ok", &ws),
+        None
+    );
+    // Gạch chéo cụt: `Path::join` nuốt nó im lặng, nên phải chặn tay — nếu
+    // không thì nhãn in ra `[dwork/]`.
+    assert_eq!(
+        huba::sessions::declared_parts("[dwork/] ok", &ws),
+        Some(("dwork".to_string(), String::new()))
+    );
+}
+
+/// Ba phiên cùng dự án, ba làn tự khai ⟹ ba nhãn khác nhau, và KHÔNG cái nào
+/// phải mượn tên việc để phân biệt.
+#[test]
+fn declared_lanes_replace_the_borrowed_task_title() {
+    let ws = workspace();
+    let root = std::path::Path::new(&ws);
+    let mut rows: Vec<huba::sessions::LiveSession> = ["A-DSIGN", "A-DDOC", ""]
+        .iter()
+        .enumerate()
+        .map(|(i, lane)| {
+            let mut s = huba::sessions::LiveSession {
+                session_id: format!("{i}{i}{i}{i}{i}{i}{i}{i}-0000-0000-0000-000000000000"),
+                ..Default::default()
+            };
+            s.folder = "dwork".into();
+            s.lane = (*lane).to_string();
+            // Tên việc DÀI và khác nhau: nếu bản vá không chạy thì nhãn sẽ mọc
+            // ra đúng những chuỗi này, nên bài kiểm phân biệt được hai đường.
+            s.doing = format!("Quét GitHub làm design lượt {i}");
+            s
+        })
+        .collect();
+    huba::sessions::label_sessions(&mut rows, root);
+    let nhan: Vec<String> = rows.iter().map(|s| s.label.clone()).collect();
+    assert_eq!(nhan, vec!["[dwork/A-DSIGN]", "[dwork/A-DDOC]", "[dwork]"]);
+    assert!(
+        !nhan.iter().any(|l| l.contains('·')),
+        "làn đã phân biệt được rồi thì đừng mượn tên việc nữa: {nhan:?}"
+    );
+}

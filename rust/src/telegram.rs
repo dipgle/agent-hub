@@ -2580,7 +2580,6 @@ impl Inbox {
         // Một tin khác đi ra ⟹ câu xác nhận đang mở thôi là tin cuối.
         // `send_ack` ghi lại sổ NGAY SAU khi gửi, nên đường ấy không mất gì.
         self.forget_ack_live();
-        let client = self.client().ok_or("không dựng được HTTP client")?;
         let mut body = json!({
             "chat_id": self.chat_id,
             "text": html,
@@ -2593,12 +2592,7 @@ impl Inbox {
         if !buttons.is_empty() {
             body["reply_markup"] = json!({ "inline_keyboard": Self::keyboard_rows(buttons) });
         }
-        let r = client
-            .post(self.api("sendMessage"))
-            .json(&body)
-            .send()
-            .map_err(|e| e.to_string())?;
-        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        let v = self.post_retry("sendMessage", &body)?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg, &v);
             let sent = Sent::read(&v);
@@ -2637,7 +2631,6 @@ impl Inbox {
         html: &str,
         buttons: &[(String, String)],
     ) -> Result<Sent, String> {
-        let client = self.client().ok_or("không dựng được HTTP client")?;
         let mut body = json!({
             "chat_id": self.chat_id,
             "message_id": message_id,
@@ -2648,12 +2641,7 @@ impl Inbox {
         if !buttons.is_empty() {
             body["reply_markup"] = json!({ "inline_keyboard": Self::keyboard_rows(buttons) });
         }
-        let r = client
-            .post(self.api("editMessageText"))
-            .json(&body)
-            .send()
-            .map_err(|e| e.to_string())?;
-        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        let v = self.post_retry("editMessageText", &body)?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             logging::info(
                 "telegram_message_edited",
@@ -2679,50 +2667,66 @@ impl Inbox {
     /// nên chỗ gọi phải chọn từ bảng ấy. `Err` mang nguyên câu Telegram trả
     /// lời: chỗ gọi cần phân biệt "phiên bản Telegram không cho thả" với "emoji
     /// sai", và cả hai đều phải rơi về một câu chữ chứ không được im.
-    pub fn react(&self, message_id: i64, emoji: &str) -> Result<(), String> {
+    /// Gửi một lượt POST tới Telegram, và THỬ LẠI khi lỗi MẠNG.
+    ///
+    /// 🔴 MỘT vòng thử lại cho CẢ tệp — 2026-08-22. Vòng này vốn nằm trong
+    /// `react()` từ 14/08, kèm đúng lý do của nó (*"một cú trượt mạng đủ để phá
+    /// cả quy ước chủ máy vừa đặt ra"*), và **không ai chép nó sang `send_text`**.
+    /// Cái giá đo được: Hà gõ `/focus` lúc `03:36:46.760Z`; huba soạn đúng câu
+    /// *"Chưa hiểu lệnh này — gõ /help"* (`pipeline.rs`), rồi
+    ///
+    /// ```text
+    /// 03:37:38.288Z  telegram_ack_failed
+    ///   err="error sending request for url (…/sendMessage)"
+    /// ```
+    ///
+    /// Câu trả lời chết trên đường đi, Hà thấy IM LẶNG, và đi hỏi tay. Riêng
+    /// ngày 22/08 có **5 lần** như thế. Cùng họ với `runtime::SIGNING_CN` sáng
+    /// nay: một luật đã học, áp cho một bản chép mà quên bản kia — nên lần này
+    /// luật ở đúng MỘT chỗ, và mọi đường gửi đi qua nó.
+    ///
+    /// Chỉ thử lại lỗi GỬI. Telegram TRẢ LỜI mà từ chối — emoji sai bảng, tin
+    /// quá cũ, chữ quá dài — thì thử mười lần cũng cùng một câu, và câu ấy là
+    /// câu cuối cùng: trả về ngay để chỗ gọi rơi về đường lùi của nó.
+    fn post_retry(&self, method: &str, body: &Value) -> Result<Value, String> {
         let client = self.client().ok_or("không dựng được HTTP client")?;
-        // 🔴 THỬ LẠI, đừng bỏ cuộc ở cú trượt đầu. Hà 2026-08-14: *"Đã gửi vào
-        // phiên thành công thì LUÔN cập nhật lại emoji like"* — sau khi thấy
-        // một tin trả lời bằng chữ thay vì dấu.
-        //
-        // Đo đúng ca ấy (11:34:57): `error sending request for url …` — mạng
-        // chập một nhịp, không phải Telegram từ chối. Bản đầu coi mọi `Err` như
-        // nhau và rơi thẳng về chữ, tức một cú trượt mạng đủ để phá cả quy ước
-        // mà chủ máy vừa đặt ra.
-        //
-        // Chỉ thử lại lỗi GỬI (mạng). Telegram trả lời mà từ chối — emoji sai
-        // bảng, tin quá cũ để thả — thì thử lại mười lần cũng cùng một câu, và
-        // lúc ấy rơi về chữ mới là đúng.
         let mut last = String::new();
         for attempt in 0..3 {
             if attempt > 0 {
                 std::thread::sleep(Duration::from_millis(400 * attempt as u64));
             }
-            let sent = client
-                .post(self.api("setMessageReaction"))
-                .json(&json!({
-                    "chat_id": self.chat_id,
-                    "message_id": message_id,
-                    "reaction": [{ "type": "emoji", "emoji": emoji }],
-                }))
-                .send();
-            match sent {
-                Ok(r) => {
-                    let v: Value = r.json().unwrap_or_else(|_| json!({}));
-                    if v.get("ok").and_then(Value::as_bool) == Some(true) {
-                        return Ok(());
-                    }
-                    // Telegram đã trả lời: đây là câu trả lời cuối cùng.
-                    return Err(v
-                        .get("description")
-                        .and_then(Value::as_str)
-                        .unwrap_or("Telegram từ chối setMessageReaction")
-                        .to_string());
-                }
+            match client.post(self.api(method)).json(body).send() {
+                Ok(r) => return Ok(r.json().unwrap_or_else(|_| json!({}))),
                 Err(e) => last = logging::redact(&e.to_string()),
             }
         }
+        // Bỏ cuộc thì phải NÓI, và nói ở tầng biết mình vừa thử mấy lần — chỗ
+        // gọi chỉ thấy một `Err` giống hệt một cú trượt đầu tiên.
+        logging::warn(
+            "telegram_send_gave_up",
+            json!({ "method": method, "attempts": 3, "err": last,
+                    "effect": "tin này KHÔNG tới điện thoại — chủ máy thấy im lặng" }),
+        );
         Err(last)
+    }
+
+    pub fn react(&self, message_id: i64, emoji: &str) -> Result<(), String> {
+        let v = self.post_retry(
+            "setMessageReaction",
+            &json!({
+                "chat_id": self.chat_id,
+                "message_id": message_id,
+                "reaction": [{ "type": "emoji", "emoji": emoji }],
+            }),
+        )?;
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+        Err(v
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("Telegram từ chối setMessageReaction")
+            .to_string())
     }
 
     /// Câu xác nhận đang mở, nếu có — để bài kiểm đọc được sổ mà không phải
@@ -2792,13 +2796,10 @@ impl Inbox {
     /// Gửi một câu ra Telegram. `Err` chứ không nuốt — chỗ gọi phải log.
     pub fn send_text(&self, text: &str) -> Result<(), String> {
         self.forget_ack_live();
-        let client = self.client().ok_or("không dựng được HTTP client")?;
-        let r = client
-            .post(self.api("sendMessage"))
-            .json(&json!({ "chat_id": self.chat_id, "text": strip_markdown(text) }))
-            .send()
-            .map_err(|e| e.to_string())?;
-        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        let v = self.post_retry(
+            "sendMessage",
+            &json!({ "chat_id": self.chat_id, "text": strip_markdown(text) }),
+        )?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg, &v);
             Ok(())
@@ -2906,18 +2907,15 @@ impl Inbox {
             return self.send_text(text);
         }
         self.forget_ack_live();
-        let client = self.client().ok_or("không dựng được HTTP client")?;
         let keyboard = Self::keyboard_rows(buttons);
-        let r = client
-            .post(self.api("sendMessage"))
-            .json(&json!({
+        let v = self.post_retry(
+            "sendMessage",
+            &json!({
                 "chat_id": self.chat_id,
                 "text": strip_markdown(text),
                 "reply_markup": { "inline_keyboard": keyboard },
-            }))
-            .send()
-            .map_err(|e| e.to_string())?;
-        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+            }),
+        )?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg, &v);
             // Ghi SỐ NÚT đã gửi. "Gửi được tin" và "tin ấy có nút bấm" là hai

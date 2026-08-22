@@ -62,6 +62,13 @@ pub struct LiveSession {
     /// mình có trùng ai không.
     #[serde(default)]
     pub label: String,
+    /// LÀN việc phiên tự khai — `A-DSIGN` trong `[dwork/A-DSIGN]`. `""` = không khai.
+    ///
+    /// Đứng RIÊNG khỏi `folder` vì hai nửa đi hai đường: `folder` phải là thư
+    /// mục THẬT (ô màu dự án băm từ nó, `clean_inbox` ghép đường dẫn từ nó),
+    /// còn làn chỉ để HIỆN. Xem [`declared_parts`].
+    #[serde(default)]
+    pub lane: String,
     pub cwd: String,
     /// Câu hỏi phiên đang CHỜ TRẢ LỜI, nếu có — xem [`pending_question`].
     ///
@@ -437,22 +444,45 @@ pub fn transcript_error(tail: &str) -> Option<String> {
 /// 🔴 Hạng là thứ vá nửa sau của lỗi 18/08. Một lời khai có thể trôi ra khỏi cửa
 /// sổ đọc 256 KB sau một quãng dài chỉ gọi công cụ; lúc ấy phép đếm quay lại một
 /// mình, và nếu nó được phép đè lên cái đã khai thì nhãn vẫn lật, chỉ chậm hơn.
-static FOLDER_MEMO: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (String, bool)>>> =
-    std::sync::OnceLock::new();
+/// Ba thứ nhớ cho MỘT phiên: dự án · làn · lời khai hay chỉ đếm được.
+///
+/// Đặt tên thay vì gõ lại cái tuple ba tầng ở bốn chỗ — và cái tên nói ra thứ
+/// tự, thứ mà `(String, String, bool)` không nói.
+type FolderMemo = HashMap<String, (String, String, bool)>;
 
-fn folder_memo() -> &'static std::sync::Mutex<HashMap<String, (String, bool)>> {
+static FOLDER_MEMO: std::sync::OnceLock<std::sync::Mutex<FolderMemo>> = std::sync::OnceLock::new();
+
+fn folder_memo() -> &'static std::sync::Mutex<FolderMemo> {
     FOLDER_MEMO.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
 /// Ghi nhớ dự án của một phiên, KÈM hạng của nguồn — xem [`FOLDER_MEMO`].
 /// Rỗng thì KHÔNG ghi đè cái đã biết.
-fn remember_folder_ranked(session_id: &str, folder: &str, declared: bool) {
+fn remember_folder_ranked(session_id: &str, folder: &str, lane: &str, declared: bool) {
     if folder.trim().is_empty() {
         return;
     }
     if let Ok(mut m) = folder_memo().lock() {
-        m.insert(session_id.to_string(), (folder.to_string(), declared));
+        m.insert(
+            session_id.to_string(),
+            (folder.to_string(), lane.to_string(), declared),
+        );
     }
+}
+
+/// LÀN đã nhớ của phiên này — `""` nếu chưa từng khai làn nào.
+///
+/// 🔴 Phải nhớ CÙNG chỗ với nhãn dự án, không đọc tươi mỗi lượt. Đo 22/08 ngay
+/// sau bản vá đầu: `ef145c0c` hiện `[dwork/A-DSIGN]` còn `218d3cd4` vẫn hiện
+/// `[dwork]·Làm ddoc` — cả hai đều CÓ khai làn, chỉ khác ở chỗ lời khai của
+/// phiên sau đã trôi ra khỏi cửa sổ 256 KB của đuôi nhật ký. Một cái nhãn lúc
+/// có lúc không thì khó đọc hơn cả cái nhãn xấu đều đều.
+fn recall_lane(session_id: &str) -> String {
+    folder_memo()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(session_id).map(|(_, l, _)| l.clone()))
+        .unwrap_or_default()
 }
 
 /// Dự án đã nhớ của phiên này, nếu từng đo được lần nào.
@@ -460,7 +490,7 @@ fn recall_folder(session_id: &str) -> Option<String> {
     folder_memo()
         .lock()
         .ok()
-        .and_then(|m| m.get(session_id).map(|(f, _)| f.clone()))
+        .and_then(|m| m.get(session_id).map(|(f, _, _)| f.clone()))
         .filter(|f| !f.trim().is_empty())
 }
 
@@ -470,8 +500,8 @@ fn recall_declared(session_id: &str) -> Option<String> {
         .lock()
         .ok()
         .and_then(|m| m.get(session_id).cloned())
-        .filter(|(f, declared)| *declared && !f.trim().is_empty())
-        .map(|(f, _)| f)
+        .filter(|(f, _, declared)| *declared && !f.trim().is_empty())
+        .map(|(f, _, _)| f)
 }
 
 pub fn display_name(name: &str, folder: &str) -> String {
@@ -576,14 +606,26 @@ fn strip_drawer(root: &Path, label: &str) -> String {
 /// KHÔNG làm hết cả lớp: đo cùng lúc, `projects-fd` và `merge xem init-project`
 /// đều mang `AI/codetrail`.
 pub fn label_sessions(rows: &mut [LiveSession], root: &Path) {
+    // 🔴 LÀN PHIÊN TỰ KHAI ĐỨNG TRONG NGOẶC, không phải tên việc đứng sau dấu
+    // `·` — Hà 2026-08-22, ảnh chụp một tin có cả hai cái tên trong một khung:
+    // huba viết `[dwork]·Quét GitHub làm design`, phiên tự xưng
+    // `[dwork/A-DSIGN]`, và *"Sao cái tên phiên ở trên không làm giống ở dưới
+    // vừa gọn vừa dễ hiểu"*.
+    //
+    // Ba phiên `dwork` sống cùng lúc lúc ấy tự xưng `dwork/A-DSIGN` ·
+    // `dwork/A-DDOC` · `dwork` — ngắn hơn, do chính chúng đặt, và **đã phân
+    // biệt sẵn**. Nhãn tự khai vào thẳng đây thì khúc `·<việc>` bên dưới
+    // thường không còn phải chạy: `same_base` rỗng.
     let base: Vec<String> = rows
         .iter()
         .map(|s| {
             let f = s.folder.trim_matches('/');
             if f.is_empty() {
                 s.name.clone()
-            } else {
+            } else if s.lane.is_empty() {
                 format!("[{}]", strip_drawer(root, f))
+            } else {
+                format!("[{}/{}]", strip_drawer(root, f), s.lane)
             }
         })
         .collect();
@@ -1371,6 +1413,75 @@ fn open_drawer(
 /// Đọc NGƯỢC và lấy lời khai mới nhất: chỉ lượt của **phiên** (`assistant`), vì
 /// lượt `user` là câu chủ máy gõ — anh ấy nhắc tên dự án khác là chuyện thường.
 pub fn folder_declared(tail: &str, workspace_root: &str) -> Option<String> {
+    declared_in_tail(tail, workspace_root).map(|(duan, _)| duan)
+}
+
+/// LÀN của phiên: lời khai mới nhất trong đuôi nhật ký, hoặc cái đã nhớ.
+///
+/// 🔴 Nhớ CÙNG hạng với nhãn dự án, không đọc tươi rồi thôi. Đo 22/08 ngay sau
+/// bản vá đầu: `ef145c0c` hiện `[dwork/A-DSIGN]` còn `218d3cd4` vẫn hiện
+/// `[dwork]·Làm ddoc` — cả hai đều CÓ khai làn, chỉ khác ở chỗ lời khai của
+/// phiên sau đã trôi khỏi cửa sổ đuôi. Một cái nhãn lúc có lúc không thì khó
+/// đọc hơn cả một cái nhãn xấu đều đều.
+pub fn lane_for_session(
+    session_id: &str,
+    tail: &str,
+    workspace_root: &str,
+    head: impl FnOnce() -> Option<String>,
+) -> String {
+    if let Some((_, lan)) = declared_in_tail(tail, workspace_root) {
+        if !lan.is_empty() {
+            return lan;
+        }
+    }
+    // Đuôi im tiếng KHÔNG có nghĩa là phiên bỏ làn — lời khai chỉ trôi ra khỏi
+    // cửa sổ 256 KB. Luật 11b: một phép đo hỏng không phải một sự thật về thế
+    // giới.
+    let nho = recall_lane(session_id);
+    if !nho.is_empty() {
+        return nho;
+    }
+    // Rồi hỏi ĐẦU nhật ký: phiên thường tự xưng ngay ở lượt đầu, và sổ nhớ thì
+    // rỗng sau mỗi lần huba khởi động lại.
+    //
+    // Closure chứ không đọc thẳng: chỉ tốn một lần đọc đĩa khi hai đường rẻ
+    // phía trên đều im — y hệt `census_head` của `folder_for_session`.
+    //
+    // ⚠ **BA CỬA NÀY KHÔNG PHỦ HẾT, và đây là số đo, không phải phỏng đoán.**
+    // Đầu đọc 64 KB, đuôi đọc 256 KB. Nhật ký của `218d3cd4` nặng 8.099.033
+    // byte và hai lời khai `[dwork/A-DDOC]` của nó nằm ở byte 2.800.503 và
+    // 3.299.843 — **34,6% và 40,7%**, tức GIỮA tệp. Đầu phủ 0,8%, đuôi phủ
+    // 3,2%; không cửa nào với tới, nên phiên ấy vẫn rơi về nhãn cũ
+    // (`[dwork]·<tên việc>`).
+    //
+    // Không quét cả 8 MB để chữa: ảnh chụp chạy mỗi vòng, bảy phiên một lượt.
+    // Cái tự chữa là SỔ NHỚ — lần sau phiên ấy tự xưng lúc huba đang chạy thì
+    // làn vào sổ và ở lại. Nói ra chỗ hở này thay vì để người đọc tưởng nó phủ
+    // hết: nửa số hàng có làn, nửa không, là thứ phải giải thích được.
+    let dau = head()
+        .and_then(|h| declared_in_tail(&h, workspace_root))
+        .map(|(_, lan)| lan)
+        .unwrap_or_default();
+    if !dau.is_empty() {
+        remember_lane(session_id, &dau);
+    }
+    dau
+}
+
+/// Ghi làn vào sổ mà KHÔNG đụng tới nhãn dự án đang nhớ.
+fn remember_lane(session_id: &str, lane: &str) {
+    if lane.trim().is_empty() {
+        return;
+    }
+    if let Ok(mut m) = folder_memo().lock() {
+        if let Some(e) = m.get_mut(session_id) {
+            e.1 = lane.to_string();
+        }
+    }
+}
+
+/// Lời tự khai MỚI NHẤT trong đuôi nhật ký, đã tách dự án / làn.
+fn declared_in_tail(tail: &str, workspace_root: &str) -> Option<(String, String)> {
     for line in tail.lines().rev() {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
             // Dòng đầu cụt là bình thường: đuôi bắt đầu giữa tệp.
@@ -1382,8 +1493,8 @@ pub fn folder_declared(tail: &str, workspace_root: &str) -> Option<String> {
         let Some(text) = text_of(&record) else {
             continue;
         };
-        if let Some(label) = declared_label(&text, workspace_root) {
-            return Some(label);
+        if let Some(parts) = declared_parts(&text, workspace_root) {
+            return Some(parts);
         }
     }
     None
@@ -1401,23 +1512,64 @@ pub fn folder_declared(tail: &str, workspace_root: &str) -> Option<String> {
 ///   cả lớp ngoặc-không-phải-dự-án, và nó cùng một luật với `open_drawer`: đo
 ///   trên đĩa, đừng gõ cứng một danh sách tên.
 pub fn declared_label(text: &str, workspace_root: &str) -> Option<String> {
+    declared_parts(text, workspace_root).map(|(duan, _)| duan)
+}
+
+/// Lời tự khai, tách làm HAI: **dự án** (một thư mục có thật) và **làn** (phần
+/// sau dấu `/`, không phải thư mục).
+///
+/// 🔴 Hà 2026-08-22, ảnh chụp một tin có cả hai cái tên trong đúng một khung:
+/// huba viết `[dwork]·Quét GitHub làm design`, còn chính phiên ấy tự xưng
+/// `[dwork/A-DSIGN]` — *"Sao cái tên phiên ở trên không làm giống ở dưới vừa
+/// gọn vừa dễ hiểu"*.
+///
+/// Anh đúng, và chỗ hỏng đo được: cửa cũ đòi CẢ chuỗi phải là một thư mục có
+/// thật, mà `~/projects/dwork/A-DSIGN` không phải thư mục — nó là tên một LÀN
+/// việc (`dwork/dev-dsign/memory/lanes/A-DSIGN.md`). Nên lời khai bị loại sạch,
+/// và `label_sessions` phải tự dựng lại phần phân biệt bằng TÊN VIỆC cắt ở 34
+/// ký tự. Đo ba phiên `dwork` đang sống cùng lúc: chúng tự xưng
+/// `dwork/A-DSIGN` · `dwork/A-DDOC` · `dwork` — **đã phân biệt sẵn, ngắn hơn,
+/// và do chính chúng đặt** — rồi huba vứt đi hai cái.
+///
+/// Cửa vẫn đứng, chỉ đứng ở ĐÚNG CHỖ: phần đầu (trước dấu `/` đầu tiên) vẫn
+/// phải là một thư mục có thật, đo trên đĩa. Phần sau thì huba không có cách
+/// nào kiểm — nó là chuyện nội bộ của dự án ấy — nên đừng giả vờ kiểm.
+///
+/// Tách làm hai chứ không trả một chuỗi, vì hai nửa đi hai đường: `folder` phải
+/// ở lại là thư mục THẬT (ô màu dự án băm từ nó, `clean_inbox` ghép đường dẫn
+/// từ nó), còn làn chỉ để HIỆN.
+pub fn declared_parts(text: &str, workspace_root: &str) -> Option<(String, String)> {
     let head = text.trim_start_matches(|c: char| c.is_whitespace() || "`*_#>".contains(c));
     let (name, _) = head.strip_prefix('[')?.split_once(']')?;
-    let name = name.trim();
+    // Bỏ gạch chéo thừa ở đuôi: `Path::join` nuốt nó im lặng, nên `[dwork/]`
+    // sẽ đọc ra dự án `dwork/` và in thành `[dwork/]` — một cái nhãn cụt.
+    let name = name.trim().trim_end_matches('/');
     if name.is_empty() || name.chars().count() > 40 || name.contains(char::is_whitespace) {
         return None;
     }
     let root = Path::new(workspace_root.trim_end_matches('/'));
-    if root.join(name).is_dir() {
-        return Some(name.to_string());
+    // Thử CẢ chuỗi trước: `AI/tcc/amm` là một dự án thật có hai dấu gạch, và nó
+    // phải đọc ra dự án chứ không phải "dự án `AI` làn `tcc/amm`".
+    let whole = |n: &str| -> Option<String> {
+        if root.join(n).is_dir() {
+            return Some(n.to_string());
+        }
+        // `AI/` là ngăn kéo, y như trong `folder_from_tail`: phiên khai `[tfl5]`
+        // nhưng thư mục là `AI/tfl5`, và nhãn phải cùng một dạng với phép đếm để
+        // hai đường không đẻ ra hai cách gọi cùng một dự án.
+        root.join("AI").join(n).is_dir().then(|| format!("AI/{n}"))
+    };
+    if let Some(duan) = whole(name) {
+        return Some((duan, String::new()));
     }
-    // `AI/` là ngăn kéo, y như trong `folder_from_tail`: phiên khai `[tfl5]`
-    // nhưng thư mục là `AI/tfl5`, và nhãn phải cùng một dạng với phép đếm để
-    // hai đường không đẻ ra hai cách gọi cùng một dự án.
-    root.join("AI")
-        .join(name)
-        .is_dir()
-        .then(|| format!("AI/{name}"))
+    // Không phải thư mục ⟹ thử đọc thành `<dự án>/<làn>`, cắt ở dấu `/` CUỐI
+    // để `AI/tcc/amm/LANE` vẫn ra dự án `AI/tcc/amm`.
+    let (dau, lan) = name.rsplit_once('/')?;
+    let lan = lan.trim();
+    if lan.is_empty() {
+        return None;
+    }
+    whole(dau).map(|duan| (duan, lan.to_string()))
 }
 
 /// Nhãn cuối cùng của một phiên — chỗ ghép của cả ba nguồn, theo đúng thứ hạng.
@@ -1436,8 +1588,8 @@ pub fn folder_for_session(
     workspace_root: &str,
     census_head: impl FnOnce() -> Option<String>,
 ) -> Option<String> {
-    if let Some(declared) = folder_declared(tail, workspace_root) {
-        remember_folder_ranked(session_id, &declared, true);
+    if let Some((declared, lane)) = declared_in_tail(tail, workspace_root) {
+        remember_folder_ranked(session_id, &declared, &lane, true);
         return Some(declared);
     }
     let Some(counted) = folder_from_tail(tail, workspace_root).or_else(census_head) else {
@@ -1455,7 +1607,7 @@ pub fn folder_for_session(
         }
         return Some(declared);
     }
-    remember_folder_ranked(session_id, &counted, false);
+    remember_folder_ranked(session_id, &counted, &recall_lane(session_id), false);
     Some(counted)
 }
 
@@ -3207,6 +3359,7 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>, tabs: &[crate::keys::Tab]) {
             session_id: format!("{SHELL_ID_PREFIX}{}", tab.tty),
             name: format!("cửa sổ {}", tab.tty),
             label: String::new(),
+            lane: String::new(),
             host: "shell".to_string(),
             kind: "shell".to_string(),
             tty: tab.tty.clone(),
@@ -3518,6 +3671,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 .to_string();
             let mut row = LiveSession {
                 label: String::new(),
+                lane: String::new(),
                 // Chép từ nhan đề tab ở `mark_doing`, sau khi đã có đủ hàng.
                 doing: String::new(),
                 // Điền ở khúc đọc tiến trình bên dưới (`shell_verdict`).
@@ -3655,6 +3809,10 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                             .and_then(|head| folder_from_tail(&head, &ws))
                     })
                     .unwrap_or_default();
+                    // SAU `folder_for_session`, không trước: chính lượt ấy ghi
+                    // lời khai mới nhất vào sổ, nên hỏi trước là đọc sổ cũ.
+                    row.lane =
+                        lane_for_session(&row.session_id, &tail, &ws, || read_head(&path).ok());
                     // Phiên có đang chờ một câu trả lời không — đọc từ chính
                     // đoạn nhật ký vừa nạp, không tốn thêm lần đọc nào.
                     row.asking = pending_question(&tail);
@@ -6185,12 +6343,12 @@ mod folder_memo_tests {
         let id = "memo-test-0000";
         assert_eq!(recall_folder(id), None, "chưa đo lần nào thì chưa biết gì");
 
-        remember_folder_ranked(id, "dwork", false);
+        remember_folder_ranked(id, "dwork", "", false);
         assert_eq!(recall_folder(id).as_deref(), Some("dwork"));
 
         // Lượt đo sau về RỖNG: giữ nguyên, không ghi đè.
-        remember_folder_ranked(id, "", false);
-        remember_folder_ranked(id, "   ", false);
+        remember_folder_ranked(id, "", "", false);
+        remember_folder_ranked(id, "   ", "", false);
         assert_eq!(
             recall_folder(id).as_deref(),
             Some("dwork"),
@@ -6198,7 +6356,7 @@ mod folder_memo_tests {
         );
 
         // Đo được dự án KHÁC thì đổi — phiên có thể chuyển thư mục thật.
-        remember_folder_ranked(id, "AI/huba", false);
+        remember_folder_ranked(id, "AI/huba", "", false);
         assert_eq!(recall_folder(id).as_deref(), Some("AI/huba"));
 
         // Và cái nhãn ấy phải đi tới tận câu chữ người đọc thấy.

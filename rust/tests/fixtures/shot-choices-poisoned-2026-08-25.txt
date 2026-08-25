@@ -1,0 +1,37 @@
+
+Searched for 2 patterns, ran 3 shell commands 
+⏺ Critical unknown before I touch anything: would a fresh request for Tổ 1.1.1.1 also come out with 0 approvers (recreating the dead end)?
+  Made 1 scratchpad edit +53, ran 1 shell command 
+⏺ 18/20 phiếu for that team do get an approver — the 2 dead-ends are stale garbage from a 2-hour window on 08-22. Let me verify empirically that cancelling actually frees a position:
+  Made 1 scratchpad edit +44 
+⏺ Agent "Trace DCA phieu approver + cancel paths" finished · 3m 31s
+⏺ Code trace answers everything. Three facts change the plan:
+  1. The 2 dead-end phiếu are stale pre-guard data — a guard now blocks creating approver-less phiếu (dca-request/create.hjson:264-276). Not a live bug.
+  2. No UI can ever approve them — "Duyệt thay" requires canDuyet > 0 (dca.jsx:190), which is 0. Permanently stuck.
+  3. Cancel exists in UI, by the phiếu's subject on My DSign (cts-chi-tiet.jsx:256-277), and CANCELLED is excluded from the block-guard (create.hjson:128-150) — so it frees the position.
+  That gives a path with zero collateral revokes. Let me verify the login+cancel affordance is real before building on it:
+  Ran 1 shell command 
+⏺ Shared test password confirmed. Now a UI recon probe — does the cancel button actually appear for the subject?
+  Made 1 scratchpad edit +62, ran 1 shell command 
+⏺ ESM resolves from the script's own directory. Moving the probe into the repo's tests/e2e (matches the existing probe-*.mjs convention):
+  Ran 2 shell commands 
+⏺ All three cancel buttons are live with 0 console errors. Let me eyeball the actual screen before trusting the selector:
+  Read 1 file 
+⏺ The screen is real — and note it shows only NV 0489 as "Chủ thể"; the subject can't see they're bundled with 2 others. I now have everything needed to decide, and the picture differs from what the
+  handover assumed:
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ☐ 3 ca cuối 
+3 ca cuối (NV 0233 · 0265 · 0489) đều vướng phiếu treo. Đường "duyệt tiếp" mà Hà chốt 25/08 nay KHÔNG dùng được cho cả 3: 2 phiếu có 0 người duyệt (nút «Duyệt thay» đòi canDuyet>0 nên không bao giờ hiện — 
+kẹt vĩnh viễn), còn phiếu D741539413100350 chở 3 người, duyệt nó sẽ THU HỒI OAN 2 CTS đã sạch của NV 0578 + NV 0610 (đúng hình dạng sự cố hôm qua: phiếu nhóm đã tốn 2 oan để dọn 1). Đường huỷ đã đo được: 
+nút «Hủy yêu cầu» hiện đủ 3/3 ca, CANCELLED không nằm trong guard chặn nên vị trí được giải phóng, và 18/20 phiếu gần đây của Tổ 1.1.1.1 đều ra người duyệt. Đi hướng nào?
+❯ 1. Huỷ cả 3, gửi lại từng người (Đề xuất)
+     Chính chủ bấm «Hủy yêu cầu» trên My DSign, rồi QTV gửi lại yêu cầu cho TỪNG người một → duyệt → kích hoạt. Đóng trọn nợ: CN cũ 3 → 0, THU HỒI OAN = 0. Đổi lại: đảo lựa chọn "duyệt tiếp" của 25/08 và bỏ
+     3 phiếu treo cũ.
+  2. Huỷ 2 ngõ cụt, duyệt tiếp phiếu 3 người
+     Giữ đúng lựa chọn 25/08 ở chỗ còn duyệt được. CN cũ 3 → 0, nhưng CHẤP NHẬN thu hồi oan 2 CTS đã sạch (NV 0578, NV 0610) — không hoàn tác được.
+  3. Chỉ huỷ 2 ngõ cụt, để yên phiếu 3 người
+     Dọn phần chắc chắn đúng, không đụng ca có tranh chấp. CN cũ 3 → 1; nợ còn treo lại đúng 1 ca (NV 0489) chờ Hà quyết sau.
+  4. Type something.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+Enter to select · ↑/↓ to navigate · Esc to cancel

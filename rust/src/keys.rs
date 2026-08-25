@@ -3685,7 +3685,11 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
         let label = rest.trim();
         // Một dòng "1." trống không phải lựa chọn; một dòng dài lê thê cũng
         // không — hộp chọn của claude là nhãn ngắn.
-        if label.is_empty() || label.len() > 120 {
+        // 🔴 ĐẾM KÝ TỰ, KHÔNG ĐẾM BYTE — Hà 2026-08-25. `str::len()` trả byte,
+        // mà chữ Việt có dấu tốn 2-3 byte mỗi ký tự: cùng một trần 120, tiếng
+        // Anh được ~120 ký tự còn tiếng Việt chỉ ~50-60. Cái trần này vì thế
+        // cắt đúng thứ tiếng mà phiên của chủ máy viết ra.
+        if label.is_empty() || label.chars().count() > 120 {
             continue;
         }
         out.push((n, label.to_string(), idx));
@@ -3739,9 +3743,43 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
                     && !rest.trim().is_empty()
             })
     });
-    let footer = has_chooser_footer(screen);
+    let chan = chooser_footer_line(screen);
+    let footer = chan.is_some();
     if out.is_empty() || (!footer && (!co_tro || out[0].0 != 1)) {
         return Vec::new();
+    }
+    // 🔴 CÓ DÒNG CHÂN ⟹ NEO VÀO NÓ, ĐỪNG CHẤM CẢ MÀN — Hà 2026-08-25, ảnh
+    // `/shot` phiên `[dwork]`: *"Có option nhưng không có chọn được"*.
+    //
+    // Màn ấy có hộp 5 lựa chọn + dòng chân đầy đủ, mà hàm này trả về **0**. Đo
+    // bằng byte trên chính màn ấy (lưu ở `tests/fixtures/`): nửa trên màn là
+    // văn xuôi của phiên, có ba dòng đánh số — 153, **115**, 185 byte. Trần 120
+    // loại được cái thứ nhất và thứ ba; cái **115 byte lọt**, nên `out[0]` là
+    // một dòng VĂN XUÔI mang số 2, `first = 2`, và phép kiểm liên tiếp ngay
+    // dưới gãy ở phần tử sau (1 ≠ 3) ⟹ vứt sạch cả hộp thật.
+    //
+    // Tức cái trần độ dài chưa bao giờ là một cái CỔNG — nó là xổ số: hai dòng
+    // văn xuôi bị loại nhờ may, dòng thứ ba sống sót và đầu độc cả danh sách.
+    // Sửa cái trần cũng không cứu được, vì bất kỳ trần nào cũng có dòng lọt.
+    //
+    // Hộp chọn là cụm dòng đánh số NGAY TRÊN dòng chân — chính CLI vẽ ra cả
+    // hai. Nên: bỏ mọi mục nằm dưới dòng chân, rồi lấy ĐUÔI liên tiếp dài nhất
+    // đếm ngược lên. Văn xuôi ở nửa trên màn từ đó không với tới được về mặt
+    // CẤU TRÚC, chứ không phải nhờ đoán theo độ dài.
+    //
+    // Không có dòng chân thì mọi hàng rào cũ giữ nguyên (con trỏ `❯` + bắt đầu
+    // từ 1 + liền dòng) — đó là thứ duy nhất ngăn một đoạn văn đánh số bị đọc
+    // thành hộp chọn, và nó đã trả giá hai lần (11/08 và 21/08).
+    if let Some(chan) = chan {
+        out.retain(|(_, _, idx)| *idx < chan);
+        if out.is_empty() {
+            return Vec::new();
+        }
+        let mut dau = out.len() - 1;
+        while dau > 0 && out[dau - 1].0 + 1 == out[dau].0 {
+            dau -= 1;
+        }
+        out.drain(..dau);
     }
     let first = out[0].0;
     for (i, (n, _, _)) in out.iter().enumerate() {
@@ -3814,11 +3852,33 @@ pub fn has_chooser_footer(screen: &str) -> bool {
     //
     // Đo TỪNG DÒNG chứ không đo cả màn: dòng chân thật là MỘT dòng, còn hai
     // mảnh rời nằm cách nhau hai mươi dòng văn xuôi thì chỉ là trùng chữ.
-    screen.lines().any(|line| {
-        let l = line.to_lowercase();
-        (l.contains("to select") || l.contains("to confirm") || l.contains("để chọn"))
-            && (l.contains("to navigate") || l.contains("to cancel") || l.contains("để huỷ"))
-    })
+    chooser_footer_line(screen).is_some()
+}
+
+/// Dòng chân ấy nằm ở DÒNG nào — `parse_choices` cần VỊ TRÍ, không chỉ có/không.
+///
+/// Tách ra để hai câu hỏi (*"màn có hộp chọn không"* và *"hộp ấy kết thúc ở
+/// đâu"*) đọc CHUNG một phép đo. Hai bản chép của cùng một phép so chuỗi là hai
+/// câu trả lời lệch nhau — đúng cái bệnh mà chính hàm này đã mắc một lần
+/// (16/08: `has_chooser_footer` nói *không* trong khi `parse_choices` trên cùng
+/// màn ấy đọc ra ba lựa chọn).
+///
+/// Lấy dòng chân CUỐI CÙNG. Một màn có thể còn mang đoạn hội thoại cũ kèm dòng
+/// chân đã cuộn qua; hộp đang MỞ là cái ở dưới cùng.
+///
+/// (`lines()` không phải `ExactSizeIterator` nên không có `rposition` — duyệt
+/// xuôi rồi lấy `last` là cùng một thứ, và không phải gom cả màn vào một `Vec`.)
+pub fn chooser_footer_line(screen: &str) -> Option<usize> {
+    screen
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| {
+            let l = line.to_lowercase();
+            (l.contains("to select") || l.contains("to confirm") || l.contains("để chọn"))
+                && (l.contains("to navigate") || l.contains("to cancel") || l.contains("để huỷ"))
+        })
+        .map(|(i, _)| i)
+        .last()
 }
 
 /// Thanh tab của một bảng hỏi nhiều câu, đọc từ màn.

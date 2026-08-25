@@ -285,6 +285,35 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub new_in_terminal: bool,
 
+    /// `host` → TÊN biến môi trường giữ mật khẩu `sudo` cho host ấy.
+    ///
+    /// Khoá `""` là **máy này**; các khoá còn lại khớp với host trong lệnh `ssh`.
+    /// Bảng rỗng, hoặc host không có trong bảng ⟹ tính năng TẮT cho host ấy.
+    ///
+    /// 🔴 BẢNG chứ không phải MỘT khoá — Hà 2026-08-26 đặt tên
+    /// `HUB_VPS_A_SUDO_PASSWORD`, và chính cái tên ấy lộ ra rằng mật khẩu sudo
+    /// thuộc về **từng máy**, không phải một giá trị dùng chung. Bản đầu của tôi
+    /// khai một `String` duy nhất; nó đúng cho tới lúc có `vps-b`.
+    ///
+    /// 🔴 Hà 2026-08-25: *"trường hợp chạy ssh xong có yc mật khẩu thì với lệnh
+    /// chạy từ tele sẽ làm thế nào?"* → *"ừ làm đi, tôi sẽ tự thêm vào huba.env"*.
+    ///
+    /// Đo được cái đang xảy ra: `hubad` chạy với tty `??`, và một tiến trình
+    /// không có terminal điều khiển thì mở `/dev/tty` ra `Errno 6`. Mà `/dev/tty`
+    /// đúng là chỗ `sudo` mở để hỏi. Nên nút ▶️ gặp `sudo` là **hỏng ngay** —
+    /// tin tốt (không treo câm), nhưng vẫn là một việc không làm được từ xa,
+    /// tức một lỗ hổng của cây cầu theo đúng phép thử một câu của huba.
+    ///
+    /// `sudo -S` đọc mật khẩu từ **stdin**, không cần tty — và `exec::RunOpts`
+    /// đã có sẵn đường bơm stdin. Nên chỗ này chỉ giữ TÊN khoá; giá trị nằm
+    /// trong `huba.env` (chmod 600), đúng luật 4.
+    ///
+    /// ⚠ Giá trị KHÔNG BAO GIỜ đi vào dòng lệnh. huba hiện dòng lệnh ra
+    /// Telegram, đặt nó làm nhãn nút và ghi vào sổ (`remember_quick`) — mật khẩu
+    /// trong `argv` là mật khẩu đi ra kèm cả cách dùng. Xem [`with_sudo_stdin`].
+    #[serde(default)]
+    pub sudo_password_env: BTreeMap<String, String>,
+
     #[serde(skip)]
     pub config_file: PathBuf,
     #[serde(skip)]
@@ -309,6 +338,9 @@ impl Default for Config {
             claude_accounts: vec![],
             claude_transcript_root: String::new(),
             new_in_terminal: true,
+            // Rỗng = TẮT. Mặc định phải là tắt: bật một đường chạy `sudo` từ xa
+            // là chuyện chủ máy phải cố ý khai, không phải thứ mọc sẵn.
+            sudo_password_env: BTreeMap::new(),
             config_file: PathBuf::new(),
             hub_home: PathBuf::new(),
         }

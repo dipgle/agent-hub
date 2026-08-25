@@ -4768,15 +4768,65 @@ pub fn html_with_links(
     shown: &str,
     anchors: &[(String, Vec<(String, String)>)],
 ) -> (String, usize, Vec<usize>) {
+    html_with_links_last(shown, anchors, &[])
+}
+
+/// Như [`html_with_links`], nhưng vài cái neo được khai là **bám lần khớp CUỐI**.
+///
+/// 🔴 Hà 2026-08-25, ảnh một tin `/shot` có `❯ ssh vps-a "curl -s http://…"`:
+/// *"sao ô chờ gợi ý mờ lại không có nút enter"*. Log của chính huba nói ra thủ
+/// phạm: `box_anchor_ambiguous {hits: 4}` — chuỗi trong ô nhập trùng với 4 dòng
+/// trên màn, vì phiên vừa chạy đúng lệnh ấy nên nó còn nằm trong phần hội thoại
+/// phía trên. `session_layout` thấy mập mờ nên bỏ neo, nút rơi xuống đáy tin.
+///
+/// Nhưng cái mập mờ ấy là BÁO ĐỘNG GIẢ. Ô nhập không phải "một chỗ nào đó trên
+/// màn có chuỗi này" — theo đúng định nghĩa của [`prompt_line_text`], nó là
+/// **dòng dấu nhắc CUỐI CÙNG còn mang chữ**. Màn cuộn từ trên xuống và ô nhập
+/// nằm dưới đáy, nên mọi bản trùng đều ở PHÍA TRÊN nó. Bám lần khớp cuối là
+/// bám đúng ô nhập, không cần đoán và không cần bỏ cuộc.
+///
+/// (Khu chữ huba tự nối thêm nay đặt lên TRƯỚC màn — xem `said_missing_head` —
+/// nên nó không đẻ ra bản trùng nào nằm DƯỚI ô nhập.)
+///
+/// Chỉ áp cho neo được khai trong `neo_cuoi`. Dòng lệnh, lựa chọn, tab, tệp vẫn
+/// bám lần đầu như cũ: chúng có thể xuất hiện nhiều lần một cách chính đáng, và
+/// "lần đầu" là thứ mắt đọc tới trước.
+pub fn html_with_links_last(
+    shown: &str,
+    anchors: &[(String, Vec<(String, String)>)],
+    neo_cuoi: &[usize],
+) -> (String, usize, Vec<usize>) {
+    // Với mỗi neo "bám cuối", tính sẵn dòng NÀO là lần khớp cuối của nó. Tính
+    // một lần ở đây thay vì hỏi lại trong vòng lặp: cùng một câu hỏi hỏi hai
+    // lần là hai câu trả lời có cơ hội lệch nhau.
+    let dong_cuoi: Vec<Option<usize>> = anchors
+        .iter()
+        .enumerate()
+        .map(|(i, (a, _))| {
+            if !neo_cuoi.contains(&i) || a.trim().is_empty() {
+                return None;
+            }
+            shown
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| line_carries(l, a))
+                .map(|(n, _)| n)
+                .last()
+        })
+        .collect();
     let mut used = vec![false; anchors.len()];
     let mut html = String::new();
     let mut linked = 0usize;
     let mut unlinked: Vec<usize> = Vec::new();
-    for line in shown.lines() {
-        let hit = anchors
-            .iter()
-            .enumerate()
-            .find(|(i, (a, _))| !used[*i] && !a.trim().is_empty() && line_carries(line, a));
+    for (so_dong, line) in shown.lines().enumerate() {
+        let hit = anchors.iter().enumerate().find(|(i, (a, _))| {
+            !used[*i]
+                && !a.trim().is_empty()
+                && line_carries(line, a)
+                // Neo "bám cuối" chỉ ăn ĐÚNG dòng cuối của nó; các dòng trùng
+                // phía trên đi qua như chữ thường.
+                && dong_cuoi[*i].is_none_or(|d| d == so_dong)
+        });
         // 🔴 NEO PHẢI NHÌN THẤY ĐƯỢC — Hà 2026-08-16, ảnh chụp tin của
         // `[mailler]` có hai dòng lệnh liền nhau: *"chỗ này tại sao chỉ rend
         // được một lệnh, mà không biết lệnh đó ăn 1 dòng hay cả 2?"*.
@@ -5270,6 +5320,124 @@ pub fn jobs_line() -> Option<String> {
 ///    Không có bước này thì "bỏ trần" chỉ đổi một cái chết ồn ào thành một sự
 ///    im lặng dài — mà im lặng dài thì người ta bấm lại lần nữa, và lần thứ hai
 ///    là một lệnh triển khai chạy hai lần.
+/// Bóc `cd <thư mục> &&|; ` ở đầu — trả `(tiền tố giữ nguyên, phần lệnh thật)`.
+fn boc_cd(line: &str) -> (String, &str) {
+    let t = line.trim_start();
+    let Some(rest) = t.strip_prefix("cd ") else {
+        return (String::new(), t);
+    };
+    if let Some((dir, tail)) = rest.split_once("&&") {
+        return (format!("cd {dir}&&"), tail.trim_start());
+    }
+    if let Some((dir, tail)) = rest.split_once(';') {
+        return (format!("cd {dir};"), tail.trim_start());
+    }
+    (String::new(), t)
+}
+
+/// Cờ của `ssh` có ăn theo một giá trị đứng sau — phải nhảy qua cả hai để không
+/// đọc nhầm giá trị ấy thành tên host.
+const SSH_CO_GIA_TRI: &[&str] = &[
+    "-p", "-i", "-o", "-l", "-F", "-J", "-b", "-c", "-E", "-L", "-R", "-D", "-W", "-e", "-m",
+];
+
+/// Kế hoạch bơm mật khẩu `sudo` qua **stdin** cho một dòng lệnh.
+///
+/// `Some((host, dòng ĐEM CHẠY))` — `host` rỗng là máy này. `None` = dòng này
+/// không cần mật khẩu, và khi ấy chỗ gọi KHÔNG được đụng gì vào nó.
+///
+/// 🔴 Hà 2026-08-25: *"trường hợp chạy ssh xong có yc mật khẩu thì với lệnh chạy
+/// từ tele sẽ làm thế nào?"*; rồi 26/08 đặt tên khoá `HUB_VPS_A_SUDO_PASSWORD`
+/// — chính cái tên ấy lộ ra rằng ca anh cần là `sudo` **ở đầu kia của ssh**,
+/// trong khi bản đầu của tôi chỉ phủ `sudo` cục bộ và còn có một bài kiểm khẳng
+/// định ca của anh BỊ LOẠI. Đọc hụt câu hỏi, không phải mã sai.
+///
+/// Vì sao ca xa lại giải được: `ssh` từ chối đọc mật khẩu **của chính nó** từ
+/// stdin, nhưng nó **chuyển tiếp stdin cho lệnh chạy ở đầu kia**. Nên
+/// `ssh vps-a "sudo -S -p '' …"` thì `sudo` trên vps-a đọc được — không cần PTY,
+/// không cần đoán lời nhắc, không cần `sshpass`.
+///
+/// Đo được trước khi vá: `hubad` chạy tty `??`, và tiến trình không có terminal
+/// điều khiển thì mở `/dev/tty` ra `[Errno 6]`. Mà đó đúng là chỗ `sudo` mở để
+/// hỏi. Nên nút ▶️ gặp `sudo` là hỏng ngay — không treo, nhưng vẫn là việc ngồi
+/// ở máy làm được mà từ xa thì không.
+///
+/// 🔴 CỔNG HẸP CÓ CHỦ Ý — `sudo` phải là lệnh ĐẦU TIÊN (cục bộ), hoặc lệnh đầu
+/// tiên của phần chạy ở xa. `cat /etc/hosts && sudo reboot` thì KHÔNG: bơm mật
+/// khẩu vào stdin của chuỗi ấy là đưa nó cho `cat` đọc trước. Hẹp thì cùng lắm
+/// mất một ca; rộng thì mất bí mật, và hai hướng hỏng ấy không cân nhau.
+pub fn sudo_stdin_plan(line: &str) -> Option<(String, String)> {
+    let (dau, than) = boc_cd(line);
+
+    // ① `sudo` ngay trên máy này.
+    if let Some(sau) = la_sudo(than) {
+        return Some((String::new(), format!("{dau}sudo -S -p '' {sau}")));
+    }
+
+    // ② `sudo` ở ĐẦU KIA của một lệnh `ssh`.
+    let rest = than.strip_prefix("ssh ")?;
+    let b = rest.as_bytes();
+    let mut i = 0usize;
+    let mut host: Option<&str> = None;
+    while i < rest.len() {
+        while i < rest.len() && b[i] == b' ' {
+            i += 1;
+        }
+        if i >= rest.len() {
+            break;
+        }
+        let dau_tok = i;
+        while i < rest.len() && b[i] != b' ' {
+            i += 1;
+        }
+        let tok = &rest[dau_tok..i];
+        if tok.starts_with('-') {
+            if SSH_CO_GIA_TRI.contains(&tok) {
+                while i < rest.len() && b[i] == b' ' {
+                    i += 1;
+                }
+                while i < rest.len() && b[i] != b' ' {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        host = Some(tok);
+        break;
+    }
+    let host = host?;
+    let truoc = rest[..i].trim_end();
+    let lenh_xa = rest[i..].trim();
+
+    // Lệnh chạy ở xa thường nằm trong một cặp nháy — viết lại phần BÊN TRONG,
+    // giữ nguyên cặp nháy, vì bỏ nó đi là đổi cách shell ở đầu kia tách tham số.
+    let q = lenh_xa.chars().next().filter(|c| *c == '"' || *c == '\'');
+    let trong = match q {
+        Some(c) if lenh_xa.len() >= 2 && lenh_xa.ends_with(c) => &lenh_xa[1..lenh_xa.len() - 1],
+        _ => lenh_xa,
+    };
+    let sau = la_sudo(trong)?;
+    let nhay = q.map(String::from).unwrap_or_default();
+    Some((
+        host.to_string(),
+        format!("{dau}ssh {truoc} {nhay}sudo -S -p '' {sau}{nhay}"),
+    ))
+}
+
+/// Phần đứng sau `sudo` nếu chuỗi này MỞ ĐẦU bằng đúng lệnh `sudo`.
+///
+/// Tách ra để cả hai nhánh (cục bộ và ở xa) hỏi CÙNG một câu — hai bản chép của
+/// cùng phép so chuỗi là hai câu trả lời có cơ hội lệch nhau.
+fn la_sudo(t: &str) -> Option<&str> {
+    let t = t.trim();
+    let sau = t.strip_prefix("sudo")?;
+    if sau.is_empty() || sau.starts_with(' ') {
+        Some(sau.trim_start())
+    } else {
+        None
+    }
+}
+
 fn watch_long_job(
     cfg: Config,
     s: crate::sessions::LiveSession,
@@ -5370,13 +5538,51 @@ fn watch_long_job(
             if let Err(e) = &watcher {
                 logging::warn("long_job_book_failed", json!({ "n": n, "err": e.to_string() }));
             }
+            // 🔴 MẬT KHẨU `sudo` ĐI BẰNG STDIN, KHÔNG BAO GIỜ QUA `argv`.
+            //
+            // huba HIỆN dòng lệnh ra Telegram, đặt nó làm nhãn nút và ghi vào sổ
+            // (`remember_quick`). Một mật khẩu trong `argv` vì thế không chỉ rời
+            // khỏi máy — nó rời khỏi máy KÈM CẢ CÁCH DÙNG, và nằm lại vĩnh viễn
+            // trong lịch sử buồng chat. `RunOpts.input` bơm thẳng vào stdin của
+            // tiến trình con (`exec.rs`), nên nó không đi qua chuỗi nào cả.
+            //
+            // Không khai `sudo_password_env`, hoặc biến ấy rỗng ⟹ KHÔNG bơm gì
+            // và cũng KHÔNG viết lại dòng lệnh: lệnh chạy y như hôm qua và hỏng
+            // y như hôm qua, có thông báo. Tắt phải là tắt hẳn, không phải một
+            // nửa đường mới.
+            // Tra bảng theo HOST. Không khớp host nào ⟹ không bơm gì và cũng
+            // KHÔNG viết lại dòng lệnh: lệnh chạy y như hôm qua và hỏng y như
+            // hôm qua, có thông báo. Tắt phải là tắt hẳn, không phải nửa đường.
+            //
+            // `user@host` thì thử cả chuỗi đầy đủ TRƯỚC, rồi mới tới phần sau
+            // `@`: một máy có thể cần mật khẩu khác nhau cho hai tài khoản, và
+            // đoán gộp là đưa mật khẩu của người này cho phiên của người kia.
+            let ke_hoach = sudo_stdin_plan(&line);
+            let mat_khau = ke_hoach.as_ref().and_then(|(host, _)| {
+                let ten = cfg.sudo_password_env.get(host.as_str()).or_else(|| {
+                    host.split_once('@')
+                        .and_then(|(_, h)| cfg.sudo_password_env.get(h))
+                })?;
+                let co = crate::config::secret_from_env(ten.trim());
+                logging::info(
+                    "sudo_stdin_gate",
+                    // TÊN khoá và TÊN host — không bao giờ giá trị (luật 4).
+                    json!({ "host": host, "env": ten.trim(), "co_gia_tri": co.is_some() }),
+                );
+                co
+            });
+            let chay = match (&ke_hoach, &mat_khau) {
+                (Some((_, viet_lai)), Some(_)) => viet_lai.clone(),
+                _ => line.clone(),
+            };
             let out = crate::exec::run(
                 "/bin/zsh",
-                &["-lc", &line],
+                &["-lc", &chay],
                 crate::exec::RunOpts {
                     cwd: Some(root.as_path()),
                     timeout: Some(std::time::Duration::from_secs(LONG_JOB_MAX_SEC)),
                     pid_out: Some(tx),
+                    input: mat_khau.map(|p| format!("{p}\n")),
                     ..Default::default()
                 },
             );
@@ -6264,7 +6470,7 @@ pub fn say_with_command_icons(
 /// trong `session_layout` là bài kiểm live đỏ ngay.
 pub fn render_session_data(text: &str, data: &SessionData) -> String {
     let l = session_layout(text, data, &[]);
-    html_with_links(&l.shown, &l.anchors).0
+    html_with_links_last(&l.shown, &l.anchors, &l.neo_cuoi).0
 }
 
 /// Chữ Telegram sẽ hiển thị, kèm bảng neo của nó.
@@ -6280,6 +6486,11 @@ struct Layout {
     cmd_btns: Vec<(String, String)>,
     /// Nút còn lại, đã trừ ⏎/⌫ nếu hai cái ấy đã vào được giữa chữ.
     rest_btns: Vec<(String, String)>,
+    /// Chỉ số những neo phải bám lần khớp **CUỐI** — xem [`html_with_links_last`].
+    ///
+    /// Hiện chỉ có ô nhập: nó là dòng dấu nhắc cuối cùng theo đúng định nghĩa,
+    /// nên mọi bản trùng đều nằm phía trên nó.
+    neo_cuoi: Vec<usize>,
 }
 
 /// Thanh tab MỘT dòng → mỗi tab MỘT dòng.
@@ -6485,6 +6696,7 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     //
     // Mã phiên nằm trong chính liên kết (`send_<sid>` / `clr_<sid>`), không lấy
     // theo con trỏ — bấm lại một tin cũ vẫn chạm đúng phiên của nó.
+    let mut neo_cuoi: Vec<usize> = Vec::new();
     let mut anchors: Vec<(String, Vec<(String, String)>)> = cmds
         .iter()
         .enumerate()
@@ -6601,18 +6813,41 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
         // Khớp nhiều dòng ⟹ KHÔNG neo giữa chữ, để hai cái nút ở đáy tin (đường
         // lùi vẫn còn nguyên). Thà nút đứng xa một chút còn hơn nút chỉ sai chỗ:
         // ⌫ ở nhầm dòng mời người ta xoá một thứ không phải ô nhập.
+        // 🔴 KHÔNG BỎ CUỘC NỮA — BÁM LẦN KHỚP CUỐI. Hà 2026-08-25, ảnh một tin
+        // có `❯ ssh vps-a "curl -s http://…"` mà không nút ⏎: *"sao ô chờ gợi ý
+        // mờ lại không có nút enter"*.
+        //
+        // Log của chính huba đã nói: `box_anchor_ambiguous {hits: 4}` — chuỗi
+        // trong ô nhập trùng 4 dòng, vì phiên vừa chạy đúng lệnh ấy nên nó còn
+        // nằm trong phần hội thoại phía trên. Cửa cũ (`hits == 1`) vì thế đóng,
+        // và nút rơi xuống đáy tin — nơi nó không nói được nó thuộc dòng nào.
+        //
+        // Cái mập mờ ấy là BÁO ĐỘNG GIẢ, và chỗ này biết thế: ô nhập không phải
+        // "một chỗ nào đó có chuỗi này", nó là **dòng dấu nhắc cuối cùng** —
+        // đúng định nghĩa `prompt_line_text` dùng để đọc ra `box_text` ngay ở
+        // trên. Màn cuộn từ trên xuống nên mọi bản trùng đều nằm PHÍA TRÊN.
+        //
+        // Tức bản vá 18/08 né hậu quả (thấy trùng thì bỏ neo) trong khi dữ kiện
+        // để trị gốc đã nằm sẵn trong tay: huba đo được vị trí, rồi vứt vị trí
+        // đi và đưa `html_with_links` một CHUỖI để dò lại từ đầu tin. Nay khai
+        // thẳng "neo này bám lần khớp cuối" (`html_with_links_last`).
+        //
+        // Cái KHÔNG đổi: luật 18/08 vẫn đúng nguyên văn — *"neo nhầm dòng thì cú
+        // Enter đi vào một dòng KHÔNG phải ô nhập"*. Bám cuối là cách THOẢ nó,
+        // không phải cách bỏ nó.
         let hits = shown
             .lines()
             .filter(|l| line_carries(l, box_text.trim()))
             .count();
         if hits > 1 {
             logging::info(
-                "box_anchor_ambiguous",
+                "box_anchor_repeated",
                 json!({ "hits": hits, "chars": box_text.trim().chars().count(),
-                        "why": "chữ trong ô nhập trùng với chữ ở chỗ khác trên màn — giữ nút ở đáy" }),
+                        "why": "chữ trong ô nhập trùng chỗ khác trên màn — neo bám DÒNG CUỐI, không bỏ cuộc" }),
             );
         }
-        if links.len() == 1 && !box_text.trim().is_empty() && hits == 1 {
+        if links.len() == 1 && !box_text.trim().is_empty() {
+            neo_cuoi.push(anchors.len());
             anchors.push((box_text.trim().to_string(), links));
             // …và bỏ cái nút ⏎/⌫ trơn ở đáy: hai đường cho cùng một việc, mà
             // cái ở đáy là cái không nói được nó thuộc về dòng nào.
@@ -6634,6 +6869,7 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
         anchors,
         cmd_btns,
         rest_btns,
+        neo_cuoi,
     }
 }
 
@@ -6692,8 +6928,9 @@ pub fn say_session_data_at(
         anchors,
         cmd_btns,
         rest_btns,
+        neo_cuoi,
     } = session_layout(text, data, buttons);
-    let (html, linked, unlinked) = html_with_links(&shown, &anchors);
+    let (html, linked, unlinked) = html_with_links_last(&shown, &anchors, &neo_cuoi);
 
     // Lệnh nào không dựng được liên kết thì rơi về NÚT ở đáy — đường lùi cũ,
     // giữ nguyên: một liên kết không bấm được thì tệ hơn một cái nút.

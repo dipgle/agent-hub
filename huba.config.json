@@ -27,6 +27,9 @@
     "chat_id_env": "HUB_TELEGRAM_CHAT_ID",
     "timeout_sec": 90
   },
+  "sudo_password_env": {
+    "vps-a": "HUB_VPS_A_SUDO_PASSWORD"
+  },
   "projects": {
     "ai1": {},
     "codetrail": {},

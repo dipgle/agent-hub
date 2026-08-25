@@ -28,15 +28,34 @@ fn data() -> SessionData {
     }
 }
 
-/// Neo mập mờ ⟹ KHÔNG chèn liên kết vào chữ. Hai cái nút vẫn còn ở đáy tin
-/// (đường lùi), nên chức năng không mất — chỉ đứng xa hơn một chút.
+/// 🔄 ĐẢO CHIỀU 2026-08-25 — neo trùng chỗ thì bám **dòng CUỐI**, không bỏ cuộc.
+///
+/// Bản gốc của bài này khoá hành vi *"mập mờ ⟹ không chèn, để nút ở đáy"*. Nó
+/// đúng với dữ kiện hồi 18/08, và sai kể từ khi có `html_with_links_last`:
+/// ô nhập là **dòng dấu nhắc cuối cùng** theo đúng định nghĩa `prompt_line_text`
+/// dùng để đọc ra nó, nên mọi bản trùng đều nằm PHÍA TRÊN. Không có gì mập mờ
+/// để mà né — chỉ có một phép dò hỏi sai câu.
+///
+/// Hà 2026-08-25, ảnh một tin không có nút ⏎: *"sao ô chờ gợi ý mờ lại không có
+/// nút enter"*. Cái giá của việc né: nút rơi xuống đáy, nơi nó không nói được
+/// nó thuộc dòng nào.
+///
+/// Vế THẬT của bài kiểm không mất, nó chỉ chặt hơn: nút phải nằm đúng dòng ô
+/// nhập, **không** nằm ở lần nhắc `/clean` giữa câu văn phía trên.
 #[test]
-fn an_ambiguous_box_text_does_not_get_linked_mid_sentence() {
+fn an_ambiguous_box_text_binds_the_last_line_not_the_first() {
     huba::telegram::set_bot_username("hub_test_bot");
     let html = render_session_data(SCREEN, &data());
+    let neo = html
+        .find("send_7bdb4f41")
+        .unwrap_or_else(|| panic!("mất nút ⏎ vì chữ trùng chỗ khác:\n{html}"));
+    let nhac_dau = html
+        .find("/clean")
+        .expect("lần nhắc trong câu văn phải còn");
     assert!(
-        !html.contains("send_7bdb4f41"),
-        "neo mập mờ mà vẫn chèn ⟹ nút ⌫ mời xoá một dòng KHÔNG phải ô nhập:\n{html}"
+        nhac_dau < neo,
+        "neo bám lần nhắc ĐẦU giữa câu văn ⟹ cú Enter đi vào một dòng KHÔNG \
+         phải ô nhập:\n{html}"
     );
 }
 

@@ -55,28 +55,93 @@ use crate::logging;
 /// `exec::lane()` đã biết câu trả lời sẵn: nó theo LUỒNG, và mọi đường đi từ
 /// một cú bấm đều đã được `exec::urgent()` đánh dấu. Nên chỗ này không cần thêm
 /// tham số nào — chỉ cần hỏi.
+/// Lượt `osascript` THÀNH CÔNG gần nhất mất bao nhiêu mili-giây.
+///
+/// Không có sổ, không có khoá: một số duy nhất, ghi bởi mỗi lượt thành công.
+/// Sai một nhịp cũng không sao — nó chỉ dùng để CHỌN TRẦN, không để phán gì.
+static OSA_LAST_OK_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Trần cho một lượt `osascript`, **tự giãn theo máy** thay vì gõ cứng.
+///
+/// 🔴 Hà 2026-08-25, tối máy quá tải: *"sao giờ vào phiên nào cung báo quá 20s
+/// ko xem được màn vậy?"* — mọi phiên cùng lúc, vì cả 11 phiên dùng CHUNG một
+/// phép dò.
+///
+/// Đo được đêm ấy: `load average` **41,5 trên máy 8 nhân** (quá tải gấp 5), do
+/// mấy lượt `cargo test` của chính tôi cộng với Spotlight đi lập chỉ mục
+/// `target/`. Ở mức ấy `osascript` không được cấp CPU trong 20 giây. Đo lại lúc
+/// load 13: **chính kịch bản ấy mất 1,0 giây**. Nên không có gì hỏng — nó ĐÓI.
+///
+/// Một con số gõ cứng không trả lời được câu hỏi ấy, vì câu hỏi là *"máy đang
+/// bận tới đâu"* — thứ chỉ đo được lúc chạy. Đúng luật Hà đã chốt: vấn đề
+/// runtime thì tự điều chỉnh, đừng gõ cứng ngưỡng.
+///
+/// Nên: lấy lượt THÀNH CÔNG gần nhất làm thước. Máy rảnh thì `last_ok` ~0,3s và
+/// trần đứng nguyên ở mức cũ; máy tải nặng thì `last_ok` nở ra và trần nở theo.
+/// Máy hồi phục thì lượt thành công kế tiếp kéo nó về — không cần ai reset.
 pub fn osa_timeout() -> Duration {
-    match crate::exec::lane() {
-        // Có người đang chờ: thà chờ thêm hai mươi lăm giây còn hơn trả về một
-        // câu "không đọc được màn" mà chính người ấy không làm gì được với nó.
-        crate::exec::Lane::Urgent => Duration::from_secs(45),
-        // Vòng nền: giữ nguyên 20s, vì ở đây lý do cũ vẫn nguyên giá trị.
-        crate::exec::Lane::Background => Duration::from_secs(20),
-    }
+    osa_budget(
+        crate::exec::lane(),
+        Duration::from_millis(OSA_LAST_OK_MS.load(std::sync::atomic::Ordering::Relaxed)),
+    )
+}
+
+/// Phần THUẦN của [`osa_timeout`] — tách ra để kiểm được mà không cần máy bận.
+///
+/// Ba ràng buộc, và cái thứ ba là cái giữ cho nó không thành một cái bẫy khác:
+/// ① **sàn** đúng bằng trần cũ (45s có người chờ · 20s vòng nền) — bản vá này
+///   chỉ được NỚI, không được rút ngắn thứ đang chạy đúng;
+/// ② **hệ số 6 lần** lượt thành công gần nhất: đủ rộng để qua một cơn tải, đủ
+///   hẹp để không ngồi chờ một cửa sổ đã chết thật;
+/// ③ **trần cứng** — nếu không thì một lượt chậm bất thường đẩy trần lên vô hạn
+///   và huba ngồi chờ mãi. Có người đang chờ thì 180s (anh còn bỏ đi được);
+///   vòng nền 90s, vì ở đây một lượt treo giữ cả nhịp quét.
+pub fn osa_budget(lane: crate::exec::Lane, last_ok: Duration) -> Duration {
+    let (san, tran) = match lane {
+        // Có người đang chờ: thà chờ thêm còn hơn trả về một câu "không đọc
+        // được màn" mà chính người ấy không làm gì được với nó.
+        crate::exec::Lane::Urgent => (Duration::from_secs(45), Duration::from_secs(180)),
+        // Vòng nền: một lượt treo ở đây giữ cả vòng chạy của daemon.
+        crate::exec::Lane::Background => (Duration::from_secs(20), Duration::from_secs(90)),
+    };
+    (last_ok * 6).clamp(san, tran)
 }
 
 fn osascript(script: &str) -> Result<String> {
+    let tran = osa_timeout();
+    let bat_dau = std::time::Instant::now();
     let out = run(
         "osascript",
         &["-e", script],
         RunOpts {
-            timeout: Some(osa_timeout()),
+            timeout: Some(tran),
             ..Default::default()
         },
     )?;
     if out.timed_out {
-        return Err(anyhow!("osascript quá {}s", osa_timeout().as_secs()));
+        // 🔴 NÓI RA VÌ SAO, đừng chỉ nói con số — Hà 2026-08-25 nhận hàng loạt
+        // `⚠ không đọc được màn: osascript quá 20s` và không có cách nào biết đó
+        // là máy bận hay cửa sổ chết. Hai chuyện ấy cần hai hành động khác nhau.
+        //
+        // Lượt thành công gần nhất là câu trả lời rẻ nhất: bình thường ~0,3s,
+        // nên một con số vài giây đã tự tố cáo máy đang tải nặng.
+        let truoc = OSA_LAST_OK_MS.load(std::sync::atomic::Ordering::Relaxed);
+        let vi = if truoc >= 2_000 {
+            format!(
+                " (máy đang tải nặng: lượt đọc gần nhất đã mất {:.1}s)",
+                truoc as f64 / 1000.0
+            )
+        } else {
+            String::new()
+        };
+        return Err(anyhow!("osascript quá {}s{vi}", tran.as_secs()));
     }
+    // Chỉ ghi lượt THÀNH CÔNG: một lượt quá hạn không nói được nó "mất bao lâu",
+    // nó chỉ nói "lâu hơn trần" — lấy nó làm thước là tự đẩy trần lên mãi.
+    OSA_LAST_OK_MS.store(
+        bat_dau.elapsed().as_millis().min(u64::MAX as u128) as u64,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     if out.code != Some(0) {
         return Err(anyhow!(
             "osascript hỏng: {}",

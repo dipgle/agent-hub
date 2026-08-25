@@ -314,6 +314,18 @@ pub struct Config {
     #[serde(default)]
     pub sudo_password_env: BTreeMap<String, String>,
 
+    /// Gim câu `👁 Đang theo …` lên đỉnh buồng chat Telegram.
+    ///
+    /// 🔴 Hà 2026-08-25: *"bật gim tin nhắn thông tin phiên đang đứng trước đi"*
+    /// — nên mặc định BẬT, khác với `sudo_password_env` (mặc định tắt vì nó mở
+    /// một đường chạy `sudo` từ xa).
+    ///
+    /// Luôn đúng MỘT tin được gim: gỡ cái cũ rồi mới gim cái mới. Buồng chat
+    /// cuộn rất nhanh trên điện thoại, nên đỉnh buồng là chỗ duy nhất luôn thấy
+    /// được câu trả lời cho *"tôi đang đứng ở phiên nào"*.
+    #[serde(default = "default_true")]
+    pub pin_following: bool,
+
     #[serde(skip)]
     pub config_file: PathBuf,
     #[serde(skip)]
@@ -341,6 +353,7 @@ impl Default for Config {
             // Rỗng = TẮT. Mặc định phải là tắt: bật một đường chạy `sudo` từ xa
             // là chuyện chủ máy phải cố ý khai, không phải thứ mọc sẵn.
             sudo_password_env: BTreeMap::new(),
+            pin_following: true,
             config_file: PathBuf::new(),
             hub_home: PathBuf::new(),
         }

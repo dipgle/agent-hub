@@ -3037,8 +3037,25 @@ impl Inbox {
     /// Không có nút nào thì gửi như một câu thường — một bảng phím rỗng là thứ
     /// Telegram từ chối, và đó sẽ là một lỗi nói về API chứ không nói về việc.
     pub fn send_buttons(&self, text: &str, buttons: &[(String, String)]) -> Result<(), String> {
+        self.send_buttons_id(text, buttons).map(|_| ())
+    }
+
+    /// Như [`Self::send_buttons`] nhưng trả về `message_id` của tin vừa gửi.
+    ///
+    /// `Ok(None)` = **đã gửi được** nhưng Telegram không trả về id. Hai kết cục
+    /// ấy phải phân biệt được: chỗ gọi muốn gim tin này, mà gim một id đoán bừa
+    /// là gim nhầm tin của người khác trong buồng.
+    ///
+    /// Không có nút thì đi đường `send_text` — nó không trả id, và cũng không
+    /// cần: tin cần gim luôn là câu `👁 Đang theo …`, mà câu ấy luôn có nút 📷.
+    pub fn send_buttons_id(
+        &self,
+        text: &str,
+        buttons: &[(String, String)],
+    ) -> Result<Option<i64>, String> {
         if buttons.is_empty() {
-            return self.send_text(text);
+            self.send_text(text)?;
+            return Ok(None);
         }
         self.forget_ack_live();
         let keyboard = Self::keyboard_rows(buttons);
@@ -3057,12 +3074,84 @@ impl Inbox {
             // thoại — không có dòng này thì câu "đã có nút" chỉ là suy luận từ
             // việc không có lỗi.
             logging::info("telegram_buttons_sent", json!({ "count": buttons.len() }));
-            Ok(())
+            Ok(v.get("result")
+                .and_then(|r| r.get("message_id"))
+                .and_then(Value::as_i64))
         } else {
             Err(v
                 .get("description")
                 .and_then(Value::as_str)
                 .unwrap_or("Telegram từ chối sendMessage")
+                .to_string())
+        }
+    }
+
+    /// Gim một tin lên đỉnh buồng chat — **IM LẶNG**.
+    ///
+    /// 🔴 Hà 2026-08-25: *"bật gim tin nhắn thông tin phiên đang đứng trước đi"*.
+    ///
+    /// `disable_notification` là bắt buộc, không phải tuỳ chọn: đổi phiên là
+    /// việc xảy ra liên tục, và một cái gim rung mỗi lần chính là *"điện thoại
+    /// rung mãi rồi bị tắt tiếng, mang theo cả những tin đáng đọc"* — luật 11
+    /// của huba, đã trả giá một lần.
+    pub fn pin(&self, message_id: i64) -> Result<(), String> {
+        self.pin_call("pinChatMessage", message_id)
+    }
+
+    /// Gỡ gim. Gọi TRƯỚC khi gim tin mới, nếu không đỉnh buồng chat mọc một
+    /// chồng gim và cái mới nhất không phải cái trên cùng.
+    pub fn unpin(&self, message_id: i64) -> Result<(), String> {
+        self.pin_call("unpinChatMessage", message_id)
+    }
+
+    /// Tin nào đang được gim — hỏi CHÍNH Telegram, không tin sổ của mình.
+    ///
+    /// `Ok(None)` = buồng chat không có tin gim nào. Tách ra khỏi `Err` vì hai
+    /// kết cục ấy khác nhau: *"không có gì gim"* và *"không hỏi được"*.
+    ///
+    /// Có mặt để một bài kiểm SỐNG đọc lại được kết quả từ đúng nguồn Hà nhìn
+    /// (DoD 4: nghiệm thu deploy phải fetch lại từ target, không đọc lại thứ
+    /// mình vừa gửi đi).
+    pub fn pinned_message_id(&self) -> Result<Option<i64>, String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let r = client
+            .post(self.api("getChat"))
+            .json(&json!({ "chat_id": self.chat_id }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối getChat")
+                .to_string());
+        }
+        Ok(v.get("result")
+            .and_then(|r| r.get("pinned_message"))
+            .and_then(|m| m.get("message_id"))
+            .and_then(Value::as_i64))
+    }
+
+    fn pin_call(&self, method: &str, message_id: i64) -> Result<(), String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let r = client
+            .post(self.api(method))
+            .json(&json!({
+                "chat_id": self.chat_id,
+                "message_id": message_id,
+                "disable_notification": true,
+            }))
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: Value = r.json().unwrap_or_else(|_| json!({}));
+        if v.get("ok").and_then(Value::as_bool) == Some(true) {
+            Ok(())
+        } else {
+            Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or(method)
                 .to_string())
         }
     }

@@ -172,6 +172,54 @@ pub fn known_projects(cfg: &Config) -> Vec<String> {
 /// Cursor holding the Claude session the phone is currently reading.
 pub const FOCUS_SESSION_KEY: &str = "focus:session";
 
+/// `message_id` của tin `👁 Đang theo …` đang được GIM trên đỉnh buồng chat.
+pub const PIN_FOLLOWING_KEY: &str = "pin:following";
+
+/// Tráo cái gim: gỡ tin cũ, gim tin mới, ghi sổ. **Một cửa duy nhất.**
+///
+/// 🔴 Hà 2026-08-25: *"bật gim tin nhắn thông tin phiên đang đứng trước đi"*.
+///
+/// Buồng chat cuộn rất nhanh trên điện thoại, nên đỉnh buồng là chỗ duy nhất
+/// luôn thấy được câu trả lời cho *"tôi đang đứng ở phiên nào"*.
+///
+/// Ba điều gói vào một chỗ, để chỗ gọi không phải nhớ cái nào trước cái nào:
+/// ① **gỡ cũ TRƯỚC khi gim mới** — không thì đỉnh buồng mọc một chồng gim và
+///   cái mới nhất lại không phải cái trên cùng;
+/// ② **ghi sổ id mới** ngay cả khi gỡ cái cũ hỏng — tin cũ có thể đã bị xoá,
+///   và một lần gỡ hụt không được phép làm mất dấu cái vừa gim;
+/// ③ **hỏng thì GHI, đừng nuốt** (luật 3). Bot bị gỡ quyền gim là chuyện có
+///   thật; im lặng thì chủ máy chỉ thấy "gim không lên" mà không biết vì sao.
+pub fn pin_following(db: &Db, tg: &crate::telegram::Inbox, message_id: i64) {
+    if let Some(cu) = db
+        .cursor_or_log(PIN_FOLLOWING_KEY)
+        .and_then(|v| v.trim().parse::<i64>().ok())
+    {
+        if cu != message_id {
+            if let Err(e) = tg.unpin(cu) {
+                // Không phải lỗi nặng: tin cũ có thể đã bị `delete_after_hours`
+                // dọn đi. Ghi lại rồi đi tiếp — cái gim mới quan trọng hơn.
+                logging::info("pin_unpin_failed", json!({ "message_id": cu, "err": e }));
+            }
+        }
+    }
+    match tg.pin(message_id) {
+        Ok(()) => {
+            if let Err(e) = db.set_cursor(PIN_FOLLOWING_KEY, &message_id.to_string()) {
+                logging::error(
+                    "pin_book_failed",
+                    json!({ "message_id": message_id, "err": e.to_string(),
+                            "effect": "đã gim nhưng KHÔNG nhớ được — lượt sau sẽ không gỡ nó" }),
+                );
+            }
+        }
+        Err(e) => logging::error(
+            "pin_failed",
+            json!({ "message_id": message_id, "err": e,
+                    "effect": "câu 'đang theo phiên nào' không lên đỉnh buồng chat" }),
+        ),
+    }
+}
+
 /// Phiên mà MỆNH LỆNH NÀY nói tới — id nằm trong chính câu lệnh, không phải
 /// trong một con trỏ ai đó vừa đặt.
 ///
@@ -11413,12 +11461,21 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     };
                     match (shot_btn.is_empty(), crate::telegram::inbox()) {
                         (false, Some(tg)) if adapter == crate::telegram::NAME => {
-                            if let Err(e) = tg.send_buttons(&ack, &shot_btn) {
-                                logging::error(
-                                    "telegram_ack_failed",
-                                    json!({ "err": e, "what": "follow_ack_shot_button" }),
-                                );
-                                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                            match tg.send_buttons_id(&ack, &shot_btn) {
+                                // Gim câu `👁 Đang theo …` lên đỉnh buồng chat.
+                                // Chỉ gim khi Telegram TRẢ VỀ id — gim một id
+                                // đoán bừa là gim nhầm tin của người khác.
+                                Ok(Some(mid)) if cfg.pin_following => {
+                                    pin_following(db, tg, mid);
+                                }
+                                Ok(_) => {}
+                                Err(e) => {
+                                    logging::error(
+                                        "telegram_ack_failed",
+                                        json!({ "err": e, "what": "follow_ack_shot_button" }),
+                                    );
+                                    reply_in_channel(db, cfg, adapter, cmd, &ack);
+                                }
                             }
                         }
                         _ => reply_in_channel(db, cfg, adapter, cmd, &ack),

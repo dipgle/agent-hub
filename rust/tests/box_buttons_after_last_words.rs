@@ -73,7 +73,16 @@ fn the_appended_block_no_longer_hides_the_input_box() {
         &data(Some("Đã bấm /clean rồi, không thấy phản hồi gì")),
     );
     assert!(html.contains("send_7bdb4f41"), "mất nút ⏎:\n{html}");
-    assert!(html.contains("clr_7bdb4f41"), "mất nút ⌫:\n{html}");
+    // 🔴 ĐẢO CHIỀU 2026-08-25 — Hà: *"nút xóa ô nhập không cần thiết vì có lệnh
+    // xóa rồi"*. Đây là bài kiểm thứ SÁU khoá cái `⌫`, và là cái bị bỏ sót lượt
+    // trước: năm bài kia đã đảo, bài này đỏ ở lượt full test đầu tiên chạy trọn
+    // (`exit 101`).
+    //
+    // Vế còn lại của bài kiểm KHÔNG đổi, và đó là lý do không xoá nó: thứ nó
+    // sinh ra để gác là *"chữ huba nối thêm vào cuối tin có che mất ô nhập
+    // không"*, đo bằng cái nút ⏎ vẫn bám đúng dòng. Cái `⌫` chỉ là hành khách
+    // đi nhờ. Giữ khẳng định ngược để nếu `clr_` mọc lại thì phải đỏ.
+    assert!(!html.contains("clr_7bdb4f41"), "nút ⌫ mọc lại:\n{html}");
 }
 
 /// Không đo được ô nhập (chỗ gọi không truyền gì) thì vẫn dò như cũ — đường lùi

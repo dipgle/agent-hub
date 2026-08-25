@@ -149,17 +149,25 @@ fn the_list_tells_running_waiting_and_stopped_apart() {
     // bản chép thứ hai của đúng cái bảng vừa gom về một chỗ — và bài kiểm sẽ
     // đỏ vì bảng đổi hình, chứ không vì sản phẩm sai.
     use huba::sessions::{ST_DEAD, ST_RUN, ST_WAIT};
-    // 🔄 Icon MỞ ĐẦU hàng, chữ ở ô thứ hai — Hà 2026-08-22: *"Chuyển icon trạng
-    // thái lên đứng trước tên phiên sẽ dễ nhìn hơn"*. Bài kiểm cũ ghim hai thứ
-    // ấy DÍNH nhau (`⚡ đang chạy`), nên nó khoá luôn cả CHỖ ĐỨNG. Ghim lại đúng
-    // hai điều phải giữ: icon ở cột đầu (mắt quét dọc mép trái) và chữ vẫn còn
-    // trên hàng (luật Hà 12/08 — bốn tình trạng phải đọc được bằng chữ).
+    // 🔄 ĐẢO CHIỀU LẦN HAI, 2026-08-25 — Hà: *"text trạng thái không cần vì có
+    // icon rồi"* · *"'đứng chờ' bỏ đi"*.
+    //
+    // Bài kiểm này đã đảo một lần (22/08, khi icon rời lên cột đầu) và vẫn giữ
+    // vế *"chữ phải còn trên hàng"* theo luật 12/08. Luật ấy nay hết hiệu lực,
+    // và hết đúng lý do: hồi 12/08 icon là bốn CHẤM TRÒN khác màu; từ 19/08 nó
+    // là bốn HÌNH khác nhau, mỗi hình tự nói nghĩa. Chữ thành bản sao thứ hai.
+    //
+    // Ghim lại đúng thứ còn phải giữ: **icon ở cột đầu**, và **chữ tình trạng
+    // KHÔNG được mọc lại**.
     let state_row = |icon: &str, word: &str| {
         let row = text
             .lines()
             .find(|l| l.starts_with(icon))
             .unwrap_or_else(|| panic!("không hàng nào mở đầu bằng {icon}:\n{text}"));
-        assert!(row.contains(word), "hàng {icon} mất chữ `{word}`: {row}");
+        assert!(
+            !row.contains(word),
+            "chữ tình trạng `{word}` mọc lại cạnh icon {icon}: {row}"
+        );
     };
     state_row(ST_RUN, "đang chạy");
     state_row(ST_WAIT, "đứng chờ");
@@ -200,7 +208,12 @@ fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
         .lines()
         .find(|l| l.starts_with(huba::sessions::ST_ASK))
         .unwrap_or_else(|| panic!("icon HỎI không ở cột đầu:\n{text}"));
-    assert!(row.contains("dừng lại HỎI"), "tình trạng: {row}");
+    // Chữ tình trạng đi ra 25/08 (xem `the_list_tells_running_waiting_and_stopped_apart`);
+    // icon `❓` ở cột đầu đã là cả câu trả lời.
+    assert!(
+        !row.contains("dừng lại HỎI"),
+        "chữ tình trạng mọc lại: {row}"
+    );
     assert!(text.contains("Nửa ngày"), "nhãn câu hỏi: {text}");
     assert!(
         text.contains("NỬA NGÀY không?"),
@@ -335,7 +348,10 @@ fn each_row_carries_the_same_facts_as_the_card_on_the_page() {
         "chế độ quyền vẫn lặp ở từng hàng: {than}"
     );
     assert!(text.contains("2 subagent"), "{text}");
-    assert!(text.contains("im 12 phút"), "{text}");
+    // Viết gọn 25/08 — Hà: *"'im 1 tiếng' thì viết gọn thành 1h là được"*.
+    // `im 12 phút` = 10 cột, `12p` = 3; sáu hàng là 42 cột trả về cho TÊN phiên.
+    assert!(text.contains("12p"), "{text}");
+    assert!(!text.contains("im 12 phút"), "dạng dài mọc lại: {text}");
     assert!(
         text.contains("💬 Đã sửa xong phần redaction"),
         "câu cuối: {text}"
@@ -501,13 +517,21 @@ fn the_real_2109_list_fits_two_phone_lines_per_session() {
         !text.contains("đang chạy · Forging"),
         "vẫn in hai lần cùng một vế: {text}"
     );
-    //    Phiên đang chạy mà CHƯA có động từ vẫn phải có chữ, không rơi về icon câm.
+    //    Phiên đang chạy mà CHƯA có động từ thì ô ấy RỖNG — icon `⚡` đã đủ.
+    //
+    //    🔄 Đảo chiều 2026-08-25 (Hà: *"text trạng thái không cần vì có icon
+    //    rồi"*). Vế cũ đòi chữ "đang chạy" cho hàng không động từ, và nó đúng
+    //    hồi icon còn là bốn chấm tròn khác màu. Nay giữ đúng phần còn giá trị:
+    //    icon vẫn ở cột đầu, và chữ tình trạng không được mọc lại.
     let huba = text
         .lines()
         .find(|l| l.contains("[huba]"))
         .expect("phải có hàng huba");
     assert!(huba.starts_with('⚡'), "{huba}");
-    assert!(huba.contains("· đang chạy ·"), "hàng không động từ: {huba}");
+    assert!(
+        !huba.contains("đang chạy"),
+        "chữ tình trạng mọc lại: {huba}"
+    );
 
     // ④ Và tổng thể phải ngắn hơn bản 21:09 — 671 ký tự / 13 dòng (kể cả dòng
     //    chân "Chưa theo phiên nào", thứ bản 21:09 không có vì lúc ấy đang theo
@@ -2038,9 +2062,7 @@ fn each_command_line_carries_its_run_link_in_one_message() {
         "{html}"
     );
     assert!(
-        html.contains(
-            "<a href=\"https://t.me/bot?start=run_1\">▶️ bash ./run.sh</a>\n"
-        ),
+        html.contains("<a href=\"https://t.me/bot?start=run_1\">▶️ bash ./run.sh</a>\n"),
         "{html}"
     );
     // …và cả tin vẫn là MỘT chuỗi, chữ giữ nguyên thứ tự, không mẩu nào rơi ra.

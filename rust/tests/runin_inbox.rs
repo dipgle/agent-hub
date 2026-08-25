@@ -64,7 +64,11 @@ fn a_directory_that_is_not_a_uuid_is_ignored() {
     for bad in ["scratch", "12345678", "not-a-uuid", ".."] {
         put(&root, "claude-501", "slug", bad, "rm -rf ~\n");
     }
-    assert!(scan_session_inboxes(&root).is_empty(), "{:#?}", scan_session_inboxes(&root));
+    assert!(
+        scan_session_inboxes(&root).is_empty(),
+        "{:#?}",
+        scan_session_inboxes(&root)
+    );
 }
 
 /// Chỉ đi vào thư mục `claude-*` — không duyệt cả `/private/tmp`.

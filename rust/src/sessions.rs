@@ -2115,12 +2115,79 @@ fn letters_only(s: &str) -> String {
 /// chép lại thứ đang nằm ngay trên màn, đúng luật đã trả giá hai lần trong một
 /// ngày ở chỗ gọi.
 pub fn said_shown_on_screen(said: &str, screen: &str) -> bool {
-    let said = letters_only(said);
-    if said.chars().count() < SAID_PROBE_MIN {
-        return true;
+    said_missing_head(said, screen).is_none()
+}
+
+/// Phần ĐẦU của lời cuối mà màn KHÔNG có — `None` nghĩa là màn đã đủ.
+///
+/// 🔴 Hà 2026-08-25: *"tại sao mục này lại không tự viết thuật toán xử lý để
+/// ghép nối luôn với màn hình chính lại cứ chèn thêm xuống cuối tin, nên nhiều
+/// thông tin bị trùng nhau rất dài"*.
+///
+/// Anh chỉ đúng chỗ hở, và chỗ hở ấy nằm ngay trong bản mô tả của
+/// [`said_shown_on_screen`]: *"đuôi của lượt gần như luôn còn trên màn kể cả khi
+/// phần trên đã trôi mất"*. Câu ấy viết ra để biện minh cho việc **dò** bằng
+/// đầu, rồi dừng lại ở đó — nên quyết định là NHỊ PHÂN: hoặc không bù gì, hoặc
+/// bù NGUYÊN VĂN cả lượt. Mà đúng theo câu vừa trích, ca "bù" gần như luôn kèm
+/// một cái đuôi đang nằm sờ sờ trên màn. Lượt càng dài thì phần trùng càng dài.
+///
+/// Màn cuộn mất từ TRÊN xuống, nên thứ nó còn giữ là một ĐUÔI liền mạch của lời
+/// cuối. Vậy chỉ cần tìm **điểm nối** — vị trí sớm nhất trong lời cuối mà từ đó
+/// trở đi màn có bản sao — rồi giao lại đúng phần trước điểm ấy. Tất định, một
+/// lượt quét chuỗi, không gọi model nào.
+///
+/// Hai lựa chọn có chủ ý, cả hai đều nghiêng về phía KHÔNG mất chữ:
+/// ① mốc dò dài `SAID_PROBE` ký tự đã gột — đủ dài để một cú khớp trùng hợp
+///    (chữ trong đầu ra lệnh chẳng hạn) gần như không xảy ra;
+/// ② điểm cắt nới tới **hết từ đang dở**, chứ không tới hết DÒNG: nhật ký hay
+///    có đoạn văn dài đúng một dòng, nới tới hết dòng là chép lại gần hết thứ
+///    đang nằm trên màn — đúng cái đang đi gỡ. Thà lặp một chữ còn hơn cắt cụt
+///    giữa từ, và thà lặp một chữ còn hơn nuốt mất một câu.
+pub fn said_missing_head(said: &str, screen: &str) -> Option<String> {
+    // Bản đã gột, kèm bản đồ ngược về chuỗi GỐC: phép so phải chạy trên bản gột
+    // (cửa sổ bẻ dòng, `claude` in `⏺`/`**` xen vào), nhưng phép CẮT phải chạy
+    // trên bản gốc — chỉ nó còn dấu câu và xuống dòng để người đọc đọc được.
+    let mut norm: Vec<char> = Vec::new();
+    let mut back: Vec<usize> = Vec::new();
+    for (b, c) in said.char_indices() {
+        if c.is_alphanumeric() {
+            for lc in c.to_lowercase() {
+                norm.push(lc);
+                back.push(b);
+            }
+        }
     }
-    let probe: String = said.chars().take(SAID_PROBE).collect();
-    letters_only(screen).contains(&probe)
+    if norm.len() < SAID_PROBE_MIN {
+        // Quá ngắn ⟹ "coi như đã hiện, đừng bù" — luật cũ, giữ nguyên.
+        return None;
+    }
+    let screen_norm = letters_only(screen);
+    // Mốc ngắn hơn `SAID_PROBE` khi cả lượt còn ngắn hơn thế; không có dòng này
+    // thì lát cắt `norm[i..i + SAID_PROBE]` nổ với mọi lượt dài 24..80 ký tự.
+    let probe_len = SAID_PROBE.min(norm.len());
+    let mut join = None;
+    for i in 0..=(norm.len() - probe_len) {
+        let probe: String = norm[i..i + probe_len].iter().collect();
+        if screen_norm.contains(&probe) {
+            join = Some(i);
+            break;
+        }
+    }
+    let i = match join {
+        // Màn có cả phần ĐẦU ⟹ có trọn: màn chỉ cuộn mất từ trên xuống, nên
+        // thấy được đầu nghĩa là không mất gì.
+        Some(0) => return None,
+        Some(i) => i,
+        // Không khớp chỗ nào ⟹ màn không mang lời nào của lượt này (ca 17/08,
+        // `/shot` ra nguyên một tệp mã). Bù trọn, như cũ.
+        None => return Some(said.trim_end().to_string()),
+    };
+    let cut = back[i];
+    let cut = said[cut..]
+        .find(char::is_whitespace)
+        .map(|k| cut + k)
+        .unwrap_or(said.len());
+    Some(said[..cut].trim_end().to_string())
 }
 
 /// Lượt cuối phiên nói ra, **dài hơn hẳn** phần xem trước 240 ký tự.
@@ -3343,17 +3410,34 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>, tabs: &[crate::keys::Tab]) {
         if taken.contains(&tab.tty) {
             continue;
         }
-        // Có CLI chạy mà không khớp phiên nào: **không** phải cửa sổ rảnh. Có
-        // thể là một `claude` của tài khoản đang mù, hoặc một CLI khác hẳn.
-        // Khai nó là "dấu nhắc trống" rồi gõ lệnh shell vào đó là gõ vào giữa
-        // một chương trình đang chạy — thứ không lùi lại được.
-        if let Some(cli) = tab.cli() {
+        // Có CLI chạy mà không khớp phiên nào (`nano`, `vim`, `top`, hoặc một
+        // `claude` của tài khoản đang mù): KHÔNG phải dấu nhắc trống. Nói ra
+        // đúng như thế — nhưng VẪN LIỆT KÊ.
+        //
+        // 🔴 Hà 2026-08-25, ảnh buồng chat: gõ `cd projects` được, `/shot`
+        // được, rồi gõ `nano .env` — lượt `/shot` ngay sau đó trả
+        // `⚠ không thấy phiên 'win-ttys001' trong danh sách`. *"sau một vài tin
+        // nhắn với terminal thì mất quyền kiểm soát nó luôn"*.
+        //
+        // Bản cũ `continue` ở đây, tức cửa sổ **biến mất khỏi danh sách**. Cái
+        // rào ấy sinh ra đúng (gõ lệnh shell vào giữa một chương trình đang
+        // chạy là thứ không lùi lại được), nhưng nó chọn cái giá tệ hơn hẳn:
+        // mất luôn đường NHÌN. Không `/shot` được thì không thấy `nano` đang
+        // mở, và không có cách nào gõ `^X` để thoát ra — cửa sổ nằm đó, mở
+        // sẵn, ngay trước mặt nếu ngồi ở máy, mà từ điện thoại thì như không
+        // tồn tại. Đúng định nghĩa lỗ hổng của cây cầu (xem `CLAUDE.md`, phép
+        // thử một câu).
+        //
+        // Nay: hàng ở lại, mang theo TÊN chương trình đang chạy. Màn nói thật,
+        // người bấm quyết — đúng luật *"đừng quàng rào robot lên thao tác của
+        // chủ máy"*.
+        let running = tab.cli().map(str::to_string);
+        if let Some(cli) = &running {
             logging::info(
                 "terminal_tab_busy_unmatched",
                 json!({ "tty": tab.tty, "cli": cli,
-                        "why": "cửa sổ chạy một CLI không khớp phiên nào — không nhận là cửa sổ rảnh" }),
+                        "why": "cửa sổ chạy một CLI không khớp phiên nào — VẪN liệt kê, có ghi tên chương trình" }),
             );
-            continue;
         }
         rows.push(LiveSession {
             session_id: format!("{SHELL_ID_PREFIX}{}", tab.tty),
@@ -3363,7 +3447,11 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>, tabs: &[crate::keys::Tab]) {
             host: "shell".to_string(),
             kind: "shell".to_string(),
             tty: tab.tty.clone(),
-            working: tab.busy,
+            // Đang chạy một chương trình thì hàng phải nói nó BẬN, kể cả khi
+            // Terminal chưa kịp khai `busy` — thứ quyết định ở đây là có một
+            // chương trình chiếm màn, không phải nhịp cập nhật của Terminal.
+            working: tab.busy || running.is_some(),
+            activity: running.clone(),
             ..Default::default()
         });
         added += 1;

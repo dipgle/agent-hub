@@ -53,8 +53,14 @@ fn a_session_whose_recorded_pct_was_evicted_is_reconsidered() {
 fn a_remembered_pct_still_holds_until_it_climbs_a_step() {
     let done = ["1ad3e613"];
     let at = [("1ad3e613", 61u8)];
-    assert!(already_done("1ad3e613", 63, &done, &at), "63 < 71 thì phải giữ");
-    assert!(already_done("1ad3e613", 70, &done, &at), "70 < 71 thì vẫn giữ");
+    assert!(
+        already_done("1ad3e613", 63, &done, &at),
+        "63 < 71 thì phải giữ"
+    );
+    assert!(
+        already_done("1ad3e613", 70, &done, &at),
+        "70 < 71 thì vẫn giữ"
+    );
     assert!(
         !already_done("1ad3e613", 71, &done, &at),
         "leo đủ một mốc thì phải hỏi lại"

@@ -850,17 +850,43 @@ pub fn chat_in_updates(v: &Value) -> Option<(i64, String)> {
     }
     for u in v.get("result").and_then(Value::as_array)?.iter().rev() {
         // Tin thường, tin đã sửa, và bài trong kênh — ba chỗ `chat` xuất hiện.
-        let m = ["message", "edited_message", "channel_post"]
+        //
+        // 🔴 `continue`, KHÔNG `?` — Hà 2026-08-25 duyệt vá nợ cổng. Dấu `?` ở
+        // hai dòng dưới thoát khỏi CẢ HÀM chứ không sang vòng sau, nên vòng lặp
+        // này chưa bao giờ lặp (clippy `never_loop` chỉ đúng chỗ). Hệ quả không
+        // phải lý thuyết: `getUpdates` trả cả `callback_query` — thứ huba tự
+        // sinh ra mỗi lần chủ máy chạm một cái nút — và bản ghi ấy KHÔNG mang
+        // `message`. Nên chỉ cần cú chạm gần nhất là một cái nút, trang cài
+        // thôi dò ra buồng chat, dù ngay bên dưới có cả chục tin chữ mang đúng
+        // `chat.id` cần tìm. Đúng cái việc tay mà hàm này sinh ra để bỏ đi.
+        //
+        // Bỏ qua một bản ghi không mang buồng KHÁC HẲN với đoán bừa một con số
+        // (điều bản mô tả trên cấm): hàm vẫn chỉ trả về `chat.id` đọc được từ
+        // một bản ghi có thật, chỉ là không dừng ở bản ghi đầu tiên thiếu nó.
+        let Some(m) = ["message", "edited_message", "channel_post"]
             .iter()
-            .find_map(|k| u.get(*k))?;
-        let id = m.get("chat").and_then(|c| c.get("id")).and_then(Value::as_i64)?;
+            .find_map(|k| u.get(*k))
+        else {
+            continue;
+        };
+        let Some(id) = m
+            .get("chat")
+            .and_then(|c| c.get("id"))
+            .and_then(Value::as_i64)
+        else {
+            continue;
+        };
         let who = m
             .get("from")
             .and_then(|f| {
                 f.get("username")
                     .and_then(Value::as_str)
                     .map(|s| format!("@{s}"))
-                    .or_else(|| f.get("first_name").and_then(Value::as_str).map(str::to_string))
+                    .or_else(|| {
+                        f.get("first_name")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    })
             })
             .unwrap_or_else(|| "?".to_string());
         return Some((id, who));

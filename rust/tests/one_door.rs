@@ -159,7 +159,14 @@ fn text_in_the_input_box_always_gets_a_send_link() {
         shown.contains("⏎"),
         "chữ trong ô nhập phải có đường gửi nhanh ngay tại dòng của nó: {shown}"
     );
-    assert!(shown.contains("xoá ô nhập"), "…và một đường xoá ô: {shown}");
+    // 🔄 ĐẢO CHIỀU 2026-08-25 — Hà: *"nút xóa ô nhập không cần thiết vì có lệnh
+    // xóa rồi"*. Chủ đề bài kiểm này là câu Hà kêu 16/08 (*"Lại mất nút gửi"*),
+    // và `⏎` ở trên đã đo trọn nó. Đường xoá vẫn còn nguyên bằng lệnh gõ
+    // (`verbs.rs` vẫn nhận `clr_`), chỉ cái đích chạm cạnh nút GỬI là đi.
+    assert!(
+        !shown.contains("xoá ô nhập"),
+        "đường xoá ô mọc lại cạnh nút gửi: {shown}"
+    );
 }
 
 /// ☑ của một lựa chọn nằm TRƯỚC số thứ tự, không phải cuối nhãn.

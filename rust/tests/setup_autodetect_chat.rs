@@ -94,3 +94,41 @@ fn a_negative_group_id_is_not_rejected() {
         Some(-1001234567890i64)
     );
 }
+
+/// 🔴 CẬP NHẬT MỚI NHẤT KHÔNG MANG `chat` ⟹ ĐỌC TIẾP XUỐNG, đừng bỏ cuộc.
+///
+/// Hà 2026-08-25, duyệt vá nợ cổng. Bản trước dùng `?` trong thân vòng lặp, mà
+/// `?` thoát khỏi CẢ HÀM chứ không sang vòng sau — nên vòng lặp ấy chưa bao giờ
+/// lặp (clippy `never_loop` chỉ đúng chỗ, và không ai đọc nó suốt nhiều tuần).
+///
+/// Hình dạng dưới đây không phải giả định: `getUpdates` trả cả `callback_query`
+/// — thứ huba TỰ SINH RA mỗi lần chủ máy chạm một cái nút — và bản ghi ấy không
+/// mang `message`. Nên chỉ cần cú chạm gần nhất là một cái nút thì trang cài
+/// thôi dò ra buồng chat, dù ngay bên dưới có tin chữ mang đúng `chat.id` cần
+/// tìm. Đúng cái việc tay mà hàm này sinh ra để bỏ đi.
+///
+/// Đây là ĐỐI CHỨNG NGƯỢC của bản vá: trả `?` về chỗ cũ là bài này đỏ ngay.
+#[test]
+fn a_button_press_on_top_does_not_hide_the_message_below_it() {
+    let v = json!({"ok": true, "result": [
+        {"update_id": 1, "message": {"chat": {"id": 8110123}, "from": {"username": "ha"}}},
+        {"update_id": 2, "callback_query": {"from": {"id": 8110123}, "data": "sess:ab12"}}
+    ]});
+    assert_eq!(
+        chat_in_updates(&v),
+        Some((8110123, "@ha".to_string())),
+        "một cú chạm nút ở trên cùng che mất tin chữ ngay bên dưới"
+    );
+}
+
+/// …và bỏ qua một bản ghi thiếu `chat.id` KHÁC HẲN đoán bừa: hàm vẫn chỉ trả về
+/// con số đọc được từ một bản ghi có thật. Ca này trộn cả hai hình dạng lệch.
+#[test]
+fn records_without_a_chat_are_skipped_not_guessed() {
+    let v = json!({"ok": true, "result": [
+        {"update_id": 1, "message": {"chat": {"id": 42}, "from": {"first_name": "Hà"}}},
+        {"update_id": 2, "message": {"from": {"id": 7}}},
+        {"update_id": 3, "callback_query": {"from": {"id": 7}}}
+    ]});
+    assert_eq!(chat_in_updates(&v), Some((42, "Hà".to_string())));
+}

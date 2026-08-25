@@ -381,6 +381,23 @@ pub fn still_in_box(screen: &str, typed: &str) -> bool {
     // ấy vào phần hội thoại phía trên — chữ vẫn còn trên màn, mà ý nghĩa ngược
     // hẳn. Soi cả màn thì huba đọc "đã gửi" thành "còn nằm trong ô", rồi bắn một
     // Enter thừa và báo sai cho chủ máy. Ô nhập là khối đóng khung cuối cùng.
+    // 🔴 KHÔNG CÓ Ô NHẬP THÌ KHÔNG CÓ GÌ "CÒN NẰM TRONG Ô" — Hà 2026-08-25:
+    // *"gõ 1 lệnh mà có 4 lần enter"*.
+    //
+    // `box_region` rơi về **bốn dòng cuối** khi `box_start` không thấy khung.
+    // Đường lùi ấy đúng cho màn `claude` mà phép dò khung trượt; nó SAI hẳn cho
+    // một cửa sổ shell trần: ở đó `do script` đã gửi lệnh rồi, và dòng lệnh vừa
+    // gõ **nằm lại trên màn vĩnh viễn** dưới dấu nhắc (`… projects % cd
+    // projects`). Nên phép kiểm luôn trả "còn trong ô", và `type_and_send` bắn
+    // thêm hai cú Enter — đúng mấy dấu nhắc trống Hà chụp được.
+    //
+    // Không thấy khung ⟹ trả `false`. Vừa vá đúng ca này, vừa bỏ một cú Enter
+    // BẮN MÙ: quyết định bấm Enter dựa trên bốn dòng cuối của một màn không rõ
+    // hình dạng chính là thứ `CLAUDE.md` §13 cấm — một Enter lạc thì không lùi
+    // lại được (ca `☐ RPC pool` → `☒` của phiên amm).
+    if box_start(screen).is_none() {
+        return false;
+    }
     let screen = box_region(screen);
     let t = squash(typed);
     let n = t.chars().count();
@@ -2895,7 +2912,11 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
                 // cờ (`env -i`), GIÁ TRỊ của cờ (`nice -n 10` — `10` không mở
                 // đầu bằng `-` nên vòng lọc đầu tiên dừng lại ở nó, đo được
                 // bằng bài kiểm), và gán biến môi trường (`env FOO=bar cmd`).
-                .find(|w| !w.starts_with('-') && !w.contains('=') && !w.chars().all(|c| c.is_ascii_digit()))
+                .find(|w| {
+                    !w.starts_with('-')
+                        && !w.contains('=')
+                        && !w.chars().all(|c| c.is_ascii_digit())
+                })
                 .unwrap_or(verb)
         } else {
             verb

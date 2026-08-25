@@ -61,7 +61,10 @@ fn the_whole_block_arrives_as_one_command_with_its_cd_in_front() {
 fn the_prose_above_the_block_stays_out_of_it() {
     let got = commands_in_report(BLOCK, 8);
     for c in &got {
-        assert!(!c.contains("Một khối, dán một lần"), "nuốt cả câu văn: {c:?}");
+        assert!(
+            !c.contains("Một khối, dán một lần"),
+            "nuốt cả câu văn: {c:?}"
+        );
     }
 }
 
@@ -71,7 +74,8 @@ fn ordinary_lines_are_untouched() {
     let text = "Chạy giúp tôi:\ngit -C ~/projects/huba push origin main\nXong thì báo.";
     let got = commands_in_report(text, 8);
     assert!(
-        got.iter().any(|c| c == "git -C ~/projects/huba push origin main"),
+        got.iter()
+            .any(|c| c == "git -C ~/projects/huba push origin main"),
         "{got:#?}"
     );
 }
@@ -82,7 +86,8 @@ fn the_single_line_cd_form_still_works() {
     let text = "cd ~/projects/AI/codetrail && git push\n";
     let got = commands_in_report(text, 8);
     assert!(
-        got.iter().any(|c| c == "cd ~/projects/AI/codetrail && git push"),
+        got.iter()
+            .any(|c| c == "cd ~/projects/AI/codetrail && git push"),
         "{got:#?}"
     );
 }

@@ -22,7 +22,10 @@ fn anchors(labels: &[&str]) -> Vec<(String, Vec<(String, String)>)> {
         .map(|(i, l)| {
             (
                 l.to_string(),
-                vec![(format!("https://t.me/b?start=k_abcd1234_{}", i + 1), "\t☑".to_string())],
+                vec![(
+                    format!("https://t.me/b?start=k_abcd1234_{}", i + 1),
+                    "\t☑".to_string(),
+                )],
             )
         })
         .collect()

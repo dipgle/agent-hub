@@ -50,5 +50,12 @@ fn a_unique_box_text_still_gets_its_links() {
     d.box_text = Some("dọn hàng chờ giúp tôi với".into());
     let html = render_session_data(&screen, &d);
     assert!(html.contains("send_7bdb4f41"), "{html}");
-    assert!(html.contains("clr_7bdb4f41"), "{html}");
+    // 🔴 ĐẢO CHIỀU 2026-08-25 — Hà: *"nút xóa ô nhập không cần thiết vì có lệnh
+    // xóa rồi"*. `⌫` đi hẳn: hai đích chạm cạnh nhau, một bên GỬI một bên XOÁ,
+    // cả hai đều không lùi lại được. Bài kiểm ở lại để khoá chiều mới, chứ
+    // không xoá — nếu `clr_` mọc lại thì phải đỏ.
+    assert!(
+        !html.contains("clr_7bdb4f41"),
+        "nút xoá ô nhập mọc lại:\n{html}"
+    );
 }

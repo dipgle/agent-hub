@@ -82,9 +82,8 @@ fn a_blank_line_after_the_mark_is_tolerated() {
 /// Ghép được với bản vá nối `\` sáng nay: lệnh nhiều dòng đi nguyên khối.
 #[test]
 fn a_marked_multi_line_command_arrives_whole() {
-    let text = format!(
-        "{RUN_MARK}\ncd ~/projects/huba && \\\ncargo test --offline && \\\necho XONG\n"
-    );
+    let text =
+        format!("{RUN_MARK}\ncd ~/projects/huba && \\\ncargo test --offline && \\\necho XONG\n");
     let got = marked_commands(&text, 8);
     assert_eq!(got.len(), 1, "{got:#?}");
     assert!(got[0].starts_with("cd ~/projects/huba &&"), "{got:#?}");

@@ -107,5 +107,16 @@ fn the_session_list_uses_the_same_table() {
     x.bg_shell = true;
     let out = huba::pipeline::session_list_text(std::slice::from_ref(&x), "", 0);
     assert!(out.contains(ST_BG), "{out}");
-    assert!(out.contains("lệnh nền"), "{out}");
+    // 🔄 ĐẢO CHIỀU 2026-08-25 — Hà: *"text trạng thái không cần vì có icon
+    // rồi"*. Ô chữ tình trạng đã đi hẳn khỏi hàng (xem `pipeline::
+    // session_list_text`), nên hàng nay là `🌀 ⬜ · acc1 · da29807e`.
+    //
+    // Vế THẬT của bài kiểm không mất: nó gác *"danh sách dùng đúng bộ ký hiệu
+    // ấy, một chỗ quyết định chứ không hai bản chép"*, và `ST_BG` ở trên đo trọn
+    // điều đó. Chữ chỉ là hành khách đi nhờ — cùng hình dạng với chín bài khoá
+    // nút `⌫` cùng ngày.
+    assert!(
+        !out.contains("lệnh nền"),
+        "chữ tình trạng mọc lại cạnh icon:\n{out}"
+    );
 }

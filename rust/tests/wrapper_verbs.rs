@@ -23,7 +23,8 @@ const REAL: &str = "cd ~/projects/AI/tfl5 && nohup bash -c 'bash scripts/upgrade
 fn the_real_line_from_the_screenshot_gets_a_button() {
     let got = commands_in_report(REAL, 8);
     assert!(
-        got.iter().any(|c| c.starts_with("cd ~/projects/AI/tfl5 &&")),
+        got.iter()
+            .any(|c| c.starts_with("cd ~/projects/AI/tfl5 &&")),
         "dòng 180 ký tự, dưới trần, mà vẫn 0 nút:\n{got:#?}"
     );
 }

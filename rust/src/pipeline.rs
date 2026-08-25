@@ -1492,18 +1492,18 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
 /// Sổ những `(phiên, lệnh)` đã tự chạy — để không chạy lại cùng một dòng.
 pub const AUTORUN_DONE_KEY: &str = "auto_run:done";
 
-/// 🪦 `autorun_allows` + `SHELL_JOINERS` GỠ 2026-08-24 — Hà chọn **mức 2**:
-/// *"Chỉ dấu, bỏ allow"*, sau khi hỏi *"Tại sao lại cần allow làm gì vậy?"*.
-///
-/// Cổng ấy sinh ra vì `auto_run` ĐOÁN theo hình dạng (`commands_in_report`),
-/// nên nó phải tự chặn lại thứ chính nó vừa đoán bừa. Nay nguồn đổi hẳn: chỉ
-/// chạy dòng phiên **CỐ Ý đánh dấu** bằng [`crate::keys::RUN_MARK`]. Không còn
-/// phép đoán thì không còn thứ để mà chặn — giữ cả hai là dựng hai cổng cho một
-/// câu hỏi, đúng hình dạng lỗi `CLAUDE.md` §7 đã ghi.
-///
-/// Cái KHÔNG mất theo: dấu chỉ nói *"mô hình cố ý bảo chạy"*, không nói *"chủ
-/// máy cho phép"*. Hà biết và chọn thế. Ghi ở đây để lần sau không ai "vá cho
-/// an toàn" bằng cách lặng lẽ dựng lại một danh sách.
+// 🪦 `autorun_allows` + `SHELL_JOINERS` GỠ 2026-08-24 — Hà chọn **mức 2**:
+// *"Chỉ dấu, bỏ allow"*, sau khi hỏi *"Tại sao lại cần allow làm gì vậy?"*.
+//
+// Cổng ấy sinh ra vì `auto_run` ĐOÁN theo hình dạng (`commands_in_report`),
+// nên nó phải tự chặn lại thứ chính nó vừa đoán bừa. Nay nguồn đổi hẳn: chỉ
+// chạy dòng phiên **CỐ Ý đánh dấu** bằng [`crate::keys::RUN_MARK`]. Không còn
+// phép đoán thì không còn thứ để mà chặn — giữ cả hai là dựng hai cổng cho một
+// câu hỏi, đúng hình dạng lỗi `CLAUDE.md` §7 đã ghi.
+//
+// Cái KHÔNG mất theo: dấu chỉ nói *"mô hình cố ý bảo chạy"*, không nói *"chủ
+// máy cho phép"*. Hà biết và chọn thế. Ghi ở đây để lần sau không ai "vá cho
+// an toàn" bằng cách lặng lẽ dựng lại một danh sách.
 
 /// Tự bấm hộ nút `▶️` cho phiên đang ĐỨNG CHỜ — trả về số lệnh đã xếp hàng.
 ///
@@ -2581,10 +2581,25 @@ pub fn session_list_text(
         // trạng phải đọc được bằng chữ) không đổi, và gộp cả cụm lên đầu thì
         // tên phiên — thứ ngón tay đang tìm — bị đẩy ra sau một quãng dài ngắn
         // tuỳ tình trạng.
+        // 🔴 CHỮ TÌNH TRẠNG ĐI RA, ICON Ở LẠI — Hà 2026-08-25: *"text trạng
+        // thái không cần vì có icon rồi"* · *"'đứng chờ' bỏ đi"*.
+        //
+        // Đây LẬT một luật cũ của chính anh (2026-08-12: *"bốn tình trạng phải
+        // phân biệt được"*), và lật đúng: hồi ấy icon là bốn CHẤM TRÒN khác
+        // MÀU (`🟢 🟡 🔴 ⚫`) — không phân biệt nổi trên màn 390px, nên chữ phải
+        // gánh. Ngày 19/08 bộ ký hiệu đổi sang bốn HÌNH khác nhau
+        // (`⚡ 💤 ❓ ❌ 🪦 🌀`, xem `sessions::ST_*`), mỗi hình tự nói nghĩa của
+        // nó. Từ lúc ấy chữ thành bản sao thứ hai — chỉ chưa ai gỡ.
+        //
+        // Động từ thì Ở LẠI: `Embellishing… 2m10s` không nói lại cái icon, nó
+        // nói phiên đang làm GÌ (Hà 2026-08-10: *"ui chưa thể hiện được phiên
+        // đang làm gì"*). Phiên đang chạy mà chưa có động từ thì ô này rỗng —
+        // icon `⚡` đã đủ, không cần một chữ "đang chạy" chen vào.
+        let _ = label;
         let run = if verb_moved {
             verb.clone()
         } else {
-            label.to_string()
+            String::new()
         };
         // Dự án ĐANG LÀM đứng trước tên: tên phiên do `claude` tự đặt
         // ("projects-ff") không nói được gì, còn `cwd` thì giống hệt nhau ở mọi
@@ -3322,7 +3337,9 @@ pub const RUNIN_INBOX_NAME: &str = "huba-run.txt";
 /// Cùng phép thử với nhánh `full_uuid` của [`split_target`] — tách ra thành hàm
 /// để hai chỗ không tự so chuỗi lần nữa mỗi chỗ một kiểu.
 pub fn looks_like_uuid(s: &str) -> bool {
-    s.len() >= 32 && s.matches('-').count() == 4 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+    s.len() >= 32
+        && s.matches('-').count() == 4
+        && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
 pub fn scan_session_inboxes(root: &std::path::Path) -> Vec<(String, String, std::path::PathBuf)> {
@@ -4778,8 +4795,69 @@ pub fn html_with_links(
         // biến một câu tiếng Anh thành thứ trông như mã. Câu hỏi "đây có phải
         // lệnh không" đã có đúng MỘT chỗ trả lời (`keys::commands_in_report`),
         // nên hỏi lại chính nó, đừng đoán theo hình dạng lần thứ hai.
+        // Neo này có phải một DÒNG LỆNH không — quyết định cái bọc khi không
+        // dựng được liên kết (`<code>` chỉ dành cho lệnh; bọc *"Set it up"* vào
+        // `<code>` là biến một câu tiếng Anh thành thứ trông như mã).
+        let anchor_is_cmd = matches!(hit, Some((_, (a, _))) if is_a_command(a));
+        // 🔴 …và NEO CHIẾM TRỌN DÒNG thì cũng bọc cả dòng — Hà 2026-08-25:
+        // *"chỉnh nốt nút enter chỗ ô chờ gợi ý bao chọn cả text cho dễ bấm"*.
+        //
+        // Đúng ca của chữ đang nằm trong ô nhập: neo LÀ cả dòng ấy, mà đích
+        // chạm thì đang to bằng đúng hai ký tự của `⏎`. Cùng một lỗi với dòng
+        // lệnh hôm 23/08, chỉ khác chỗ.
+        //
+        // Điều kiện hẹp có chủ ý — neo phải bằng ĐÚNG cả dòng: một đường dẫn
+        // nằm giữa câu (nút 📎) hay một nhãn lựa chọn nằm sau số thứ tự thì
+        // không khớp, nên chúng giữ nguyên hình dạng cũ. Nới ra là đổi hình
+        // dạng của những chỗ chưa ai hỏi.
+        // Dấu nhắc của TUI (`❯ `, `$ `, `> `…) đứng TRƯỚC chữ, nên "cả dòng"
+        // phải hiểu là "cả dòng sau khi bóc dấu nhắc" — bài kiểm bắt đúng chỗ
+        // này ngay lượt đầu. Phần bóc ra vẫn nằm ngoài thẻ `<a>`, vì
+        // `split_at_anchor` giao nó lại làm `head`.
+        let bare_line = line
+            .trim()
+            .trim_start_matches(|c: char| {
+                matches!(c, '❯' | '$' | '>' | '⏵' | '%' | '•' | '*' | '☐' | '☑' | '☒')
+                    || c.is_whitespace()
+            })
+            .trim();
+        let anchor_is_whole_line = matches!(
+            hit,
+            Some((_, (a, _))) if a.trim() == bare_line && a.trim().chars().count() >= 4
+        );
+        // 🔴 …VÀ ĐƯỜNG DẪN TỆP NẰM GIỮA CÂU — Hà 2026-08-25, ảnh một tin có hai
+        // lần `FEATURE-GAPS.md`: *"icon tải tệp gắn không đúng chỗ trong nội
+        // dung tin vậy, và cũng chưa bao text đường dẫn file"*.
+        //
+        // Hai lời ấy là MỘT gốc, không phải hai lỗi. Đường dẫn giữa câu không
+        // phải lệnh (`is_a_command` đúng khi nói không) và không chiếm trọn
+        // dòng, nên nó rơi vào nhánh `_ => (line, "", "")`: `cmd_part` rỗng ⟹
+        // không thẻ `<a>` nào bọc lấy tên tệp ⟹ cái 📎 bị đẩy xuống danh sách
+        // `after`, tức dán vào **cuối dòng nguồn**. Trên màn 390px Telegram bẻ
+        // lại đoạn văn, nên "cuối dòng nguồn" hiện ra giữa câu — đúng chỗ Hà
+        // thấy nó đứng sau *"thuộc về"* và sau *"commit"*.
+        //
+        // Và nó kéo theo cái thứ ba không ai thấy: `tame_auto_links` chỉ soi
+        // `/` với `@` (xem hàm ấy), nên một tên tệp trần đi qua nguyên vẹn và
+        // **Telegram tự nối liên kết** — `.md` là TLD thật của Moldova, y hệt
+        // con bug `.sh` ngày 16/08. Chữ xanh trong ảnh không phải nút tải của
+        // huba; nó trỏ ra một tên miền ngoài. Bọc `<a>` chặn sẵn cả ca ấy, nên
+        // một phép vá đóng cả ba triệu chứng.
+        //
+        // Đây chính là ca lượt trước CỐ Ý để lại (*"một đường dẫn nằm giữa câu
+        // (nút 📎) … giữ nguyên hình dạng cũ. Nới ra là đổi hình dạng của những
+        // chỗ chưa ai hỏi"*). Nay đã có người hỏi, nên nới đúng một ca ấy.
+        //
+        // Hỏi bằng CHÍNH cái đã đặt neo xuống (`session_layout` gắn icon `📎`
+        // cho mọi neo lấy từ `data.files`), không tự dựng lại phép "chuỗi này có
+        // phải đường dẫn không" — hai bản chép của cùng một câu hỏi là hai chỉ
+        // số lệch nhau, đúng thứ `remember_files`/`file_anchors` đã trả giá.
+        let anchor_is_file =
+            matches!(hit, Some((_, (_, links))) if links.iter().any(|(_, i)| i.trim() == "📎"));
         let (head, cmd_part, tail) = match hit {
-            Some((_, (a, _))) if is_a_command(a) => split_at_anchor(line, a),
+            Some((_, (a, _))) if anchor_is_cmd || anchor_is_whole_line || anchor_is_file => {
+                split_at_anchor(line, a)
+            }
             _ => (line, "", ""),
         };
         // 🔴 Icon mở đầu bằng TAB ⟹ chèn TRƯỚC dòng, không phải sau — Hà
@@ -4824,9 +4902,11 @@ pub fn html_with_links(
         // bot) thì `<code>` ở lại — nó vẫn đang giữ hai việc của lượt 16/08: vẽ
         // ranh giới "lệnh ăn 1 dòng hay 2", và chặn tự-nối-liên-kết. Bỏ nó ở
         // nhánh không có link là đánh đổi lấy không gì cả.
-        let cmd_link = if cmd_part.is_empty() {
-            None
-        } else if after.is_empty() {
+        // Hai vế hỏi hai chuyện khác nhau — *không có chữ để bọc* và *không có
+        // liên kết để bọc bằng* — nhưng cùng ra một câu trả lời, nên gộp
+        // (clippy `if_same_then_else`). Tách ra chỉ nói được điều mà hai chữ
+        // trong điều kiện đã nói.
+        let cmd_link = if cmd_part.is_empty() || after.is_empty() {
             None
         } else {
             Some(after.remove(0))
@@ -4851,10 +4931,13 @@ pub fn html_with_links(
                     ));
                     linked += 1;
                 }
-                None => html.push_str(&format!(
+                // Không dựng được liên kết: LỆNH thì giữ `<code>` (ranh giới +
+                // chặn tự-nối-liên-kết), còn chữ thường thì để nguyên là chữ.
+                None if anchor_is_cmd => html.push_str(&format!(
                     "<code>{}</code>",
                     crate::telegram::html_escape(cmd_part)
                 )),
+                None => html.push_str(&tame_auto_links(&crate::telegram::html_escape(cmd_part))),
             }
         }
         html.push_str(&tame_auto_links(&crate::telegram::html_escape(tail)));
@@ -6349,7 +6432,9 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     // `strip_box_rules` tỉa hai đầu dòng — chạy sau nó thì cái neo vẫn còn,
     // nhưng đặt đúng thứ tự đọc (cắt gợi ý → gột khung → gộp dòng trống) thì
     // không ai phải suy xem bước nào làm hỏng neo của bước nào.
-    let shown = strip_box_rules(&strip_keyboard_hints(&crate::telegram::strip_markdown(text)));
+    let shown = strip_box_rules(&strip_keyboard_hints(&crate::telegram::strip_markdown(
+        text,
+    )));
 
     // `run:<i>` → payload `run_<i>`; nút cài lại huba → `upgrade`. Cùng bộ ký tự
     // mà tên lệnh cho phép, nên payload đi thẳng, không mã hoá gì thêm.
@@ -6492,10 +6577,11 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     }
     if let (Some(sid), Some(box_text)) = (&key_sid, box_anchor) {
         let short: String = sid.chars().take(8).collect();
-        // ⏎ bám ngay sau chữ trong ô (chỗ mắt đang nhìn); ⌫ xuống DÒNG RIÊNG,
-        // mang thêm chữ — hai đích chạm không được nằm cạnh nhau khi một bên
-        // gửi còn một bên xoá.
-        let links: Vec<(String, String)> = [("send_", "⏎"), ("clr_", "\n⌫ xoá ô nhập")]
+        // 🔴 CHỈ CÒN ⏎ — Hà 2026-08-25: *"nút xóa ô nhập không cần thiết vì có
+        // lệnh xóa rồi"*. Hai đích chạm cạnh nhau, một bên GỬI một bên XOÁ, cả
+        // hai đều không lùi lại được — bỏ được cái nào là bớt một cú bấm nhầm
+        // không sửa được. Đường xoá vẫn còn nguyên bằng lệnh gõ.
+        let links: Vec<(String, String)> = [("send_", "⏎")]
             .iter()
             .filter_map(|(p, icon)| {
                 crate::telegram::deep_link(&format!("{p}{short}"))
@@ -6526,7 +6612,7 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
                         "why": "chữ trong ô nhập trùng với chữ ở chỗ khác trên màn — giữ nút ở đáy" }),
             );
         }
-        if links.len() == 2 && !box_text.trim().is_empty() && hits == 1 {
+        if links.len() == 1 && !box_text.trim().is_empty() && hits == 1 {
             anchors.push((box_text.trim().to_string(), links));
             // …và bỏ cái nút ⏎/⌫ trơn ở đáy: hai đường cho cùng một việc, mà
             // cái ở đáy là cái không nói được nó thuộc về dòng nào.
@@ -6537,8 +6623,11 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
             // `text_links=3, buttons=0`, tức hộp chọn 5 lựa chọn mà không một
             // nút nào. Hà: *"Sao lại đẩy mớ option vào ô nhập chát thế này?"* —
             // đúng, cả mớ option thành chữ vì cái lọc này ăn mất nút của chúng.
-            rest_btns.retain(|(_, d)| !d.ends_with(":enter") && !d.ends_with(":clear"));
+            rest_btns.retain(|(_, d)| !d.ends_with(":enter"));
         }
+        // …và nút xoá ở đáy đi theo cái ⌫ vừa gỡ, KHÔNG phụ thuộc neo có bám
+        // được hay không: Hà bảo nó thừa, nên nó thừa ở cả hai chỗ.
+        rest_btns.retain(|(_, d)| !d.ends_with(":clear"));
     }
     Layout {
         shown,
@@ -7565,14 +7654,22 @@ fn session_meta(
 ///
 /// Dưới một phút thì KHÔNG nói: "im 0 phút" là một dòng chữ không mang tin, và
 /// mỗi dòng thừa đẩy phiên cuối danh sách ra khỏi màn.
+///
+/// 🔴 VIẾT GỌN 2026-08-25 — Hà, kèm ảnh danh sách: *"ví dụ 'đứng chờ' bỏ đi,
+/// 'im 1 tiếng' thì viết gọn thành 1h là được"*.
+///
+/// `im 1 tiếng` = 11 cột, `1h` = 2. Trên sáu hàng là **54 cột** lấy lại, và
+/// mỗi cột lấy lại là một cột trả về cho TÊN phiên — ô duy nhất bị `cut_to_cols`
+/// cắt cụt (xem `ROW_COLS`). Chữ "im" cũng đi: ô này đứng cạnh icon tình trạng
+/// `💤`, nên nó chỉ nhắc lại điều cái icon vừa nói.
 fn quiet_for(last_activity: Option<&str>, now_ms: i64) -> Option<String> {
     let dt = chrono::DateTime::parse_from_rfc3339(last_activity?).ok()?;
     let mins = (now_ms - dt.timestamp_millis()) / 60_000;
     match mins {
         m if m < 1 => None,
-        m if m < 60 => Some(format!("im {m} phút")),
-        m if m < 60 * 24 => Some(format!("im {} tiếng", m / 60)),
-        m => Some(format!("im {} ngày", m / (60 * 24))),
+        m if m < 60 => Some(format!("{m}p")),
+        m if m < 60 * 24 => Some(format!("{}h", m / 60)),
+        m => Some(format!("{}n", m / (60 * 24))),
     }
 }
 
@@ -9245,17 +9342,51 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         // này thì mọi lượt nới thành công vẫn
                                         // kèm một bản chép — đúng cái đã gỡ đi
                                         // hai lần trong ngày 17/08.
-                                        if !crate::sessions::said_shown_on_screen(said, &out) {
-                                            // NGUYÊN VĂN, không cắt 600. Đường
-                                            // gửi đã cắt theo dòng cho vừa trần
-                                            // Telegram (`split_for_telegram`),
-                                            // nên cắt thêm ở đây chỉ để mất chữ
-                                            // — mà mất chữ đúng lúc màn đã mất
-                                            // chữ là mất hai lần.
-                                            out.push_str(&format!(
-                                                "\n\n🗣 Lời cuối của phiên không hiện trọn trên màn \
-                                                 (phần trên đã cuộn qua). Nguyên văn lấy từ nhật ký:\n{said}"
-                                            ));
+                                        // 🔴 GHÉP NỐI, KHÔNG CHÈN XUỐNG CUỐI —
+                                        // Hà 2026-08-25: *"tại sao mục này lại
+                                        // không tự viết thuật toán xử lý để ghép
+                                        // nối luôn với màn hình chính lại cứ chèn
+                                        // thêm xuống cuối tin, nên nhiều thông
+                                        // tin bị trùng nhau rất dài"*.
+                                        //
+                                        // Hai chỗ đổi, và cái thứ hai mới là
+                                        // cái anh kêu:
+                                        // ① CHỈ phần màn thiếu
+                                        //   (`said_missing_head`), không nguyên
+                                        //   văn cả lượt — màn cuộn mất từ trên
+                                        //   xuống nên cái đuôi vẫn đang nằm đó,
+                                        //   và bản cũ chép đè lên chính nó;
+                                        // ② đặt lên TRƯỚC màn, không sau. Đây là
+                                        //   thứ tự thời gian thật (phiên nói
+                                        //   trước, lệnh in ra sau), nên đọc một
+                                        //   mạch từ trên xuống là đúng mạch. Đặt
+                                        //   sau thì người đọc phải nhảy xuống
+                                        //   cuối rồi ngược lên.
+                                        //
+                                        // Và nó AN TOÀN hơn cho phép đo ô nhập:
+                                        // con bug 18/08 (`prompt_line_text` đọc
+                                        // "khối đóng khung CUỐI CÙNG" rồi bám vào
+                                        // chữ huba tự viết) sinh ra vì khối này
+                                        // nối vào ĐUÔI. Nối lên đầu thì ô nhập
+                                        // vẫn là khối cuối, đúng như màn gốc.
+                                        // `shot_box` đo trước vẫn giữ nguyên —
+                                        // hai hàng rào tốt hơn một.
+                                        //
+                                        // KHÔNG cắt 600 như bản 20/08: đường gửi
+                                        // đã cắt theo dòng cho vừa trần Telegram
+                                        // (`split_for_telegram`), nên cắt thêm ở
+                                        // đây chỉ để mất chữ — mà mất chữ đúng
+                                        // lúc màn đã mất chữ là mất hai lần.
+                                        if let Some(head) =
+                                            crate::sessions::said_missing_head(said, &out)
+                                        {
+                                            let whole = head.trim() == said.trim();
+                                            let nhan = if whole {
+                                                "🗣 Màn không mang lời nào của lượt này. Nguyên văn lấy từ nhật ký:"
+                                            } else {
+                                                "🗣 Phần đầu lượt này đã cuộn khỏi màn — nối lại từ nhật ký:"
+                                            };
+                                            out = format!("{nhan}\n{head}\n\n{out}");
                                         }
                                     }
                                 }

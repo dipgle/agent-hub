@@ -48,10 +48,11 @@ fn the_send_and_clear_links_survive_a_slash_command_in_the_box() {
         html.contains("send_7bdb4f41"),
         "mất nút ⏎ ngay tại dòng ô nhập:\n{html}"
     );
-    assert!(
-        html.contains("clr_7bdb4f41"),
-        "mất nút ⌫ xoá ô nhập:\n{html}"
-    );
+    // 🔄 ĐẢO CHIỀU 2026-08-25 — Hà: *"nút xóa ô nhập không cần thiết vì có lệnh
+    // xóa rồi"*. Chủ đề của bài kiểm này là *"neo còn bám được khi ô nhập chứa
+    // một `/lệnh`"*, và `send_` ở trên đã đo trọn điều ấy; `clr_` chỉ là bản
+    // chép thứ hai của cùng một phép đo. Giữ chiều ngược để `clr_` mọc lại là đỏ.
+    assert!(!html.contains("clr_7bdb4f41"), "nút ⌫ mọc lại:\n{html}");
 }
 
 /// Và neo vẫn bám khi ô nhập KHÔNG có `/lệnh` nào — ca đối chứng, để bài kiểm
@@ -62,7 +63,7 @@ fn a_plain_box_keeps_its_links() {
     let plain = SCREEN.replace("/clean", "clean");
     let html = render_session_data(&plain, &data());
     assert!(html.contains("send_7bdb4f41"), "{html}");
-    assert!(html.contains("clr_7bdb4f41"), "{html}");
+    assert!(!html.contains("clr_7bdb4f41"), "nút ⌫ mọc lại: {html}");
 }
 
 /// Phép đo trần: chèn liên kết vào một neo có chứa `/lệnh`.

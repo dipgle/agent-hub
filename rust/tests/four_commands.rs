@@ -60,11 +60,14 @@ fn all_four_get_an_icon_on_their_own_line() {
         "có neo không dựng được liên kết: {unlinked:?}"
     );
     assert_eq!(linked, 4, "bốn dòng lệnh thì phải có bốn icon");
+    // Cả dòng lệnh nằm TRONG thẻ, icon đi cùng vào trong — xem
+    // `command_anchors::the_command_is_wrapped_so_the_whole_line_can_be_tapped`
+    // để biết vì sao không phải `<code>` bọc ngoài (Telegram nuốt link).
     for (i, c) in CMDS.iter().enumerate() {
-        let want = format!("<code>{c}</code> <a href=\"https://t.me/b?start=run_{i}\">▶️</a>");
+        let want = format!("<a href=\"https://t.me/b?start=run_{i}\">▶️ {c}</a>");
         assert!(
             html.contains(&want),
-            "lệnh {i} không có icon ngay sau nó:\n{c}"
+            "lệnh {i} không phải là đích chạm trọn dòng:\n{c}"
         );
     }
 }

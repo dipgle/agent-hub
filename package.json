@@ -1,0 +1,27 @@
+{
+  "name": "huba",
+  "version": "1.0.0",
+  "description": "Trên Mac lúc nào cũng có mươi phiên `claude` đang chạy trong các cửa sổ Terminal. `huba` đưa chúng vào **một buồng chat Telegram**: xem phiên nào đang làm gì, mở phiên mới, gõ thẳng vào một phiên đang chạy, hỏi chen ngang mà không phá việc nó đang làm, dừng nó, hoặc đóng sổ lấy bản bàn giao để làm tiếp trên máy.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dipgle/agent-hub.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/dipgle/agent-hub/issues"
+  },
+  "homepage": "https://github.com/dipgle/agent-hub#readme",
+  "dependencies": {
+    "playwright": "^1.61.1"
+  }
+}

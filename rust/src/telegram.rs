@@ -827,6 +827,94 @@ pub fn deep_link(payload: &str) -> Option<String> {
     Some(format!("https://t.me/{bot}?start={payload}"))
 }
 
+/// Buồng chat đọc được từ một phản hồi `getUpdates` — `(id, tên người gõ)`.
+///
+/// 🔴 Hà 2026-08-25: *"Khi cài mới hub ở ui chỉ cần nhập token thì có cơ chế tự
+/// quét id chứ, bắt người dùng đi lấy id thành phức tạp"*.
+///
+/// Đúng: trang cài đang bắt chủ máy tự mở
+/// `api.telegram.org/bot<TOKEN>/getUpdates` rồi đọc `message.chat.id` bằng mắt
+/// — một việc huba làm hộ được, vì nó đã có token và đã nói chuyện với đúng cái
+/// API ấy suốt ngày.
+///
+/// Tách THUẦN khỏi phần mạng để kiểm được: vào là JSON, ra là buồng chat. Mọi
+/// hình dạng lệch (chưa ai nhắn, `ok:false`, cập nhật không mang `message`) đều
+/// phải trả `None` chứ không đoán bừa một con số — một `chat_id` sai là cái
+/// CỔNG của cả huba mở nhầm buồng.
+///
+/// Lấy `message.chat.id`, không lấy `from.id`: cổng của kênh gác theo BUỒNG với
+/// chữ (xem `update_sender`), nên id ghi vào `huba.env` phải là buồng.
+pub fn chat_in_updates(v: &Value) -> Option<(i64, String)> {
+    if v.get("ok").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    for u in v.get("result").and_then(Value::as_array)?.iter().rev() {
+        // Tin thường, tin đã sửa, và bài trong kênh — ba chỗ `chat` xuất hiện.
+        let m = ["message", "edited_message", "channel_post"]
+            .iter()
+            .find_map(|k| u.get(*k))?;
+        let id = m.get("chat").and_then(|c| c.get("id")).and_then(Value::as_i64)?;
+        let who = m
+            .get("from")
+            .and_then(|f| {
+                f.get("username")
+                    .and_then(Value::as_str)
+                    .map(|s| format!("@{s}"))
+                    .or_else(|| f.get("first_name").and_then(Value::as_str).map(str::to_string))
+            })
+            .unwrap_or_else(|| "?".to_string());
+        return Some((id, who));
+    }
+    None
+}
+
+/// Bot của token này tên gì, và ai vừa nhắn cho nó.
+///
+/// Hai lời gọi, và thứ tự có nghĩa: `getMe` trả lời *"token có đúng không"* —
+/// câu phải hỏi TRƯỚC, vì nếu token sai thì "chưa ai nhắn" là một lời nói dối
+/// về thế giới. Chỉ khi token đúng mới đi hỏi buồng chat.
+///
+/// ⚠ `getUpdates` gọi KHÔNG kèm `offset`: nó chỉ đọc, không xác nhận, nên
+/// daemon vẫn nhận đủ những cập nhật ấy. Nhưng Telegram chỉ cho MỘT người đọc
+/// tại một thời điểm — hubad đang chạy thì lời gọi này nhận `409 Conflict`, và
+/// câu trả lời phải nói đúng như thế thay vì "chưa ai nhắn".
+pub fn probe_token(token: &str) -> Result<(String, Option<(i64, String)>), String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| logging::redact(&e.to_string()))?;
+    let call = |method: &str| -> Result<Value, String> {
+        client
+            .get(format!("https://api.telegram.org/bot{token}/{method}"))
+            .send()
+            .and_then(|r| r.json::<Value>())
+            .map_err(|e| logging::redact(&e.to_string()))
+    };
+    let me = call("getMe")?;
+    if me.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(me
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("Telegram không nhận token này")
+            .to_string());
+    }
+    let bot = me
+        .get("result")
+        .and_then(|r| r.get("username"))
+        .and_then(Value::as_str)
+        .unwrap_or("?")
+        .to_string();
+    let ups = call("getUpdates")?;
+    if ups.get("error_code").and_then(Value::as_i64) == Some(409) {
+        return Err(
+            "hubad đang chạy và đang giữ đường đọc tin của Telegram (409). Dừng nó rồi dò lại, \
+             hoặc điền tay chat id."
+                .to_string(),
+        );
+    }
+    Ok((bot, chat_in_updates(&ups)))
+}
+
 /// Thứ Telegram nói nó VỪA HIỂN THỊ — bản dịch của chính nó cho chuỗi ta gửi.
 ///
 /// Đây là câu trả lời cho *"cách bạn nhìn là gì"*: `sendMessage` trả về đối
@@ -860,6 +948,17 @@ pub struct Sent {
     /// Chữ như người đọc thấy — thẻ đã thành định dạng, không còn trong chữ.
     pub text: String,
     pub links: Vec<Link>,
+    /// MỌI entity Telegram dựng, không riêng `text_link` — `(kiểu, at, len)`.
+    ///
+    /// 🔴 `links` trả lời được "có bấm được không", nhưng KHÔNG trả lời được
+    /// "Telegram có giữ cả hai định dạng chồng nhau không". Câu ấy có thật:
+    /// bọc cả khối lệnh vào `<a>` thì `<code>` bên trong hoặc còn hoặc bị
+    /// nuốt, và hai kết cục ấy nhìn từ `links` giống hệt nhau. Một phép đo
+    /// không phân biệt được hai kết cục thì nó không đo cái đang hỏi.
+    ///
+    /// `at`/`len` giữ nguyên đơn vị mã UTF-16 của Telegram — cùng lý do với
+    /// [`Link::at`]: quy đổi là thêm một phép dịch có thể sai.
+    pub spans: Vec<(String, usize, usize)>,
 }
 
 impl Sent {
@@ -876,12 +975,20 @@ impl Sent {
         // emoji. Nên cắt trên chính UTF-16 rồi dựng chuỗi lại.
         let u: Vec<u16> = text.encode_utf16().collect();
         let mut links = Vec::new();
+        let mut spans = Vec::new();
         for e in m
             .get("entities")
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default()
         {
+            if let (Some(k), Some(off), Some(len)) = (
+                e.get("type").and_then(Value::as_str),
+                e.get("offset").and_then(Value::as_u64),
+                e.get("length").and_then(Value::as_u64),
+            ) {
+                spans.push((k.to_string(), off as usize, len as usize));
+            }
             if e.get("type").and_then(Value::as_str) != Some("text_link") {
                 continue;
             }
@@ -906,6 +1013,7 @@ impl Sent {
             message_id: m.get("message_id").and_then(Value::as_i64).unwrap_or(0),
             text,
             links,
+            spans,
         }
     }
 

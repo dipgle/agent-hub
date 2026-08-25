@@ -49,6 +49,46 @@ impl Default for AutoHandoverCfg {
     }
 }
 
+/// Tự chạy hộ lệnh mà một phiên ĐANG ĐỨNG CHỜ nhờ chủ máy chạy.
+///
+/// 🔴 Hà 2026-08-23: *"luồng kiểm tra phiên dừng lại chờ sẽ quét nội dung trả về
+/// có lệnh cần tôi chạy thì sẽ chạy luôn lệnh đó, kết quả chạy được sẽ gửi vào
+/// hàng chờ của phiên đó luôn"*.
+///
+/// Đây là cái nút `▶️` tự bấm. Và chính vì thế nó phải có một cổng KHÁC với
+/// cổng của cái nút: `keys::commands_in_report` trả lời *"đây có phải một lệnh
+/// không"* — đủ để BÀY một cái nút, vì còn một ngón tay người quyết định. Bỏ
+/// ngón tay ấy đi thì câu phải trả lời là *"lệnh này chạy được khi KHÔNG AI
+/// NHÌN không"*, và không bộ nhận-dạng-hình-dạng nào trả lời được câu đó.
+///
+/// Bằng chứng có sẵn trong chính tệp này: 13/08 một bộ gác từ chối
+/// `git filter-branch` rồi in ra câu giải thích CHỨA lệnh ấy; huba thấy hình
+/// dạng một lệnh và bày nút `▶ git filter-branch --force`. Cái nút ấy còn cần
+/// người bấm. Bản tự chạy thì không.
+///
+/// 🔴 ĐỔI NGUỒN 2026-08-24, sau khi Hà hỏi *"Tại sao lại cần allow làm gì
+/// vậy?"* rồi chốt *"Chỉ dấu, bỏ allow"*.
+///
+/// Bản đầu có một danh sách cho phép, và nó cần thiết vì `auto_run` **đoán**
+/// theo hình dạng — nên phải tự chặn lại thứ chính nó đoán bừa. Nay nguồn khác
+/// hẳn: chỉ chạy dòng phiên **CỐ Ý đánh dấu** bằng `keys::RUN_MARK`
+/// (`#huba-run` chiếm trọn một dòng, ngay trên dòng lệnh). Hết đoán thì hết thứ
+/// để chặn.
+///
+/// ⚠ Cái dấu nói *"mô hình cố ý bảo chạy"*, KHÔNG nói *"chủ máy cho phép"*. Hà
+/// biết rủi ro ấy và chọn thế; đừng lặng lẽ dựng lại một danh sách ở đây.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AutoRunCfg {
+    pub enabled: bool,
+}
+
+impl Default for AutoRunCfg {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Xác nhận lần hai qua Telegram cho những lệnh KHÔNG lùi lại được.
 ///
 /// Hà 2026-08-10: *"riêng một số lệnh dừng hoặc tắt phiên cần có xác thực qua
@@ -214,6 +254,7 @@ pub struct Config {
     pub call: CallCfg,
     /// Tự đóng sổ khi ngữ cảnh đầy — xem [`AutoHandoverCfg`].
     pub auto_handover: AutoHandoverCfg,
+    pub auto_run: AutoRunCfg,
     /// Xác nhận lần hai cho lệnh không lùi lại được — xem [`ConfirmCfg`].
     #[serde(default)]
     pub confirm: ConfirmCfg,
@@ -260,6 +301,7 @@ impl Default for Config {
             poll_interval_sec: 120,
             call: CallCfg::default(),
             auto_handover: AutoHandoverCfg::default(),
+            auto_run: AutoRunCfg::default(),
             confirm: ConfirmCfg::default(),
             projects: BTreeMap::new(),
             notify: NotifyCfg::default(),

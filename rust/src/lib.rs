@@ -22,6 +22,7 @@ pub mod adapters;
 ///
 /// Vì sao phải có: `do script` kèm một CR không tắt được, nên trên hộp chọn huba
 /// không có phím nào chỉ DI mà không CHỐT. Đọc đầu `cgkeys.rs` trước khi sửa.
+pub mod browser;
 pub mod cgkeys;
 pub mod commands;
 pub mod config;
@@ -50,3 +51,4 @@ pub mod setup;
 pub mod telegram;
 pub mod verbs;
 pub mod watch;
+pub mod web;

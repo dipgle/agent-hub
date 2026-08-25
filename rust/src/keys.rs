@@ -36,21 +36,46 @@ use serde_json::json;
 use crate::exec::{run, RunOpts};
 use crate::logging;
 
-/// `osascript` mất vài trăm ms; 20s là quá rộng rãi, và một cái treo ở đây sẽ
-/// giữ cả vòng chạy của daemon.
-const OSA_TIMEOUT: Duration = Duration::from_secs(20);
+/// Trần cho một lượt `osascript` — **tuỳ ai đang chờ**.
+///
+/// 🔴 Hà 2026-08-25, ảnh một tin mang `⚠ không đọc được màn: osascript quá
+/// 20s`: *"Sao quá 20s lại không chụp được màn"*.
+///
+/// Trần 20 giây cũ là MỘT con số cho mọi lượt gọi, và lý do của nó chỉ đúng cho
+/// một nửa: *"một cái treo ở đây sẽ giữ cả vòng chạy của daemon"*. Đúng với
+/// vòng quét định kỳ — ở đó không ai đang chờ, và giữ vòng là giữ mọi thứ khác.
+/// Sai với `/shot`: lúc ấy chủ máy **đang ngồi nhìn điện thoại chờ đúng câu trả
+/// lời này**, nên bỏ cuộc ở giây thứ 20 là đem câu trả lời của anh đi đổi lấy
+/// một vòng quét chẳng có việc gì gấp.
+///
+/// Đo được cái giá: **386 lượt `osascript quá 20s` trong một ngày** (log
+/// 23/08), rải khắp mọi phép hỏi Terminal. Terminal bận theo cơn — một lượt
+/// chờ dài hơn thường qua được, còn hai lượt ngắn thì trượt cả hai.
+///
+/// `exec::lane()` đã biết câu trả lời sẵn: nó theo LUỒNG, và mọi đường đi từ
+/// một cú bấm đều đã được `exec::urgent()` đánh dấu. Nên chỗ này không cần thêm
+/// tham số nào — chỉ cần hỏi.
+pub fn osa_timeout() -> Duration {
+    match crate::exec::lane() {
+        // Có người đang chờ: thà chờ thêm hai mươi lăm giây còn hơn trả về một
+        // câu "không đọc được màn" mà chính người ấy không làm gì được với nó.
+        crate::exec::Lane::Urgent => Duration::from_secs(45),
+        // Vòng nền: giữ nguyên 20s, vì ở đây lý do cũ vẫn nguyên giá trị.
+        crate::exec::Lane::Background => Duration::from_secs(20),
+    }
+}
 
 fn osascript(script: &str) -> Result<String> {
     let out = run(
         "osascript",
         &["-e", script],
         RunOpts {
-            timeout: Some(OSA_TIMEOUT),
+            timeout: Some(osa_timeout()),
             ..Default::default()
         },
     )?;
     if out.timed_out {
-        return Err(anyhow!("osascript quá {}s", OSA_TIMEOUT.as_secs()));
+        return Err(anyhow!("osascript quá {}s", osa_timeout().as_secs()));
     }
     if out.code != Some(0) {
         return Err(anyhow!(
@@ -509,7 +534,7 @@ pub fn terminal_pid() -> Result<i32> {
         "ps",
         &["-Ao", "pid=,comm="],
         RunOpts {
-            timeout: Some(OSA_TIMEOUT),
+            timeout: Some(osa_timeout()),
             ..Default::default()
         },
     )?;
@@ -1696,6 +1721,36 @@ end tell"#
 /// chụp màn hình cũng bị chặn, nên không nhìn được có hộp thoại nào đang treo
 /// trên chúng không). Chưa biết thì KHÔNG đoán trong câu báo lỗi — chỉ kể thứ
 /// đo được và chỉ đường ⌘W.
+/// Cửa sổ SHELL trần: gõ `exit`, chờ tiến trình chết, rồi mới đóng.
+///
+/// 🔴 Vì sao không gọi thẳng [`close_window`]: đóng một cửa sổ còn tiến trình
+/// sống bật hộp thoại *"Do you want to terminate running processes?"* của
+/// Terminal, và một modal thì **khoá mọi lệnh automation sau nó** — huba câm
+/// cho tới khi có người ngồi xuống bấm. Đây là luật đã đóng khung trong
+/// [`quit_and_close`], chỉ khác một chữ: shell thoát bằng `exit`, TUI của
+/// `claude` thoát bằng `/exit` — gõ nhầm `/exit` vào dấu nhắc zsh chỉ ra
+/// `zsh: no such file or directory` rồi cửa sổ nằm nguyên đó.
+///
+/// Khác `sessions::close_session` ở chỗ CHỜ: hàm này CHẶN cho tới khi xong,
+/// nên chỉ gọi từ một luồng có quyền chờ (`watch_terminal_job`). Đường lệnh thì
+/// vẫn phải đi qua sổ chờ đóng (`close_pending_tick`), vì nó giữ `CMD_LOCK` và
+/// một cú thoát có thể tốn hàng chục phút.
+pub fn exit_and_close_shell(window: i64, cho: std::time::Duration) -> Result<Closed> {
+    // Tab đã chết thì không có gì để thoát — gõ `exit` vào `[Process completed]`
+    // là gõ vào chỗ không ai đọc.
+    if tab_proc_count(window).unwrap_or(1) > 0 {
+        type_into(window, "exit")?;
+        let han = std::time::Instant::now();
+        while han.elapsed() < cho {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            if tab_proc_count(window).unwrap_or(1) == 0 {
+                break;
+            }
+        }
+    }
+    close_window(window)
+}
+
 pub fn close_window(window: i64) -> Result<Closed> {
     osascript(&format!(
         r#"tell application "Terminal" to close (first window whose id is {window})"#
@@ -2440,6 +2495,153 @@ fn network_without_target(verb: &str, line: &str) -> bool {
     })
 }
 
+/// Dấu phiên đặt để nói *"dòng dưới là lệnh, chạy hộ tôi"*.
+///
+/// 🔴 Hà 2026-08-24: *"có quy tắc nào để bảo claude đánh dấu vào output kết quả
+/// là lệnh để bắt tôi chạy không"* — rồi chọn **chỉ dùng dấu, bỏ danh sách cho
+/// phép**.
+///
+/// Vì sao hình dạng này, ba lý do và cả ba đo được:
+/// ① `#` là dấu chú thích của shell ⟹ chủ máy copy cả khối dán vào Terminal thì
+///    dòng dấu tự bị bỏ qua, lệnh vẫn chạy đúng;
+/// ② dấu nằm ở DÒNG RIÊNG nên dòng lệnh không bị bẩn — nút bấm, chữ hiện ra, và
+///    thứ copy được đều y hệt nhau;
+/// ③ ghép được với [`join_continuations`]: lệnh nối `\` nhiều dòng vẫn đi nguyên
+///    khối.
+pub const RUN_MARK: &str = "#huba-run";
+
+/// Những lệnh phiên ĐÃ ĐÁNH DẤU — không đoán theo hình dạng.
+///
+/// Khác [`commands_in_report`] ở đúng một điểm, và điểm ấy là cả thiết kế:
+/// hàm kia hỏi *"dòng này TRÔNG giống lệnh không"* để bày một cái nút cho người
+/// bấm; hàm này hỏi *"phiên có CỐ Ý bảo chạy không"* để chạy khi không ai nhìn.
+/// Hai câu hỏi khác nhau thì không dùng chung một câu trả lời — đó là bài học
+/// đã trả giá bằng một lỗ RCE trong bản `autorun_allows` hôm qua.
+///
+/// 🔴 DẤU PHẢI CHIẾM TRỌN MỘT DÒNG. `echo "#huba-run"` hay một câu văn nhắc tới
+/// cái dấu đều KHÔNG kích hoạt được. Nới chỗ này là mở lại đúng cửa vừa đóng:
+/// chữ trong `last_text` đến từ web, từ diff, từ tệp phiên vừa đọc.
+///
+/// ⚠ Cái dấu nói *"mô hình cố ý bảo chạy"*, KHÔNG nói *"chủ máy cho phép"*. Hà
+/// biết và chọn mức này (2026-08-24); đừng lặng lẽ thêm một cổng nữa vào đây mà
+/// không hỏi, cũng đừng lặng lẽ nới nó ra.
+pub fn marked_commands(text: &str, max: usize) -> Vec<String> {
+    let rows = join_continuations(text);
+    let mut out: Vec<String> = Vec::new();
+    let mut armed = false;
+    for (raw, joined) in rows.iter() {
+        let line = raw.trim();
+        if line == RUN_MARK {
+            armed = true;
+            continue;
+        }
+        if !armed {
+            continue;
+        }
+        // Dòng trống ngay sau dấu: bỏ qua, đừng tắt dấu — TUI hay chèn một
+        // dòng trống giữa hai khối.
+        if line.is_empty() {
+            continue;
+        }
+        armed = false;
+        // Bóc dấu nhắc/trang trí của TUI, cùng bộ với `commands_in_report` —
+        // hai chỗ đọc cùng một màn thì phải bóc cùng một thứ.
+        let mut cmd = line;
+        for p in ["$ ", "❯ ", "> ", "⏵ ", "% ", "• ", "- ", "! ", "!"] {
+            if let Some(rest) = cmd.strip_prefix(p) {
+                cmd = rest.trim();
+            }
+        }
+        let cap = if *joined {
+            BTN_CMD_BLOCK_MAX
+        } else {
+            BTN_CMD_REPORT_MAX
+        };
+        if cmd.len() < 2 || cmd.len() > cap {
+            logging::warn(
+                "run_mark_line_rejected",
+                json!({ "len": cmd.len(), "cap": cap,
+                        "why": "dòng sau dấu quá ngắn hoặc quá dài" }),
+            );
+            continue;
+        }
+        out.push(cmd.to_string());
+        if out.len() >= max {
+            break;
+        }
+    }
+    out
+}
+
+/// Trần cho một lệnh do NGƯỜI VIẾT nối bằng `\` — rộng hơn hẳn dòng thường.
+///
+/// Trần 200 của dòng thường trả lời câu *"một KHỐI không phải một lệnh"*. Câu ấy
+/// vẫn đúng cho những dòng nằm cạnh nhau tình cờ. Nhưng một chuỗi nối bằng `\`
+/// thì tác giả đã nói thẳng nó là MỘT lệnh — không còn gì để đoán, nên trần ở
+/// đây đo cái khác: dài tới mức này thì dán vào điện thoại đã thành bức tường.
+const BTN_CMD_BLOCK_MAX: usize = 700;
+
+/// Nối những dòng mà người viết đã nối bằng `\` ở cuối dòng.
+///
+/// 🔴 Hà 2026-08-23, ảnh chụp buồng `[dwork · A-CHUNG]`: *"Khối lệnh chạy gom
+/// bị thiếu hẳn `cd` dẫn đến chạy không đúng thư mục"*.
+///
+/// Nguyên văn khối trên màn:
+///
+/// ```text
+/// cd ~/projects/dwork/dev-chung && \
+/// git merge --no-edit origin/main && \
+/// bash ~/projects/scripts/dci-cong-tat-ca.sh dev-chung && \
+/// …
+/// ```
+///
+/// huba gắn `▶️` vào **đúng dòng thứ hai**, vì nó mở đầu bằng `git` ∈ `KNOWN`.
+/// Dòng `cd …` ở trên bị bỏ lại: `after_cd` chỉ nhận `cd X && <lệnh>` khi cả
+/// hai vế nằm trên CÙNG một dòng, mà ở đây vế sau `&&` chỉ là dấu `\`. Bấm cái
+/// nút ấy là `git merge` **trong thư mục khác** — và trên một cây git thật thì
+/// đó không phải một lỗi hiển thị.
+///
+/// ⚠ ĐÂY KHÔNG PHẢI BỘ NỐI DÒNG ĐÃ GỠ 2026-08-15. Cái ấy đi đoán xem cửa sổ
+/// terminal có bẻ dòng hay không — một phép đoán trên chữ đã mất thông tin, và
+/// nó đã tạo ra một nút chạy lệnh triển khai THIẾU tham số. Cái này không đoán
+/// gì: `\` cuối dòng là **dấu tác giả tự đặt** để nói "câu chưa hết". Nối theo
+/// dấu ấy là đọc đúng thứ người ta viết, không phải dựng lại thứ đã mất.
+///
+/// Trả `(dòng, có_nối_không)`; cờ thứ hai để chỗ gọi nới trần đúng cho những
+/// dòng đã được tác giả khai là một lệnh — xem [`BTN_CMD_BLOCK_MAX`].
+fn join_continuations(screen: &str) -> Vec<(String, bool)> {
+    let mut out: Vec<(String, bool)> = Vec::new();
+    let mut acc: Option<String> = None;
+    let push_part = |acc: &mut Option<String>, part: &str| match acc.as_mut() {
+        Some(a) => {
+            a.push(' ');
+            a.push_str(part.trim());
+        }
+        None => *acc = Some(part.trim().to_string()),
+    };
+    for raw in screen.lines() {
+        match raw.trim_end().strip_suffix('\\') {
+            Some(head) => push_part(&mut acc, head),
+            None => match acc.take() {
+                // Dòng cuối của một chuỗi nối: gộp nốt rồi đóng khối.
+                Some(mut a) => {
+                    a.push(' ');
+                    a.push_str(raw.trim());
+                    out.push((a, true));
+                }
+                None => out.push((raw.to_string(), false)),
+            },
+        }
+    }
+    // Khối kết thúc bằng `\` treo lơ lửng (màn bị cắt, hoặc tác giả gõ thừa):
+    // vẫn trả về, để nó đi qua đúng những hàng rào như mọi dòng khác thay vì
+    // biến mất không dấu vết.
+    if let Some(a) = acc {
+        out.push((a, true));
+    }
+    out
+}
+
 pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
     let max_len = BTN_CMD_REPORT_MAX;
     let screen = text;
@@ -2574,9 +2776,9 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
         "which",
     ];
     let mut out: Vec<String> = Vec::new();
-    let rows: Vec<&str> = screen.lines().collect();
-    for raw in rows.iter() {
-        let raw = *raw;
+    let rows = join_continuations(screen);
+    for (raw, joined) in rows.iter() {
+        let (raw, joined) = (raw.as_str(), *joined);
         // Câu đang CẤM một lệnh thì không phải câu mời chạy nó.
         if forbids(raw) {
             continue;
@@ -2632,7 +2834,9 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
             line
         };
         let line = line.trim();
-        if line.len() < 4 || line.len() > 300 {
+        // Dòng do tác giả nối bằng `\` được nới trần — xem [`BTN_CMD_BLOCK_MAX`].
+        let hard_max = if joined { BTN_CMD_BLOCK_MAX } else { 300 };
+        if line.len() < 4 || line.len() > hard_max {
             continue;
         }
         // 🔴 Hà 2026-08-14: *"Cả 1 khối lệnh dài này thì không được tạo nút"* —
@@ -2646,7 +2850,7 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
         // Từ 08-15 nguồn không còn bị bẻ, nên trần này thôi làm cái việc "sợ
         // mẩu cụt" và chỉ còn làm đúng một việc: một KHỐI không phải một lệnh.
         // 200 nhận trọn lệnh triển khai có đường dẫn tuyệt đối, chặn cả khối.
-        if line.len() > max_len {
+        if line.len() > if joined { BTN_CMD_BLOCK_MAX } else { max_len } {
             continue;
         }
         // MỘT bộ luật cho cả hai lượt quét — xem `looks_like_prose`.
@@ -2660,6 +2864,42 @@ pub fn commands_in_report(text: &str, max: usize) -> Vec<String> {
         let verb = after_cd(line)
             .and_then(|t| t.split_whitespace().next())
             .unwrap_or(first);
+        // 🔴 BÓC LỚP BỌC RỒI MỚI HỎI HÀNG RÀO — Hà 2026-08-24, ảnh `/shot` của
+        // `[tfl5]`: *"Sao ko có chạy đc lệnh"*. Dòng ấy là
+        // `cd ~/projects/AI/tfl5 && nohup bash -c '…' & echo started` — 180 ký
+        // tự, dưới trần 200, không dấu hiệu văn xuôi nào. Chạy thẳng
+        // `commands_in_report` trên nó trả về **rỗng**.
+        //
+        // Vì `after_cd` giao lại `nohup bash -c '…'`, và động từ đầu là `nohup`
+        // — không có trong `KNOWN`. Hàng rào cố ý HẸP nên nó đúng khi từ chối
+        // `nohup`; cái sai là hỏi nó về từ SAI. `nohup` không chạy gì cả, nó
+        // chỉ bọc quanh lệnh thật, y hệt `cd X &&` ở dòng trên.
+        //
+        // Nên đi đúng đường `after_cd` đã mở: **không nới hàng rào, chỉ hỏi
+        // đúng chỗ**. Nhét `nohup` vào `KNOWN` thì mọi dòng mở đầu bằng nó lọt
+        // qua mà lệnh thật bên trong chưa ai nhìn.
+        //
+        // ⚠ `sudo` KHÔNG nằm ở đây, và đó là chủ ý cũ giữ nguyên (xem chú thích
+        // của nó bên trên): nó đổi QUYỀN chứ không chỉ đổi cách chạy.
+        //
+        // Hậu quả thứ hai của cùng cái lỗi, cũng thấy trong ảnh: `upgrade.sh`
+        // trong dòng ấy mọc một nút 📎 mời TẢI VỀ. `paths_not_in_commands` chỉ
+        // chừa đường dẫn nào NẰM TRONG một lệnh đã nhận ra — lệnh không được
+        // nhận thì đường dẫn của nó thành tệp rời. Vá chỗ này là vá cả hai.
+        const WRAPPERS: &[&str] = &["nohup", "env", "time", "stdbuf", "caffeinate", "nice"];
+        let verb = if WRAPPERS.contains(&verb) {
+            let rest = after_cd(line).unwrap_or(line);
+            rest.split_whitespace()
+                .skip(1)
+                // Bỏ qua thứ thuộc về CHÍNH lớp bọc, ba dạng đã gặp:
+                // cờ (`env -i`), GIÁ TRỊ của cờ (`nice -n 10` — `10` không mở
+                // đầu bằng `-` nên vòng lọc đầu tiên dừng lại ở nó, đo được
+                // bằng bài kiểm), và gán biến môi trường (`env FOO=bar cmd`).
+                .find(|w| !w.starts_with('-') && !w.contains('=') && !w.chars().all(|c| c.is_ascii_digit()))
+                .unwrap_or(verb)
+        } else {
+            verb
+        };
         let looks_like = KNOWN.contains(&verb) || verb.starts_with("./");
         if !looks_like {
             continue;

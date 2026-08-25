@@ -263,6 +263,16 @@ pub enum CommandKind {
     /// giữa chừng), mà dữ liệu để quyết định chỉ nằm trên tab Sức khoẻ — thứ
     /// không với tới được khi đang gõ trên Telegram.
     Accounts,
+    /// `/web` — lái CHROME THẬT của chủ máy: xem tab nào đang mở, mở một địa
+    /// chỉ, chuyển tab, đọc nội dung trang thành chữ.
+    ///
+    /// 🔴 Hà 2026-08-23: *"Cổng điều khiển browser thế nào rồi"*. Đúng một
+    /// "gap" theo phép thử cầu nối (`CLAUDE.md`): ngồi ở máy thì mở Chrome là
+    /// một cú click, còn từ điện thoại thì trước lượt này KHÔNG có đường nào.
+    ///
+    /// `arg` trống = danh sách tab · một địa chỉ = mở · `<cửa sổ>.<tab>` =
+    /// chuyển sang tab ấy · `doc`/`text` = đọc trang thành chữ.
+    Web,
 }
 
 #[derive(Debug, Clone)]

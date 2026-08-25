@@ -224,6 +224,39 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
             ));
         }
     }
+    // `wb_<cửa sổ>_<tab>` — chạm vào một hàng TAB của `/web`.
+    //
+    // Cùng khuôn với `s_<id phiên>`: tham số nằm trong TÊN lệnh vì chạm một
+    // liên kết chỉ gửi lại đúng token ấy, chữ sau dấu cách rơi mất. Dấu `_`
+    // ngăn ô ở payload rồi đổi thành `.` khi thành lệnh, vì `.` không nằm trong
+    // bộ ký tự Telegram cho phép ở `?start=`.
+    if let Some(rest) = verb.strip_prefix("wb_") {
+        if let Some((w, t)) = rest.split_once('_') {
+            let so = |x: &str| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit());
+            if so(w) && so(t) {
+                return Some((CommandKind::Web, 0, format!("{w}.{t}")));
+            }
+        }
+    }
+    // `s_<id phiên>` — CHẠM VÀO CHÍNH HÀNG của phiên trong danh sách, thay cho
+    // một cái nút lặp lại hàng ấy dưới đáy tin.
+    //
+    // 🔴 Hà 2026-08-22, ảnh chụp buồng chat lúc 21:36: *"Vẫn đang hiện cả danh
+    // sách lẫn nút thừa thãi"*. Mỗi phiên hiện HAI lần — một hàng chữ, rồi một
+    // cái nút mang đúng tên + tài khoản + icon tình trạng của hàng ấy. Sáu nút
+    // ăn gần nửa màn, và Telegram cho nút một chiều cao CỐ ĐỊNH nên rút ngắn
+    // nhãn không lấy lại được một pixel nào: chỉ có bỏ hẳn.
+    //
+    // Id ĐẦY ĐỦ nằm trong payload (uuid 36 ký tự + `s_` = 38 ≤ 64 của
+    // Telegram), nên liên kết mang đúng cái lệnh cũ cái nút mang — `/session
+    // <uuid>` — chứ không phải một đường thứ hai phải nhớ.
+    if let Some(id) = verb.strip_prefix("s_") {
+        let ok = crate::sessions::is_shell_id(id)
+            || (!id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
+        if ok {
+            return Some((CommandKind::Session, 0, id.to_string()));
+        }
+    }
     if let Some(tty) = verb.strip_prefix("w_") {
         if is_tty_name(tty) {
             return Some((

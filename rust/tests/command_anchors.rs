@@ -72,25 +72,52 @@ fn no_icon_lands_on_a_prose_line() {
     }
 }
 
-/// Lỗi số 2: phần lệnh phải nằm trong `<code>`, và icon đứng NGAY SAU khung ấy
-/// — tức mắt đọc được ranh giới thay vì phải đoán.
+/// Lỗi số 2: phần lệnh phải được BỌC, để mắt đọc được nó ăn tới đâu — và cái
+/// bọc ấy nay là `<a>`, không còn là `<code>`.
+///
+/// 🔴 ĐẢO CHIỀU, KHÔNG XOÁ (2026-08-23). Bài kiểm này ra đời để khoá `<code>`,
+/// và nó khoá đúng hai thứ: **ranh giới nhìn thấy được** và **`deploy.sh`
+/// không bị Telegram tự nối thành link**. Hà 2026-08-23: *"Tại sao các nút
+/// chạy khối lệnh không bao cả khối như cách làm ở danh sách phiên cho dễ
+/// bấm"* — và `<a>` giữ được CẢ HAI thứ trên trong khi `<code>` thì không cho
+/// bấm.
+///
+/// Đo thật, `tests/cmd_block_tap_live.rs` (06:10Z và 06:16Z cùng ngày):
+/// `<a href="…"><code>lệnh</code></a>` ⟹ Telegram nuốt link, chỉ còn `code`.
+/// `<a href="…">lệnh</a>` ⟹ `text_link` phủ trọn 20 ký tự dòng lệnh, và
+/// **không** có entity `url` nào mọc ra ở `gate.sh` — thẻ `<a>` bọc ngoài chặn
+/// sẵn phép tự-nối-liên-kết. Nên đổi bọc là đổi cơ chế, không phải bỏ lời hứa.
 #[test]
-fn the_command_is_boxed_so_its_extent_is_visible() {
+fn the_command_is_wrapped_so_the_whole_line_can_be_tapped() {
     let (html, _, _) = html_with_links(REPORT, &anchors());
-    let want = format!("<code>{GIT_MV}</code>");
+    let want = format!("<a href=\"https://t.me/b?start=run_0\">▶️ {GIT_MV}</a>");
     assert!(
         html.contains(&want),
-        "dòng lệnh không được bọc <code> ⟹ Telegram vẫn tự biến deploy.sh thành link:\n{html}"
+        "cả dòng lệnh phải nằm trong <a> — đích chạm to bằng dòng, icon nằm BÊN TRONG:\n{html}"
     );
-    // …và icon phải đi liền ngay sau khung, không lang thang xuống dưới.
-    let after = html
-        .split(&want)
-        .nth(1)
-        .expect("phải có phần sau khung <code>");
+    // …và không còn `<code>` quanh chính dòng ấy: hai thẻ chồng nhau thì
+    // Telegram bỏ cái `<a>` (đo 06:10Z), tức đích chạm chết im.
     assert!(
-        after.trim_start().starts_with("<a href"),
-        "icon không đứng ngay sau dòng lệnh của nó: {:?}",
-        &after[..after.len().min(60)]
+        !html.contains(&format!("<code>{GIT_MV}</code>")),
+        "vẫn còn <code> bọc dòng lệnh ⟹ Telegram sẽ nuốt link:\n{html}"
+    );
+}
+
+/// …nhưng khi KHÔNG dựng được liên kết thì `<code>` phải ở lại.
+///
+/// 🔴 Đây là nửa còn lại của lượt 16/08, và nó không được đi theo cái bọc mới:
+/// chưa biết tên bot (chưa kịp `getMe`, hoặc mạng hỏng) thì `link_of` trả về
+/// rỗng — lúc ấy dòng lệnh không có `<a>` nào bọc, nên nếu bỏ luôn `<code>`
+/// thì `deploy.sh` lại thành liên kết xanh dẫn ra web. Đổi lấy không gì cả.
+#[test]
+fn a_command_with_no_link_keeps_its_code_box() {
+    let anchors = vec![(GIT_MV.to_string(), Vec::new())];
+    let (html, linked, unlinked) = html_with_links(REPORT, &anchors);
+    assert_eq!(linked, 0, "không có liên kết nào để mà đếm");
+    assert_eq!(unlinked, vec![0], "neo không bấm được phải được nói ra");
+    assert!(
+        html.contains(&format!("<code>{GIT_MV}</code>")),
+        "mất <code> ở nhánh không có link ⟹ deploy.sh lại tự thành link:\n{html}"
     );
 }
 

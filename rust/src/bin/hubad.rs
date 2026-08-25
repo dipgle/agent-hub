@@ -392,7 +392,30 @@ fn real_main() -> Result<()> {
 
         let mut delay = Duration::from_secs(cfg.poll_interval_sec);
         match run_once(&db, &cfg) {
-            Ok(_) => consecutive_failures = 0,
+            Ok(summary) => {
+                consecutive_failures = 0;
+                // 🔴 CÒN PHIÊN QUÁ NGƯỠNG ĐANG BỊ GIỮ ⟹ THÔI NGỦ ĐỦ HAI PHÚT.
+                //
+                // Hà 2026-08-23: *"sao nó đủ điều kiện chuyển phiên mới nhưng
+                // không tự chuyển, cho đến khi tôi chạy một lệnh bất kỳ mới vào
+                // luồng chuyển phiên"*. Anh mô tả đúng một lỗi LẤY MẪU: cửa nổ
+                // đòi phiên vừa rảnh vừa im ≥ `idle_sec` tại đúng khoảnh khắc
+                // vòng chạy qua, mà lưới vòng là 124 giây — khe hợp lệ hẹp hơn
+                // lưới thì bắt hụt. Đo trên log từ 20/08: chờ trung vị **15
+                // phút**, ca lâu nhất **205 phút**, hai phiên **không bao giờ**
+                // chuyển. Và 8/24 lượt nổ cưỡi lên một vòng do lệnh Telegram
+                // đánh thức — tức cái "gõ lệnh thì nó chạy" của anh là thật:
+                // lệnh thêm một mẫu ngoài lưới.
+                //
+                // Chỉ dày mẫu KHI ĐANG CANH. Không phiên nào quá ngưỡng thì
+                // vòng về đúng nhịp cũ, không tốn thêm gì.
+                if summary.watching > 0 {
+                    let slice = Duration::from_secs(huba::pipeline::watch_slice_sec(&cfg));
+                    if slice < delay {
+                        delay = slice;
+                    }
+                }
+            }
             Err(e) => {
                 consecutive_failures += 1;
                 logging::error(

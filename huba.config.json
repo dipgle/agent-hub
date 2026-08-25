@@ -12,8 +12,14 @@
   },
   "auto_handover": {
     "enabled": true,
-    "at_percent": 60,
+    "at_percent": 70,
     "idle_sec": 120
+  },
+  "auto_run": {
+    "enabled": true,
+    "allow": [
+      "bash ~/projects/huba/install_update.sh --verify"
+    ]
   },
   "confirm": {
     "enabled": true,

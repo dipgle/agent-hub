@@ -149,12 +149,22 @@ fn the_list_tells_running_waiting_and_stopped_apart() {
     // bản chép thứ hai của đúng cái bảng vừa gom về một chỗ — và bài kiểm sẽ
     // đỏ vì bảng đổi hình, chứ không vì sản phẩm sai.
     use huba::sessions::{ST_DEAD, ST_RUN, ST_WAIT};
-    assert!(text.contains(&format!("{ST_RUN} đang chạy")), "{text}");
-    assert!(text.contains(&format!("{ST_WAIT} đứng chờ")), "{text}");
-    assert!(
-        text.contains(&format!("{ST_DEAD} đã tắt")),
-        "phiên đã tắt bị gộp vào 'đứng chờ': {text}"
-    );
+    // 🔄 Icon MỞ ĐẦU hàng, chữ ở ô thứ hai — Hà 2026-08-22: *"Chuyển icon trạng
+    // thái lên đứng trước tên phiên sẽ dễ nhìn hơn"*. Bài kiểm cũ ghim hai thứ
+    // ấy DÍNH nhau (`⚡ đang chạy`), nên nó khoá luôn cả CHỖ ĐỨNG. Ghim lại đúng
+    // hai điều phải giữ: icon ở cột đầu (mắt quét dọc mép trái) và chữ vẫn còn
+    // trên hàng (luật Hà 12/08 — bốn tình trạng phải đọc được bằng chữ).
+    let state_row = |icon: &str, word: &str| {
+        let row = text
+            .lines()
+            .find(|l| l.starts_with(icon))
+            .unwrap_or_else(|| panic!("không hàng nào mở đầu bằng {icon}:\n{text}"));
+        assert!(row.contains(word), "hàng {icon} mất chữ `{word}`: {row}");
+    };
+    state_row(ST_RUN, "đang chạy");
+    state_row(ST_WAIT, "đứng chờ");
+    // Phiên đã tắt bị gộp vào "đứng chờ" là nói sai về thứ người ta sắp làm với nó.
+    state_row(ST_DEAD, "đã tắt");
     assert!(
         !text.contains("▶"),
         "`▶` phải để dành cho NÚT chạy lệnh: {text}"
@@ -184,10 +194,13 @@ fn a_session_waiting_for_an_answer_shows_the_question_and_the_options() {
         rest: Vec::new(),
     });
     let text = session_list_text(&[s], "", NOW);
-    assert!(
-        text.contains(&format!("{} dừng lại HỎI", huba::sessions::ST_ASK)),
-        "tình trạng: {text}"
-    );
+    // Icon mở đầu hàng, chữ ở ô thứ hai (Hà 22/08) — hai vế phải cùng còn, chỉ
+    // chỗ đứng đổi.
+    let row = text
+        .lines()
+        .find(|l| l.starts_with(huba::sessions::ST_ASK))
+        .unwrap_or_else(|| panic!("icon HỎI không ở cột đầu:\n{text}"));
+    assert!(row.contains("dừng lại HỎI"), "tình trạng: {row}");
     assert!(text.contains("Nửa ngày"), "nhãn câu hỏi: {text}");
     assert!(
         text.contains("NỬA NGÀY không?"),
@@ -350,6 +363,170 @@ fn each_row_carries_the_same_facts_as_the_card_on_the_page() {
     // Xuống dòng trong câu cuối phải bị dẹp: một dòng 💬 vỡ làm ba dòng thì
     // danh sách năm phiên trông như mười lăm.
     assert!(!text.contains("Đã sửa xong\n"), "còn xuống dòng: {text}");
+}
+
+/// Dựng lại NGUYÊN VĂN lượt `/session` lúc 21:09 ngày 22/08 và ghim hai chỗ bản
+/// gọn lần một không với tới.
+///
+/// 🔴 Hà 2026-08-22, ngay sau khi bản gọn lần một lên máy: *"Chưa làm gọn danh
+/// sách phiên à"*. Cả hai vế đều đúng cùng lúc, và đó mới là bài học: số dòng
+/// **logic** đã xuống 1,9/phiên, còn thứ Hà nhìn là số dòng **sau khi Telegram
+/// tự xuống dòng**. Lấy nguyên chuỗi từ `logs/huba.log` mà đếm: **671 ký tự cho
+/// 6 phiên**, hàng dài nhất 105 — trên màn ~38 cột thì đó là ba dòng cho một
+/// phiên. Đếm `\n` cho một khung tự xuống dòng là phép đo mù (charter §2d), nên
+/// bài kiểm này đếm thứ Hà đếm: **bề ngang**.
+///
+/// Đo bằng `chars().count()` chứ KHÔNG gọi `pipeline::cols` — bài kiểm mà dùng
+/// đúng hàm nó đang gác thì hai bên cùng sai một kiểu vẫn xanh
+/// ([`feedback_probe_matches_itself`]). `cols` luôn ≥ số ký tự (emoji tính hai
+/// cột), nên "≤ 76 ký tự" là hệ quả yếu hơn nhưng ĐỘC LẬP của "≤ 76 cột".
+#[test]
+fn the_real_2109_list_fits_two_phone_lines_per_session() {
+    let mut rows = Vec::new();
+    for (id, label, folder, acc, working, verb, pct, said) in [
+        (
+            "93001074-d0f9-4829-88f2-2a2afce6f294",
+            "[huba]",
+            "AI/huba",
+            "acc1",
+            true,
+            "",
+            11,
+            "[dùng Bash]",
+        ),
+        (
+            "a71e4107-0000-0000-0000-000000000000",
+            "[onghut]",
+            "onghut",
+            "acc1",
+            true,
+            "",
+            10,
+            "[dùng Read]",
+        ),
+        (
+            "6949414b-0000-0000-0000-000000000000",
+            "[tfl5]",
+            "AI/tfl5",
+            "acc1",
+            true,
+            "Forging… 30m47s",
+            25,
+            "[dùng Bash]",
+        ),
+        (
+            "ef145c0c-0000-0000-0000-000000000000",
+            "[dwork/A-DSIGN]",
+            "dwork",
+            "acc3",
+            false,
+            "",
+            63,
+            "`[dwork/A-DSIGN]` `create.hjson` xong — nhận danh sách, gom nhóm, phát phiếu",
+        ),
+        (
+            "7db02925-0000-0000-0000-000000000000",
+            "[dwork]·Hoàn tất A-DDOC và chờ phản hồi ph…",
+            "dwork",
+            "acc3",
+            true,
+            "Drizzling… 16m14s",
+            35,
+            "[dùng Bash]",
+        ),
+        (
+            "0f6ba82b-0000-0000-0000-000000000000",
+            "[dwork]·Tiếp dwork, quét và pull GitHub",
+            "dwork",
+            "acc3",
+            false,
+            "",
+            42,
+            "[dwork] Đã ghi và đẩy — `f977927`. Ghi vào **tệp trả lời chuẩn** `docs/trao-doi.md`",
+        ),
+    ] {
+        let mut s = sess(id, label, acc, working);
+        s.label = label.to_string();
+        s.folder = folder.to_string();
+        s.context_tokens = pct * 10_000;
+        if !verb.is_empty() {
+            s.activity = Some(verb.to_string());
+        }
+        s.last_text = Some(said.to_string());
+        rows.push(s);
+    }
+    let text = session_list_text(&rows, "", NOW);
+
+    // ① Không hàng phiên nào tràn sang dòng thứ ba.
+    //
+    // Nhận hàng phiên bằng ô TÀI KHOẢN, không bằng ký tự mở đầu: từ 22/08 hàng
+    // mở đầu bằng icon TÌNH TRẠNG (bốn ký tự khác nhau, cộng `👁` khi đang
+    // theo), nên một phép lọc theo `⌨` sẽ đếm 0 hàng và điều kiện dưới đây xanh
+    // ở mọi bố cục — đúng hình dạng phép đo mù mà chính bài kiểm này gác.
+    let rows_shown: Vec<&str> = text.lines().filter(|l| l.contains("· acc")).collect();
+    assert_eq!(rows_shown.len(), 6, "lọc hàng phiên trượt:\n{text}");
+    for line in rows_shown {
+        assert!(
+            line.chars().count() <= 76,
+            "hàng phiên tràn dòng thứ ba ({} ký tự): {line}",
+            line.chars().count()
+        );
+    }
+
+    // ② `[dùng Bash]` thôi chiếm một dòng riêng — 4/6 dòng `💬` của lượt thật
+    //    là dấu vết công cụ, và hàng ngay trên chúng đã nói phiên đang chạy.
+    assert!(
+        !text.contains("💬 [dùng"),
+        "dấu vết công cụ vẫn ăn một dòng: {text}"
+    );
+    //    …nhưng câu cuối THẬT thì vẫn phải còn, không thì mất luôn thứ nói
+    //    phiên nào đáng mở ra.
+    assert!(
+        text.contains("💬 `[dwork/A-DSIGN]`"),
+        "mất câu cuối: {text}"
+    );
+
+    // ③ Động từ thay chỗ chữ "đang chạy", chứ không đứng cạnh nó — và icon tình
+    //    trạng mở đầu hàng (Hà 22/08), nên hai vế ấy KHÔNG còn dính nhau.
+    let tfl5 = text
+        .lines()
+        .find(|l| l.contains("[tfl5]"))
+        .expect("phải có hàng tfl5");
+    assert!(
+        tfl5.starts_with('⚡'),
+        "icon tình trạng không ở cột đầu: {tfl5}"
+    );
+    assert!(tfl5.contains("· Forging… 30m47s ·"), "{tfl5}");
+    assert!(
+        !text.contains("đang chạy · Forging"),
+        "vẫn in hai lần cùng một vế: {text}"
+    );
+    //    Phiên đang chạy mà CHƯA có động từ vẫn phải có chữ, không rơi về icon câm.
+    let huba = text
+        .lines()
+        .find(|l| l.contains("[huba]"))
+        .expect("phải có hàng huba");
+    assert!(huba.starts_with('⚡'), "{huba}");
+    assert!(huba.contains("· đang chạy ·"), "hàng không động từ: {huba}");
+
+    // ④ Và tổng thể phải ngắn hơn bản 21:09 — 671 ký tự / 13 dòng (kể cả dòng
+    //    chân "Chưa theo phiên nào", thứ bản 21:09 không có vì lúc ấy đang theo
+    //    một phiên). Đo được sau bản vá: **570 ký tự / 10 dòng**.
+    //
+    //    Ngưỡng đặt ở 600 chứ không dán chặt vào 570: ghim đúng con số hôm nay
+    //    thì mai thêm một chữ vào dòng chân là đỏ, mà đỏ vì lời văn thì người
+    //    ta sửa bài kiểm chứ không sửa bố cục. Vế thật sự gác là ① — không hàng
+    //    nào tràn dòng thứ ba.
+    assert!(
+        text.chars().count() < 600,
+        "chưa gọn hơn bản 21:09 (671 ký tự), đang {}:\n{text}",
+        text.chars().count()
+    );
+    assert!(
+        text.lines().count() <= 10,
+        "13 dòng của bản 21:09 chưa xuống, đang {}:\n{text}",
+        text.lines().count()
+    );
 }
 
 /// Phiên ĐANG CHẠY thì không nói "im N phút".
@@ -1391,7 +1568,17 @@ fn the_list_says_whether_a_session_lives_in_a_terminal_or_an_editor() {
         .lines()
         .find(|l| l.contains("[games]"))
         .unwrap_or_default();
-    assert!(l_term.contains("⌨"), "{text}");
+    // 🔄 ĐẢO CHIỀU, KHÔNG XOÁ — Hà 2026-08-23: *"bỏ icon bàn phím đi thay thành
+    // các icon tình trạng vào đó"*. `⌨` là nguồn MẶC ĐỊNH (5/6 hàng của ảnh
+    // 21:36 mang đúng nó), nên trên hàng nó không phân biệt được gì mà lại chen
+    // vào giữa icon tình trạng với tên phiên. Bài kiểm ở lại và đổi chiều, vì
+    // "vá lại cho đầy đủ" phải làm ĐỎ một bài kiểm có chủ, đừng lặng lẽ đúng.
+    assert!(
+        !l_term.contains("⌨"),
+        "nguồn mặc định quay lại chiếm chỗ giữa tình trạng và tên: {text}"
+    );
+    // …còn NGOẠI LỆ thì vẫn phải nói ra: một phiên nền không gõ vào được, và đó
+    // là câu người ta sắp hỏi.
     assert!(l_bg.contains("🌙"), "{text}");
     assert!(!l_term.contains("🌙"), "gắn nhầm nguồn: {text}");
 
@@ -1838,19 +2025,21 @@ fn each_command_line_carries_its_run_link_in_one_message() {
 
     assert_eq!(linked, 2, "{html}");
     assert!(unlinked.is_empty());
-    // Liên kết nằm NGAY SAU dòng lệnh, không phải dưới đáy tin — và dòng lệnh
-    // nằm trong `<code>`, thêm 2026-08-16 (Hà: *"không biết lệnh đó ăn 1 dòng
-    // hay cả 2?"*). Cái khung ấy vẽ ra ranh giới cho mắt, và chặn Telegram tự
-    // biến `deploy.sh`/`update.sh` thành liên kết web (`.sh` là TLD có thật).
+    // Liên kết ôm TRỌN dòng lệnh, không phải một icon 2 ký tự dán ở cuối, và
+    // không phải một cái nút dưới đáy tin. Ranh giới "lệnh ăn 1 dòng hay cả 2"
+    // (Hà 2026-08-16) nay do chính thẻ `<a>` vẽ ra — và nó cũng chặn Telegram
+    // tự biến `deploy.sh`/`update.sh` thành liên kết web đúng như `<code>` đã
+    // làm (đo 2026-08-23, `tests/cmd_block_tap_live.rs`).
     assert!(
         html.contains(
-            "./huba self-install</code> <a href=\"https://t.me/bot?start=run_0\">▶️</a>\n"
+            // `&&` đã qua `html_escape` — chữ trong thẻ vẫn là chữ, phải thoát.
+            "<a href=\"https://t.me/bot?start=run_0\">▶️ cd ~/projects/huba &amp;&amp; ./huba self-install</a>\n"
         ),
         "{html}"
     );
     assert!(
         html.contains(
-            "<code>bash ./run.sh</code> <a href=\"https://t.me/bot?start=run_1\">▶️</a>\n"
+            "<a href=\"https://t.me/bot?start=run_1\">▶️ bash ./run.sh</a>\n"
         ),
         "{html}"
     );

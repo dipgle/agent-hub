@@ -269,6 +269,17 @@ pub const ROUTES: &[Route] = &[
         listed: true,
     },
     Route {
+        name: "web",
+        aliases: &["browser", "trinhduyet"],
+        kind: CommandKind::Web,
+        // `Rest`, cùng lý do với `terminal`: gõ trơn = XEM, và một route
+        // `listed: true` thì "gõ trơn" là cách một ngón tay chạm tới được.
+        arg: Arg::Rest,
+        usage: "[địa chỉ | <cửa sổ>.<tab> | an …]",
+        help: "Chrome TRÊN MÁY: trống = các tab; địa chỉ = mở. `an` = trình duyệt ẩn của huba",
+        listed: true,
+    },
+    Route {
         name: "accounts",
         aliases: &["acc", "taikhoan"],
         kind: CommandKind::Accounts,

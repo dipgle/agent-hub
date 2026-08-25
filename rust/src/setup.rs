@@ -68,10 +68,15 @@ const FIELDS: &[Field] = &[
     },
     Field {
         key: "HUB_TELEGRAM_CHAT_ID",
-        label: "Chat ID Telegram",
-        hint: "Nhắn một câu cho bot rồi mở https://api.telegram.org/bot<TOKEN>/getUpdates và đọc message.chat.id. Đây cũng là CỔNG: chỉ buồng chat này ra lệnh được cho huba.",
+        label: "Chat ID Telegram — để trống, huba tự dò",
+        hint: "Nhắn BẤT CỨ GÌ cho bot của bạn rồi bấm Lưu: huba hỏi Telegram và tự điền. Chỉ gõ tay khi bạn muốn chỉ định một buồng khác. Đây cũng là CỔNG: chỉ buồng chat này ra lệnh được cho huba.",
         secret: false,
-        required: true,
+        // 🔴 THÔI BẮT BUỘC 2026-08-25 — Hà: *"chỉ cần nhập token thì có cơ chế
+        // tự quét id chứ, bắt người dùng đi lấy id thành phức tạp"*. Đúng: ô
+        // này từng buộc chủ máy tự mở `api.telegram.org/bot<TOKEN>/getUpdates`
+        // rồi đọc `message.chat.id` bằng mắt — việc huba làm hộ được, vì nó đã
+        // có token và đã nói chuyện với đúng cái API ấy suốt ngày.
+        required: false,
     },
 ];
 
@@ -200,9 +205,10 @@ fn handle(stream: &mut TcpStream, ticket: &str, env_path: &Path) -> Result<bool>
     if method == "POST" {
         let mut body = vec![0u8; len];
         reader.read_exact(&mut body)?;
-        let form = parse_form(&String::from_utf8_lossy(&body));
+        let mut form = parse_form(&String::from_utf8_lossy(&body));
+        let dò = auto_chat_id(&mut form);
         let written = save_env(env_path, &form)?;
-        let page = saved_page(&written);
+        let page = saved_page(&written, &dò);
         respond(
             stream,
             "200 OK",
@@ -385,7 +391,54 @@ fn form_page(ticket: &str, have: &[String]) -> String {
     )
 }
 
-fn saved_page(written: &[String]) -> String {
+/// Điền hộ `HUB_TELEGRAM_CHAT_ID` khi chủ máy để trống — trả câu để in ra trang.
+///
+/// 🔴 Hà 2026-08-25: *"chỉ cần nhập token thì có cơ chế tự quét id chứ, bắt
+/// người dùng đi lấy id thành phức tạp"*.
+///
+/// Ba nhánh, và cả ba đều NÓI RA, vì đây là lúc duy nhất chủ máy còn đang nhìn
+/// màn hình cài đặt: dò được (in cả bot lẫn ai đã nhắn, để nhìn một cái là biết
+/// đúng buồng chưa) · token đúng mà chưa ai nhắn (bảo nhắn rồi Lưu lại) · hỏi
+/// không được (in nguyên văn lý do — token sai và hubad-đang-giữ-đường là hai
+/// chuyện khác hẳn nhau).
+///
+/// KHÔNG đè lên giá trị chủ máy tự gõ: gõ tay nghĩa là cố ý chỉ định một buồng
+/// khác, và huba đoán đè lên một lựa chọn có chủ ý là sai.
+fn auto_chat_id(form: &mut std::collections::BTreeMap<String, String>) -> String {
+    let token = form
+        .get("HUB_TELEGRAM_BOT_TOKEN")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+    let da_go = form
+        .get("HUB_TELEGRAM_CHAT_ID")
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if token.is_empty() || da_go {
+        return String::new();
+    }
+    match crate::telegram::probe_token(&token) {
+        Ok((bot, Some((id, who)))) => {
+            form.insert("HUB_TELEGRAM_CHAT_ID".to_string(), id.to_string());
+            logging::info(
+                "setup_chat_id_detected",
+                json!({ "bot": bot, "chat_id": id }),
+            );
+            format!(
+                "<p>🔎 Đã tự dò: bot <code>@{}</code>, buồng chat <code>{}</code> (tin gần nhất từ {}).                  Không đúng buồng thì gõ tay rồi Lưu lại.</p>",
+                esc(&bot),
+                id,
+                esc(&who)
+            )
+        }
+        Ok((bot, None)) => format!(
+            "<p>⚠ Token đúng (bot <code>@{}</code>) nhưng <b>chưa ai nhắn cho nó</b>, nên chưa có              buồng nào để dò. Mở Telegram, nhắn một câu bất kỳ cho bot, rồi bấm Lưu lại.</p>",
+            esc(&bot)
+        ),
+        Err(e) => format!("<p>⚠ Chưa dò được chat id: {}</p>", esc(&e)),
+    }
+}
+
+fn saved_page(written: &[String], dò: &str) -> String {
     let list = if written.is_empty() {
         "<p>Không có ô nào được điền — file cũ giữ nguyên.</p>".to_string()
     } else {
@@ -402,7 +455,7 @@ fn saved_page(written: &[String]) -> String {
         "<!doctype html><html lang=\"vi\"><head><meta charset=\"utf-8\">\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
          <title>Đã lưu</title><style>{STYLE}</style></head><body>\
-         <h1>✅ Đã lưu</h1>{list}\
+         <h1>✅ Đã lưu</h1>{list}{dò}\
          <p>Bước tiếp theo, chạy ở terminal:</p>\
          <p><code>./huba doctor</code> — kiểm tra thật: hỏi Telegram, tìm claude CLI, đọc thư mục dự án.</p>\
          <p><code>./huba self-install</code> — cài daemon để huba tự chạy cùng máy.</p>\

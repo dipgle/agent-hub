@@ -4321,6 +4321,40 @@ pub enum Look {
 
 /// Nhìn màn phiên, nói thật là nhìn được tới đâu.
 pub fn look(tty: &str, lines: usize) -> Look {
+    look_at(tty, lines, false)
+}
+
+/// Như [`look`], nhưng NỚI CỬA SỔ HẾT CỠ trước khi đọc.
+///
+/// 🔴 Dùng cho những cửa mà đọc hụt thì hỏng KHÔNG LÙI LẠI ĐƯỢC — hôm nay đúng
+/// hai chỗ: cổng chặn phím mũi tên và cổng chặn phím SỐ (`pipeline`, nhánh
+/// `CommandKind::Key`). Cả hai đều gửi một phím vào một màn CÓ THỂ đang mở hộp
+/// chọn, mà `do script` luôn kèm một CR — nên phím ấy vừa DI vừa CHỐT.
+///
+/// **Vì sao không gộp cả làn theo [`crate::exec::Lane`]** (hướng đề xuất sáng
+/// 26/08, và tôi bỏ nó sau khi đo). `Lane` trả lời câu *"có ai đang chờ không"*.
+/// Câu quyết định ở đây là câu KHÁC: *"quyết định này có lùi lại được không"*.
+/// Một cú bấm phím đi qua **ba** lượt đọc màn — cổng chặn, `before`, `after` —
+/// mà chỉ lượt đầu nuôi một quyết định không lùi được; hai lượt sau là cặp so
+/// sánh, chỉ cần NHẤT QUÁN VỚI NHAU. Gộp theo làn bắt cả ba trả giá:
+/// [`screen_text_tall`] mang `delay 1.2` cứng, nên +3,6 giây mỗi cú bấm và cửa
+/// sổ của chủ máy tự phóng to rồi thu lại ba lần ngay trước mắt. Hẹp lại đúng
+/// chỗ hỏng thì chỉ còn +1,2 giây, và chỉ khi thật sự gửi một phím nguy hiểm.
+///
+/// Cái giá ấy đổi lấy gì, đo được: `24×80 ⟹ 1081 ký tự` · nới hết cỡ
+/// `⟹ 3943` (xem [`screen_text_tall`]). Gấp 3,6 lần chữ, tức hộp chọn dài hơn
+/// màn có thêm chừng ấy cơ hội lộ ra trước khi huba dám gõ. Fixture thật
+/// `shot-amm-chooser-2026-08-19.txt` là đúng hình dạng ấy: hộp bắt đầu từ `2.`
+/// vì lựa chọn 1 ĐÃ cuộn khỏi mép trên, và chỉ còn dòng chân giữ cho
+/// [`parse_choices`] nhận ra đó là một cái hộp.
+///
+/// Nới hụt thì **KHÔNG im**: rơi về bản hẹp và ghi log, vì lúc ấy cổng vẫn phải
+/// phán trên thứ đọc được — nhưng người đọc log phải biết nó phán trên bản nào.
+pub fn look_sure(tty: &str, lines: usize) -> Look {
+    look_at(tty, lines, true)
+}
+
+fn look_at(tty: &str, lines: usize, rong: bool) -> Look {
     let w = match window_of(tty) {
         Ok(Some(w)) => w,
         Ok(None) => {
@@ -4339,17 +4373,47 @@ pub fn look(tty: &str, lines: usize) -> Look {
             };
         }
     };
-    let screen = match screen_text(w) {
-        Ok(s) => s,
-        Err(e) => {
-            logging::warn(
-                "keys_screen_read_failed",
-                json!({ "window": w, "err": e.to_string() }),
-            );
-            return Look::Blind {
-                why: format!("không đọc được chữ trên màn: {e}"),
-            };
+    // Xin bản RỘNG trước khi rơi về bản hẹp. Không dùng `?`/`unwrap_or` im lặng:
+    // cổng an toàn phía dưới phán trên bản nào là chuyện người đọc log phải biết
+    // — và một lượt nới hụt là dấu hiệu Terminal đang không nghe lời, thứ đáng
+    // biết trước khi tin vào phán quyết kế tiếp.
+    let screen = if rong {
+        match screen_text_tall(w, GROW_ASK) {
+            Ok(s) if !s.trim().is_empty() => Some(s),
+            Ok(_) => {
+                logging::warn(
+                    "keys_wide_read_empty",
+                    json!({ "window": w,
+                            "effect": "nới hết cỡ xong đọc ra rỗng — cổng phán trên BẢN HẸP" }),
+                );
+                None
+            }
+            Err(e) => {
+                logging::warn(
+                    "keys_wide_read_failed",
+                    json!({ "window": w, "err": e.to_string(),
+                            "effect": "không nới được cửa sổ — cổng phán trên BẢN HẸP" }),
+                );
+                None
+            }
         }
+    } else {
+        None
+    };
+    let screen = match screen {
+        Some(s) => s,
+        None => match screen_text(w) {
+            Ok(s) => s,
+            Err(e) => {
+                logging::warn(
+                    "keys_screen_read_failed",
+                    json!({ "window": w, "err": e.to_string() }),
+                );
+                return Look::Blind {
+                    why: format!("không đọc được chữ trên màn: {e}"),
+                };
+            }
+        },
     };
     look_from_screen(&screen, lines)
 }

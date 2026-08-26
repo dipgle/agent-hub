@@ -10296,7 +10296,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 && typed.trim().len() == 1
                                 && typed.trim().chars().all(|c| c.is_ascii_digit());
                             let refusal = if digit {
-                                match crate::keys::look(&s.tty, 24) {
+                                // 🔴 `look_sure`, không `look`: cổng này quyết
+                                // định có gửi một con số vào một màn CÓ THỂ đang
+                                // mở hộp chọn, và `do script` kèm một CR nên con
+                                // số ấy vừa DI vừa CHỐT. Đọc hụt ở đây hỏng theo
+                                // hướng không lùi lại được, nên nó đáng 1,2 giây
+                                // nới cửa sổ — xem `keys::look_sure` để biết vì
+                                // sao chỉ ĐÚNG hai cổng này trả giá ấy, chứ
+                                // không phải cả làn Urgent.
+                                match crate::keys::look_sure(&s.tty, 24) {
                                     crate::keys::Look::Saw { body, .. }
                                         if !crate::keys::parse_choices(&body).is_empty() =>
                                     {
@@ -10333,7 +10341,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     }
                                 }
                             } else if is_key && arrow {
-                                match crate::keys::arrow_verdict(&crate::keys::look(&s.tty, 24)) {
+                                // 🔴 `look_sure` — cùng lý do với cổng số ngay
+                                // trên, và ở đây còn gắt hơn: điều kiện để GỬI
+                                // một mũi tên là *biết chắc KHÔNG có hộp chọn*,
+                                // chứ không phải *không thấy hộp chọn nào*. Đọc
+                                // trên bản hẹp là dựng đúng chữ "không thấy"
+                                // thành "không có".
+                                match crate::keys::arrow_verdict(&crate::keys::look_sure(
+                                    &s.tty, 24,
+                                )) {
                                     crate::keys::Arrow::Send => None,
                                     crate::keys::Arrow::RefuseDialog => {
                                         logging::info(

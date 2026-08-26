@@ -172,8 +172,280 @@ pub fn known_projects(cfg: &Config) -> Vec<String> {
 /// Cursor holding the Claude session the phone is currently reading.
 pub const FOCUS_SESSION_KEY: &str = "focus:session";
 
-/// `message_id` của tin `👁 Đang theo …` đang được GIM trên đỉnh buồng chat.
+/// Tin đang được GIM trên đỉnh buồng chat: `{"m":<message_id>,"t":"<chữ>"}`.
+///
+/// Giữ CẢ chữ chứ không riêng id, vì Telegram từ chối `editMessageText` khi nội
+/// dung không đổi một ký tự (xem `edit_html`) — và vòng quét chạy mỗi ~10 giây.
+/// Nhớ chữ đã gim là cách duy nhất biết "lần này có gì mới" mà không phải hỏi
+/// Telegram. Một khoá cho một sự thật: hai khoá phải giữ đồng bộ là hai khoá sẽ
+/// lệch nhau.
 pub const PIN_FOLLOWING_KEY: &str = "pin:following";
+
+/// Dòng chữ của tin gim — **icon trạng thái** rồi tới tên phiên, không gì khác.
+///
+/// 🔴 Hà 2026-08-26: *"bỏ icon hiện tại đi thay thành icon trạng thái làm việc,
+/// bỏ text sau icon đó đi"* · *"nút xem màn bỏ text đi, bao cả tin cho dễ bấm"*.
+///
+/// Icon lấy từ [`crate::sessions::state_of`] — cùng bộ ký hiệu với danh sách
+/// phiên, một chỗ quyết định chứ không hai bản chép. CHỮ tình trạng thì bỏ, đúng
+/// luật đã áp cho danh sách hôm 25/08: từ 19/08 mỗi tình trạng là một HÌNH khác
+/// nhau, nên chữ chỉ là bản sao thứ hai.
+///
+/// Hàm thuần để kiểm được — cái quyết định "có sửa tin gim không" là phép so
+/// chuỗi này, nên nó phải đo được mà không cần mạng.
+/// Đọc sổ gim: `(message_id, chữ đã gim)`.
+///
+/// 🔴 ĐỌC ĐƯỢC CẢ SỔ DẠNG CŨ — số trần, không phải JSON. Sổ này ra đời ngày
+/// 25/08 giữ mỗi `message_id`, và **trên máy Hà nó ĐANG giữ một con số**: đo
+/// lúc 16:21 ngày 26/08, `sqlite3 data/huba.sqlite` trả
+/// `pin:following|12071|2026-08-26T09:23:45Z`.
+///
+/// Bản đầu của hàm này chỉ hiểu JSON, nên trên đúng cái máy nó sinh ra để phục
+/// vụ, nó trả `None` ở mọi lượt: `refresh_pin` về sớm (tin gim ĐỨNG NGUYÊN, cái
+/// icon trạng thái thành một lời nói dối treo trên đỉnh buồng chat) và
+/// `pin_following` thôi gỡ tin cũ (buồng chat mọc thêm một cái gim mỗi lần đổi
+/// phiên). Cả hai đều **câm** — không một dòng log, vì `None` ở đây nghĩa là
+/// "chưa gim gì", một trạng thái hợp lệ. Đúng hình dạng luật 3 cấm.
+///
+/// Chữ trả về là `""` cho sổ cũ: nó khác mọi giá trị `pin_line` sinh ra (dòng
+/// nào cũng mở đầu bằng một icon), nên lượt quét kế tiếp thấy "có gì mới", sửa
+/// tin gim về đúng dạng rồi ghi lại sổ theo JSON. Tự chuyển hệ, không cần một
+/// bước di trú riêng để quên chạy.
+pub fn pinned_message(db: &Db) -> Option<(i64, String)> {
+    let v = db.cursor_or_log(PIN_FOLLOWING_KEY)?;
+    if let Ok(m) = v.trim().parse::<i64>() {
+        return Some((m, String::new()));
+    }
+    let j: serde_json::Value = serde_json::from_str(&v).ok()?;
+    Some((
+        j.get("m").and_then(serde_json::Value::as_i64)?,
+        j.get("t")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+    ))
+}
+
+/// Dựng HTML của tin gim: cả dòng nằm trong thẻ, chạm chỗ nào cũng mở màn.
+fn pin_html(sid: &str, line: &str) -> Option<String> {
+    let href = crate::telegram::deep_link(&format!("shot_{sid}"))?;
+    Some(format!(
+        "<a href=\"{}\">{}</a>",
+        crate::telegram::html_escape(&href),
+        crate::telegram::html_escape(line)
+    ))
+}
+
+/// MỘT CỬA để đặt tin gim: sửa tin đang gim, chỉ gửi tin mới khi chưa có cái nào.
+///
+/// 🔴 Vì sao phải là "sửa", không phải "gửi rồi gim" — Hà 2026-08-26: *"hiện tại
+/// khi chọn vào phiên đã có sẵn pin message rồi"*. Đường cũ gửi một tin chào MỚI
+/// mỗi lần đổi phiên rồi gim nó, tức mỗi cú chạm để lại một dòng vĩnh viễn trong
+/// buồng chat nói đúng cái điều mà dòng đang gim trên đỉnh đã nói. Tin gim là
+/// MỘT chỗ đứng, không phải một cuốn sổ chép tay.
+///
+/// Trả `Some(message_id)` khi đỉnh buồng chat nay mang đúng `line`; `None` khi
+/// không đặt được — và chỗ gọi phải đọc `None` ấy để rơi về đường cũ, chứ không
+/// được coi như đã xong (nếu không thì một lượt gim hụt = chủ máy mất luôn câu
+/// trả lời cho cú chạm của mình).
+///
+/// 🔴 `tao_neu_thieu` — **vòng nền KHÔNG được đẻ tin**. Cú chạm của chủ máy thì
+/// được: anh vừa hỏi, một tin mới là câu trả lời. Nhưng `refresh_pin` chạy mỗi
+/// ~10 giây và không có ai hỏi cả; nếu nó được phép gửi mới thì một lượt
+/// `editMessageText` hỏng DAI DẲNG (bot bị siết nhịp, mất quyền sửa) biến thành
+/// một tin mới mỗi mười giây — đúng luật 11 của dự án: một cái điện thoại rung
+/// mãi là một cái điện thoại bị tắt tiếng, và nó mang theo cả những tin đáng đọc.
+fn pin_apply(
+    db: &Db,
+    tg: &crate::telegram::Inbox,
+    sid: &str,
+    line: &str,
+    tao_neu_thieu: bool,
+) -> Option<i64> {
+    let html = pin_html(sid, line)?;
+    if let Some((mid, cu)) = pinned_message(db) {
+        // Chữ y hệt ⟹ không gọi mạng. Telegram từ chối `editMessageText` khi nội
+        // dung không đổi một ký tự, nên đây vừa là tiết kiệm vừa là tránh đẻ ra
+        // một dòng lỗi giả.
+        if cu == line {
+            return Some(mid);
+        }
+        match tg.edit_html(mid, &html, &[]) {
+            Ok(_) => {
+                pin_book(db, mid, line);
+                return Some(mid);
+            }
+            // Tin gim có thể đã bị xoá (`delete_after_hours`) hoặc chủ máy tự gỡ
+            // — GHI rồi đi tiếp xuống đường gửi mới, đừng nuốt và cũng đừng bỏ
+            // cuộc: mất tin gim thì dựng lại một cái, không để trống đỉnh.
+            Err(e) => logging::info(
+                "pin_edit_failed",
+                json!({ "message_id": mid, "err": e, "tao_neu_thieu": tao_neu_thieu,
+                        "effect": if tao_neu_thieu { "gửi một tin gim mới thay chỗ" }
+                                  else { "giữ nguyên tin gim cũ — vòng nền không đẻ tin" } }),
+            ),
+        }
+    }
+    if !tao_neu_thieu {
+        return None;
+    }
+    match tg.send_html_report(&html, &[]) {
+        Ok(sent) => {
+            pin_following(db, tg, sent.message_id, line);
+            Some(sent.message_id)
+        }
+        Err(e) => {
+            logging::error(
+                "pin_send_failed",
+                json!({ "err": e, "effect": "đỉnh buồng chat không có tin gim nào cho phiên này" }),
+            );
+            None
+        }
+    }
+}
+
+/// Ghi sổ gim. Một chỗ, vì hai bản chép là hai bản sẽ lệch.
+fn pin_book(db: &Db, message_id: i64, text: &str) {
+    let so = json!({ "m": message_id, "t": text }).to_string();
+    if let Err(e) = db.set_cursor(PIN_FOLLOWING_KEY, &so) {
+        logging::error(
+            "pin_book_failed",
+            json!({ "message_id": message_id, "err": e.to_string(),
+                    "effect": "đã đặt tin gim nhưng sổ giữ chữ CŨ — vòng sau sẽ sửa lại y hệt" }),
+        );
+    }
+}
+
+/// Tin "⏳ đang quét màn" đang chờ được xoá — giữ đúng `message_id` của nó.
+///
+/// 🔴 Hà 2026-08-26, ảnh buồng chat: *"chỗ tin phản hồi này chưa hợp lý khi kích
+/// chọn vào phiên, chỉ cần hiện thông báo chờ quét màn, sau khi nhận được tin
+/// thì xóa nó luôn đi"*.
+///
+/// Cú chạm vào một phiên xếp luôn `/shot` (xem đường nhanh trong
+/// `CommandKind::Session`), và cú chụp ấy tốn vài giây. Khoảng lặng ấy phải có
+/// người nói — nhưng nói xong thì đi, vì nó là TRẠNG THÁI TẠM, không phải một
+/// sự kiện đáng nằm lại trong sổ hội thoại.
+pub const SCAN_NOTICE_KEY: &str = "scan:notice";
+
+/// Đặt dòng "đang quét màn", nhớ id để còn xoá.
+fn scan_notice(db: &Db, tg: &crate::telegram::Inbox, ten: &str) {
+    // Tin cũ chưa kịp xoá thì dọn trước: hai dòng "đang quét" chồng nhau nói
+    // rằng huba đang quét hai lần, mà nó chỉ quét một.
+    clear_scan_notice(db, tg);
+    match tg.send_html_report(
+        &format!("⏳ đang quét màn {}…", crate::telegram::html_escape(ten)),
+        &[],
+    ) {
+        Ok(sent) => {
+            if let Err(e) = db.set_cursor(SCAN_NOTICE_KEY, &sent.message_id.to_string()) {
+                logging::error(
+                    "scan_notice_book_failed",
+                    json!({ "message_id": sent.message_id, "err": e.to_string(),
+                            "effect": "dòng 'đang quét màn' sẽ NẰM LẠI trong buồng chat" }),
+                );
+            }
+        }
+        // Không gửi được thì thôi — nhưng phải nói, vì lúc ấy chủ máy chạm vào
+        // phiên và KHÔNG thấy gì phản hồi cho tới khi màn tới.
+        Err(e) => logging::warn("scan_notice_failed", json!({ "err": e })),
+    }
+}
+
+/// Xoá dòng "đang quét màn" nếu còn — gọi ngay khi màn đã tới.
+fn clear_scan_notice(db: &Db, tg: &crate::telegram::Inbox) {
+    let Some(mid) = db
+        .cursor_or_log(SCAN_NOTICE_KEY)
+        .and_then(|v| v.trim().parse::<i64>().ok())
+    else {
+        return;
+    };
+    // Xoá được hay không thì SỔ CŨNG PHẢI SẠCH: giữ lại một id đã chết nghĩa là
+    // mọi lượt sau đều đi xoá đúng cái tin ấy thêm một lần nữa, mỗi lần một dòng
+    // lỗi, mãi mãi.
+    if let Err(e) = tg.delete_message(mid) {
+        logging::info(
+            "scan_notice_delete_failed",
+            json!({ "message_id": mid, "err": e,
+                    "effect": "dòng 'đang quét màn' nằm lại; chủ máy tự xoá được" }),
+        );
+    }
+    if let Err(e) = db.set_cursor(SCAN_NOTICE_KEY, "") {
+        logging::error(
+            "scan_notice_book_failed",
+            json!({ "err": e.to_string(), "effect": "sổ còn giữ một id đã xoá" }),
+        );
+    }
+}
+
+/// Giữ tin gim ĐÚNG VỚI SỰ THẬT — chạy mỗi vòng quét.
+///
+/// 🔴 Không có hàm này thì cái icon trạng thái là một lời nói dối. Tin gim được
+/// viết MỘT LẦN, lúc chủ máy chuyển phiên; mà trạng thái phiên đổi liên tục —
+/// `⚡` mười giây sau đã là `💤` hoặc `❓`. Cái gim thì vẫn đứng nguyên trên đỉnh
+/// buồng chat, trông như đang sống. Đúng thứ `CLAUDE.md` gọi là phép đo mù:
+/// nhìn thì có tin, mà tin ấy không đổi được theo sự thật.
+///
+/// Ba cửa, theo thứ tự rẻ trước:
+/// ① tắt cờ, hoặc chưa theo phiên nào, hoặc chưa gim gì ⟹ về ngay;
+/// ② chữ KHÔNG đổi ⟹ về ngay. Vòng quét chạy mỗi ~10 giây, mà Telegram từ chối
+///   `editMessageText` khi nội dung y hệt — nện nó mỗi vòng là vừa tốn vừa đẻ
+///   một dòng lỗi giả mỗi lần;
+/// ③ phiên BIẾN MẤT khỏi danh sách ⟹ KHÔNG sửa gì. Nó có thể chỉ là một lượt
+///   `claude agents` mù (xem luật 11b: danh sách rỗng không có nghĩa là phiên
+///   chết), và viết "đã tắt" lên đỉnh buồng chat vì một phép hỏi trượt là đúng
+///   con bug đã trả giá ngày 12/08 với ba tin báo tử sai trong tám giây.
+pub fn refresh_pin(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot) {
+    if !cfg.pin_following {
+        return;
+    }
+    let Some((_, cu)) = pinned_message(db) else {
+        return;
+    };
+    let sid = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+    if sid.trim().is_empty() {
+        return;
+    }
+    let Some(s) = live.sessions.iter().find(|s| s.session_id == sid) else {
+        return;
+    };
+    let moi = pin_line(s);
+    if moi == cu {
+        return;
+    }
+    let Some(tg) = crate::telegram::inbox() else {
+        return;
+    };
+    // ĐÚNG MỘT CỬA với đường chạm-vào-phiên: `pin_apply` sửa tin đang gim, và chỉ
+    // dựng tin mới khi cái cũ đã biến mất. Trước 26/08 chỗ này có bản chép riêng
+    // của phép sửa + ghi sổ; hai bản chép của cùng một sự thật là hai bản sẽ lệch.
+    // `false` = vòng nền chỉ SỬA, không đẻ tin mới. Xem `pin_apply`.
+    pin_apply(db, tg, &sid, &moi, false);
+}
+
+pub fn pin_line(s: &crate::sessions::LiveSession) -> String {
+    let (icon, _) = crate::sessions::state_of(s);
+    pin_line_from(icon, &crate::sessions::shown(s), &s.account)
+}
+
+/// Hình dạng CHUNG của dòng gim: `<icon> <tên>` và `(tài khoản)` nếu biết.
+///
+/// 🔴 MỘT HÀM, không phải hai chỗ `format!` giống nhau. `refresh_pin` so CHUỖI để
+/// biết "lần này có gì mới", nên hai bản chép lệch nhau **một khoảng trắng** là
+/// tin gim bị sửa lại ở MỌI vòng quét — mười giây một lần, mãi mãi, và không có
+/// gì kêu lên cả. Đường nhanh (chạm vào phiên) không có `LiveSession` nên nó
+/// không gọi được `pin_line`; nó gọi thẳng hàm này với icon `👁`, và nhờ vậy hai
+/// dòng chỉ có thể khác nhau đúng ở cái icon — đúng phần `refresh_pin` phải sửa.
+///
+/// Không biết tài khoản thì **đừng mở ngoặc**: một cặp `()` rỗng nói rằng huba
+/// biết một điều gì đó rồi bỏ trống (cùng luật `follow_ack_head`).
+pub fn pin_line_from(icon: &str, ten: &str, tai_khoan: &str) -> String {
+    if tai_khoan.trim().is_empty() {
+        format!("{icon} {ten}")
+    } else {
+        format!("{icon} {ten} ({tai_khoan})")
+    }
+}
 
 /// Tráo cái gim: gỡ tin cũ, gim tin mới, ghi sổ. **Một cửa duy nhất.**
 ///
@@ -189,11 +461,8 @@ pub const PIN_FOLLOWING_KEY: &str = "pin:following";
 ///   và một lần gỡ hụt không được phép làm mất dấu cái vừa gim;
 /// ③ **hỏng thì GHI, đừng nuốt** (luật 3). Bot bị gỡ quyền gim là chuyện có
 ///   thật; im lặng thì chủ máy chỉ thấy "gim không lên" mà không biết vì sao.
-pub fn pin_following(db: &Db, tg: &crate::telegram::Inbox, message_id: i64) {
-    if let Some(cu) = db
-        .cursor_or_log(PIN_FOLLOWING_KEY)
-        .and_then(|v| v.trim().parse::<i64>().ok())
-    {
+pub fn pin_following(db: &Db, tg: &crate::telegram::Inbox, message_id: i64, text: &str) {
+    if let Some(cu) = pinned_message(db).map(|(m, _)| m) {
         if cu != message_id {
             if let Err(e) = tg.unpin(cu) {
                 // Không phải lỗi nặng: tin cũ có thể đã bị `delete_after_hours`
@@ -203,15 +472,7 @@ pub fn pin_following(db: &Db, tg: &crate::telegram::Inbox, message_id: i64) {
         }
     }
     match tg.pin(message_id) {
-        Ok(()) => {
-            if let Err(e) = db.set_cursor(PIN_FOLLOWING_KEY, &message_id.to_string()) {
-                logging::error(
-                    "pin_book_failed",
-                    json!({ "message_id": message_id, "err": e.to_string(),
-                            "effect": "đã gim nhưng KHÔNG nhớ được — lượt sau sẽ không gỡ nó" }),
-                );
-            }
-        }
+        Ok(()) => pin_book(db, message_id, text),
         Err(e) => logging::error(
             "pin_failed",
             json!({ "message_id": message_id, "err": e,
@@ -5706,12 +5967,21 @@ fn watch_long_job(
                                                 "landed": format!("{other:?}"),
                                                 "effect": "kết quả nằm trong ô nhập của phiên, CHƯA gửi" }),
                                     );
+                                    // Cùng bẫy với nhánh `Bảng ĐÃ ĐỦ` (xem chú
+                                    // thích ở `pick_answer`): `/key enter` vẽ ra
+                                    // một lệnh chạm được, nhưng chạm chỉ gửi
+                                    // token `/key` — chữ sau dấu cách rơi mất,
+                                    // và huba đáp *"Chưa hiểu lệnh này"* về đúng
+                                    // cái nó vừa mời bấm. `send_`/`clr_` là hai
+                                    // liên kết TỰ MANG phiên, đã có sẵn trong
+                                    // `verbs.rs` cho đúng việc này.
                                     format!(
                                         "⚠ Đã chạy xong, nhưng kết quả còn NẰM TRONG Ô NHẬP của {} — chưa gửi.\n\
-                                         Bấm /key enter để gửi, hoặc /key clear để xoá đi.\n\n$ {}\n{}",
+                                         Bấm /send_{sid} để gửi, hoặc /clr_{sid} để xoá đi.\n\n$ {}\n{}",
                                         crate::sessions::shown(&s),
                                         line,
-                                        crate::exec::truncate(&report, 400)
+                                        crate::exec::truncate(&report, 400),
+                                        sid = s.session_id.chars().take(8).collect::<String>()
                                     )
                                 }
                                 // 🔴 KHÔNG BỎ CUỘC Ở ĐÂY — xem [`RUNIN_PENDING_KEY`].
@@ -7434,7 +7704,7 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
     let (table, rong) = crate::keys::ask_table_wide(&body, w, questions.len().max(q));
     // Nới rồi thì chấm con trỏ trên CHÍNH cái màn vừa đọc ra bảng: đếm ô trống
     // trên bản rộng mà tìm con trỏ trên bản hẹp là hỏi hai cái màn khác nhau.
-    let da_noi = rong.is_some();
+    let mut da_noi = rong.is_some();
     let body = rong.unwrap_or(body);
     let total = table.as_ref().map(|t| t.answered.len()).unwrap_or(1);
     if q > total {
@@ -7444,7 +7714,57 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
     }
     // Không có thanh tab ⟹ bảng MỘT câu ⟹ không có gì để đi tới; `/pick 1.x`
     // vẫn chạy được và trùng đúng nghĩa với `/key x`.
-    let cursor = match crate::keys::cursor_on(&body, &questions) {
+    // 🔴 KHỚP HỤT THÌ NHÌN RỘNG HƠN TRƯỚC KHI BỎ CUỘC.
+    //
+    // `cursor_on` tìm NGUYÊN VĂN câu hỏi (lấy từ nhật ký) trong chữ trên màn, vì
+    // câu ĐANG MỞ là câu duy nhất CLI in đủ ra dưới thanh tab. Ở `24×80` một bảng
+    // nhiều câu với lựa chọn dài (mỗi lựa chọn bẻ đôi ở cột 80) đẩy dòng câu hỏi
+    // cuộn khỏi mép trên — và lúc ấy huba từ chối một cú bấm hoàn toàn hợp lệ.
+    //
+    // Cửa nới **đã có** (`ask_table_wide`) nhưng nó hỏi câu khác: chỉ nới khi
+    // THANH TAB bị cắt. Tab đủ mà câu hỏi thiếu thì cửa ấy đóng. Hai triệu chứng
+    // của cùng một cái màn hẹp, mới có một cái được canh.
+    //
+    // ⚠ Và đây KHÔNG phải thủ phạm của lượt 16:45 ngày 26/08 (ảnh Hà gửi). Log
+    // của chính lượt ấy nói `questions:1 total:2` — sổ thiếu câu, không phải màn
+    // thiếu chữ; xem lời từ chối bên dưới, nơi hai trạng thái ấy được tách ra.
+    // Ghi rõ chỗ này để người đọc sau đừng tưởng cửa nới đã trị được ca đó.
+    //
+    // Nới rồi thì `da_noi = true`: phần đọc-lại-sau-khi-gõ ở dưới BẮT BUỘC dùng
+    // cùng bề ngang, nếu không thì đếm ô trống trên hai cái màn khác nhau và trả
+    // lời sai, tự tin, về đúng cú bấm vừa rồi.
+    let mut vi_tri = crate::keys::cursor_on(&body, &questions);
+    if vi_tri.is_none() && total > 1 && !da_noi {
+        match crate::keys::screen_text_tall(w, crate::keys::GROW_ASK) {
+            Ok(rong2) if !rong2.trim().is_empty() => {
+                vi_tri = crate::keys::cursor_on(&rong2, &questions);
+                logging::info(
+                    "pick_cursor_regrown",
+                    json!({ "session": s.session_id, "questions": questions.len(),
+                            "khop": vi_tri.is_some() }),
+                );
+                // Chỉ cần ghi nhớ ĐÃ NỚI: `body` xong việc ngay sau phép khớp
+                // này, còn `da_noi` thì đi tiếp xuống phần đọc-lại-sau-khi-gõ và
+                // quyết định bề ngang của nó.
+                if vi_tri.is_some() {
+                    da_noi = true;
+                }
+            }
+            // Không nới được thì nói ra rồi rơi về câu từ chối bên dưới — đừng
+            // im, vì lúc ấy lời từ chối sẽ đổ cho "không khớp" trong khi thủ
+            // phạm là cửa sổ không nới được.
+            Ok(_) => logging::warn(
+                "pick_cursor_grow_empty",
+                json!({ "window": w, "effect": "nới xong đọc ra rỗng — chấm trên bản hẹp" }),
+            ),
+            Err(e) => logging::warn(
+                "pick_cursor_grow_failed",
+                json!({ "window": w, "err": logging::err_chain(&e),
+                        "effect": "không nới được cửa sổ — chấm trên bản hẹp" }),
+            ),
+        }
+    }
+    let cursor = match vi_tri {
         Some(c) => c,
         None if total == 1 => 0,
         None => {
@@ -7452,11 +7772,64 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
                 "pick_cursor_unknown",
                 json!({ "session": s.session_id, "questions": questions.len(), "total": total }),
             );
-            return format!(
-                "⚠ Đọc được bảng {total} câu của {name} nhưng KHÔNG khớp được câu nào đang mở, \
-                 nên tôi không biết phải đi mấy bước — và đi mò thì chốt nhầm câu. `/shot` để \
-                 nhìn, rồi `/key <số>` cho câu đang mở."
-            );
+            // 🔴 NÓI RA CÁI LỆCH, ĐỪNG NÓI "KHÔNG KHỚP" — Hà 2026-08-26, ảnh
+            // buồng chat 16:45: *"chưa chọn được, có phải do chưa vào phiên
+            // không?"*. Câu cũ để anh đoán, và đoán ra một nguyên nhân sai (chưa
+            // vào phiên), vì nó giấu đúng con số phân biệt được hai chuyện.
+            //
+            // Log của chính hai lượt ấy: `pick_cursor_unknown questions:1
+            // total:2`. Sổ nhật ký của huba mới có MỘT câu trong khi thanh tab
+            // trên màn đã có HAI — bảng vừa mở, `AskUserQuestion` chưa kịp vào
+            // `.jsonl` (xem `CLAUDE.md` §13: hộp đang treo chưa được ghi). Nên
+            // `cursor_on` chỉ dò được câu huba biết, mà câu đang mở là câu kia.
+            // Đo được: hai phút sau, sổ đã đủ hai câu và `/pick` chạy đúng.
+            //
+            // Hai trạng thái khác hẳn nhau, và cách chữa cũng khác:
+            // * sổ THIẾU câu ⟹ đợi một nhịp rồi `/pick` lại, hoặc `/key <số>`;
+            // * sổ ĐỦ mà vẫn không khớp ⟹ chữ câu hỏi không có trên màn (đã nới
+            //   hết cỡ ở trên mà vẫn thiếu) ⟹ `/key <số>` là đường chắc.
+            //
+            // KHÔNG đoán bừa vị trí con trỏ trong cả hai ca: mũi tên đi kèm một
+            // CR nên đi mò là chốt nhầm hộ chủ máy, và cái đó không lùi lại được.
+            let so_sach = questions.len();
+            // 🔴 LỜI TỪ CHỐI PHẢI BẤM ĐƯỢC — Hà 2026-08-26: *"thao tác vẫn chưa
+            // được mượt và thông minh khi có nhiều lựa chọn"*.
+            //
+            // huba không biết câu đang mở là câu NÀO, nhưng nó đọc được các LỰA
+            // CHỌN đang hiện — và số của chúng là số CLI tự đánh cho đúng câu ấy,
+            // nên `/k_<phiên>_<số>` chạm phát nào trúng phát đó. Bảo người ta gõ
+            // `/key <số>` thì vừa bắt gõ tay vừa là một ngõ cụt: Telegram vẽ
+            // `/key` thành lệnh chạm được, mà chạm chỉ gửi token `/key` — chữ sau
+            // dấu cách rơi mất (cùng bẫy đã trị ở nhánh `Bảng ĐÃ ĐỦ`).
+            //
+            // Đọc được lựa chọn nào thì mời đúng chừng ấy. Không đọc được cái nào
+            // thì nói thẳng là không có gì để mời, đừng bịa ra một dãy số.
+            let short: String = s.session_id.chars().take(8).collect();
+            let mut moi = String::new();
+            for (n, nhan) in crate::keys::parse_choices(&body) {
+                moi.push_str(&format!(
+                    "\n/k_{short}_{n} {}",
+                    crate::exec::truncate(nhan.trim(), 60)
+                ));
+            }
+            let duong_ra = if moi.is_empty() {
+                "\n/shot để nhìn màn, rồi /key <số> cho câu đang mở.".to_string()
+            } else {
+                format!("\nChạm thẳng lựa chọn của câu ĐANG MỞ:{moi}")
+            };
+            return if so_sach < total {
+                format!(
+                    "⚠ Bảng của {name} có {total} câu trên màn, nhưng sổ của tôi mới ghi được \
+                     {so_sach} — bảng vừa mở, nhật ký phiên chưa kịp có nó. Nên tôi KHÔNG biết \
+                     câu đang mở là câu nào, và đi mò thì chốt nhầm câu.{duong_ra}"
+                )
+            } else {
+                format!(
+                    "⚠ Đọc được bảng {total} câu của {name}, sổ cũng đủ {so_sach} câu, nhưng chữ \
+                     của câu ĐANG MỞ không có trên màn (đã nới hết cỡ mà vẫn thiếu) — nên tôi \
+                     không biết phải đi mấy bước, và đi mò thì chốt nhầm câu.{duong_ra}"
+                )
+            };
         }
     };
 
@@ -7532,8 +7905,21 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
         // Ô trống bớt đi: đúng thứ vừa làm, và nói luôn còn mấy câu nữa.
         (Some(b), Some(a)) if a < b => {
             if a == 0 {
+                // 🔴 ĐƯỜNG GỬI PHẢI BẤM ĐƯỢC — Hà 2026-08-26, ảnh buồng chat
+                // 16:48: *"thao tác vẫn chưa được mượt và thông minh khi có
+                // nhiều lựa chọn"*. Câu này bảo *"bấm `/key enter` để gửi"*,
+                // Telegram vẽ `/key` thành một lệnh chạm được, Hà chạm — và
+                // client chỉ gửi đúng token `/key`, chữ `enter` sau dấu cách
+                // RƠI MẤT. huba tự trả lời chính mình: *"Chưa hiểu lệnh này"*.
+                //
+                // Đúng cái bẫy `verbs.rs` đã ghi khi dựng `send_<id>`: *"`/key`
+                // có tham số đứng sau dấu cách, mà chạm thì chỉ gửi lại token
+                // lệnh"*. Nhánh `(Some(0), Some(0))` ngay dưới đã dùng
+                // `/send_{sid}` từ trước; nhánh này bị bỏ quên — một luật sửa ở
+                // một chỗ trong hai chỗ cùng hình dạng.
                 format!(
-                    "✅ {name} · câu {q} ({label}) → chọn {opt}. Bảng ĐÃ ĐỦ — bấm `/key enter` để gửi."
+                    "✅ {name} · câu {q} ({label}) → chọn {opt}. Bảng ĐÃ ĐỦ — bấm /send_{sid} để gửi.",
+                    sid = s.session_id.chars().take(8).collect::<String>()
                 )
             } else {
                 format!("✅ {name} · câu {q} ({label}) → chọn {opt}. Còn {a} câu chưa trả lời.")
@@ -11385,6 +11771,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // sẽ bỏ luôn những lệnh còn lại trong cùng một lượt.
                     Some(ack)
                 } else {
+                    // Đường nhanh tự lo phần nói năng của nó (sửa tin gim + một
+                    // dòng "đang quét màn" sống ngắn), nên chỗ gửi ở cuối phải
+                    // biết mà ĐỪNG gửi lại. Cờ chứ không phải `return`: `return`
+                    // ở đây bỏ luôn những lệnh còn lại trong cùng một lượt.
+                    let mut tu_tra_loi = false;
                     let ack = if want == "-" || want.eq_ignore_ascii_case("off") {
                         match db.set_cursor(FOCUS_SESSION_KEY, "") {
                             Ok(()) => "👁 Đã thôi theo phiên.".to_string(),
@@ -11407,7 +11798,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 //
                                 // `👁 ` ở đầu vẫn giữ, nhưng chỉ làm DẤU NHẬN
                                 // BIẾT cho chỗ gửi (nó bóc ra rồi thay bằng 📷).
-                                let head = format!("👁 {name} ({account})");
+                                // CÙNG một hàm với `pin_line`, nên hai dòng chỉ
+                                // có thể khác nhau đúng ở cái icon — xem
+                                // `pin_line_from` để biết vì sao chỗ này không
+                                // được phép có một bản `format!` riêng.
+                                let head = pin_line_from("👁", &name, &account);
                                 // …và ĐƯA LUÔN MÀN, đừng bắt bấm thêm một lần.
                                 //
                                 // 🔴 Hà 2026-08-13: *"bấm vào phiên sao không hiện
@@ -11425,6 +11820,39 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // phải ngón tay nào bấm.
                                 if adapter == crate::telegram::NAME {
                                     if let Some(tg) = crate::telegram::inbox() {
+                                        // 🔴 SỬA TIN GIM, ĐỪNG GỬI TIN CHÀO MỚI —
+                                        // Hà 2026-08-26: *"chỗ tin phản hồi này
+                                        // chưa hợp lý khi kích chọn vào phiên …
+                                        // hiện tại khi chọn vào phiên đã có sẵn
+                                        // pin message rồi"*. Dòng đang gim trên
+                                        // đỉnh nói đúng cái điều tin chào định
+                                        // nói, nên tin chào chỉ là một dòng thừa
+                                        // nằm lại vĩnh viễn sau mỗi cú chạm.
+                                        //
+                                        // Icon ở đây là `👁`, KHÔNG phải icon
+                                        // trạng thái: đường nhanh cố ý không dựng
+                                        // ảnh chụp (xem `session_name_from_book`
+                                        // — đường cũ mất 48 giây cho đúng hai
+                                        // chuỗi ký tự), nên nó không có
+                                        // `LiveSession` để hỏi `state_of`.
+                                        // `refresh_pin` thay đúng icon ấy ở vòng
+                                        // quét kế; giữa hai nhịp thì TÊN phiên —
+                                        // thứ ngón tay đang tìm — đã đúng rồi.
+                                        //
+                                        // Gim hụt ⟹ `tu_tra_loi` giữ nguyên
+                                        // `false` ⟹ rơi về đường gửi cũ ở cuối.
+                                        // Không có vế ấy thì một lượt gim hỏng =
+                                        // cú chạm của chủ máy không có hồi âm nào.
+                                        if cfg.pin_following
+                                            && pin_apply(db, tg, want, &head, true).is_some()
+                                        {
+                                            // Cú chụp tốn vài giây (`command_done
+                                            // Shot` đo được 2,7s · 4,5s). Khoảng
+                                            // lặng ấy phải có người nói — rồi đi,
+                                            // vì nó là TRẠNG THÁI TẠM.
+                                            scan_notice(db, tg, &name);
+                                            tu_tra_loi = true;
+                                        }
                                         tg.push_text("/shot");
                                     }
                                 }
@@ -11524,6 +11952,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         Vec::new()
                     };
                     match (shot_btn.is_empty(), crate::telegram::inbox()) {
+                        // Đường nhanh đã sửa tin gim + đặt dòng "đang quét màn"
+                        // rồi: gửi thêm ở đây là đẻ lại đúng cái tin thừa vừa bỏ.
+                        _ if tu_tra_loi => {}
                         (false, Some(tg)) if adapter == crate::telegram::NAME => {
                             // 🔴 CẢ DÒNG LÀ ĐÍCH CHẠM, ICON ĐI VÀO TRONG — Hà
                             // 2026-08-26: *"nút xem màn bỏ text đi để icon và
@@ -11561,7 +11992,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // Telegram TRẢ VỀ id — gim một id đoán bừa là
                                 // gim nhầm tin của người khác.
                                 Ok(Some(mid)) if cfg.pin_following => {
-                                    pin_following(db, tg, mid);
+                                    pin_following(db, tg, mid, than);
                                 }
                                 Ok(_) => {}
                                 Err(e) => {
@@ -11607,6 +12038,21 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
         // nothing looked broken; only the log lied, which is the worst place
         // for it to lie because the log is where you go when something IS
         // broken.
+        // Màn đã tới ⟹ dòng "đang quét màn" hết việc (xem `SCAN_NOTICE_KEY`).
+        //
+        // Đặt ở ĐÂY, sau khi nhánh phía trên đã gửi câu trả lời của nó, nên thứ
+        // tự trên buồng chat là: ảnh màn tới, dòng chờ biến mất. Và tính CẢ nhánh
+        // trả lời bằng một lời TỪ CHỐI ("phiên nền — không có màn nào để chụp"):
+        // với chủ máy thì tin đã tới, còn một dòng "đang quét" treo lại sau một
+        // câu từ chối là huba nói dối về việc nó đang làm.
+        if matches!(
+            cmd.kind,
+            CommandKind::Shot | CommandKind::Photo | CommandKind::Tab
+        ) {
+            if let Some(tg) = crate::telegram::inbox() {
+                clear_scan_notice(db, tg);
+            }
+        }
         logging::info(
             "command_done",
             json!({ "kind": format!("{:?}", cmd.kind), "adapter": adapter,
@@ -12325,6 +12771,9 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     let mut live = crate::sessions::snapshot(cfg);
     mark_started_by_hub(db, &mut live);
     announce_changes(db, cfg, &live);
+    // Giữ tin gim đúng với sự thật — xem `refresh_pin`. Đặt ngay sau cái loa vì
+    // dùng CHUNG một ảnh chụp: dựng hai lần là hai câu trả lời lệch nhau.
+    refresh_pin(db, cfg, &live);
     let now_sec = chrono::Utc::now().timestamp();
     // Cửa sổ đang chờ đóng: ngó lại một lượt (rẻ — một câu AppleScript mỗi cửa
     // sổ, và chỉ khi đã qua 30 giây). Phải bám VÒNG CHẠY chứ không đứng chờ

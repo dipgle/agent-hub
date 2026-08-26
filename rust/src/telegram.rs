@@ -1311,8 +1311,12 @@ impl Inbox {
         }
         // 4. Nói cho phiên biết — đi đúng đường chữ thường đã có.
         let line = match caption.map(str::trim).filter(|c| !c.is_empty()) {
-            Some(c) => format!("Tôi vừa gửi một tệp: {} — {}", dest.display(), c),
-            None => format!("Tôi vừa gửi một tệp: {}", dest.display()),
+            // 🔴 "Xem tệp", không phải "Tôi vừa gửi một tệp" — Hà 2026-08-26.
+            // Câu này đi THẲNG vào ô nhập của phiên, tức nó là LỜI CỦA CHỦ MÁY
+            // nói với phiên; một câu tường thuật ("tôi vừa gửi…") bắt phiên tự
+            // suy ra việc phải làm, còn động từ thì nói thẳng.
+            Some(c) => format!("Xem tệp: {} — {}", dest.display(), c),
+            None => format!("Xem tệp: {}", dest.display()),
         };
         // 🔴 MANG THEO message_id. Hà 2026-08-14, sau khi gửi một tấm ảnh:
         // *"khi tôi gửi ảnh vẫn đang nhận lại 1 phản hồi"*.

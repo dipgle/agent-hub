@@ -425,7 +425,7 @@ pub fn refresh_pin(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapsh
 
 pub fn pin_line(s: &crate::sessions::LiveSession) -> String {
     let (icon, _) = crate::sessions::state_of(s);
-    pin_line_from(icon, &crate::sessions::shown(s), &s.account)
+    pin_line_from(Some(icon), &crate::sessions::shown(s), &s.account)
 }
 
 /// Hình dạng CHUNG của dòng gim: `<icon> <tên>` và `(tài khoản)` nếu biết.
@@ -453,7 +453,28 @@ pub fn pin_line(s: &crate::sessions::LiveSession) -> String {
 /// trong một liếc), còn 📷 là nhãn của HÀNH ĐỘNG. Không dựng lại cái nút — Hà đã
 /// bỏ nó ngày 26/08 (*"nút xem màn bỏ text đi để icon và bao hết text của tin
 /// gim"*), và một cái nút đứng rời ở đáy thì đích chạm chỉ to bằng chính nó.
-pub fn pin_line_from(icon: &str, ten: &str, tai_khoan: &str) -> String {
+/// 🔴 VÀ 👁 LUÔN ĐỨNG ĐẦU — Hà 2026-08-27: *"Một phiên đang có monitor thì luôn
+/// chèn thêm icon eye vào để dễ nhận dạng"*.
+///
+/// Trước lượt này con mắt chỉ sống đúng một nhịp: đường nhanh dựng dòng gim bằng
+/// `👁`, rồi `refresh_pin` ở vòng quét kế THAY nó bằng icon trạng thái. Đo trên
+/// tin gim thật lúc 02:5x — `⚡ 🟪 [dwork]·… (acc3) 📷`, không còn mắt. Tức cái
+/// dấu nói *"đây là phiên anh đang theo"* biến mất sau chừng mười giây, đúng lúc
+/// nó bắt đầu có ích: khi tin gim đã trôi khỏi tầm mắt và anh quay lại nhìn.
+///
+/// Hai icon KHÔNG thay nhau được vì chúng trả lời hai câu khác nhau: `👁` nói
+/// *phiên nào* (đang theo cái này, không phải mười cái kia), `⚡/💤/❓` nói *nó
+/// đang thế nào*. Danh sách `/session` đã giữ đúng cả hai từ lâu
+/// (`session_list_text`, biến `eye`); tin gim thì rơi mất một cái.
+///
+/// `trang_thai = None` là đường nhanh — chạm vào phiên thì chưa có `LiveSession`
+/// để hỏi `state_of` (xem `session_name_from_book`). Lúc ấy in mắt + tên, và
+/// `refresh_pin` chèn icon trạng thái vào giữa ở vòng kế.
+pub fn pin_line_from(trang_thai: Option<&str>, ten: &str, tai_khoan: &str) -> String {
+    let icon = match trang_thai {
+        Some(i) => format!("👁 {i}"),
+        None => "👁".to_string(),
+    };
     if tai_khoan.trim().is_empty() {
         format!("{icon} {ten} 📷")
     } else {
@@ -11923,7 +11944,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // có thể khác nhau đúng ở cái icon — xem
                                 // `pin_line_from` để biết vì sao chỗ này không
                                 // được phép có một bản `format!` riêng.
-                                let head = pin_line_from("👁", &name, &account);
+                                let head = pin_line_from(None, &name, &account);
                                 // …và ĐƯA LUÔN MÀN, đừng bắt bấm thêm một lần.
                                 //
                                 // 🔴 Hà 2026-08-13: *"bấm vào phiên sao không hiện

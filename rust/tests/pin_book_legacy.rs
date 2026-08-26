@@ -94,14 +94,14 @@ fn the_empty_legacy_text_never_equals_a_real_pin_line() {
 }
 
 /// Dòng của ĐƯỜNG NHANH (chạm vào phiên) và dòng của `refresh_pin` chỉ được khác
-/// nhau ĐÚNG ở cái icon.
+/// nhau ĐÚNG ở icon TRẠNG THÁI — con mắt thì cả hai đều phải có.
 ///
 /// 🔴 Vì sao đây là một cái cổng, không phải một chi tiết thẩm mỹ: `refresh_pin`
 /// so CHUỖI để biết "lần này có gì mới". Lệch thêm bất cứ chỗ nào — một cặp `()`
 /// rỗng, một khoảng trắng — là tin gim bị `editMessageText` ở MỌI vòng quét, mười
 /// giây một lần, mãi mãi, và không có gì kêu lên cả.
 #[test]
-fn the_fast_path_line_and_the_refresh_line_differ_only_in_the_icon() {
+fn the_fast_path_line_and_the_refresh_line_differ_only_in_the_status_icon() {
     let s = huba::sessions::LiveSession {
         session_id: "b1e46802".into(),
         label: "[social]".into(),
@@ -109,13 +109,15 @@ fn the_fast_path_line_and_the_refresh_line_differ_only_in_the_icon() {
         ..Default::default()
     };
     let (icon, _) = huba::sessions::state_of(&s);
-    let nhanh = huba::pipeline::pin_line_from("\u{1f441}", &huba::sessions::shown(&s), &s.account);
+    let nhanh = huba::pipeline::pin_line_from(None, &huba::sessions::shown(&s), &s.account);
     let nen = huba::pipeline::pin_line(&s);
+
+    // Bóc phần khác nhau đã biết: đường nhanh chưa có icon trạng thái để in.
     assert_eq!(
-        nhanh.strip_prefix("\u{1f441}"),
-        nen.strip_prefix(icon),
-        "hai dòng phải giống hệt nhau sau khi bóc icon — nếu không, refresh_pin \
-         sửa tin gim ở mọi vòng quét"
+        nhanh.strip_prefix("\u{1f441} "),
+        nen.strip_prefix(&format!("\u{1f441} {icon} ")),
+        "sau khi bóc mắt (và icon trạng thái ở bản nền) thì hai dòng phải giống hệt \
+         nhau — nếu không, refresh_pin sửa tin gim ở mọi vòng quét"
     );
 }
 
@@ -124,15 +126,15 @@ fn the_fast_path_line_and_the_refresh_line_differ_only_in_the_icon() {
 #[test]
 fn an_unknown_account_leaves_no_empty_parens() {
     for tk in ["", "   "] {
-        let dong = huba::pipeline::pin_line_from("\u{26a1}", "[social]", tk);
+        let dong = huba::pipeline::pin_line_from(Some("\u{26a1}"), "[social]", tk);
         assert_eq!(
-            dong, "\u{26a1} [social] \u{1f4f7}",
+            dong, "\u{1f441} \u{26a1} [social] \u{1f4f7}",
             "tài khoản {tk:?} không được đẻ ra ngoặc rỗng (📷 cuối dòng thì vẫn phải có)"
         );
     }
     assert_eq!(
-        huba::pipeline::pin_line_from("\u{26a1}", "[social]", "acc1"),
-        "\u{26a1} [social] (acc1) \u{1f4f7}"
+        huba::pipeline::pin_line_from(Some("\u{26a1}"), "[social]", "acc1"),
+        "\u{1f441} \u{26a1} [social] (acc1) \u{1f4f7}"
     );
 }
 
@@ -171,12 +173,57 @@ fn the_pin_line_always_carries_the_view_screen_marker() {
     };
     for dong in [
         huba::pipeline::pin_line(&s),
-        huba::pipeline::pin_line_from("\u{1f441}", "[onghut]", "acc1"),
-        huba::pipeline::pin_line_from("\u{1f441}", "[onghut]", ""),
+        huba::pipeline::pin_line_from(None, "[onghut]", "acc1"),
+        huba::pipeline::pin_line_from(Some("\u{26a1}"), "[onghut]", ""),
     ] {
         assert!(
             dong.ends_with(" \u{1f4f7}"),
             "dòng gim {dong:?} thiếu 📷 — không còn gì nói chạm vào là xem màn"
         );
+    }
+}
+
+/// 🔴 CON MẮT PHẢI LUÔN Ở ĐÓ — Hà 2026-08-27: *"Một phiên đang có monitor thì luôn
+/// chèn thêm icon eye vào để dễ nhận dạng"*.
+///
+/// Trước lượt này mắt chỉ sống một nhịp: đường nhanh in `👁`, rồi `refresh_pin`
+/// THAY nó bằng icon trạng thái. Đo trên tin gim thật: `⚡ 🟪 [dwork]·… (acc3) 📷`
+/// — không còn mắt. Hai icon không thay nhau được: `👁` nói *phiên nào*, `⚡/💤/❓`
+/// nói *nó đang thế nào*.
+#[test]
+fn every_pin_line_starts_with_the_eye() {
+    let s = huba::sessions::LiveSession {
+        session_id: "33ee6bc5".into(),
+        label: "[dwork]".into(),
+        account: "acc3".into(),
+        ..Default::default()
+    };
+    for dong in [
+        huba::pipeline::pin_line(&s),
+        huba::pipeline::pin_line_from(None, "[dwork]", "acc3"),
+        huba::pipeline::pin_line_from(Some("\u{26a1}"), "[dwork]", ""),
+        huba::pipeline::pin_line_from(Some("\u{2753}"), "c\u{1eeda} s\u{1ed5} ttys006", ""),
+    ] {
+        assert!(
+            dong.starts_with("\u{1f441} "),
+            "dòng gim {dong:?} không mở đầu bằng 👁 — mất dấu duy nhất nói ĐÂY là phiên \
+             đang được theo"
+        );
+    }
+}
+
+/// ĐỐI CHỨNG: mắt KHÔNG được nuốt mất icon trạng thái.
+///
+/// Nếu chèn mắt mà bỏ icon trạng thái thì tin gim thôi nói phiên đang chạy hay
+/// đang chờ — đổi một phép đo mù lấy một phép đo mù khác.
+#[test]
+fn the_eye_does_not_swallow_the_status_icon() {
+    for icon in ["\u{26a1}", "\u{1f4a4}", "\u{2753}"] {
+        let dong = huba::pipeline::pin_line_from(Some(icon), "[x]", "");
+        assert!(
+            dong.contains(icon),
+            "dòng {dong:?} mất icon trạng thái {icon:?}"
+        );
+        assert!(dong.starts_with("\u{1f441} "), "và mắt vẫn phải đứng đầu");
     }
 }

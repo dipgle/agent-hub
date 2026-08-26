@@ -14,6 +14,29 @@
 
 use crate::adapters::CommandKind;
 
+/// BÀN PHÍM THƯỜNG TRỰC dưới ô nhập: `(nhãn nút, lệnh nó gửi)`.
+///
+/// 🔴 Hà 2026-08-26: *"sao pin msg không bấm được nút trực tiếp ở trên à, nó đang
+/// cuộn tới tin đó không hợp lý lắm"*.
+///
+/// Câu trả lời là một giới hạn của Telegram, không phải chỗ huba làm thiếu: BĂNG
+/// GIM ở đỉnh buồng chat là chỗ **chỉ để hiện chữ**. Không có API nào gắn nút vào
+/// nó, và chạm vào băng thì client luôn nhảy tới tin gốc. Nên dù tin gim mang
+/// `inline_keyboard` hay mang cả dòng là một liên kết, từ trên đỉnh vẫn chỉ ra
+/// đúng một cú cuộn.
+///
+/// Thứ Telegram CHO PHÉP luôn nằm trong tầm tay, một chạm, không cuộn là
+/// `ReplyKeyboardMarkup` — bàn phím nằm ngay trên ô nhập, sống qua mọi tin cho
+/// tới khi có bàn phím khác thay. Nó gửi CHỮ chứ không gửi callback, nên mỗi nút
+/// là đúng một route đã có; không đẻ đường xử lý mới.
+///
+/// ⚠ **MỘT bảng, hai chỗ đọc**: `telegram::persistent_keyboard` dựng nút từ đây,
+/// `parse_command` dịch ngược cũng từ đây. Hai bản chép là hai bản sẽ lệch, và
+/// lúc lệch thì nút hiện ra nhưng bấm vào huba trả lời *"Chưa hiểu lệnh này"* —
+/// đúng con bug `/key enter` đã trả giá sáng cùng ngày. `tests/keyboard.rs` khoá
+/// vòng tròn ấy lại.
+pub const KEYBOARD: &[(&str, &str)] = &[("📷 Xem màn", "/shot"), ("📋 Phiên", "/session")];
+
 /// `ttys014` — tên một tty như Terminal khai, đã bỏ `/dev/`.
 ///
 /// Hẹp có chủ ý: payload đi thẳng vào `win-<tty>` rồi thành id phiên, nên nhận
@@ -44,6 +67,13 @@ fn is_tty_name(s: &str) -> bool {
 /// là `(route, id, phần còn lại)`.
 pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
     let t = text.trim();
+    // Nút bàn phím thường trực gửi NHÃN, không gửi lệnh — dịch về đúng route đã
+    // có (xem [`KEYBOARD`]). Đặt TRƯỚC cửa `starts_with('/')`, vì nhãn có emoji
+    // và không mở đầu bằng dấu gạch chéo.
+    let t = KEYBOARD
+        .iter()
+        .find(|(nhan, _)| *nhan == t)
+        .map_or(t, |(_, lenh)| *lenh);
     if !t.starts_with('/') {
         return None;
     }

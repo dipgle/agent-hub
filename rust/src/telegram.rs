@@ -2993,6 +2993,26 @@ impl Inbox {
     /// Gộp theo `callback_data` bắt đầu bằng `file:` chứ không theo vị trí: đó là
     /// dấu hiệu của thứ đang xếp, không phải một quy ước đếm-thứ-tự mà chỗ gọi
     /// phải nhớ giữ đúng. Ba nút một hàng — bốn thì nhãn bắt đầu bị cắt trên 390px.
+    /// Bàn phím THƯỜNG TRỰC nằm ngay trên ô nhập — xem [`crate::verbs::KEYBOARD`]
+    /// để biết vì sao nó tồn tại và vì sao bảng nhãn chỉ được có MỘT bản.
+    ///
+    /// ⚠ Một tin chỉ mang được MỘT loại `reply_markup`: `inline_keyboard` HOẶC
+    /// `keyboard`. Nên thứ này chỉ đi kèm những tin KHÔNG có nút gắn dưới — và nó
+    /// chỉ cần tới đúng một lần là nằm lại trong buồng chat.
+    pub fn persistent_keyboard() -> Value {
+        let hang: Vec<Value> = crate::verbs::KEYBOARD
+            .iter()
+            .map(|(nhan, _)| json!({ "text": nhan }))
+            .collect();
+        json!({
+            "keyboard": [hang],
+            // Kẹp cho vừa một hàng thay vì chiếm nửa màn hình.
+            "resize_keyboard": true,
+            // Ở lại sau mỗi lần gõ, chứ không tắt đi rồi phải đi tìm.
+            "is_persistent": true,
+        })
+    }
+
     pub fn keyboard_rows(buttons: &[(String, String)]) -> Vec<Vec<Value>> {
         /// Nút được xếp CHUNG HÀNG với nút cùng loại — và tối đa mấy cái.
         ///

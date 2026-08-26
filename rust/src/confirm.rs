@@ -107,7 +107,17 @@ pub fn tell(cfg: &Config, text: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     let r = client
         .post(format!("https://api.telegram.org/bot{token}/sendMessage"))
-        .json(&json!({ "chat_id": chat_id, "text": text }))
+        // 🔴 KÈM BÀN PHÍM THƯỜNG TRỰC — Hà 2026-08-26: *"sao pin msg không bấm
+        // được nút trực tiếp ở trên à"*. Băng gim ở đỉnh không nhận nút được (xem
+        // `verbs::KEYBOARD`), nên đường một-chạm-không-cuộn là bàn phím dưới ô
+        // nhập. Gắn ở ĐÂY vì đây là tin huba gửi mà KHÔNG bao giờ có nút dưới
+        // (một tin chỉ mang được một loại `reply_markup`), và nó đi ra sau mỗi
+        // lần cài lại — tức bàn phím tự dựng lại mà không cần ai nhớ.
+        .json(&json!({
+            "chat_id": chat_id,
+            "text": text,
+            "reply_markup": crate::telegram::Inbox::persistent_keyboard(),
+        }))
         .send()
         .map_err(|e| e.to_string())?;
     let v: Value = r.json().unwrap_or_else(|_| json!({}));

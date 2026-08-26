@@ -439,11 +439,25 @@ pub fn pin_line(s: &crate::sessions::LiveSession) -> String {
 ///
 /// Không biết tài khoản thì **đừng mở ngoặc**: một cặp `()` rỗng nói rằng huba
 /// biết một điều gì đó rồi bỏ trống (cùng luật `follow_ack_head`).
+/// 🔴 VÀ PHẢI CÓ 📷 Ở CUỐI — Hà 2026-08-26: *"pin msg: sao lại mất link xem màn
+/// rồi"*.
+///
+/// Hỏi thẳng Telegram (`getChat`) thì liên kết KHÔNG mất: `text_link offset=0
+/// len=20`, tức cả dòng vẫn mở được màn. Thứ mất là **cái nút `📷 Xem màn`** —
+/// `refresh_pin` sửa tin bằng `edit_html(mid, html, &[])`, mà `editMessageText`
+/// không kèm `reply_markup` thì Telegram XOÁ bàn phím của tin ấy. Cùng lúc 📷 đã
+/// nhường chỗ cho icon trạng thái, nên dòng gim còn đúng một màu chữ xanh và
+/// không còn gì nói nó dẫn đi đâu.
+///
+/// Nên 📷 quay lại, nhưng ở CUỐI: đầu dòng là chỗ của icon trạng thái (thứ đọc
+/// trong một liếc), còn 📷 là nhãn của HÀNH ĐỘNG. Không dựng lại cái nút — Hà đã
+/// bỏ nó ngày 26/08 (*"nút xem màn bỏ text đi để icon và bao hết text của tin
+/// gim"*), và một cái nút đứng rời ở đáy thì đích chạm chỉ to bằng chính nó.
 pub fn pin_line_from(icon: &str, ten: &str, tai_khoan: &str) -> String {
     if tai_khoan.trim().is_empty() {
-        format!("{icon} {ten}")
+        format!("{icon} {ten} 📷")
     } else {
-        format!("{icon} {ten} ({tai_khoan})")
+        format!("{icon} {ten} ({tai_khoan}) 📷")
     }
 }
 

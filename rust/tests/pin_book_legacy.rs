@@ -126,13 +126,13 @@ fn an_unknown_account_leaves_no_empty_parens() {
     for tk in ["", "   "] {
         let dong = huba::pipeline::pin_line_from("\u{26a1}", "[social]", tk);
         assert_eq!(
-            dong, "\u{26a1} [social]",
-            "tài khoản {tk:?} không được đẻ ra ngoặc rỗng"
+            dong, "\u{26a1} [social] \u{1f4f7}",
+            "tài khoản {tk:?} không được đẻ ra ngoặc rỗng (📷 cuối dòng thì vẫn phải có)"
         );
     }
     assert_eq!(
         huba::pipeline::pin_line_from("\u{26a1}", "[social]", "acc1"),
-        "\u{26a1} [social] (acc1)"
+        "\u{26a1} [social] (acc1) \u{1f4f7}"
     );
 }
 
@@ -152,4 +152,31 @@ fn the_json_only_reader_goes_blind_on_the_real_book_value() {
         "đây là chỗ bản cũ chết câm: JSON phân tích XONG (một Number), nhưng \
          `.get(\"m\")` không có gì, và `?` biến nó thành 'chưa gim gì'"
     );
+}
+
+/// Dòng gim phải MANG DẤU HIỆU nó dẫn đi đâu.
+///
+/// 🔴 Hà 2026-08-26: *"pin msg: sao lại mất link xem màn rồi"*. Đo bằng `getChat`
+/// hôm ấy: liên kết vẫn còn (`text_link offset=0 len=20`) nhưng `reply_markup`
+/// đã bị `edit_html(..., &[])` xoá, và 📷 thì đã nhường chỗ cho icon trạng thái —
+/// nên dòng gim không còn gì nói nó là đường xem màn. Một đích chạm không ai
+/// nhận ra là một đích chạm không tồn tại.
+#[test]
+fn the_pin_line_always_carries_the_view_screen_marker() {
+    let s = huba::sessions::LiveSession {
+        session_id: "871f7b31".into(),
+        label: "[onghut]".into(),
+        account: "acc1".into(),
+        ..Default::default()
+    };
+    for dong in [
+        huba::pipeline::pin_line(&s),
+        huba::pipeline::pin_line_from("\u{1f441}", "[onghut]", "acc1"),
+        huba::pipeline::pin_line_from("\u{1f441}", "[onghut]", ""),
+    ] {
+        assert!(
+            dong.ends_with(" \u{1f4f7}"),
+            "dòng gim {dong:?} thiếu 📷 — không còn gì nói chạm vào là xem màn"
+        );
+    }
 }

@@ -700,6 +700,29 @@ pub fn enter_button(
 ///
 /// 📌 Và đây là nhánh hay chạy nhất ngay sau một lượt `hubad` khởi động lại (sổ
 /// còn rỗng), tức lỗi hiện ra đúng lúc chủ máy hay bấm nút nhất.
+/// DÒNG CUỐI còn chữ trên màn một tab — thứ phân biệt được hai cửa sổ trần.
+///
+/// 🔴 Hà 2026-08-26, ảnh `/terminal`: ba hàng `ttys015` `ttys013` `ttys005` giống
+/// hệt nhau, cả ba đều *"dấu nhắc trống"* — *"đang hiện như thế này biết cái nào
+/// để vào?"*. Con số `ttys0NN` do hệ điều hành cấp phát, nó không mang một mẩu
+/// nghĩa nào của chủ máy; còn dấu nhắc thì luôn in kèm thư mục.
+///
+/// Trả `None` cho CẢ HAI ca "không có gì để nói" — chưa xin chữ (`None`) và màn
+/// thật sự trống (`Some("")`) — vì chỗ gọi làm cùng một việc ở cả hai: rơi về câu
+/// cũ. Cái phải giữ phân biệt là ở tầng dưới (`Tab::screen`), nơi nó còn đổi được
+/// quyết định.
+///
+/// Cắt 60 ký tự: đủ cho `hanguyen@Has-MacBook-Pro projects %` (34, đo thật) và
+/// vẫn gọn trên màn 390px.
+fn last_screen_line(screen: Option<&str>) -> Option<String> {
+    let dong = screen?
+        .lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| !l.is_empty())?;
+    Some(crate::exec::truncate(dong, 60))
+}
+
 /// Cửa sổ TRẦN đang ở trạng thái nào — đo, không khai sẵn.
 ///
 /// 🔴 Hà 2026-08-26: *"khi chạy lệnh qua cửa sổ → chạy ssh sudo thì sẽ hỏi mật
@@ -8819,7 +8842,25 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     //
                     // Đó cũng là câu trả lời cho *"chưa kế thừa được các lệnh"*:
                     // thêm một hạng mục tiêu mà KHÔNG thêm một đường đi.
-                    let (ack, buttons, inline_html) = match crate::keys::terminal_tabs() {
+                    // 🔴 KÈM CHỮ MÀN, vì nếu không thì ba hàng giống hệt nhau —
+                    // Hà 2026-08-26, ảnh `/terminal` 19:44: ba dòng `ttys015`
+                    // `ttys013` `ttys005`, cả ba đều *"dấu nhắc trống"*: *"đang
+                    // hiện như thế này biết cái nào để vào?"*.
+                    //
+                    // Câu hỏi ấy không có câu trả lời trong bản cũ, và đó là lỗi
+                    // của danh sách chứ không phải của người đọc: thứ duy nhất
+                    // phân biệt ba hàng là con số `ttys0NN`, mà con số ấy do hệ
+                    // điều hành cấp phát — nó không mang một mẩu nghĩa nào của
+                    // chủ máy. Thứ mang nghĩa là DÒNG CUỐI trên màn: dấu nhắc
+                    // luôn in kèm thư mục (`hanguyen@Has-MacBook-Pro projects %`
+                    // — đo trên chính ba cửa sổ ấy), tức đúng cái mắt nhận ra
+                    // trong một liếc.
+                    //
+                    // Đổi `terminal_tabs` → `terminal_screens`: vẫn MỘT lượt dò,
+                    // chỉ xin thêm chữ. Đắt hơn (~1s, đo `ms_terminal_probe`)
+                    // nhưng route này do NGÓN TAY gọi và người ta đang đứng chờ
+                    // — đúng làn `exec::urgent`, không phải vòng nền.
+                    let (ack, buttons, inline_html) = match crate::keys::terminal_screens() {
                         Err(e) => (
                             format!(
                                 "⚠ không hỏi được Terminal: {}",
@@ -8897,7 +8938,23 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             format!("đang chạy: {}", names.join(", "))
                                         }
                                     } else {
-                                        "dấu nhắc trống".to_string()
+                                        // 🔴 DÒNG CUỐI TRÊN MÀN, không phải câu
+                                        // "dấu nhắc trống" — xem chú thích ở chỗ
+                                        // gọi `terminal_screens`.
+                                        //
+                                        // Cái icon ⚪/🟢 đã nói rảnh hay bận rồi,
+                                        // nên ô chữ này phải trả lời câu KHÁC:
+                                        // *cửa sổ nào?* Dấu nhắc in kèm thư mục,
+                                        // nên chính nó là câu trả lời — và nó là
+                                        // chữ THẬT đang nằm trên màn ấy, không
+                                        // phải một nhãn huba tự đặt.
+                                        //
+                                        // Không đọc được màn thì rơi về câu cũ,
+                                        // đừng bịa: "không có dòng nào" và "không
+                                        // xin chữ" là hai chuyện, và `screen` giữ
+                                        // đúng hai chuyện ấy (`None` vs `Some("")`).
+                                        last_screen_line(tb.screen.as_deref())
+                                            .unwrap_or_else(|| "dấu nhắc trống".to_string())
                                     };
                                     out.push_str(&format!(
                                         "\n{} {}\n    {doing}",

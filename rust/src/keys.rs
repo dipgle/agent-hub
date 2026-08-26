@@ -4216,6 +4216,38 @@ pub fn activity(screen: &str) -> Option<Activity> {
 /// bài kiểm `shell_is_not_busy` bắt đúng ca ấy trước khi nó kịp lên máy.
 ///
 /// Dòng chân thì nói thẳng và không đổi theo lượt: đang chạy thì nó mang
+/// Cửa sổ đang đứng ở một Ô HỎI MẬT KHẨU (`sudo`, `ssh`, `ssh` + `sudo`).
+///
+/// 🔴 Hà 2026-08-26: *"chạy ssh sudo thì sẽ hỏi mật khẩu, lệnh terminal thấy rồi
+/// nhưng trạng thái lại là dấu nhắc trống là không đúng"*.
+///
+/// Đây là một trạng thái RIÊNG, không phải "rảnh" và cũng không phải "đang chạy
+/// gì đó": chữ gõ vào lúc này đi thẳng vào ô mật khẩu, KHÔNG phải vào shell — nên
+/// một câu chào mời *"gõ chữ ở đây là chạy lệnh shell"* là mời chủ máy gõ một
+/// dòng lệnh vào đúng chỗ nó sẽ bị hiểu thành mật khẩu.
+///
+/// Đo trên DÒNG CUỐI còn chữ, không quét cả màn: chữ "password" nằm rải rác
+/// trong output của bất cứ lệnh nào (`grep -i password`, một tệp `.env` vừa
+/// `cat`, chính lệnh vừa gõ), nên quét cả màn là dựng một phép đo kêu oan —
+/// cùng bài học `screen_running` ngay dưới.
+///
+/// Ba hình dạng đã gặp thật, đều kết bằng dấu hai chấm rồi để con trỏ ngay sau:
+/// `[sudo] password for ha:` · `ha@vps-a's password:` · `Enter passphrase for key
+/// '…':`. Bắt theo cái ĐUÔI ấy chứ không theo chữ đầu dòng, vì phần đầu đổi theo
+/// hệ điều hành và theo tên người.
+pub fn password_prompt(screen: &str) -> bool {
+    let Some(cuoi) = screen.lines().rev().find(|l| !l.trim().is_empty()) else {
+        return false;
+    };
+    let l = cuoi.trim().to_lowercase();
+    // Dấu nhắc thật để con trỏ NGAY SAU dấu hai chấm — cùng lắm là một khoảng
+    // trắng. Một dòng kể chuyện về mật khẩu thì còn chữ phía sau.
+    if !l.trim_end().ends_with(':') {
+        return false;
+    }
+    l.contains("password") || l.contains("passphrase") || l.contains("mật khẩu")
+}
+
 /// `esc to interrupt`, đang chờ thì không. Đo trên ĐÚNG dòng ấy chứ không quét
 /// cả màn: chữ `esc to interrupt` còn nằm rải rác trong phần hội thoại đã cuộn.
 pub fn screen_running(screen: &str) -> Option<bool> {

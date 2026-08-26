@@ -3439,6 +3439,18 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>, tabs: &[crate::keys::Tab]) {
                         "why": "cửa sổ chạy một CLI không khớp phiên nào — VẪN liệt kê, có ghi tên chương trình" }),
             );
         }
+        // 🔴 Ô HỎI MẬT KHẨU LÀ MỘT TRẠNG THÁI RIÊNG — Hà 2026-08-26: *"chạy ssh
+        // sudo thì sẽ hỏi mật khẩu, lệnh terminal thấy rồi nhưng trạng thái lại
+        // là dấu nhắc trống là không đúng"*.
+        //
+        // `sudo` qua `ssh` không phải lúc nào cũng khai một tiến trình con đọc
+        // ra được: `ssh` là thứ duy nhất `processes of tab` thấy, còn cái đang
+        // hỏi nằm ở ĐẦU KIA. Nên phải hỏi thêm MÀN, và chữ ấy đã có sẵn trong
+        // cùng lượt dò (`keys::terminal_screens`) — không tốn thêm osascript nào.
+        let hoi_mk = tab
+            .screen
+            .as_deref()
+            .is_some_and(crate::keys::password_prompt);
         rows.push(LiveSession {
             session_id: format!("{SHELL_ID_PREFIX}{}", tab.tty),
             name: format!("cửa sổ {}", tab.tty),
@@ -3450,8 +3462,14 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>, tabs: &[crate::keys::Tab]) {
             // Đang chạy một chương trình thì hàng phải nói nó BẬN, kể cả khi
             // Terminal chưa kịp khai `busy` — thứ quyết định ở đây là có một
             // chương trình chiếm màn, không phải nhịp cập nhật của Terminal.
-            working: tab.busy || running.is_some(),
-            activity: running.clone(),
+            // Và một ô hỏi mật khẩu thì BẬN dù `busy` có nói gì: có người đang
+            // chờ chủ máy gõ.
+            working: tab.busy || running.is_some() || hoi_mk,
+            activity: match (&running, hoi_mk) {
+                (Some(cli), true) => Some(format!("{cli} · ĐANG HỎI MẬT KHẨU")),
+                (None, true) => Some("ĐANG HỎI MẬT KHẨU".to_string()),
+                (r, false) => r.clone(),
+            },
             ..Default::default()
         });
         added += 1;

@@ -700,6 +700,40 @@ pub fn enter_button(
 ///
 /// 📌 Và đây là nhánh hay chạy nhất ngay sau một lượt `hubad` khởi động lại (sổ
 /// còn rỗng), tức lỗi hiện ra đúng lúc chủ máy hay bấm nút nhất.
+/// Cửa sổ TRẦN đang ở trạng thái nào — đo, không khai sẵn.
+///
+/// 🔴 Hà 2026-08-26: *"khi chạy lệnh qua cửa sổ → chạy ssh sudo thì sẽ hỏi mật
+/// khẩu, lệnh terminal thấy rồi nhưng trạng thái lại là dấu nhắc trống là không
+/// đúng"*.
+///
+/// Bản cũ gõ CỨNG đúng một câu cho MỌI cửa sổ trần — *" — dấu nhắc trống: gõ chữ
+/// ở đây là chạy lệnh shell"* — trong khi cùng lúc ấy nhật ký đang ghi
+/// `terminal_tab_busy_unmatched cli:ssh tty:ttys006` và `working` của chính hàng
+/// ấy đã là `true`. huba BIẾT cửa sổ đang chạy ssh rồi vẫn khai nó rảnh: một lời
+/// khai không đi qua phép đo nào, đúng thứ `CLAUDE.md` §13 cấm.
+///
+/// Và vế sau còn nguy hơn vế trước. Khi `ssh`/`sudo` đang treo ô mật khẩu, chữ
+/// gõ vào đi THẲNG vào ô ấy — nên câu *"gõ chữ ở đây là chạy lệnh shell"* là mời
+/// chủ máy gõ một dòng lệnh vào đúng chỗ nó sẽ bị đọc thành mật khẩu, rồi dòng ấy
+/// đi tiếp vào nhật ký của một máy khác.
+fn shell_how(s: &crate::sessions::LiveSession) -> String {
+    if !s.working {
+        return " — dấu nhắc trống: gõ chữ ở đây là chạy lệnh shell".to_string();
+    }
+    match s
+        .activity
+        .as_deref()
+        .map(str::trim)
+        .filter(|a| !a.is_empty())
+    {
+        Some(a) => format!(" — {a}: chữ gõ ở đây đi THẲNG vào nó, không phải vào shell"),
+        // Bận mà không đọc được tên chương trình vẫn là BẬN. Nói đúng chừng ấy,
+        // đừng rơi về "dấu nhắc trống" chỉ vì thiếu một cái tên.
+        None => " — đang chạy một chương trình: chữ gõ ở đây đi thẳng vào nó, không phải vào shell"
+            .to_string(),
+    }
+}
+
 pub fn follow_ack_head(s: &crate::sessions::LiveSession, how: &str) -> String {
     // Cửa sổ trần không có tài khoản — in `()` rỗng là một cặp ngoặc nói rằng
     // huba biết một điều gì đó rồi bỏ trống. Không biết thì đừng mở ngoặc.
@@ -11903,20 +11937,21 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // được phiên nền) nhưng người đọc hiểu thành
                                     // "gõ tiếp được", vì đó là thứ mọi phiên khác
                                     // cho phép.
-                                    let how = match (s.pid == 0, s.host.as_str()) {
+                                    let how: String = match (s.pid == 0, s.host.as_str()) {
                                     // 🔴 Cửa sổ TRẦN không phải một phiên đã
                                     // dừng. Bản cũ rơi vào nhánh `pid == 0` và
                                     // trả lời *"đã dừng, /tell nói tiếp được"* —
                                     // mà `/tell` chỉ nói được với một phiên
                                     // `claude`. Một câu mời đi vào ngõ cụt.
-                                    (_, "shell") => " — dấu nhắc trống: gõ chữ ở đây là chạy lệnh shell",
+                                    (_, "shell") => shell_how(&s),
                                     (_, "dead") => {
                                         " — ĐÃ TẮT: chỉ còn /handover lấy bản bàn giao; gõ thẳng thì không. \
-                                         Dọn khỏi danh sách bằng /stop"
+                                         Dọn khỏi danh sách bằng /stop".to_string()
                                     }
-                                    (true, _) => " — đã dừng; /new <id> mở lại nó trong một cửa sổ",
-                                    _ => "",
+                                    (true, _) => " — đã dừng; /new <id> mở lại nó trong một cửa sổ".to_string(),
+                                    _ => String::new(),
                                 };
+                                    let how = how.as_str();
                                     let head = follow_ack_head(&s, how);
                                     // KHÔNG chụp lại màn ở đây (Hà 2026-08-12).
                                     //

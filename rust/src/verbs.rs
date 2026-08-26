@@ -257,6 +257,23 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
             return Some((CommandKind::Session, 0, id.to_string()));
         }
     }
+    // `shot_<id>` — XEM MÀN của đúng phiên ấy, bằng một LIÊN KẾT trong chữ.
+    //
+    // 🔴 Hà 2026-08-26: *"nút xem màn bỏ text đi để icon và bao hết text của tin
+    // gim"*. Cái nút bàn phím `shot:<id>` vốn đã có, nhưng nút thì đứng RỜI ở
+    // đáy tin — không bọc được chữ, nên đích chạm to đúng bằng cái emoji.
+    //
+    // Anh em sinh đôi của `s_`: cùng hình dạng, cùng phép kiểm id, khác đúng
+    // cái việc nó làm. Tách riêng chứ không nhét thêm cờ vào `s_`, vì *"vào
+    // phiên"* và *"xem màn"* là hai việc — gộp là dựng một đường mà người đọc
+    // không đoán được nó sẽ làm gì.
+    if let Some(id) = verb.strip_prefix("shot_") {
+        let ok = crate::sessions::is_shell_id(id)
+            || (!id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-'));
+        if ok {
+            return Some((CommandKind::Shot, 0, id.to_string()));
+        }
+    }
     if let Some(tty) = verb.strip_prefix("w_") {
         if is_tty_name(tty) {
             return Some((

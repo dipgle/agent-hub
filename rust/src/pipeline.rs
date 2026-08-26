@@ -433,7 +433,7 @@ pub fn follow_ack_head(s: &crate::sessions::LiveSession, how: &str) -> String {
     } else {
         format!(" ({})", s.account)
     };
-    format!("👁 Đang theo {}{}{}", crate::sessions::shown(s), who, how)
+    format!("👁 {}{}{}", crate::sessions::shown(s), who, how)
 }
 
 pub fn session_name_from_book(book_json: &str, id: &str) -> Option<(String, String)> {
@@ -5353,22 +5353,9 @@ pub fn jobs_line() -> Option<String> {
     )
 }
 
-/// Chạy một lệnh ở luồng riêng, theo dõi nó, rồi báo lại — thay cho việc ngồi
-/// chờ tới một cái trần.
+/// Bóc `cd <thư mục>` + `&&` hoặc `;` ở đầu.
 ///
-/// 🔴 Hà 2026-08-14: *"Có những lệnh sẽ chạy khá lâu nên cần cơ chế theo dõi
-/// riêng thay vì cố định timeout"*.
-///
-/// Ba việc, và cái thứ ba mới là thứ trước đây thiếu:
-/// 1. **Chạy**, với cái phanh cuối một tiếng (`LONG_JOB_MAX_SEC`) — chạm phanh
-///    thì NÓI rõ là bị dừng vì quá lâu, không lẫn với "lệnh chạy xong".
-/// 2. **Báo lại** khi xong: cùng báo cáo, cùng đường dán vào phiên, cùng cổng
-///    quét bí mật như đường cũ.
-/// 3. **Theo dõi trong lúc chạy**: mỗi 90 giây nhắc một câu kèm nút ⏹ dừng.
-///    Không có bước này thì "bỏ trần" chỉ đổi một cái chết ồn ào thành một sự
-///    im lặng dài — mà im lặng dài thì người ta bấm lại lần nữa, và lần thứ hai
-///    là một lệnh triển khai chạy hai lần.
-/// Bóc `cd <thư mục> &&|; ` ở đầu — trả `(tiền tố giữ nguyên, phần lệnh thật)`.
+/// Trả `(tiền tố giữ nguyên, phần lệnh thật)`.
 fn boc_cd(line: &str) -> (String, &str) {
     let t = line.trim_start();
     let Some(rest) = t.strip_prefix("cd ") else {
@@ -5486,6 +5473,21 @@ fn la_sudo(t: &str) -> Option<&str> {
     }
 }
 
+/// Chạy một lệnh ở luồng riêng, theo dõi nó, rồi báo lại — thay cho việc ngồi
+/// chờ tới một cái trần.
+///
+/// 🔴 Hà 2026-08-14: *"Có những lệnh sẽ chạy khá lâu nên cần cơ chế theo dõi
+/// riêng thay vì cố định timeout"*.
+///
+/// Ba việc, và cái thứ ba mới là thứ trước đây thiếu:
+/// 1. **Chạy**, với cái phanh cuối một tiếng (`LONG_JOB_MAX_SEC`) — chạm phanh
+///    thì NÓI rõ là bị dừng vì quá lâu, không lẫn với "lệnh chạy xong".
+/// 2. **Báo lại** khi xong: cùng báo cáo, cùng đường dán vào phiên, cùng cổng
+///    quét bí mật như đường cũ.
+/// 3. **Theo dõi trong lúc chạy**: mỗi 90 giây nhắc một câu kèm nút ⏹ dừng.
+///    Không có bước này thì "bỏ trần" chỉ đổi một cái chết ồn ào thành một sự
+///    im lặng dài — mà im lặng dài thì người ta bấm lại lần nữa, và lần thứ hai
+///    là một lệnh triển khai chạy hai lần.
 fn watch_long_job(
     cfg: Config,
     s: crate::sessions::LiveSession,
@@ -9279,6 +9281,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             | CommandKind::Photo
             | CommandKind::Front
             | CommandKind::Clean
+            | CommandKind::Clear
             | CommandKind::Tab
             | CommandKind::Pick => {
                 // Gõ vào ĐÚNG cửa sổ của phiên đang theo. Không ghép được cửa
@@ -9426,14 +9429,32 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // · vừa dọn xong N tin · dọn không được (và lúc
                                 // ấy phải nói còn bao nhiêu, chứ không phải một
                                 // câu "xong" cho một việc chưa xong).
-                                match crate::keys::clear_queue(w) {
+                                // 🔴 DỌN NỐT Ô NHẬP — Hà 2026-08-26: *"Sửa lại
+                                // lệnh clean … để cùng có tác dụng xóa text ở ô
+                                // chat"*.
+                                //
+                                // Thứ tự bắt buộc: hàng chờ TRƯỚC, ô nhập SAU.
+                                // `clear_queue` bấm `↑` để lôi từng tin trong
+                                // hàng chờ NGƯỢC VÀO ô nhập rồi xoá — nên tin
+                                // cuối cùng được lôi ra nằm lại đúng trong ô.
+                                // Chính nó là thứ đổ chữ vào cái ô mà anh thấy
+                                // vẫn còn. Xoá ô trước là xoá một cái ô sắp được
+                                // đổ đầy trở lại.
+                                let don = crate::keys::clear_queue(w);
+                                let o_sach = matches!(crate::keys::clear_box(w), Ok(true));
+                                let con_o = if o_sach {
+                                    String::new()
+                                } else {
+                                    " ⚠ ô nhập vẫn còn chữ — gõ `/clear` lần nữa.".to_string()
+                                };
+                                match don {
                                     Ok((0, 0)) => format!(
-                                        "🧹 {} không có tin nào trong hàng chờ.",
+                                        "🧹 {} không có tin nào trong hàng chờ; ô nhập đã sạch.{con_o}",
                                         crate::sessions::shown(&s)
                                     ),
                                     Ok((removed, 0)) => format!(
-                                        "🧹 Đã xoá {removed} tin khỏi hàng chờ của {} — hàng chờ trống. \
-                                         Lượt đang chạy KHÔNG bị cắt (muốn cắt thì `/key esc`).",
+                                        "🧹 Đã xoá {removed} tin khỏi hàng chờ của {} — hàng chờ trống, ô nhập đã sạch. \
+                                         Lượt đang chạy KHÔNG bị cắt (muốn cắt thì `/key esc`).{con_o}",
                                         crate::sessions::shown(&s)
                                     ),
                                     Ok((removed, left)) => format!(
@@ -9444,6 +9465,41 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     ),
                                     Err(e) => format!(
                                         "⚠ không dọn được hàng chờ: {}",
+                                        crate::exec::truncate(&e.to_string(), 200)
+                                    ),
+                                }
+                            } else if matches!(cmd.kind, CommandKind::Clear) {
+                                // 🔴 `/clear` — CHỈ ô nhập, hàng chờ giữ nguyên.
+                                //
+                                // Hà 2026-08-26: *"thêm lệnh clear để cùng có
+                                // tác dụng xóa text ở ô chat"*. Phép xoá vốn đã
+                                // có, nhưng nấp sau `/key clear` — một lệnh nói
+                                // về PHÍM, trong khi đây không phải một phím mà
+                                // là "xoá đúng bấy nhiêu ký tự đang có".
+                                //
+                                // Giữ riêng với `/clean` vì hậu quả khác nhau:
+                                // ở đây chỉ mất chữ CHƯA gửi, còn `/clean` mất
+                                // cả tin đã xếp hàng chờ chạy — thứ không lấy
+                                // lại được.
+                                match crate::keys::clear_box(w) {
+                                    Ok(true) => format!(
+                                        "🧽 Đã xoá ô nhập của {}. Hàng chờ giữ nguyên (muốn dọn cả thì `/clean`).",
+                                        crate::sessions::shown(&s)
+                                    ),
+                                    Ok(false) => {
+                                        logging::warn(
+                                            "keys_clear_incomplete",
+                                            json!({ "session": s.session_id,
+                                                    "effect": "ô nhập vẫn còn chữ sau khi xoá — không khai là đã sạch" }),
+                                        );
+                                        format!(
+                                            "⚠ ô nhập của {} vẫn còn chữ sau khi xoá — gõ `/clear` lần nữa, \
+                                             hoặc xoá tay ở máy.",
+                                            crate::sessions::shown(&s)
+                                        )
+                                    }
+                                    Err(e) => format!(
+                                        "⚠ không xoá được ô nhập: {}",
                                         crate::exec::truncate(&e.to_string(), 200)
                                     ),
                                 }
@@ -11343,7 +11399,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         // cũ mất 48 giây cho đúng hai chuỗi ký tự.
                         match db.set_cursor(FOCUS_SESSION_KEY, want) {
                             Ok(()) => {
-                                let head = format!("👁 Đang theo phiên {name} ({account})");
+                                // 🔴 BỎ CHỮ "ĐANG THEO PHIÊN" — Hà 2026-08-26: *"Chỉnh tin gim bỏ
+                                // text 'đang theo phiên' đi"*. Tin này được GIM
+                                // lên đỉnh buồng chat, nên nó không cần tự giới
+                                // thiệu: chỗ nó nằm đã nói nó là gì. Cái còn lại
+                                // là thứ ngón tay đang tìm — TÊN phiên.
+                                //
+                                // `👁 ` ở đầu vẫn giữ, nhưng chỉ làm DẤU NHẬN
+                                // BIẾT cho chỗ gửi (nó bóc ra rồi thay bằng 📷).
+                                let head = format!("👁 {name} ({account})");
                                 // …và ĐƯA LUÔN MÀN, đừng bắt bấm thêm một lần.
                                 //
                                 // 🔴 Hà 2026-08-13: *"bấm vào phiên sao không hiện
@@ -11461,10 +11525,41 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     };
                     match (shot_btn.is_empty(), crate::telegram::inbox()) {
                         (false, Some(tg)) if adapter == crate::telegram::NAME => {
-                            match tg.send_buttons_id(&ack, &shot_btn) {
-                                // Gim câu `👁 Đang theo …` lên đỉnh buồng chat.
-                                // Chỉ gim khi Telegram TRẢ VỀ id — gim một id
-                                // đoán bừa là gim nhầm tin của người khác.
+                            // 🔴 CẢ DÒNG LÀ ĐÍCH CHẠM, ICON ĐI VÀO TRONG — Hà
+                            // 2026-08-26: *"nút xem màn bỏ text đi để icon và
+                            // bao hết text của tin gim"*.
+                            //
+                            // Cái nút bàn phím `shot:<id>` đứng RỜI ở đáy tin
+                            // nên không bọc được chữ; đích chạm to đúng bằng
+                            // cái emoji. Cùng lỗi đã vá cho dòng lệnh (23/08),
+                            // ô nhập (25/08) và tên tệp (25/08) — đây là chỗ
+                            // thứ tư của cùng một luật.
+                            //
+                            // `ack` mở đầu bằng `👁 ` (dấu nhận biết của nhánh
+                            // này). Bóc nó ra rồi bọc phần còn lại vào thẻ với
+                            // icon 📷 — một icon, không phải hai.
+                            let than = ack.strip_prefix("👁 ").unwrap_or(&ack);
+                            let lien_ket = crate::telegram::deep_link(&format!("shot_{want}"));
+                            let gui = match &lien_ket {
+                                // Không dựng được liên kết (chưa biết tên bot)
+                                // ⟹ rơi về NÚT cũ. Đường lùi phải còn: mất cái
+                                // nút là mất đường xem màn, không chỉ mất đẹp.
+                                None => tg.send_buttons_id(&ack, &shot_btn),
+                                Some(href) => tg
+                                    .send_html_report(
+                                        &format!(
+                                            "<a href=\"{}\">📷 {}</a>",
+                                            crate::telegram::html_escape(href),
+                                            crate::telegram::html_escape(than)
+                                        ),
+                                        &[],
+                                    )
+                                    .map(|s| Some(s.message_id)),
+                            };
+                            match gui {
+                                // Gim tin ấy lên đỉnh buồng chat. Chỉ gim khi
+                                // Telegram TRẢ VỀ id — gim một id đoán bừa là
+                                // gim nhầm tin của người khác.
                                 Ok(Some(mid)) if cfg.pin_following => {
                                     pin_following(db, tg, mid);
                                 }

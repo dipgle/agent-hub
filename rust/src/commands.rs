@@ -208,7 +208,16 @@ pub const ROUTES: &[Route] = &[
         kind: CommandKind::Clean,
         arg: Arg::Rest,
         usage: "[id]",
-        help: "Xoá sạch hàng chờ của phiên (chữ đã gõ, chưa tới lượt chạy)",
+        help: "Xoá hàng chờ VÀ ô nhập của phiên",
+        listed: true,
+    },
+    Route {
+        name: "clear",
+        aliases: &["xoao", "xoaonhap"],
+        kind: CommandKind::Clear,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Chỉ xoá chữ trong ô nhập — hàng chờ giữ nguyên",
         listed: true,
     },
     Route {

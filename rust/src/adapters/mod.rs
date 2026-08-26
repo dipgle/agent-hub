@@ -138,7 +138,28 @@ pub enum CommandKind {
     /// điện thoại phải làm được đúng chừng ấy.
     ///
     /// KHÔNG cắt lượt đang chạy (đó là `/key esc`): chỉ dọn phần chưa bắt đầu.
+    ///
+    /// 🔴 …VÀ DỌN NỐT Ô NHẬP — Hà 2026-08-26: *"Sửa lại lệnh clean và thêm lệnh
+    /// clear để cùng có tác dụng xóa text ở ô chat"*.
+    ///
+    /// Bản cũ dừng ngay sau khi dọn hàng chờ, nên chữ vẫn nằm lại trong ô — mà
+    /// chính `clear_queue` là thứ kéo nó vào đấy: nó bấm `↑` để lôi từng tin
+    /// trong hàng chờ NGƯỢC VÀO ô nhập rồi xoá. Tin cuối cùng được lôi ra nằm
+    /// lại, và người gõ `/clean` đọc thành "dọn chưa sạch".
+    ///
+    /// Nên thứ tự bắt buộc là **hàng chờ trước, ô nhập sau**; làm ngược lại là
+    /// xoá một cái ô sắp được đổ đầy trở lại.
     Clean,
+    /// `/clear [id]` — chỉ xoá **ô nhập**, không đụng hàng chờ.
+    ///
+    /// 🔴 Hà 2026-08-26, cùng câu trên. Phép xoá ô nhập vốn đã có
+    /// (`keys::clear_box`) nhưng chỉ gọi được qua `/key clear` hoặc một liên kết
+    /// `clr_<sid>` — tức nó nấp sau một lệnh nói về chuyện khác.
+    ///
+    /// Giữ RIÊNG với `/clean` chứ không gộp, vì hậu quả khác nhau: `/clear` chỉ
+    /// bỏ chữ chưa gửi, còn `/clean` bỏ cả những tin ĐÃ xếp hàng chờ chạy — thứ
+    /// mất đi thì không lấy lại được.
+    Clear,
     /// `/run_<n>` — chạy lệnh thứ `n` trong sổ lệnh vừa thấy trên màn.
     ///
     /// Anh em sinh đôi của nút `run:<n>`, khác đúng một chỗ và chỗ ấy là cả lý

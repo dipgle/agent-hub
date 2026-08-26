@@ -171,6 +171,24 @@ pub struct LiveSession {
     /// cái thiếu chỉ là ĐEM KẾT QUẢ RA MÀN — trường này là chỗ đem ra.
     #[serde(default)]
     pub bg_shell: bool,
+    /// CỬA SỔ TERMINAL đang treo một ô hỏi mật khẩu (`sudo`, `ssh`, `ssh`+`sudo`).
+    ///
+    /// 🔴 Hà 2026-08-26: *"làm icon ❓ đi"* · *"hỏi ở đây là ở terminal chạy lệnh
+    /// chứ không phải session cli"*.
+    ///
+    /// **Vì sao là một trường RIÊNG, không mượn `asking`.** `asking` là bảng
+    /// `AskUserQuestion` đọc từ NHẬT KÝ của một phiên `claude`, và `/pick` đọc
+    /// thẳng nó (`pipeline::pick_answer` dựng `questions` từ `asking.question` +
+    /// `asking.rest`). Nhét một bảng giả vào đó để mượn cái icon là đổi hành vi
+    /// của một route khác hẳn — `/pick` sẽ đi đếm bước trên một bảng không tồn
+    /// tại, và chốt nhầm là thứ không lùi lại được. Hai sự thật khác nhau thì hai
+    /// trường; gộp để tiết kiệm một `bool` là dựng đúng cái bẫy `screen_of → None`
+    /// gộp ba kết cục (luật 13).
+    ///
+    /// Chỉ [`add_shell_windows`] đặt trường này. Phiên `claude` không bao giờ
+    /// mang nó: ô mật khẩu của một phiên `claude` là chuyện của chính CLI ấy.
+    #[serde(default)]
+    pub asking_password: bool,
     /// Phiên đang làm gì, bằng đúng chữ terminal hiện — `"Brewing… 10m43s"`.
     ///
     /// Hà 2026-08-10: *"ui chưa thể hiện được phiên đang làm gì ví dụ Brewing…;
@@ -1982,6 +2000,18 @@ pub fn state_of(s: &LiveSession) -> (&'static str, &'static str) {
     if s.error.is_some() {
         return (ST_ERR, "dừng vì LỖI");
     }
+    // 🔴 TRƯỚC `working` — Hà 2026-08-26: *"làm icon ❓ đi"*. Một cửa sổ đang treo
+    // ô mật khẩu thì `busy` cũng đúng (có `ssh` chạy), nên nếu để sau thì nó rơi
+    // vào `⚡ đang chạy` và cái ❓ không bao giờ hiện ra. Mà hai thứ ấy đòi hai
+    // việc khác nhau ở phía chủ máy: `⚡` nói *"cứ để đấy"*, `❓` nói *"nó đang
+    // đợi ANH"*. Cái đợi phải thắng cái chạy.
+    //
+    // Chữ khác hẳn `dừng lại HỎI` của phiên CLI, cố ý: hai câu ấy dẫn tới hai
+    // đường trả lời khác nhau (`/pick` vs gõ thẳng vào cửa sổ), nên đọc lên phải
+    // phân biệt được ngay.
+    if s.asking_password {
+        return (ST_ASK, "hỏi MẬT KHẨU");
+    }
     if s.working {
         return (ST_RUN, "đang chạy");
     }
@@ -3465,6 +3495,10 @@ fn add_shell_windows(rows: &mut Vec<LiveSession>, tabs: &[crate::keys::Tab]) {
             // Và một ô hỏi mật khẩu thì BẬN dù `busy` có nói gì: có người đang
             // chờ chủ máy gõ.
             working: tab.busy || running.is_some() || hoi_mk,
+            // Cửa sổ TERMINAL đang hỏi — không phải bảng hỏi của một phiên
+            // `claude`. Xem chú thích ở chính trường này để biết vì sao không
+            // mượn `asking`.
+            asking_password: hoi_mk,
             activity: match (&running, hoi_mk) {
                 (Some(cli), true) => Some(format!("{cli} · ĐANG HỎI MẬT KHẨU")),
                 (None, true) => Some("ĐANG HỎI MẬT KHẨU".to_string()),
@@ -3782,6 +3816,12 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 doing: String::new(),
                 // Điền ở khúc đọc tiến trình bên dưới (`shell_verdict`).
                 bg_shell: false,
+                // LUÔN `false` ở đây, và đó là câu trả lời chứ không phải chỗ
+                // chưa điền: trường này nói về CỬA SỔ TERMINAL treo ô mật khẩu
+                // (`add_shell_windows`), còn hàng này là một phiên `claude`. Ô
+                // mật khẩu của một phiên `claude` là chuyện của chính CLI ấy, và
+                // nó đã có `asking` riêng — thứ `/pick` đọc.
+                asking_password: false,
                 account: account.name.clone(),
                 name: s
                     .get("name")

@@ -73,3 +73,68 @@ fn only_the_last_non_empty_line_decides() {
         "ô hỏi đã cuộn lên trên thì KHÔNG còn là trạng thái hiện tại"
     );
 }
+
+// ── Icon ❓ cho CỬA SỔ TERMINAL, không phải cho phiên CLI ───────────────────
+//
+// 🔴 Hà 2026-08-26: *"làm icon ❓ đi"* · *"hỏi ở đây là ở terminal chạy lệnh chứ
+// không phải session cli"*.
+
+use huba::sessions::{state_of, LiveSession, ST_ASK, ST_RUN, ST_WAIT};
+
+fn cua_so(working: bool, hoi: bool) -> LiveSession {
+    LiveSession {
+        session_id: "win-/dev/ttys006".into(),
+        host: "shell".into(),
+        kind: "shell".into(),
+        working,
+        asking_password: hoi,
+        ..Default::default()
+    }
+}
+
+/// Ô hỏi mật khẩu phải THẮNG `working`.
+///
+/// Đây là nửa dễ quên: cửa sổ treo ô mật khẩu thì `busy` cũng đúng (có `ssh`
+/// chạy), nên nếu phép chấm để `working` đi trước thì hàng rơi vào `⚡ đang chạy`
+/// và cái ❓ KHÔNG BAO GIỜ hiện ra — một nhánh mã có mà không đường nào tới.
+#[test]
+fn a_terminal_asking_for_a_password_beats_merely_running() {
+    let (icon, chu) = state_of(&cua_so(true, true));
+    assert_eq!(icon, ST_ASK, "cửa sổ đang đợi chủ máy gõ thì phải là ❓");
+    assert_eq!(
+        chu, "hỏi MẬT KHẨU",
+        "chữ phải khác 'dừng lại HỎI' của phiên CLI: hai câu dẫn tới hai đường \
+         trả lời khác nhau (/pick vs gõ thẳng vào cửa sổ)"
+    );
+}
+
+/// ĐỐI CHỨNG NGƯỢC: cùng cửa sổ ấy, thôi hỏi thì thôi ❓.
+#[test]
+fn the_same_window_without_a_prompt_is_not_asking() {
+    assert_eq!(state_of(&cua_so(true, false)).0, ST_RUN);
+    assert_eq!(state_of(&cua_so(false, false)).0, ST_WAIT);
+}
+
+/// Trường này KHÔNG chạm tới `asking` của phiên CLI — thứ `/pick` đọc.
+///
+/// Gộp hai sự thật vào một trường để tiết kiệm một `bool` là để `/pick` đi đếm
+/// bước trên một bảng không tồn tại, và chốt nhầm thì không lùi lại được.
+#[test]
+fn a_cli_session_never_carries_the_terminal_password_flag() {
+    let s = LiveSession {
+        session_id: "b1e46802".into(),
+        host: "interactive".into(),
+        kind: "interactive".into(),
+        working: true,
+        ..Default::default()
+    };
+    assert!(
+        !s.asking_password,
+        "mặc định phải là false cho mọi phiên CLI"
+    );
+    assert!(
+        s.asking.is_none(),
+        "và nó không được đẻ ra một bảng hỏi giả"
+    );
+    assert_eq!(state_of(&s).0, ST_RUN);
+}

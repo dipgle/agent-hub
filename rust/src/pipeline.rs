@@ -5659,6 +5659,50 @@ fn say_term_result(text: &str) {
     }
 }
 
+/// Ba phép đọc của `/refresh` nói lên chuyện gì.
+///
+/// 🔴 Tách ra thành hàm THUẦN vì bản đầu (viết và cài cùng ngày 27/08) chẩn
+/// đoán SAI ngay ca thật đầu tiên, và sai một cách tự tin. Hà: *"Phiên này đang
+/// bị kẹt không làm được gì, treo view"*. Đo trên chính cửa sổ ấy:
+///
+/// ```text
+/// cửa sổ 24×80 (cỡ đang bị)   →    25 byte  ← trống trơn
+/// trong lúc nới 999×999        →  1405 byte  ← TUI VẼ ĐƯỢC
+/// trả lại 24×80                →    25 byte  ← trống lại
+/// đọc lại sau vài giây         →    25 byte  ← không phải nhịp trễ
+/// rồi 40×120 → 620 byte · 50×180 → 1084 byte
+/// ```
+///
+/// Bản đầu chỉ so màn TRƯỚC với màn SAU ở cùng cỡ, thấy y hệt (25 ↔ 25), rồi
+/// kết luận *"phiên đang treo thật"*. Phiên không hề treo — **cửa sổ quá nhỏ để
+/// TUI vẽ**. Bằng chứng phân biệt hai ca ấy nằm ở phép đọc THỨ BA (bản nới) mà
+/// bản đầu cầm trong tay rồi không dùng: nới ra có chữ ⟹ TUI sống.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshVerdict {
+    /// Vẽ lại xong màn đổi — đúng thứ lệnh này sinh ra để làm.
+    Redrew,
+    /// Nới thì vẽ được, trả lại chiều cũ thì TRỐNG ⟹ cửa sổ quá nhỏ.
+    TooSmall,
+    /// Màn không đổi và vốn đã có chữ — không có gì để sửa.
+    Unchanged,
+    /// Không đọc được một trong hai đầu: KHÔNG có phán quyết (§13②).
+    Unknown,
+}
+
+/// `man` = chữ đọc được lúc cửa sổ đang nới hết cỡ.
+pub fn refresh_verdict(truoc: Option<&str>, man: &str, sau: Option<&str>) -> RefreshVerdict {
+    // Hỏi ca "cửa sổ quá nhỏ" TRƯỚC: nó cũng thoả "trước == sau", nên để sau
+    // thì nó bị nuốt vào `Unchanged` và người đọc mất đúng câu cần nghe.
+    if !man.trim().is_empty() && sau.is_some_and(|s| s.trim().is_empty()) {
+        return RefreshVerdict::TooSmall;
+    }
+    match (truoc, sau) {
+        (Some(a), Some(b)) if a != b => RefreshVerdict::Redrew,
+        (Some(_), Some(_)) => RefreshVerdict::Unchanged,
+        _ => RefreshVerdict::Unknown,
+    }
+}
+
 /// Việc đang chạy nền, để **theo dõi và dừng được** — thứ Hà đòi thay cho một
 /// con số timeout.
 #[derive(Debug, Clone)]
@@ -10179,6 +10223,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // lại → đọc thường. So bản tall với bản thường
                                 // là so hai cách bẻ dòng khác nhau, tức "đổi" ở
                                 // mọi lượt — một phép đo không bao giờ đỏ.
+                                let co_truoc = crate::keys::size_of(w).ok();
                                 let truoc = crate::keys::screen_text(w).ok();
                                 match crate::keys::screen_text_tall(
                                     w,
@@ -10186,28 +10231,72 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 ) {
                                     Ok(man) if !man.trim().is_empty() => {
                                         let sau = crate::keys::screen_text(w).ok();
-                                        // Không đọc được một trong hai đầu ⟹
-                                        // KHÔNG có phán quyết, và đó là trạng
-                                        // thái thứ ba chứ không phải "không đổi".
-                                        let doi = match (&truoc, &sau) {
-                                            (Some(a), Some(b)) => Some(a != b),
-                                            _ => None,
+                                        let pq = refresh_verdict(
+                                            truoc.as_deref(),
+                                            &man,
+                                            sau.as_deref(),
+                                        );
+                                        let co = |c: Option<(usize, usize)>| {
+                                            c.map(|(r, k)| format!("{r}\u{00d7}{k}"))
+                                                .unwrap_or_else(|| "?".to_string())
                                         };
                                         logging::info(
                                             "screen_refreshed",
                                             json!({ "session": s.session_id, "window": w,
                                                     "chars": man.chars().count(),
-                                                    "changed": doi }),
+                                                    "verdict": format!("{pq:?}"),
+                                                    "size": co(co_truoc) }),
                                         );
-                                        let phan = match doi {
-                                            Some(true) => "màn ĐÃ đổi sau khi vẽ lại".to_string(),
-                                            Some(false) => format!(
-                                                "nhưng màn KHÔNG đổi một ký tự nào — nếu nó vẫn hiện sai thì \
-                                                 {ten} đang treo thật, không phải màn vẽ dở"
-                                            ),
-                                            None => "không đọc lại được màn để so, nên tôi CHƯA \
-                                                     xác nhận được nó có đổi không"
-                                                .to_string(),
+                                        let phan = match pq {
+                                            RefreshVerdict::Redrew => {
+                                                "màn ĐÃ đổi sau khi vẽ lại".to_string()
+                                            }
+                                            RefreshVerdict::Unchanged => {
+                                                "màn không đổi, và nó vốn đã có chữ — tức \
+                                                 không có gì để sửa"
+                                                    .to_string()
+                                            }
+                                            // 🔴 KHÔNG trả người ta về màn trắng.
+                                            // `screen_text_tall` trả lại chiều cũ vì nó
+                                            // là hàm ĐỌC; ở đây chiều cũ CHÍNH LÀ nguyên
+                                            // nhân, nên khôi phục nó là khôi phục cái hỏng.
+                                            RefreshVerdict::TooSmall => {
+                                                let noi = crate::keys::resize(
+                                                    w,
+                                                    crate::keys::GROW_ASK,
+                                                    crate::keys::GROW_ASK,
+                                                );
+                                                logging::warn(
+                                                    "screen_too_small_for_tui",
+                                                    json!({ "session": s.session_id, "window": w,
+                                                            "size": co(co_truoc),
+                                                            "kept_open": noi.is_ok() }),
+                                                );
+                                                match noi {
+                                                    // Xin `GROW_ASK` chứ không gõ một con số
+                                                    // đo được: Terminal kẹp giùm cho vừa màn
+                                                    // hình, nên cùng dòng mã đúng ở mọi máy.
+                                                    Ok(()) => format!(
+                                                        "cửa sổ đang {} và TUI KHÔNG vẽ nổi ở cỡ ấy (đọc ra trống), \
+                                                         nhưng nới ra là vẽ ngay ⟹ CỬA SỔ QUÁ NHỎ, không phải phiên treo. \
+                                                         Tôi để nó ở {} thay vì trả về cỡ cũ — trả về là trả anh lại màn trắng. \
+                                                         Kéo nhỏ lại lúc nào cũng được",
+                                                        co(co_truoc),
+                                                        co(crate::keys::size_of(w).ok())
+                                                    ),
+                                                    Err(e) => format!(
+                                                        "cửa sổ đang {} và TUI không vẽ nổi ở cỡ ấy — nới ra thì vẽ được, \
+                                                         nhưng tôi KHÔNG giữ nổi cỡ mới ({}), nên màn có thể vẫn trắng",
+                                                        co(co_truoc),
+                                                        crate::exec::truncate(&e.to_string(), 120)
+                                                    ),
+                                                }
+                                            }
+                                            RefreshVerdict::Unknown => {
+                                                "không đọc lại được màn để so, nên tôi CHƯA \
+                                                 xác nhận được nó có đổi không"
+                                                    .to_string()
+                                            }
                                         };
                                         format!("🔄 Đã bắt màn của {ten} vẽ lại — {phan}:\n\n{man}")
                                     }

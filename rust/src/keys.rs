@@ -2457,6 +2457,43 @@ end tell"#
 /// chiều ngang.
 pub const GROW_ASK: usize = 999;
 
+/// Cỡ hiện tại của cửa sổ: `(dòng, cột)`.
+pub fn size_of(window: i64) -> Result<(usize, usize)> {
+    let out = osascript(&format!(
+        r#"tell application "Terminal"
+  return (number of rows of selected tab of window id {window} as string) & "x" & (number of columns of selected tab of window id {window} as string)
+end tell"#
+    ))?;
+    let (r, c) = out
+        .trim()
+        .split_once('x')
+        .ok_or_else(|| anyhow::anyhow!("Terminal trả cỡ lạ: {out:?}"))?;
+    Ok((r.trim().parse()?, c.trim().parse()?))
+}
+
+/// Đặt cỡ cửa sổ và ĐỂ NGUYÊN ở đó — khác hẳn [`screen_text_tall`], thứ luôn
+/// trả lại chiều cũ.
+///
+/// 🔴 Vì sao phải có một hàm KHÔNG trả lại (đo trên cửa sổ thật của phiên
+/// `[social]`, 27/08, lúc Hà báo *"treo view"*): cửa sổ ấy đang `24×80` và ở cỡ
+/// đó TUI vẽ **25 byte — trống trơn**. Nới lên thì nó vẽ ngay (`40×120` → 620
+/// byte · `50×180` → 1084 byte). Phiên KHÔNG treo; cái treo là cửa sổ quá nhỏ.
+///
+/// Nên với `/refresh`, "trả lại chiều cũ" chính là trả người ta về màn trắng.
+/// Một lệnh sinh ra để SỬA màn mà kết thúc bằng cách khôi phục đúng nguyên nhân
+/// thì nó không sửa gì cả.
+///
+/// Cột trước, dòng sau — cùng thứ tự đã đo là về đúng cỡ ở `screen_text_tall`.
+pub fn resize(window: i64, rows: usize, cols: usize) -> Result<()> {
+    osascript(&format!(
+        r#"tell application "Terminal"
+  set number of columns of selected tab of window id {window} to {cols}
+  set number of rows of selected tab of window id {window} to {rows}
+end tell"#
+    ))?;
+    Ok(())
+}
+
 /// Đọc màn sau khi NỚI CAO cửa sổ, rồi trả lại đúng chiều cũ.
 ///
 /// 🔴 Hà 2026-08-19, sau khi tự cuộn màn rồi gõ `/shot` lại: *"đúng là bạn đang

@@ -10282,11 +10282,35 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         }
                                     }
                                 }
-                                // Câu ĐANG HIỆN đã có ☑ ngay tại dòng của nó,
-                                // nên khu chữ ở cuối chỉ còn việc với các câu
-                                // SAU — và với dòng `/send_…`.
+                                // 🔴 HỎI, ĐỪNG GIẢ ĐỊNH. Dòng này gõ cứng `true`
+                                // với lý lẽ *"câu đang hiện đã có ☑ ngay tại
+                                // dòng của nó"* — và cái ☑ ấy dựng từ
+                                // `shot_choices`, tức từ `keys::parse_choices`,
+                                // thứ **mù với bảng `AskUserQuestion`** (mỗi lựa
+                                // chọn có một dòng mô tả bên dưới, đúng hình dạng
+                                // luật "liền dòng" loại bỏ). CLAUDE.md đã ghi sự
+                                // mù ấy từ 14/08; dòng này vẫn tin vào nó.
+                                //
+                                // Hậu quả đo được (Hà 27/08: *"Có option nhưng
+                                // ko chọn được"*, lượt `/shot` 10:23:46Z của
+                                // `574e5be2`): tin mang **3** đích chạm cho Câu 2
+                                // — câu KHÔNG hiện trên màn — và **0** đích chạm,
+                                // 0 ký tự ☑, cho Câu 1 đang mở ngay trước mắt với
+                                // 5 lựa chọn. Câu đang hiện rơi trọn vào khe giữa
+                                // hai đường: đường trong-chữ mù, đường ở-đáy thì
+                                // cố ý bỏ qua nó.
+                                //
+                                // Nay bỏ câu đầu CHỈ KHI thật sự đã dựng được
+                                // đích chạm trong chữ. Fail-closed: không đo được
+                                // thì in cả câu đầu ra đáy — thừa một khu chữ còn
+                                // hơn một câu hỏi không có đường trả lời.
                                 if let Some(a) = shot_asking.as_ref() {
-                                    out.push_str(&ask_command_lines(&shot_sid, a, true));
+                                    let da_co_trong_chu = !shot_choices.is_empty();
+                                    out.push_str(&ask_command_lines(
+                                        &shot_sid,
+                                        a,
+                                        da_co_trong_chu,
+                                    ));
                                 }
                                 out
                             } else if matches!(cmd.kind, CommandKind::Pick) {

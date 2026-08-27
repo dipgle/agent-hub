@@ -70,8 +70,10 @@ fn the_watch_slice_never_stretches_a_shorter_loop() {
 /// đúng một giá trị — và không ai biết lúc nó thôi đúng.
 #[test]
 fn the_slice_follows_the_idle_requirement_it_is_chasing() {
-    let mut cfg = Config::default();
-    cfg.poll_interval_sec = 600;
+    let mut cfg = Config {
+        poll_interval_sec: 600,
+        ..Default::default()
+    };
     cfg.auto_handover.idle_sec = 120;
     let at_120 = watch_slice_sec(&cfg);
     cfg.auto_handover.idle_sec = 600;

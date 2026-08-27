@@ -35,7 +35,11 @@ use crate::adapters::CommandKind;
 /// lúc lệch thì nút hiện ra nhưng bấm vào huba trả lời *"Chưa hiểu lệnh này"* —
 /// đúng con bug `/key enter` đã trả giá sáng cùng ngày. `tests/keyboard.rs` khoá
 /// vòng tròn ấy lại.
-pub const KEYBOARD: &[(&str, &str)] = &[("📷 Xem màn", "/shot"), ("📋 Phiên", "/session")];
+pub const KEYBOARD: &[(&str, &str)] = &[
+    ("📷 Xem màn", "/shot"),
+    ("🔄 Làm tươi", "/refresh"),
+    ("📋 Phiên", "/session"),
+];
 
 /// `ttys014` — tên một tty như Terminal khai, đã bỏ `/dev/`.
 ///
@@ -517,6 +521,11 @@ pub fn parse_command(text: &str) -> Option<(CommandKind, i64, String)> {
         "upgrade" | "capnhat" => Some((CommandKind::Upgrade, 0, String::new())),
         // `/shot` — đọc màn của phiên đang theo.
         "shot" | "chup" => Some((CommandKind::Shot, 0, String::new())),
+        // 🔴 `/refresh` KHÔNG có nhánh ở đây, và đó là chỗ tôi suýt viết thừa
+        // (27/08). Nó khai `Arg::Rest` trong bảng, mà bảng trả lời TRƯỚC — một
+        // nhánh viết thêm ở đây không bao giờ tới lượt, y hệt ba nhánh `/win` ·
+        // `/cmd` · `/project` đã chết trước khi bị gỡ. `tests/routes_parse.rs`
+        // là thứ đo ra điều đó: cấy một route rồi thấy cổng vẫn xanh.
         // `/key <tên phím>` — một phím điều khiển.
         "key" | "phim" => {
             let what = t[1..]

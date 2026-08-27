@@ -5686,19 +5686,41 @@ pub fn stop_job(n: usize) -> Result<String, String> {
     let Some(job) = job else {
         return Err("việc ấy đã xong hoặc đã dừng rồi".to_string());
     };
-    let out = std::process::Command::new("/bin/kill")
-        .args(["-TERM", &format!("-{}", job.pid)])
-        .output()
-        .map_err(|e| e.to_string())?;
+    let ket = crate::exec::kill_group_verified(job.pid);
     logging::info(
         "long_job_stop_asked",
-        json!({ "n": n, "pid": job.pid, "ok": out.status.success(),
+        json!({ "n": n, "pid": job.pid, "verdict": format!("{ket:?}"),
                 "cmd": crate::exec::truncate(&job.line, 120) }),
     );
-    Ok(format!(
-        "⏹ đã bảo dừng: {}",
-        crate::exec::truncate(&job.line, 100)
-    ))
+    let line = crate::exec::truncate(&job.line, 100);
+    use crate::exec::GroupKill as G;
+    match ket {
+        G::AlreadyGone => Ok(format!(
+            "⏹ {line}\nNó đã tự xong trước khi tôi kịp gửi tín hiệu nào."
+        )),
+        G::GoneAfterTerm => Ok(format!(
+            "⏹ ĐÃ DỪNG HẲN: {line}\nĐọc lại nhóm tiến trình {} — không còn ai.",
+            job.pid
+        )),
+        G::GoneAfterKill => Ok(format!(
+            "⏹ ĐÃ DỪNG HẲN: {line}\nNó BỎ QUA lời xin dừng tử tế (TERM) nên tôi phải KILL; \
+             nhóm {} nay đã rỗng.",
+            job.pid
+        )),
+        // Đây là câu mà bản trước KHÔNG BAO GIỜ nói được, và vì thế Hà bấm bốn
+        // lần trong 13 phút mà không biết thêm gì.
+        G::StillAlive => Err(format!(
+            "CHƯA DỪNG ĐƯỢC: {line}\nĐã gửi TERM rồi KILL, đọc lại: nhóm tiến trình {} VẪN còn \
+             người sống — nó đang kẹt ở chỗ ngay cả KILL cũng không cắt được (thường là đang \
+             chờ đĩa/mạng trong nhân). Bấm lại cũng ra kết quả này; cần nhìn tận nơi.",
+            job.pid
+        )),
+        G::Unknown => Err(format!(
+            "đã gửi tín hiệu dừng cho {line}, nhưng KHÔNG hỏi lại được `/bin/kill` xem nhóm {} \
+             chết chưa — nên tôi CHƯA xác nhận nó đã dừng.",
+            job.pid
+        )),
+    }
 }
 
 /// Danh sách việc đang chạy, cho `/jobs` và cho câu trả lời khi có người hỏi.
@@ -9809,6 +9831,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             | CommandKind::Shot
             | CommandKind::Photo
             | CommandKind::Front
+            | CommandKind::Refresh
             | CommandKind::Clean
             | CommandKind::Clear
             | CommandKind::Tab
@@ -10100,6 +10123,117 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         format!(
                                             "⚠ không đưa được cửa sổ của {} ra trước: {}",
                                             crate::sessions::shown(&s),
+                                            crate::exec::truncate(&e.to_string(), 200)
+                                        )
+                                    }
+                                }
+                            } else if matches!(cmd.kind, CommandKind::Refresh) {
+                                // 🔴 `/refresh` — BẮT MÀN VẼ LẠI, và KHÔNG ngắt
+                                // lượt đang chạy.
+                                //
+                                // Hà 2026-08-27: *"Thi thoảng màn terminal bị
+                                // treo và không hiển thị đúng tôi phải ngồi máy
+                                // bấm ctrl+c nó mới làm tươi lại, có cách nào để
+                                // bắt được hoặc tôi thao tác gửi phím từ tele
+                                // thay việc này không"*.
+                                //
+                                // Không đi bằng Ctrl+C, và đó là cả thiết kế:
+                                // trên một phiên đang chạy dở nó NGẮT LƯỢT —
+                                // phím phá, không phải phím làm tươi. Ngồi ở máy
+                                // thì còn nhìn màn để biết lúc nào bấm được; từ
+                                // điện thoại thì đúng cái màn ấy đang hỏng, tức
+                                // bấm mù vào đúng lúc không được phép bấm mù.
+                                //
+                                // Đường không phá: ĐỔI KÍCH THƯỚC cửa sổ ⟹
+                                // Terminal gửi `SIGWINCH` ⟹ TUI vẽ lại toàn màn,
+                                // lượt đang chạy không hề hấn.
+                                // `keys::screen_text_tall` đã làm đúng động tác
+                                // ấy từ 20/08 (nới → đọc → TRẢ LẠI chiều cũ,
+                                // trọn trong MỘT lượt `osascript`, nên huba chết
+                                // giữa chừng cũng không bỏ lại cửa sổ ở chiều
+                                // lạ); ở đây gọi nó ra vì một MỤC ĐÍCH khác: sửa
+                                // cái màn, không phải đọc thêm chữ.
+                                //
+                                // 🔴 Và nó nằm TRONG khối này chứ không thành
+                                // một arm riêng — chỗ đắt không phải việc nới,
+                                // mà là việc TÌM CỬA SỔ. Bản đầu (viết 27/08,
+                                // chưa kịp chạy) gọi thẳng `sessions::snapshot`,
+                                // đúng đường mà khối này cố ý tránh: ba lần
+                                // spawn `claude` 279 MB, đo được **117–134 giây**
+                                // trên máy đang swap rồi còn trả "không thấy
+                                // phiên". Một lệnh chỉ được bấm LÚC màn đang hỏng
+                                // mà bắt chờ hai phút là hỏng đúng việc nó sinh
+                                // ra để làm.
+                                let ten = crate::sessions::shown(&s);
+                                // 🔴 ĐO, ĐỪNG KHAI. Cùng luật với `/front` ngay
+                                // trên: `osascript` trả 0 khi CÂU LỆNH chạy
+                                // xong, không khi việc đã xong. Ở đây khoảng
+                                // cách ấy còn rộng hơn — `SIGWINCH` tới được
+                                // Terminal không có nghĩa TUI vẽ lại, và nếu
+                                // phiên treo THẬT (tiến trình kẹt, không phải
+                                // màn vẽ dở) thì không gì đổi cả. Nói "đã làm
+                                // tươi" lúc ấy là nói hộ một việc chưa xảy ra,
+                                // đúng lúc chủ máy đang ở xa và không kiểm được.
+                                //
+                                // Phép so phải CÙNG CỠ: đọc thường → nới/đọc/trả
+                                // lại → đọc thường. So bản tall với bản thường
+                                // là so hai cách bẻ dòng khác nhau, tức "đổi" ở
+                                // mọi lượt — một phép đo không bao giờ đỏ.
+                                let truoc = crate::keys::screen_text(w).ok();
+                                match crate::keys::screen_text_tall(
+                                    w,
+                                    crate::keys::GROW_ASK,
+                                ) {
+                                    Ok(man) if !man.trim().is_empty() => {
+                                        let sau = crate::keys::screen_text(w).ok();
+                                        // Không đọc được một trong hai đầu ⟹
+                                        // KHÔNG có phán quyết, và đó là trạng
+                                        // thái thứ ba chứ không phải "không đổi".
+                                        let doi = match (&truoc, &sau) {
+                                            (Some(a), Some(b)) => Some(a != b),
+                                            _ => None,
+                                        };
+                                        logging::info(
+                                            "screen_refreshed",
+                                            json!({ "session": s.session_id, "window": w,
+                                                    "chars": man.chars().count(),
+                                                    "changed": doi }),
+                                        );
+                                        let phan = match doi {
+                                            Some(true) => "màn ĐÃ đổi sau khi vẽ lại".to_string(),
+                                            Some(false) => format!(
+                                                "nhưng màn KHÔNG đổi một ký tự nào — nếu nó vẫn hiện sai thì \
+                                                 {ten} đang treo thật, không phải màn vẽ dở"
+                                            ),
+                                            None => "không đọc lại được màn để so, nên tôi CHƯA \
+                                                     xác nhận được nó có đổi không"
+                                                .to_string(),
+                                        };
+                                        format!("🔄 Đã bắt màn của {ten} vẽ lại — {phan}:\n\n{man}")
+                                    }
+                                    // Nới xong mà đọc ra rỗng là một trạng thái
+                                    // RIÊNG, không phải "màn trống" và cũng không
+                                    // phải "đã làm tươi": Terminal nhận lệnh mà
+                                    // trả về không gì cả.
+                                    Ok(_) => {
+                                        logging::warn(
+                                            "screen_refresh_empty",
+                                            json!({ "session": s.session_id, "window": w,
+                                                    "effect": "nới xong đọc ra rỗng — KHÔNG khai là đã làm tươi" }),
+                                        );
+                                        format!(
+                                            "⚠ Đã nới cửa sổ của {ten} rồi trả lại chiều cũ, nhưng đọc ra RỖNG \
+                                             — màn có thể đã vẽ lại mà tôi không nhìn thấy. 📷 /shot xem lần nữa."
+                                        )
+                                    }
+                                    Err(e) => {
+                                        logging::warn(
+                                            "screen_refresh_failed",
+                                            json!({ "session": s.session_id, "window": w,
+                                                    "err": crate::logging::err_chain(&e) }),
+                                        );
+                                        format!(
+                                            "⚠ không nới được cửa sổ của {ten}: {}",
                                             crate::exec::truncate(&e.to_string(), 200)
                                         )
                                     }
@@ -11285,6 +11419,17 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         s.host
                                     ),
                                 }
+                            } else if matches!(cmd.kind, CommandKind::Refresh) {
+                                // Cùng bài học 19/08 ở ngay trên: một lời từ
+                                // chối nói về việc GÕ, gửi cho người vừa xin VẼ
+                                // LẠI, là lời từ chối lạc route. Và ở đây nó còn
+                                // sai về bản chất — phiên nền không vẽ TUI nào,
+                                // nên nó không thể có cái màn treo để làm tươi.
+                                format!(
+                                    "⚠ {ten} là phiên NỀN (host: {}) — không vẽ TUI nào, nên không có màn để vẽ lại.\n\
+                                     Đọc thì vẫn được: 📷 /shot lấy lời cuối từ nhật ký, /ask hỏi bên lề.",
+                                    s.host
+                                )
                             } else {
                                 format!(
                                     "⚠ {ten} là phiên NỀN (host: {}) — không có cửa sổ Terminal để gõ vào.\n\
@@ -11309,7 +11454,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let mut cmd_lines: Vec<String> = Vec::new();
                 // Tệp thấy trong chữ → neo cho liên kết 📎 (xem `file_anchors`).
                 let mut shot_files: Vec<(String, usize)> = Vec::new();
-                if matches!(cmd.kind, CommandKind::Shot | CommandKind::Tab) {
+                // `/refresh` đứng chung hàng với `/shot` ở đây, không phải vì
+                // tiện: `ack` của nó CŨNG là một màn của phiên, và luật "MỘT
+                // CỬA cho chữ của phiên" nói rõ cái người ta nhận ở Telegram
+                // phải thao tác được với lệnh của phiên ấy. Bỏ nó ra ngoài là
+                // dựng lại đúng thứ Hà đọc thành *"lúc được lúc không"*.
+                if matches!(
+                    cmd.kind,
+                    CommandKind::Shot | CommandKind::Tab | CommandKind::Refresh
+                ) {
                     // 🔴 2026-08-15 — NGUỒN đổi: sổ, không phải màn.
                     //
                     // `ack` ở đây là `contents of selected tab`, tức chữ đã đi
@@ -11401,7 +11554,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // ý nội dung chat cần có cách bấm nhanh để gửi nó"*). Đi đúng
                 // route `/key <id> enter` đã có — nút chỉ là phím tắt của một
                 // đường đi sẵn, không phải một nhánh xử lý mới.
-                if matches!(cmd.kind, CommandKind::Shot | CommandKind::Tab) {
+                if matches!(
+                    cmd.kind,
+                    CommandKind::Shot | CommandKind::Tab | CommandKind::Refresh
+                ) {
                     // 🔴 Hà 2026-08-14: *"Sao có 2 nút làm đi"*. Vì đúng hai
                     // khối cùng dựng nó: khối trên (`say:<n>`, cùng kho với
                     // lệnh) và khối này (`run:0`, một kho riêng). Cả hai đều

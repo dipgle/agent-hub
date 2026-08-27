@@ -89,6 +89,15 @@ pub const ROUTES: &[Route] = &[
         listed: false,
     },
     Route {
+        name: "refresh",
+        aliases: &["lamtuoi"],
+        kind: CommandKind::Refresh,
+        arg: Arg::Rest,
+        usage: "[id]",
+        help: "Bắt màn vẽ lại khi nó hiện sai (không ngắt lượt đang chạy)",
+        listed: true,
+    },
+    Route {
         name: "shot",
         aliases: &["chup"],
         kind: CommandKind::Shot,

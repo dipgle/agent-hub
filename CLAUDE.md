@@ -273,8 +273,12 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    not public endpoints.
 
    Routes: session · new · ask · tell · stop · close · handover · type · key ·
-   **pick** · shot · runin · **terminal** · run · doctor · set · upgrade · help ·
-   **accounts**.
+   **pick** · shot · **refresh** · runin · **terminal** · run · doctor · set ·
+   upgrade · help · **accounts**.
+   ⚠ Dòng trên là bản đọc cho người, KHÔNG phải nguồn: bảng thật là
+   `commands::ROUTES`, và nó đã trôi khỏi dòng này ít nhất một lần (`front`,
+   `anh`, `clean`, `clear`, `tab`, `web`, `enter`, `right` có trong bảng mà
+   không có ở đây). Cần con số đúng thì đọc bảng, đừng đếm dấu chấm giữa.
    (`ingest`/`poll` died 2026-08-14 with the poll stage — it read the chat room,
    and Telegram pushes. `cmd`/`win`/`project` died 2026-08-15: đo trên toàn bộ
    log thì `win` và `project` chưa chạy lần nào từ 26/07, `cmd` đúng một lần và

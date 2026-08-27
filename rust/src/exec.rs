@@ -215,22 +215,132 @@ const TASKPOLICY: &str = "/usr/bin/taskpolicy";
 /// Lỗi ở đây không báo ra ngoài vì "không giết được" gần như luôn có nghĩa là
 /// "nó chết rồi" — nhưng vẫn ghi log, vì một tiến trình không chịu chết là thứ
 /// đáng biết.
+/// Kết cục **ĐO ĐƯỢC** của một lần xin dừng — không phải "đã gửi tín hiệu".
+///
+/// 🔴 Vì sao cái enum này phải tồn tại (Hà 2026-08-27, ảnh Telegram: bấm
+/// `⏹ dừng lệnh này` **bốn lần**, mỗi lần huba đáp *"đã bảo dừng"*, và lệnh vẫn
+/// chạy tiếp 15 → 16 → 18 phút): `pipeline::stop_job` gửi đúng một SIGTERM rồi
+/// trả về một câu khẳng định. Nhật ký cho thấy `/bin/kill` trả **thành công cả
+/// bốn lần** (`long_job_stop_asked ok:true pid:97020`) trong khi việc còn sống
+/// thêm 13 phút — vì đích là `node` đang chạy Playwright, thứ tự cài bộ bắt
+/// SIGTERM của riêng nó. "Gửi được tín hiệu" và "nó chết" là hai mệnh đề khác
+/// nhau, và huba đã nói cái thứ hai trong khi chỉ đo được cái thứ nhất.
+///
+/// Đo trên chính máy này trước khi viết: `zsh -c 'trap "" TERM; sleep 60'` sống
+/// qua TERM (`kill -0` rc=0) và chết ngay khi KILL (rc=1) — nên bậc thang
+/// TERM → đọc lại → KILL → đọc lại là bậc thang đúng, và `kill -0` là phép đọc
+/// đúng.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupKill {
+    /// Nhóm đã rỗng TRƯỚC khi gửi tín hiệu nào — việc tự xong.
+    AlreadyGone,
+    GoneAfterTerm,
+    /// Bỏ qua TERM, chỉ chết khi KILL. Đây là ca đã cắn 27/08.
+    GoneAfterKill,
+    /// Gửi cả TERM lẫn KILL, đọc lại: VẪN còn người sống.
+    StillAlive,
+    /// KHÔNG ĐO ĐƯỢC — trạng thái riêng, cấm lẫn vào màu xanh (§13②).
+    Unknown,
+}
+
+/// Nhóm tiến trình `pgid` còn ai sống không. `None` = không hỏi được.
+///
+/// Hỏi cả NHÓM (`-pgid`) chứ không hỏi đứa con: câu cần trả lời là *"cả họ chết
+/// chưa"*. `exec::run` đặt `process_group(0)` nên pgid = pid của đứa con, và
+/// nhóm còn tồn tại chừng nào còn một tiến trình trong đó — kể cả khi trưởng
+/// nhóm đã chết mà cháu chắt còn sống.
 #[cfg(unix)]
-fn kill_group(pid: u32) {
-    for sig in ["-TERM", "-KILL"] {
-        let out = Command::new("/bin/kill")
-            .args([sig, &format!("-{pid}")])
+pub fn group_alive(pgid: u32) -> Option<bool> {
+    Command::new("/bin/kill")
+        .args(["-0", &format!("-{pgid}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()
+        .map(|s| s.success())
+}
+
+#[cfg(not(unix))]
+pub fn group_alive(_pgid: u32) -> Option<bool> {
+    None
+}
+
+/// Giết cả nhóm tiến trình của `pgid`, **rồi đọc lại xem nó chết chưa**.
+///
+/// Cùng luật với `/front` trong `pipeline.rs`: mã thoát của `/bin/kill` nói câu
+/// lệnh chạy xong, không nói việc đã xong. Nên mỗi bậc đều kết thúc bằng một
+/// lượt ĐỌC, và cái trả về là điều đo được chứ không phải điều đã gửi.
+#[cfg(unix)]
+pub fn kill_group_verified(pgid: u32) -> GroupKill {
+    match group_alive(pgid) {
+        None => return GroupKill::Unknown,
+        Some(false) => return GroupKill::AlreadyGone,
+        Some(true) => {}
+    }
+    // TERM trước rồi KILL: cho tiến trình cơ hội dọn dẹp, nhưng đừng CHỜ nó
+    // mãi. Hạn chờ đủ rộng cho một lượt dọn dẹp thật (đóng trình duyệt, xả
+    // tệp), đủ hẹp để người bấm nút không nghĩ là huba treo.
+    for (sig, han, xong) in [
+        (
+            "-TERM",
+            Duration::from_millis(2500),
+            GroupKill::GoneAfterTerm,
+        ),
+        (
+            "-KILL",
+            Duration::from_millis(1500),
+            GroupKill::GoneAfterKill,
+        ),
+    ] {
+        if let Err(e) = Command::new("/bin/kill")
+            .args([sig, &format!("-{pgid}")])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status();
-        if let Err(e) = out {
+            .status()
+        {
             crate::logging::warn(
                 "kill_group_failed",
-                serde_json::json!({ "pid": pid, "sig": sig, "err": e.to_string() }),
+                serde_json::json!({ "pgid": pgid, "sig": sig, "err": e.to_string() }),
             );
-            return;
+            return GroupKill::Unknown;
         }
-        thread::sleep(Duration::from_millis(200));
+        let han_chot = Instant::now() + han;
+        loop {
+            match group_alive(pgid) {
+                Some(false) => return xong,
+                None => return GroupKill::Unknown,
+                Some(true) => {
+                    if Instant::now() >= han_chot {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(150));
+                }
+            }
+        }
+    }
+    GroupKill::StillAlive
+}
+
+#[cfg(not(unix))]
+pub fn kill_group_verified(_pgid: u32) -> GroupKill {
+    GroupKill::Unknown
+}
+
+/// Đường HẾT GIỜ: cùng bậc thang, và nay nó GHI RA kết cục.
+///
+/// Trước 27/08 hàm này gửi TERM rồi KILL rồi thôi — "không giết được" bị coi là
+/// "nó chết rồi". Phần lớn lượt thì đúng, nhưng `StillAlive` là một sự thật
+/// khác hẳn và nó vừa xảy ra thật; một tiến trình không chịu chết là thứ đáng
+/// biết, nên nó phải nằm trong log dưới đúng cái tên của nó.
+#[cfg(unix)]
+fn kill_group(pid: u32) {
+    let ket = kill_group_verified(pid);
+    if matches!(ket, GroupKill::StillAlive | GroupKill::Unknown) {
+        crate::logging::warn(
+            "kill_group_unconfirmed",
+            serde_json::json!({ "pgid": pid, "verdict": format!("{ket:?}"),
+                                "effect": "hết giờ rồi mà nhóm chưa chắc đã chết" }),
+        );
     }
 }
 

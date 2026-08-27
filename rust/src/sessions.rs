@@ -189,6 +189,20 @@ pub struct LiveSession {
     /// mang nó: ô mật khẩu của một phiên `claude` là chuyện của chính CLI ấy.
     #[serde(default)]
     pub asking_password: bool,
+    /// Số **monitor** của `claude` còn chạy trong phiên này — đọc từ CHÂN MÀN.
+    ///
+    /// 🔴 Hà 2026-08-27: *"Một phiên đang có monitor thì luôn chèn thêm icon eye
+    /// vào để dễ nhận dạng"*. `monitor` là khái niệm của chính `claude` (chân màn
+    /// in `· 1 monitor still running`), KHÔNG phải "phiên đang được theo" — tôi
+    /// đọc nhầm một lượt trước khi Hà chỉ vào ảnh chụp.
+    ///
+    /// Khác `bg_shell` ở NGUỒN: một lệnh shell nền để lại tiến trình con trong
+    /// `ps` (`Procs::running_shell`), còn monitor thì không để lại gì cả — nó
+    /// chạy bên trong `claude`. Nên trường này chỉ điền được khi lượt dò có xin
+    /// chữ màn; không có màn thì `0`, và `0` ở đây nghĩa là "không thấy", không
+    /// phải "chắc chắn không có".
+    #[serde(default)]
+    pub monitors: usize,
     /// Phiên đang làm gì, bằng đúng chữ terminal hiện — `"Brewing… 10m43s"`.
     ///
     /// Hà 2026-08-10: *"ui chưa thể hiện được phiên đang làm gì ví dụ Brewing…;
@@ -1886,6 +1900,15 @@ fn tab_activity(tabs: &[crate::keys::Tab], tty: &str) -> Option<String> {
         // Màn có bí mật ⟹ không đoán, và không đưa chữ nào ra.
         _ => None,
     }
+}
+
+/// Mấy monitor còn chạy trong tab ấy — cùng nguồn chữ với [`tab_activity`], nên
+/// không tốn thêm một lượt `osascript` nào.
+fn tab_monitors(tabs: &[crate::keys::Tab], tty: &str) -> usize {
+    crate::keys::alive_tab(tabs, tty)
+        .and_then(|t| t.screen.as_deref())
+        .map(crate::keys::monitors_on_screen)
+        .unwrap_or(0)
 }
 
 /// Nhật ký đứng im bao nhiêu giây, tính từ mốc hoạt động cuối.
@@ -3822,6 +3845,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 // mật khẩu của một phiên `claude` là chuyện của chính CLI ấy, và
                 // nó đã có `asking` riêng — thứ `/pick` đọc.
                 asking_password: false,
+                // Điền ở khúc đọc màn bên dưới (`tab_monitors`).
+                monitors: 0,
                 account: account.name.clone(),
                 name: s
                     .get("name")
@@ -4040,6 +4065,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // đúng-sai, không còn nghĩa tiền bạc.
                     if row.working && !row.tty.is_empty() {
                         row.activity = tab_activity(&tabs, &row.tty);
+                        // Monitor chỉ đọc được từ màn — xem `keys::monitors_on_screen`.
+                        row.monitors = tab_monitors(&tabs, &row.tty);
                     }
                     row.context_tokens = parsed.context_tokens;
                     row.model = parsed.model.clone();

@@ -4216,6 +4216,70 @@ pub fn activity(screen: &str) -> Option<Activity> {
 /// bài kiểm `shell_is_not_busy` bắt đúng ca ấy trước khi nó kịp lên máy.
 ///
 /// Dòng chân thì nói thẳng và không đổi theo lượt: đang chạy thì nó mang
+/// Phiên có mấy **monitor** còn chạy — đọc từ CHÂN MÀN.
+///
+/// 🔴 Hà 2026-08-27: *"Một phiên đang có monitor thì luôn chèn thêm icon eye vào
+/// để dễ nhận dạng"* · *"monitor là cái đang chạy nền ở cuối màn hình"*.
+///
+/// `monitor` là khái niệm của chính `claude`, không phải của huba. Ảnh chụp Hà
+/// gửi có đúng hai chỗ in nó, và cả hai đều ở chân màn:
+///
+/// ```text
+/// ✳ Sautéed for 8s · 1 monitor still running
+/// ⏵⏵ auto mode on · 1 monitor · ← for agents · ↓ to manage
+/// ```
+///
+/// **Không có dấu vết nào trong `ps`** — khác hẳn `· 1 shell still running`, thứ
+/// mà `Procs::running_shell` bắt được qua tiến trình con `shell-snapshots`. Một
+/// monitor là việc nền BÊN TRONG `claude`, nên màn là nguồn duy nhất.
+///
+/// Hai cửa chặn đoán bừa, và cả hai đều cần:
+/// ① chỉ đọc **8 dòng cuối** còn chữ — chữ "monitor" nằm rải rác trong hội thoại
+///   (chính phiên này vừa bàn về nó cả buổi), quét cả màn là đếm nhầm lời bàn
+///   thành việc đang chạy;
+/// ② dòng phải có dấu `·` — cả hai dòng chân thật đều dùng nó làm dấu phân cách,
+///   còn một câu văn xuôi lỡ mang chữ "3 monitor" thì thường không có.
+///
+/// Trả về SỐ, không phải `bool`: chân màn khai *bao nhiêu* cái, và một ngày nào
+/// đó chỗ hiển thị có thể muốn nói ra con số ấy. Gộp thành `bool` ở đây là vứt
+/// một dữ kiện đã đọc được rồi.
+pub fn monitors_on_screen(screen: &str) -> usize {
+    screen
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .rev()
+        .take(8)
+        .filter(|l| l.contains('·'))
+        .filter_map(monitors_in_line)
+        .max()
+        .unwrap_or(0)
+}
+
+/// `… · 1 monitor …` → `Some(1)`. Tách ra để kiểm được từng dòng một.
+fn monitors_in_line(line: &str) -> Option<usize> {
+    // Bắt `<số> monitor` — số đứng NGAY TRƯỚC chữ, cách đúng một khoảng trắng.
+    // Không dùng regex: một phép tách chuỗi ở đây đọc được bằng mắt, và nó là
+    // thứ sẽ bị soi lại khi `claude` đổi chân màn.
+    for (i, _) in line.match_indices("monitor") {
+        let truoc = line[..i].trim_end();
+        let so: String = truoc
+            .chars()
+            .rev()
+            .take_while(char::is_ascii_digit)
+            .collect();
+        if so.is_empty() || truoc.len() == so.len() && truoc.is_empty() {
+            continue;
+        }
+        // Phải có khoảng trắng ngăn số với chữ, nếu không `10monitor` cũng lọt.
+        if line[..i].ends_with(' ') {
+            if let Ok(n) = so.chars().rev().collect::<String>().parse::<usize>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
 /// Cửa sổ đang đứng ở một Ô HỎI MẬT KHẨU (`sudo`, `ssh`, `ssh` + `sudo`).
 ///
 /// 🔴 Hà 2026-08-26: *"chạy ssh sudo thì sẽ hỏi mật khẩu, lệnh terminal thấy rồi

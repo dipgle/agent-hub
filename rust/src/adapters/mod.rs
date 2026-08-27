@@ -64,30 +64,17 @@ pub enum CommandKind {
     /// ký: hộp chọn đang chờ, thanh tiến trình, lỗi vừa in ra. `sessions::
     /// stream` đọc tệp, mà tệp chỉ có sau khi lượt kết thúc.
     Shot,
-    /// `/refresh` — BẮT TUI VẼ LẠI cả màn, rồi đọc lại.
-    ///
-    /// 🔴 Hà 2026-08-27: *"Thi thoảng màn terminal bị treo và không hiển thị
-    /// đúng tôi phải ngồi máy bấm ctrl+c nó mới làm tươi lại, có cách nào để bắt
-    /// được hoặc tôi thao tác gửi phím từ tele thay việc này không"*.
-    ///
-    /// **Không đi bằng Ctrl+C, và đó là cả thiết kế.** Trên một phiên đang chạy
-    /// dở, Ctrl+C NGẮT LƯỢT — nó là phím phá, không phải phím làm tươi. Ngồi ở
-    /// máy thì còn nhìn màn để biết lúc nào bấm được; từ điện thoại thì đúng cái
-    /// màn ấy đang hỏng, tức bấm mù vào đúng lúc không được phép bấm mù.
-    ///
-    /// Đường không phá: ĐỔI KÍCH THƯỚC cửa sổ. Terminal gửi `SIGWINCH`, TUI vẽ
-    /// lại toàn màn — chính là thứ Ctrl+C vô tình gây ra, nhưng không đụng gì
-    /// tới lượt đang chạy. `keys::screen_text_tall` đã làm đúng động tác ấy từ
-    /// 20/08 (nới → đọc → TRẢ LẠI chiều cũ, trọn trong một lượt `osascript`);
-    /// route này chỉ gọi nó ra vì một lý do khác: sửa cái màn, không phải đọc
-    /// thêm chữ.
-    ///
-    /// Xử ở đâu: **trong khối `/shot`·`/front`** của `pipeline::execute_commands`,
-    /// không phải một arm riêng — cách tìm cửa sổ mới là chỗ đắt, và khối ấy đi
-    /// đường sổ (`sessions::window_target_from_book`) thay cho `snapshot`, thứ đã
-    /// đo được **117–134 giây** trên máy đang swap. Lệnh này chỉ được bấm ĐÚNG
-    /// lúc màn đang hỏng, nên độ trễ ấy là hỏng chính nó.
-    Refresh,
+    // 🪦 `Refresh` — sống đúng một ngày (27/08). Nó nới cửa sổ để bắt TUI vẽ
+    // lại: đường ấy KHÔNG đi bằng Ctrl+C là có chủ ý, vì Ctrl+C ngắt lượt đang
+    // chạy dở. Hà thử trên máy rồi bác: *"Cách bạn xử lý màn bị treo không
+    // được, cứ để nó là lệnh ctrl+c cho tôi"* · *"Bỏ nút làm tươi ở phiên chát
+    // đi, trường hợp này ít xảy ra"*.
+    //
+    // Nay là route `/ctrlc` với `Arg::Fixed("ctrl-c")` đi vào `Key` — không
+    // handler riêng, không trạng thái riêng, không cái nút nào chiếm chỗ trên
+    // bàn phím thường trực. Cái mất đi khi gỡ: khả năng phân biệt "cửa sổ quá
+    // nhỏ" với "phiên treo" (đo được: cửa sổ 24×80 vẽ 0 chữ, nới ra 1405 byte).
+    // Phép đo ấy còn đúng, chỉ là chủ máy không cần huba tự làm hộ.
     /// `/anh` — ẢNH THẬT của màn hình, không phải chữ đọc từ tab.
     ///
     /// 🔴 Hà 2026-08-17: *"Thêm lệnh chụp ảnh màn hình để tôi xem thực sự đang

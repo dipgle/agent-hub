@@ -35,11 +35,11 @@ use crate::adapters::CommandKind;
 /// lúc lệch thì nút hiện ra nhưng bấm vào huba trả lời *"Chưa hiểu lệnh này"* —
 /// đúng con bug `/key enter` đã trả giá sáng cùng ngày. `tests/keyboard.rs` khoá
 /// vòng tròn ấy lại.
-pub const KEYBOARD: &[(&str, &str)] = &[
-    ("📷 Xem màn", "/shot"),
-    ("🔄 Làm tươi", "/refresh"),
-    ("📋 Phiên", "/session"),
-];
+// 🪦 `🔄 Làm tươi` — nằm đây đúng một ngày (27/08). Hà: *"Bỏ nút làm tươi ở
+// phiên chát đi, trường hợp này ít xảy ra"*. Bàn phím thường trực chiếm chỗ ở
+// MỌI tin, nên chỗ trên nó đắt hơn chỗ trong menu ☰; việc hiếm thì để ở menu.
+// Route vẫn sống dưới cái tên `/ctrlc` (alias `refresh`, `lamtuoi`).
+pub const KEYBOARD: &[(&str, &str)] = &[("📷 Xem màn", "/shot"), ("📋 Phiên", "/session")];
 
 /// `ttys014` — tên một tty như Terminal khai, đã bỏ `/dev/`.
 ///

@@ -89,12 +89,20 @@ pub const ROUTES: &[Route] = &[
         listed: false,
     },
     Route {
-        name: "refresh",
-        aliases: &["lamtuoi"],
-        kind: CommandKind::Refresh,
-        arg: Arg::Rest,
-        usage: "[id]",
-        help: "Bắt màn vẽ lại khi nó hiện sai (không ngắt lượt đang chạy)",
+        name: "ctrlc",
+        aliases: &["ctrl-c", "refresh", "lamtuoi"],
+        kind: CommandKind::Key,
+        // 🔴 `Arg::Fixed`, KHÔNG phải một route có handler riêng — và đó là cả
+        // bài học của ngày 27/08. Bản trước dựng hẳn `CommandKind::Refresh` +
+        // một nhánh xử lý riêng để nới cửa sổ; Hà thử rồi bác: *"Cách bạn xử lý
+        // màn bị treo không được, cứ để nó là lệnh ctrl+c cho tôi"*. Thứ anh
+        // muốn là phím anh vẫn bấm khi ngồi trước máy — mà `/key` đã gửi phím
+        // được từ lâu, nên việc duy nhất còn thiếu là một cái TÊN gọi nó ra.
+        // Menu ☰ của Telegram không khai được tham số, nên `/key ctrl-c` không
+        // vào menu được; một route mang sẵn tham số thì vào được.
+        arg: Arg::Fixed("ctrl-c"),
+        usage: "",
+        help: "Gửi Ctrl+C vào phiên — NGẮT lượt đang chạy dở",
         listed: true,
     },
     Route {

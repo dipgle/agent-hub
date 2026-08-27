@@ -5659,70 +5659,6 @@ fn say_term_result(text: &str) {
     }
 }
 
-/// Hai lượt đọc ở HAI cỡ cửa sổ nói lên chuyện gì.
-///
-/// 🔴 Hàm này viết lại HAI lần trong một ngày, và cả hai lần đều vì cùng một
-/// kiểu sai: hỏi câu dễ đo thay vì câu đáng hỏi.
-///
-/// **Lần một** — Hà: *"Phiên này đang bị kẹt không làm được gì, treo view"*. Đo
-/// trên chính cửa sổ ấy (`[social]`, window 16384):
-///
-/// ```text
-/// cửa sổ 24×80 (cỡ đang bị)   →    25 byte  ← trống trơn
-/// nới 999×999                  →  1405 byte  ← TUI VẼ ĐƯỢC
-/// trả lại 24×80                →    25 byte  ← và sau vài giây vẫn 25
-/// 40×120 → 620 byte  ·  50×180 → 1084 byte
-/// ```
-///
-/// Bản đầu so màn TRƯỚC với màn SAU **ở cùng một cỡ**, thấy y hệt (25 ↔ 25), rồi
-/// kết luận *"phiên đang treo thật"*. Phiên không treo; cửa sổ quá nhỏ để vẽ.
-///
-/// **Lần hai** — Hà bấm 🔄 rồi báo *"cửa sổ vẫn không to lên"*. Nhật ký:
-/// `session 171d0566 [huba] · size 24×80 · verdict Redrew`. Phép so cùng-cỡ ấy
-/// còn hỏng theo chiều NGƯỢC LẠI: phiên đang chạy thì hai lượt đọc cách nhau vài
-/// giây **luôn** khác nhau — `Redrew` là công của phiên vừa in thêm chữ, không
-/// phải của cú vẽ lại. Một phép đo dương giả ở đây và âm giả ở kia thì nó không
-/// đo cái nó khai.
-///
-/// Câu đáng hỏi không phải *"màn có đổi không"* mà **"nới ra thì đọc được
-/// không"** — và câu ấy chỉ cần hai lượt đọc ở hai cỡ.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RefreshVerdict {
-    /// Cỡ cũ ra màn TRẮNG, nới ra thì có chữ — cửa sổ quá nhỏ để TUI vẽ.
-    WasBlankNowDraws,
-    /// Cả hai lượt đọc đều có chữ: màn vốn vẽ được, nới ra để đọc trọn hơn.
-    Draws,
-    /// Nới hết cỡ VẪN không có chữ nào — chưa phân biệt được phiên treo với
-    /// Terminal không trả lời. Đây là ca duy nhất được phép nói tới chữ "treo".
-    StillBlank,
-    /// Không đọc được một trong hai đầu: KHÔNG có phán quyết (§13②).
-    Unknown,
-}
-
-/// `truoc` đọc ở cỡ cũ, `sau` đọc SAU khi đã nới hết cỡ.
-///
-/// 🔴 Không còn so `truoc` với `sau` để hỏi *"màn có đổi không"* — phép so ấy đã
-/// hỏng hai lần theo hai chiều ngược nhau, và cả hai đều đo được:
-/// * **Dương giả**: phiên `[huba]` đang chạy thì hai lượt đọc cách nhau vài giây
-///   luôn khác nhau, vì phiên vừa in thêm chữ. `Redrew` khi ấy là công của phiên,
-///   không phải của cú vẽ lại.
-/// * **Âm giả**: cửa sổ `[social]` trắng ở `24×80` thì trước == sau == trống, và
-///   bản cũ đọc sự giống nhau ấy thành *"phiên đang treo thật"*.
-///
-/// Câu đáng hỏi không phải *"màn có đổi không"* mà **"nới ra thì có đọc được
-/// không"** — và câu ấy chỉ cần hai lượt đọc ở HAI cỡ.
-pub fn refresh_verdict(truoc: Option<&str>, sau: Option<&str>) -> RefreshVerdict {
-    let co_chu = |t: &str| !t.trim().is_empty();
-    match (truoc, sau) {
-        (Some(a), Some(b)) => match (co_chu(a), co_chu(b)) {
-            (false, true) => RefreshVerdict::WasBlankNowDraws,
-            (_, true) => RefreshVerdict::Draws,
-            (_, false) => RefreshVerdict::StillBlank,
-        },
-        _ => RefreshVerdict::Unknown,
-    }
-}
-
 /// Việc đang chạy nền, để **theo dõi và dừng được** — thứ Hà đòi thay cho một
 /// con số timeout.
 #[derive(Debug, Clone)]
@@ -9895,7 +9831,6 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             | CommandKind::Shot
             | CommandKind::Photo
             | CommandKind::Front
-            | CommandKind::Refresh
             | CommandKind::Clean
             | CommandKind::Clear
             | CommandKind::Tab
@@ -10187,138 +10122,6 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         format!(
                                             "⚠ không đưa được cửa sổ của {} ra trước: {}",
                                             crate::sessions::shown(&s),
-                                            crate::exec::truncate(&e.to_string(), 200)
-                                        )
-                                    }
-                                }
-                            } else if matches!(cmd.kind, CommandKind::Refresh) {
-                                // 🔴 `/refresh` — BẮT MÀN VẼ LẠI, và KHÔNG ngắt
-                                // lượt đang chạy.
-                                //
-                                // Hà 2026-08-27: *"Thi thoảng màn terminal bị
-                                // treo và không hiển thị đúng tôi phải ngồi máy
-                                // bấm ctrl+c nó mới làm tươi lại, có cách nào để
-                                // bắt được hoặc tôi thao tác gửi phím từ tele
-                                // thay việc này không"*.
-                                //
-                                // Không đi bằng Ctrl+C, và đó là cả thiết kế:
-                                // trên một phiên đang chạy dở nó NGẮT LƯỢT —
-                                // phím phá, không phải phím làm tươi. Ngồi ở máy
-                                // thì còn nhìn màn để biết lúc nào bấm được; từ
-                                // điện thoại thì đúng cái màn ấy đang hỏng, tức
-                                // bấm mù vào đúng lúc không được phép bấm mù.
-                                //
-                                // Đường không phá: ĐỔI KÍCH THƯỚC cửa sổ ⟹
-                                // Terminal gửi `SIGWINCH` ⟹ TUI vẽ lại toàn màn,
-                                // lượt đang chạy không hề hấn.
-                                // `keys::screen_text_tall` đã làm đúng động tác
-                                // ấy từ 20/08 (nới → đọc → TRẢ LẠI chiều cũ,
-                                // trọn trong MỘT lượt `osascript`, nên huba chết
-                                // giữa chừng cũng không bỏ lại cửa sổ ở chiều
-                                // lạ); ở đây gọi nó ra vì một MỤC ĐÍCH khác: sửa
-                                // cái màn, không phải đọc thêm chữ.
-                                //
-                                // 🔴 Và nó nằm TRONG khối này chứ không thành
-                                // một arm riêng — chỗ đắt không phải việc nới,
-                                // mà là việc TÌM CỬA SỔ. Bản đầu (viết 27/08,
-                                // chưa kịp chạy) gọi thẳng `sessions::snapshot`,
-                                // đúng đường mà khối này cố ý tránh: ba lần
-                                // spawn `claude` 279 MB, đo được **117–134 giây**
-                                // trên máy đang swap rồi còn trả "không thấy
-                                // phiên". Một lệnh chỉ được bấm LÚC màn đang hỏng
-                                // mà bắt chờ hai phút là hỏng đúng việc nó sinh
-                                // ra để làm.
-                                let ten = crate::sessions::shown(&s);
-                                // 🔴 ĐO, ĐỪNG KHAI. Cùng luật với `/front` ngay
-                                // trên: `osascript` trả 0 khi CÂU LỆNH chạy
-                                // xong, không khi việc đã xong.
-                                //
-                                // 🔴 VÀ `/refresh` GIỮ CỠ TO, không trả lại —
-                                // Hà 27/08, sau khi bấm nút: *"cửa sổ vẫn không
-                                // to lên"*. Đúng luật bản trước (chỉ giữ khi màn
-                                // TRẮNG), và luật ấy hẹp hơn thứ anh cần; anh đã
-                                // nói một lần rồi hôm 20/08: *"Sao không mở rộng
-                                // cửa sổ ra hết cỡ"*. Ranh giới đúng là ranh giới
-                                // giữa hai VIỆC, không giữa hai trạng thái màn:
-                                // **`/shot` là ĐỌC nên trả lại cỡ; `/refresh` là
-                                // SỬA nên để nguyên cỡ to.**
-                                //
-                                // Nên ở đây KHÔNG dùng `screen_text_tall` (thứ
-                                // luôn khôi phục): nới một lần, đọc, để đó. Một
-                                // lần đổi cỡ thay vì ba, và cái màn ở lại đúng
-                                // trạng thái đọc được.
-                                let co_truoc = crate::keys::size_of(w).ok();
-                                let truoc = crate::keys::screen_text(w).ok();
-                                match crate::keys::resize(
-                                    w,
-                                    crate::keys::GROW_ASK,
-                                    crate::keys::GROW_ASK,
-                                ) {
-                                    Ok(()) => {
-                                        // TUI cần một nhịp mới vẽ xong khung mới
-                                        // — cùng con số `screen_text_tall` đã
-                                        // dùng từ 20/08. Đọc ngay là đọc dở.
-                                        std::thread::sleep(
-                                            std::time::Duration::from_millis(1200),
-                                        );
-                                        let sau = crate::keys::screen_text(w).ok();
-                                        let pq = refresh_verdict(
-                                            truoc.as_deref(),
-                                            sau.as_deref(),
-                                        );
-                                        let co = |c: Option<(usize, usize)>| {
-                                            c.map(|(r, k)| format!("{r}\u{00d7}{k}"))
-                                                .unwrap_or_else(|| "?".to_string())
-                                        };
-                                        let co_sau = co(crate::keys::size_of(w).ok());
-                                        let truoc_co = co(co_truoc);
-                                        logging::info(
-                                            "screen_refreshed",
-                                            json!({ "session": s.session_id, "window": w,
-                                                    "verdict": format!("{pq:?}"),
-                                                    "size_before": truoc_co,
-                                                    "size_after": co_sau,
-                                                    "chars": sau.as_deref()
-                                                        .map(|t| t.chars().count()) }),
-                                        );
-                                        let man = sau.unwrap_or_default();
-                                        match pq {
-                                            RefreshVerdict::WasBlankNowDraws => {
-                                                logging::warn(
-                                                    "screen_too_small_for_tui",
-                                                    json!({ "session": s.session_id, "window": w,
-                                                            "size_before": truoc_co }),
-                                                );
-                                                format!(
-                                                    "🔄 {ten}: ở {truoc_co} màn TRẮNG, nới lên {co_sau} là có chữ ngay \
-                                                     ⟹ cửa sổ quá nhỏ, KHÔNG phải phiên treo. Tôi để nguyên cỡ mới:\n\n{man}"
-                                                )
-                                            }
-                                            RefreshVerdict::Draws => format!(
-                                                "🔄 {ten}: đã vẽ lại và nới {truoc_co} → {co_sau} (để nguyên cỡ này \
-                                                 cho đọc trọn hơn):\n\n{man}"
-                                            ),
-                                            // Ca DUY NHẤT được phép nhắc chữ "treo"
-                                            // — và vẫn không được khẳng định nó.
-                                            RefreshVerdict::StillBlank => format!(
-                                                "⚠ {ten}: nới {truoc_co} → {co_sau} mà màn VẪN không có chữ nào. \
-                                                 Tôi CHƯA phân biệt được phiên treo với Terminal không trả lời — \
-                                                 cỡ mới giữ nguyên, 📷 /shot xem lần nữa."
-                                            ),
-                                            RefreshVerdict::Unknown => format!(
-                                                "⚠ {ten}: đã nới {truoc_co} → {co_sau}, nhưng KHÔNG đọc được màn \
-                                                 ở một trong hai đầu nên tôi chưa kết luận gì."
-                                            ),
-                                        }
-                                    }
-                                    Err(e) => {
-                                        logging::warn(
-                                            "screen_refresh_failed",
-                                            json!({ "session": s.session_id, "window": w,
-                                                    "err": crate::logging::err_chain(&e) }),
-                                        );
-                                        format!(
-                                            "⚠ không nới được cửa sổ của {ten}: {}",
                                             crate::exec::truncate(&e.to_string(), 200)
                                         )
                                     }
@@ -11504,17 +11307,6 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         s.host
                                     ),
                                 }
-                            } else if matches!(cmd.kind, CommandKind::Refresh) {
-                                // Cùng bài học 19/08 ở ngay trên: một lời từ
-                                // chối nói về việc GÕ, gửi cho người vừa xin VẼ
-                                // LẠI, là lời từ chối lạc route. Và ở đây nó còn
-                                // sai về bản chất — phiên nền không vẽ TUI nào,
-                                // nên nó không thể có cái màn treo để làm tươi.
-                                format!(
-                                    "⚠ {ten} là phiên NỀN (host: {}) — không vẽ TUI nào, nên không có màn để vẽ lại.\n\
-                                     Đọc thì vẫn được: 📷 /shot lấy lời cuối từ nhật ký, /ask hỏi bên lề.",
-                                    s.host
-                                )
                             } else {
                                 format!(
                                     "⚠ {ten} là phiên NỀN (host: {}) — không có cửa sổ Terminal để gõ vào.\n\
@@ -11544,10 +11336,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // CỬA cho chữ của phiên" nói rõ cái người ta nhận ở Telegram
                 // phải thao tác được với lệnh của phiên ấy. Bỏ nó ra ngoài là
                 // dựng lại đúng thứ Hà đọc thành *"lúc được lúc không"*.
-                if matches!(
-                    cmd.kind,
-                    CommandKind::Shot | CommandKind::Tab | CommandKind::Refresh
-                ) {
+                if matches!(cmd.kind, CommandKind::Shot | CommandKind::Tab) {
                     // 🔴 2026-08-15 — NGUỒN đổi: sổ, không phải màn.
                     //
                     // `ack` ở đây là `contents of selected tab`, tức chữ đã đi
@@ -11639,10 +11428,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // ý nội dung chat cần có cách bấm nhanh để gửi nó"*). Đi đúng
                 // route `/key <id> enter` đã có — nút chỉ là phím tắt của một
                 // đường đi sẵn, không phải một nhánh xử lý mới.
-                if matches!(
-                    cmd.kind,
-                    CommandKind::Shot | CommandKind::Tab | CommandKind::Refresh
-                ) {
+                if matches!(cmd.kind, CommandKind::Shot | CommandKind::Tab) {
                     // 🔴 Hà 2026-08-14: *"Sao có 2 nút làm đi"*. Vì đúng hai
                     // khối cùng dựng nó: khối trên (`say:<n>`, cùng kho với
                     // lệnh) và khối này (`run:0`, một kho riêng). Cả hai đều

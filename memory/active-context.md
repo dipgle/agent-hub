@@ -1,5 +1,61 @@
 # active context — huba
 
+## 🎯 2026-08-27 — hai nút KHAI một việc mà không ĐO nó
+
+`fmt 0` · `clippy --all-targets 0` · **109/109 tệp test · 637 ca xanh · 0 đỏ**
+(38 ca `#[ignore]` = bài live cần Terminal thật). Cài `hubd@2026-08-27T07:32:03Z`,
+`--verify` KHỚP, đã đẩy `4a24891` + `2644d4f`.
+
+### ⏹ Nút dừng YẾU HƠN cái đồng hồ
+
+Hà bấm `⏹ dừng lệnh này` **bốn lần**, mỗi lần nhận *"đã bảo dừng"*, lệnh vẫn chạy
+15 → 16 → 18 phút. Nhật ký: `/bin/kill` **thành công cả bốn lần**
+(`long_job_stop_asked ok:true pid:97020`) — đích là `node` chạy Playwright, thứ
+tự cài bộ bắt SIGTERM. *"Gửi được tín hiệu"* ≠ *"nó chết"*, và huba khẳng định
+vế sau trong khi chỉ đo được vế trước.
+
+Ngược đời: đường HẾT GIỜ tự động (`exec::kill_group`) vốn đã leo thang TERM →
+KILL từ lâu. **Cái nút một con người bấm lại yếu hơn cái đồng hồ.**
+
+`exec::kill_group_verified` nay TERM → đọc lại → KILL → đọc lại (`kill -0` trên
+cả NHÓM), trả `GroupKill` — điều đo được. Năm câu cho năm trạng thái, trong đó
+có câu bản cũ không bao giờ nói được: *"CHƯA DỪNG ĐƯỢC … bấm lại cũng ra kết quả
+này"*. Đối chứng ngược đã chạy: gỡ bậc KILL ⟹ `StillAlive` ≠ `GoneAfterKill`, 101.
+
+### 🔄 Màn trắng là CỬA SỔ QUÁ NHỎ, không phải phiên treo
+
+Hà: *"Phiên này đang bị kẹt không làm được gì, treo view"*. Đo trên cửa sổ ấy
+(`[social]`, ttys013, window 16384): `24×80` → **25 byte** · nới `999×999` →
+**1405 byte** · trả lại `24×80` → 25 byte · đọc lại sau vài giây → 25 byte ·
+`40×120` → 620 · `50×180` → 1084. **TUI sống; cửa sổ quá nhỏ để vẽ.**
+
+`/refresh` cài buổi sáng chẩn đoán SAI đúng ca này: nó so màn TRƯỚC với SAU ở
+CÙNG một cỡ, thấy y hệt, rồi kết luận *"phiên đang treo thật"* — trong khi bản
+đọc lúc nới (1405 byte) nằm sẵn trong tay nó. `refresh_verdict` nay đọc cả ba,
+cho `Redrew · TooSmall · Unchanged · Unknown`; gặp `TooSmall` thì `keys::resize`
+**giữ cửa sổ ở cỡ nới** — trả về cỡ cũ là trả người ta lại màn trắng.
+
+### 📐 Hai chỗ phép ĐO của tôi hỏng trước khi mã hỏng
+
+* `tests/routes_parse.rs` ca cấy đầu tiên **LỌT**: `verbs::parse_command` tra
+  `commands::lookup` TRƯỚC, nên hai bảng đã dính liền cho 4 hạng `Arg`. Cổng chỉ
+  đo thật được **3 route `Arg::Custom`** — mẫu số ấy nay khai thẳng trong tệp,
+  kèm `measured_surface_is_not_empty` bắt đỏ khi nó về 0. Cùng lượt lôi ra nhánh
+  `"refresh"|"lamtuoi"` trong `verbs.rs` là **mã chết**.
+* Lượt quét test: **hai lượt chạy chồng nhau** (một lượt cũ tôi tưởng đã giết)
+  cùng giành osascript ⟹ `ask_table_live` trông như treo 3 phút; máy sạch thì 13s.
+* `clippy` tới hôm nay vẫn chấm lib+bins: **lớp test chưa từng bị lint**. Bật
+  `--all-targets` là đỏ ngay (`auto_handover_cadence.rs:74`).
+
+### ⏭ Việc kế tiếp
+
+**Cả hai nút chỉ Hà nghiệm thu được** — chúng sống ở đầu kia của cây cầu:
+① bấm `⏹` trên một lệnh bỏ qua TERM ⟹ phải đọc *"Nó BỎ QUA lời xin dừng tử tế
+(TERM) nên tôi phải KILL"* và lệnh biến khỏi dòng `⚡ đang chạy trên máy`;
+② bấm `🔄 Làm tươi` trên một màn trắng ⟹ phải đọc *"cửa sổ đang 24×80 và TUI
+KHÔNG vẽ nổi ở cỡ ấy … Tôi để nó ở 61×206"* và cửa sổ ở lại cỡ to.
+
+
 ## 🎯 2026-08-25 — bốn bản vá, và một PHÉP ĐO của tôi bị bác
 
 `exit: 0` · **604 passed** · 0 failed · 37 ignored · 94 tệp · **0 warning**.

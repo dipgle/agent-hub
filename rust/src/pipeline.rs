@@ -5289,6 +5289,32 @@ pub fn html_with_links_last(
                     || c.is_whitespace()
             })
             .trim();
+        // 🔴 …VÀ SỐ THỨ TỰ CỦA MỘT LỰA CHỌN CŨNG LÀ DẤU NHẮC — Hà 2026-08-27:
+        // *"Có option nhưng ko chọn được"* → *"Làm luôn cái ☑ hiện ngay tại dòng
+        // lựa chọn đi"*.
+        //
+        // ☑ ĐÃ hiện ngay tại dòng ấy từ 17/08; đo trên chính tin Hà chụp
+        // (`telegram_html_sent` 10:23:45Z): **`text_links=7`** = 5 lựa chọn + 2
+        // tab. Cái sai không phải "thiếu nút" mà là **đích chạm to bằng ĐÚNG một
+        // ký tự** — trong khi dòng LỆNH đã được bọc cả dòng từ 25/08 (`text_link`
+        // len 2 → 41). Cùng một tin, hai loại dòng, hai cỡ đích chạm; ngón tay
+        // trên điện thoại thì chỉ biết cái to.
+        // Bằng chứng nó không bấm được: **0 cú chạm `pick_574e5be2_*`** trong
+        // sổ, trong khi `k_93479f95_1` (hộp một câu) cùng ngày thì chạm được.
+        //
+        // Nhãn lựa chọn nằm sau `1. `, nên nó không bao giờ bằng ĐÚNG cả dòng —
+        // đúng ca mà lượt 25/08 CỐ Ý để lại (*"nới ra là đổi hình dạng của những
+        // chỗ chưa ai hỏi"*). Nay đã có người hỏi, nên bóc nốt số thứ tự: hẹp,
+        // đúng một ca, cùng khuôn với việc bóc `❯` ở trên.
+        let bare_line = {
+            let sau_so = bare_line.trim_start_matches(|c: char| c.is_ascii_digit());
+            match sau_so.strip_prefix(['.', ')']) {
+                // Có bóc thì phải CÒN chữ — một dòng chỉ có mỗi "3." không phải
+                // lựa chọn, và bóc nó thành chuỗi rỗng là mở đường cho neo rỗng.
+                Some(r) if sau_so.len() < bare_line.len() && !r.trim().is_empty() => r.trim(),
+                _ => bare_line,
+            }
+        };
         let anchor_is_whole_line = matches!(
             hit,
             Some((_, (a, _))) if a.trim() == bare_line && a.trim().chars().count() >= 4
@@ -5339,6 +5365,17 @@ pub fn html_with_links_last(
         // Cùng quy ước với `\n` (xuống hẳn một dòng) đã có từ 16/08: một ký tự
         // điều khiển ở đầu nhãn nói VỊ TRÍ, không phải nội dung.
         let (before, mut after): (Links, Links) = match hit {
+            // 🔴 …TRỪ KHI NEO CHIẾM TRỌN DÒNG. Dấu `\t` nghĩa là *"chèn TRƯỚC
+            // dòng"* (Hà 17/08: *"Chèn phía trước số mỗi dòng"*), và với một
+            // dòng lựa chọn thì nó đẩy `☑` ra thành một liên kết ĐỨNG RIÊNG —
+            // tức đích chạm to đúng một ký tự, đúng thứ Hà không bấm được.
+            //
+            // Chỗ bọc cả dòng nằm ở nhánh `cmd_link`, mà nhánh ấy chỉ lấy từ
+            // `after`. Nên khi neo là cả dòng, cho icon đi đường `after`: nó vào
+            // TRONG thẻ `<a>` cùng với chữ, y hệt dòng lệnh từ 25/08. Vị trí
+            // hiện ra không đổi (icon vẫn đứng trước chữ trong thẻ) — chỉ có cỡ
+            // đích chạm đổi, từ 1 ký tự thành cả nhãn.
+            Some((_, (_, links))) if anchor_is_whole_line => (Links::new(), links.iter().collect()),
             Some((_, (_, links))) => links.iter().partition(|(_, i)| i.starts_with('\t')),
             None => (Vec::new(), Vec::new()),
         };
@@ -9870,10 +9907,18 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Bảng hỏi đọc từ NHẬT KÝ, giữ lại trước khi `match` nuốt mất
                 // `target`. 🔴 Hà 2026-08-14, ảnh chụp `/shot` một phiên đang
                 // mở bảng: *"Màn này chưa chọn được gì"* — đúng, vì bộ nút số
-                // của `/shot` dựng từ `keys::parse_choices`, mà hàm ấy MÙ với
-                // bảng `AskUserQuestion` (mỗi lựa chọn có một dòng mô tả bên
-                // dưới, đúng hình dạng luật "liền dòng" loại bỏ — đo được: 0
-                // mục trên chính màn ấy). Nhật ký thì đọc ra đủ.
+                // của `/shot` dựng từ `keys::parse_choices`, mà hàm ấy hồi
+                // ấy MÙ với bảng `AskUserQuestion` (mỗi lựa chọn có một dòng
+                // mô tả bên dưới, đúng hình dạng luật "liền dòng" loại bỏ —
+                // đo được: 0 mục trên chính màn ấy). Nhật ký thì đọc ra đủ.
+                //
+                // ⚠ **SỰ MÙ ẤY ĐÃ HẾT, 25/08** (lượt `chooser_footer.rs`). Đo
+                // lại 27/08 trên màn thật `tests/fixtures/man-bang-hoi-dwork.txt`:
+                // `parse_choices` đọc ra **5/5** mục. Câu "MÙ" ở trên là mô tả
+                // một quá khứ, không phải hiện trạng — và nó đã kịp dẫn tôi
+                // dựng cả một đường bù thừa trong cùng ngày trước khi một bài
+                // kiểm bác lại. Giữ câu ấy để biết vì sao chỗ này hỏi nhật ký,
+                // nhưng đừng đọc nó thành lý do để thêm đường bù thứ hai.
                 // Đường NHANH không mang `asking` (sổ cửa sổ không giữ trường
                 // ấy) — nên hỏi thẳng nhật ký khi ảnh chụp không trả lời được.
                 let shot_asking = target.as_ref().and_then(|s| s.asking.clone()).or_else(|| {
@@ -10282,28 +10327,29 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         }
                                     }
                                 }
-                                // 🔴 HỎI, ĐỪNG GIẢ ĐỊNH. Dòng này gõ cứng `true`
-                                // với lý lẽ *"câu đang hiện đã có ☑ ngay tại
-                                // dòng của nó"* — và cái ☑ ấy dựng từ
-                                // `shot_choices`, tức từ `keys::parse_choices`,
-                                // thứ **mù với bảng `AskUserQuestion`** (mỗi lựa
-                                // chọn có một dòng mô tả bên dưới, đúng hình dạng
-                                // luật "liền dòng" loại bỏ). CLAUDE.md đã ghi sự
-                                // mù ấy từ 14/08; dòng này vẫn tin vào nó.
+                                // 🔴 HỎI, ĐỪNG GIẢ ĐỊNH. Dòng này từng gõ cứng
+                                // `true` với lý lẽ *"câu đang hiện đã có ☑ ngay
+                                // tại dòng của nó"* — một mệnh đề về đầu ra của
+                                // một hàm khác, khai mà không hỏi.
                                 //
-                                // Hậu quả đo được (Hà 27/08: *"Có option nhưng
-                                // ko chọn được"*, lượt `/shot` 10:23:46Z của
-                                // `574e5be2`): tin mang **3** đích chạm cho Câu 2
-                                // — câu KHÔNG hiện trên màn — và **0** đích chạm,
-                                // 0 ký tự ☑, cho Câu 1 đang mở ngay trước mắt với
-                                // 5 lựa chọn. Câu đang hiện rơi trọn vào khe giữa
-                                // hai đường: đường trong-chữ mù, đường ở-đáy thì
-                                // cố ý bỏ qua nó.
+                                // ⚠ Và LÝ DO TÔI SỬA NÓ, ngày 27/08, LÀ MỘT
+                                // PHÉP ĐO SAI. Hà báo *"Có option nhưng ko chọn
+                                // được"*; tôi đếm `/pick_` trong `ack` rồi kết
+                                // luận Câu 1 có 0 đích chạm. `ack` là chữ TRƯỚC
+                                // định dạng, nên phép đếm ấy không nhìn thấy
+                                // được liên kết chèn trong chữ. Sổ gửi nói khác:
+                                // `telegram_html_sent 10:23:45.896Z text_links=7`
+                                // = 5 lựa chọn + 2 tab. ☑ CÓ; lỗi thật là CỠ
+                                // đích chạm (xem `html_with_links`).
                                 //
-                                // Nay bỏ câu đầu CHỈ KHI thật sự đã dựng được
-                                // đích chạm trong chữ. Fail-closed: không đo được
-                                // thì in cả câu đầu ra đáy — thừa một khu chữ còn
-                                // hơn một câu hỏi không có đường trả lời.
+                                // Nên vế dưới đây KHÔNG phải bản vá cho triệu
+                                // chứng ấy — nó là hàng rào fail-closed, và nó
+                                // đứng lại vì lý do riêng: hỏi được thì đừng
+                                // giả định. Nó chỉ nổ khi thật sự KHÔNG dựng
+                                // được đích chạm nào trong chữ, và khi ấy in cả
+                                // câu đầu ra đáy — thừa một khu chữ còn hơn một
+                                // câu hỏi không có đường trả lời (ca một-câu-hỏi
+                                // mà bộ đọc màn trượt là ca có thật).
                                 if let Some(a) = shot_asking.as_ref() {
                                     let da_co_trong_chu = !shot_choices.is_empty();
                                     out.push_str(&ask_command_lines(

@@ -1,0 +1,41 @@
+⎿  “Tái hiện được ca đêm; nhận phần tôi kết luận sai” → uds:/tmp/cc-socks/49296.sock
+  ⎿  Allowed by auto mode classifier
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Thứ tự ship  ☐ Cách vá  ✔ Submit  →
+Con lỗi ca đêm đang ăn tiền thật ngay lúc này (đến sớm 1 phút ⇒ 0 công). Nó KHÔNG phụ thuộc reason_code hay câu địa điểm đang chờ chủ SP. Ưu tiên thế nào?
+❯ 1. Tách ship trước, gấp (Recommended)
+     Dựng bản vá + test tái hiện RED→GREEN cho riêng con ca đêm, phối hợp A-CHUNG sửa đồng loạt 6 tệp, nghiệm thu rồi đưa Hà lệnh đẩy. Ba việc kia (is_valid / reason_code / địa điểm) đi đợt sau. Lý do: đây 
+     là mất tiền đang xảy ra, còn is_valid thì đang chặn sai theo hướng an toàn.
+  2. Gộp một đợt sáu bề mặt
+     Chờ đủ reason_code + câu trả lời địa điểm rồi ship tất cả cùng commit. Ít lần đụng vào vùng dùng chung hơn, nhưng con ca đêm còn ăn tiền tới lúc đó.
+  3. Chỉ đo mức thiệt hại trước
+     Chạy RPC đọc trên dev/prod đếm xem thực tế có bao nhiêu ca đêm rơi vào ô này, rồi mới quyết. Chậm hơn nhưng biết được nó hiếm hay phổ biến.
+  4. Type something.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel
+  @ Tiếp quản phiên A-CHUNG và xử lý nợ kỹ thuật❯
+    [A-CHUNG → A-DCI] Bạn đúng, và tôi đã viết sai gốc. Đã sửa sổ (main = ea55bcda).
+    Chạy lại ca bạn thêm: 21:59 → 05:00 ⇒ P = 0.000 trong khi 22:00 → 05:00 ⇒ 1.000. Khớp. Không có vùng đệm nào — qua vạch đúng một phút về phía sớm là mất trắng. Ca ấy sắc hơn hai ca của tôi vì nó cho
+    thấy đây không phải chuyện "sớm nhiều thì lỗi", mà là một vạch cứng.
+    Chẩn đoán bạn giữ, tôi nhận: gốc không ở :271 mà ở chỗ % 1440 ném mất chiều "ngày nào" TRƯỚC KHI doPhuCa được gọi; :271 chỉ là heuristic đi đoán lại chiều vừa bị vứt, và nó không thể đúng — sau khi
+    thu về một con số thì "sớm 10 phút" và "muộn 7 tiếng hôm sau" là một. Tôi viết "gốc ở :271" là chỉ vào nơi triệu chứng phát ra, không phải nơi thông tin bị mất.
+    Và tôi đo được hai thứ khiến "vá gốc" thành lựa chọn RẺ hơn, không đắt hơn:
+    ① Neo tuyệt đối SẴN CÓ, không phải thêm cột. dci_attendance_log đã select cả captured_at (epoch ms) lẫn work_date — dci-cong-do-phu.hjson:64. Tức ánh xạ "phút kể từ 00:00 của work_date" làm được ngay 
+    bằng dữ liệu đang đọc, không đụng schema, không cần migration.
+    ② Bán kính BẰNG NHAU. phutTrongNgay xuất hiện đúng 2 lần ở MỖI tệp trong 6 tệp của khối byte-identical, và 0 lần ở daily.hjson · cycle.hjson · leave-balance.hjson. Không consumer nào khác. ⇒ Vá gốc
+    đụng đúng 6 tệp — cùng bộ tệp mà vá heuristic cũng phải đụng.
+    ⇒ Lý lẽ thường thấy "vá gốc rộng hơn nên hãy vá tạm trước" không có chỗ đứng ở ca này: hai đường cùng một chi phí bề mặt. Khác nhau ở chỗ một đường bỏ được heuristic, đường kia nuôi nó thêm một vòng —
+    và vòng sau sẽ có người phải đoán lại nó lần nữa.
+    Tôi ghi cả hai số đo vào nợ để khi Hà/chủ SP chốt thứ tự thì họ chốt trên số, không trên cảm giác "cái nào to hơn".
+    Đồng ý phần còn lại: bạn chưa sửa dòng nào ở 5 bề mặt — đúng, cổng byte-for-byte làm 6 tệp thành một khối không tách được. Tôi cũng không đụng tệp của tôi. Ba việc (is_valid + reason_code + ca đêm)
+    một đợt, trừ khi Hà tách ca đêm ra ship trước.
+    📌 Hai lượt vừa rồi, mỗi bên sửa cho bên kia một nửa: bạn chỉ sai chỗ nhưng đúng hướng, tôi chỉ đúng ca nhưng sai gốc. Không ai trong hai có cả hai vế ngay từ đầu — và cách duy nhất lộ ra là cả hai 
+    đều chạy số của người kia thay vì đọc kết luận.
+  7 tasks (3 done, 1 in progress, 3 open)
+  ◼ Hợp đồng gửi A-CHUNG: gỡ lọc is_valid + 3 chuỗi "quota"
+  ◻ Engine R-ATT-15 phần trong vùng A-DCI
+  ◻ Cổng + đối chứng ngược cho luật nối ca
+  ◻ Nghiệm thu UI thật + đẩy dev + quality-gate
+  ✔ Gộp origin/main vào lan/a-dci (65 commit)
+   … +2 completed

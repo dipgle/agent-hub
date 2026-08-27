@@ -83,14 +83,25 @@ fn a_file_path_in_the_middle_of_a_line_is_wrapped_whole() {
     );
 }
 
-/// 🔴 HÀNG RÀO NGƯỢC — cái nới 25/08 chỉ nới cho ĐƯỜNG DẪN, không cho nhãn lựa
-/// chọn. Nhãn lựa chọn đứng sau số thứ tự (`1. Vá ACL`), và đích chạm ☑ của nó
-/// cố ý nằm ở ĐẦU dòng (Hà 17/08: *"Chèn phía trước số mỗi dòng"*) — mắt chạy
-/// dọc cột số để chọn, nên bọc cả cụm là kéo nó ra khỏi cột ấy.
+/// 🪦 **ĐẢO CHIỀU 2026-08-27**, không xoá — bài này từng khoá điều NGƯỢC LẠI.
 ///
-/// Thiếu bài này thì "nới cho 📎" và "nới cho tất cả" trông giống hệt nhau.
+/// Bản 25/08 viết: *"cái nới chỉ nới cho ĐƯỜNG DẪN, không cho nhãn lựa chọn …
+/// đích chạm ☑ cố ý nằm ở ĐẦU dòng (Hà 17/08: 'Chèn phía trước số mỗi dòng') —
+/// mắt chạy dọc cột số để chọn, nên bọc cả cụm là kéo nó ra khỏi cột ấy"*. Lý
+/// lẽ ấy nói về chỗ ĐẶT, và nó vẫn đúng: ☑ vẫn đứng đầu, trước nhãn.
+///
+/// Cái nó bỏ quên là **CỠ**. Hà 27/08: *"Có option nhưng ko chọn được"* →
+/// *"Làm luôn cái ☑ hiện ngay tại dòng lựa chọn đi"*. Đo trên tin thật
+/// (`telegram_html_sent 10:23:45.896Z`): `text_links=7`, tức nút CÓ — mà **0 cú
+/// chạm `pick_574e5be2_*`** trong sổ, trong khi `k_93479f95_1` (đích chạm khác)
+/// cùng ngày thì chạm được. Đích chạm to đúng một ký tự thì mắt thấy được mà
+/// ngón tay không trúng.
+///
+/// Nên nay nhãn nằm TRONG thẻ cùng ☑ — y hệt dòng lệnh từ 25/08 (`text_link`
+/// len 2 → 41). Vị trí không đổi, chỉ cỡ đổi. Giữ bài này ở chiều mới để lần
+/// sau ai nới/thu cũng phải đi qua một quyết định có người chốt.
 #[test]
-fn a_choice_label_after_its_number_keeps_the_old_shape() {
+fn a_choice_label_is_tappable_along_its_whole_length() {
     let man = "  1. Vá ACL trước, đăng nhập sau\n";
     let anchors = vec![(
         "Vá ACL trước, đăng nhập sau".to_string(),
@@ -102,12 +113,24 @@ fn a_choice_label_after_its_number_keeps_the_old_shape() {
     let (html, linked, _) = html_with_links(man, &anchors);
     assert_eq!(linked, 1, "{html}");
     assert!(
-        !html.contains("☑ Vá ACL trước, đăng nhập sau</a>"),
-        "nhãn lựa chọn bị bọc cả cụm — bản vá 📎 nới lan sang chỗ chưa ai hỏi:\n{html}"
+        html.contains("☑ Vá ACL trước, đăng nhập sau</a>"),
+        "nhãn phải nằm TRONG thẻ cùng ☑ — ngoài thẻ thì đích chạm chỉ to bằng một \
+         ký tự, đúng thứ Hà không bấm trúng:\n{html}"
+    );
+    // ⚠ KHÔNG assert `"1. Vá ACL"` liền nhau nữa — đó là phép đo của bản CŨ, và
+    // nó sai ngay sau bản vá: thẻ `<a>` nay chen vào giữa số và nhãn. Một assert
+    // thừa hưởng từ hành vi cũ sẽ đỏ vì chính bản vá đúng.
+    //
+    // Số thứ tự phải nằm NGOÀI thẻ: mắt chạy dọc cột số để chọn (Hà 17/08), và
+    // kéo cột ấy vào trong liên kết là đổi hình dạng người ta đã quen đọc.
+    let truoc_the = html.split("<a href=").next().unwrap_or_default();
+    assert!(
+        truoc_the.contains("1."),
+        "số thứ tự bị kéo vào trong thẻ — cột số phải ở ngoài:\n{html}"
     );
     assert!(
-        html.contains("1. Vá ACL trước"),
-        "nuốt mất số thứ tự hoặc nhãn:\n{html}"
+        html.contains("Vá ACL trước, đăng nhập sau"),
+        "nuốt mất nhãn:\n{html}"
     );
 }
 

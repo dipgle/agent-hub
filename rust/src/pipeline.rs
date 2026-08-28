@@ -5727,6 +5727,17 @@ struct Job {
     pid: u32,
     line: String,
     session: String,
+    /// Nhãn NGƯỜI ĐỌC ĐƯỢC của phiên đã nhờ: `[tfl5]`, `[dwork/A-DSIGN]`.
+    ///
+    /// 🔴 Vì sao `session` (uuid) không đủ — Hà 2026-08-29: *"ko biết lệnh của
+    /// phiên nào gọi"*. Tám ký tự đầu của một uuid trả lời đúng câu hỏi ấy về
+    /// mặt hình thức và sai về mặt dùng được: chủ máy đang đứng ngoài đường,
+    /// nhìn điện thoại, và `5a7f2f4a` không nói cho anh biết đó là tfl5 hay
+    /// dwork. Nhãn thì `sessions::label_sessions` đã tính sẵn cho mọi phiên.
+    ///
+    /// Rỗng là một trạng thái THẬT (phiên chưa kịp gán nhãn), và chỗ đọc phải
+    /// rơi về uuid chứ không in một cặp ngoặc trống — cùng luật `pin_line_from`.
+    label: String,
     started: std::time::Instant,
 }
 
@@ -5783,6 +5794,26 @@ pub fn stop_job(n: usize) -> Result<String, String> {
     }
 }
 
+/// AI đã nhờ việc này — một chuỗi người đọc được, **không bao giờ rỗng**.
+///
+/// 🔴 Hà 2026-08-29: *"ko biết lệnh của phiên nào gọi"*. Nhãn (`[tfl5]`) trả
+/// lời được câu ấy; tám ký tự uuid thì trả lời đúng về hình thức mà vô dụng khi
+/// chủ máy đang nhìn điện thoại ngoài đường. Nên: nhãn trước, uuid là lưới đỡ.
+///
+/// Và tuyệt đối không rơi về chuỗi rỗng hay `[]` trống — một cặp ngoặc trống
+/// nói rằng huba biết một điều gì đó rồi bỏ trống, cùng luật `pin_line_from`.
+pub fn job_who(label: &str, session: &str) -> String {
+    if !label.is_empty() {
+        return label.to_string();
+    }
+    let id: String = session.chars().take(8).collect();
+    if id.is_empty() {
+        "[phiên không rõ]".to_string()
+    } else {
+        format!("[{id}]")
+    }
+}
+
 /// Danh sách việc đang chạy, cho `/jobs` và cho câu trả lời khi có người hỏi.
 pub fn jobs_line() -> Option<String> {
     let jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
@@ -5793,10 +5824,10 @@ pub fn jobs_line() -> Option<String> {
         jobs.iter()
             .map(|j| {
                 format!(
-                    "#{} · {}s · [{}] {}",
+                    "#{} · {}s · {} {}",
                     j.n,
                     j.started.elapsed().as_secs(),
-                    j.session.chars().take(8).collect::<String>(),
+                    job_who(&j.label, &j.session),
                     crate::exec::truncate(&j.line, 60)
                 )
             })
@@ -5979,39 +6010,93 @@ fn watch_long_job(
             // việc rời sổ — không cần thêm một kênh thứ hai để bảo nó dừng.
             let ticker = std::thread::Builder::new()
                 .name(format!("long-job-tick-{n}"))
-                .spawn(move || loop {
-                    std::thread::sleep(std::time::Duration::from_secs(LONG_JOB_TICK_SEC));
-                    let still = {
-                        let jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
-                        jobs.iter().find(|j| j.n == n).map(|j| j.started.elapsed())
-                    };
-                    match still {
-                        Some(el) => {
-                            // Nút ⏹ đi KÈM câu nhắc, không bắt nhớ một động từ:
-                            // `/stop` đã là route dừng PHIÊN, nên một lệnh chữ
-                            // ở đây vừa trùng tên vừa mời gõ nhầm thứ đáng sợ
-                            // hơn hẳn — dừng cả phiên thay vì dừng một lệnh.
-                            let text = format!(
-                                "⏳ vẫn đang chạy ({} phút) — {}",
-                                el.as_secs() / 60,
-                                crate::exec::truncate(&ticker_line, 100),
-                            );
-                            match (
-                                ticker_adapter == crate::telegram::NAME,
-                                crate::telegram::inbox(),
-                            ) {
-                                (true, Some(tg)) => {
-                                    if let Err(e) = tg.send_buttons(
-                                        &text,
-                                        &[("⏹ dừng lệnh này".to_string(), format!("stopjob:{n}"))],
-                                    ) {
-                                        logging::error("telegram_ack_failed", json!({ "err": e }));
+                .spawn(move || {
+                    // MỘT VIỆC = MỘT TIN, sửa tại chỗ.
+                    //
+                    // 🔴 Hà 2026-08-29, ảnh Telegram kín đặc một màn: *"Sao lắm
+                    // lệnh chạy thế, mãi không dừng, mà ko biết lệnh của phiên
+                    // nào gọi"*. Đo ngay lúc ấy: chỉ **BA** việc chạy thật (job
+                    // #3·#4·#5, pid 60751·81437·93966, đều kẹt ở một `docker
+                    // info` không có `timeout`). Nhưng nhịp 90 giây đẻ một tin
+                    // MỚI mỗi lần ⟹ ~70 tin trong một buổi. Cái anh đếm được là
+                    // TIN; cái anh tưởng mình đếm là VIỆC. Hai con số lệch nhau
+                    // hơn hai mươi lần, và cái sai ấy là do huba dựng ra.
+                    //
+                    // Telegram cho sửa tin tại chỗ, và huba đã dùng từ 17/08 cho
+                    // hộp chọn (`edit_html`) — cùng một lẽ ấy ở đây: số phút thì
+                    // đổi, còn tin thì đứng yên một chỗ, nút ⏹ nằm nguyên đó.
+                    let mut msg_id: Option<i64> = None;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(LONG_JOB_TICK_SEC));
+                        let still = {
+                            let jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+                            jobs.iter()
+                                .find(|j| j.n == n)
+                                .map(|j| (j.started.elapsed(), job_who(&j.label, &j.session)))
+                        };
+                        let (el, ai) = match still {
+                            Some(v) => v,
+                            None => break,
+                        };
+                        // Nút ⏹ đi KÈM câu nhắc, không bắt nhớ một động từ:
+                        // `/stop` đã là route dừng PHIÊN, nên một lệnh chữ
+                        // ở đây vừa trùng tên vừa mời gõ nhầm thứ đáng sợ
+                        // hơn hẳn — dừng cả phiên thay vì dừng một lệnh.
+                        let text = format!(
+                            "⏳ {ai} vẫn đang chạy ({} phút) — {}",
+                            el.as_secs() / 60,
+                            crate::exec::truncate(&ticker_line, 100),
+                        );
+                        let nut = [("⏹ dừng lệnh này".to_string(), format!("stopjob:{n}"))];
+                        match (
+                            ticker_adapter == crate::telegram::NAME,
+                            crate::telegram::inbox(),
+                        ) {
+                            (true, Some(tg)) => {
+                                // Sửa tin đang giữ; sửa hỏng thì gửi tin mới và
+                                // NÓI RA. Tin có thể bị chủ máy xoá, hoặc trôi
+                                // quá hạn sửa của Telegram — im lặng ở đây là
+                                // mất hẳn người báo tin mà không ai biết.
+                                let sua: Result<(), String> = match msg_id {
+                                    Some(id) => tg
+                                        .edit_html(
+                                            id,
+                                            &crate::telegram::html_escape(&text),
+                                            &nut,
+                                        )
+                                        .map(|_| ()),
+                                    None => Err("chưa có tin nào để sửa".to_string()),
+                                };
+                                if let Err(why) = sua {
+                                    if msg_id.is_some() {
+                                        logging::warn(
+                                            "long_job_tick_edit_failed",
+                                            json!({ "n": n, "why": why }),
+                                        );
+                                    }
+                                    match tg.send_buttons_id(&text, &nut) {
+                                        Ok(id) => {
+                                            // `Ok(None)` = gửi được nhưng không
+                                            // có id ⟹ lượt sau lại đẻ tin mới.
+                                            // Đó đúng cái đang chữa, nên nó phải
+                                            // để lại vết chứ không âm thầm.
+                                            if id.is_none() {
+                                                logging::warn(
+                                                    "long_job_tick_no_message_id",
+                                                    json!({ "n": n }),
+                                                );
+                                            }
+                                            msg_id = id;
+                                        }
+                                        Err(e) => logging::error(
+                                            "telegram_ack_failed",
+                                            json!({ "err": e }),
+                                        ),
                                     }
                                 }
-                                _ => say_back(&ticker_cfg, &ticker_adapter, &ticker_chat, &text),
                             }
+                            _ => say_back(&ticker_cfg, &ticker_adapter, &ticker_chat, &text),
                         }
-                        None => break,
                     }
                 });
             if let Err(e) = &ticker {
@@ -6021,19 +6106,31 @@ fn watch_long_job(
             let watcher = {
                 let line = line.clone();
                 let session = s.session_id.clone();
+                let label = s.label.clone();
                 std::thread::Builder::new()
                     .name(format!("long-job-pid-{n}"))
                     .spawn(move || {
                         if let Ok(pid) = rx.recv() {
                             let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
+                            // Ghi AI nhờ, ngay lúc mở sổ. Trước bản này dòng
+                            // `long_job_started` chỉ có `n` + `pid`, nên khi
+                            // Hà hỏi "lệnh của phiên nào" thì chính nhật ký
+                            // cũng không trả lời được — phải đi dò `ps -o ppid`.
+                            // KHÔNG ghi `line`: dòng lệnh là thứ có thể mang
+                            // mật khẩu, và `fields` đã làm lộ một token một lần.
+                            logging::info(
+                                "long_job_started",
+                                json!({ "n": n, "pid": pid,
+                                        "session": session, "label": label }),
+                            );
                             jobs.push(Job {
                                 n,
                                 pid,
                                 line,
                                 session,
+                                label,
                                 started: std::time::Instant::now(),
                             });
-                            logging::info("long_job_started", json!({ "n": n, "pid": pid }));
                         }
                     })
             };

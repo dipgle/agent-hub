@@ -5760,6 +5760,22 @@ pub fn start_fresh_after_handover(
     // nên cửa sổ đầu đứng ở hộp *"Quick safety check"* — ĐÃ HẾT; `.claude.json`
     // của cả hai nay đều có mục cho `/Users/hanguyen/projects`.
     acc: Option<&str>,
+    // GIỮ cửa sổ cũ thay vì đóng nó.
+    //
+    // 🔴 Hà 2026-08-28, ngay sau lượt chuyển thật đầu tiên: *"Thế này thì đóng
+    // mất phiên rồi à"*. Anh hỏi đúng chỗ, và câu trả lời là **có, và đó là một
+    // mặc định sai cho ca này**.
+    //
+    // Luật "mở phiên mới rồi đóng phiên cũ" sinh ra cho ca ĐẦY NGỮ CẢNH
+    // (12/08): ở đó phiên cũ đã cạn, giữ lại vô nghĩa. Ca HẾT HẠN MỨC khác hẳn
+    // về bản chất — phiên cũ vẫn tốt nguyên, nó chỉ bị một cái đồng hồ chặn.
+    // Đóng nó là vứt một cửa sổ đang sống (kèm cả phần cuộn của nó) để đổi lấy
+    // không gì cả, đúng lúc bản bàn giao mang sang lại là bản THÔ.
+    //
+    // Đo được ngay lượt ấy: nhật ký cũ còn nguyên 5.342.774 byte trên đĩa, nên
+    // không mất VIỆC — nhưng cửa sổ thì mất thật, và lấy lại phải chờ tài khoản
+    // kia mở hạn mức.
+    giu_cua_so_cu: bool,
 ) -> Result<FreshWindow> {
     let task = format!(
         "Tiếp quản phiên trước (phiên cũ đã đầy ngữ cảnh nên huba đóng sổ và mở phiên này). \
@@ -5835,6 +5851,21 @@ pub fn start_fresh_after_handover(
         });
     }
 
+    // Được dặn giữ thì GIỮ — và nói ra bằng `old_kept`, đừng để chỗ gọi đoán.
+    if giu_cua_so_cu {
+        logging::info(
+            "handover_old_window_kept",
+            json!({ "session": session.session_id, "tty": session.tty,
+                    "why": "bàn giao vì HẾT HẠN MỨC — phiên cũ không cạn, chỉ bị chặn" }),
+        );
+        return Ok(FreshWindow {
+            tty: tty_short,
+            new_id,
+            closed_err: None,
+            old_kept: true,
+            asking: Vec::new(),
+        });
+    }
     // Đóng cửa sổ CŨ. Hỏng thì KHÔNG coi là hỏng cả việc: phiên mới đã chạy, và
     // một cửa sổ thừa còn mở thì chủ máy đóng bằng tay được — nói ra là đủ.
     let closed_err = match crate::keys::window_of(&session.tty) {

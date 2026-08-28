@@ -1786,7 +1786,7 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                 let moved = if s.tty.is_empty() {
                     Err(anyhow::anyhow!("phiên không có cửa sổ terminal"))
                 } else {
-                    crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint, None)
+                    crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint, None, false)
                 };
                 // Con trỏ chuyển sang phiên MỚI THẬT (id ghép từ nhật ký), không
                 // phải id bản fork: bản fork chỉ là chỗ lấy bản bàn giao, nó
@@ -2088,6 +2088,28 @@ pub fn already_handed_over(
         && done_at
             .get(sid)
             .is_some_and(|d| pct < d.saturating_add(AUTO_RETRY_STEP))
+}
+
+/// Câu nói về SỐ PHẬN CỦA CỬA SỔ CŨ sau một lượt bàn giao — rỗng khi nó đã đóng.
+///
+/// 🔴 Dựng TỪ [`crate::sessions::FreshWindow::old_kept`], không gõ tay ở chỗ gọi
+/// (28/08). Trước đó `old_kept` là trường **chỉ-ghi**: ba chỗ đặt nó, không chỗ
+/// nào đọc. Nên câu "cửa sổ cũ giữ nguyên" đúng được chỉ nhờ hai đoạn mã ở hai
+/// tệp tình cờ đồng ý với nhau — đổi một bên là câu báo nói dối mà không gì đỏ
+/// lên. Và một nhánh đã im sẵn từ trước: `new_id.is_none()` cũng GIỮ cửa sổ cũ
+/// (phiên mới chưa chào đời) nhưng chưa lần nào nói ra, nên chủ máy tưởng mất.
+///
+/// Cố ý KHÔNG nói *vì sao* giữ — hai nhánh giữ vì hai lẽ khác nhau (hết hạn mức
+/// · phiên mới chưa chào đời), và lẽ ấy đã nằm trong câu bao quanh. Ở đây chỉ
+/// hai điều đúng ở cả hai: cửa sổ còn đó, và đây là đường về.
+pub fn old_window_note(old_kept: bool, cwd: &str, session_id: &str) -> String {
+    if !old_kept {
+        return String::new();
+    }
+    format!(
+        "🔒 Cửa sổ cũ VẪN CÒN — chưa mất gì. Gõ tiếp ngay ở đó được, hoặc mở lại bằng:\n\
+         cd {cwd} && claude --resume {session_id}\n\n"
+    )
 }
 
 /// Ngủ bao lâu khi CÒN phiên quá ngưỡng đang bị giữ.
@@ -9370,7 +9392,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // được mà phiên chưa kịp sinh nhật ký thì chưa
                                 // có gì để trỏ tới (xem `FreshWindow::new_id`).
                                 Some(acc) => match crate::sessions::start_fresh_after_handover(
-                                    cfg, s, &h.checkpoint, Some(acc),
+                                    cfg,
+                                    s,
+                                    &h.checkpoint,
+                                    Some(acc),
+                                    false,
                                 ) {
                                     Ok(w) => {
                                         if let Some(id) = w.new_id.as_deref() {
@@ -9390,19 +9416,23 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         match w.new_id.as_deref() {
                                             Some(id) => format!(
                                                 "📋 Đã đóng sổ {} và mở phiên mới bằng **{acc}** \
-                                                 (cũ: {}) ở {} — đang theo phiên {}.\n\n{}",
+                                                 (cũ: {}) ở {} — đang theo phiên {}.\n\n{}{}",
                                                 h.source_name, s.account, w.tty,
                                                 id.chars().take(8).collect::<String>(),
+                                                old_window_note(w.old_kept, &s.cwd, &s.session_id),
                                                 h.checkpoint
                                             ),
                                             // Cửa sổ mở rồi nhưng chưa ghép được
                                             // id ⟹ nói đúng thế, đừng trỏ con trỏ
-                                            // vào chỗ trống.
+                                            // vào chỗ trống. Và nhánh này GIỮ cửa
+                                            // sổ cũ (`old_kept`) — nay nói ra.
                                             None => format!(
                                                 "📋 Đã đóng sổ {} và mở cửa sổ mới bằng **{acc}** ở {}, \
                                                  NHƯNG chưa ghép được id phiên mới — nhìn cửa sổ ấy giúp \
-                                                 tôi (thường là nó đang hỏi một hộp xác nhận).\n\n{}",
-                                                h.source_name, w.tty, h.checkpoint
+                                                 tôi (thường là nó đang hỏi một hộp xác nhận).\n\n{}{}",
+                                                h.source_name, w.tty,
+                                                old_window_note(w.old_kept, &s.cwd, &s.session_id),
+                                                h.checkpoint
                                             ),
                                         }
                                     }
@@ -9439,8 +9469,18 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // Không xin đổi tài khoản thì chỉ đưa bản
                                     // bàn giao ra — chủ máy tự quyết làm gì.
                                     None => format!("⚠ bàn giao hỏng: {loi}\n\n{cp}"),
+                                    // 🔴 GIỮ cửa sổ cũ ở nhánh này, và chỉ nhánh
+                                    // này. Tới được đây nghĩa là tài khoản cũ
+                                    // KHÔNG gọi được — tức phiên cũ chưa cạn, nó
+                                    // chỉ bị một cái đồng hồ chặn. Hà 28/08, ngay
+                                    // lượt chuyển thật đầu tiên: *"Thế này thì
+                                    // đóng mất phiên rồi à"*.
                                     Some(acc) => match crate::sessions::start_fresh_after_handover(
-                                        cfg, s, &cp, Some(acc),
+                                        cfg,
+                                        s,
+                                        &cp,
+                                        Some(acc),
+                                        true,
                                     ) {
                                         Ok(w) => {
                                             if let Some(id) = w.new_id.as_deref() {
@@ -9462,8 +9502,11 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             );
                                             format!(
                                                 "📋 {} không tự viết được bản bàn giao ({loi}), nên tôi dựng \
-                                                 từ nhật ký và mở phiên mới bằng **{acc}** ở {}.\n\n{cp}",
-                                                s.name, w.tty
+                                                 từ nhật ký và mở phiên mới bằng **{acc}** ở {}.\n\
+                                                 Phiên cũ KHÔNG cạn — nó chỉ bị một cái đồng hồ chặn.\n\n{}{cp}",
+                                                s.name,
+                                                w.tty,
+                                                old_window_note(w.old_kept, &s.cwd, &s.session_id)
                                             )
                                         }
                                         Err(e2) => format!(

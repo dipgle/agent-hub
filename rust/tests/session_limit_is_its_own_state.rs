@@ -15,6 +15,7 @@
 //! `You've hit your session limit · resets 10:30pm (Asia/Saigon)`
 
 use huba::keys::session_limit_on_screen;
+use huba::pipeline::old_window_note;
 use huba::sessions::{state_of, LiveSession, ST_LIMIT, ST_WAIT};
 
 const MAN_CHAN: &str = "\
@@ -89,5 +90,48 @@ fn being_blocked_outranks_looking_busy() {
         ST_LIMIT,
         "`⚡ đang chạy` bảo chủ máy chờ, mà chờ thì không bao giờ xong — cái KẸT phải \
          thắng cái chạy, cùng luật với ❓ của ô mật khẩu"
+    );
+}
+
+/// 🔴 Hà 2026-08-28, ngay lượt chuyển tài khoản THẬT đầu tiên (21:14): *"Thế này
+/// thì đóng mất phiên rồi à"*.
+///
+/// Anh hỏi đúng chỗ. Luật "mở phiên mới rồi đóng phiên cũ" sinh ra cho ca ĐẦY
+/// NGỮ CẢNH (12/08) — ở đó phiên cũ đã cạn, giữ lại vô nghĩa. Ca HẾT HẠN MỨC
+/// ngược hẳn: phiên cũ còn tốt nguyên, chỉ bị một cái đồng hồ chặn, mà bản bàn
+/// giao mang sang lại là bản THÔ dựng từ nhật ký. Đóng nó là vứt một cửa sổ đang
+/// sống để đổi lấy không gì cả.
+///
+/// Bài kiểm đo **câu chủ máy đọc**, vì đó là chỗ duy nhất anh biết được cửa sổ
+/// còn hay mất: `start_fresh_after_handover` mở cửa sổ thật nên không gọi được
+/// ở đây.
+#[test]
+fn a_kept_window_is_announced_with_the_way_back() {
+    let cau = old_window_note(true, "/Users/hanguyen/projects/huba", "93479f95");
+    assert!(
+        cau.contains("claude --resume 93479f95"),
+        "giữ cửa sổ mà không đưa đường về thì chủ máy vẫn phải tự mò: {cau:?}"
+    );
+    assert!(
+        cau.contains("/Users/hanguyen/projects/huba"),
+        "`--resume` chạy sai thư mục là mở nhầm phiên — `cd` phải đi kèm: {cau:?}"
+    );
+    assert!(
+        cau.contains("VẪN CÒN"),
+        "phải nói thẳng cửa sổ còn đó, đừng bắt suy ra từ việc KHÔNG nói gì: {cau:?}"
+    );
+}
+
+/// ĐỐI CHỨNG NGƯỢC (§13①). Cửa sổ ĐÃ đóng mà vẫn mời `--resume` ở đó thì tệ hơn
+/// im lặng: chủ máy đi tìm một cửa sổ không còn.
+///
+/// Đây cũng là vế giữ cho bản vá là CỘNG THÊM — lượt `/handover -a acc` chạy
+/// trót lọt (đóng cửa sổ cũ như xưa nay) phải đọc y hệt trước.
+#[test]
+fn a_closed_window_says_nothing_at_all() {
+    assert_eq!(
+        old_window_note(false, "/Users/hanguyen/projects/huba", "93479f95"),
+        "",
+        "cửa sổ đã đóng mà còn mời gõ tiếp ở đó ⟹ sai một cách im lặng"
     );
 }

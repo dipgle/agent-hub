@@ -4643,6 +4643,49 @@ pub fn handover(cfg: &Config, session: &LiveSession) -> Result<Handover> {
     })
 }
 
+/// Bản bàn giao dựng TỪ NHẬT KÝ — **không gọi `claude`, không tốn hạn mức**.
+///
+/// 🔴 Vì sao phải có, đo được ngay hôm viết nó (2026-08-28): acc3 trả
+/// *"You've hit your session limit · resets 10:30pm (Asia/Saigon)"*, và mọi
+/// phiên `[dwork]` đang chạy bằng acc3. Đường bàn giao thường bắt chính phiên
+/// tự viết bản tổng kết (`fork_call` → `claude -p --resume … --fork-session`),
+/// mà lời gọi ấy ghim `CLAUDE_CONFIG_DIR` vào **tài khoản của phiên** — tức
+/// đúng tài khoản vừa hết hạn mức. Nên `/handover -a acc1` chết ở bước ĐẦU,
+/// đúng lúc chủ máy cần nó nhất.
+///
+/// Đường này không hỏi mô hình câu nào: nhật ký `.jsonl` đã có sẵn mọi lượt
+/// phiên từng nói. Bản dựng ra **thô hơn** bản phiên tự viết — nó không biết
+/// việc gì còn dở, không tự tóm ý — nên chỗ gọi phải NÓI RA điều đó thay vì
+/// đưa ra như nhau. Thô mà có, hơn tinh mà không bao giờ tới.
+pub fn handover_from_journal(cfg: &Config, session: &LiveSession) -> Option<String> {
+    let st = stream(cfg, &session.session_id, &session.cwd, 40);
+    // Chỉ giữ LỜI của phiên và của chủ máy; bỏ `tool`/`result` — chúng dài,
+    // và một bản bàn giao cần "đã bàn gì", không cần "đã chạy lệnh gì".
+    let mut dong: Vec<String> = Vec::new();
+    for e in st.events.iter().filter(|e| e.kind == "say") {
+        let t = e.text.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let ai = if e.role == "user" { "Hà" } else { "Phiên" };
+        // Chặn trên cho mỗi lượt: một lượt dài không được nuốt cả bản bàn giao.
+        dong.push(format!("**{ai}:** {}", crate::exec::truncate(t, 900)));
+    }
+    if dong.is_empty() {
+        return None;
+    }
+    // Giữ phần CUỐI: gần hiện tại nhất là phần còn dùng được.
+    let giu = dong.len().saturating_sub(12);
+    Some(format!(
+        "⚠ Bản bàn giao này dựng TỪ NHẬT KÝ, không phải do phiên cũ tự viết — tài khoản \
+         của nó ({}) không gọi được. Nó là {} lượt nói cuối, nguyên văn, KHÔNG tóm tắt: \
+         việc gì còn dở thì phải tự đọc ra.\n\n{}",
+        session.account,
+        dong.len() - giu,
+        dong[giu..].join("\n\n")
+    ))
+}
+
 /// A question asked ALONGSIDE a running session, and its answer.
 ///
 /// "Alongside" is the product claim and the reason this is not just a chat

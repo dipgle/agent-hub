@@ -9415,10 +9415,65 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 },
                             }
                         }
-                        Err(e) => format!(
-                            "⚠ bàn giao hỏng: {}",
-                            crate::exec::truncate(&e.to_string(), 200)
-                        ),
+                        // 🔴 TÀI KHOẢN HẾT HẠN MỨC THÌ BƯỚC VIẾT BÀN GIAO CHẾT
+                        // TRƯỚC — và đó đúng là lúc chủ máy cần bàn giao nhất.
+                        //
+                        // Đo 2026-08-28: acc3 trả *"You've hit your session limit
+                        // · resets 10:30pm"*, mà mọi phiên `[dwork]` chạy acc3.
+                        // `fork_call` ghim `CLAUDE_CONFIG_DIR` vào tài khoản của
+                        // PHIÊN, nên nó gọi đúng cái tài khoản đã chết.
+                        //
+                        // Đường lui KHÔNG hỏi mô hình câu nào: nhật ký đã có sẵn
+                        // mọi lượt phiên từng nói. Thô hơn hẳn bản phiên tự viết
+                        // — và `handover_from_journal` nói thẳng điều đó ngay
+                        // trong chữ, chứ không đưa ra như thể chúng ngang nhau.
+                        Err(e) => {
+                            let loi = crate::exec::truncate(&e.to_string(), 200);
+                            match crate::sessions::handover_from_journal(cfg, s) {
+                                None => format!(
+                                    "⚠ bàn giao hỏng: {loi}\nVà nhật ký của phiên cũng không có \
+                                     lượt nói nào để dựng bản thay thế."
+                                ),
+                                Some(cp) => match acc_moi.as_deref() {
+                                    // Không xin đổi tài khoản thì chỉ đưa bản
+                                    // bàn giao ra — chủ máy tự quyết làm gì.
+                                    None => format!("⚠ bàn giao hỏng: {loi}\n\n{cp}"),
+                                    Some(acc) => match crate::sessions::start_fresh_after_handover(
+                                        cfg, s, &cp, Some(acc),
+                                    ) {
+                                        Ok(w) => {
+                                            if let Some(id) = w.new_id.as_deref() {
+                                                if let Err(e) =
+                                                    db.set_cursor(FOCUS_SESSION_KEY, id)
+                                                {
+                                                    logging::error(
+                                                        "focus_after_handover_failed",
+                                                        json!({ "err": e.to_string() }),
+                                                    );
+                                                }
+                                            }
+                                            logging::warn(
+                                                "handover_from_journal_used",
+                                                json!({ "session": s.session_id,
+                                                        "acc_cu": s.account, "acc_moi": acc,
+                                                        "vi_sao": loi, "tty": w.tty,
+                                                        "new_id": w.new_id }),
+                                            );
+                                            format!(
+                                                "📋 {} không tự viết được bản bàn giao ({loi}), nên tôi dựng \
+                                                 từ nhật ký và mở phiên mới bằng **{acc}** ở {}.\n\n{cp}",
+                                                s.name, w.tty
+                                            )
+                                        }
+                                        Err(e2) => format!(
+                                            "⚠ bàn giao hỏng ({loi}) và cũng KHÔNG mở được cửa sổ bằng \
+                                             {acc}: {}\n\n{cp}",
+                                            crate::exec::truncate(&e2.to_string(), 160)
+                                        ),
+                                    },
+                                },
+                            }
+                        }
                         },
                     },
                 };

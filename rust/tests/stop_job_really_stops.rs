@@ -30,10 +30,26 @@ use huba::exec::{group_alive, kill_group_verified, GroupKill, RunOpts};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
+/// Đường dẫn cái mốc "đã sẵn sàng" cho một ca kiểm.
+///
+/// 🔴 Vì sao phải có (đo 28/08, cổng này ĐỎ một lượt rồi xanh lại khi chạy
+/// riêng): `viec_nen` cũ chỉ chờ **nhóm tiến trình xuất hiện**, mà nhóm có ngay
+/// lúc `fork` — TRƯỚC khi `zsh` kịp đọc và cài `trap '' TERM`. Máy đang tải
+/// nặng thì TERM rơi đúng khe ấy, zsh chết như một tiến trình thường, và ca
+/// "bỏ qua TERM" đọc ra `GoneAfterTerm`.
+///
+/// Sản phẩm không sai; PHÉP ĐO sai — nó tin một dấu hiệu (nhóm tồn tại) trả lời
+/// một câu khác (cái bẫy đã cài chưa). Nay tiến trình con TỰ NÓI khi sẵn sàng,
+/// và bài kiểm chờ đúng lời ấy. Một cổng chập chờn dạy người đọc lướt qua màu
+/// đỏ — nó tệ hơn không có cổng.
+fn moc(ten: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("huba-stopjob-{ten}-{}", std::process::id()))
+}
+
 /// Dựng một việc chạy nền ĐÚNG đường `watch_long_job` đi: `exec::run` trong một
 /// luồng riêng, pid lấy ra bằng `pid_out`. Dựng bằng tay một `Command` khác thì
 /// bài kiểm đo một đường mà sản phẩm đi một đường.
-fn viec_nen(dong_lenh: &str) -> u32 {
+fn viec_nen_cho_moc(dong_lenh: &str, moc: Option<&std::path::Path>) -> u32 {
     let (tx, rx) = mpsc::channel();
     let cmd = dong_lenh.to_string();
     std::thread::spawn(move || {
@@ -52,14 +68,27 @@ fn viec_nen(dong_lenh: &str) -> u32 {
         .expect("exec::run phải nói ra pid ngay khi dựng xong tiến trình");
     // Nhóm phải NHÌN THẤY ĐƯỢC trước khi đo, nếu không bài kiểm đo lúc nó chưa
     // kịp tồn tại rồi kết luận nhầm là "đã chết".
-    let han = Instant::now() + Duration::from_secs(5);
+    let han = Instant::now() + Duration::from_secs(20);
     while Instant::now() < han {
-        if group_alive(pid) == Some(true) {
+        let nhom = group_alive(pid) == Some(true);
+        // Có mốc thì phải đợi CHÍNH nó: nhóm tồn tại chỉ nói "đã fork", không
+        // nói "cái bẫy đã cài".
+        let san_sang = moc.is_none_or(|m| m.exists());
+        if nhom && san_sang {
             return pid;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    panic!("nhóm tiến trình {pid} không bao giờ hiện ra — phép đo hỏng, không phải sản phẩm hỏng");
+    panic!(
+        "nhóm {pid} chưa sẵn sàng sau 20s (nhóm sống: {:?}, mốc: {:?}) — phép đo hỏng, \
+         không phải sản phẩm hỏng",
+        group_alive(pid),
+        moc.map(|m| m.exists())
+    );
+}
+
+fn viec_nen(dong_lenh: &str) -> u32 {
+    viec_nen_cho_moc(dong_lenh, None)
 }
 
 #[test]
@@ -88,7 +117,14 @@ fn a_plain_job_dies_on_the_polite_signal() {
 /// `GoneAfterTerm` thì hoặc bậc KILL đã bị gỡ, hoặc phép đọc lại đang nói dối.
 #[test]
 fn a_job_that_ignores_term_is_still_stopped_and_says_so() {
-    let pid = viec_nen("trap '' TERM; sleep 60");
+    let m = moc("bo-qua-term");
+    let _ = std::fs::remove_file(&m);
+    // Thứ tự trong dòng lệnh là cả phép đo: cài bẫy XONG mới đặt mốc, nên thấy
+    // mốc là chắc chắn bẫy đã sống.
+    let pid = viec_nen_cho_moc(
+        &format!("trap '' TERM; : > {}; sleep 60", m.display()),
+        Some(&m),
+    );
     assert_eq!(
         kill_group_verified(pid),
         GroupKill::GoneAfterKill,

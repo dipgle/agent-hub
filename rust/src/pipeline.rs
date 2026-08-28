@@ -1785,7 +1785,7 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                 let moved = if s.tty.is_empty() {
                     Err(anyhow::anyhow!("phiên không có cửa sổ terminal"))
                 } else {
-                    crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint)
+                    crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint, None)
                 };
                 // Con trỏ chuyển sang phiên MỚI THẬT (id ghép từ nhật ký), không
                 // phải id bản fork: bản fork chỉ là chỗ lấy bản bàn giao, nó
@@ -9282,7 +9282,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // Books, not brakes. This costs a `claude` call and every cent
                 // lands in `spend` — but it is the OWNER asking, so it is not
                 // gated the way the unattended robot is (see `owner_budget_state`).
-                let want = cmd.arg.trim().to_string();
+                // 🔴 `-a <acc>` — ĐỔI TÀI KHOẢN khi đóng sổ. Hà 2026-08-28:
+                // *"tài khoản đang dùng của phiên bị báo hết tokens thì muốn
+                // chuyển sang acc khác được không"* → *"Giống như cách chuyển
+                // phiên khi sắp tới giới hạn context vẫn giữ được ngữ cảnh và
+                // thêm là dùng acc khác"*.
+                //
+                // CỘNG THÊM, không đổi hành vi cũ: không có `-a` thì route này
+                // vẫn chỉ trả về dòng `claude --resume …` như trước. Có `-a`
+                // thì nó đi nốt đoạn mà đường TỰ ĐỘNG vẫn đi — mở cửa sổ mới,
+                // trắng ngữ cảnh, mang bản bàn giao làm đề bài — chỉ khác chỗ
+                // cửa sổ ấy chạy bằng tài khoản nào.
+                let (co, phan_con_lai) = split_flags(&cmd.arg, &["a", "acc"]);
+                let acc_moi = co.get("a").or_else(|| co.get("acc")).cloned();
+                let want = phan_con_lai.trim().to_string();
                 let want = if want.is_empty() {
                     db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default()
                 } else {
@@ -9346,10 +9359,61 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 "handover_done",
                                 json!({ "from": h.source_id, "to": h.new_session_id, "cost_usd": h.cost_usd }),
                             );
-                            format!(
-                                "📋 Đã đóng sổ phiên {}. Tiếp tục bằng:\n{}\n\n{}",
-                                h.source_name, h.resume_command, h.checkpoint
-                            )
+                            match acc_moi.as_deref() {
+                                None => format!(
+                                    "📋 Đã đóng sổ phiên {}. Tiếp tục bằng:\n{}\n\n{}",
+                                    h.source_name, h.resume_command, h.checkpoint
+                                ),
+                                // Mở cửa sổ mới trên tài khoản KHÁC. Nói ra kết
+                                // cục ĐO ĐƯỢC, đừng khai "đã chuyển": cửa sổ mở
+                                // được mà phiên chưa kịp sinh nhật ký thì chưa
+                                // có gì để trỏ tới (xem `FreshWindow::new_id`).
+                                Some(acc) => match crate::sessions::start_fresh_after_handover(
+                                    cfg, s, &h.checkpoint, Some(acc),
+                                ) {
+                                    Ok(w) => {
+                                        if let Some(id) = w.new_id.as_deref() {
+                                            if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, id) {
+                                                logging::error(
+                                                    "focus_after_handover_failed",
+                                                    json!({ "err": e.to_string() }),
+                                                );
+                                            }
+                                        }
+                                        logging::info(
+                                            "handover_switched_account",
+                                            json!({ "from": h.source_id, "acc_cu": s.account,
+                                                    "acc_moi": acc, "tty": w.tty,
+                                                    "new_id": w.new_id }),
+                                        );
+                                        match w.new_id.as_deref() {
+                                            Some(id) => format!(
+                                                "📋 Đã đóng sổ {} và mở phiên mới bằng **{acc}** \
+                                                 (cũ: {}) ở {} — đang theo phiên {}.\n\n{}",
+                                                h.source_name, s.account, w.tty,
+                                                id.chars().take(8).collect::<String>(),
+                                                h.checkpoint
+                                            ),
+                                            // Cửa sổ mở rồi nhưng chưa ghép được
+                                            // id ⟹ nói đúng thế, đừng trỏ con trỏ
+                                            // vào chỗ trống.
+                                            None => format!(
+                                                "📋 Đã đóng sổ {} và mở cửa sổ mới bằng **{acc}** ở {}, \
+                                                 NHƯNG chưa ghép được id phiên mới — nhìn cửa sổ ấy giúp \
+                                                 tôi (thường là nó đang hỏi một hộp xác nhận).\n\n{}",
+                                                h.source_name, w.tty, h.checkpoint
+                                            ),
+                                        }
+                                    }
+                                    Err(e) => format!(
+                                        "📋 Đã đóng sổ {} nhưng KHÔNG mở được cửa sổ bằng {acc}: {}\n\
+                                         Bản bàn giao vẫn còn đây, mở tay bằng:\n{}\n\n{}",
+                                        h.source_name,
+                                        crate::exec::truncate(&e.to_string(), 160),
+                                        h.resume_command, h.checkpoint
+                                    ),
+                                },
+                            }
                         }
                         Err(e) => format!(
                             "⚠ bàn giao hỏng: {}",

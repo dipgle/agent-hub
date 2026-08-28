@@ -5665,6 +5665,22 @@ pub fn start_fresh_after_handover(
     cfg: &Config,
     session: &LiveSession,
     checkpoint: &str,
+    // 🔴 Tài khoản cho cửa sổ MỚI — `None` = giữ tài khoản của phiên cũ.
+    //
+    // Hà 2026-08-28: *"tài khoản đang dùng của phiên bị báo hết tokens thì muốn
+    // chuyển sang acc khác được không … Giống như cách chuyển phiên khi sắp tới
+    // giới hạn context vẫn giữ được ngữ cảnh và thêm là dùng acc khác"*.
+    //
+    // Đi được là nhờ hình dạng sẵn có, không nhờ thêm máy móc: phiên sau bàn
+    // giao **trắng ngữ cảnh**, chỉ mang bản bàn giao làm đề bài (cố ý, từ sự cố
+    // 12/08 ở khối 🔴 ngay dưới). Một phiên trắng ngữ cảnh thì không cần nhật ký
+    // cũ, nên nó mở bằng tài khoản nào cũng được — chỗ duy nhất phải đổi là
+    // `account_launch`.
+    //
+    // Đo trước khi tin (28/08): bẫy 12/08 — acc2/acc3 chưa "tin" `~/projects`
+    // nên cửa sổ đầu đứng ở hộp *"Quick safety check"* — ĐÃ HẾT; `.claude.json`
+    // của cả hai nay đều có mục cho `/Users/hanguyen/projects`.
+    acc: Option<&str>,
 ) -> Result<FreshWindow> {
     let task = format!(
         "Tiếp quản phiên trước (phiên cũ đã đầy ngữ cảnh nên huba đóng sổ và mở phiên này). \
@@ -5672,11 +5688,10 @@ pub fn start_fresh_after_handover(
     );
     let cwd = Path::new(&session.cwd);
     // Ngoại lệ đã nói ở `terminal_command`: bản bàn giao ~2 KB đi bằng argv.
-    let cmd = terminal_command(
-        &account_launch(cfg, Some(&session.account)),
-        cwd,
-        Some(&task),
-    );
+    // Tên tài khoản lạ KHÔNG rơi về mặc định — `account_launch` đã gác chỗ ấy,
+    // và mở nhầm tài khoản là mở nhầm cả kho phiên.
+    let dung_acc = acc.unwrap_or(session.account.as_str());
+    let cmd = terminal_command(&account_launch(cfg, Some(dung_acc)), cwd, Some(&task));
     let opened_at = std::time::SystemTime::now();
     let (_window, tty) = crate::keys::open_window(&cmd)?;
     let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
@@ -5696,7 +5711,9 @@ pub fn start_fresh_after_handover(
     );
     logging::info(
         "handover_window_opened",
-        json!({ "tty": tty_short, "session": new_id.clone().unwrap_or_default(), "fresh": true }),
+        json!({ "tty": tty_short, "session": new_id.clone().unwrap_or_default(), "fresh": true,
+                "acc_cu": session.account, "acc_moi": dung_acc,
+                "doi_acc": dung_acc != session.account }),
     );
 
     // 🔴 KHÔNG ĐÓNG CỬA SỔ CŨ KHI PHIÊN MỚI CHƯA CHỨNG MINH NÓ CHÀO ĐỜI.

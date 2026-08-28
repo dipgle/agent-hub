@@ -260,9 +260,14 @@ pub const ROUTES: &[Route] = &[
         aliases: &["bangiao"],
         kind: CommandKind::Handover,
         arg: Arg::Rest,
-        usage: "[id]",
-        help: "Đóng sổ, mở phiên mới nối tiếp",
-        listed: false,
+        usage: "[-a acc] [id]",
+        // 🔴 `listed: true` từ 28/08. Nó ở ngoài menu suốt vì "ít dùng", mà
+        // chính sự vô hình ấy là thứ `CLAUDE.md` đã ghi một lần rồi ở `/win`:
+        // con số "0 lượt dùng" đo SỰ VÔ HÌNH, không đo sự vô dụng. Nay nó là
+        // đường thoát khi một tài khoản hết hạn mức — đúng lúc chủ máy đang ở
+        // xa và cần tìm ra nó trong menu.
+        help: "Đóng sổ phiên, mở phiên mới nối tiếp (-a acc2 để đổi tài khoản)",
+        listed: true,
     },
     Route {
         name: "runin",

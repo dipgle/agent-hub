@@ -4218,6 +4218,46 @@ pub fn activity(screen: &str) -> Option<Activity> {
     None
 }
 
+/// Phiên có đang bị CHẶN VÌ HẾT HẠN MỨC không — và mở lại lúc nào.
+///
+/// 🔴 Hà 2026-08-28: *"đang có tk bị limit"* → *"theo tôi hiểu là hub tự kiểm
+/// soát khi bị limit thì xử lý luôn chứ?"*. Đúng: cần gạt tay (`/handover -a`)
+/// chỉ dùng được khi chủ máy ĐÃ BIẾT, mà biết là việc của huba.
+///
+/// Đo nguyên văn trên máy này cùng ngày, tài khoản acc3:
+/// `You've hit your session limit · resets 10:30pm (Asia/Saigon)`
+///
+/// Trả về nguyên văn phần SAU dấu `·` (giờ mở lại) vì đó là thứ quyết định chủ
+/// máy làm gì tiếp: còn 10 phút thì chờ, còn 5 tiếng thì chuyển tài khoản. Gộp
+/// thành `bool` là vứt đi dữ kiện đã đọc được — cùng lý lẽ với
+/// [`monitors_on_screen`] ngay dưới.
+///
+/// Hẹp có chủ ý: đòi CẢ `hit your` LẪN `limit` trên cùng một dòng. Màn của một
+/// phiên đang BÀN về hạn mức (đúng cái phiên này suốt hôm nay) nhắc chữ `limit`
+/// cả chục lần; bắt theo một chữ là dựng một phép đo kêu oan, và một cảnh báo
+/// kêu oan thì bị lướt qua.
+pub fn session_limit_on_screen(screen: &str) -> Option<String> {
+    for line in screen.lines() {
+        let l = line.trim();
+        let low = l.to_lowercase();
+        if !(low.contains("hit your") && low.contains("limit")) {
+            continue;
+        }
+        // Dòng phải NGẮN như một dòng trạng thái. Một câu văn dài nhắc tới nó
+        // (ví dụ chính bản bàn giao đang kể lại sự cố) không phải trạng thái.
+        if l.chars().count() > 120 {
+            continue;
+        }
+        let khi = l
+            .split_once('·')
+            .map(|(_, r)| r.trim().to_string())
+            .filter(|r| !r.is_empty())
+            .unwrap_or_else(|| l.to_string());
+        return Some(khi);
+    }
+    None
+}
+
 /// Phiên có đang chạy một lượt không — hỏi DÒNG CHÂN, thứ TUI luôn vẽ.
 ///
 /// `None` = không tìm thấy dòng chân ⟹ không đo được, và chỗ gọi phải xử lý

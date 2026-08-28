@@ -978,6 +978,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     for c in changes {
         // Tra lại phiên để có `tty` (đọc màn), câu cuối nó nói, và ai mở nó.
         let id = match &c {
+            crate::watch::Change::Limited { id, .. } => id.clone(),
             crate::watch::Change::Failed { id, .. } => id.clone(),
             crate::watch::Change::Finished { id, .. } => id.clone(),
             crate::watch::Change::Asking { id, .. } => id.clone(),

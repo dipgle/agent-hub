@@ -189,6 +189,18 @@ pub struct LiveSession {
     /// mang nó: ô mật khẩu của một phiên `claude` là chuyện của chính CLI ấy.
     #[serde(default)]
     pub asking_password: bool,
+    /// Phiên bị CHẶN vì hết hạn mức, và giờ mở lại — đọc từ MÀN.
+    ///
+    /// 🔴 Hà 2026-08-28: *"theo tôi hiểu là hub tự kiểm soát khi bị limit thì xử
+    /// lý luôn chứ?"*. Trước trường này, một phiên hết hạn mức trông y hệt một
+    /// phiên đứng chờ: nhật ký đứng im, không lỗi, không hộp hỏi. Tức huba nhìn
+    /// thẳng vào nó mà không thấy gì — và cái cần gạt tay (`/handover -a`) chỉ
+    /// dùng được khi chủ máy ĐÃ BIẾT, mà biết là việc của huba.
+    ///
+    /// Giữ nguyên văn giờ mở lại chứ không phải một `bool`: còn 10 phút thì chờ,
+    /// còn 5 tiếng thì chuyển tài khoản — hai hành động khác nhau.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limited: Option<String>,
     /// Số **monitor** của `claude` còn chạy trong phiên này — đọc từ CHÂN MÀN.
     ///
     /// 🔴 Hà 2026-08-27: *"Một phiên đang có monitor thì luôn chèn thêm icon eye
@@ -1998,6 +2010,12 @@ pub const ST_ASK: &str = "❓";
 pub const ST_ERR: &str = "❌";
 /// Đã tắt.
 pub const ST_DEAD: &str = "🪦";
+/// HẾT HẠN MỨC — tài khoản bị chặn, phiên sẽ KHÔNG tự chạy lại.
+///
+/// 🔴 Ký hiệu riêng, không mượn `❌`: lỗi thì thử lại được, hết hạn mức thì
+/// không — nó chờ đồng hồ, hoặc chờ một tài khoản khác. Hai câu ấy dẫn tới hai
+/// việc khác nhau, nên chúng không được nhìn giống nhau trên danh sách.
+pub const ST_LIMIT: &str = "🚫";
 
 /// Tình trạng một phiên, thành `(ký hiệu, chữ)` — **một chỗ duy nhất** quyết định.
 ///
@@ -2034,6 +2052,13 @@ pub fn state_of(s: &LiveSession) -> (&'static str, &'static str) {
     // phân biệt được ngay.
     if s.asking_password {
         return (ST_ASK, "hỏi MẬT KHẨU");
+    }
+    // 🔴 TRƯỚC `working` và trước `đứng chờ`: một phiên hết hạn mức trông y hệt
+    // một phiên rảnh, mà hai thứ ấy đòi hai việc hoàn toàn khác nhau ở phía chủ
+    // máy — "cứ để đấy" so với "nó sẽ KHÔNG tự chạy lại". Cùng lý lẽ với ❓ của
+    // ô mật khẩu: cái đang KẸT phải thắng cái đang chạy.
+    if s.limited.is_some() {
+        return (ST_LIMIT, "HẾT HẠN MỨC");
     }
     if s.working {
         return (ST_RUN, "đang chạy");
@@ -3847,6 +3872,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 asking_password: false,
                 // Điền ở khúc đọc màn bên dưới (`tab_monitors`).
                 monitors: 0,
+                // Cũng điền ở khúc đọc màn — xem `keys::session_limit_on_screen`.
+                limited: None,
                 account: account.name.clone(),
                 name: s
                     .get("name")
@@ -4067,6 +4094,15 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                         row.activity = tab_activity(&tabs, &row.tty);
                         // Monitor chỉ đọc được từ màn — xem `keys::monitors_on_screen`.
                         row.monitors = tab_monitors(&tabs, &row.tty);
+                    }
+                    // 🔴 NGOÀI cửa `working` — và đó là cả điểm mấu chốt: một
+                    // phiên hết hạn mức KHÔNG chạy, nên để trong cửa ấy là không
+                    // bao giờ đọc được nó. Chữ đã nằm sẵn trong `tabs`, không
+                    // tốn thêm lượt `osascript` nào.
+                    if !row.tty.is_empty() {
+                        row.limited = crate::keys::alive_tab(&tabs, &row.tty)
+                            .and_then(|t| t.screen.as_deref())
+                            .and_then(crate::keys::session_limit_on_screen);
                     }
                     row.context_tokens = parsed.context_tokens;
                     row.model = parsed.model.clone();

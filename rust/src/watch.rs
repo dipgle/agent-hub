@@ -52,6 +52,12 @@ pub const ASKING: &str = "asking";
 /// nhịp thì phiên nằm im và nhìn y hệt một phiên đã xong việc. Nay nó là một
 /// TRẠNG THÁI đọc từ nhật ký, nên vào đúng cỗ máy "so hai lượt, nói một lần".
 pub const ERRORED: &str = "errored";
+/// Bị CHẶN vì hết hạn mức — phiên sẽ không tự chạy lại, dù chờ bao lâu.
+///
+/// 🔴 Trạng thái riêng, không gộp vào `errored`: lỗi thì thử lại được, hết hạn
+/// mức thì chỉ có hai đường — chờ đồng hồ, hoặc chuyển tài khoản. Hai câu ấy
+/// dẫn tới hai việc khác nhau ở phía chủ máy (Hà 2026-08-28).
+pub const LIMITED: &str = "limited";
 
 /// Chạy ngắn hơn chừng này thì XONG không phải là tin.
 ///
@@ -223,6 +229,15 @@ pub enum Change {
         /// Các câu còn lại của cùng bảng — xem `sessions::Asking::rest`.
         rest: Vec<crate::sessions::Question>,
     },
+    /// Phiên bị CHẶN vì tài khoản hết hạn mức — xem `LIMITED`.
+    Limited {
+        id: String,
+        name: String,
+        /// Tài khoản đang bị chặn.
+        acc: String,
+        /// Nguyên văn giờ mở lại, đọc từ màn.
+        when: String,
+    },
     /// Phiên đứng lại vì một LỖI — xem `ERRORED`.
     Failed {
         id: String,
@@ -288,7 +303,7 @@ impl Change {
     /// Tên phiên, dùng cho nhãn nút "vào phiên" — mỗi biến thể đều mang sẵn.
     pub fn name(&self) -> &str {
         match self {
-            Change::Failed { name, .. } => name,
+            Change::Limited { name, .. } | Change::Failed { name, .. } => name,
             Change::Finished { name, .. }
             | Change::Asking { name, .. }
             | Change::Ended { name, .. } => name,
@@ -305,6 +320,23 @@ impl Change {
         match self {
             // Lỗi: nói THẲNG ra dòng lỗi. Người đọc không cần biết nó im bao
             // lâu — họ cần biết nó hỏng vì cái gì.
+            // Hết hạn mức: nói ra ĐƯỜNG ĐI, không chỉ nói ra sự thật. Một tin
+            // báo "nó chặn rồi" mà không kèm cách đi tiếp thì chủ máy vẫn phải
+            // tự nhớ cú pháp — đúng lúc anh đang ở xa và đang bực.
+            Change::Limited {
+                id,
+                name,
+                acc,
+                when,
+                ..
+            } => {
+                let ngan: String = id.chars().take(8).collect();
+                format!(
+                    "🚫 {name} bị chặn — tài khoản {acc} hết hạn mức ({when}).\n\
+                     Nó sẽ KHÔNG tự chạy lại. Chuyển sang tài khoản khác, giữ nguyên việc:\n\
+                     /handover -a acc1 {ngan}"
+                )
+            }
             Change::Failed { name, line, .. } => {
                 let head = format!(
                     "{ST_ERR} {name} đang dừng vì LỖI:\n{}",
@@ -694,6 +726,11 @@ pub fn name_from_mark(id: &str, mark: &Mark) -> String {
 fn state_of(s: &LiveSession) -> &'static str {
     if s.host == "dead" {
         DEAD
+    } else if s.limited.is_some() {
+        // TRƯỚC mọi thứ trừ `dead`: một phiên vừa bị chặn vẫn có thể còn cờ
+        // `working` từ lượt dở, và lúc ấy huba sẽ im (đang chạy thì không phải
+        // tin) — im đúng lúc đáng nói nhất.
+        LIMITED
     } else if s.error.is_some() && !s.working {
         // Lỗi đứng TRƯỚC `idle`: cùng một phiên im lìm, nhưng "im vì xong" và
         // "im vì hỏng" đòi hai việc khác hẳn nhau của người đọc.
@@ -818,7 +855,14 @@ pub fn changes(
         // theo luật "đừng kêu vào mặt người đang nhìn" — kẹt thì dù đang ngồi
         // trước máy cũng đáng được gọi, vì có thể người ta đang nhìn cửa sổ khác.
         // LỖI — nói một lần, ngay lúc dòng lỗi xuất hiện trong nhật ký.
-        if state == ERRORED && before.is_some_and(|b| b.s != ERRORED) {
+        if state == LIMITED && before.is_some_and(|b| b.s != LIMITED) {
+            out.push(Change::Limited {
+                id: s.session_id.clone(),
+                name: crate::sessions::shown(s),
+                acc: s.account.clone(),
+                when: s.limited.clone().unwrap_or_default(),
+            });
+        } else if state == ERRORED && before.is_some_and(|b| b.s != ERRORED) {
             out.push(Change::Failed {
                 id: s.session_id.clone(),
                 name: crate::sessions::shown(s),

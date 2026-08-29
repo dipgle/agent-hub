@@ -1786,7 +1786,11 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                 let moved = if s.tty.is_empty() {
                     Err(anyhow::anyhow!("phiên không có cửa sổ terminal"))
                 } else {
-                    crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint, None, false)
+                    // `auto: true` — lượt này KHÔNG ai bấm, nên huba tự dọn cửa
+                    // sổ nó tự mở. Đây là chỗ duy nhất đóng cửa sổ cũ, và lý do
+                    // đo được: 5–14 lượt mỗi ngày, không dọn thì một tuần đọng
+                    // ~50 cửa sổ.
+                    crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint, None, true)
                 };
                 // Con trỏ chuyển sang phiên MỚI THẬT (id ghép từ nhật ký), không
                 // phải id bản fork: bản fork chỉ là chỗ lấy bản bàn giao, nó
@@ -9488,6 +9492,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // cục ĐO ĐƯỢC, đừng khai "đã chuyển": cửa sổ mở
                                 // được mà phiên chưa kịp sinh nhật ký thì chưa
                                 // có gì để trỏ tới (xem `FreshWindow::new_id`).
+                                // `auto: false` — CHỦ MÁY GÕ lượt này, nên cửa sổ
+                                // cũ giữ nguyên. Hà 29/08: *"Mỗi phiên làm một
+                                // dự án thì đóng làm gì trong khi việc chưa hết"*.
                                 Some(acc) => match crate::sessions::start_fresh_after_handover(
                                     cfg,
                                     s,
@@ -9566,18 +9573,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // Không xin đổi tài khoản thì chỉ đưa bản
                                     // bàn giao ra — chủ máy tự quyết làm gì.
                                     None => format!("⚠ bàn giao hỏng: {loi}\n\n{cp}"),
-                                    // 🔴 GIỮ cửa sổ cũ ở nhánh này, và chỉ nhánh
-                                    // này. Tới được đây nghĩa là tài khoản cũ
-                                    // KHÔNG gọi được — tức phiên cũ chưa cạn, nó
-                                    // chỉ bị một cái đồng hồ chặn. Hà 28/08, ngay
-                                    // lượt chuyển thật đầu tiên: *"Thế này thì
-                                    // đóng mất phiên rồi à"*.
+                                    // `auto: false` — chủ máy gõ. Ở đây phiên cũ
+                                    // lại càng chưa cạn: tới được nhánh này nghĩa
+                                    // là tài khoản cũ không GỌI được, tức nó chỉ
+                                    // bị một cái đồng hồ chặn.
                                     Some(acc) => match crate::sessions::start_fresh_after_handover(
                                         cfg,
                                         s,
                                         &cp,
                                         Some(acc),
-                                        true,
+                                        false,
                                     ) {
                                         Ok(w) => {
                                             if let Some(id) = w.new_id.as_deref() {

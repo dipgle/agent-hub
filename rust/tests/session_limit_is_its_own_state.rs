@@ -16,7 +16,7 @@
 
 use huba::keys::session_limit_on_screen;
 use huba::pipeline::old_window_note;
-use huba::sessions::{state_of, LiveSession, ST_LIMIT, ST_WAIT};
+use huba::sessions::{should_close_old_window, state_of, LiveSession, ST_LIMIT, ST_WAIT};
 
 const MAN_CHAN: &str = "\
 ⏺ Đang chạy bước cuối rồi tôi báo lại.
@@ -120,6 +120,44 @@ fn a_kept_window_is_announced_with_the_way_back() {
         cau.contains("VẪN CÒN"),
         "phải nói thẳng cửa sổ còn đó, đừng bắt suy ra từ việc KHÔNG nói gì: {cau:?}"
     );
+}
+
+/// 🔴 LUẬT MỘT CÂU — Hà 2026-08-29: *"Sao lằng nhằng thế? Mỗi phiên làm một dự
+/// án thì đóng làm gì trong khi việc chưa hết"*.
+///
+/// Trước đó tôi dựng một cây điều kiện theo CA (hết hạn mức thì giữ · sắp hết
+/// thì đóng · đầy ngữ cảnh thì đóng) rồi mời anh chọn. Cây ấy phải nuôi mãi: ca
+/// mới nào cũng đẻ thêm một nhánh, và mỗi nhánh là một chỗ để quên. Luật đúng
+/// không hỏi *"ca nào"*, nó hỏi *"AI LÀM"* — và nó cũng chính là câu mã của tệp
+/// này đã viết ra từ 13/08 mà chỉ áp cho một nhánh: *"Hai cửa sổ thì chủ máy
+/// đóng bớt được; một phiên đang làm dở bị đóng thì không lấy lại được"*.
+///
+/// Lượt TỰ ĐỘNG vẫn dọn, và lý do ấy đo được chứ không phải phỏng đoán:
+/// `handover_window_opened` chạy 5–14 lượt MỖI NGÀY (110 lượt từ 21/08) ⟹ không
+/// dọn thì một tuần đọng ~50 cửa sổ Terminal.
+#[test]
+fn huba_only_closes_windows_it_opened_by_itself() {
+    assert!(
+        should_close_old_window(true, true),
+        "lượt TỰ ĐỘNG mà không dọn ⟹ ~50 cửa sổ đọng lại sau một tuần"
+    );
+    assert!(
+        !should_close_old_window(false, true),
+        "CHỦ MÁY GÕ lượt này — cửa sổ của anh là của anh, đây đúng là ca Hà bác 29/08"
+    );
+}
+
+/// ĐỐI CHỨNG NGƯỢC của chính luật ấy: chưa thấy phiên mới chào đời thì **không
+/// bao giờ** đóng, kể cả lượt tự động. Đây là vế đã trả giá thật 2026-08-13
+/// 04:31 — id rỗng mà vẫn đóng cửa sổ đang làm việc của chủ máy, tức phá cái
+/// chắc chắn để đổi lấy cái chưa chứng minh, đúng lúc mù nhất.
+#[test]
+fn a_session_that_never_appeared_never_costs_the_old_window() {
+    assert!(
+        !should_close_old_window(true, false),
+        "tự động + phiên mới chưa chào đời ⟹ vẫn phải GIỮ, đây là ca 13/08"
+    );
+    assert!(!should_close_old_window(false, false));
 }
 
 /// ĐỐI CHỨNG NGƯỢC (§13①). Cửa sổ ĐÃ đóng mà vẫn mời `--resume` ở đó thì tệ hơn

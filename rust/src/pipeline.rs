@@ -1365,6 +1365,8 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 let data = SessionData {
                     sid: id.clone(),
                     cmds: crate::sessions::lines_of(&cmds),
+                    // Đường NHẬT KÝ — chỗ duy nhất nói được "chọn một".
+                    kind: crate::sessions::ChoiceKind::from_journal(multi),
                     // Bảng nhiều câu ⟹ mã `"1.<n>"` (câu 1) để ☑ đi bằng
                     // `pick_`; hộp một câu ⟹ mã `"<n>"`, đi bằng `k_`.
                     choices: opts
@@ -3164,10 +3166,38 @@ pub fn session_list_text(
         // Bỏ cả cột nguồn là bỏ luôn câu trả lời ấy; bỏ MẶC ĐỊNH thì câu trả lời
         // chỉ hiện đúng lúc nó mang tin. Cột icon tình trạng vẫn thẳng vì nó
         // đứng TRƯỚC, không phải sau.
+        // 🔴 CÓ OPTION ĐANG CHỜ ⟹ THÊM MỘT KÝ HIỆU — Hà 2026-08-30: *"icon trạng
+        // thái phiên thêm icon checkbox nếu đang có option chờ"*.
+        //
+        // Nó KHÔNG lặp lại `❓`: `❓` nói *"phiên dừng lại hỏi"*, thứ đúng cả với
+        // một câu hỏi chữ tự do; ký hiệu này nói *"có lựa chọn BẤM ĐƯỢC ngay từ
+        // đây"*. Hai câu dẫn tới hai thao tác khác nhau, nên chúng đáng hai chỗ.
+        //
+        // Và nó dùng đúng bộ ký hiệu của dòng lựa chọn trong tin
+        // (`sessions::ChoiceKind`) — liếc thấy `◉` ở danh sách thì mở ra cũng là
+        // `◉`, không phải học hai bảng ký hiệu.
+        //
+        // ⚠ CHỖ MÙ, khai ra chứ không lấp bằng phỏng đoán: nguồn ở đây là
+        // `s.asking`, tức NHẬT KÝ. Một bảng hỏi vừa mở có thể chưa kịp được ghi
+        // (đo 2026-08-19: 3,59 MB nhật ký phiên amm có 0 lần `AskUserQuestion`
+        // trong khi bảng nằm trên màn), và lúc ấy hàng này KHÔNG có ký hiệu dù
+        // màn đang có option chờ. Danh sách không đọc màn từng hàng — mỗi hàng
+        // là hai lượt `osascript` mỗi vòng.
+        let cho_chon = s
+            .asking
+            .as_ref()
+            .filter(|a| !a.options.is_empty())
+            .map(|a| {
+                format!(
+                    "{} ",
+                    crate::sessions::ChoiceKind::from_journal(a.multi).glyph()
+                )
+            })
+            .unwrap_or_default();
         let src = source_icon(&s.host);
         let head = match src {
-            "⌨" => format!("{eye}{icon} "),
-            _ => format!("{eye}{icon} {src} "),
+            "⌨" => format!("{eye}{icon} {cho_chon}"),
+            _ => format!("{eye}{icon} {src} {cho_chon}"),
         };
         // Chừa chỗ cho đích chạm `👉 ` mà `session_tap_anchors` chèn vào đầu
         // dòng lúc dựng HTML: nó không nằm trong chuỗi này (bài kiểm và các kênh
@@ -6638,6 +6668,10 @@ pub struct SessionData {
     /// `(mã lựa chọn, nhãn)` — mã là `"3"` cho hộp một câu, `"1.3"` cho bảng
     /// nhiều câu (câu 1, lựa chọn 3). Xem `session_layout`.
     pub choices: Vec<(String, String)>,
+    /// Hộp chọn ấy là CHỌN MỘT hay CHỌN NHIỀU — quyết ký hiệu đứng trước mỗi
+    /// lựa chọn. Xem [`crate::sessions::ChoiceKind`]; mặc định là `Unknown`, và
+    /// `Unknown` vẽ checkbox chứ không vẽ radio.
+    pub kind: crate::sessions::ChoiceKind,
     /// Chữ đang nằm trong ô nhập → ⏎ gửi · ⌫ xoá.
     pub box_text: Option<String>,
     /// Màn có dòng `Submit` (hộp CHỌN NHIỀU) → ✅ gửi bảng, ngay tại dòng ấy.
@@ -7417,7 +7451,14 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
             if let Some(href) = crate::telegram::deep_link(&payload) {
                 // TAB ở đầu nhãn = chèn TRƯỚC dòng, tức trước `1.` (Hà 17/08:
                 // *"Chèn phía trước số mỗi dòng"*) — xem `html_with_links`.
-                anchors.push((label.clone(), vec![(href, "\t☑".to_string())]));
+                // Ký hiệu theo LOẠI hộp — Hà 2026-08-30: *"Nếu option chỉ chọn
+                // 1 thì để nút radio và chọn nhiều mới để checkbox"*. Nguồn ký
+                // hiệu nằm ở `sessions::ChoiceKind` để hàng phiên trong danh
+                // sách dùng đúng bộ ấy.
+                anchors.push((
+                    label.clone(),
+                    vec![(href, format!("\t{}", data.kind.glyph()))],
+                ));
             }
         }
     }
@@ -12085,6 +12126,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // hàm dựng chuỗi phím, nên "thấy Submit" ở hai chỗ
                             // là MỘT phép đo.
                             submit: shot_submit || crate::keys::has_submit(&ack),
+                            // Đường MÀN: thấy `Submit` ⟹ chắc chắn chọn nhiều;
+                            // không thấy ⟹ KHÔNG kết luận (dòng ấy có thể đã
+                            // trôi khỏi khung). Xem `ChoiceKind`.
+                            kind: crate::sessions::ChoiceKind::from_screen(
+                                shot_submit || crate::keys::has_submit(&ack),
+                            ),
                             // Đo trên ảnh màn, không đo lại trên `ack` — `ack`
                             // đã mang cả khu chữ huba tự nối.
                             box_text: shot_box.clone(),

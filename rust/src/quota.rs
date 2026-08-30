@@ -272,6 +272,38 @@ pub fn rank(q: &Quota, now_ms: i64) -> Rank {
 /// Thứ tự giữ nguyên vì nó là cách phá hoà: hai tài khoản cùng hạng thì lấy cái
 /// chủ máy xếp trước, chứ không lấy cái tình cờ nằm trước trong một `HashMap`.
 pub fn rank_all(cfg: &crate::config::Config, now_ms: i64) -> Vec<Ranked> {
+    read_all(cfg)
+        .into_iter()
+        .map(|q| {
+            let r = rank(&q, now_ms);
+            logging::info(
+                "quota_read",
+                json!({ "account": q.account, "week_pct": q.week_pct,
+                        "week_resets_at": q.week_resets_at, "hour5_pct": q.hour5_pct,
+                        "fetched_at_ms": q.fetched_at_ms, "why_unknown": q.why_unknown,
+                        "rank": r.say() }),
+            );
+            Ranked {
+                name: q.account,
+                rank: r,
+            }
+        })
+        .collect()
+}
+
+/// Bản đọc thô của mọi tài khoản, theo đúng thứ tự cấu hình.
+///
+/// 🔴 Tách khỏi [`rank_all`] vì `runtime::accounts_text` cần bản THÔ (nó in cả
+/// phần trăm lẫn tuổi), còn chỗ chọn tài khoản chỉ cần cái hạng. Quan trọng hơn:
+/// **đây là chỗ duy nhất chạm đĩa**, nên `accounts_text` giữ nguyên được ranh
+/// giới nó đã tự đặt từ đầu (*"phần dựng câu, tách khỏi phần đi đo"*).
+///
+/// Ranh giới ấy tôi vừa phá một lần trong chính lượt này (30/08): cho
+/// `accounts_text` tự gọi `read` là biến một hàm dựng chữ thuần thành hàm đọc
+/// `$HOME`, và bài kiểm `usage_still_being_measured_says_so_instead_of_showing_zero`
+/// đỏ ngay — nó chấm *"không được bịa 0%"* trên một câu nay mang số thật của
+/// máy đang chạy. Cổng bắt đúng chỗ; chép lại đây để đừng ai vá lại kiểu ấy.
+pub fn read_all(cfg: &crate::config::Config) -> Vec<Quota> {
     cfg.claude_accounts_or_ambient()
         .iter()
         .map(|a| {
@@ -280,19 +312,7 @@ pub fn rank_all(cfg: &crate::config::Config, now_ms: i64) -> Vec<Ranked> {
                 .as_deref()
                 .filter(|d| !d.is_empty())
                 .map(|d| crate::config::expand_home(Path::new(d)));
-            let q = read(&a.name, dir.as_deref());
-            let r = rank(&q, now_ms);
-            logging::info(
-                "quota_read",
-                json!({ "account": a.name, "week_pct": q.week_pct,
-                        "week_resets_at": q.week_resets_at, "hour5_pct": q.hour5_pct,
-                        "fetched_at_ms": q.fetched_at_ms, "why_unknown": q.why_unknown,
-                        "rank": r.say() }),
-            );
-            Ranked {
-                name: a.name.clone(),
-                rank: r,
-            }
+            read(&a.name, dir.as_deref())
         })
         .collect()
 }

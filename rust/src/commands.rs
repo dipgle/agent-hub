@@ -52,6 +52,23 @@ pub struct Route {
     /// Tên chính — cũng là tên đăng ký với Telegram. Phải hợp lệ (xem test).
     pub name: &'static str,
     pub aliases: &'static [&'static str],
+    /// Cách gõ CŨ: bộ phân tích còn nhận, nhưng KHÔNG bao giờ khai với Telegram.
+    ///
+    /// 🔴 Sinh ra 2026-08-30 từ một va chạm giữa hai luật đều đúng, và cả hai
+    /// đều có bài kiểm đứng sau:
+    /// * tên khai với Telegram phải hợp lệ (`[a-z0-9_]`) — sai luật thì Telegram
+    ///   thôi tô sáng nó, mà tô sáng chính là cách huba cho bấm từ trong chữ;
+    /// * một cách gõ ĐÃ ĐI RA NGOÀI thì không được chết — nó nằm trong hàng trăm
+    ///   tin Telegram đã gửi và trong tay quen của chủ máy.
+    ///
+    /// `ctrl-c` vướng cả hai: dấu gạch NGANG không hợp lệ với Telegram, mà
+    /// `/ctrl-c` thì đã gửi đi rồi. Trước đó `aliases` gánh cả hai việc, nên chỗ
+    /// duy nhất còn lại là một ngoại lệ gõ cứng trong bài kiểm (`if *n == "?"`) —
+    /// tức một danh sách miễn trừ dài dần mà không ai đọc.
+    ///
+    /// Tách ra thì mỗi danh sách trả lời đúng một câu: `aliases` là thứ huba
+    /// KHAI, `legacy` là thứ huba NHẬN.
+    pub legacy: &'static [&'static str],
     pub kind: CommandKind,
     pub arg: Arg,
     /// Cú pháp hiện trong `/help`, ví dụ `<câu hỏi>` hay `[id]`.
@@ -68,6 +85,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "session",
         aliases: &["phien"],
+        legacy: &[],
         kind: CommandKind::Session,
         arg: Arg::Rest,
         usage: "[id]",
@@ -82,6 +100,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "sessions",
         aliases: &["phiens", "danhsach"],
+        legacy: &[],
         kind: CommandKind::Session,
         arg: Arg::None,
         usage: "",
@@ -101,6 +120,9 @@ pub const ROUTES: &[Route] = &[
         // Dấu gạch NGANG vẫn sống ở `Arg::Fixed("ctrl-c")` ngay dưới, và ở đó nó
         // đúng: đấy là tên PHÍM gửi cho `keys`, không phải tên lệnh cho Telegram.
         aliases: &["ctrl_c", "refresh", "lamtuoi"],
+        // `/ctrl-c` đã đi ra ngoài trước khi luật tên Telegram được đo — nhận,
+        // nhưng không khai.
+        legacy: &["ctrl-c"],
         kind: CommandKind::Key,
         // 🔴 `Arg::Fixed`, KHÔNG phải một route có handler riêng — và đó là cả
         // bài học của ngày 27/08. Bản trước dựng hẳn `CommandKind::Refresh` +
@@ -118,6 +140,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "shot",
         aliases: &["chup"],
+        legacy: &[],
         kind: CommandKind::Shot,
         arg: Arg::Rest,
         usage: "[id]",
@@ -132,6 +155,7 @@ pub const ROUTES: &[Route] = &[
         // nhận lấy cái từ người ta với tay tới.
         name: "front",
         aliases: &["focus", "truoc"],
+        legacy: &[],
         kind: CommandKind::Front,
         arg: Arg::Rest,
         usage: "[id]",
@@ -141,6 +165,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "anh",
         aliases: &["photo", "screenshot"],
+        legacy: &[],
         kind: CommandKind::Photo,
         arg: Arg::Rest,
         usage: "[id]",
@@ -150,6 +175,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "ask",
         aliases: &["hoi"],
+        legacy: &[],
         kind: CommandKind::Ask,
         arg: Arg::Custom,
         usage: "<câu hỏi>",
@@ -159,6 +185,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "new",
         aliases: &["moi"],
+        legacy: &[],
         kind: CommandKind::New,
         // 🔴 `Custom` → `Rest` ngày 2026-08-14: đề bài KHÔNG bắt buộc. Chạm vào
         // dòng này trong menu Telegram chỉ gửi đúng `/new`, nên một lệnh
@@ -174,6 +201,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "type",
         aliases: &["go"],
+        legacy: &[],
         kind: CommandKind::Type,
         arg: Arg::RestRequired,
         usage: "<chữ>",
@@ -183,6 +211,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "key",
         aliases: &["phim"],
+        legacy: &[],
         kind: CommandKind::Key,
         arg: Arg::RestRequired,
         usage: "<up|down|left|right|enter|esc|tab|space|1-9>",
@@ -196,6 +225,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "enter",
         aliases: &["gui"],
+        legacy: &[],
         kind: CommandKind::Key,
         arg: Arg::Fixed("enter"),
         usage: "",
@@ -205,6 +235,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "right",
         aliases: &["goiy"],
+        legacy: &[],
         kind: CommandKind::Key,
         arg: Arg::Fixed("right"),
         usage: "",
@@ -214,6 +245,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "pick",
         aliases: &["chon"],
+        legacy: &[],
         kind: CommandKind::Pick,
         arg: Arg::RestRequired,
         usage: "<câu>.<lựa chọn>",
@@ -223,6 +255,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "tab",
         aliases: &["cau"],
+        legacy: &[],
         kind: CommandKind::Tab,
         arg: Arg::RestRequired,
         usage: "<số>",
@@ -232,6 +265,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "clean",
         aliases: &["don", "xoacho"],
+        legacy: &[],
         kind: CommandKind::Clean,
         arg: Arg::Rest,
         usage: "[id]",
@@ -241,6 +275,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "clear",
         aliases: &["xoao", "xoaonhap"],
+        legacy: &[],
         kind: CommandKind::Clear,
         arg: Arg::Rest,
         usage: "[id]",
@@ -250,6 +285,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "stop",
         aliases: &["dung"],
+        legacy: &[],
         kind: CommandKind::Stop,
         arg: Arg::Rest,
         usage: "[id]",
@@ -259,6 +295,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "close",
         aliases: &["dong", "dongphien"],
+        legacy: &[],
         kind: CommandKind::Close,
         arg: Arg::Rest,
         usage: "[id]",
@@ -268,6 +305,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "handover",
         aliases: &["bangiao"],
+        legacy: &[],
         kind: CommandKind::Handover,
         arg: Arg::Rest,
         usage: "[-a acc] [id]",
@@ -282,6 +320,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "runin",
         aliases: &[],
+        legacy: &[],
         kind: CommandKind::RunIn,
         arg: Arg::Custom,
         usage: "<id> <dòng lệnh>",
@@ -291,6 +330,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "upgrade",
         aliases: &["capnhat"],
+        legacy: &[],
         kind: CommandKind::Upgrade,
         arg: Arg::None,
         usage: "",
@@ -300,6 +340,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "terminal",
         aliases: &["win", "cuaso", "tty"],
+        legacy: &[],
         kind: CommandKind::Win,
         // 🔴 `Rest`, không phải `RestRequired`: trơn = XEM DANH SÁCH (Hà
         // 2026-08-15). `RestRequired` trả `None` cho `/terminal` trơn — tức gõ
@@ -312,6 +353,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "web",
         aliases: &["browser", "trinhduyet"],
+        legacy: &[],
         kind: CommandKind::Web,
         // `Rest`, cùng lý do với `terminal`: gõ trơn = XEM, và một route
         // `listed: true` thì "gõ trơn" là cách một ngón tay chạm tới được.
@@ -323,6 +365,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "accounts",
         aliases: &["acc", "taikhoan"],
+        legacy: &[],
         kind: CommandKind::Accounts,
         arg: Arg::None,
         usage: "",
@@ -332,6 +375,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "set",
         aliases: &["cauhinh"],
+        legacy: &[],
         kind: CommandKind::SetConfig,
         // Luật riêng: đòi CẢ khoá lẫn giá trị. `/set autonomy.default` (thiếu
         // vế sau) phải KHÔNG parse — một lệnh đổi cấu hình mà nuốt nửa câu là
@@ -344,6 +388,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "doctor",
         aliases: &["health"],
+        legacy: &[],
         kind: CommandKind::Doctor,
         arg: Arg::None,
         usage: "",
@@ -357,6 +402,7 @@ pub const ROUTES: &[Route] = &[
     Route {
         name: "run",
         aliases: &["cycle"],
+        legacy: &[],
         kind: CommandKind::Run,
         arg: Arg::None,
         usage: "",
@@ -365,7 +411,11 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         name: "help",
-        aliases: &["?"],
+        aliases: &[],
+        // `?` là lối gõ tắt cũ. Telegram không nhận nó làm tên lệnh, nên nó chưa
+        // bao giờ được khai — trước 30/08 nó nấp trong `aliases` kèm một ngoại lệ
+        // gõ cứng trong bài kiểm.
+        legacy: &["?"],
         kind: CommandKind::Help,
         arg: Arg::None,
         usage: "",
@@ -378,7 +428,7 @@ pub const ROUTES: &[Route] = &[
 pub fn lookup(verb: &str) -> Option<&'static Route> {
     ROUTES
         .iter()
-        .find(|r| r.name == verb || r.aliases.contains(&verb))
+        .find(|r| r.name == verb || r.aliases.contains(&verb) || r.legacy.contains(&verb))
 }
 
 /// Chữ cho `/help`, sinh TỪ BẢNG — nên một lệnh mới không thể ra đời mà thiếu
@@ -454,13 +504,12 @@ mod tests {
     /// trong tin — mà tô sáng chính là cách huba cho bấm từ trong chữ.
     #[test]
     fn every_command_name_is_one_telegram_will_highlight() {
+        // MẪU SỐ: quét đúng thứ huba KHAI. `legacy` cố ý không nằm ở đây — nó là
+        // thứ huba NHẬN mà không khai, xem `Route::legacy`.
+        let mut dem = 0;
         for r in ROUTES {
             for n in std::iter::once(&r.name).chain(r.aliases.iter()) {
-                // `?` là lối gõ tắt cũ, không khai với Telegram — nhưng vẫn phải
-                // parse được, nên nó là ngoại lệ DUY NHẤT và có tên ở đây.
-                if *n == "?" {
-                    continue;
-                }
+                dem += 1;
                 assert!(n.len() <= 32, "tên quá dài: {n}");
                 assert!(
                     n.chars()
@@ -469,6 +518,10 @@ mod tests {
                 );
             }
         }
+        assert!(
+            dem >= 30,
+            "chỉ chấm được {dem} tên — phép quét đang nhìn nhầm chỗ"
+        );
     }
 
     /// 🔴 Cái từ chủ máy GÕ RA phải dẫn tới đâu đó.
@@ -503,7 +556,10 @@ mod tests {
     fn no_two_routes_answer_to_the_same_name() {
         let mut seen: Vec<&str> = Vec::new();
         for r in ROUTES {
-            for n in std::iter::once(&r.name).chain(r.aliases.iter()) {
+            for n in std::iter::once(&r.name)
+                .chain(r.aliases.iter())
+                .chain(r.legacy.iter())
+            {
                 assert!(!seen.contains(n), "tên trùng: {n}");
                 seen.push(n);
             }
@@ -522,6 +578,10 @@ mod tests {
             assert_eq!(lookup(r.name).map(|x| x.name), Some(r.name));
             for a in r.aliases {
                 assert_eq!(lookup(a).map(|x| x.name), Some(r.name), "alias {a}");
+            }
+            // Cách gõ CŨ cũng phải tới đúng chỗ — đó là cả lý do nó còn sống.
+            for a in r.legacy {
+                assert_eq!(lookup(a).map(|x| x.name), Some(r.name), "legacy {a}");
             }
         }
         assert!(lookup("khongcolenhnay").is_none());

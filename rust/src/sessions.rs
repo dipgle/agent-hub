@@ -2017,6 +2017,72 @@ pub const ST_DEAD: &str = "🪦";
 /// việc khác nhau, nên chúng không được nhìn giống nhau trên danh sách.
 pub const ST_LIMIT: &str = "🚫";
 
+/// Hộp chọn đang chờ thuộc loại nào — và vì sao nó phải có BA giá trị.
+///
+/// 🔴 Hà 2026-08-30: *"Nếu option chỉ chọn 1 thì để nút radio và chọn nhiều mới
+/// để checkbox, icon trạng thái phiên thêm icon checkbox nếu đang có option
+/// chờ"*.
+///
+/// Ký hiệu ở đây là NGUỒN DUY NHẤT cho cả hai chỗ Hà nói tới — dòng lựa chọn
+/// trong tin, và hàng phiên trong danh sách. Hai màn nói khác nhau về cùng một
+/// hộp thì không ai đối chiếu được (cùng lý do `state_of` phải nằm một chỗ).
+///
+/// **Vì sao [`ChoiceKind::Unknown`] phải là một giá trị riêng, và vì sao nó vẽ
+/// CHECKBOX chứ không phải radio.** Hai cái sai không ngang giá:
+/// * vẽ radio lên một hộp CHỌN NHIỀU là nói *"bấm một cái là xong"* — chủ máy
+///   bấm rồi ngồi chờ một việc sẽ không xảy ra, vì phiên vẫn đang đợi Enter.
+///   Đó đúng là con bug 2026-08-13 mà chính trường [`Asking::multi`] sinh ra để
+///   trị (*"option này chọn nhiều chứ không phải chọn 1"*);
+/// * vẽ checkbox lên một hộp CHỌN MỘT thì bấm một cái nó vẫn gửi.
+///
+/// Nên `Unknown` nghiêng về checkbox: giữ nguyên hình dạng vẫn chạy từ trước, và
+/// không bao giờ hứa một điều huba chưa đo được.
+///
+/// Chỉ có ĐÚNG MỘT nguồn được phép nói `Single`: `multiSelect: false` đọc từ
+/// chính lời gọi `AskUserQuestion` trong nhật ký. Màn hình thì không — một hộp
+/// chọn nhiều có dòng `Submit` ở đáy, nhưng VẮNG dòng ấy không chứng minh được
+/// gì (nó có thể đã trôi khỏi khung nhìn), và "vắng bằng chứng" mà đọc thành
+/// "bằng chứng vắng" là đúng cái hướng sai đắt hơn ở trên.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChoiceKind {
+    /// Không đo được loại hộp — vẽ như chọn nhiều, xem trên.
+    #[default]
+    Unknown,
+    /// `multiSelect: false` trong nhật ký: bấm một cái là gửi luôn.
+    Single,
+    /// Chọn nhiều: bấm một số là BẬT/TẮT một mục, chưa gửi.
+    Multi,
+}
+
+impl ChoiceKind {
+    /// Đọc từ cờ `multiSelect` của nhật ký — nguồn DUY NHẤT nói được `Single`.
+    pub fn from_journal(multi: bool) -> Self {
+        if multi {
+            ChoiceKind::Multi
+        } else {
+            ChoiceKind::Single
+        }
+    }
+
+    /// Đọc từ MÀN: thấy dòng `Submit` ⟹ chắc chắn chọn nhiều. Không thấy ⟹
+    /// **không kết luận** (xem chú thích của enum).
+    pub fn from_screen(has_submit: bool) -> Self {
+        if has_submit {
+            ChoiceKind::Multi
+        } else {
+            ChoiceKind::Unknown
+        }
+    }
+
+    /// Ký hiệu đứng trước một lựa chọn, và cũng là ký hiệu gắn vào hàng phiên.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            ChoiceKind::Single => "◉",
+            ChoiceKind::Multi | ChoiceKind::Unknown => "☑",
+        }
+    }
+}
+
 /// Cùng một sự thật tới bằng HAI đường — xếp lại `(lỗi, hết hạn mức)` cho đúng.
 ///
 /// 🔴 Đo trên máy này 2026-08-30 05:16: BỐN phiên acc3 mang nguyên văn

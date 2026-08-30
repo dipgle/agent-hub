@@ -169,12 +169,23 @@ fn text_in_the_input_box_always_gets_a_send_link() {
     );
 }
 
-/// ☑ của một lựa chọn nằm TRƯỚC số thứ tự, không phải cuối nhãn.
+/// Ký hiệu của một lựa chọn nằm TRƯỚC chữ, và nằm TRONG thẻ `<a>`.
 ///
 /// 🔴 Hà 2026-08-17, ảnh một tin tự phát có bốn lựa chọn và bốn nút `☐ 1 Khô`…
 /// ở đáy: *"Sao không chèn icon thẳng vào các lựa chọn mà chèn phía dưới"* →
-/// *"Chèn phía trước số mỗi dòng"*. Mắt chạy dọc CỘT SỐ để chọn, nên đích chạm
-/// phải nằm trên cùng cột ấy; dán cuối nhãn thì mỗi dòng một chỗ khác nhau.
+/// *"Chèn phía trước số mỗi dòng"*. Mắt chạy dọc cột ấy để chọn.
+///
+/// 🔴 VÀ NÓ ĐÃ ĐỔI HÌNH DẠNG 2026-08-27 (`a8b3dd4`), Hà: *"Đích chạm của một
+/// lựa chọn to bằng 1 ký tự — mắt thấy, ngón tay không trúng"*. Từ lượt ấy neo
+/// của một dòng lựa chọn được coi là **trọn dòng** (số thứ tự bị bóc ra khi so),
+/// nên icon đi VÀO TRONG thẻ cùng với chữ: `1. <a …>☑ Không xoá gì</a>`. Đích
+/// chạm to bằng cả nhãn thay vì một ký tự.
+///
+/// ⚠ Bài kiểm này **nằm đỏ từ 27/08 tới 30/08** vì nó còn khoá hình dạng cũ
+/// (`☑` phải đứng trước chuỗi `1.`) — và không ai thấy, vì lượt 27/08 chỉ chạy
+/// "10 suite vùng ảnh hưởng". Cùng ngày, cùng lý do với con `ctrl-c` trong
+/// `commands.rs`. Nay nó khoá điều CÒN ĐÚNG ở cả hai lượt: icon đứng trước CHỮ,
+/// và cả nhãn là đích chạm.
 #[test]
 fn a_choice_gets_its_tick_before_the_number() {
     huba::telegram::set_bot_username("hub_test_bot");
@@ -192,11 +203,30 @@ fn a_choice_gets_its_tick_before_the_number() {
             ..Default::default()
         },
     );
+    let mut cham = 0;
     for line in shown.lines().filter(|l| l.contains("Không xoá gì")) {
+        cham += 1;
         let tick = line.find('☑').expect("phải có ☑");
-        let num = line.find("1.").expect("phải còn số thứ tự");
-        assert!(tick < num, "☑ phải đứng TRƯỚC số: {line}");
+        let chu = line.find("Không xoá gì").expect("phải còn nhãn");
+        assert!(tick < chu, "☑ phải đứng TRƯỚC chữ: {line}");
+        assert!(
+            line.find("<a ").is_some_and(|a| a < tick),
+            "☑ phải nằm TRONG thẻ <a> — để ngoài là dựng lại đúng cái đích chạm \
+             một ký tự mà 27/08 vừa bỏ: {line}"
+        );
+        let dong = line.find("</a>").expect("thẻ phải đóng");
+        assert!(chu < dong, "cả nhãn phải nằm trong đích chạm: {line}");
+        assert!(
+            line.contains("1."),
+            "số thứ tự vẫn phải còn trên dòng: {line}"
+        );
     }
+    // MẪU SỐ: không dòng nào khớp thì cả vòng `for` ở trên không chấm gì, và bài
+    // kiểm xanh vì nó không chạy — đúng dạng phép đo mù.
+    assert_eq!(
+        cham, 1,
+        "phải chấm đúng một dòng lựa chọn, chấm được {cham}"
+    );
 }
 
 /// 🖥 trả về KẾT QUẢ của lệnh vừa gõ, không trả cả màn hình có sẵn từ trước.

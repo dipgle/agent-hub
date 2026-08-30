@@ -132,18 +132,36 @@ fn daemon_block(now: i64) -> Value {
 /// luôn luôn một tài khoản duy nhất. Cái đó phải NÓI RA trên màn, vì hậu quả
 /// của nó (tuần cạn hạn mức thì phiên mới chết giữa chừng) chỉ lộ ra về sau.
 ///
-/// Hạn mức lấy từ bản đã đo sẵn (`usage_cached`, 5 phút một lượt) — không đẻ
-/// thêm tiến trình `claude` nào cho một lệnh xem.
+/// Hạn mức lấy từ SỔ của chính CLI (`quota::read_all` — đọc tệp, không spawn) và
+/// từ bản dò đã đo sẵn (`usage_cached`, 5 phút một lượt). Không đẻ thêm một tiến
+/// trình `claude` nào cho một lệnh xem.
 pub fn accounts_say(cfg: &Config, live: &SessionsSnapshot, now: i64) -> String {
-    accounts_text(cfg, live, &usage_cached(cfg, now))
+    accounts_text(
+        cfg,
+        live,
+        &usage_cached(cfg, now),
+        &crate::quota::read_all(cfg),
+    )
 }
 
 /// Phần dựng câu, tách khỏi phần đi đo — để test được mà không spawn `claude`.
 ///
 /// Một hàm vừa gọi tiến trình vừa dựng chữ thì test của nó hoặc phải chạy thật
-/// (chậm, phụ thuộc máy) hoặc không có test. Ranh giới đặt ở đây vì `usage` là
-/// thứ DUY NHẤT phải đi hỏi ra ngoài.
-pub fn accounts_text(cfg: &Config, live: &SessionsSnapshot, usage: &Value) -> String {
+/// (chậm, phụ thuộc máy) hoặc không có test. Ranh giới đặt ở đây vì `usage` và
+/// `quotas` là hai thứ DUY NHẤT phải đi hỏi ra ngoài.
+///
+/// 🔴 `quotas` là THAM SỐ, không phải một lượt `quota::read` gọi tại chỗ — và
+/// tôi vừa phá đúng ranh giới ấy một lần trong ngày 30/08. Cho hàm này tự đọc
+/// `$HOME/.claude*.json` làm nó phụ thuộc máy đang chạy, và bài kiểm
+/// `usage_still_being_measured_says_so_instead_of_showing_zero` đỏ ngay: nó chấm
+/// *"không được bịa 0%"* trên một câu nay mang `5 tiếng 0%` thật của acc2. Cổng
+/// bắt đúng chỗ, và cái nó bắt không phải con chữ — là ranh giới.
+pub fn accounts_text(
+    cfg: &Config,
+    live: &SessionsSnapshot,
+    usage: &Value,
+    quotas: &[crate::quota::Quota],
+) -> String {
     let pending = usage.get("pending").and_then(Value::as_bool) == Some(true);
     let per_acc = usage.get("accounts");
     let accounts = cfg.claude_accounts_or_ambient();
@@ -200,15 +218,11 @@ pub fn accounts_text(cfg: &Config, live: &SessionsSnapshot, usage: &Value) -> St
         //
         // Dòng mới đọc tệp, nên nó có số ngay — và nó in kèm TUỔI của số ấy, vì
         // đây là chỗ chủ máy soi lại luật chọn tài khoản (`watch::suggest_account`).
-        let q = crate::quota::read(
-            &acc.name,
-            acc.config_dir
-                .as_deref()
-                .filter(|d| !d.is_empty())
-                .map(|d| crate::config::expand_home(std::path::Path::new(d)))
-                .as_deref(),
-        );
-        out.push_str(&format!("    hạn mức: {}\n", q.say(crate::quota::now_ms())));
+        // Không có bản đọc cho tài khoản này thì IM ở dòng ấy — im khác hẳn với
+        // in ra một câu "chưa đo được" mà chính chỗ gọi chưa hề đi đo.
+        if let Some(q) = quotas.iter().find(|q| q.account == acc.name) {
+            out.push_str(&format!("    hạn mức: {}\n", q.say(crate::quota::now_ms())));
+        }
         let row = per_acc.and_then(|m| m.get(&acc.name));
         match row {
             // Nhãn khác hẳn dòng trên, cố ý: hai NGUỒN khác nhau cho cùng một
@@ -244,7 +258,9 @@ pub fn accounts_text(cfg: &Config, live: &SessionsSnapshot, usage: &Value) -> St
                 }
             }
             // "Chưa đo xong" KHÁC "đã đo và bằng 0". Nói đúng cái đang có.
-            None if pending => out.push_str("    (dò /usage: đang chạy)\n"),
+            // Giữ nguyên chữ "đang đo": nó là thứ phân biệt *"chưa đo xong"* với
+            // *"đã đo và bằng 0"*, và có một bài kiểm đứng trên đúng con chữ ấy.
+            None if pending => out.push_str("    (dò /usage: đang đo, chưa có số)\n"),
             None => {}
         }
     }

@@ -214,7 +214,7 @@ fn row(account: &str, name: &str) -> huba::sessions::LiveSession {
 #[test]
 fn the_accounts_list_names_the_one_that_new_lands_on() {
     let live = snap_with(vec![row("acc1", "projects-7c")]);
-    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}));
+    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[]);
     let line = said
         .lines()
         .find(|l| l.starts_with("acc1"))
@@ -245,7 +245,7 @@ fn a_blind_account_says_its_zero_is_not_trustworthy() {
     live.blind.push("acc2".into());
     live.notes
         .push("acc2: spawn claude failed: No such file or directory".into());
-    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}));
+    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[]);
     assert!(
         said.contains("KHÔNG liệt kê được"),
         "không cảnh báo tài khoản mù:\n{said}"
@@ -260,8 +260,12 @@ fn a_blind_account_says_its_zero_is_not_trustworthy() {
 #[test]
 fn usage_still_being_measured_says_so_instead_of_showing_zero() {
     let live = snap_with(vec![]);
-    let said =
-        huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({ "pending": true }));
+    let said = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &serde_json::json!({ "pending": true }),
+        &[],
+    );
     assert!(said.contains("đang đo"), "phải nói đang đo:\n{said}");
     assert!(!said.contains("0%"), "không được bịa 0%:\n{said}");
 }
@@ -273,9 +277,71 @@ fn measured_quota_reaches_the_line() {
         &acc_cfg(),
         &live,
         &serde_json::json!({ "accounts": { "acc1": { "week_pct": 98, "session_pct": 6 } } }),
+        &[],
     );
     assert!(said.contains("tuần 98%"), "thiếu hạn mức tuần:\n{said}");
     assert!(said.contains("phiên 6%"), "thiếu hạn mức phiên:\n{said}");
+}
+
+/// Số hạn mức đọc từ SỔ của chính CLI phải tới được dòng, kèm TUỔI của nó.
+///
+/// 🔴 Hà 2026-08-30: *"mở phiên mới ở acc khác chưa kiểm soát được acc đó có
+/// đang còn nhiều tokens nhất không"*. `/accounts` là chỗ DUY NHẤT anh soi lại
+/// được luật chọn tài khoản, nên nó phải in cả cái để soi — và tuổi bản đọc là
+/// một nửa của cái ấy: acc1 trên máy này đang mang một con số già hai ngày.
+#[test]
+fn quota_from_the_cli_book_reaches_the_line() {
+    let live = snap_with(vec![]);
+    // Mốc giả 2026-08-30T15:00:00Z; bản đọc trước đó 2 tiếng.
+    let now = 1_788_102_000_000i64;
+    let q = huba::quota::Quota {
+        account: "acc1".into(),
+        week_pct: Some(22),
+        week_resets_at: Some("2026-09-02T10:59:59+00:00".into()),
+        hour5_pct: Some(0),
+        hour5_resets_at: None,
+        fetched_at_ms: Some(now - 2 * 60 * 60 * 1000),
+        why_unknown: None,
+    };
+    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[q]);
+    assert!(said.contains("tuần 22%"), "thiếu số tuần:\n{said}");
+    assert!(
+        said.contains("đã dùng 22%"),
+        "thiếu HẠNG — số trần không nói được ai rộng cửa hơn:\n{said}"
+    );
+    assert!(said.contains("tiếng trước"), "thiếu TUỔI bản đọc:\n{said}");
+}
+
+/// 🔴 ĐỐI CHỨNG NGƯỢC của ranh giới "dựng chữ ≠ đi đo" — bài kiểm này ĐỎ nếu
+/// `accounts_text` lại tự đi đọc `$HOME`.
+///
+/// Đây là chỗ tôi vừa phá trong chính ngày 30/08: cho hàm dựng chữ tự gọi
+/// `quota::read` làm nó phụ thuộc máy đang chạy, và
+/// `usage_still_being_measured_says_so_instead_of_showing_zero` đỏ vì câu in ra
+/// mang `5 tiếng 0%` thật của acc2. Không truyền bản đọc nào vào thì dòng hạn
+/// mức KHÔNG được xuất hiện — im khác hẳn với bịa một câu "chưa đo được" mà
+/// chính chỗ gọi chưa hề đi đo.
+#[test]
+fn accounts_text_khong_tu_di_doc_o_dia() {
+    let live = snap_with(vec![]);
+    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[]);
+    assert!(
+        !said.contains("hạn mức:"),
+        "không đưa bản đọc nào vào mà vẫn có dòng hạn mức ⟹ hàm đang tự đọc đĩa:\n{said}"
+    );
+    // …và có bản đọc thì dòng ấy PHẢI hiện — không thì bài trên xanh nhờ hàm
+    // không bao giờ in gì, tức nó không đo cái gì cả.
+    let q = huba::quota::Quota {
+        account: "acc1".into(),
+        week_pct: Some(5),
+        week_resets_at: Some("2026-09-02T10:59:59+00:00".into()),
+        hour5_pct: Some(0),
+        hour5_resets_at: None,
+        fetched_at_ms: None,
+        why_unknown: None,
+    };
+    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[q]);
+    assert!(said.contains("hạn mức:"), "có bản đọc mà không in:\n{said}");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

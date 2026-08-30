@@ -786,20 +786,39 @@ fn state_of(s: &LiveSession) -> &'static str {
 /// sang **đúng tài khoản vừa chết**, và câu ấy đọc lên vẫn trơn tru như mọi câu
 /// khác — không có gì đỏ lên, chỉ có một cú chạm vô ích ở đầu kia cây cầu.
 ///
-/// Hai cửa, theo thứ tự:
+/// Ba cửa, theo thứ tự:
 /// 1. bỏ chính tài khoản đang bị chặn;
 /// 2. bỏ mọi tài khoản mà huba ĐANG NHÌN THẤY một phiên bị chặn — đo được sáng
-///    nay: acc3 đứng `weekly limit · resets Sep 1` trên BỐN phiên cùng lúc, nên
-///    gợi ý sang đó là gợi ý một cú chạm vô ích thứ hai.
+///    30/08: acc3 đứng `weekly limit · resets Sep 1` trên BỐN phiên cùng lúc, nên
+///    gợi ý sang đó là gợi ý một cú chạm vô ích thứ hai;
+/// 3. trong số còn lại, lấy cái CÒN NHIỀU CHỖ NHẤT ([`crate::quota::Rank`]).
+///
+/// 🔴 Cửa 3 là chỗ vá ngày 2026-08-30, và nó vá đúng câu Hà hỏi: *"mở phiên mới ở
+/// acc khác chưa kiểm soát được acc đó có đang còn nhiều tokens nhất không"*.
+///
+/// Luật cũ dừng ở cửa 2 rồi lấy **tên đầu tiên trong cấu hình**, với lời tự bào
+/// chữa ghi ngay tại đây: *"huba không có phép đo nào tốt hơn để xếp lại
+/// (`/usage` treo)"*. Câu ấy đúng về phép dò và SAI về sự thật — số hạn mức nằm
+/// sẵn trong `<config_dir>/.claude.json` do chính CLI ghi, không cần dò gì cả.
+/// Đo cùng lúc anh hỏi: **acc1 92% · acc2 22% · acc3 100%**, và luật cũ trả
+/// `acc1`. Xem [`crate::quota`].
+///
+/// Cửa 2 vẫn giữ dù cửa 3 mạnh hơn, vì hai cửa đo hai thứ khác nhau và cái nào
+/// cũng có lúc là cái duy nhất còn thấy: cửa 2 đọc MÀN (biết ngay lúc này, kể cả
+/// khi tệp chưa kịp cập nhật), cửa 3 đọc TỆP (biết cả tài khoản không có phiên
+/// nào — đúng chỗ cửa 2 mù hoàn toàn).
 ///
 /// `None` = không còn tài khoản nào để gợi ý, và đó là một câu trả lời chứ không
 /// phải một chỗ trống. Bịa ra một cái tên thì tốn của chủ máy đúng cái thứ đang
 /// thiếu: một lượt gọi `claude`.
 ///
-/// Thứ tự trong `accounts` là thứ tự cấu hình, cố ý: nó là thứ tự chủ máy tự
-/// xếp, và huba không có phép đo nào tốt hơn để xếp lại (`/usage` treo — xem
-/// `PLAN.md`, mục còn nợ).
-pub fn suggest_account(limited: &str, accounts: &[String], now: &[LiveSession]) -> Option<String> {
+/// Hoà thì lấy cái đứng trước trong cấu hình — thứ tự chủ máy tự xếp, và
+/// `min_by_key` của Rust giữ phần tử ĐẦU khi bằng nhau.
+pub fn suggest_account(
+    limited: &str,
+    accounts: &[crate::quota::Ranked],
+    now: &[LiveSession],
+) -> Option<String> {
     let dang_chan: Vec<&str> = now
         .iter()
         .filter(|s| s.limited.is_some())
@@ -807,8 +826,12 @@ pub fn suggest_account(limited: &str, accounts: &[String], now: &[LiveSession]) 
         .collect();
     accounts
         .iter()
-        .find(|a| a.as_str() != limited && !dang_chan.contains(&a.as_str()))
-        .cloned()
+        .filter(|a| a.name != limited && !dang_chan.contains(&a.name.as_str()))
+        // Đã đo được là KỊCH TRẦN thì không phải một gợi ý, nó là cú chạm vô ích
+        // thứ ba. Thà trả `None` và nói thẳng là không biết chuyển đi đâu.
+        .filter(|a| a.rank != crate::quota::Rank::Full)
+        .min_by_key(|a| a.rank)
+        .map(|a| a.name.clone())
 }
 
 pub fn changes(

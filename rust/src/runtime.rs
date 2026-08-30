@@ -190,10 +190,32 @@ pub fn accounts_text(cfg: &Config, live: &SessionsSnapshot, usage: &Value) -> St
                 "    ⚠ lượt này KHÔNG liệt kê được phiên — con số trên không đáng tin: {why}\n"
             ));
         }
+        // 🔴 HẠN MỨC ĐỌC TỪ SỔ CỦA CHÍNH CLI — thêm 2026-08-30, và nó là dòng
+        // hạn mức DUY NHẤT thật sự tới được màn.
+        //
+        // Đường cũ (`per_acc`, từ `claude -p "/usage"`) treo tới trần 60 giây và
+        // trả 0 byte từ 12/08; đo trên nhật ký thì `/accounts` chạy đúng ba lần
+        // trong đời và cả ba lần in *"hạn mức: đang đo, hỏi lại sau một phút"*.
+        // Một dòng không bao giờ có số thì không phải một phép đo.
+        //
+        // Dòng mới đọc tệp, nên nó có số ngay — và nó in kèm TUỔI của số ấy, vì
+        // đây là chỗ chủ máy soi lại luật chọn tài khoản (`watch::suggest_account`).
+        let q = crate::quota::read(
+            &acc.name,
+            acc.config_dir
+                .as_deref()
+                .filter(|d| !d.is_empty())
+                .map(|d| crate::config::expand_home(std::path::Path::new(d)))
+                .as_deref(),
+        );
+        out.push_str(&format!("    hạn mức: {}\n", q.say(crate::quota::now_ms())));
         let row = per_acc.and_then(|m| m.get(&acc.name));
         match row {
+            // Nhãn khác hẳn dòng trên, cố ý: hai NGUỒN khác nhau cho cùng một
+            // câu hỏi thì phải đọc ra là hai dòng, không thì lúc chúng lệch nhau
+            // người đọc không biết tin cái nào.
             Some(v) if v.get("err").is_some() => out.push_str(&format!(
-                "    hạn mức: chưa đo được ({})\n",
+                "    (dò /usage: chưa đo được — {})\n",
                 v.get("err").and_then(Value::as_str).unwrap_or("")
             )),
             Some(v) => {
@@ -218,11 +240,11 @@ pub fn accounts_text(cfg: &Config, live: &SessionsSnapshot, usage: &Value) -> St
                     }
                 }
                 if !parts.is_empty() {
-                    out.push_str(&format!("    đã dùng: {}\n", parts.join(" · ")));
+                    out.push_str(&format!("    (dò /usage: {})\n", parts.join(" · ")));
                 }
             }
             // "Chưa đo xong" KHÁC "đã đo và bằng 0". Nói đúng cái đang có.
-            None if pending => out.push_str("    hạn mức: đang đo, hỏi lại sau một phút\n"),
+            None if pending => out.push_str("    (dò /usage: đang chạy)\n"),
             None => {}
         }
     }

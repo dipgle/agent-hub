@@ -107,7 +107,7 @@ fn being_blocked_outranks_looking_busy() {
 /// ở đây.
 #[test]
 fn a_kept_window_is_announced_with_the_way_back() {
-    let cau = old_window_note(true, "/Users/hanguyen/projects/huba", "93479f95");
+    let cau = old_window_note(true, None, "/Users/hanguyen/projects/huba", "93479f95");
     assert!(
         cau.contains("claude --resume 93479f95"),
         "giữ cửa sổ mà không đưa đường về thì chủ máy vẫn phải tự mò: {cau:?}"
@@ -122,42 +122,74 @@ fn a_kept_window_is_announced_with_the_way_back() {
     );
 }
 
-/// 🔴 LUẬT MỘT CÂU — Hà 2026-08-29: *"Sao lằng nhằng thế? Mỗi phiên làm một dự
-/// án thì đóng làm gì trong khi việc chưa hết"*.
+/// 🔴 LUẬT MỘT CÂU, VÀ NÓ ĐÃ ĐẢO CHIỀU HAI LẦN.
 ///
-/// Trước đó tôi dựng một cây điều kiện theo CA (hết hạn mức thì giữ · sắp hết
-/// thì đóng · đầy ngữ cảnh thì đóng) rồi mời anh chọn. Cây ấy phải nuôi mãi: ca
-/// mới nào cũng đẻ thêm một nhánh, và mỗi nhánh là một chỗ để quên. Luật đúng
-/// không hỏi *"ca nào"*, nó hỏi *"AI LÀM"* — và nó cũng chính là câu mã của tệp
-/// này đã viết ra từ 13/08 mà chỉ áp cho một nhánh: *"Hai cửa sổ thì chủ máy
-/// đóng bớt được; một phiên đang làm dở bị đóng thì không lấy lại được"*.
+/// * **29/08** — Hà: *"Sao lằng nhằng thế? Mỗi phiên làm một dự án thì đóng làm
+///   gì trong khi việc chưa hết"*. Tôi vừa dựng một cây điều kiện theo CA rồi
+///   mời anh chọn; anh bác cả cây, và luật thành *"AI LÀM"* (`auto`).
+/// * **30/08** — Hà: *"chuyển xong cửa sổ cũ không đóng được"*. Vế `auto` đi.
+///   Nó hỏi *ai gõ*, trong khi điều đáng hỏi là *việc đã chuyển đi chưa* — mà
+///   một lượt bàn giao thành công thì theo định nghĩa là việc đã sang phiên
+///   mới, và cửa sổ cũ chỉ còn là một ngõ cụt trông y hệt một phiên đang sống.
 ///
-/// Lượt TỰ ĐỘNG vẫn dọn, và lý do ấy đo được chứ không phải phỏng đoán:
-/// `handover_window_opened` chạy 5–14 lượt MỖI NGÀY (110 lượt từ 21/08) ⟹ không
-/// dọn thì một tuần đọng ~50 cửa sổ Terminal.
+/// Lý do dọn thì đo được và không đổi qua cả hai lần: `handover_window_opened`
+/// chạy 5–14 lượt MỖI NGÀY (110 lượt từ 21/08) ⟹ không dọn thì một tuần đọng
+/// ~50 cửa sổ Terminal.
 #[test]
-fn huba_only_closes_windows_it_opened_by_itself() {
+fn ban_giao_xong_thi_cua_so_cu_dong() {
     assert!(
-        should_close_old_window(true, true),
-        "lượt TỰ ĐỘNG mà không dọn ⟹ ~50 cửa sổ đọng lại sau một tuần"
-    );
-    assert!(
-        !should_close_old_window(false, true),
-        "CHỦ MÁY GÕ lượt này — cửa sổ của anh là của anh, đây đúng là ca Hà bác 29/08"
+        should_close_old_window(true),
+        "phiên mới đã chào đời ⟹ cửa sổ cũ là ngõ cụt, đóng"
     );
 }
 
 /// ĐỐI CHỨNG NGƯỢC của chính luật ấy: chưa thấy phiên mới chào đời thì **không
-/// bao giờ** đóng, kể cả lượt tự động. Đây là vế đã trả giá thật 2026-08-13
-/// 04:31 — id rỗng mà vẫn đóng cửa sổ đang làm việc của chủ máy, tức phá cái
-/// chắc chắn để đổi lấy cái chưa chứng minh, đúng lúc mù nhất.
+/// bao giờ** đóng. Đây là vế đã trả giá thật 2026-08-13 04:31 — id rỗng mà vẫn
+/// đóng cửa sổ đang làm việc của chủ máy, tức phá cái chắc chắn để đổi lấy cái
+/// chưa chứng minh, đúng lúc mù nhất.
+///
+/// Không có bài này thì `should_close_old_window` trả `true` cứng cũng xanh, tức
+/// cổng không đo gì cả.
 #[test]
 fn a_session_that_never_appeared_never_costs_the_old_window() {
     assert!(
-        !should_close_old_window(true, false),
-        "tự động + phiên mới chưa chào đời ⟹ vẫn phải GIỮ, đây là ca 13/08"
+        !should_close_old_window(false),
+        "phiên mới chưa chào đời ⟹ vẫn phải GIỮ, đây là ca 13/08"
     );
-    assert!(!should_close_old_window(false, false));
+}
+
+/// ĐÓNG HỤT PHẢI ĐỌC KHÁC ĐÓNG-CÓ-CHỦ-Ý — thêm 2026-08-30 cùng lượt bỏ vế `auto`.
+///
+/// Từ nay cửa sổ cũ mặc định đóng, nên *"đã thử và không đóng được"* thành ca
+/// thường gặp. Gộp nó vào câu *"giữ có chủ ý"* là để chủ máy tưởng huba cố tình
+/// chừa cửa sổ lại, trong khi thật ra nó vừa thất bại — và anh sẽ không đi dọn.
+///
+/// Ca này có thật, đo được: 30/08 lúc 07:27 và 07:40, `/close` gõ `/exit` rồi
+/// thấy `Busy` bảy lượt liền, `close_gave_up` sau 650 và 697 giây.
+#[test]
+fn dong_hut_thi_noi_thang_la_hut() {
+    let cau = old_window_note(
+        false,
+        Some("sau 30 giây tab vẫn Busy"),
+        "/Users/hanguyen/projects/huba",
+        "93479f95",
+    );
+    assert!(
+        cau.contains("CHƯA đóng được"),
+        "phải nói thẳng là thất bại: {cau:?}"
+    );
+    assert!(
+        cau.contains("sau 30 giây tab vẫn Busy"),
+        "phải mang theo LÝ DO đo được, không phải một câu chung chung: {cau:?}"
+    );
+    assert!(
+        cau.contains("claude --resume 93479f95"),
+        "cửa sổ còn đó thì vẫn phải có đường về: {cau:?}"
+    );
+    assert!(
+        !cau.contains("VẪN CÒN — chưa mất gì"),
+        "đừng đọc như thể huba cố ý giữ: {cau:?}"
+    );
 }
 
 /// ĐỐI CHỨNG NGƯỢC (§13①). Cửa sổ ĐÃ đóng mà vẫn mời `--resume` ở đó thì tệ hơn
@@ -168,7 +200,7 @@ fn a_session_that_never_appeared_never_costs_the_old_window() {
 #[test]
 fn a_closed_window_says_nothing_at_all() {
     assert_eq!(
-        old_window_note(false, "/Users/hanguyen/projects/huba", "93479f95"),
+        old_window_note(false, None, "/Users/hanguyen/projects/huba", "93479f95"),
         "",
         "cửa sổ đã đóng mà còn mời gõ tiếp ở đó ⟹ sai một cách im lặng"
     );

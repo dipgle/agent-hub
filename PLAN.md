@@ -93,6 +93,14 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
   còn lại chưa kiểm: chồng lấn với `claude agents` trong cùng một vòng. Phép đo
   kế tiếp: ghi kèm "lúc ấy còn lời gọi `claude` nào đang chạy không".
 
+  ⚠ **Món nợ này thu hẹp ngày 2026-08-30, KHÔNG phải đã trả.** Số hạn mức nay
+  đọc từ `<config_dir>/.claude.json`, khoá `cachedUsageUtilization` — chính CLI
+  ghi, không cần dò (`rust/src/quota.rs`). Nên hai thứ từng phụ thuộc phép dò
+  nay có số: hàng `/accounts` và luật chọn tài khoản
+  (`watch::suggest_account`). Cái phép dò vẫn là đường DUY NHẤT làm được, và
+  vẫn treo: **ép số tươi lại theo yêu cầu**. Tệp chỉ đổi khi chính CLI của tài
+  khoản ấy chạy — đo được ngay 30/08: bản đọc của acc1 già hai ngày.
+
 - ~~Chưa quan sát được một tin Telegram THẬT mang thông tin chốt (S18)~~ →
   **đã có, 18:17:13**: `⏸ projects-7c dừng, đang chờ bạn — sau 16 phút chạy` kèm
   nguyên khối thông tin chốt (mở bằng kết luận, có dấu đứt `⋯`, và **ba dòng

@@ -979,18 +979,21 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     // tiên có `Config`. `watch::changes` cố ý không nhận danh sách tài khoản:
     // nó là hàm SO HAI LƯỢT, và mọi thứ nó nhận thêm là một thứ 29 bài kiểm
     // phải dựng lại mà không đo thêm được gì.
-    let tai_khoan: Vec<String> = cfg
-        .claude_accounts_or_ambient()
-        .into_iter()
-        .map(|a| a.name)
-        .collect();
+    //
+    // 🔴 Và ở đây mới đọc được HẠN MỨC từng tài khoản (30/08): nó cần `Config`
+    // để biết thư mục sổ của mỗi tài khoản. Đọc tệp, không spawn — xem
+    // `quota::rank_all`.
+    let tai_khoan = crate::quota::rank_all(cfg, crate::quota::now_ms());
     for mut c in changes {
         if let crate::watch::Change::Limited { acc, goi_y, .. } = &mut c {
             *goi_y = crate::watch::suggest_account(acc, &tai_khoan, live);
             logging::info(
                 "limited_suggested_account",
                 json!({ "acc_chan": acc, "goi_y": goi_y,
-                        "trong_so": tai_khoan.len() }),
+                        "trong_so": tai_khoan.len(),
+                        "hang": tai_khoan.iter()
+                            .map(|a| format!("{}={}", a.name, a.rank.say()))
+                            .collect::<Vec<_>>() }),
             );
         }
         // Tra lại phiên để có `tty` (đọc màn), câu cuối nó nói, và ai mở nó.
@@ -1800,14 +1803,50 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                 // đó huba dừng ở chỗ đưa một dòng `claude --resume …` cho chủ
                 // máy tự gõ — vô dụng đúng lúc anh đang ở trên điện thoại, tức
                 // đúng lúc tính năng này sinh ra để phục vụ.
+                // 🔴 TÀI KHOẢN CỦA PHIÊN KẾ NHIỆM — sửa 2026-08-30, Hà: *"mở
+                // phiên mới ở acc khác chưa kiểm soát được acc đó có đang còn
+                // nhiều tokens nhất không"*.
+                //
+                // Luật cũ truyền `None`, tức **giữ nguyên tài khoản cũ**, kể cả
+                // khi tài khoản ấy đã kịch trần. Lượt này không ai bấm, nên cái
+                // sai ấy không có người canh: phiên kế nhiệm mở ra rồi chết ngay
+                // ở lượt đầu, và cả chuỗi bàn giao thành công cốc.
+                //
+                // Đổi HẸP có chủ ý — chỉ chuyển khi tài khoản cũ đo được là ĐÃ
+                // KỊCH TRẦN. Còn chỗ, hay không đo được, thì giữ nguyên: bàn giao
+                // tự động vốn không phải chỗ để huba tự ý xáo tài khoản của chủ
+                // máy, và một ẩn số không phải một lý do.
+                let hang = crate::quota::rank_all(cfg, crate::quota::now_ms());
+                let acc_cu_het = hang
+                    .iter()
+                    .find(|a| a.name == s.account)
+                    .is_some_and(|a| a.rank == crate::quota::Rank::Full);
+                let acc_moi = if acc_cu_het {
+                    let m = crate::watch::suggest_account(&s.account, &hang, &live.sessions);
+                    logging::info(
+                        "auto_handover_account_switch",
+                        json!({ "session": s.session_id, "acc_cu": s.account, "acc_moi": m,
+                                "vi_sao": "tài khoản cũ đo được là đã kịch trần",
+                                "hang": hang.iter()
+                                    .map(|a| format!("{}={}", a.name, a.rank.say()))
+                                    .collect::<Vec<_>>() }),
+                    );
+                    m
+                } else {
+                    None
+                };
                 let moved = if s.tty.is_empty() {
                     Err(anyhow::anyhow!("phiên không có cửa sổ terminal"))
                 } else {
-                    // `auto: true` — lượt này KHÔNG ai bấm, nên huba tự dọn cửa
-                    // sổ nó tự mở. Đây là chỗ duy nhất đóng cửa sổ cũ, và lý do
-                    // đo được: 5–14 lượt mỗi ngày, không dọn thì một tuần đọng
-                    // ~50 cửa sổ.
-                    crate::sessions::start_fresh_after_handover(cfg, s, &h.checkpoint, None, true)
+                    // Bàn giao xong thì cửa sổ cũ đóng — xem
+                    // `sessions::should_close_old_window`. Lý do đo được: 5–14
+                    // lượt mỗi ngày, không dọn thì một tuần đọng ~50 cửa sổ.
+                    crate::sessions::start_fresh_after_handover(
+                        cfg,
+                        s,
+                        &h.checkpoint,
+                        acc_moi.as_deref(),
+                    )
                 };
                 // Con trỏ chuyển sang phiên MỚI THẬT (id ghép từ nhật ký), không
                 // phải id bản fork: bản fork chỉ là chỗ lấy bản bàn giao, nó
@@ -2120,17 +2159,36 @@ pub fn already_handed_over(
 /// lên. Và một nhánh đã im sẵn từ trước: `new_id.is_none()` cũng GIỮ cửa sổ cũ
 /// (phiên mới chưa chào đời) nhưng chưa lần nào nói ra, nên chủ máy tưởng mất.
 ///
-/// Cố ý KHÔNG nói *vì sao* giữ — hai nhánh giữ vì hai lẽ khác nhau (hết hạn mức
-/// · phiên mới chưa chào đời), và lẽ ấy đã nằm trong câu bao quanh. Ở đây chỉ
-/// hai điều đúng ở cả hai: cửa sổ còn đó, và đây là đường về.
-pub fn old_window_note(old_kept: bool, cwd: &str, session_id: &str) -> String {
-    if !old_kept {
-        return String::new();
+/// Cố ý KHÔNG nói *vì sao* giữ — hai nhánh giữ vì hai lẽ khác nhau, và lẽ ấy đã
+/// nằm trong câu bao quanh. Ở đây chỉ hai điều đúng ở cả hai: cửa sổ còn đó, và
+/// đây là đường về.
+///
+/// 🔴 BA kết cục, không phải hai — thêm 2026-08-30 cùng lượt bỏ vế `auto`
+/// (`sessions::should_close_old_window`). Từ nay cửa sổ cũ MẶC ĐỊNH đóng, nên
+/// *"đã thử đóng và KHÔNG đóng được"* thành một ca thường gặp — và nó phải đọc
+/// khác hẳn ca *"giữ có chủ ý"*. Gộp hai ca ấy vào một câu là để chủ máy tưởng
+/// huba cố ý chừa cửa sổ lại, trong khi thật ra nó vừa thất bại.
+///
+/// Đo được vì sao ca ấy có thật: 30/08 lúc 07:27 và 07:40, đường `/close` gõ
+/// `/exit` rồi thấy `tab_state` = `Busy` bảy lượt liền, `close_gave_up` sau 650
+/// và 697 giây. Cùng cơ chế ấy chặn ở đây.
+pub fn old_window_note(
+    old_kept: bool,
+    closed_err: Option<&str>,
+    cwd: &str,
+    session_id: &str,
+) -> String {
+    let ve = format!("cd {cwd} && claude --resume {session_id}");
+    match (old_kept, closed_err) {
+        (_, Some(why)) => format!(
+            "⚠ Cửa sổ cũ CHƯA đóng được: {why}\nNó vẫn còn đó — đóng tay, hoặc /close sau khi \
+             phiên ấy rảnh. Mở lại bằng:\n{ve}\n\n"
+        ),
+        (true, None) => format!(
+            "🔒 Cửa sổ cũ VẪN CÒN — chưa mất gì. Gõ tiếp ngay ở đó được, hoặc mở lại bằng:\n{ve}\n\n"
+        ),
+        (false, None) => String::new(),
     }
-    format!(
-        "🔒 Cửa sổ cũ VẪN CÒN — chưa mất gì. Gõ tiếp ngay ở đó được, hoặc mở lại bằng:\n\
-         cd {cwd} && claude --resume {session_id}\n\n"
-    )
 }
 
 /// Ngủ bao lâu khi CÒN phiên quá ngưỡng đang bị giữ.
@@ -7909,24 +7967,30 @@ fn tab_move(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> Result<(), S
             ));
         }
     };
-    // 🔴 ĐỌC CÙNG BỀ NGANG VỚI LÚC DỰNG NÚT. Cái nút `tab n` đi ra điện thoại
-    // từ ảnh chụp, mà ảnh chụp NỚI cửa sổ khi màn bị mép cắt (`shot_grew_window`
-    // ngay dưới); đường này thì đọc bằng `look` → `screen_text`, không nới. Nên
-    // chấm cú bấm trên bản đọc hẹp là có ngày trả lời *"bảng chỉ có 2 câu, không
-    // có câu 3"* về đúng cái nút huba vừa tự dựng ra.
+    // 🔴 BẢN ĐỌC CÓ THỂ CỤT, VÀ LỜI TỪ CHỐI PHẢI NÓI RA. Cái nút `tab n` đi ra
+    // điện thoại từ ảnh chụp; nếu lúc ấy cửa sổ rộng hơn bây giờ (chủ máy tự kéo)
+    // thì đường này đếm hụt và trả lời *"bảng chỉ có 2 câu, không có câu 3"* về
+    // đúng cái nút huba vừa tự dựng ra.
+    //
+    // Trước 30/08 chỗ này tự NỚI cửa sổ rồi đọc lại. Nay huba không đụng vào cỡ
+    // cửa sổ của chủ máy nữa (Hà 2026-08-30), nên nó làm cái còn được phép làm:
+    // đính lời cảnh báo vào chính câu từ chối, để con số cụt không đọc lên như
+    // một con số chắc chắn.
     //
     // `want` lấy con số lớn hơn giữa sổ phiên và chính số tab vừa bấm — cả hai
     // đều là mệnh đề của huba, không phải số bịa. Xem `keys::tab_bar_cut`.
     let tu_so = s.asking.as_ref().map(|a| a.rest.len() + 1).unwrap_or(0);
-    let Some(table) = crate::keys::ask_table_wide(&body, w, tu_so.max(n)).0 else {
+    let (bang, hep) = crate::keys::ask_table_seen(&body, tu_so.max(n));
+    let hep_note = hep.map(|w| format!("\n{w}")).unwrap_or_default();
+    let Some(table) = bang else {
         return Err(format!(
-            "⚠ Màn của {name} không có bảng hỏi nhiều câu nào đang mở, nên không có tab để sang."
+            "⚠ Màn của {name} không có bảng hỏi nhiều câu nào đang mở, nên không có tab để sang.{hep_note}"
         ));
     };
     let tabs = table.answered.len();
     if n > tabs {
         return Err(format!(
-            "⚠ Bảng của {name} có {tabs} câu, không có câu {n}. (`/tab 0` là bước gửi.)"
+            "⚠ Bảng của {name} có {tabs} câu, không có câu {n}. (`/tab 0` là bước gửi.){hep_note}"
         ));
     }
     let keys = crate::keys::tab_keys(tabs, n);
@@ -8007,73 +8071,35 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
         }
     };
 
-    // Cùng cửa nới với `/tab`: bản đọc hẹp có thể cắt mất tab, và ở đây cái giá
+    // Cùng phép đo với `/tab`: bản đọc hẹp có thể cắt mất tab, và ở đây cái giá
     // là từ chối một cú bấm hợp lệ bằng câu *"bảng chỉ có N câu"*. `want` lấy
     // con số lớn hơn giữa sổ phiên và chính câu vừa bấm — xem `keys::tab_bar_cut`.
-    let (table, rong) = crate::keys::ask_table_wide(&body, w, questions.len().max(q));
-    // Nới rồi thì chấm con trỏ trên CHÍNH cái màn vừa đọc ra bảng: đếm ô trống
-    // trên bản rộng mà tìm con trỏ trên bản hẹp là hỏi hai cái màn khác nhau.
-    let mut da_noi = rong.is_some();
-    let body = rong.unwrap_or(body);
+    let (table, hep) = crate::keys::ask_table_seen(&body, questions.len().max(q));
+    let hep_note = hep.map(|w| format!("\n{w}")).unwrap_or_default();
     let total = table.as_ref().map(|t| t.answered.len()).unwrap_or(1);
     if q > total {
         return format!(
-            "⚠ Bảng của {name} có {total} câu, không có câu {q}. (Bảng một câu thì dùng `/key`.)"
+            "⚠ Bảng của {name} có {total} câu, không có câu {q}. (Bảng một câu thì dùng `/key`.){hep_note}"
         );
     }
     // Không có thanh tab ⟹ bảng MỘT câu ⟹ không có gì để đi tới; `/pick 1.x`
     // vẫn chạy được và trùng đúng nghĩa với `/key x`.
-    // 🔴 KHỚP HỤT THÌ NHÌN RỘNG HƠN TRƯỚC KHI BỎ CUỘC.
+    //
+    // 🔴 KHỚP HỤT THÌ TỪ CHỐI VÀ NÓI VÌ SAO — không còn đường nới cửa sổ.
     //
     // `cursor_on` tìm NGUYÊN VĂN câu hỏi (lấy từ nhật ký) trong chữ trên màn, vì
     // câu ĐANG MỞ là câu duy nhất CLI in đủ ra dưới thanh tab. Ở `24×80` một bảng
     // nhiều câu với lựa chọn dài (mỗi lựa chọn bẻ đôi ở cột 80) đẩy dòng câu hỏi
     // cuộn khỏi mép trên — và lúc ấy huba từ chối một cú bấm hoàn toàn hợp lệ.
     //
-    // Cửa nới **đã có** (`ask_table_wide`) nhưng nó hỏi câu khác: chỉ nới khi
-    // THANH TAB bị cắt. Tab đủ mà câu hỏi thiếu thì cửa ấy đóng. Hai triệu chứng
-    // của cùng một cái màn hẹp, mới có một cái được canh.
+    // Tới 30/08 chỗ này nới cửa sổ rồi khớp lại (`pick_cursor_regrown`). Hà bỏ cả
+    // lối nới, nên ca ấy nay rơi thẳng xuống lời từ chối bên dưới — và lời từ chối
+    // ấy phải mang theo cái mẫu số của nó, đúng như nó đang làm.
     //
-    // ⚠ Và đây KHÔNG phải thủ phạm của lượt 16:45 ngày 26/08 (ảnh Hà gửi). Log
-    // của chính lượt ấy nói `questions:1 total:2` — sổ thiếu câu, không phải màn
-    // thiếu chữ; xem lời từ chối bên dưới, nơi hai trạng thái ấy được tách ra.
-    // Ghi rõ chỗ này để người đọc sau đừng tưởng cửa nới đã trị được ca đó.
-    //
-    // Nới rồi thì `da_noi = true`: phần đọc-lại-sau-khi-gõ ở dưới BẮT BUỘC dùng
-    // cùng bề ngang, nếu không thì đếm ô trống trên hai cái màn khác nhau và trả
-    // lời sai, tự tin, về đúng cú bấm vừa rồi.
-    let mut vi_tri = crate::keys::cursor_on(&body, &questions);
-    if vi_tri.is_none() && total > 1 && !da_noi {
-        match crate::keys::screen_text_tall(w, crate::keys::GROW_ASK) {
-            Ok(rong2) if !rong2.trim().is_empty() => {
-                vi_tri = crate::keys::cursor_on(&rong2, &questions);
-                logging::info(
-                    "pick_cursor_regrown",
-                    json!({ "session": s.session_id, "questions": questions.len(),
-                            "khop": vi_tri.is_some() }),
-                );
-                // Chỉ cần ghi nhớ ĐÃ NỚI: `body` xong việc ngay sau phép khớp
-                // này, còn `da_noi` thì đi tiếp xuống phần đọc-lại-sau-khi-gõ và
-                // quyết định bề ngang của nó.
-                if vi_tri.is_some() {
-                    da_noi = true;
-                }
-            }
-            // Không nới được thì nói ra rồi rơi về câu từ chối bên dưới — đừng
-            // im, vì lúc ấy lời từ chối sẽ đổ cho "không khớp" trong khi thủ
-            // phạm là cửa sổ không nới được.
-            Ok(_) => logging::warn(
-                "pick_cursor_grow_empty",
-                json!({ "window": w, "effect": "nới xong đọc ra rỗng — chấm trên bản hẹp" }),
-            ),
-            Err(e) => logging::warn(
-                "pick_cursor_grow_failed",
-                json!({ "window": w, "err": logging::err_chain(&e),
-                        "effect": "không nới được cửa sổ — chấm trên bản hẹp" }),
-            ),
-        }
-    }
-    let cursor = match vi_tri {
+    // ⚠ Và cửa nới cũ KHÔNG phải thủ phạm của lượt 16:45 ngày 26/08 (ảnh Hà gửi).
+    // Log của chính lượt ấy nói `questions:1 total:2` — sổ thiếu câu, không phải
+    // màn thiếu chữ. Ghi rõ để người đọc sau đừng tưởng bỏ nới là mất một bản vá.
+    let cursor = match crate::keys::cursor_on(&body, &questions) {
         Some(c) => c,
         None if total == 1 => 0,
         None => {
@@ -8095,8 +8121,9 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
             //
             // Hai trạng thái khác hẳn nhau, và cách chữa cũng khác:
             // * sổ THIẾU câu ⟹ đợi một nhịp rồi `/pick` lại, hoặc `/key <số>`;
-            // * sổ ĐỦ mà vẫn không khớp ⟹ chữ câu hỏi không có trên màn (đã nới
-            //   hết cỡ ở trên mà vẫn thiếu) ⟹ `/key <số>` là đường chắc.
+            // * sổ ĐỦ mà vẫn không khớp ⟹ chữ câu hỏi không có trên màn (cửa sổ
+            //   hẹp, và từ 30/08 huba không nới nó nữa) ⟹ `/key <số>` là đường
+            //   chắc, hoặc chủ máy tự kéo cửa sổ rộng ra rồi bấm lại.
             //
             // KHÔNG đoán bừa vị trí con trỏ trong cả hai ca: mũi tên đi kèm một
             // CR nên đi mò là chốt nhầm hộ chủ máy, và cái đó không lùi lại được.
@@ -8168,17 +8195,15 @@ fn pick_answer(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> String {
     let mut seen_body = String::new();
     for _ in 0..3 {
         std::thread::sleep(std::time::Duration::from_millis(900));
-        // Đọc lại BẰNG ĐÚNG BỀ NGANG của lần đọc trước. `before` đếm trên bản
-        // rộng mà `after` đếm trên bản hẹp là so hai cái màn khác nhau: số ô
-        // trống lệch đi rồi rơi vào nhánh *"bảng KHÔNG đổi"* hoặc *"bảng biến
-        // mất"* — một câu sai, tự tin, về đúng cú bấm vừa rồi.
-        let doc = if da_noi {
-            crate::keys::screen_text_tall(w, crate::keys::GROW_ASK).ok()
-        } else {
-            match crate::keys::look(&s.tty, PICK_LINES) {
-                crate::keys::Look::Saw { body, .. } => Some(body),
-                crate::keys::Look::Blind { .. } => None,
-            }
+        // Đọc lại BẰNG ĐÚNG BỀ NGANG của lần đọc trước — nay chuyện ấy tự đúng,
+        // vì cả `before` lẫn `after` đều đọc bằng `look` trên đúng cửa sổ ấy và
+        // không ai đổi cỡ nó giữa chừng (30/08, bỏ lối nới). Trước đó `before`
+        // có thể đếm trên bản rộng còn `after` trên bản hẹp: số ô trống lệch đi
+        // rồi rơi vào nhánh *"bảng KHÔNG đổi"* hoặc *"bảng biến mất"* — một câu
+        // sai, tự tin, về đúng cú bấm vừa rồi.
+        let doc = match crate::keys::look(&s.tty, PICK_LINES) {
+            crate::keys::Look::Saw { body, .. } => Some(body),
+            crate::keys::Look::Blind { .. } => None,
         };
         if let Some(body) = doc {
             let t = crate::keys::ask_table(&body);
@@ -8369,85 +8394,42 @@ pub fn screen_report(
             // xem trước trong ảnh chụp vẫn qua `sessions::preview_risk` vì nó
             // nằm lại trong một tài liệu trên server tfl5 — chỗ mà thiết lập tự
             // xoá của Telegram không với tới.
-            // 🔴 HỘP BỊ MÉP MÀN CẮT ⟹ ĐỌC LẠI BẰNG CỬA SỔ CAO — Hà 2026-08-19:
-            // *"phải có cách khác để mọi thứ trong phiên phải thể hiện đúng đủ
-            // khi gửi giống như một bản sao hoàn hảo chứ?"*
+            // 🔴 MÀN BỊ MÉP CẮT — nhận ra được, và từ 2026-08-30 chỉ CUỘN, không
+            // nới. Hà: *"đừng thay đổi kích thước của cửa sổ terminal nữa"*.
             //
-            // Dấu hiệu nhận ra "bị cắt" là thứ đo được, không phải phỏng đoán:
-            // danh sách lựa chọn đọc ra mà số ĐẦU không phải 1 ⟹ mấy mục trên
-            // đã cuộn khỏi mép. Chỉ lúc ấy mới nới, vì nới là đụng vào cửa sổ
-            // của chủ máy và tốn thêm ~1,5 giây (xem `keys::screen_text_tall`).
+            // Dấu hiệu "bị cắt" là thứ đo được, không phải phỏng đoán: danh sách
+            // lựa chọn đọc ra mà số ĐẦU không phải 1 ⟹ mấy mục trên đã trôi khỏi
+            // mép.
             let mut screen = screen;
-            let mut choices = crate::keys::parse_choices(&screen);
+            let choices = crate::keys::parse_choices(&screen);
             let mut grew = false;
-            let choices_cut = choices.first().is_some_and(|(n, _)| *n > 1);
+            // Hộp chọn bị cắt thì huba KHÔNG còn cách nào lấy thêm (cuộn sẽ đẩy
+            // hộp ra khỏi khung), nên nó đi thẳng vào lời khai `cut_note` ở cuối
+            // hàm — nói ra chỗ mù, không im, và mời chủ máy tự nới cửa sổ.
             // 🔴 VĂN XUÔI CŨNG BỊ MÉP CẮT, và cho tới 20/08 không có gì nhận ra
             // — Hà: *"Tốt nhất là tự kiểm và cuộn lên để lấy đầy đủ và đúng
-            // nhất"*. Cửa nới cũ chỉ mở cho hộp chọn, vì hộp chọn có một dấu
-            // hiệu tự tố cáo (số đầu không phải 1). Một câu trả lời dài thì
-            // không có dấu hiệu nào cả: nó chỉ đơn giản bắt đầu giữa câu.
+            // nhất"*. Hộp chọn có một dấu hiệu tự tố cáo (số đầu không phải 1);
+            // một câu trả lời dài thì không có dấu hiệu nào cả — nó chỉ đơn giản
+            // bắt đầu giữa câu.
             //
-            // Thước đo là NHẬT KÝ — hỏi `said_shown_on_screen` xem chữ phiên
-            // vừa nói có nằm trên màn không. Đo thật trên cửa sổ phiên `[huba]`
-            // 20/08: 24×80 ⟹ 1081 ký tự, nới HẾT CỠ ⟹ 61×206 và **3943** ký
-            // tự, đầu màn lùi về phần đã trôi. Cuộn lên được thật, gấp 3,6 lần.
+            // Thước đo là NHẬT KÝ — hỏi `said_shown_on_screen` xem chữ phiên vừa
+            // nói có nằm trên màn không.
             let prose_cut =
                 said.is_some_and(|t| !crate::sessions::said_shown_on_screen(t, &screen));
-            if choices_cut || prose_cut {
-                match crate::keys::screen_text_tall(window, crate::keys::GROW_ASK) {
-                    Ok(rong) if !rong.trim().is_empty() => {
-                        let them = crate::keys::parse_choices(&rong);
-                        // Chỉ nhận bản rộng khi nó THẬT SỰ hơn: nới xong mà vẫn
-                        // cụt (hộp dài hơn cả 60 dòng) thì đừng đổi lấy một bản
-                        // đọc khác cũng cụt.
-                        //
-                        // Hai ca hỏi hai câu khác nhau, vì "hơn" ở hai ca là hai
-                        // thứ: hộp chọn hơn khi đã thấy lựa chọn `1.`, còn văn
-                        // xuôi hơn khi đọc ra NHIỀU CHỮ HƠN — nó không có mốc
-                        // nào để mà "đủ".
-                        let het_cut = them.first().is_some_and(|(n, _)| *n == 1);
-                        let dai_hon = rong.chars().count() > screen.chars().count();
-                        logging::info(
-                            "shot_grew_window",
-                            json!({ "window": window, "xin": crate::keys::GROW_ASK,
-                                    "choices_before": choices.len(), "choices_after": them.len(),
-                                    "chars_before": screen.chars().count(),
-                                    "chars_after": rong.chars().count(),
-                                    "why": if choices_cut { "hộp chọn bị mép màn cắt" }
-                                           else { "lời cuối của phiên không hiện trọn trên màn" },
-                                    "taken": (choices_cut && het_cut) || (prose_cut && dai_hon) }),
-                        );
-                        if (choices_cut && het_cut) || (prose_cut && dai_hon) {
-                            screen = rong;
-                            choices = them;
-                            grew = true;
-                        }
-                    }
-                    Ok(_) => logging::warn(
-                        "shot_grow_empty",
-                        json!({ "window": window,
-                                "effect": "nới cửa sổ xong đọc ra rỗng — giữ bản đọc cũ" }),
-                    ),
-                    Err(e) => logging::warn(
-                        "shot_grow_failed",
-                        json!({ "window": window, "err": crate::logging::err_chain(&e),
-                                "effect": "không nới được cửa sổ — tin vẫn đi, nhưng thiếu phần đã cuộn khỏi mép" }),
-                    ),
-                }
-            }
-            // 🔴 NỚI RỒI MÀ VĂN XUÔI VẪN THIẾU ⟹ CUỘN. Hà 2026-08-20: *"Chỉ cần
-            // focus tới cửa sổ di chuột tới khung nhìn cuộn chuột là được"*.
+            // 🪦 Ở đây từng có một cửa NỚI CỬA SỔ hết cỡ (`shot_grew_window`,
+            // 19/08–30/08): đo được là nó lấy thêm thật (24×80 ⟹ 1081 ký tự, nới
+            // ⟹ 61×206 và 3943). Nó đi cùng cả lối nới — xem tấm bia ở
+            // `keys::screen_text_tall`. Cái thay nó là CUỘN ngay dưới, thứ không
+            // đụng tới cỡ cửa sổ; và ca cuộn không cứu được thì `/shot` phải KHAI
+            // ra chứ không gửi đi một bản cụt trông như bản đủ.
             //
-            // Đứng SAU cửa nới, không thay nó, vì hai thứ lấy hai kiểu: nới là
-            // MỘT lượt đọc rẻ, đụng trần 61×206 rồi thôi; cuộn thì đi ngược bao
-            // xa tuỳ ý nhưng tốn một lượt đọc mỗi nấc và động vào cửa sổ chủ máy
-            // đang nhìn. Rẻ trước, đắt sau — và ca thường gặp (lượt trả lời hơi
-            // dài hơn khung) đã xong ở cửa trên rồi.
+            // 🔴 CUỘN. Hà 2026-08-20: *"Chỉ cần focus tới cửa sổ di chuột tới
+            // khung nhìn cuộn chuột là được"*.
             //
             // KHÔNG cuộn khi có hộp chọn: bánh xe không chốt được gì, nhưng cuộn
             // một hộp đang treo ra khỏi khung thì `parse_choices` đọc trượt, và
             // tin sẽ mất đúng thứ đáng bấm.
-            if !grew && prose_cut && choices.is_empty() {
+            if prose_cut && choices.is_empty() {
                 // Trần THẤP có chủ ý (10 nấc ≈ 80 dòng ngược). Đo 20/08: mỗi nấc tốn
                 // ~4 giây khi TUI đang vẽ, nên 24 nấc là một phút rưỡi cho người
                 // đang cầm điện thoại. Cuộn lo phần MÀN, nhật ký lo phần đuôi —
@@ -8478,10 +8460,9 @@ pub fn screen_report(
                     ),
                 }
             }
-            // Nới cửa sổ xong mà vẫn cắt theo trần cũ (40 dòng) thì công cốc:
-            // bản rộng đọc ra 61 đoạn, `SHOT_LINES` là 40, và phần bị cắt lại
-            // đúng là phần vừa lấy được. Đọc rộng ⟹ lấy trọn, trần vẫn là
-            // `SHOT_LINES_MAX`.
+            // Cuộn ngược lấy thêm được chữ mà vẫn cắt theo trần cũ (40 dòng) thì
+            // công cốc: phần bị cắt lại đúng là phần vừa lấy được. Lấy thêm ⟹ lấy
+            // trọn, trần vẫn là `SHOT_LINES_MAX`.
             let lines = if grew { SHOT_LINES_MAX } else { lines };
             let tail: Vec<&str> = screen
                 .lines()
@@ -8529,12 +8510,23 @@ pub fn screen_report(
             // 80×24 ⟹ màn mở đầu bằng đuôi mô tả của lựa chọn 1 và số của nó thì
             // không còn. Không có dòng này thì tin đọc như thể hộp chỉ có năm
             // mục bắt đầu từ số 2.
+            // 🔴 Câu này mang CỠ THẬT của cửa sổ từ 2026-08-30, và đó không phải
+            // phần trang trí. Trước đây huba tự nới cửa sổ nên câu *"nới cửa sổ
+            // lên"* là lời khuyên thừa; nay nó là việc DUY NHẤT chữa được ca này,
+            // và một lời khuyên "nới lên đi" không có số thì người nhận không
+            // biết đang ở đâu và cần bao nhiêu. `24×80` thì biết.
             let cut_note = match choices.first() {
-                Some((n, _)) if *n > 1 => format!(
-                    "\n\n⚠ Hộp chọn CAO HƠN cửa sổ: {} lựa chọn đầu đã cuộn khỏi mép trên, huba không đọc được. \
-                     Số vẫn bấm đúng (/key <số>); muốn thấy cả hộp thì nới cửa sổ terminal cao lên.",
-                    n - 1
-                ),
+                Some((n, _)) if *n > 1 => {
+                    let co = crate::keys::window_size(window)
+                        .map(|(r, c)| format!(" Màn đang {r}×{c}."))
+                        .unwrap_or_default();
+                    format!(
+                        "\n\n⚠ Hộp chọn CAO HƠN cửa sổ: {} lựa chọn đầu đã cuộn khỏi mép trên, huba không đọc được. \
+                         Số vẫn bấm đúng (/key <số>); muốn thấy cả hộp thì tự kéo cửa sổ terminal cao lên —{co} \
+                         huba không đổi cỡ cửa sổ của Hà nữa.",
+                        n - 1
+                    )
+                }
                 _ => String::new(),
             };
             let text = format!("📷 Màn của {what}:\n\n{body}{quick_note}{cut_note}");
@@ -9436,6 +9428,33 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // cửa sổ ấy chạy bằng tài khoản nào.
                 let (co, phan_con_lai) = split_flags(&cmd.arg, &["a", "acc"]);
                 let acc_moi = co.get("a").or_else(|| co.get("acc")).cloned();
+                // 🔴 TÊN TÀI KHOẢN PHẢI CÓ THẬT — gác thêm 2026-08-30.
+                //
+                // `/new` đã gác chỗ này từ lâu (`bad_account`); `/handover -a`
+                // thì không, nên một cái tên gõ sai rơi xuống `account_launch`,
+                // ghi một dòng `account_launch_unknown` rồi **lặng lẽ mở cửa sổ
+                // bằng tài khoản MẶC ĐỊNH**. Chủ máy đọc ack thấy "đã chuyển"
+                // trong khi phiên mới nằm đúng chỗ cũ. Hai cửa cho cùng một câu
+                // hỏi thì phải trả lời như nhau.
+                let biet_acc: Vec<String> = cfg
+                    .claude_accounts_or_ambient()
+                    .into_iter()
+                    .map(|a| a.name)
+                    .collect();
+                let acc_bad = acc_moi
+                    .as_deref()
+                    .filter(|a| !biet_acc.iter().any(|b| b == a));
+                let acc_bad = acc_bad.map(|a| {
+                    logging::warn(
+                        "handover_bad_account",
+                        json!({ "goi": a, "biet": biet_acc }),
+                    );
+                    format!(
+                        "⚠ Không có tài khoản '{}'. Máy này khai: {}.",
+                        crate::exec::truncate(a, 24),
+                        biet_acc.join(" · ")
+                    )
+                });
                 let want = phan_con_lai.trim().to_string();
                 let want = if want.is_empty() {
                     db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default()
@@ -9452,6 +9471,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     .cloned()
                     .or_else(|| ended_session(db, &want));
                 let ack = match target.as_ref() {
+                    // Tên tài khoản sai thì dừng TRƯỚC khi gọi `claude` — lượt
+                    // bàn giao tốn hạn mức thật, và nó sẽ tốn cho một cái đích
+                    // không tồn tại.
+                    _ if acc_bad.is_some() => acc_bad.clone().unwrap_or_default(),
                     None => format!(
                         "⚠ không thấy phiên '{}' đang chạy, và nó cũng không nằm trong sổ phiên \
                          vừa tắt (giữ 24 giờ)",
@@ -9509,15 +9532,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // cục ĐO ĐƯỢC, đừng khai "đã chuyển": cửa sổ mở
                                 // được mà phiên chưa kịp sinh nhật ký thì chưa
                                 // có gì để trỏ tới (xem `FreshWindow::new_id`).
-                                // `auto: false` — CHỦ MÁY GÕ lượt này, nên cửa sổ
-                                // cũ giữ nguyên. Hà 29/08: *"Mỗi phiên làm một
-                                // dự án thì đóng làm gì trong khi việc chưa hết"*.
+                                // Cửa sổ cũ ĐÓNG sau khi phiên mới chào đời —
+                                // Hà 2026-08-30: *"chuyển xong cửa sổ cũ không
+                                // đóng được"*. Đóng hụt thì `w.closed_err` nói ra,
+                                // xem `old_window_note`.
                                 Some(acc) => match crate::sessions::start_fresh_after_handover(
                                     cfg,
                                     s,
                                     &h.checkpoint,
                                     Some(acc),
-                                    false,
                                 ) {
                                     Ok(w) => {
                                         if let Some(id) = w.new_id.as_deref() {
@@ -9540,7 +9563,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                  (cũ: {}) ở {} — đang theo phiên {}.\n\n{}{}",
                                                 h.source_name, s.account, w.tty,
                                                 id.chars().take(8).collect::<String>(),
-                                                old_window_note(w.old_kept, &s.cwd, &s.session_id),
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), &s.cwd, &s.session_id),
                                                 h.checkpoint
                                             ),
                                             // Cửa sổ mở rồi nhưng chưa ghép được
@@ -9552,7 +9575,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                  NHƯNG chưa ghép được id phiên mới — nhìn cửa sổ ấy giúp \
                                                  tôi (thường là nó đang hỏi một hộp xác nhận).\n\n{}{}",
                                                 h.source_name, w.tty,
-                                                old_window_note(w.old_kept, &s.cwd, &s.session_id),
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), &s.cwd, &s.session_id),
                                                 h.checkpoint
                                             ),
                                         }
@@ -9590,16 +9613,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     // Không xin đổi tài khoản thì chỉ đưa bản
                                     // bàn giao ra — chủ máy tự quyết làm gì.
                                     None => format!("⚠ bàn giao hỏng: {loi}\n\n{cp}"),
-                                    // `auto: false` — chủ máy gõ. Ở đây phiên cũ
-                                    // lại càng chưa cạn: tới được nhánh này nghĩa
-                                    // là tài khoản cũ không GỌI được, tức nó chỉ
-                                    // bị một cái đồng hồ chặn.
+                                    // Tới được nhánh này nghĩa là tài khoản cũ
+                                    // không GỌI được — bản bàn giao dựng từ nhật
+                                    // ký. Việc đã sang phiên mới, nên cửa sổ cũ
+                                    // vẫn đóng (Hà 2026-08-30).
                                     Some(acc) => match crate::sessions::start_fresh_after_handover(
                                         cfg,
                                         s,
                                         &cp,
                                         Some(acc),
-                                        false,
                                     ) {
                                         Ok(w) => {
                                             if let Some(id) = w.new_id.as_deref() {
@@ -9625,7 +9647,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                  Phiên cũ KHÔNG cạn — nó chỉ bị một cái đồng hồ chặn.\n\n{}{cp}",
                                                 s.name,
                                                 w.tty,
-                                                old_window_note(w.old_kept, &s.cwd, &s.session_id)
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), &s.cwd, &s.session_id)
                                             )
                                         }
                                         Err(e2) => format!(
@@ -9920,6 +9942,32 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             crate::exec::truncate(name, 40),
                             known.join(", ")
                         ),
+                    }
+                };
+                // 🔴 NÓI RA HẠN MỨC CỦA CÁI TÀI KHOẢN VỪA CHỌN — thêm 2026-08-30,
+                // Hà: *"mở phiên mới ở acc khác chưa kiểm soát được acc đó có
+                // đang còn nhiều tokens nhất không"*.
+                //
+                // NÓI chứ không CHẶN. Đây là nút chủ máy tự bấm, và anh có thể
+                // biết thứ huba không biết (`cachedUsageUtilization` chỉ tươi khi
+                // chính CLI của tài khoản ấy vừa chạy). Cái sai cần chữa là huba
+                // IM: mở một cửa sổ trên một tài khoản đã kịch trần thì cửa sổ ấy
+                // chết ở lượt đầu, và tới lúc đó anh mới biết.
+                let ack = match account.as_deref() {
+                    None => ack,
+                    Some(a) => {
+                        let hang = crate::quota::rank_all(cfg, crate::quota::now_ms());
+                        match hang.iter().find(|r| r.name == a) {
+                            Some(r) if r.rank == crate::quota::Rank::Full => {
+                                let khac = crate::watch::suggest_account(a, &hang, &[])
+                                    .map(|m| format!(" Còn cửa: {m}."))
+                                    .unwrap_or_else(|| {
+                                        " Và huba không thấy tài khoản nào còn cửa.".to_string()
+                                    });
+                                format!("{ack}\n⚠ {a} ĐÃ KỊCH TRẦN hạn mức — phiên này nhiều khả năng chết ngay lượt đầu.{khac}")
+                            }
+                            _ => ack,
+                        }
                     }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
@@ -10708,15 +10756,18 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 && typed.trim().len() == 1
                                 && typed.trim().chars().all(|c| c.is_ascii_digit());
                             let refusal = if digit {
-                                // 🔴 `look_sure`, không `look`: cổng này quyết
-                                // định có gửi một con số vào một màn CÓ THỂ đang
-                                // mở hộp chọn, và `do script` kèm một CR nên con
-                                // số ấy vừa DI vừa CHỐT. Đọc hụt ở đây hỏng theo
-                                // hướng không lùi lại được, nên nó đáng 1,2 giây
-                                // nới cửa sổ — xem `keys::look_sure` để biết vì
-                                // sao chỉ ĐÚNG hai cổng này trả giá ấy, chứ
-                                // không phải cả làn Urgent.
-                                match crate::keys::look_sure(&s.tty, 24) {
+                                // 🔴 Cổng này quyết định có gửi một con số vào một
+                                // màn CÓ THỂ đang mở hộp chọn, và `do script` kèm
+                                // một CR nên con số ấy vừa DI vừa CHỐT. Đọc hụt ở
+                                // đây hỏng theo hướng không lùi lại được ⟹ đọc
+                                // không ra hộp thì TỪ CHỐI, không gửi liều.
+                                //
+                                // 🪦 Tới 30/08 chỗ này là `look_sure` (nới cửa sổ
+                                // hết cỡ rồi mới đọc, +1,2 giây). Bỏ nới — Hà
+                                // 2026-08-30 — nên hộp cao hơn khung nhìn nay
+                                // không lộ ra, và cổng từ chối. Từ chối là chiều
+                                // an toàn của cổng này.
+                                match crate::keys::look(&s.tty, 24) {
                                     crate::keys::Look::Saw { body, .. }
                                         if !crate::keys::parse_choices(&body).is_empty() =>
                                     {
@@ -10753,15 +10804,20 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     }
                                 }
                             } else if is_key && arrow {
-                                // 🔴 `look_sure` — cùng lý do với cổng số ngay
-                                // trên, và ở đây còn gắt hơn: điều kiện để GỬI
-                                // một mũi tên là *biết chắc KHÔNG có hộp chọn*,
-                                // chứ không phải *không thấy hộp chọn nào*. Đọc
-                                // trên bản hẹp là dựng đúng chữ "không thấy"
-                                // thành "không có".
-                                match crate::keys::arrow_verdict(&crate::keys::look_sure(
-                                    &s.tty, 24,
-                                )) {
+                                // 🔴 Điều kiện để GỬI một mũi tên là *biết chắc
+                                // KHÔNG có hộp chọn*, chứ không phải *không thấy
+                                // hộp chọn nào* — `arrow_verdict` giữ đúng chỗ
+                                // ấy, và `Blind`/`Withheld` là TỪ CHỐI.
+                                //
+                                // 🪦 Tới 30/08 đây là `look_sure`: nới cửa sổ hết
+                                // cỡ rồi mới đọc, để một cái hộp cao hơn khung
+                                // vẫn lộ ra. Bỏ nới (Hà 2026-08-30) làm bản đọc
+                                // hẹp lại, nên cổng này TỪ CHỐI NHIỀU HƠN chứ
+                                // không gửi liều hơn — chiều an toàn. Cái mất là
+                                // sự tiện: một hộp cao hơn cửa sổ nay ra
+                                // `RefuseBlind`, và lời từ chối bên dưới đã mời
+                                // sẵn đường vòng (gõ thẳng SỐ).
+                                match crate::keys::arrow_verdict(&crate::keys::look(&s.tty, 24)) {
                                     crate::keys::Arrow::Send => None,
                                     crate::keys::Arrow::RefuseDialog => {
                                         logging::info(

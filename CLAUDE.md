@@ -505,27 +505,38 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
       phiên, 0 dòng hội thoại).
       ⟹ Nói cho đúng: **10 trang lịch sử ấy nằm trong bộ nhớ của chính `claude`**,
       TUI tự vẽ lại khi chủ máy cuộn; Terminal không giữ bản sao nào, nên
-      AppleScript không có gì để với tới. Muốn lấy nó phải bắt TUI VẼ LẠI (nới
-      cửa sổ — đang làm), hoặc bắt TUI TỰ CUỘN (cần phím cuộn trong `cgkeys`,
-      chưa dịch, và chỉ bản `hubad` ĐÃ KÝ mới gửi phím được).
+      AppleScript không có gì để với tới. Muốn lấy nó phải bắt TUI TỰ CUỘN —
+      `keys::screen_scrollback`, bánh xe chuột, đo được 934 → 1391 ký tự sau 10
+      lượt. (Đường "bắt TUI VẼ LẠI bằng cách nới cửa sổ" đã chết 30/08, xem tấm
+      bia bên dưới.)
       ⚠ **Bẫy đo, cắn ba lượt liên tiếp trước khi ra được số trên:** TUI in DÒNG
       LỆNH đang chạy lên chính cái màn đang đo, nên một mốc viết vào argv (hay
       vào lệnh sinh ra nó) tự xuất hiện trên màn ⟹ phép đo trả "CÓ" ở mọi ô, tự
       khớp chính nó. Mốc phải rút từ NHẬT KÝ và không bao giờ đi qua dòng lệnh.
       Cùng họ với `pgrep -f 'cargo test…'` khớp đúng argv của chính watcher.
-    · **Nới cửa sổ ra HẾT CỠ** — đường duy nhất lấy thêm được, và nó phải
-      nới-đọc-TRẢ LẠI trong **một** lượt `osascript` (`keys::screen_text_tall`),
-      vì nửa chừng mà huba chết là cửa sổ chủ máy nằm lại ở chiều lạ. Trả **cột
-      trước, dòng sau**.
-    🔴 **Cả HAI chiều, và xin `999` chứ đừng gõ một con số đo được** (Hà
-    2026-08-20: *"Sao không mở rộng cửa sổ ra hết cỡ"*). Terminal **kẹp giùm**
-    cho vừa màn hình — xin 999 nhận về 61×206, không một lỗi nào — nên một dòng
-    mã lấy đúng tối đa ở MỌI màn hình, kể cả cái chưa ai đo. Bản trước gõ cứng
-    `60` từ một phép đo trên một màn, nên vừa hụt một dòng ở đây vừa hụt bao
-    nhiêu tuỳ máy ở nơi khác. Đo cùng ngày, trên cửa sổ thật:
-    `24×80 ⟹ 1081 ký tự` · `nới cao ⟹ 2689` · `nới cả ngang ⟹ **3943**` —
-    một phần ba số ấy là nhờ chiều NGANG, vì cột rộng thì dòng dài thôi bị bẻ,
-    nên cùng 61 dòng chứa nhiều chữ hơn hẳn.
+    · **CUỘN bằng bánh xe** (`keys::screen_scrollback`) — đường DUY NHẤT còn lại
+      để lấy thêm chữ, và nó không đụng tới cỡ cửa sổ. Luôn trả màn về đáy, kể
+      cả khi đọc hỏng giữa chừng.
+    🔴 **huba KHÔNG ĐỔI KÍCH THƯỚC CỬA SỔ NỮA — Hà 2026-08-30**: *"đừng thay đổi
+    kích thước của sổ terminal nữa, bỏ hết các chỗ đi, để nó luôn full màn hình
+    nếu là cửa sổ mới, còn là tab thì không động đến kích thước"*.
+    · **Cửa sổ MỚI** (`keys::open_window`) sinh ra đã hết cỡ: xin
+      `keys::FULL_SCREEN_ASK` (999) ngay trong lượt `do script`, TRƯỚC `delay 1`
+      vì `claude` đọc bề ngang lúc khởi động. Terminal **kẹp giùm** cho vừa màn
+      hình — xin 999 nhận về 61×206, không một lỗi nào — nên một dòng mã lấy
+      đúng tối đa ở MỌI màn hình, kể cả cái chưa ai đo. `open_window` trả về cả
+      cỡ THẬT rồi ghi `window_opened_full_screen`: "đã mở hết cỡ" là một mệnh đề,
+      và mệnh đề nào cũng phải có số đứng sau.
+    · **Cửa sổ / tab ĐANG SỐNG**: không đụng, không bao giờ. Đọc được tới đâu thì
+      nói tới đó, và **khai ra chỗ đọc hụt** (`⚠ Màn đang hẹp…`, `cut_note` của
+      `/shot`, `keys::tab_bar_cut` → `ask_table_seen`) chứ không im.
+    🪦 `keys::screen_text_tall` + `GROW_ASK` (19/08–30/08) nới cửa sổ đang sống
+    rồi trả lại chiều cũ. Nó lấy thêm thật — đo được: `24×80 ⟹ 1081 ký tự` ·
+    `nới cao ⟹ 2689` · `nới cả ngang ⟹ **3943**` — nhưng cái giá là cửa sổ của
+    chủ máy tự phóng to rồi thu nhỏ trước mắt anh ở mỗi `/shot`, mỗi `/pick`, mỗi
+    cú bấm phím nguy hiểm (tới **ba** lần một lượt `/pick`, mỗi lần kèm
+    `delay 1.2` cứng). **Đừng dựng lại nó dưới một cái tên khác** — cổng
+    `rust/tests/no_window_resizing.rs` sẽ đỏ.
     ⚠ `61×206` là trần CỨNG của màn hình này: một lượt dài hơn khung ấy thì màn
     không có cách nào lấy trọn — nhật ký mới giữ được, xem dưới.
     🔴 **Và đừng hỏi màn "có lời nào của phiên không"** (cùng ngày, ảnh `/shot`

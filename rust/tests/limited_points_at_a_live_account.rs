@@ -16,11 +16,31 @@
 //!    không phải `🚫 HẾT HẠN MỨC` — xem `settle_limit`. Nên Hà phải tự đi hỏi
 //!    cú pháp mà huba đã biết sẵn.
 
+use huba::quota::{Rank, Ranked};
 use huba::sessions::{settle_limit, state_of, LiveSession, ST_ERR, ST_LIMIT};
 use huba::watch::{suggest_account, Change, Idle};
 
-fn acc(names: &[&str]) -> Vec<String> {
-    names.iter().map(|s| s.to_string()).collect()
+/// Ba tài khoản mà huba KHÔNG đo được hạn mức — tức mọi bài dưới đây chấm đúng
+/// hai cửa đầu (bỏ tài khoản chết · bỏ tài khoản đang thấy phiên bị chặn) và
+/// phép phá hoà theo thứ tự cấu hình. Cửa thứ ba (còn nhiều chỗ nhất) có bài
+/// riêng ở cuối tệp.
+fn acc(names: &[&str]) -> Vec<Ranked> {
+    names
+        .iter()
+        .map(|s| Ranked {
+            name: s.to_string(),
+            rank: Rank::Unknown,
+        })
+        .collect()
+}
+
+fn xep(rows: &[(&str, Rank)]) -> Vec<Ranked> {
+    rows.iter()
+        .map(|(n, r)| Ranked {
+            name: n.to_string(),
+            rank: *r,
+        })
+        .collect()
 }
 
 fn phien(account: &str, limited: Option<&str>) -> LiveSession {
@@ -198,5 +218,68 @@ fn a_real_api_error_stays_an_error() {
     assert_eq!(
         loi, None,
         "đọc thẳng trên màn là bằng chứng chắc hơn, và hai vế không được cùng Some"
+    );
+}
+
+/// 🔴 CỬA THỨ BA — tài khoản CÒN NHIỀU CHỖ NHẤT, không phải tài khoản đứng đầu
+/// cấu hình. Hà 2026-08-30: *"mở phiên mới ở acc khác chưa kiểm soát được acc đó
+/// có đang còn nhiều tokens nhất không"*.
+///
+/// Số trong bài này là số ĐO ĐƯỢC trên máy, không phải số nghĩ ra: đọc
+/// `cachedUsageUtilization` của ba tệp `.claude.json` lúc anh hỏi ⟹ acc1 92% ·
+/// acc2 22% · acc3 100%. Luật cũ (thứ tự cấu hình) trả `acc1`.
+#[test]
+fn con_nhieu_cho_nhat_thang_thu_tu_cau_hinh() {
+    let hang = xep(&[
+        ("acc1", Rank::Free(92)),
+        ("acc2", Rank::Free(22)),
+        ("acc3", Rank::Full),
+    ]);
+    assert_eq!(
+        suggest_account("acc3", &hang, &[]).as_deref(),
+        Some("acc2"),
+        "acc1 đứng trước trong cấu hình nhưng đã dùng 92% — cửa rộng hơn là acc2"
+    );
+}
+
+/// Đã đo được là KỊCH TRẦN thì không phải một gợi ý. Đây là cửa mà bản cũ mù
+/// hoàn toàn: `limited` chỉ tồn tại khi tài khoản ấy ĐANG có một phiên đứng đó
+/// với dòng hạn mức trên màn — đóng bốn cửa sổ acc3 đi là nó lại đọc lên như một
+/// tài khoản rảnh.
+#[test]
+fn tai_khoan_da_kich_tran_khong_bao_gio_duoc_goi_y() {
+    let hang = xep(&[("acc1", Rank::Full), ("acc2", Rank::Full)]);
+    assert_eq!(
+        suggest_account("acc3", &hang, &[]),
+        None,
+        "không còn cửa nào thì nói thẳng là không biết chuyển đi đâu"
+    );
+    // Và một ẩn số vẫn hơn một cánh cửa đã đóng.
+    let hang = xep(&[("acc1", Rank::Full), ("acc2", Rank::Unknown)]);
+    assert_eq!(suggest_account("acc3", &hang, &[]).as_deref(), Some("acc2"));
+}
+
+/// Hoà thì lấy cái chủ máy xếp trước — thứ tự cấu hình vẫn là phép phá hoà, chỉ
+/// không còn là phép CHỌN.
+#[test]
+fn hoa_thi_lay_cai_dung_truoc_trong_cau_hinh() {
+    let hang = xep(&[("acc1", Rank::Free(30)), ("acc2", Rank::Free(30))]);
+    assert_eq!(suggest_account("acc3", &hang, &[]).as_deref(), Some("acc1"));
+}
+
+/// Hai cửa cũ KHÔNG bị cửa mới nuốt: một tài khoản đang thấy phiên bị chặn thì
+/// vẫn bị loại, dù tệp của nó đọc ra rộng cửa nhất.
+///
+/// Đây là ca thật, không phải ca nghĩ ra: tệp chỉ đổi khi chính CLI của tài
+/// khoản ấy chạy, nên nó có thể còn ghi số của mấy phút trước — trong khi màn
+/// đang nói tài khoản ấy vừa bị chặn ngay lúc này.
+#[test]
+fn man_dang_bao_bi_chan_thi_thang_ca_con_so_dep_trong_tep() {
+    let hang = xep(&[("acc1", Rank::Free(5)), ("acc2", Rank::Free(60))]);
+    let dang_song = [phien("acc1", Some("resets Sep 1 at 1pm"))];
+    assert_eq!(
+        suggest_account("acc3", &hang, &dang_song).as_deref(),
+        Some("acc2"),
+        "màn nói acc1 vừa bị chặn ⟹ con số 5% trong tệp là số đã cũ"
     );
 }

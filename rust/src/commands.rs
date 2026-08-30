@@ -90,7 +90,17 @@ pub const ROUTES: &[Route] = &[
     },
     Route {
         name: "ctrlc",
-        aliases: &["ctrl-c", "refresh", "lamtuoi"],
+        // 🔴 `ctrl_c`, KHÔNG phải `ctrl-c` — sửa 2026-08-30. Tên lệnh Telegram chỉ
+        // nhận chữ thường + số + gạch DƯỚI, nên bản 27/08 làm
+        // `every_command_name_is_one_telegram_will_highlight` ĐỎ ngay lượt cài, và
+        // nó nằm đỏ ba ngày vì lượt ấy chỉ chạy "10 suite vùng ảnh hưởng" chứ
+        // không chạy suite của thư viện. Cái giá thật không nằm ở bài kiểm: một
+        // cái tên sai luật thì Telegram thôi tô sáng nó, mà tô sáng chính là cách
+        // huba cho bấm từ trong chữ.
+        //
+        // Dấu gạch NGANG vẫn sống ở `Arg::Fixed("ctrl-c")` ngay dưới, và ở đó nó
+        // đúng: đấy là tên PHÍM gửi cho `keys`, không phải tên lệnh cho Telegram.
+        aliases: &["ctrl_c", "refresh", "lamtuoi"],
         kind: CommandKind::Key,
         // 🔴 `Arg::Fixed`, KHÔNG phải một route có handler riêng — và đó là cả
         // bài học của ngày 27/08. Bản trước dựng hẳn `CommandKind::Refresh` +

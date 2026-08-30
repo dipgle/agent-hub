@@ -39,6 +39,9 @@ pub mod exec;
 pub mod keys;
 pub mod logging;
 pub mod pipeline;
+/// Tài khoản nào còn nhiều hạn mức nhất — đọc `cachedUsageUtilization` trong
+/// `<config_dir>/.claude.json`, thứ chính CLI ghi. Không spawn, không tốn quota.
+pub mod quota;
 /// Kept from the inbox era on purpose: `sessions.rs` runs every transcript
 /// preview through `leak_scan` before it can travel to a doc on a server. The
 /// product that needed a full outbound leak gate is gone; the gate that stops a

@@ -582,22 +582,88 @@ pub fn open_window(cmd: &str) -> Result<(i64, String)> {
     // Nay chỉ hỏi thứ BẮT BUỘC phải có — `tty` của chính tab vừa tạo — rồi lấy
     // id bằng `window_of`, đúng hàm đã dùng ở mọi chỗ khác. Hỏi ít đi một thứ,
     // và không còn chỗ nào cho `window 1` sai.
+    // 🔴 HẾT CỠ NGAY LÚC SINH RA — Hà 2026-08-30: *"để nó luôn full màn hình nếu
+    // là cửa sổ mới, còn là tab thì không động đến kích thước"*.
+    //
+    // Đặt ở ĐÂY chứ không ở một hàm nới về sau, và đó là cả chỗ đổi: cửa sổ này
+    // chưa thuộc về ai lúc dòng lệnh chạy, nên cho nó cỡ nào cũng không giật
+    // khỏi tay chủ máy. Một cửa sổ ĐANG SỐNG thì ngược lại — xem tấm bia của
+    // `screen_text_tall`.
+    //
+    // Và đặt TRƯỚC `delay 1`, không phải sau: `claude` đọc bề ngang lúc khởi
+    // động để tự bố cục, nên nới sau khi TUI vẽ xong là bắt nó vẽ lại lần nữa.
+    //
+    // `try` bọc riêng khúc đổi cỡ vì bài học của chính hàm này: cửa sổ ĐÃ dựng
+    // xong rồi mới tới mấy dòng sau, nên một lỗi ở đây mà ném ra là bỏ lại đúng
+    // một cửa sổ mồ côi. Cỡ hụt thì phiên vẫn chạy được; mất dấu thì không.
+    //
+    // Trả về cả cỡ THẬT sau khi đổi, không chỉ tty: "đã mở hết cỡ" là một mệnh
+    // đề, và mệnh đề nào cũng phải có số đứng sau (luật 13). Terminal kẹp giùm
+    // nên số nhận về là trần thật của màn hình này.
     let script = format!(
         r#"tell application "Terminal"
   set w to do script {}
+  try
+    set number of rows of w to {rows}
+    set number of columns of w to {cols}
+  end try
   delay 1
-  return tty of w
+  return (tty of w) & "|" & ((number of rows of w) as text) & "|" & ((number of columns of w) as text)
 end tell"#,
-        as_string(cmd)
+        as_string(cmd),
+        rows = FULL_SCREEN_ASK,
+        cols = FULL_SCREEN_ASK,
     );
-    let tty = osascript(&script)?.trim().to_string();
+    let out = osascript(&script)?;
+    let mut phan = out.trim().split('|');
+    let tty = phan.next().unwrap_or("").trim().to_string();
     if tty.is_empty() {
         return Err(anyhow!("Terminal mở cửa sổ nhưng không khai tty"));
+    }
+    // Cỡ chỉ để GHI SỔ. Không đọc được cỡ mà vẫn có tty thì cửa sổ vẫn dùng
+    // được — nhưng lúc ấy huba KHÔNG được nói "đã mở hết cỡ", nên hai ca ấy đi
+    // ra log bằng hai hình dạng khác nhau chứ không cùng một dòng.
+    let rows = phan.next().and_then(|s| s.trim().parse::<i64>().ok());
+    let cols = phan.next().and_then(|s| s.trim().parse::<i64>().ok());
+    match (rows, cols) {
+        (Some(r), Some(c)) => logging::info(
+            "window_opened_full_screen",
+            json!({ "tty": tty, "xin": FULL_SCREEN_ASK, "rows": r, "cols": c }),
+        ),
+        _ => logging::warn(
+            "window_size_unread",
+            json!({ "tty": tty, "raw": out.trim(),
+                    "effect": "cửa sổ mở được nhưng không đọc được cỡ — đừng khai là đã hết cỡ" }),
+        ),
     }
     // Id lấy sau, và hỏng thì thôi: cửa sổ đã dựng rồi, ném lỗi ở đây là bỏ lại
     // đúng một cửa sổ mồ côi — cái giá vừa trả hôm nay.
     let id = window_of(&tty).ok().flatten().unwrap_or(0);
     Ok((id, tty))
+}
+
+/// Cỡ hiện tại của một cửa sổ: `(dòng, cột)`.
+///
+/// 🔴 Chỉ ĐỌC — và đó là cả điểm của nó. Từ 2026-08-30 huba không đổi cỡ cửa sổ
+/// đang sống nữa (xem tấm bia ở `screen_text_tall`), nên thứ nó còn được phép
+/// làm với một cái màn hẹp là **nói ra con số**. Một câu *"màn đang hẹp"* không
+/// có số thì chủ máy không biết nới bao nhiêu là đủ; `24×80` thì biết.
+pub fn window_size(window: i64) -> Result<(i64, i64)> {
+    let out = osascript(&format!(
+        r#"tell application "Terminal"
+  return ((number of rows of selected tab of window id {window}) as text) & "|" & ((number of columns of selected tab of window id {window}) as text)
+end tell"#
+    ))?;
+    let (r, c) = out
+        .trim()
+        .split_once('|')
+        .ok_or_else(|| anyhow!("Terminal trả cỡ lạ: {:?}", crate::exec::truncate(&out, 40)))?;
+    Ok((
+        r.trim()
+            .parse()
+            .map_err(|e| anyhow!("số dòng {r:?}: {e}"))?,
+        c.trim().parse().map_err(|e| anyhow!("số cột {c:?}: {e}"))?,
+    ))
 }
 
 /// PID của Terminal.app — đích của [`crate::cgkeys::post`].
@@ -748,8 +814,10 @@ fn merge_above(older: &[String], have: &[String]) -> Vec<String> {
 ///   khởi động.
 /// * Menu `View ▸ Scroll to Top` — click được (`MENU-OK`), `contents` không đổi
 ///   một ký tự. Đó là cuộn của Terminal, và Terminal chẳng giữ gì để cuộn.
-/// * Nới cửa sổ hết cỡ ([`screen_text_tall`]) — lấy thêm thật, nhưng đụng trần
-///   cứng 61×206 của màn hình.
+/// * Nới cửa sổ hết cỡ (`screen_text_tall`, đã chết 30/08) — lấy thêm thật,
+///   nhưng đụng trần cứng 61×206 của màn hình, và nó phóng to rồi thu nhỏ cửa
+///   sổ của chủ máy ngay trước mắt anh. Hàm này nay là đường DUY NHẤT lấy thêm
+///   chữ, và nó không đụng tới cỡ cửa sổ — chỉ cuộn rồi trả về đáy.
 ///
 /// Bánh xe thì đi thẳng vào TUI, và TUI có sẵn cả lịch sử trong bộ nhớ nó: đo
 /// được 934 → 1391 ký tự sau 10 lượt, đầu khung lùi về một đoạn đã trôi.
@@ -1956,26 +2024,17 @@ pub enum Closed {
     Hidden,
 }
 
-pub fn quit_and_close(window: i64) -> Result<Closed> {
-    // Một đường gõ `/exit` duy nhất — xem `send_exit`. Trước 2026-08-15 đây là
-    // bản chép tay THỨ HAI của cùng một dòng `do script`, và nó là bản thiếu cú
-    // Enter rời.
-    send_exit(window)?;
-    // Chờ CLI nhả tab. 20 × 500ms: `/exit` thường xong trong ~3 giây, nhưng một
-    // phiên đang giữa lượt phải kết thúc lượt ấy trước.
-    // 60 × 500ms = 30 giây. Rộng hơn "vừa đủ cho một phiên rảnh" là có chủ ý:
-    // `claude` XẾP HÀNG chữ khi đang giữa lượt, nên `/exit` chỉ có hiệu lực sau
-    // khi lượt ấy chạy xong. Bấm "Tắt hẳn" đúng lúc phiên đang chạy là chuyện
-    // thường, và bỏ cuộc sau 10 giây thì biến một việc chỉ cần chờ thành một
-    // lời báo hỏng.
-    let mut still_busy = true;
+/// Chờ tab nhả — `Ok(true)` là đã rảnh, `Ok(false)` là hết giờ mà vẫn bận.
+///
+/// 30 giây (60 × 500ms). Rộng hơn "vừa đủ cho một phiên rảnh" là có chủ ý:
+/// `claude` XẾP HÀNG chữ khi đang giữa lượt, nên `/exit` chỉ có hiệu lực sau khi
+/// lượt ấy chạy xong. Bỏ cuộc sau 10 giây thì biến một việc chỉ cần chờ thành
+/// một lời báo hỏng.
+fn cho_tab_ranh(window: i64) -> Result<ChoTab> {
     for _ in 0..60 {
         std::thread::sleep(std::time::Duration::from_millis(500));
         match tab_state(window) {
-            Ok(TabState::Idle) => {
-                still_busy = false;
-                break;
-            }
+            Ok(TabState::Idle) => return Ok(ChoTab::Ranh),
             Ok(TabState::Busy) => {}
             // Cửa sổ biến mất trong lúc chờ là việc ĐÃ XONG, không phải huba mù:
             // Terminal tự dọn cửa sổ khi shell thoát (tuỳ hồ sơ), và chủ máy
@@ -1986,12 +2045,140 @@ pub fn quit_and_close(window: i64) -> Result<Closed> {
                     json!({ "window": window,
                             "why": "cửa sổ không còn trong lúc chờ /exit — đã đóng, không phải hỏi không được" }),
                 );
-                return Ok(Closed::Gone);
+                return Ok(ChoTab::CuaSoDaDi);
             }
             // Không hỏi được thì DỪNG, đừng đóng liều: đóng khi chưa chắc đã
             // thoát là đúng cái bật hộp thoại.
             Err(e) => return Err(e.context("không hỏi được tab còn bận không")),
         }
+    }
+    Ok(ChoTab::VanBan)
+}
+
+/// Ba kết cục của một lượt chờ tab — ba giá trị, vì chúng dẫn tới ba việc khác
+/// nhau và gộp bất kỳ hai cái nào cũng là một `bool` mang hai nghĩa.
+enum ChoTab {
+    /// Tab đã về dấu nhắc — đóng được.
+    Ranh,
+    /// Hết giờ chờ mà tab vẫn có tiến trình chạy.
+    VanBan,
+    /// Cửa sổ biến mất trong lúc chờ — việc đã xong bằng đường khác.
+    CuaSoDaDi,
+}
+
+pub fn quit_and_close(window: i64) -> Result<Closed> {
+    // Một đường gõ `/exit` duy nhất — xem `send_exit`. Trước 2026-08-15 đây là
+    // bản chép tay THỨ HAI của cùng một dòng `do script`, và nó là bản thiếu cú
+    // Enter rời.
+    send_exit(window)?;
+    let mut still_busy = match cho_tab_ranh(window)? {
+        ChoTab::CuaSoDaDi => return Ok(Closed::Gone),
+        ChoTab::Ranh => false,
+        ChoTab::VanBan => true,
+    };
+
+    // 🔴 `/exit` BỊ XẾP HÀNG THÌ CHỜ BAO LÂU CŨNG KHÔNG XONG — vá 2026-08-30.
+    //
+    // Hà: *"chuyển xong cửa sổ cũ không đóng được"*. Đo trên nhật ký thật, phiên
+    // `a56224e8` cửa sổ `18224`, HAI lượt liền trong ngày 30/08:
+    //
+    // ```text
+    // 07:27:59  session_close_window
+    // 07:28:00  keys_exit_sent  landed="Gone"      ← chữ ĐÃ rời ô nhập
+    // 07:28:04 → 07:38:50  close_still_busy ×7
+    // 07:38:51  close_gave_up  waited_sec=650
+    // 07:40:50  (lượt hai, y hệt) … close_gave_up  waited_sec=697
+    // ```
+    //
+    // `Delivered::Gone` chỉ nói **chữ đã rời ô nhập**, mà một tin XẾP HÀNG cũng
+    // rời ô nhập — nó chuyển xuống danh sách `❯ (…)` phía dưới. Nên hai chuyện
+    // rất khác nhau (*đã gửi* và *đang nằm chờ*) đọc ra cùng một giá trị, và
+    // huba đứng đợi 11 phút một thứ về bản chất sẽ không tới.
+    //
+    // Người ngồi trước máy làm gì lúc ấy? Bấm **Esc** cắt lượt đang chạy rồi gõ
+    // lại — chính câu lời-từ-chối cũ đã bảo chủ máy làm thế (*"Cắt lượt đang
+    // chạy bằng /key esc rồi /close"*). Tức huba biết cách chữa, biết từ lâu, và
+    // bắt anh tự đi làm — đúng cái phép thử CẦU NỐI trong CLAUDE.md gạt bỏ.
+    //
+    // Nên: đo hàng chờ (`queued_count` — huba đã có sẵn từ 18/08), cắt lượt, gõ
+    // lại. Một vòng, không phải một vòng lặp: cắt xong mà vẫn bận thì đó là một
+    // sự thật khác, và câu báo bên dưới nói ra sự thật ấy chứ không thử mãi.
+    if still_busy {
+        let hang_cho = screen_text(window).map(|s| queued_count(&s)).unwrap_or(0);
+        logging::warn(
+            "close_exit_queued",
+            json!({ "window": window, "queued": hang_cho,
+                    "why": "30 giây vẫn Busy — `/exit` nhiều khả năng đang nằm trong hàng chờ \
+                            sau một lượt đang chạy",
+                    "next": "cắt lượt bằng Esc rồi gõ lại /exit" }),
+        );
+        // Esc cắt lượt đang chạy. Đây là thao tác PHÁ (lượt đang chạy mất), và
+        // nó chỉ hợp lệ vì cả hai chỗ gọi hàm này đều đã có nghĩa "đóng phiên
+        // này lại": `/close` và bước dọn sau một lượt bàn giao đã xong.
+        //
+        // 🔴 PHÍM RỜI, KHÔNG PHẢI `do script` — Hà hỏi thẳng 2026-08-30: *"Nó có
+        // phải là bấm phím thực sự như tôi ngồi máy bấm ở bàn phím không"*.
+        //
+        // Bản đầu của tôi gọi `press(window, "esc")`, tức GHI byte `0x1B` vào
+        // tab qua `do script`. Với cái tty thì byte ấy đúng là thứ phím Esc thật
+        // đẩy vào — nhưng `do script` **kèm một CR không tắt được**
+        // (`do_script`), và một cú Esc thật thì không. Trên một màn đang mở hộp
+        // chọn, CR ấy là một cú CHỐT: đúng cái giá đã trả 19/08 khi một Enter
+        // lạc chốt `☐ RPC pool` → `☒` trên bảng hỏi của phiên amm.
+        //
+        // `send_bare` → `cgkeys::post` → `CGEventPostToPid` là phím RỜI thật,
+        // không kèm gì. Nó đắt hơn hai thứ, và cả hai đều phải khai:
+        // ① đòi quyền Trợ năng cấp cho đúng bản `hubad` đã ký — thiếu quyền thì
+        //    sự kiện rơi vào hư không **trong im lặng** (`cgkeys.rs` luật 2);
+        // ② `send_bare` đưa cửa sổ ấy lên trước (`focus_window`), vì phím rời đi
+        //    tới cả TIẾN TRÌNH chứ không tới một cửa sổ.
+        //
+        // Đường lùi có ĐIỀU KIỆN, không lùi bừa: hụt phím rời thì chỉ được ghi
+        // byte qua `do script` khi màn KHÔNG có hộp chọn. Có hộp chọn mà vẫn
+        // ghi là đổi một lượt đóng cửa sổ lấy một câu trả lời sai trong việc của
+        // chủ máy — thà để `/exit` nằm trong hàng chờ và báo thật.
+        let bang_phim_that = send_bare(window, &["esc".to_string()]);
+        match &bang_phim_that {
+            Ok(()) => logging::info(
+                "close_interrupt_sent",
+                json!({ "window": window, "duong": "cgkeys (phím rời, không kèm CR)" }),
+            ),
+            Err(e) => {
+                let co_hop_chon = screen_text(window)
+                    .map(|s| !parse_choices(&s).is_empty())
+                    .unwrap_or(true);
+                logging::warn(
+                    "close_interrupt_bare_failed",
+                    json!({ "window": window, "err": e.to_string(),
+                            "co_hop_chon": co_hop_chon,
+                            "effect": if co_hop_chon {
+                                "màn có hộp chọn ⟹ KHÔNG ghi byte qua do script (CR sẽ chốt hộ) — bỏ lượt cắt"
+                            } else {
+                                "rơi về ghi byte 0x1B qua do script; ô nhập rỗng nên CR đi kèm không gửi gì"
+                            } }),
+                );
+                if !co_hop_chon {
+                    if let Err(e2) = press(window, "esc") {
+                        logging::warn(
+                            "close_interrupt_failed",
+                            json!({ "window": window, "err": e2.to_string(),
+                                    "effect": "không cắt được lượt — vẫn thử gõ lại /exit" }),
+                        );
+                    }
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        send_exit(window)?;
+        still_busy = match cho_tab_ranh(window)? {
+            ChoTab::CuaSoDaDi => return Ok(Closed::Gone),
+            ChoTab::Ranh => false,
+            ChoTab::VanBan => true,
+        };
+        logging::info(
+            "close_retried_after_interrupt",
+            json!({ "window": window, "queued_truoc": hang_cho, "con_ban": still_busy }),
+        );
     }
     if still_busy {
         // 🔴 Câu này phải kể thứ ĐO ĐƯỢC, không phải thứ giả định.
@@ -2003,7 +2190,7 @@ pub fn quit_and_close(window: i64) -> Result<Closed> {
         // `tab_state` — nên nó chỉ được nói chừng ấy, và chỉ đường tới dòng log
         // `keys_exit_sent` cho phần còn lại.
         anyhow::bail!(
-            "sau 30 giây `tab_state` vẫn `Busy` — tức **CLI chưa thoát** (`busy` chỉ về `false` khi tiến trình trong tab kết thúc; xem chú thích của hàm này). Hai lý do có thể: phiên đang giữa một lượt nên `claude` xếp `/exit` vào hàng chờ, HOẶC dòng ấy chưa được gửi đi. Cửa sổ giữ nguyên (đóng lúc này sẽ bật hộp thoại 'terminate running processes'). Cắt lượt đang chạy bằng `/key esc` rồi `/close`, hoặc chờ phiên rảnh. Lệnh thoát có được đẩy đi hay không: xem log `keys_exit_sent`"
+            "đã gửi `/exit`, chờ 30 giây, CẮT lượt bằng Esc rồi gửi lại và chờ thêm 30 giây — `tab_state` vẫn `Busy`, tức **CLI chưa thoát** (`busy` chỉ về `false` khi tiến trình trong tab kết thúc). Còn lại hai khả năng: tab đang chạy một tiến trình KHÔNG phải `claude` (một lệnh nền dài), hoặc màn đang treo một hộp thoại nuốt phím. Cửa sổ giữ nguyên (đóng lúc này sẽ bật hộp thoại 'terminate running processes'). Mở `/shot` xem màn đang có gì. Lệnh thoát có được đẩy đi hay không: xem log `keys_exit_sent` và `close_exit_queued`"
         );
     }
     // Một đường đóng duy nhất — và nó tự KIỂM. Bản trước chép tay lại dòng
@@ -2456,79 +2643,42 @@ end tell"#
     osascript(&script)
 }
 
-/// Xin HẾT CỠ — Terminal tự kẹp lại cho vừa màn hình.
+/// Cỡ xin khi DỰNG một cửa sổ mới — Terminal tự kẹp lại cho vừa màn hình.
 ///
-/// 🔴 Hà 2026-08-20: *"Sao không mở rộng cửa sổ ra hết cỡ"*. Số cũ là 60, gõ
-/// cứng từ một phép đo trên MỘT màn hình — nên nó vừa bỏ phí một dòng ở đây
-/// (trần thật là 61), vừa bỏ phí bao nhiêu tuỳ màn ở máy khác. Đo 20/08 trên
-/// chính cửa sổ này: xin `999` ⟹ Terminal trả về **61**, không một lỗi nào.
-/// Nó KẸP giùm, nên "hết cỡ" là một con số đúng ở mọi màn hình, còn một con số
-/// đo được thì chỉ đúng ở cái màn đã đo.
+/// 🔴 Đo 2026-08-20 trên chính máy này: xin `999` ⟹ Terminal trả về **61×206**,
+/// không một lỗi nào. Nó KẸP giùm, nên "hết cỡ" là một con số đúng ở mọi màn
+/// hình, còn một con số đo được thì chỉ đúng ở cái màn đã đo (số cũ gõ cứng
+/// `60` vừa hụt một dòng ở đây vừa hụt bao nhiêu tuỳ máy ở nơi khác).
 ///
-/// Dùng cho CẢ hai chiều: chiều ngang cũng nới, và đó không phải phần thêm cho
-/// đẹp — cột rộng thì dòng dài thôi bị bẻ, nên cùng 61 dòng chứa nhiều chữ hơn
-/// hẳn. Đo cùng lượt: 24×80 ⟹ 1081 ký tự · nới cao ⟹ 2689 · nới cả ngang
-/// (206 cột) ⟹ **3943**. Gấp 3,6 lần bản gốc, và một phần ba số ấy là nhờ
-/// chiều ngang.
-pub const GROW_ASK: usize = 999;
+/// ⚠ Từ 2026-08-30 con số này chỉ còn ĐÚNG MỘT chỗ dùng: [`open_window`], lúc
+/// cửa sổ vừa sinh ra. Xem tấm bia ngay dưới để biết vì sao không còn chỗ nào
+/// nới một cửa sổ ĐANG SỐNG.
+pub const FULL_SCREEN_ASK: usize = 999;
 
-/// Đọc màn sau khi NỚI CAO cửa sổ, rồi trả lại đúng chiều cũ.
-///
-/// 🔴 Hà 2026-08-19, sau khi tự cuộn màn rồi gõ `/shot` lại: *"đúng là bạn đang
-/// chỉ lấy được đúng nội dung đang trong khung nhìn, vậy những gì gửi lên tele
-/// làm sao đủ nội dung ngữ cảnh được?"* · *"phải có cách khác để mọi thứ trong
-/// phiên phải thể hiện đúng đủ khi gửi giống như một bản sao hoàn hảo chứ?"*
-///
-/// Anh đúng, và hai đường tôi thử trước đều KHÔNG phải câu trả lời — đo, không
-/// đoán:
-/// * `contents of tab` chỉ trả phần ĐANG HIỆN: 26 đoạn / 1487 ký tự.
-/// * `history of tab` (toàn bộ cuộn lại) trả **42 đoạn / 3487 ký tự**, mà 16
-///   dòng thêm ấy là dòng đăng nhập shell + câu lệnh mở phiên — **không có một
-///   dòng hội thoại nào**. Vì TUI vẽ ĐÈ tại chỗ chứ không đẩy chữ ra khỏi màn,
-///   nên bộ đệm cuộn của Terminal không giữ gì cả. Đừng thử lại đường này.
-///
-/// Đường đi được là đường một người ngồi trước máy sẽ làm: **kéo cửa sổ ra hết
-/// cỡ**, để chính CLI vẽ lại đủ, đọc, rồi trả lại như cũ.
-///
-/// 🔴 Hà 2026-08-20: *"Sao không mở rộng cửa sổ ra hết cỡ"* — và cả hai chiều,
-/// không riêng chiều cao. Đo trên cửa sổ thật cùng ngày:
-/// `24×80 ⟹ 1081 ký tự` · `nới cao ⟹ 61 dòng, 2689` · `nới cả ngang ⟹ 206 cột,
-/// 3943`. Chiều ngang đáng một phần ba số ấy, vì cột rộng thì dòng dài thôi bị
-/// bẻ — cùng 61 dòng mà chứa nhiều chữ hơn hẳn.
-///
-/// Xin [`GROW_ASK`] chứ không xin một con số đo được: Terminal KẸP giùm cho vừa
-/// màn hình (xin 999, nhận 61×206, không lỗi), nên cùng một dòng mã lấy đúng
-/// tối đa ở mọi màn hình — kể cả cái màn chưa ai đo.
-///
-/// Bốn điều hàm này giữ, và cả bốn đều ở TRONG một lượt `osascript` — vì nửa
-/// chừng mà huba chết thì cửa sổ của chủ máy nằm lại ở chiều lạ:
-/// * nhớ CẢ HAI chiều cũ TRƯỚC khi đổi;
-/// * `try` bọc đúng khúc đọc, nên lỗi đọc không cướp mất bước trả lại;
-/// * trả lại trên MỌI đường ra;
-/// * trả **cột trước, dòng sau** — đúng thứ tự đã đo là về lại đúng `24×80`.
-pub fn screen_text_tall(window: i64, ask: usize) -> Result<String> {
-    let script = format!(
-        // ⚠ ĐỊA CHỈ ĐẦY ĐỦ mỗi lần, không gán `tb` rồi `contents of tb`:
-        // `contents of <tham chiếu>` là toán tử giải-tham-chiếu của AppleScript,
-        // nó trả về chính cái tab chứ không phải chữ trên màn (bẫy đã trả giá
-        // 2026-08-16, xem chú thích ở `tabs_script`).
-        r#"tell application "Terminal"
-  set cr to number of rows of selected tab of window id {window}
-  set cc to number of columns of selected tab of window id {window}
-  set doc to ""
-  try
-    set number of rows of selected tab of window id {window} to {ask}
-    set number of columns of selected tab of window id {window} to {ask}
-    delay 1.2
-    set doc to contents of selected tab of window id {window}
-  end try
-  set number of columns of selected tab of window id {window} to cc
-  set number of rows of selected tab of window id {window} to cr
-  return doc
-end tell"#
-    );
-    osascript(&script)
-}
+// 🪦 `GROW_ASK` + `screen_text_tall` — nới cửa sổ đang sống rồi trả lại chiều
+// cũ. Sống từ 19/08, chết 2026-08-30.
+//
+// Hà: *"đừng thay đổi kích thước của cửa sổ terminal nữa, bỏ hết các chỗ đi, để
+// nó luôn full màn hình nếu là cửa sổ mới, còn là tab thì không động đến kích
+// thước"*.
+//
+// Nó giải đúng một bài toán thật (màn `24×80` cắt mất hộp chọn và lời phiên
+// nói), và giải bằng cách phóng to rồi thu nhỏ cửa sổ của chủ máy ngay trước
+// mắt anh — mỗi cú `/shot`, mỗi cú `/pick`, mỗi cú bấm phím nguy hiểm. Tính cả
+// `delay 1.2` cứng bên trong, một lượt `/pick` đi qua tới ba lần co giãn.
+//
+// Cách chữa mới đứng ở chỗ RẺ HƠN HẲN: cửa sổ do huba mở thì sinh ra đã hết cỡ
+// ([`open_window`]), nên không còn gì để nới về sau. Còn cửa sổ (hay tab) của
+// chủ máy thì **không phải của huba** — huba đọc được tới đâu thì nói tới đó,
+// và nói ra chỗ đọc hụt, chứ không đụng vào tay người khác.
+//
+// Cái mất, ghi thẳng ra để đừng ai tưởng là hoà: một tab hẹp của chủ máy vẫn
+// cắt chữ như cũ, và huba không còn cách nào lấy thêm. Nó phải KHAI ra
+// (`shot_screen_narrow`), không được im.
+//
+// ⚠ Đừng dựng lại nó ở một cái tên khác. Đường "đọc `history of tab` cho đủ" là
+// ngõ cụt đã đo hai lần (bộ đệm cuộn của Terminal rỗng vì TUI vẽ đè tại chỗ) —
+// xem CLAUDE.md điều 13.
 
 /// Trần độ dài một dòng lệnh đáng dựng nút.
 ///
@@ -4034,22 +4184,25 @@ pub fn ask_table(screen: &str) -> Option<AskTable> {
 
 /// Bản đọc HẸP này có dấu hiệu THIẾU tab không.
 ///
-/// 🔴 Cùng một cái bảng, huba đọc ra hai con số khác nhau tuỳ đường đi — và
-/// đường dựng NÚT nhìn rộng hơn đường THI HÀNH cú bấm:
-/// * `/shot` nới cửa sổ hết cỡ khi màn bị mép cắt rồi mới đọc
-///   (`pipeline.rs`, nhật ký `shot_grew_window`), và nút tab dựng từ **bản rộng**
-///   ấy;
-/// * `/tab` với `/pick` đọc bằng [`look`] → [`screen_text`], **không nới lần
-///   nào**.
-///
-/// Nên cái nút `tab 3` đi ra điện thoại từ một bản đọc thấy 3 tab, còn cú bấm
-/// vào chính nó lại chấm trên một bản đọc chỉ thấy 2 — và câu trả lời là *"bảng
-/// chỉ có 2 câu, không có câu 3"* về đúng cái nút huba vừa tự dựng ra. Cửa sổ
-/// hẹp còn một dạng tệ hơn: thanh tab bị BẺ DÒNG thì `←` và `→` thôi chung một
-/// dòng, [`ask_table`] trả `None`, và một bảng nhiều câu đọc thành bảng một câu.
+/// 🔴 Cùng một cái bảng, huba đọc ra hai con số khác nhau tuỳ bề ngang cửa sổ:
+/// thanh tab bị mép cắt thì `/tab` và `/pick` đếm hụt, và câu trả lời đi ra
+/// điện thoại là *"bảng chỉ có 2 câu, không có câu 3"* về đúng cái nút huba vừa
+/// tự dựng ra. Cửa sổ hẹp còn một dạng tệ hơn: thanh tab bị BẺ DÒNG thì `←` và
+/// `→` thôi chung một dòng, [`ask_table`] trả `None`, và một bảng nhiều câu đọc
+/// thành bảng một câu.
 ///
 /// `want` là con số đến từ nguồn KHÁC màn — sổ phiên, hoặc chính số tab chủ máy
 /// vừa bấm. Con số thứ hai không phải số bịa: cái nút ấy do huba dựng.
+///
+/// 🔴 **Từ 2026-08-30 hàm này chỉ còn để NÓI, không còn để SỬA.** Trước đó nó
+/// là cái cò của một lượt nới cửa sổ (`ask_table_wide`); nay huba không đụng
+/// vào cỡ cửa sổ của chủ máy nữa (xem tấm bia ở `screen_text_tall`), nên cái nó
+/// trả về đi thẳng vào lời từ chối: *"thanh tab có thể đang bị mép màn cắt"*.
+///
+/// Bỏ hẳn nó thì rẻ hơn một dòng mã và đắt hơn nhiều ở chỗ khác: lúc ấy huba
+/// đếm hụt rồi trả lời chắc nịch, và người đọc không có cách nào biết con số
+/// kia là con số cụt. Một phép đo hỏng phải KÊU (luật 3), kể cả khi nó không
+/// còn quyền tự chữa.
 pub fn tab_bar_cut(near: Option<&AskTable>, want: usize) -> bool {
     match near {
         Some(t) => t.answered.len() < want,
@@ -4060,71 +4213,34 @@ pub fn tab_bar_cut(near: Option<&AskTable>, want: usize) -> bool {
     }
 }
 
-/// Hai lần đọc cùng một thanh tab: bản RỘNG chỉ thắng khi nó thật sự thấy
-/// nhiều tab hơn.
+/// Thanh tab đọc từ chữ ĐÃ CÓ, kèm lời cảnh báo nếu bản đọc có dấu hiệu cụt.
 ///
-/// "Rộng hơn" không tự động là "đúng hơn": nới xong mà TUI chưa vẽ lại kịp thì
-/// bản rộng đọc ra ÍT hơn, và lấy nó là đổi một bản đọc đủ lấy một bản đọc cụt.
-/// Cùng đúng luật `shot_grew_window` đang giữ — chỉ nhận bản rộng khi nó THẬT
-/// SỰ hơn.
-pub fn wider_table(near: Option<AskTable>, far: Option<AskTable>) -> (Option<AskTable>, bool) {
-    let n = near.as_ref().map(|t| t.answered.len()).unwrap_or(0);
-    let f = far.as_ref().map(|t| t.answered.len()).unwrap_or(0);
-    if f > n {
-        (far, true)
-    } else {
-        (near, false)
+/// Trả `(bảng, lời cảnh báo)`. Lời cảnh báo có mặt đúng khi [`tab_bar_cut`] nói
+/// bản đọc thiếu tab so với `want` — chỗ gọi phải mang nó vào câu trả lời cho
+/// chủ máy, vì đó là lúc con số huba sắp nói ra là con số cụt.
+///
+/// 🪦 Tiền thân `ask_table_wide` (19/08–30/08) nới cửa sổ hết cỡ rồi đọc lại,
+/// và chỉ nhận bản rộng khi nó THẬT SỰ thấy nhiều tab hơn (`wider_table`). Cả
+/// bộ ấy đi cùng lượt bỏ nới cửa sổ 2026-08-30 — xem tấm bia ở
+/// `screen_text_tall`. Cái còn lại là phần huba vẫn được phép làm: NÓI.
+pub fn ask_table_seen(body: &str, want: usize) -> (Option<AskTable>, Option<String>) {
+    let table = ask_table(body);
+    if !tab_bar_cut(table.as_ref(), want) {
+        return (table, None);
     }
-}
-
-/// Thanh tab đọc từ chữ ĐÃ CÓ; thiếu tab so với `want` thì NỚI CỬA SỔ đọc lại.
-///
-/// Trả `(bảng, chữ của bản đọc rộng nếu đã nhận nó)` — chỗ gọi cần cả chữ, vì
-/// [`cursor_on`] phải chấm trên đúng cái màn mà bảng vừa đọc ra: đếm ô trống
-/// trên bản rộng rồi tìm con trỏ trên bản hẹp là hỏi hai cái màn khác nhau.
-///
-/// Nới là đụng vào cửa sổ chủ máy và tốn thêm ~1,5 giây, nên chỉ nới khi
-/// [`tab_bar_cut`] nói có dấu hiệu thiếu — không nới phòng xa.
-pub fn ask_table_wide(body: &str, window: i64, want: usize) -> (Option<AskTable>, Option<String>) {
-    let near = ask_table(body);
-    if !tab_bar_cut(near.as_ref(), want) {
-        return (near, None);
-    }
-    let rong = match screen_text_tall(window, GROW_ASK) {
-        Ok(r) if !r.trim().is_empty() => r,
-        Ok(_) => {
-            logging::warn(
-                "tab_bar_grow_empty",
-                json!({ "window": window, "want": want,
-                        "effect": "nới cửa sổ xong đọc ra rỗng — chấm trên bản đọc hẹp" }),
-            );
-            return (near, None);
-        }
-        Err(e) => {
-            logging::warn(
-                "tab_bar_grow_failed",
-                json!({ "window": window, "want": want, "err": logging::err_chain(&e),
-                        "effect": "không nới được cửa sổ — chấm trên bản đọc hẹp, có thể thiếu tab" }),
-            );
-            return (near, None);
-        }
-    };
-    let far = ask_table(&rong);
-    let (before, after) = (
-        near.as_ref().map(|t| t.answered.len()).unwrap_or(0),
-        far.as_ref().map(|t| t.answered.len()).unwrap_or(0),
-    );
-    let (table, lay_rong) = wider_table(near, far);
+    let thay = table.as_ref().map(|t| t.answered.len()).unwrap_or(0);
     logging::info(
-        "tab_bar_regrown",
-        json!({ "window": window, "xin": GROW_ASK, "want": want,
-                "tabs_before": before, "tabs_after": after, "taken": lay_rong }),
+        "tab_bar_narrow",
+        json!({ "want": want, "seen": thay,
+                "effect": "thanh tab đọc ra ít hơn nguồn khác — nói ra, không nới cửa sổ" }),
     );
-    if lay_rong {
-        (table, Some(rong))
-    } else {
-        (table, None)
-    }
+    (
+        table,
+        Some(format!(
+            "⚠ Màn đang hẹp: thanh tab đọc ra {thay} câu trong khi nguồn khác nói {want}. \
+             Nới cửa sổ Terminal rộng thêm rồi bấm lại."
+        )),
+    )
 }
 
 /// Bảng đang đứng ở CÂU NÀO, ghép bằng chữ chứ không bằng màu.
@@ -4439,41 +4555,23 @@ pub enum Look {
 }
 
 /// Nhìn màn phiên, nói thật là nhìn được tới đâu.
+///
+/// 🪦 Có một thời hàm này có người anh em `look_sure` — nới cửa sổ hết cỡ trước
+/// khi đọc, dành cho hai cổng mà đọc hụt thì hỏng KHÔNG LÙI LẠI ĐƯỢC (cổng chặn
+/// phím mũi tên và cổng chặn phím SỐ: `do script` luôn kèm một CR, nên ở đó một
+/// phím vừa DI vừa CHỐT). Nó chết 2026-08-30 cùng cả lối nới cửa sổ — xem tấm
+/// bia ở `screen_text_tall`.
+///
+/// 🔴 Điều KHÔNG chết theo nó, và phải đọc trước khi chạm vào hai cổng ấy: khi
+/// đọc hụt, cổng phải từ chối chứ không được đoán. [`arrow_verdict`] gửi phím
+/// **chỉ khi chứng minh được màn không có hộp chọn**, không phải khi nó không
+/// nhìn thấy hộp nào — `Blind`/`Withheld` là từ chối, y như cũ. Bản đọc nay hẹp
+/// hơn thì cổng ấy từ chối NHIỀU hơn, và đó là chiều an toàn.
 pub fn look(tty: &str, lines: usize) -> Look {
-    look_at(tty, lines, false)
+    look_at(tty, lines)
 }
 
-/// Như [`look`], nhưng NỚI CỬA SỔ HẾT CỠ trước khi đọc.
-///
-/// 🔴 Dùng cho những cửa mà đọc hụt thì hỏng KHÔNG LÙI LẠI ĐƯỢC — hôm nay đúng
-/// hai chỗ: cổng chặn phím mũi tên và cổng chặn phím SỐ (`pipeline`, nhánh
-/// `CommandKind::Key`). Cả hai đều gửi một phím vào một màn CÓ THỂ đang mở hộp
-/// chọn, mà `do script` luôn kèm một CR — nên phím ấy vừa DI vừa CHỐT.
-///
-/// **Vì sao không gộp cả làn theo [`crate::exec::Lane`]** (hướng đề xuất sáng
-/// 26/08, và tôi bỏ nó sau khi đo). `Lane` trả lời câu *"có ai đang chờ không"*.
-/// Câu quyết định ở đây là câu KHÁC: *"quyết định này có lùi lại được không"*.
-/// Một cú bấm phím đi qua **ba** lượt đọc màn — cổng chặn, `before`, `after` —
-/// mà chỉ lượt đầu nuôi một quyết định không lùi được; hai lượt sau là cặp so
-/// sánh, chỉ cần NHẤT QUÁN VỚI NHAU. Gộp theo làn bắt cả ba trả giá:
-/// [`screen_text_tall`] mang `delay 1.2` cứng, nên +3,6 giây mỗi cú bấm và cửa
-/// sổ của chủ máy tự phóng to rồi thu lại ba lần ngay trước mắt. Hẹp lại đúng
-/// chỗ hỏng thì chỉ còn +1,2 giây, và chỉ khi thật sự gửi một phím nguy hiểm.
-///
-/// Cái giá ấy đổi lấy gì, đo được: `24×80 ⟹ 1081 ký tự` · nới hết cỡ
-/// `⟹ 3943` (xem [`screen_text_tall`]). Gấp 3,6 lần chữ, tức hộp chọn dài hơn
-/// màn có thêm chừng ấy cơ hội lộ ra trước khi huba dám gõ. Fixture thật
-/// `shot-amm-chooser-2026-08-19.txt` là đúng hình dạng ấy: hộp bắt đầu từ `2.`
-/// vì lựa chọn 1 ĐÃ cuộn khỏi mép trên, và chỉ còn dòng chân giữ cho
-/// [`parse_choices`] nhận ra đó là một cái hộp.
-///
-/// Nới hụt thì **KHÔNG im**: rơi về bản hẹp và ghi log, vì lúc ấy cổng vẫn phải
-/// phán trên thứ đọc được — nhưng người đọc log phải biết nó phán trên bản nào.
-pub fn look_sure(tty: &str, lines: usize) -> Look {
-    look_at(tty, lines, true)
-}
-
-fn look_at(tty: &str, lines: usize, rong: bool) -> Look {
+fn look_at(tty: &str, lines: usize) -> Look {
     let w = match window_of(tty) {
         Ok(Some(w)) => w,
         Ok(None) => {
@@ -4492,47 +4590,20 @@ fn look_at(tty: &str, lines: usize, rong: bool) -> Look {
             };
         }
     };
-    // Xin bản RỘNG trước khi rơi về bản hẹp. Không dùng `?`/`unwrap_or` im lặng:
-    // cổng an toàn phía dưới phán trên bản nào là chuyện người đọc log phải biết
-    // — và một lượt nới hụt là dấu hiệu Terminal đang không nghe lời, thứ đáng
-    // biết trước khi tin vào phán quyết kế tiếp.
-    let screen = if rong {
-        match screen_text_tall(w, GROW_ASK) {
-            Ok(s) if !s.trim().is_empty() => Some(s),
-            Ok(_) => {
-                logging::warn(
-                    "keys_wide_read_empty",
-                    json!({ "window": w,
-                            "effect": "nới hết cỡ xong đọc ra rỗng — cổng phán trên BẢN HẸP" }),
-                );
-                None
-            }
-            Err(e) => {
-                logging::warn(
-                    "keys_wide_read_failed",
-                    json!({ "window": w, "err": e.to_string(),
-                            "effect": "không nới được cửa sổ — cổng phán trên BẢN HẸP" }),
-                );
-                None
-            }
+    // Một bản đọc, đúng khung nhìn đang có. Hỏng thì `Blind` — KHÔNG im, vì cổng
+    // an toàn phía dưới phán trên thứ này, và "không đọc được" phải khác hẳn
+    // "đọc được và không thấy gì".
+    let screen = match screen_text(w) {
+        Ok(s) => s,
+        Err(e) => {
+            logging::warn(
+                "keys_screen_read_failed",
+                json!({ "window": w, "err": e.to_string() }),
+            );
+            return Look::Blind {
+                why: format!("không đọc được chữ trên màn: {e}"),
+            };
         }
-    } else {
-        None
-    };
-    let screen = match screen {
-        Some(s) => s,
-        None => match screen_text(w) {
-            Ok(s) => s,
-            Err(e) => {
-                logging::warn(
-                    "keys_screen_read_failed",
-                    json!({ "window": w, "err": e.to_string() }),
-                );
-                return Look::Blind {
-                    why: format!("không đọc được chữ trên màn: {e}"),
-                };
-            }
-        },
     };
     look_from_screen(&screen, lines)
 }
@@ -4985,20 +5056,19 @@ mod tests {
         assert_eq!(t.left(), 1, "còn đúng một ô trống");
     }
 
-    /// 🔴 CÙNG MỘT BẢNG, HAI CON SỐ — và cái nút đi ra điện thoại từ bản đọc
-    /// RỘNG còn cú bấm vào nó chấm trên bản đọc HẸP.
+    /// 🔴 CÙNG MỘT BẢNG, HAI CON SỐ — cái nút đi ra điện thoại từ một bản đọc
+    /// còn cú bấm vào nó chấm trên một bản đọc khác, hẹp hơn.
     ///
-    /// `/shot` nới cửa sổ khi màn bị mép cắt rồi dựng nút tab từ bản rộng ấy
-    /// (`pipeline.rs`, `shot_grew_window`); `/tab` và `/pick` thì đọc bằng
-    /// `look` → `screen_text`, không nới. Nên huba có thể trả lời *"bảng chỉ có
-    /// 2 câu, không có câu 3"* về đúng cái nút chính nó vừa dựng.
+    /// Nguồn của bề rộng nay là chính chủ máy (huba thôi đổi cỡ cửa sổ từ
+    /// 2026-08-30), nên khoảng lệch ấy vẫn còn: anh kéo hẹp cửa sổ lại giữa hai
+    /// lượt là đủ. Cái đổi là huba không tự chữa nữa — nó NÓI.
     #[test]
     fn doc_ra_it_tab_hon_so_la_dau_hieu_bi_cat() {
         let t = super::ask_table(REAL_TAB_BAR).expect("thanh tab thật phải đọc được");
         assert_eq!(t.answered.len(), 2, "bản đọc hẹp thấy 2 tab");
-        // Nguồn khác màn nói 3 câu ⟹ nới cửa sổ nhìn lại trước khi từ chối.
+        // Nguồn khác màn nói 3 câu ⟹ con số đang cầm là con số cụt.
         assert!(super::tab_bar_cut(Some(&t), 3));
-        // Khớp rồi thì thôi: nới là đụng vào cửa sổ chủ máy, không làm phòng xa.
+        // Khớp rồi thì im: một lời cảnh báo lúc nào cũng bật là một lời không ai đọc.
         assert!(!super::tab_bar_cut(Some(&t), 2));
         assert!(!super::tab_bar_cut(Some(&t), 0));
     }
@@ -5015,40 +5085,44 @@ mod tests {
         );
         assert!(
             super::tab_bar_cut(None, 3),
-            "sổ nói 3 câu mà không thấy tab nào ⟹ nới rồi nhìn lại"
+            "sổ nói 3 câu mà không thấy tab nào ⟹ bản đọc này không tin được"
         );
-        // Bảng MỘT câu thì đúng là không có thanh tab — không phải cớ để nới.
+        // Bảng MỘT câu thì đúng là không có thanh tab — không phải cớ để kêu.
         assert!(!super::tab_bar_cut(None, 1));
         assert!(!super::tab_bar_cut(None, 0));
     }
 
-    /// Bản rộng chỉ THẮNG khi nó thật sự thấy nhiều tab hơn — nới xong mà TUI
-    /// chưa vẽ lại kịp thì giữ nguyên bản hẹp, đừng đổi một bản đọc đủ lấy một
-    /// bản đọc cụt.
+    /// Bản đọc cụt phải đi kèm LỜI, và bản đọc đủ thì phải im.
+    ///
+    /// 🔴 Đây là chỗ luật "bỏ nới cửa sổ" (Hà 2026-08-30) không được biến thành
+    /// một lượt đếm hụt trong im lặng. Bài kiểm chấm cả hai chiều, vì một hàm
+    /// luôn cảnh báo và một hàm không bao giờ cảnh báo đều "qua" nếu chỉ chấm
+    /// một chiều — và cả hai đều vô dụng.
     #[test]
-    fn ban_rong_chi_thang_khi_that_su_hon() {
-        let hep = super::ask_table(REAL_TAB_BAR);
-        let rong = super::ask_table("←  ☒ Vá ACL  ☐ Đăng nhập  ☐ RPC pool  ✔ Submit  →");
-        assert_eq!(rong.as_ref().unwrap().answered.len(), 3);
+    fn ban_doc_cut_thi_phai_kem_loi_canh_bao() {
+        let (bang, loi) = super::ask_table_seen(REAL_TAB_BAR, 3);
+        assert_eq!(
+            bang.expect("vẫn đọc ra bảng").answered.len(),
+            2,
+            "bảng vẫn trả về — cụt không phải là mù"
+        );
+        let loi = loi.expect("2 tab đọc được mà nguồn khác nói 3 ⟹ phải có lời");
+        assert!(
+            loi.contains('2') && loi.contains('3'),
+            "lời phải mang cả hai con số: {loi}"
+        );
 
-        let (lay, doi) = super::wider_table(hep.clone(), rong.clone());
-        assert!(doi, "2 → 3 tab thì phải nhận bản rộng");
-        assert_eq!(lay.unwrap().answered.len(), 3);
+        let (bang, loi) = super::ask_table_seen(REAL_TAB_BAR, 2);
+        assert_eq!(bang.expect("vẫn đọc ra bảng").answered.len(), 2);
+        assert!(
+            loi.is_none(),
+            "khớp thì KHÔNG kêu, kẻo lời cảnh báo mất giá"
+        );
 
-        let (lay, doi) = super::wider_table(rong.clone(), hep.clone());
-        assert!(!doi, "bản rộng đọc ra ÍT hơn ⟹ giữ bản cũ");
-        assert_eq!(lay.unwrap().answered.len(), 3);
-
-        let (lay, doi) = super::wider_table(hep.clone(), None);
-        assert!(!doi, "nới xong không thấy bảng nào ⟹ giữ bản cũ");
-        assert_eq!(lay.unwrap().answered.len(), 2);
-
-        // Thanh tab bị bẻ dòng ở bản hẹp, nới ra thì đọc được: đúng ca cứu được.
-        let (lay, doi) = super::wider_table(None, rong);
-        assert!(doi);
-        assert_eq!(lay.unwrap().answered.len(), 3);
-
-        assert_eq!(super::wider_table(None, None), (None, false));
+        // Thanh tab bẻ dòng: không có bảng nào, và đó đúng là lúc phải kêu to nhất.
+        let (bang, loi) = super::ask_table_seen("←  ☒ Vá ACL  ☐ Đăng nhập\n  ✔ Submit  →", 2);
+        assert!(bang.is_none());
+        assert!(loi.is_some(), "mất hẳn bảng mà im là dạng hỏng tệ nhất");
     }
 
     #[test]

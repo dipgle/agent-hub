@@ -5788,17 +5788,32 @@ pub struct FreshWindow {
 
 /// Có được đóng cửa sổ cũ sau một lượt bàn giao không.
 ///
-/// **Luật một câu: huba tự làm thì tự dọn; chủ máy gõ thì huba không đụng vào
-/// cửa sổ của anh.** Cộng thêm một điều kiện đã có từ 13/08 — chưa thấy phiên
-/// mới chào đời thì tuyệt đối không đóng, vì lúc ấy huba đang mù nhất.
+/// **Luật một câu: bàn giao XONG thì cửa sổ cũ đóng — dù ai gõ.** Điều kiện duy
+/// nhất, có từ 13/08 và không đổi: chưa thấy phiên mới chào đời thì tuyệt đối
+/// không đóng, vì đó đúng là lúc huba mù nhất (phá cái chắc chắn để đổi lấy cái
+/// chưa chứng minh).
 ///
-/// 🔴 Tách thành hàm thuần 2026-08-29 để luật này **đo được**. Trước đó nó nằm
-/// rải trong luồng của [`start_fresh_after_handover`] dưới dạng hai lần rẽ
-/// nhánh, nên không bài kiểm nào phát biểu được nó — mà đây đúng là luật Hà vừa
-/// bác bỏ một lần (*"đóng làm gì trong khi việc chưa hết"*). Luật đã bị bác một
-/// lần thì lần sau phải có chỗ đọc ra thành chữ.
-pub fn should_close_old_window(auto: bool, new_session_appeared: bool) -> bool {
-    auto && new_session_appeared
+/// 🔴 LUẬT NÀY ĐÃ ĐỔI CHIỀU HAI LẦN, và cả hai lần đều do Hà. Ghi cả hai ra, vì
+/// một luật đảo chiều mà không kể lý do thì lần thứ ba sẽ đảo lại vì "trông có
+/// vẻ hợp lý hơn":
+///
+/// * **29/08** (`50e01da`): *"đóng làm gì trong khi việc chưa hết"* ⟹ thêm vế
+///   `auto`, tức chủ máy gõ thì huba không đụng vào cửa sổ của anh.
+/// * **30/08**: *"chuyển xong cửa sổ cũ không đóng được"* ⟹ bỏ vế ấy. Cái vế
+///   `auto` giải sai bài toán: nó hỏi *ai gõ*, trong khi điều đáng hỏi là *việc
+///   đã chuyển đi chưa*. Mà một lượt bàn giao THÀNH CÔNG thì theo định nghĩa là
+///   việc đã sang phiên mới — bản bàn giao nằm ở đó, cửa sổ cũ chỉ còn là một
+///   ngõ cụt trông y hệt một phiên đang sống.
+///
+/// Cái vế `auto` bỏ đi vẫn để lại một dấu vết đáng giữ: **`auto` là hằng số do
+/// chỗ gọi truyền vào, không phải một thuộc tính đo được của phiên** — chính hai
+/// lượt vá 28–29/08 đã tự khai chỗ hở ấy trong mục `CÒN HỞ`. Luật mới không có
+/// chỗ cho một hằng số như thế nữa.
+///
+/// Vẫn là hàm thuần: luật này đã bị đảo hai lần, nên nó phải có đúng một chỗ đọc
+/// ra thành chữ và một bài kiểm phát biểu được nó.
+pub fn should_close_old_window(new_session_appeared: bool) -> bool {
+    new_session_appeared
 }
 
 /// Mở một phiên MỚI mang theo bản bàn giao. Cửa sổ cũ chỉ đóng khi
@@ -5823,30 +5838,19 @@ pub fn start_fresh_after_handover(
     // nên cửa sổ đầu đứng ở hộp *"Quick safety check"* — ĐÃ HẾT; `.claude.json`
     // của cả hai nay đều có mục cho `/Users/hanguyen/projects`.
     acc: Option<&str>,
-    // Lượt này do HUBA TỰ LÀM (`true`) hay do CHỦ MÁY GÕ (`false`).
+    // 🪦 Tham số `auto` (28–30/08) — *"lượt này do huba tự làm hay chủ máy gõ"*.
     //
-    // Nó quyết đúng một việc: có đóng cửa sổ cũ hay không. **huba tự làm thì tự
-    // dọn; chủ máy gõ thì huba không đụng vào cửa sổ của anh.**
+    // Nó quyết đúng một việc: có đóng cửa sổ cũ hay không. Hà bỏ nó ngày 30/08
+    // (*"chuyển xong cửa sổ cũ không đóng được"*), và lý do đáng giữ nằm ở HÌNH
+    // DẠNG của nó chứ không ở câu trả lời: `auto` là một **hằng số do chỗ gọi
+    // gõ vào** — `false` ở hai nhánh `/handover`, `true` ở nhánh tự động — nên
+    // không phép đo nào chạm tới được nó, và hai lượt vá 28–29/08 đều đã tự khai
+    // chỗ hở ấy trong mục `CÒN HỞ` mà không gỡ được.
     //
-    // 🔴 Hà 2026-08-29, sau khi tôi dựng một cây điều kiện "ca này giữ, ca kia
-    // đóng" rồi mời anh chọn: *"Sao lằng nhằng thế? Mỗi phiên làm một dự án thì
-    // đóng làm gì trong khi việc chưa hết"*. Anh hỏi trúng tiền đề, và tiền đề
-    // ấy **chưa bao giờ được viết ra** — nó chỉ được thừa kế. Tệ hơn: mã của
-    // chính tệp này đã nói ngược lại từ 2026-08-13, ngay bên trên (*"Hai cửa sổ
-    // thì chủ máy đóng bớt được; một phiên đang làm dở bị đóng thì không lấy
-    // lại được"*), mà câu ấy chỉ được áp cho MỘT nhánh.
-    //
-    // Có đúng MỘT lý do thật để đóng, và nó đo được: `handover_window_opened`
-    // chạy **5–14 lượt MỖI NGÀY** (110 lượt từ 21/08). Không dọn thì một tuần
-    // đọng ~50 cửa sổ Terminal. Nhưng lý do ấy **chỉ nói về lượt TỰ ĐỘNG** —
-    // thứ huba làm khi không ai bấm, cho một phiên đã cạn ngữ cảnh. Với lượt
-    // chủ máy tự gõ thì không có lý do nào cả, và tôi đã không tìm ra lý do nào
-    // khi đi tìm.
-    //
-    // Nên tham số này KHÔNG hỏi "ca nào" (hết hạn mức · sắp hết · đầy ngữ cảnh
-    // — một cây điều kiện phải nuôi mãi), nó hỏi "ai làm". Một câu, hết lằng
-    // nhằng, và không ca mới nào sinh thêm nhánh.
-    auto: bool,
+    // Lý do THẬT để đóng thì đo được và không đổi: `handover_window_opened` chạy
+    // 5–14 lượt mỗi ngày (110 lượt từ 21/08); không dọn thì một tuần đọng ~50
+    // cửa sổ Terminal. Điều 30/08 làm rõ là lý do ấy không phụ thuộc vào việc ai
+    // gõ — xem [`should_close_old_window`].
 ) -> Result<FreshWindow> {
     let task = format!(
         "Tiếp quản phiên trước (phiên cũ đã đầy ngữ cảnh nên huba đóng sổ và mở phiên này). \
@@ -5922,14 +5926,13 @@ pub fn start_fresh_after_handover(
         });
     }
 
-    // Chủ máy gõ thì cửa sổ của anh là của anh — huba không đụng vào.
     // Tới đây `new_id` chắc chắn có (nhánh trên đã trả về), nên câu hỏi còn lại
     // đúng một vế; vẫn hỏi qua hàm để luật chỉ được phát biểu ở MỘT chỗ.
-    if !should_close_old_window(auto, true) {
+    if !should_close_old_window(true) {
         logging::info(
             "handover_old_window_kept",
             json!({ "session": session.session_id, "tty": session.tty,
-                    "why": "lượt bàn giao do chủ máy gõ — huba chỉ dọn thứ nó tự làm" }),
+                    "why": "should_close_old_window nói KHÔNG" }),
         );
         return Ok(FreshWindow {
             tty: tty_short,

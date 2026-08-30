@@ -237,6 +237,13 @@ pub enum Change {
         acc: String,
         /// Nguyên văn giờ mở lại, đọc từ màn.
         when: String,
+        /// Tài khoản nên chuyển sang — xem [`suggest_account`].
+        ///
+        /// `None` ở chỗ DỰNG (`changes` không biết máy có mấy tài khoản), điền
+        /// ở chỗ NÓI (`pipeline::announce_changes`, nơi có `Config`). Để `None`
+        /// tới lúc phát ngôn cũng là một câu đúng — "không có ai để gợi ý" —
+        /// nên nó không phải một ô chờ được điền, nó là một trong hai kết cục.
+        goi_y: Option<String>,
     },
     /// Phiên đứng lại vì một LỖI — xem `ERRORED`.
     Failed {
@@ -328,14 +335,26 @@ impl Change {
                 name,
                 acc,
                 when,
-                ..
+                goi_y,
             } => {
                 let ngan: String = id.chars().take(8).collect();
-                format!(
-                    "🚫 {name} bị chặn — tài khoản {acc} hết hạn mức ({when}).\n\
-                     Nó sẽ KHÔNG tự chạy lại. Chuyển sang tài khoản khác, giữ nguyên việc:\n\
-                     /handover -a acc1 {ngan}"
-                )
+                match goi_y {
+                    Some(m) => format!(
+                        "🚫 {name} bị chặn — tài khoản {acc} hết hạn mức ({when}).\n\
+                         Nó sẽ KHÔNG tự chạy lại. Chuyển sang tài khoản khác, giữ nguyên việc:\n\
+                         /handover -a {m} {ngan}"
+                    ),
+                    // Không có ai để gợi ý thì NÓI ĐÚNG CHỪNG ẤY, và vẫn đưa
+                    // hình dạng câu lệnh: chủ máy có thể biết một tài khoản mà
+                    // huba chưa nhìn thấy, nhưng nếu cú pháp cũng mất luôn thì
+                    // anh phải đi tra — đúng lúc đang ở xa.
+                    None => format!(
+                        "🚫 {name} bị chặn — tài khoản {acc} hết hạn mức ({when}).\n\
+                         Nó sẽ KHÔNG tự chạy lại, và huba KHÔNG thấy tài khoản nào đang rảnh \
+                         để gợi ý — chờ đồng hồ, hoặc tự chọn:\n\
+                         /handover -a <tài khoản> {ngan}"
+                    ),
+                }
             }
             Change::Failed { name, line, .. } => {
                 let head = format!(
@@ -757,6 +776,41 @@ fn state_of(s: &LiveSession) -> &'static str {
 /// được giữ nguyên**: xoá khỏi sổ là lượt sau nó quay lại thành "phiên mới",
 /// rồi lúc tắt thật lại báo thêm một lần nữa (đo được: `37e59209` báo 14:44 +
 /// 16:08, `69a38c64` báo 14:44 + 16:42 — không phải loa lặp, mà là sổ bị xoá).
+/// Tài khoản nên chuyển sang khi một phiên bị chặn — KHÔNG BAO GIỜ là cái vừa chết.
+///
+/// 🔴 Hà 2026-08-30, ngay sau khi hỏi *"phiên gần hết token muốn chủ động chuyển
+/// ngữ cảnh sang phiên mới với acc khác thì dùng lệnh nào"*: câu gợi ý trong tin
+/// báo tự động gõ cứng `acc1` từ lúc dựng (28/08, `Change::Limited`). Nó đúng
+/// suốt ba ngày vì acc1 chưa lần nào là cái bị chặn — một hằng số đúng nhờ hoàn
+/// cảnh chứ không nhờ lý lẽ. Ngày acc1 hết hạn mức thì huba bảo chủ máy chuyển
+/// sang **đúng tài khoản vừa chết**, và câu ấy đọc lên vẫn trơn tru như mọi câu
+/// khác — không có gì đỏ lên, chỉ có một cú chạm vô ích ở đầu kia cây cầu.
+///
+/// Hai cửa, theo thứ tự:
+/// 1. bỏ chính tài khoản đang bị chặn;
+/// 2. bỏ mọi tài khoản mà huba ĐANG NHÌN THẤY một phiên bị chặn — đo được sáng
+///    nay: acc3 đứng `weekly limit · resets Sep 1` trên BỐN phiên cùng lúc, nên
+///    gợi ý sang đó là gợi ý một cú chạm vô ích thứ hai.
+///
+/// `None` = không còn tài khoản nào để gợi ý, và đó là một câu trả lời chứ không
+/// phải một chỗ trống. Bịa ra một cái tên thì tốn của chủ máy đúng cái thứ đang
+/// thiếu: một lượt gọi `claude`.
+///
+/// Thứ tự trong `accounts` là thứ tự cấu hình, cố ý: nó là thứ tự chủ máy tự
+/// xếp, và huba không có phép đo nào tốt hơn để xếp lại (`/usage` treo — xem
+/// `PLAN.md`, mục còn nợ).
+pub fn suggest_account(limited: &str, accounts: &[String], now: &[LiveSession]) -> Option<String> {
+    let dang_chan: Vec<&str> = now
+        .iter()
+        .filter(|s| s.limited.is_some())
+        .map(|s| s.account.as_str())
+        .collect();
+    accounts
+        .iter()
+        .find(|a| a.as_str() != limited && !dang_chan.contains(&a.as_str()))
+        .cloned()
+}
+
 pub fn changes(
     prev: &BTreeMap<String, Mark>,
     now: &[LiveSession],
@@ -861,6 +915,9 @@ pub fn changes(
                 name: crate::sessions::shown(s),
                 acc: s.account.clone(),
                 when: s.limited.clone().unwrap_or_default(),
+                // Chỗ này không biết máy có mấy tài khoản (`changes` cố ý chỉ
+                // nhận cái nó so được). Người điền là `announce_changes`.
+                goi_y: None,
             });
         } else if state == ERRORED && before.is_some_and(|b| b.s != ERRORED) {
             out.push(Change::Failed {

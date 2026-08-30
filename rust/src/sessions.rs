@@ -2017,6 +2017,46 @@ pub const ST_DEAD: &str = "🪦";
 /// việc khác nhau, nên chúng không được nhìn giống nhau trên danh sách.
 pub const ST_LIMIT: &str = "🚫";
 
+/// Cùng một sự thật tới bằng HAI đường — xếp lại `(lỗi, hết hạn mức)` cho đúng.
+///
+/// 🔴 Đo trên máy này 2026-08-30 05:16: BỐN phiên acc3 mang nguyên văn
+/// `You've hit your weekly limit · resets Sep 1 at 1pm (Asia/Saigon)` mà danh
+/// sách đọc ra `❌ dừng vì LỖI` — trong khi 11:08 hôm trước **cùng bốn phiên ấy**
+/// đọc ra `🚫 HẾT HẠN MỨC`. Một trạng thái lật qua lật lại theo chuyện cửa sổ có
+/// cuộn hay không thì không phải một phép đo, nó là một cái xúc xắc.
+///
+/// Gốc: `limited` đọc từ MÀN (`session_limit_on_screen`), `error` đọc từ NHẬT KÝ
+/// (`transcript_error`) — mà CLI ghi câu hết hạn mức bằng đúng kênh
+/// `isApiErrorMessage`, nên đường nhật ký luôn có, còn đường màn hình hụt ngay
+/// khi cửa sổ cuộn qua hoặc phiên không còn cửa sổ. Rồi `state_of` xét `error`
+/// TRƯỚC `limited`, nên đường bền hơn lại là đường thắng, với câu trả lời sai.
+///
+/// Cái giá không nằm ở cái icon: tin `❌` KHÔNG mang câu `/handover -a …`, nên
+/// đúng lúc chủ máy cần đường thoát nhất thì huba đưa anh một dòng lỗi rồi thôi.
+/// Chính Hà đã phải hỏi lại cú pháp ấy sáng 30/08, với bốn phiên đang đứng đó.
+///
+/// Vì sao là MỘT hàm chứ không phải hai câu `if` ở chỗ gọi: luật này có hai vế
+/// (nhận thêm nguồn · và bỏ vế `error` khi đã nhận) mà vế thứ hai mới là vế sửa
+/// được lỗi. Tách rời thì bài kiểm đo được vế một và xanh, trong khi vế hai bị
+/// ai đó bỏ đi — đúng chỗ hở đã khai hai lần ở `old_kept` và `should_close_old_window`.
+pub fn settle_limit(
+    error: Option<String>,
+    tren_man: Option<String>,
+) -> (Option<String>, Option<String>) {
+    let chan = tren_man.or_else(|| {
+        error
+            .as_deref()
+            .and_then(crate::keys::session_limit_on_screen)
+    });
+    // Hết hạn mức thì KHÔNG còn là lỗi: lỗi thì thử lại được, hết hạn mức thì
+    // chỉ có chờ đồng hồ hoặc đổi tài khoản. Giữ cả hai là giữ nguyên cái đọc
+    // sai, vì `state_of` sẽ chọn `error`.
+    match chan {
+        Some(k) => (None, Some(k)),
+        None => (error, None),
+    }
+}
+
 /// Tình trạng một phiên, thành `(ký hiệu, chữ)` — **một chỗ duy nhất** quyết định.
 ///
 /// Danh sách phiên và tin tự phát phải nói CÙNG một thứ về cùng một trạng thái
@@ -4099,11 +4139,17 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // phiên hết hạn mức KHÔNG chạy, nên để trong cửa ấy là không
                     // bao giờ đọc được nó. Chữ đã nằm sẵn trong `tabs`, không
                     // tốn thêm lượt `osascript` nào.
-                    if !row.tty.is_empty() {
-                        row.limited = crate::keys::alive_tab(&tabs, &row.tty)
+                    let tren_man = if row.tty.is_empty() {
+                        None
+                    } else {
+                        crate::keys::alive_tab(&tabs, &row.tty)
                             .and_then(|t| t.screen.as_deref())
-                            .and_then(crate::keys::session_limit_on_screen);
-                    }
+                            .and_then(crate::keys::session_limit_on_screen)
+                    };
+                    // Hai nguồn, một phán quyết — xem [`settle_limit`].
+                    let (loi, chan) = settle_limit(row.error.take(), tren_man);
+                    row.error = loi;
+                    row.limited = chan;
                     row.context_tokens = parsed.context_tokens;
                     row.model = parsed.model.clone();
                     row.last_role = parsed.last_role;

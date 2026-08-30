@@ -4633,6 +4633,48 @@ pub fn ghost_verdict(key: &str, screen_unchanged: bool, seen: &Look) -> Option<A
     Some(arrow_verdict(seen))
 }
 
+/// Một phím không ăn — được phép nói ra chẩn đoán NÀO.
+///
+/// 🔴 Hà 2026-08-30, dán lại nguyên tin huba gửi: *"⚠ đã bấm 'enter' rồi bấm →
+/// để nhận gợi ý nhưng màn KHÔNG đổi … Chữ trong ô nhập nhiều khả năng là GỢI Ý
+/// MỜ của TUI"* — rồi hỏi *"thứ tự bấm ở gợi ý bị ngược à?"*.
+///
+/// Thứ tự KHÔNG ngược ([`ghost_verdict`] giải thích vì sao Enter phải đi trước).
+/// Cái sai là câu chẩn đoán: đo màn của chính phiên ấy cùng lúc (`ttys018`,
+/// window 18153, 24×80, 1687 ký tự) thì **ô nhập RỖNG**, không có gợi ý mờ nào —
+/// phiên đang giữa một lượt chạy, `✻ Meandering… (34m 7s · ↓ 51.5k tokens)`.
+///
+/// Và trên một phiên ĐANG CHẠY, "màn không đổi" không nói được gì về cú bấm:
+/// `unchanged` là phép so HAI BẢN ĐỌC RỜI (`is_key` phá vòng ngay sau lần đọc
+/// đầu), nên nó trả lời *"hai lượt đọc ấy có giống nhau không"* — một câu hỏi mà
+/// nhịp vẽ của TUI trả lời hộ, chứ không phải phím. Bằng nhau ở đó là im lặng,
+/// không phải bằng chứng, và một phỏng đoán dựng trên im lặng thì đọc lên vẫn
+/// giống hệt một chẩn đoán.
+///
+/// Nên thứ tự ở đây là thứ tự CHẮC CHẮN GIẢM DẦN, không phải thứ tự dễ nói:
+/// 1. **hết hạn mức** — đọc được thành chữ, và có đường đi tiếp (`/handover -a`);
+/// 2. **đang chạy** — biết chắc, nên nói thẳng là chưa kết luận được;
+/// 3. **gợi ý mờ** — chỉ khi đã loại được hai ca trên. Đây là phỏng đoán, và nó
+///    phải đứng cuối: một phỏng đoán nói trước hai điều biết chắc thì người đọc
+///    đi sửa nhầm chỗ, đúng như sáng nay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoEffect {
+    /// Tài khoản hết hạn mức — gõ gì cũng không vào. Mang theo giờ mở lại.
+    Limited(String),
+    /// Phiên đang giữa một lượt. Mang theo dòng việc nếu đọc được.
+    Busy(Option<String>),
+    /// Không loại được hai ca trên ⟹ mới tới lượt nghi gợi ý mờ.
+    Ghost,
+}
+
+pub fn no_effect_reason(limited: Option<&str>, working: bool, activity: Option<&str>) -> NoEffect {
+    match (limited, working) {
+        (Some(khi), _) => NoEffect::Limited(khi.to_string()),
+        (None, true) => NoEffect::Busy(activity.map(str::to_string)),
+        (None, false) => NoEffect::Ghost,
+    }
+}
+
 /// Chữ trên màn của phiên, đã gác bí mật và cắt gọn — dạng dùng được ngay.
 ///
 /// `None` khi phiên không có cửa sổ, khi không đọc được màn, hoặc khi màn có

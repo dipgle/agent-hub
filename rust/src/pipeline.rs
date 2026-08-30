@@ -975,7 +975,24 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         return;
     }
 
-    for c in changes {
+    // Tài khoản để GỢI Ý khi một phiên bị chặn — điền ở đây vì đây là chỗ đầu
+    // tiên có `Config`. `watch::changes` cố ý không nhận danh sách tài khoản:
+    // nó là hàm SO HAI LƯỢT, và mọi thứ nó nhận thêm là một thứ 29 bài kiểm
+    // phải dựng lại mà không đo thêm được gì.
+    let tai_khoan: Vec<String> = cfg
+        .claude_accounts_or_ambient()
+        .into_iter()
+        .map(|a| a.name)
+        .collect();
+    for mut c in changes {
+        if let crate::watch::Change::Limited { acc, goi_y, .. } = &mut c {
+            *goi_y = crate::watch::suggest_account(acc, &tai_khoan, live);
+            logging::info(
+                "limited_suggested_account",
+                json!({ "acc_chan": acc, "goi_y": goi_y,
+                        "trong_so": tai_khoan.len() }),
+            );
+        }
         // Tra lại phiên để có `tty` (đọc màn), câu cuối nó nói, và ai mở nó.
         let id = match &c {
             crate::watch::Change::Limited { id, .. } => id.clone(),
@@ -11326,19 +11343,48 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                  nhưng cú Enter rời chưa đưa nó đi. Bấm ⏎ lần nữa."
                                             )
                                         } else if unchanged {
+                                            // Ba chẩn đoán, chắc chắn giảm dần —
+                                            // xem `keys::no_effect_reason`.
+                                            let vi_sao = crate::keys::no_effect_reason(
+                                                s.limited.as_deref(),
+                                                s.working,
+                                                s.activity.as_deref(),
+                                            );
                                             logging::info(
                                                 "keys_press_no_effect",
                                                 json!({ "session": s.session_id,
                                                         "key": typed.trim(),
+                                                        "chan_doan": format!("{vi_sao:?}"),
                                                         "why": "màn không đổi sau khi bấm" }),
                                             );
-                                            format!(
-                                                "⚠ đã bấm '{}'{} nhưng màn KHÔNG đổi · {name}\n                                                 Chữ trong ô nhập nhiều khả năng là GỢI Ý MỜ của TUI \
-                                                 (huba đọc màn không thấy màu nên không phân biệt được \
-                                                 với chữ đã gõ). Muốn gửi câu ấy thì gõ thẳng nó ở đây.",
+                                            let da_bam = format!(
+                                                "⚠ đã bấm '{}'{} nhưng màn KHÔNG đổi · {name}",
                                                 typed.trim(),
                                                 if tried_right { " rồi bấm → để nhận gợi ý" } else { "" }
-                                            )
+                                            );
+                                            match vi_sao {
+                                                crate::keys::NoEffect::Limited(khi) => format!(
+                                                    "{da_bam}\nTài khoản {} HẾT HẠN MỨC ({khi}) — gõ gì cũng \
+                                                     không vào, và nó sẽ không tự chạy lại. Đường đi tiếp:\n\
+                                                     /handover -a <tài khoản khác> {}",
+                                                    s.account,
+                                                    s.session_id.chars().take(8).collect::<String>(),
+                                                ),
+                                                // Đang chạy thì "màn không đổi" CHƯA nói được gì:
+                                                // đồng hồ TUI nhích mỗi giây, hai lượt đọc sát nhau
+                                                // bằng nhau vì lý do không liên quan tới cú bấm.
+                                                crate::keys::NoEffect::Busy(viec) => format!(
+                                                    "{da_bam}\nPhiên đang CHẠY{} nên chưa kết luận được gì từ \
+                                                     việc màn đứng yên — chữ gõ vào lúc này nằm hàng chờ tới \
+                                                     khi nó xong lượt.",
+                                                    viec.map(|v| format!(" ({v})")).unwrap_or_default(),
+                                                ),
+                                                crate::keys::NoEffect::Ghost => format!(
+                                                    "{da_bam}\nChữ trong ô nhập nhiều khả năng là GỢI Ý MỜ của \
+                                                     TUI (huba đọc màn không thấy màu nên không phân biệt được \
+                                                     với chữ đã gõ). Muốn gửi câu ấy thì gõ thẳng nó ở đây."
+                                                ),
+                                            }
                                         } else {
                                             // 🔴 NÓI KẾT QUẢ, KHÔNG NÓI HÀNH
                                             // ĐỘNG — Hà 2026-08-17: *"Bấm chọn

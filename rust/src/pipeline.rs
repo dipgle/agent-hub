@@ -181,6 +181,15 @@ pub const FOCUS_SESSION_KEY: &str = "focus:session";
 /// lệch nhau.
 pub const PIN_FOLLOWING_KEY: &str = "pin:following";
 
+// 🪦 `FREETEXT_KEY` (sổ "đang chờ nội dung") sống đúng nửa giờ ngày 2026-08-31.
+//
+// Nó dựng cho một thiết kế đi vòng: chặn cú bấm mục tự-do, hỏi nội dung, rồi
+// ghép `<số><nội dung>` gửi trong một lượt `do script`. Cái vòng ấy thừa —
+// `keys::send_bare` → `cgkeys::post` gửi được phím RỜI không kèm CR, tức làm
+// đúng điều Hà tả (*"Chọn xong con trỏ chờ nằm ngay tại đó để gõ text"*) mà
+// không cần sổ nào. Đường ấy đã có sẵn từ 19/08 cho phím mũi tên; tôi quên mất
+// nó và suýt xây một cơ chế thứ hai bên cạnh.
+
 /// Dòng chữ của tin gim — **icon trạng thái** rồi tới tên phiên, không gì khác.
 ///
 /// 🔴 Hà 2026-08-26: *"bỏ icon hiện tại đi thay thành icon trạng thái làm việc,
@@ -8059,6 +8068,110 @@ fn tab_move(s: &crate::sessions::LiveSession, w: i64, arg: &str) -> Result<(), S
     Ok(())
 }
 
+/// Sau một cú bấm số: MÀN đang vẽ gì, và tin phải nói gì về nó.
+///
+/// Trả `(câu xác nhận, nút lựa chọn, có dòng Submit không)` — đúng ba thứ chỗ
+/// gọi cần, và không thứ nào suy ra từ trí nhớ: tất cả đọc từ `screen`, tức bản
+/// chụp SAU cú bấm.
+///
+/// 🔴 Hà 2026-08-31: *"Nếu nó có nhiều tab thì nó sẽ nhảy sang tab tiếp theo"* ·
+/// *"Vậy tin đó phải sửa lại từ nội dung chụp lại"*.
+///
+/// Bản trước không có hàm này: chỗ gọi ĐẾM số lựa chọn trước/sau rồi suy ra một
+/// câu. Phép đếm ấy mù đúng hai ca hay gặp nhất của bảng hỏi nhiều câu:
+///
+/// · **nhảy sang tab kế** — câu hỏi đã KHÁC mà tin vẫn in bảng cũ; và nếu tab
+///   mới tình cờ cũng bấy nhiêu lựa chọn thì nhánh "số trước = số sau" còn mắng
+///   oan *"hộp này có thể không nhận phím số"* về một cú bấm vừa chạy đúng.
+/// · **bấm `Type something`** — ô nhập chữ mở ra nên không còn lựa chọn nào, và
+///   phép đếm đọc `0` thành *"bảng đã đóng"*. Hà: *"bấm vào đó lại không nhập
+///   được nội dung mà nó lại bị bỏ qua luôn"*.
+///
+/// Hai ca ấy khác hẳn nhau và phép đếm cho cùng một câu trả lời, vì nó hỏi *"có
+/// bao nhiêu"* chứ không hỏi *"đang là gì"*.
+///
+/// ⚠ **Mã nút phải mang SỐ CÂU đang đứng.** Sau cú bấm con trỏ đã sang câu
+/// khác, nên một mã gõ cứng `1.<n>` đưa cú bấm SAU vào đúng câu vừa trả lời
+/// xong — sửa một câu đã chốt, và đó là thứ không lùi lại được.
+///
+/// ⚠ **Hàm này KHÔNG nhận `Option<&str>`.** "Không đọc được màn" là một trạng
+/// thái riêng và nó phải chết ở chỗ gọi: gộp vào đây thì `None` và *"màn không
+/// còn lựa chọn nào"* cùng đi ra một cửa, mà một cái nói việc đã xong còn cái
+/// kia nói huba đang mù.
+pub fn press_ack_from_screen(
+    screen: &str,
+    typed: &str,
+    name: &str,
+    questions: &[String],
+) -> (String, Vec<(String, String)>, bool) {
+    let opts = crate::keys::parse_choices(screen);
+    let table = crate::keys::ask_table(screen);
+    // 🔴 CÂU ĐANG ĐỨNG hỏi `keys::cursor_on`, KHÔNG tự chế một phép đo thứ hai.
+    //
+    // `cursor_on` ghép nguyên văn câu hỏi mà bảng in dưới thanh tab với danh
+    // sách câu đọc từ NHẬT KÝ — thứ neo vào chữ đang hiện, không vào số phím đã
+    // bấm. Bản đầu của tôi ở đây lấy "câu chưa trả lời ĐẦU TIÊN" trên thanh tab,
+    // và nó sai ngay ở màn thật 31/08: thanh `←  ☐ Q2 …  ☐ Q3 …  ✔ Submit  →`
+    // cho ra chỉ mục 0 ⟹ `cau = 1`, trong khi con trỏ đang ở Q2. Một mã nút sai
+    // đưa cú bấm SAU vào đúng câu vừa chốt xong — thứ không lùi lại được.
+    //
+    // Đường lùi (không có câu nào từ nhật ký, hoặc không ghép được) là ô chưa
+    // trả lời đầu tiên; và không có thanh tab thì là bảng MỘT câu ⟹ `1`, mã nút
+    // khi ấy là số trần — xem `/pick` vs `/key`, hai dạng mã cho hai dạng bảng.
+    let cau = crate::keys::cursor_on(screen, questions)
+        .or_else(|| {
+            table
+                .as_ref()
+                .and_then(|t| t.answered.iter().position(|a| !a))
+        })
+        .map(|i| i + 1)
+        .unwrap_or(1);
+    let choices: Vec<(String, String)> = opts
+        .iter()
+        .map(|(n, l)| {
+            let code = if table.is_some() {
+                format!("{cau}.{n}")
+            } else {
+                n.to_string()
+            };
+            (code, l.clone())
+        })
+        .collect();
+    let submit = crate::keys::has_submit(screen);
+    let ack = if opts.is_empty() {
+        // Hết lựa chọn: hoặc bảng đóng thật, hoặc ô nhập chữ vừa mở ra. huba
+        // KHÔNG có dấu hiệu nào phân biệt chắc chắn hai cái ấy, nên nó nói đúng
+        // chừng nó biết rồi ĐƯA LUÔN MÀN — nhìn một cái là biết, thay vì đọc
+        // một lời đoán. Đây là chỗ bản cũ tự tin nhất và sai nhiều nhất.
+        let sach: Vec<&str> = screen
+            .lines()
+            .map(str::trim_end)
+            .filter(|l| !l.trim().is_empty())
+            .collect();
+        let duoi = sach[sach.len().saturating_sub(8)..].join("\n");
+        format!(
+            "✓ đã bấm '{typed}' — màn KHÔNG còn lựa chọn nào · {name}\n\
+             Màn đang là:\n{duoi}\n\
+             Đang chờ chữ thì gõ thẳng vào đây — tôi dán vào ô nhập rồi Enter."
+        )
+    } else {
+        let lines: Vec<String> = opts.iter().map(|(n, l)| format!("{n}. {l}")).collect();
+        let dau = match table.as_ref() {
+            Some(t) => format!(
+                "✓ đã bấm '{typed}' — nay đứng ở câu {cau}/{} · {name}",
+                t.answered.len()
+            ),
+            None => format!(
+                "✓ đã bấm '{typed}' — màn còn {} lựa chọn · {name}",
+                opts.len()
+            ),
+        };
+        let submit_line = if submit { "\nSubmit" } else { "" };
+        format!("{dau}\n{}{submit_line}", lines.join("\n"))
+    };
+    (ack, choices, submit)
+}
+
 /// `/pick <câu>.<lựa chọn>` — trả lời MỘT câu bất kỳ của bảng hỏi nhiều câu.
 ///
 /// 🔴 Hà 2026-08-13: *"chọn option xong thì vẫn còn bước nữa nên không pass qua
@@ -10886,7 +10999,100 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     crate::keys::Look::Saw { body, .. }
                                         if !crate::keys::parse_choices(&body).is_empty() =>
                                     {
-                                        None
+                                        // 🔴 MỤC TỰ-DO thì KHÔNG bấm trần — xem
+                                        // `keys::free_text_choice` và
+                                        // `FREETEXT_KEY`. Bấm trần = trả lời câu
+                                        // ấy bằng chuỗi RỖNG rồi nhảy tab, và
+                                        // không có đường lùi.
+                                        //
+                                        // Cổng này đứng ĐÚNG chỗ: nhánh "màn có
+                                        // hộp chọn nên cho gõ". Đặt ở đây thì
+                                        // phím chưa rời khỏi huba; đặt sau lượt
+                                        // gõ thì câu đã mất rồi.
+                                        let nhan = typed
+                                            .trim()
+                                            .parse::<usize>()
+                                            .ok()
+                                            .and_then(|n| {
+                                                crate::keys::parse_choices(&body)
+                                                    .into_iter()
+                                                    .find(|(k, _)| *k == n)
+                                                    .map(|(_, l)| l)
+                                            });
+                                        if nhan
+                                            .as_deref()
+                                            .is_some_and(crate::keys::free_text_choice)
+                                        {
+                                            let so = typed.trim().to_string();
+                                            // 🔴 GỬI BẰNG PHÍM RỜI, KHÔNG QUA
+                                            // `do script` — Hà 2026-08-31:
+                                            // *"Chọn xong con trỏ chờ nằm ngay
+                                            // tại đó để gõ text"* · *"Nên nếu
+                                            // gửi text nó phải vào đó"*.
+                                            //
+                                            // Đúng thứ `cgkeys` sinh ra để làm:
+                                            // `CGEventPostToPid` đưa phím thẳng
+                                            // vào tiến trình Terminal nên KHÔNG
+                                            // kèm CR, và chính cái CR mới là thứ
+                                            // rơi vào ô vừa mở rồi gửi một chuỗi
+                                            // rỗng. Cùng lý do đường ấy đã có
+                                            // mặt cho phím mũi tên (xem
+                                            // `keys::send_bare`).
+                                            //
+                                            // Thiếu quyền Trợ năng thì KHÔNG rơi
+                                            // về `do script`: rơi về là mất câu
+                                            // ấy, tức hỏng theo chiều không lùi
+                                            // được. Nói ra và dừng.
+                                            if !crate::cgkeys::trusted() {
+                                                logging::warn(
+                                                    "free_text_no_accessibility",
+                                                    json!({ "session": s.session_id, "muc": so,
+                                                            "why": "phím rời cần Trợ năng; do script kèm CR sẽ trả lời rỗng" }),
+                                                );
+                                                Some(format!(
+                                                    "✍ Mục {so} là ô gõ chữ tự do, và nó cần PHÍM RỜI để bấm mà không \
+                                                     kèm Enter — thứ chỉ chạy được khi `hubd` có quyền Trợ năng.\n\
+                                                     Quyền ấy đang thiếu, nên tôi KHÔNG bấm: bấm qua đường thường sẽ \
+                                                     trả lời câu này bằng một chuỗi RỖNG rồi nhảy sang câu kế.\n\
+                                                     Cấp quyền ở System Settings → Privacy & Security → Accessibility → `hubd`."
+                                                ))
+                                            } else {
+                                                match crate::keys::send_bare(
+                                                    w,
+                                                    std::slice::from_ref(&so),
+                                                ) {
+                                                    Ok(()) => {
+                                                        logging::info(
+                                                            "free_text_opened_by_bare_key",
+                                                            json!({ "session": s.session_id,
+                                                                    "muc": so, "nhan": nhan,
+                                                                    "why": "phím rời không kèm CR ⟹ ô nhập mở ra và con trỏ đứng chờ" }),
+                                                        );
+                                                        Some(format!(
+                                                            "✍ Đã chọn mục {so} bằng phím RỜI (không kèm Enter), nên ô nhập \
+                                                             đang mở và con trỏ đứng chờ ngay đó.\n\
+                                                             👉 Gõ nội dung vào đây — nó đi thẳng vào ô ấy.\n\n\
+                                                             (Bấm kiểu thường sẽ kèm một Enter và trả lời câu này bằng chuỗi \
+                                                             RỖNG rồi nhảy tab — đúng cái đã xảy ra với Q2 lúc 15:58.)"
+                                                        ))
+                                                    }
+                                                    Err(e) => {
+                                                        logging::error(
+                                                            "free_text_bare_key_failed",
+                                                            json!({ "session": s.session_id,
+                                                                    "muc": so, "err": e.to_string() }),
+                                                        );
+                                                        Some(format!(
+                                                            "⚠ Mục {so} là ô gõ chữ tự do và phím rời KHÔNG gửi được ({e}).\n\
+                                                             Tôi không bấm qua đường thường, vì đường ấy kèm một Enter và sẽ \
+                                                             trả lời câu này bằng chuỗi rỗng."
+                                                        ))
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            None
+                                        }
                                     }
                                     crate::keys::Look::Saw { .. } => {
                                         logging::info(
@@ -11728,42 +11934,82 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                     lines.join("\n")
                                                 )
                                             } else {
-                                                // 🔴 "Đã bấm" chỉ khai rằng phím
-                                                // rời khỏi huba. Với hộp chọn MỘT
-                                                // thì KẾT QUẢ đo được là: bảng
-                                                // còn hay đã đóng.
+                                                // 🔴 DỰNG LẠI TIN TỪ BẢN CHỤP SAU CÚ BẤM — Hà
+                                                // 2026-08-31: *"Nếu nó có nhiều tab thì nó sẽ
+                                                // nhảy sang tab tiếp theo"* · *"Vậy tin đó phải
+                                                // sửa lại từ nội dung chụp lại"*.
                                                 //
-                                                // Hà 2026-08-17 bấm `1` bốn lượt
-                                                // vào một bảng đã cũ; hai lượt
-                                                // đầu huba đáp `✓ đã bấm '1'` —
-                                                // xanh, vì phép đo cũ chỉ hỏi
-                                                // "màn có đổi gì không", mà một
-                                                // phiên đang chạy thì màn luôn
-                                                // đổi (đồng hồ, con quay).
-                                                let n_before = before
-                                                    .as_deref()
-                                                    .map(|b| crate::keys::parse_choices(b).len())
-                                                    .unwrap_or(0);
-                                                let n_after = view
-                                                    .as_ref()
-                                                    .map(|(b, _)| {
-                                                        crate::keys::parse_choices(b).len()
-                                                    })
-                                                    .unwrap_or(0);
-                                                match (n_before, n_after) {
-                                                    (b, 0) if b > 0 => format!(
-                                                        "✓ đã chọn '{}' — bảng đã đóng · {name}",
-                                                        typed.trim()
-                                                    ),
-                                                    (b, a) if b > 0 && a == b => format!(
-                                                        "⚠ đã gửi '{}' mà bảng vẫn còn nguyên {b} lựa chọn · {name}\n\
-                                                         Hộp này có thể không nhận phím số — /shot để nhìn.",
-                                                        typed.trim()
-                                                    ),
-                                                    _ => format!(
-                                                        "✓ đã bấm '{}' · {name}",
-                                                        typed.trim()
-                                                    ),
+                                                // Bản cũ chỉ ĐẾM số lựa chọn trước/sau rồi suy
+                                                // ra một câu. Phép đếm ấy mù đúng hai ca hay gặp
+                                                // nhất:
+                                                // · bảng nhiều câu nhảy sang tab kế — câu hỏi đã
+                                                //   KHÁC mà tin vẫn là tab cũ; và nếu tab mới
+                                                //   tình cờ cũng bấy nhiêu lựa chọn thì nhánh
+                                                //   `a == b` còn mắng oan *"hộp không nhận phím
+                                                //   số"*;
+                                                // · bấm `Type something` — ô nhập chữ mở ra,
+                                                //   không còn lựa chọn nào, và phép đếm đọc thành
+                                                //   *"bảng đã đóng"* (Hà: *"bấm vào đó lại không
+                                                //   nhập được nội dung mà nó lại bị bỏ qua
+                                                //   luôn"*).
+                                                //
+                                                // Nên hỏi lại chính cái MÀN và trả về đúng thứ nó
+                                                // đang vẽ — cùng bộ máy `shot_choices` mà nhánh
+                                                // bảng tích ở trên dùng, nên nút hiện ra ngay chứ
+                                                // không bắt bấm thêm một lượt `/shot`.
+                                                //
+                                                // ⚠ "Không đọc được màn" là TRẠNG THÁI RIÊNG,
+                                                // không được lẫn vào *"bảng đã đóng"*: cả hai đều
+                                                // cho 0 lựa chọn, mà một cái nói việc đã xong còn
+                                                // cái kia nói tôi đang mù.
+                                                match view.as_ref().map(|(b, _)| b.as_str()) {
+                                                    None => {
+                                                        logging::warn(
+                                                            "keys_after_press_blind",
+                                                            json!({ "session": s.session_id,
+                                                                    "typed": typed.trim(),
+                                                                    "why": "gõ xong nhưng không đọc lại được màn — không dám kết luận" }),
+                                                        );
+                                                        format!(
+                                                            "✓ đã bấm '{}' · {name}\n\
+                                                             ⚠ nhưng KHÔNG đọc lại được màn, nên tôi không biết nó đổi thành gì — /shot để nhìn.",
+                                                            typed.trim()
+                                                        )
+                                                    }
+                                                    Some(screen) => {
+                                                        // Phần dựng tin tách hẳn ra `press_ack_from_screen` để có chỗ mà
+                                                        // viết bài kiểm: nằm trong `execute_commands` thì không bài nào
+                                                        // với tới được, và đó chính là lý do bản đếm cũ sống lâu đến thế.
+                                                        // Danh sách câu lấy từ
+                                                        // NHẬT KÝ — cùng nguồn
+                                                        // `pick_answer` dùng, để
+                                                        // `cursor_on` có cái mà
+                                                        // ghép. Vắng thì hàm tự
+                                                        // rơi về đường lùi.
+                                                        let cau_hoi: Vec<String> = s
+                                                            .asking
+                                                            .as_ref()
+                                                            .map(|a| {
+                                                                std::iter::once(
+                                                                    a.question.clone(),
+                                                                )
+                                                                .chain(a.rest.iter().map(
+                                                                    |r| r.question.clone(),
+                                                                ))
+                                                                .collect()
+                                                            })
+                                                            .unwrap_or_default();
+                                                        let (ack, ch, sub) =
+                                                            press_ack_from_screen(
+                                                                screen,
+                                                                typed.trim(),
+                                                                &name,
+                                                                &cau_hoi,
+                                                            );
+                                                        shot_choices = ch;
+                                                        shot_submit = sub;
+                                                        ack
+                                                    }
                                                 }
                                             }
                                         }

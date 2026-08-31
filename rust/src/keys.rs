@@ -2473,6 +2473,58 @@ end tell"#
     )
 }
 
+/// Nhãn này có phải mục "gõ chữ tự do" của `AskUserQuestion` không.
+///
+/// 🔴 Hà 2026-08-31: *"Lựa chọn type something nhưng bấm vào đó lại không nhập
+/// được nội dung mà nó lại bị bỏ qua luôn"*.
+///
+/// Vì sao phải nhận riêng nó, và vì sao nó KHÔNG giống mọi mục khác: bấm một mục
+/// thường là chốt xong một câu; bấm mục này thì `claude` mở một ô nhập chữ, mà
+/// **mọi lượt ghi của `do script` đều kèm một CR không tắt được** (xem
+/// [`do_script`]). Cái CR ấy rơi thẳng vào ô vừa mở và gửi một chuỗi RỖNG.
+///
+/// Đo được trên bảng thật của phiên `[dwork]`, 2026-08-31 15:58: Hà bấm `3`
+/// (`Type something.`) rồi không gõ gì, và thanh tab đọc lại ra
+/// `←  ☒ Q2 chọn mốc  ☐ Q3 hai lượt  ✔ Submit  →` — Q2 **đã bị đánh dấu trả
+/// lời** bằng chuỗi rỗng, bảng nhảy sang Q3. Không một tiếng nào báo.
+///
+/// Nên chỗ gọi phải TỪ CHỐI bấm trần mục này và đi hỏi nội dung trước — xem
+/// `pipeline::FREETEXT_KEY`.
+///
+/// Nhận bằng HÌNH DẠNG chứ không bằng một danh sách chép tay: bỏ ô `[ ]`/`☐`
+/// dẫn đầu, bỏ dấu câu cuối, rồi so **không phân biệt hoa thường** với đúng cụm
+/// `claude` in ra. `Type something else` là biến thể có thật khi bảng đã có sẵn
+/// một câu trả lời tự do.
+/// ⚠ Nhận cả DÒNG THÔ (`  3. Type something.  `), không chỉ nhãn đã bóc.
+///
+/// Chỗ gọi hôm nay đưa vào nhãn từ [`parse_choices`], tức số thứ tự đã được bóc
+/// sẵn — nên vế ấy là phòng xa. Nhưng hai chiều hỏng ở đây KHÔNG cân nhau: nhận
+/// THỪA thì cùng lắm huba đi đường phím rời cho một mục thường (vẫn chọn đúng
+/// mục ấy, chỉ là không kèm Enter); nhận HỤT thì nó bấm trần một ô chữ tự do và
+/// **ăn mất câu trả lời**. Nên nghiêng về phía nhận.
+pub fn free_text_choice(label: &str) -> bool {
+    let bo_dau = |s: &str| {
+        s.trim()
+            .trim_start_matches(|c: char| {
+                matches!(c, '[' | ']' | '☐' | '☒' | '☑' | '✔' | '❯' | '•' | '*' | '-')
+                    || c.is_whitespace()
+            })
+            .trim()
+            .to_string()
+    };
+    let mut l = bo_dau(label);
+    // `1. ` · `12. ` — số thứ tự do TUI in ra, không thuộc về nhãn. Cùng phép
+    // bóc với `pipeline::choice_anchor`; giữ trần 2 chữ số vì hộp chọn của
+    // `claude` không bao giờ dài hơn thế.
+    if let Some(i) = l.find(". ") {
+        if i > 0 && i <= 2 && l[..i].chars().all(|c| c.is_ascii_digit()) {
+            l = bo_dau(&l[i + 2..]);
+        }
+    }
+    let l = l.trim_end_matches(['.', '…', ' ']).to_ascii_lowercase();
+    l == "type something" || l == "type something else"
+}
+
 /// Một phím điều khiển: `up` `down` `enter` `esc` `tab` `space`, hoặc `1`–`9`.
 ///
 /// Hộp chọn của `claude` đi bằng mũi tên + Enter, và gửi chữ "xuống" vào đó thì

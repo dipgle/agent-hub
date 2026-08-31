@@ -892,17 +892,20 @@ fn two_sessions_in_one_project_get_two_different_names() {
         names[0], names[1],
         "hai phiên khác nhau, một cái tên: {names:?}"
     );
-    // Nhãn nay mở đầu bằng một ô vuông màu theo dự án (Hà 2026-08-14: *"đánh
-    // dấu màu vào tin nhận theo từng dự án để dễ nhận biết"*) — cùng dự án thì
-    // cùng màu, nên hai phiên này phải mang CÙNG một ô.
+    // 🔄 ĐẢO CHIỀU 2026-08-31 — Hà: *"Tôi đã bảo Bỏ icon màu đi từ rất lâu rồi
+    // sao giờ nó hiện lại?"*. Từ 14/08 nhãn mở đầu bằng một ô vuông màu theo dự
+    // án; nay ô ấy đi hẳn (xem khối 🔴 trong `sessions::shown`).
+    //
+    // Vế THẬT của bài kiểm không mất — nó gác *"nhãn suy được ra dự án"* — nên
+    // vế ấy giữ nguyên, chỉ vế MÀU là đảo: trước đòi có ô, nay đòi không ô.
     assert!(
         names.iter().all(|n| n.contains("[dwork]")),
         "vẫn phải đọc ra dự án: {names:?}"
     );
-    let dot = huba::sessions::project_dot("dwork");
+    let o_mau = ["🟦", "🟩", "🟧", "🟪", "🟫", "🟨", "🟥", "⬜"];
     assert!(
-        names.iter().all(|n| n.starts_with(dot)),
-        "màu phải suy từ tên dự án: {names:?}"
+        names.iter().all(|n| !o_mau.iter().any(|o| n.contains(o))),
+        "nhãn không được đeo ô màu nữa: {names:?}"
     );
     assert!(names.iter().any(|n| n.contains("0a109818")), "{names:?}");
 
@@ -917,11 +920,9 @@ fn two_sessions_in_one_project_get_two_different_names() {
     );
     let (solo, _) = changes(&solo_book, &solo_rows, NOW, &[]);
     match solo.first() {
-        Some(Change::Finished { name, .. }) => assert_eq!(
-            name,
-            &format!("{} [dwork]", huba::sessions::project_dot("dwork")),
-            "thừa id khi không trùng"
-        ),
+        Some(Change::Finished { name, .. }) => {
+            assert_eq!(name, "[dwork]", "thừa id khi không trùng — và không ô màu")
+        }
         other => panic!("phải là Finished: {other:?}"),
     }
 }

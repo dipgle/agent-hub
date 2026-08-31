@@ -4374,6 +4374,57 @@ pub fn session_limit_on_screen(screen: &str) -> Option<String> {
     None
 }
 
+/// Tài khoản này bị TỔ CHỨC KHOÁ — đọc từ màn, vì không sổ nào ghi nó.
+///
+/// 🔴 Hà 2026-08-31, ảnh buồng chat: `/new dwork/a-dsign` mở một cửa sổ acc1 và
+/// nó chết ngay dòng đầu:
+///
+/// ```text
+/// Your organization has disabled Claude subscription access for Claude Code ·
+/// Use an Anthropic API key instead, or ask your admin to enable access
+/// ```
+///
+/// Đây KHÔNG phải hết hạn mức, và khác nhau ở chỗ đắt nhất: hạn mức chờ một cái
+/// đồng hồ rồi tự mở, còn cái này thì không — chờ bao lâu cũng vô ích.
+///
+/// ⚠ Và không có phép đo nào khác thấy được nó. Đo trên máy này cùng lúc:
+/// `~/.claude.json` của acc1 vẫn ghi `seven_day 92%`, `fetchedAtMs` **28/08**
+/// (già ba ngày), `resets_at` đã qua từ 30/08 — nên [`crate::quota`] xếp acc1
+/// vào `Unknown`, tức "chưa đo được", chứ không phải "đã chết". Sổ của CLI
+/// không có trường nào cho việc bị khoá; dòng chữ này là nguồn DUY NHẤT.
+///
+/// Bắt bằng HÌNH DẠNG, không bằng một trần độ dài vặn cho vừa: dòng phải **MỞ
+/// ĐẦU** bằng đúng câu CLI in ra (`Your organization has disabled`).
+///
+/// 🔴 Bản đầu của tôi bắt theo cụm `disabled` + `subscription access` kèm trần
+/// 200 ký tự, và **đối chứng ngược đỏ ngay**: một câu tiếng Việt tôi vừa viết
+/// cho Hà về chính sự cố này dài 172 ký tự — lọt trần, khớp cả hai từ. Vặn trần
+/// xuống 160 thì chỉ là chỉnh một con số cho vừa đúng một mẫu, và nó sẽ đỏ lại ở
+/// mẫu sau.
+///
+/// Neo vào ĐẦU DÒNG thì chặt hơn hẳn, và nó chặn đúng ca nguy hiểm nhất: một
+/// phiên đang BÀN về chuyện bị khoá — chính phiên này suốt hôm nay — có thể chép
+/// nguyên văn câu tiếng Anh ấy vào giữa một đoạn văn. Cùng bài học với
+/// [`session_limit_on_screen`] và với con bug 21/08 (*văn xuôi đánh số không
+/// phải hộp chọn*): nhận theo hình dạng của thứ CLI vẽ ra, đừng nhận theo việc
+/// một chuỗi có xuất hiện hay không.
+///
+/// Bỏ dấu trang trí ở đầu (`⏺`, `>`, `·`) trước khi so, vì TUI hay chèn chúng.
+pub fn account_blocked_on_screen(screen: &str) -> Option<String> {
+    const MO_DAU: &str = "Your organization has disabled";
+    for line in screen.lines() {
+        let l = line
+            .trim()
+            .trim_start_matches(|c: char| !c.is_alphanumeric())
+            .trim();
+        if !l.starts_with(MO_DAU) {
+            continue;
+        }
+        return Some(crate::exec::truncate(l, 160));
+    }
+    None
+}
+
 /// Phiên có đang chạy một lượt không — hỏi DÒNG CHÂN, thứ TUI luôn vẽ.
 ///
 /// `None` = không tìm thấy dòng chân ⟹ không đo được, và chỗ gọi phải xử lý

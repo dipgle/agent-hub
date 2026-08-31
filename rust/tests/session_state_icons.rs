@@ -109,7 +109,8 @@ fn the_session_list_uses_the_same_table() {
     assert!(out.contains(ST_BG), "{out}");
     // 🔄 ĐẢO CHIỀU 2026-08-25 — Hà: *"text trạng thái không cần vì có icon
     // rồi"*. Ô chữ tình trạng đã đi hẳn khỏi hàng (xem `pipeline::
-    // session_list_text`), nên hàng nay là `🌀 ⬜ · acc1 · da29807e`.
+    // session_list_text`), nên hàng nay là `🌀 · acc1 · da29807e`.
+    // (Ô màu dự án `⬜` cũng đã rời khỏi nhãn 2026-08-31 — xem `sessions::shown`.)
     //
     // Vế THẬT của bài kiểm không mất: nó gác *"danh sách dùng đúng bộ ký hiệu
     // ấy, một chỗ quyết định chứ không hai bản chép"*, và `ST_BG` ở trên đo trọn

@@ -201,6 +201,36 @@ pub struct LiveSession {
     /// còn 5 tiếng thì chuyển tài khoản — hai hành động khác nhau.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limited: Option<String>,
+    /// Tài khoản của phiên này bị TỔ CHỨC KHOÁ — nguyên văn dòng trên màn.
+    ///
+    /// 🔴 Khác hẳn [`LiveSession::limited`] ở chỗ đắt nhất: hạn mức chờ một cái
+    /// đồng hồ rồi tự mở, còn bị khoá thì không — chờ bao lâu cũng vô ích, và
+    /// mở thêm phiên trên tài khoản ấy là ném đi một cửa sổ. Xem
+    /// [`crate::keys::account_blocked_on_screen`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_dead: Option<String>,
+    /// Số lựa chọn ĐỌC ĐƯỢC TRÊN MÀN của phiên (0 = không thấy hộp chọn nào).
+    ///
+    /// 🔴 Nguồn THỨ HAI cho câu hỏi *"phiên này có hộp chọn đang chờ không"*, và
+    /// nó có mặt đúng lúc nguồn thứ nhất mù: `pending_question` đọc NHẬT KÝ, mà
+    /// một bảng đang TREO chưa chắc đã được ghi vào đó. Xem `waiting_choice`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub screen_choices: usize,
+    /// Màn cho thấy đây CHẮC CHẮN không phải hộp chọn-một.
+    ///
+    /// Hai hình dạng, và phải nhận CẢ HAI — chúng khác nhau ở chỗ vẽ, giống nhau
+    /// ở hậu quả (bấm một số KHÔNG gửi bảng đi):
+    /// · hộp MỘT CÂU chọn nhiều: danh sách có ô `[ ]` + một dòng `Submit` riêng
+    ///   ⟹ [`crate::keys::has_submit`];
+    /// · bảng NHIỀU CÂU: một thanh tab `←  ☐ Q2 …  ✔ Submit  →` ⟹
+    ///   [`crate::keys::ask_table`]. Ở đây `Submit` nằm TRONG thanh tab nên
+    ///   `has_submit` không thấy — đo được trên màn thật của phiên `[dwork]`
+    ///   ngày 2026-08-31, và đó là ca Hà gửi ảnh.
+    ///
+    /// Vắng cả hai thì KHÔNG kết luận được gì (thanh tab trôi khỏi khung nhìn
+    /// được) — xem [`ChoiceKind::from_screen`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub screen_multi: bool,
     /// Số **monitor** của `claude` còn chạy trong phiên này — đọc từ CHÂN MÀN.
     ///
     /// 🔴 Hà 2026-08-27: *"Một phiên đang có monitor thì luôn chèn thêm icon eye
@@ -719,7 +749,22 @@ pub fn shown(s: &LiveSession) -> String {
     } else {
         s.label.clone()
     };
-    format!("{} {name}", project_dot(&s.folder))
+    // 🔴 THÔI ĐEO Ô MÀU DỰ ÁN — Hà 2026-08-31: *"Tôi đã bảo Bỏ icon màu đi từ rất
+    // lâu rồi sao giờ nó hiện lại?"*
+    //
+    // Câu ấy có một nửa tôi phải ghi ra cho đúng: icon TRẠNG THÁI màu
+    // (`🟢🟡🔴⚫`) đã bỏ 19/08, đổi sang HÌNH (`⚡💤❓❌🪦`); ô màu DỰ ÁN thì chưa bao
+    // giờ bị bỏ — nên nó không "hiện lại", nó nằm đó suốt. Trong nhật ký còn một
+    // tin của Hà lúc **26/08 09:03**: *"ở pinned message: bỏ icon hiện tại đi
+    // th…"* (log cắt cụt), và KHÔNG commit nào nhắc tới nó. Rất có thể lệnh ấy
+    // đã rơi mất một lần rồi; lần này nó có một cổng đứng sau
+    // (`tests/no_project_colour.rs`).
+    //
+    // ⚠ Phải GỠ chứ không chỉ thôi gắn: sổ theo dõi giữ nhãn ĐÃ đúc kèm ô
+    // (`watch::Mark::l`), nên bỏ bước gắn mà quên bước gỡ thì mọi phiên đã nằm
+    // trong sổ vẫn đeo ô — tức lệnh "đã làm" mà Hà vẫn nhìn thấy nó, đúng hình
+    // dạng của chính lần này.
+    without_dot(&name).to_string()
 }
 
 /// Một ô vuông màu ĐỨNG TRƯỚC tên dự án, cùng dự án thì cùng màu, mãi mãi.
@@ -782,6 +827,11 @@ pub fn without_dot(label: &str) -> &str {
         .unwrap_or(t)
 }
 
+/// 🪦 KHÔNG CÒN CHỖ GỌI NÀO TỪ 2026-08-31 — xem khối 🔴 trong [`shown`].
+///
+/// Giữ hàm lại vì nó là ĐỊNH NGHĨA của "những ô nào từng được phát", thứ
+/// [`without_dot`] phải biết để gỡ nhãn cũ trong sổ. Đừng nối nó lại vào
+/// [`shown`]: `tests/no_project_colour.rs` sẽ đỏ.
 pub fn project_dot(folder: &str) -> &'static str {
     let key = folder.trim();
     if key.is_empty() {
@@ -2123,6 +2173,40 @@ pub fn settle_limit(
     }
 }
 
+/// `screen_choices == 0` — cửa `skip_serializing_if` của [`LiveSession`], để một
+/// phiên không có hộp chọn nào không phải mang thêm một trường rỗng trong JSON.
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+/// Phiên này có hộp chọn BẤM ĐƯỢC đang chờ không — và thuộc loại nào.
+///
+/// 🔴 Hà 2026-08-30: *"icon trạng thái phiên thêm icon checkbox nếu đang có
+/// option chờ"*, rồi ngay sau lượt cài đầu: *"Chưa thấy icon trạng thái option ở
+/// ds phiên"* · *"Trên pinned cũng chưa có"*.
+///
+/// Câu thứ ba là chỗ hỏng thật, và nó là hình dạng quen của tệp này: tôi gắn ký
+/// hiệu vào **danh sách phiên** rồi quên **tin gim** — dù chính tin gim đã mang
+/// `👁` cho monitor, tức nó vốn là một dòng tình trạng phiên y như hàng danh
+/// sách. Vá một chỗ, sót chỗ bên cạnh.
+///
+/// Nên phép đo nằm ở ĐÂY, cạnh [`state_of`], và cả hai màn cùng hỏi nó. Hai bản
+/// chép của cùng một câu hỏi là hai bản sẽ lệch — đúng lý lẽ đã kéo `state_of`
+/// từ `pipeline.rs` về tệp này.
+///
+/// `None` khi phiên không hỏi, hoặc hỏi mà KHÔNG có lựa chọn nào (câu hỏi chữ tự
+/// do): ký hiệu này hứa *"bấm được ngay từ đây"*, nên gắn nó lên một câu phải gõ
+/// tay là một lời hứa suông.
+pub fn waiting_choice(s: &LiveSession) -> Option<ChoiceKind> {
+    // NHẬT KÝ trước: nó là nguồn có CẤU TRÚC, và chỉ nó nói được "chọn một".
+    if let Some(a) = s.asking.as_ref().filter(|a| !a.options.is_empty()) {
+        return Some(ChoiceKind::from_journal(a.multi));
+    }
+    // …rồi tới MÀN, cho đúng ca nhật ký mù (bảng đang treo chưa được ghi).
+    // Màn không bao giờ được kết luận "chọn một" — xem `ChoiceKind::from_screen`.
+    (s.screen_choices > 0).then(|| ChoiceKind::from_screen(s.screen_multi))
+}
+
 /// Tình trạng một phiên, thành `(ký hiệu, chữ)` — **một chỗ duy nhất** quyết định.
 ///
 /// Danh sách phiên và tin tự phát phải nói CÙNG một thứ về cùng một trạng thái
@@ -2141,7 +2225,23 @@ pub fn state_of(s: &LiveSession) -> (&'static str, &'static str) {
     if s.host == "dead" {
         return (ST_DEAD, "đã tắt");
     }
-    if s.asking.is_some() {
+    // 🔴 HAI NGUỒN CHO "ĐANG HỎI" — vế thứ hai thêm 2026-08-31.
+    //
+    // Hà gửi ảnh buồng chat: tin gim đọc `💤 [dwork]` trong khi màn phiên ấy
+    // treo nguyên một bảng hỏi hai câu kèm `✔ Submit`. `💤` nói *"đứng chờ"* —
+    // một câu SAI về việc chủ máy sắp phải làm, và sai đúng theo cái hướng tệ
+    // nhất: nhìn từ xa, một phiên KẸT giống hệt một phiên rảnh.
+    //
+    // `asking` đọc từ NHẬT KÝ, và một bảng ĐANG TREO chưa chắc đã được ghi vào
+    // đó (đo 19/08 trên phiên amm: 0 lần `AskUserQuestion` trong 3,59 MB nhật ký
+    // trong khi bảng nằm trên màn). Nên màn là nguồn thứ hai, và nó có mặt đúng
+    // lúc nguồn thứ nhất mù.
+    //
+    // ⚠ Vế màn CHỈ đổi ICON, không đẻ tin: `watch::state_of` vẫn hỏi
+    // `s.asking.is_some()`, nên một dương tính giả ở đây không bắn tin nào lên
+    // Telegram — nó chỉ làm một hàng đọc ra `❓` thay vì `💤`. Chọn chỗ nới có
+    // chủ ý: rộng ở chỗ chỉ tốn một cái icon, chặt ở chỗ tốn một tiếng chuông.
+    if s.asking.is_some() || s.screen_choices > 0 {
         return (ST_ASK, "dừng lại HỎI");
     }
     if s.error.is_some() {
@@ -3980,6 +4080,9 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 monitors: 0,
                 // Cũng điền ở khúc đọc màn — xem `keys::session_limit_on_screen`.
                 limited: None,
+                account_dead: None,
+                screen_choices: 0,
+                screen_multi: false,
                 account: account.name.clone(),
                 name: s
                     .get("name")
@@ -4205,13 +4308,47 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // phiên hết hạn mức KHÔNG chạy, nên để trong cửa ấy là không
                     // bao giờ đọc được nó. Chữ đã nằm sẵn trong `tabs`, không
                     // tốn thêm lượt `osascript` nào.
-                    let tren_man = if row.tty.is_empty() {
+                    let man = if row.tty.is_empty() {
                         None
                     } else {
-                        crate::keys::alive_tab(&tabs, &row.tty)
-                            .and_then(|t| t.screen.as_deref())
-                            .and_then(crate::keys::session_limit_on_screen)
+                        crate::keys::alive_tab(&tabs, &row.tty).and_then(|t| t.screen.as_deref())
                     };
+                    let tren_man = man.and_then(crate::keys::session_limit_on_screen);
+                    // 🔴 TÀI KHOẢN BỊ KHOÁ — cùng cửa với dòng hạn mức, cùng lý
+                    // do (chữ đã nằm sẵn trong `tabs`), nhưng là một sự thật
+                    // KHÁC: hạn mức chờ đồng hồ, bị khoá thì chờ vô ích.
+                    row.account_dead = man.and_then(crate::keys::account_blocked_on_screen);
+                    // 🔴 HỘP CHỌN ĐỌC TỪ MÀN — thêm 2026-08-31, và nó đi cùng cửa
+                    // với dòng hạn mức vì cùng một lý do: chữ đã nằm sẵn trong
+                    // `tabs`, không tốn thêm lượt `osascript` nào.
+                    //
+                    // Hà 2026-08-30 gửi ảnh buồng chat: tin gim đọc `💤 [dwork]`
+                    // trong khi màn phiên ấy treo nguyên một bảng hỏi HAI CÂU.
+                    // Đo lại trên chính cửa sổ đó (ttys001, window 386):
+                    //   `←  ☐ Q2 chọn mốc  ☐ Q3 hai lượt  ✔ Submit  →`
+                    //   `❯ 1. (a) KHÔNG lọc — dev đề xuất`
+                    //   `Enter to select · Tab/Arrow keys to navigate · Esc to cancel`
+                    // mà `huba sessions --json` khai `working:false · asking:không`.
+                    //
+                    // Gốc: `pending_question` đọc NHẬT KÝ, và một bảng ĐANG TREO
+                    // chưa chắc đã được ghi vào đó (đo 2026-08-19: 3,59 MB nhật ký
+                    // phiên amm có 0 lần `AskUserQuestion` trong khi bảng nằm trên
+                    // màn). Chỗ mù ấy đã được khai từ 19/08 như một ca hiếm — nó
+                    // không hiếm, nó là ca thường gặp nhất của chính tính năng này.
+                    //
+                    // Đọc bằng `parse_choices` — ĐÚNG hàm mà hai cổng chặn phím
+                    // đang tin để trả lời *"màn có đang mở hộp chọn không"*. Dùng
+                    // một phép đo thứ hai ở đây là mở đường cho hai câu trả lời
+                    // khác nhau về cùng một cái màn.
+                    row.screen_choices = man
+                        .map(|t| crate::keys::parse_choices(t).len())
+                        .unwrap_or(0);
+                    // Hai hình dạng của "chọn nhiều", nhận cả hai — xem
+                    // `LiveSession::screen_multi`. `has_submit` chỉ thấy hộp MỘT
+                    // câu; bảng nhiều câu thì `Submit` nằm trong thanh tab.
+                    row.screen_multi = man
+                        .map(|t| crate::keys::has_submit(t) || crate::keys::ask_table(t).is_some())
+                        .unwrap_or(false);
                     // Hai nguồn, một phán quyết — xem [`settle_limit`].
                     let (loi, chan) = settle_limit(row.error.take(), tren_man);
                     row.error = loi;

@@ -263,9 +263,18 @@ fn a_bare_window_choice_link_round_trips() {
     assert_eq!(parse_command("/start k_khong-phai_1"), None);
 }
 
-/// Nhãn chép từ sổ không được đeo HAI ô màu.
+/// Nhãn chép từ sổ KHÔNG đeo ô màu nào.
+///
+/// 🔄 ĐẢO CHIỀU 2026-08-31 — Hà: *"Tôi đã bảo Bỏ icon màu đi từ rất lâu rồi sao
+/// giờ nó hiện lại?"*. Bài này trước khoá *"đúng MỘT ô"*, luật của 14/08; nay ô
+/// màu dự án đi hẳn khỏi nhãn (xem khối 🔴 trong `sessions::shown` và
+/// `tests/no_project_colour.rs`).
+///
+/// Vế THẬT của bài kiểm không mất, chỉ đổi số: nó gác quãng **sổ → nhãn**, tức
+/// nhãn đã đúc kèm ô từ những lượt trước phải được GỠ chứ không chồng thêm. Số
+/// ô đúng nay là 0, trước là 1 — cùng một câu hỏi.
 #[test]
-fn a_label_taken_from_the_book_keeps_exactly_one_dot() {
+fn a_label_taken_from_the_book_keeps_no_dot() {
     assert_eq!(without_dot("🟥 [dwork]·a14bc255"), "[dwork]·a14bc255");
     assert_eq!(without_dot("[dwork]·a14bc255"), "[dwork]·a14bc255");
     let s = LiveSession {
@@ -273,13 +282,17 @@ fn a_label_taken_from_the_book_keeps_exactly_one_dot() {
         label: without_dot("🟥 [dwork]·a14bc255").to_string(),
         ..Default::default()
     };
-    // Không ghim MÀU ở đây — bảng màu là việc của `project_dot` và nó đổi thật
-    // (bộ cũ có 🟥/🟨, bộ nay trung tính). Thứ bài kiểm này khoá là HÌNH DẠNG:
-    // đúng một ô, đứng đầu, rồi tới nhãn.
     let out = shown(&s);
     assert_eq!(
-        out,
-        format!("{} [dwork]·a14bc255", huba::sessions::project_dot("dwork")),
-        "nhãn chép từ sổ phải đeo đúng MỘT ô màu"
+        out, "[dwork]·a14bc255",
+        "nhãn chép từ sổ không được đeo ô màu"
     );
+    // ĐỐI CHỨNG NGƯỢC: nhãn trong sổ CÒN mang ô cũ thì vẫn phải ra sạch — nếu
+    // không, bài trên xanh chỉ vì `label` truyền vào đã sạch sẵn.
+    let cu = LiveSession {
+        folder: "dwork".into(),
+        label: "🟪 [dwork]·a14bc255".into(),
+        ..Default::default()
+    };
+    assert_eq!(shown(&cu), "[dwork]·a14bc255", "ô cũ trong sổ phải bị gỡ");
 }

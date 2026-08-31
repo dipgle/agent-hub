@@ -428,6 +428,7 @@ pub fn pin_line(s: &crate::sessions::LiveSession) -> String {
     pin_line_from(
         Some(icon),
         s.monitors > 0,
+        crate::sessions::waiting_choice(s),
         &crate::sessions::shown(s),
         &s.account,
     )
@@ -480,6 +481,7 @@ pub fn pin_line(s: &crate::sessions::LiveSession) -> String {
 pub fn pin_line_from(
     trang_thai: Option<&str>,
     monitor: bool,
+    chon: Option<crate::sessions::ChoiceKind>,
     ten: &str,
     tai_khoan: &str,
 ) -> String {
@@ -490,6 +492,17 @@ pub fn pin_line_from(
     }
     if monitor {
         dau.push_str("👁 ");
+    }
+    // 🔴 CÓ OPTION ĐANG CHỜ ⟹ ký hiệu, y như hàng danh sách — Hà 2026-08-30:
+    // *"Trên pinned cũng chưa có"*. Cùng một phép đo
+    // (`sessions::waiting_choice`), cùng một bộ ký hiệu (`ChoiceKind`), nên hai
+    // màn không thể nói khác nhau về cùng một hộp.
+    //
+    // Đứng SAU `👁`: `👁` nói việc NỀN của phiên, ký hiệu này nói việc đang chờ
+    // NGƯỜI — và cái chờ người là cái ngón tay sắp chạm tới, nên nó đứng gần tên.
+    if let Some(k) = chon {
+        dau.push_str(k.glyph());
+        dau.push(' ');
     }
     let duoi = if tai_khoan.trim().is_empty() {
         String::new()
@@ -3183,16 +3196,8 @@ pub fn session_list_text(
         // trong khi bảng nằm trên màn), và lúc ấy hàng này KHÔNG có ký hiệu dù
         // màn đang có option chờ. Danh sách không đọc màn từng hàng — mỗi hàng
         // là hai lượt `osascript` mỗi vòng.
-        let cho_chon = s
-            .asking
-            .as_ref()
-            .filter(|a| !a.options.is_empty())
-            .map(|a| {
-                format!(
-                    "{} ",
-                    crate::sessions::ChoiceKind::from_journal(a.multi).glyph()
-                )
-            })
+        let cho_chon = crate::sessions::waiting_choice(s)
+            .map(|k| format!("{} ", k.glyph()))
             .unwrap_or_default();
         let src = source_icon(&s.host);
         let head = match src {
@@ -9806,6 +9811,42 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     .as_ref()
                     .filter(|a| !known_accounts.contains(a))
                     .cloned();
+                // 🔴 KHÔNG GÕ `-a` THÌ CHỌN CÁI CÒN CỬA, ĐỪNG GÕ CỨNG MẶC ĐỊNH.
+                //
+                // Hà 2026-08-31, ảnh buồng chat: `/new dwork/a-dsign` mở một cửa
+                // sổ acc1 và nó chết ngay dòng đầu — *"Your organization has
+                // disabled Claude subscription access"*. acc1 lúc ấy không dùng
+                // được, mà `/new` vẫn nhảy vào vì "tài khoản mặc định" là một
+                // HẰNG SỐ, không phải một phép đo.
+                //
+                // Lượt vá sáng cùng ngày mới chỉ CẢNH BÁO khi chủ máy có gõ `-a`,
+                // và tôi đã tự khai chỗ hở này rồi để nguyên. Để nguyên là sai:
+                // đường mặc định mới là đường anh đi nhiều nhất.
+                //
+                // Vẫn KHÔNG đoán bừa: `suggest_account` chỉ trả về một cái tên
+                // khi nó loại được cái chết (màn báo chặn/khoá) và xếp được hạng
+                // (`quota`). Không còn ai ⟹ `None` ⟹ rơi về tài khoản mặc định
+                // như xưa — thà đi đường cũ còn hơn bịa một cái tên.
+                let account = match (&account, &bad_account) {
+                    (None, None) => {
+                        let hang = crate::quota::rank_all(cfg, crate::quota::now_ms());
+                        // Ảnh chụp RIÊNG cho lượt này (~0,5 giây đo được:
+                        // `sessions_snapshot_ms` 519–555ms). Đắt hơn đọc sổ,
+                        // nhưng tín hiệu "tài khoản đã chết" chỉ nằm trên MÀN và
+                        // nó phải là màn LÚC NÀY — `/new` vốn đã tốn 15–60 giây.
+                        let live = crate::sessions::snapshot(cfg);
+                        let chon = crate::watch::suggest_account("", &hang, &live.sessions);
+                        logging::info(
+                            "new_account_chosen",
+                            json!({ "chon": chon, "vi_sao": "không gõ -a — lấy cái còn cửa nhất",
+                                    "hang": hang.iter()
+                                        .map(|a| format!("{}={}", a.name, a.rank.say()))
+                                        .collect::<Vec<_>>() }),
+                        );
+                        chon
+                    }
+                    _ => account,
+                };
                 // 🔴 `/new <id>` = MỞ LẠI một phiên đã tắt — thay cho `/tell`.
                 //
                 // Hà 2026-08-15: *"lệnh tell là không cần thiết?"* · *"vì trên
@@ -10247,6 +10288,39 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // sổ thì TỪ CHỐI — gõ vào cửa sổ lạ là gõ vào việc của người
                 // khác, và đó là hàng rào duy nhất còn lại ở đường này.
                 let (want, typed) = target_and_rest(db, &cmd.arg);
+                // 🔴 XEM MÀN CỦA MỘT PHIÊN = VÀO PHIÊN ẤY — Hà 2026-08-31:
+                // *"Bấm \"xem màn\" cũng không tự nhảy vào phiên đó là sao?"*
+                //
+                // Trước đó `shot_<id>` cố ý tách khỏi `s_<id>` (*"vào phiên"* và
+                // *"xem màn"* là hai việc). Tách ấy đúng về khái niệm và sai về
+                // hậu quả: chủ máy nhìn màn phiên A rồi gõ tiếp, mà con trỏ vẫn
+                // ở phiên B — chữ đi nhầm phiên. Đo được đúng hình dạng ấy trong
+                // log 01:31:22: `/shot` không mang id ⟹ `route_target_from_focus`
+                // ⟹ chụp màn một phiên khác hẳn cái anh vừa chạm.
+                //
+                // Chỉ khi câu lệnh TỰ MANG id (liên kết `shot_<id>`), không phải
+                // lượt `/shot` trần từ menu ☰ — lượt ấy vốn đã nói "phiên đang
+                // theo", kéo con trỏ ở đó là kéo về chính nó.
+                if matches!(cmd.kind, CommandKind::Shot | CommandKind::Photo)
+                    && split_target(&cmd.arg).is_some()
+                    && !want.trim().is_empty()
+                {
+                    match db.set_cursor(FOCUS_SESSION_KEY, want.trim()) {
+                        Ok(()) => logging::info(
+                            "focus_follows_shot",
+                            json!({ "session": want.trim(),
+                                    "why": "xem màn của một phiên thì con trỏ đi theo — \
+                                            gõ tiếp phải vào đúng phiên vừa nhìn" }),
+                        ),
+                        // Không im: con trỏ không nhích được nghĩa là câu tiếp
+                        // theo của chủ máy sẽ đi vào phiên CŨ, và anh không có
+                        // cách nào biết.
+                        Err(e) => logging::error(
+                            "focus_follows_shot_failed",
+                            json!({ "session": want.trim(), "err": e.to_string() }),
+                        ),
+                    }
+                }
                 // ĐƯỜNG NHANH: sổ nói cửa sổ nào, `ps` chứng thực — xem
                 // `sessions::window_target_from_book`. Đường cũ dựng lại ảnh
                 // chụp (ba lần spawn `claude` 279 MB) chỉ để tra `tty`, và trên
@@ -12472,7 +12546,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // có thể khác nhau đúng ở cái icon — xem
                                 // `pin_line_from` để biết vì sao chỗ này không
                                 // được phép có một bản `format!` riêng.
-                                let head = pin_line_from(None, false, &name, &account);
+                                let head = pin_line_from(None, false, None, &name, &account);
                                 // …và ĐƯA LUÔN MÀN, đừng bắt bấm thêm một lần.
                                 //
                                 // 🔴 Hà 2026-08-13: *"bấm vào phiên sao không hiện

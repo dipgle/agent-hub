@@ -110,7 +110,8 @@ fn the_fast_path_line_and_the_refresh_line_differ_only_in_the_status_icon() {
     };
     assert_eq!(s.monitors, 0, "phiên mẫu này cố ý KHÔNG có monitor");
     let (icon, _) = huba::sessions::state_of(&s);
-    let nhanh = huba::pipeline::pin_line_from(None, false, &huba::sessions::shown(&s), &s.account);
+    let nhanh =
+        huba::pipeline::pin_line_from(None, false, None, &huba::sessions::shown(&s), &s.account);
     let nen = huba::pipeline::pin_line(&s);
     assert_eq!(
         Some(nhanh.as_str()),
@@ -126,13 +127,13 @@ fn the_fast_path_line_and_the_refresh_line_differ_only_in_the_status_icon() {
 fn an_unknown_account_leaves_no_empty_parens() {
     for tk in ["", "   "] {
         assert_eq!(
-            huba::pipeline::pin_line_from(Some("\u{26a1}"), false, "[social]", tk),
+            huba::pipeline::pin_line_from(Some("\u{26a1}"), false, None, "[social]", tk),
             "\u{26a1} [social]",
             "tài khoản {tk:?} không được đẻ ra ngoặc rỗng"
         );
     }
     assert_eq!(
-        huba::pipeline::pin_line_from(Some("\u{26a1}"), false, "[social]", "acc1"),
+        huba::pipeline::pin_line_from(Some("\u{26a1}"), false, None, "[social]", "acc1"),
         "\u{26a1} [social] (acc1)"
     );
 }
@@ -146,12 +147,12 @@ fn an_unknown_account_leaves_no_empty_parens() {
 #[test]
 fn the_eye_marks_a_running_monitor_and_nothing_else() {
     assert_eq!(
-        huba::pipeline::pin_line_from(Some("\u{26a1}"), true, "[dwork]", "acc3"),
+        huba::pipeline::pin_line_from(Some("\u{26a1}"), true, None, "[dwork]", "acc3"),
         "\u{26a1} \u{1f441} [dwork] (acc3)",
         "còn monitor ⟹ phải có mắt"
     );
     assert_eq!(
-        huba::pipeline::pin_line_from(Some("\u{26a1}"), false, "[dwork]", "acc3"),
+        huba::pipeline::pin_line_from(Some("\u{26a1}"), false, None, "[dwork]", "acc3"),
         "\u{26a1} [dwork] (acc3)",
         "hết monitor ⟹ phải HẾT mắt; một cái mắt luôn sáng thì không nhận dạng được gì"
     );
@@ -161,7 +162,7 @@ fn the_eye_marks_a_running_monitor_and_nothing_else() {
 #[test]
 fn the_eye_does_not_swallow_the_status_icon() {
     for icon in ["\u{26a1}", "\u{1f4a4}", "\u{2753}"] {
-        let dong = huba::pipeline::pin_line_from(Some(icon), true, "[x]", "");
+        let dong = huba::pipeline::pin_line_from(Some(icon), true, None, "[x]", "");
         assert!(dong.starts_with(icon), "dòng {dong:?} mất icon trạng thái");
         assert!(dong.contains("\u{1f441}"), "và mắt vẫn phải có");
     }
@@ -182,8 +183,8 @@ fn the_pin_line_carries_no_camera_icon() {
     };
     for dong in [
         huba::pipeline::pin_line(&s),
-        huba::pipeline::pin_line_from(None, false, "[onghut]", "acc1"),
-        huba::pipeline::pin_line_from(Some("\u{26a1}"), true, "[onghut]", ""),
+        huba::pipeline::pin_line_from(None, false, None, "[onghut]", "acc1"),
+        huba::pipeline::pin_line_from(Some("\u{26a1}"), true, None, "[onghut]", ""),
     ] {
         assert!(
             !dong.contains("\u{1f4f7}"),

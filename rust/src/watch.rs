@@ -819,9 +819,17 @@ pub fn suggest_account(
     accounts: &[crate::quota::Ranked],
     now: &[LiveSession],
 ) -> Option<String> {
+    // Hai cửa đọc từ MÀN, gộp làm một danh sách "đừng gợi ý":
+    // · `limited` — hết hạn mức, chờ đồng hồ thì tự mở;
+    // · `account_dead` — TỔ CHỨC KHOÁ, chờ bao lâu cũng vô ích (Hà 2026-08-31:
+    //   `/new` mở một cửa sổ acc1 rồi nó chết ngay dòng đầu).
+    //
+    // Cái thứ hai KHÔNG có trong sổ `.claude.json` — đo được cùng lúc: acc1 ở đó
+    // vẫn ghi `92%` với `fetchedAtMs` già ba ngày, nên `quota` xếp nó `Unknown`
+    // chứ không phải "đã chết". Màn là nguồn duy nhất.
     let dang_chan: Vec<&str> = now
         .iter()
-        .filter(|s| s.limited.is_some())
+        .filter(|s| s.limited.is_some() || s.account_dead.is_some())
         .map(|s| s.account.as_str())
         .collect();
     accounts

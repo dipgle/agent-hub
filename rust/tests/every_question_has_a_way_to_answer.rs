@@ -51,7 +51,7 @@ fn bang_hai_cau() -> Asking {
 /// CẢ câu đang mở. Fail-closed: thừa một khu chữ còn hơn một câu không trả lời được.
 #[test]
 fn when_nothing_is_tappable_inline_the_open_question_still_gets_targets() {
-    let chu = ask_command_lines("574e5be2", &bang_hai_cau(), false);
+    let chu = ask_command_lines("574e5be2", &bang_hai_cau(), false, None);
     assert!(
         chu.contains("/pick_574e5be2_1_1"),
         "câu ĐANG MỞ phải có đích chạm — đây đúng là chỗ Hà nhìn thấy 5 lựa chọn \
@@ -74,7 +74,7 @@ fn when_nothing_is_tappable_inline_the_open_question_still_gets_targets() {
 /// lúc ấy nó không đo cái nó khai.
 #[test]
 fn skipping_the_current_question_really_skips_it() {
-    let chu = ask_command_lines("574e5be2", &bang_hai_cau(), true);
+    let chu = ask_command_lines("574e5be2", &bang_hai_cau(), true, None);
     assert!(
         !chu.contains("/pick_574e5be2_1_"),
         "bỏ câu đang hiện thì đích chạm của nó KHÔNG được nằm ở đáy — nếu không \
@@ -91,7 +91,7 @@ fn skipping_the_current_question_really_skips_it() {
 #[test]
 fn there_is_always_a_way_to_submit() {
     for bo_cau_dau in [true, false] {
-        let chu = ask_command_lines("574e5be2", &bang_hai_cau(), bo_cau_dau);
+        let chu = ask_command_lines("574e5be2", &bang_hai_cau(), bo_cau_dau, None);
         assert!(
             chu.contains("/send_574e5be2"),
             "thiếu dòng gửi khi skip_current={bo_cau_dau}"

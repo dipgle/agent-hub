@@ -7845,6 +7845,7 @@ pub fn ask_command_lines(
     session_id: &str,
     a: &crate::sessions::Asking,
     skip_current: bool,
+    dang_o: Option<usize>,
 ) -> String {
     let sid: String = session_id.chars().take(8).collect();
     if sid.is_empty() {
@@ -7874,8 +7875,24 @@ pub fn ask_command_lines(
         } else {
             header
         };
+        // 🔴 ĐÁNH DẤU CÂU ĐANG MỞ — Hà 2026-08-31: *"Option chưa thể hiện được
+        // tab đang được chọn"*.
+        //
+        // Bảng vẽ tab hiện hành bằng NỀN MÀU, mà `contents of tab` trả chữ trần
+        // nên màu không đi qua đường ấy — danh sách in ra bốn câu trông y hệt
+        // nhau, và chủ máy không biết cú bấm sắp tới rơi vào câu nào. Vị trí lấy
+        // từ `keys::cursor_on` (ghép nguyên văn câu hỏi đang in dưới thanh tab
+        // với danh sách câu đọc từ nhật ký), truyền vào đây.
+        //
+        // ⚠ `None` = CHƯA ĐO ĐƯỢC, và khi ấy KHÔNG đánh dấu câu nào. Đoán bừa
+        // một cái mũi tên là tệ hơn không có: nó trông y như một phép đo.
+        let dau = if dang_o == Some(qi) {
+            "  ◀ ĐANG MỞ"
+        } else {
+            ""
+        };
         out.push_str(&format!(
-            "\n\n▸ Câu {} — {}{}",
+            "\n\n▸ Câu {} — {}{}{dau}",
             qi + 1,
             crate::exec::truncate(&head, 60),
             if multi { " (CHỌN NHIỀU)" } else { "" }
@@ -7896,7 +7913,28 @@ pub fn ask_command_lines(
         // mất" ở ngay tệp bên cạnh, rồi dẫm đúng vào nó ở dòng này.
         //
         // Tham số phải nằm TRONG tên: `/send_<8 ký tự đầu id>`.
-        out.push_str(&format!("\n\nTrả lời hết rồi gửi: /send_{sid}"));
+        //
+        // 🔴 BẢNG NHIỀU CÂU CẦN HAI BƯỚC — Hà 2026-08-31: *"Làm gì có chỗ nào
+        // bấm submit"*.
+        //
+        // `/send_` chỉ bấm ENTER. Với hộp MỘT câu thì Enter là gửi; với bảng
+        // NHIỀU câu, Enter chốt đúng cái câu đang mở rồi bảng đứng nguyên đó —
+        // nên dòng này vẫn hứa "gửi" trong khi nó không gửi được gì. Ô `✔ Submit`
+        // nằm ở cuối thanh tab, phải đi tới nó trước: `/tab_<id>_0` (chính lời
+        // từ chối của `tab_move` đã nói *"`/tab 0` là bước gửi"*).
+        //
+        // Vì sao không gộp thành một lệnh: hai bước là hai lượt gửi phím vào
+        // cửa sổ của chủ máy, và bước một có thể trượt (bảng cụt, đọc hụt thanh
+        // tab). Gộp lại thì một cú bấm hỏng nửa chừng mà chủ máy không biết nó
+        // dừng ở đâu.
+        if a.rest.is_empty() {
+            out.push_str(&format!("\n\nTrả lời hết rồi gửi: /send_{sid}"));
+        } else {
+            out.push_str(&format!(
+                "\n\nTrả lời hết rồi gửi — HAI bước: /tab_{sid}_0 (tới ô ✔ Submit) \
+                 rồi /send_{sid}"
+            ));
+        }
     }
     out
 }
@@ -10766,6 +10804,18 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // Nhật ký nói bảng có nhiều câu; MÀN nói còn ô
                                 // trống hay đã sang bước Review — xem
                                 // `multi_question_screen`.
+                                // Câu ĐANG MỞ, đọc từ chính bản chụp này —
+                                // xem khối 🔴 trong `ask_command_lines`. Tính ở
+                                // ĐÂY vì `rep.text` bị chuyển quyền sở hữu ngay
+                                // sau đó; không ghép được ⟹ `None` ⟹ không đánh
+                                // dấu câu nào, chứ không đoán.
+                                let dang_o = shot_asking.as_ref().and_then(|a| {
+                                    let cau_hoi: Vec<String> =
+                                        std::iter::once(a.question.clone())
+                                            .chain(a.rest.iter().map(|r| r.question.clone()))
+                                            .collect();
+                                    crate::keys::cursor_on(&rep.text, &cau_hoi)
+                                });
                                 let table = multi_question_screen(
                                     shot_asking.as_ref().is_some_and(|a| !a.rest.is_empty()),
                                     &rep.text,
@@ -10914,6 +10964,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         &shot_sid,
                                         a,
                                         da_co_trong_chu,
+                                        dang_o,
                                     ));
                                 }
                                 out

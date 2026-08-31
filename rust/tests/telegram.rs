@@ -2140,7 +2140,8 @@ fn every_option_becomes_a_tappable_command_next_to_its_question() {
             multi: true,
         }],
     };
-    let txt = huba::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, false);
+    let txt =
+        huba::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, false, None);
     // Tham số nằm trong TÊN lệnh: chạm chỉ gửi lại token, chữ sau dấu cách rơi.
     assert!(txt.contains("/pick_4963b95c_1_1 Từ chối"), "{txt}");
     assert!(txt.contains("/pick_4963b95c_1_2 Vẫn lưu"), "{txt}");
@@ -2151,7 +2152,7 @@ fn every_option_becomes_a_tappable_command_next_to_its_question() {
     // bản lại đi chèn thêm xuống cuối"*). Các câu SAU thì vẫn phải có: chúng
     // chưa hiện trên màn nên không có dòng nào để neo.
     let skipped =
-        huba::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, true);
+        huba::pipeline::ask_command_lines("4963b95c-93b0-46e3-baf9-40bbfacbef2f", &a, true, None);
     assert!(!skipped.contains("/pick_4963b95c_1_1"), "{skipped}");
     assert!(skipped.contains("/pick_4963b95c_2_1"), "{skipped}");
     assert!(skipped.contains("/send_4963b95c"), "{skipped}");

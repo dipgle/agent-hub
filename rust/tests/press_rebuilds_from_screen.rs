@@ -200,3 +200,95 @@ fn nhan_dung_muc_go_chu_tu_do() {
         );
     }
 }
+
+/// ⑦ Danh sách câu phải CHỈ RA câu đang mở — Hà: *"Option chưa thể hiện được tab
+/// đang được chọn"*.
+///
+/// Bảng vẽ tab hiện hành bằng NỀN MÀU, mà `contents of tab` trả chữ trần nên màu
+/// không đi qua. Bốn câu in ra trông y hệt nhau, và chủ máy không biết cú bấm
+/// sắp tới rơi vào câu nào.
+#[test]
+fn danh_sach_cau_chi_ra_cau_dang_mo() {
+    let a = bang_ba_cau();
+    let co = huba::pipeline::ask_command_lines("0864e405", &a, false, Some(1));
+    assert!(
+        co.contains("▸ Câu 2") && co.contains("◀ ĐANG MỞ"),
+        "phải đánh dấu câu 2:\n{co}"
+    );
+    // Đúng MỘT dấu — hai dấu thì nó thôi chỉ ra được cái gì.
+    assert_eq!(co.matches("◀ ĐANG MỞ").count(), 1, "{co}");
+    // …và dấu ấy nằm trên dòng của Câu 2, không phải Câu 1 hay 3.
+    let dong = co
+        .lines()
+        .find(|l| l.contains("◀ ĐANG MỞ"))
+        .unwrap_or_default();
+    assert!(dong.contains("▸ Câu 2"), "dấu rơi nhầm dòng: {dong:?}");
+
+    // 🔴 CHƯA ĐO ĐƯỢC thì KHÔNG đánh dấu câu nào — đoán bừa một cái mũi tên tệ
+    // hơn không có, vì nó trông y như một phép đo.
+    let khong = huba::pipeline::ask_command_lines("0864e405", &a, false, None);
+    assert!(
+        !khong.contains("◀ ĐANG MỞ"),
+        "không đo được mà vẫn chỉ trỏ:\n{khong}"
+    );
+    // MẪU SỐ: bản không-dấu vẫn phải dựng ra đủ ba câu, không thì assert trên
+    // xanh nhờ chuỗi rỗng.
+    for n in ["▸ Câu 1", "▸ Câu 2", "▸ Câu 3"] {
+        assert!(khong.contains(n), "thiếu {n}:\n{khong}");
+    }
+}
+
+/// ⑧ Bảng NHIỀU câu gửi bằng HAI bước — `/send_` trần chỉ bấm Enter.
+///
+/// 🔴 Hà 2026-08-31: *"Làm gì có chỗ nào bấm submit"*. Với hộp MỘT câu thì Enter
+/// là gửi; với bảng nhiều câu, Enter chốt đúng câu đang mở rồi bảng đứng nguyên
+/// — nên dòng cũ hứa "gửi" về một thao tác không gửi được gì.
+#[test]
+fn bang_nhieu_cau_gui_bang_hai_buoc() {
+    let nhieu = huba::pipeline::ask_command_lines("0864e405", &bang_ba_cau(), false, None);
+    assert!(
+        nhieu.contains("/tab_0864e405_0"),
+        "phải chỉ ra bước đi tới ô Submit:\n{nhieu}"
+    );
+    assert!(nhieu.contains("/send_0864e405"), "{nhieu}");
+
+    // ĐỐI CHỨNG NGƯỢC: hộp MỘT câu KHÔNG được mọc thêm bước thừa.
+    let mot = huba::pipeline::ask_command_lines("0864e405", &bang_mot_cau(), false, None);
+    assert!(
+        !mot.contains("/tab_"),
+        "hộp một câu thì Enter là gửi, đừng bắt đi thêm một bước:\n{mot}"
+    );
+    assert!(mot.contains("/send_0864e405"), "{mot}");
+}
+
+fn hoi(q: &str, opts: &[&str]) -> huba::sessions::Question {
+    huba::sessions::Question {
+        header: String::new(),
+        question: q.to_string(),
+        options: opts.iter().map(|s| s.to_string()).collect(),
+        multi: false,
+    }
+}
+
+fn bang_mot_cau() -> huba::sessions::Asking {
+    huba::sessions::Asking {
+        header: String::new(),
+        question: "Q1 — một câu thôi".into(),
+        options: vec!["(a)".into(), "(b)".into()],
+        multi: false,
+        rest: vec![],
+    }
+}
+
+fn bang_ba_cau() -> huba::sessions::Asking {
+    huba::sessions::Asking {
+        header: String::new(),
+        question: "Q1 — câu đã trả lời từ trước".into(),
+        options: vec!["(a)".into(), "(b)".into()],
+        multi: false,
+        rest: vec![
+            hoi("Q2 — chọn mốc", &["(a)", "(b)"]),
+            hoi("Q3 — hai lượt", &["(a)", "(b)"]),
+        ],
+    }
+}

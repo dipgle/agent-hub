@@ -8153,28 +8153,33 @@ pub fn press_ack_from_screen(
     // cho ra chỉ mục 0 ⟹ `cau = 1`, trong khi con trỏ đang ở Q2. Một mã nút sai
     // đưa cú bấm SAU vào đúng câu vừa chốt xong — thứ không lùi lại được.
     //
-    // Đường lùi (không có câu nào từ nhật ký, hoặc không ghép được) là ô chưa
-    // trả lời đầu tiên; và không có thanh tab thì là bảng MỘT câu ⟹ `1`, mã nút
-    // khi ấy là số trần — xem `/pick` vs `/key`, hai dạng mã cho hai dạng bảng.
-    let cau = crate::keys::cursor_on(screen, questions)
-        .or_else(|| {
-            table
-                .as_ref()
-                .and_then(|t| t.answered.iter().position(|a| !a))
-        })
-        .map(|i| i + 1)
-        .unwrap_or(1);
-    let choices: Vec<(String, String)> = opts
-        .iter()
-        .map(|(n, l)| {
-            let code = if table.is_some() {
-                format!("{cau}.{n}")
-            } else {
-                n.to_string()
-            };
-            (code, l.clone())
-        })
-        .collect();
+    // 🔴 KHÔNG BIẾT ĐANG Ở CÂU NÀO ⟹ KHÔNG GẮN NÚT NÀO — Hà 2026-09-01: *"Tab
+    // lựa chọn hiện không đúng làm bấm chọn nhầm"*.
+    //
+    // Bản trước có một ĐƯỜNG LÙI ("ô chưa trả lời đầu tiên", rồi `unwrap_or(1)`),
+    // và đường lùi ấy chính là con dao: `cursor_on` trả `None` nghĩa là *không đo
+    // được*, mà đường lùi biến nó thành một con số trông y như đã đo — rồi con số
+    // ấy đi thẳng vào mã nút `<câu>.<lựa chọn>`. Sai một bậc là cú bấm sau ghi đè
+    // lên một câu ĐÃ CHỐT, và không có đường lùi nào cho việc đó.
+    //
+    // Bảng NHIỀU câu mà không xác định được câu ⟹ trả về danh sách nút RỖNG. Chủ
+    // máy mất một đích chạm và phải `/shot` nhìn — đắt, nhưng rẻ hơn hẳn một cú
+    // bấm im lặng đi nhầm chỗ. Bảng MỘT câu không có chuyện nhầm: mã là số trần.
+    let cau = crate::keys::cursor_on(screen, questions).map(|i| i + 1);
+    let mu = table.is_some() && cau.is_none();
+    let choices: Vec<(String, String)> = if mu {
+        Vec::new()
+    } else {
+        opts.iter()
+            .map(|(n, l)| {
+                let code = match (table.is_some(), cau) {
+                    (true, Some(c)) => format!("{c}.{n}"),
+                    _ => n.to_string(),
+                };
+                (code, l.clone())
+            })
+            .collect()
+    };
     let submit = crate::keys::has_submit(screen);
     let ack = if opts.is_empty() {
         // Hết lựa chọn: hoặc bảng đóng thật, hoặc ô nhập chữ vừa mở ra. huba
@@ -8194,12 +8199,21 @@ pub fn press_ack_from_screen(
         )
     } else {
         let lines: Vec<String> = opts.iter().map(|(n, l)| format!("{n}. {l}")).collect();
-        let dau = match table.as_ref() {
-            Some(t) => format!(
-                "✓ đã bấm '{typed}' — nay đứng ở câu {cau}/{} · {name}",
+        let dau = match (table.as_ref(), cau) {
+            (Some(t), Some(c)) => format!(
+                "✓ đã bấm '{typed}' — nay đứng ở câu {c}/{} · {name}",
                 t.answered.len()
             ),
-            None => format!(
+            // 🔴 Bảng nhiều câu mà KHÔNG đọc ra đang đứng ở câu nào: nói thẳng,
+            // và nói luôn vì sao không có nút. Im ở đây thì chủ máy đọc một danh
+            // sách lựa chọn không bấm được rồi tưởng huba hỏng.
+            (Some(t), None) => format!(
+                "⚠ đã bấm '{typed}' — nhưng KHÔNG đọc ra đang đứng ở câu nào (bảng {} câu) · {name}\n\
+                 Nên tôi KHÔNG gắn nút: một nút đoán sai câu sẽ ghi đè lên câu đã chốt. \
+                 /shot để nhìn, rồi bấm bằng /pick <câu>.<lựa chọn>.",
+                t.answered.len()
+            ),
+            (None, _) => format!(
                 "✓ đã bấm '{typed}' — màn còn {} lựa chọn · {name}",
                 opts.len()
             ),

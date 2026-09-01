@@ -292,3 +292,100 @@ fn bang_ba_cau() -> huba::sessions::Asking {
         ],
     }
 }
+
+/// ⑨ Chữ phía TRÊN thanh tab KHÔNG được nhận là câu đang mở.
+///
+/// 🔴 Hà 2026-09-01: *"Tab lựa chọn hiện không đúng làm bấm chọn nhầm"*.
+///
+/// `/shot` gửi trọn màn, và lời phiên ngay trên bảng thường nhắc lại chính mấy
+/// câu ấy. Bản trước soi cả màn rồi lấy câu KHỚP ĐẦU TIÊN theo thứ tự nhật ký —
+/// nên nó bắt đúng câu ĐÃ TRẢ LỜI nằm trong đoạn văn phía trên, rồi con số ấy đi
+/// thẳng vào mã nút `<câu>.<lựa chọn>`.
+#[test]
+fn chu_phia_tren_thanh_tab_khong_phai_cau_dang_mo() {
+    let man = "\
+⏺ Xin Hà chốt hai câu đang chặn:
+  · Q2 — Khi tìm mốc vào/ra, có bỏ qua lượt không hợp lệ không?
+  · Q3 — Hai lượt cùng chiều thì tính sao?
+────────────────────────────────────────────────
+←  ☒ Q2 chọn mốc  ☐ Q3 hai lượt  ✔ Submit  →
+Q3 — Hai lượt cùng chiều thì tính sao?
+❯ 1. (a) THIẾU MỐC
+  2. (b) ĐỦ MỐC
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel";
+    let qs = vec![
+        "Q2 — Khi tìm mốc vào/ra, có bỏ qua lượt không hợp lệ không?".to_string(),
+        "Q3 — Hai lượt cùng chiều thì tính sao?".to_string(),
+    ];
+    // MẪU SỐ: câu Q2 PHẢI có mặt trên màn, không thì bài này không chặn gì cả.
+    assert!(man.contains("Q2 — Khi tìm mốc"), "màn mẫu phải chứa cả Q2");
+    assert_eq!(
+        huba::keys::cursor_on(man, &qs),
+        Some(1),
+        "câu đang mở là câu in NGAY DƯỚI thanh tab, không phải câu khớp đầu tiên trên màn"
+    );
+
+    let (_, nut, _) = press_ack_from_screen(man, "1", "[dwork]", &qs);
+    let ma: Vec<&str> = nut.iter().map(|(m, _)| m.as_str()).collect();
+    assert_eq!(
+        ma,
+        vec!["2.1", "2.2"],
+        "mã nút phải trỏ câu 2, không phải câu 1: {nut:?}"
+    );
+}
+
+/// ⑩ KHÔNG xác định được câu ⟹ KHÔNG gắn nút, và NÓI RA.
+///
+/// "Không đo được" phải là trạng thái riêng. Đường lùi cũ (`unwrap_or(1)`) biến
+/// nó thành một con số trông y như đã đo, rồi con số ấy ghi đè lên một câu đã
+/// chốt — thứ không lùi lại được.
+#[test]
+fn khong_biet_dang_o_cau_nao_thi_khong_gan_nut() {
+    // Câu đang mở bị CẮT khỏi khung nhìn (hộp cao hơn cửa sổ) — ca có thật.
+    let cut = "\
+←  ☒ Q2 chọn mốc  ☐ Q3 hai lượt  ✔ Submit  →
+❯ 1. (a) THIẾU MỐC
+  2. (b) ĐỦ MỐC
+Enter to select · Tab/Arrow keys to navigate · Esc to cancel";
+    let qs = vec![
+        "Q2 — Khi tìm mốc vào/ra, có bỏ qua lượt không hợp lệ không?".to_string(),
+        "Q3 — Hai lượt cùng chiều thì tính sao?".to_string(),
+    ];
+    assert_eq!(
+        huba::keys::cursor_on(cut, &qs),
+        None,
+        "không câu nào in ra ⟹ không biết"
+    );
+
+    let (ack, nut, _) = press_ack_from_screen(cut, "1", "[dwork]", &qs);
+    assert!(
+        nut.is_empty(),
+        "không biết câu nào thì KHÔNG được gắn nút: {nut:?}"
+    );
+    assert!(
+        ack.contains("KHÔNG đọc ra đang đứng ở câu nào"),
+        "và phải nói ra chỗ mù:\n{ack}"
+    );
+
+    // ĐỐI CHỨNG NGƯỢC: thêm đúng câu đang mở vào màn thì nút hiện lại. Không có
+    // vế này thì một hàm luôn trả rỗng cũng làm bài trên xanh.
+    let du = format!("{cut}\nQ3 — Hai lượt cùng chiều thì tính sao?");
+    let (_, nut2, _) = press_ack_from_screen(&du, "1", "[dwork]", &qs);
+    assert_eq!(nut2.len(), 2, "có câu rồi thì phải gắn nút lại: {nut2:?}");
+}
+
+/// ⑪ Hai câu cùng khớp dưới thanh tab ⟹ NHẬP NHẰNG ⟹ `None`, không chọn bừa.
+#[test]
+fn nhap_nhang_thi_khong_doan() {
+    let man = "\
+←  ☐ Q1  ☐ Q2  ✔ Submit  →
+Chọn A hay B?
+Chọn A hay B?
+❯ 1. A";
+    let qs = vec!["Chọn A hay B?".to_string(), "Chọn A hay B?".to_string()];
+    assert_eq!(
+        huba::keys::cursor_on(man, &qs),
+        None,
+        "hai câu giống hệt cùng khớp ⟹ không biết là câu nào ⟹ đừng đoán"
+    );
+}

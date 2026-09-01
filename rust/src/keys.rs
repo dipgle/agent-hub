@@ -4305,15 +4305,49 @@ pub fn ask_table_seen(body: &str, want: usize) -> (Option<AskTable>, Option<Stri
 ///
 /// Bỏ hết khoảng trắng hai bên trước khi so: TUI ngắt dòng câu hỏi theo bề
 /// ngang cửa sổ, nên so nguyên văn là trượt đúng những câu dài.
+/// 🔴 NEO DƯỚI THANH TAB, VÀ NHẬP NHẰNG THÌ TRẢ `None` — sửa 2026-09-01 sau khi
+/// Hà báo *"Tab lựa chọn hiện không đúng làm bấm chọn nhầm"*.
+///
+/// Bản trước soi **cả màn** rồi lấy câu KHỚP ĐẦU TIÊN theo thứ tự trong nhật ký.
+/// Hai chỗ hỏng, và cả hai đều trả về một con số trông như đã đo:
+///
+/// · **Chữ phía TRÊN bảng cũng khớp.** `/shot` gửi trọn màn, và lời phiên ngay
+///   trên bảng thường nhắc lại chính mấy câu ấy (*"xin chốt hai câu đang
+///   chặn…"*). Câu khớp đầu tiên khi ấy là câu ĐÃ TRẢ LỜI, không phải câu đang mở.
+/// · **Câu đang mở bị cắt** (hộp cao hơn khung nhìn — ca có thật, xem
+///   `tab_bar_cut`) thì nó không khớp, và hàm lặng lẽ rơi sang một câu khác còn
+///   nhìn thấy được.
+///
+/// Hậu quả không dừng ở một mũi tên chỉ sai: `pipeline::press_ack_from_screen`
+/// lấy đúng con số này làm **mã nút** `<câu>.<lựa chọn>`, nên chỉ sai một bậc là
+/// cú bấm sau ghi đè lên một câu đã chốt — thứ không lùi lại được.
+///
+/// Nên: câu đang mở là câu bảng in **NGAY DƯỚI thanh tab**, và chỉ vùng ấy được
+/// soi. Khớp nhiều hơn một câu ⟹ `None`, vì "không biết" phải là một trạng thái
+/// riêng chứ không được đội lốt một câu trả lời (điều 13② của charter).
 pub fn cursor_on(screen: &str, questions: &[String]) -> Option<usize> {
     let squash = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
-    let flat = squash(screen);
-    questions
+    // Thanh tab nhận đúng như `ask_table` nhận: một dòng có cả `←` lẫn `→`.
+    // Không có thanh tab ⟹ bảng MỘT câu ⟹ cả màn là vùng của nó.
+    let vung: String = match screen
+        .lines()
+        .position(|l| l.contains('←') && l.contains('→'))
+    {
+        Some(i) => screen.lines().skip(i + 1).collect::<Vec<_>>().join("\n"),
+        None => screen.to_string(),
+    };
+    let flat = squash(&vung);
+    let khop: Vec<usize> = questions
         .iter()
         .enumerate()
         .filter(|(_, q)| !q.trim().is_empty())
-        .find(|(_, q)| flat.contains(&squash(q)))
+        .filter(|(_, q)| flat.contains(&squash(q)))
         .map(|(i, _)| i)
+        .collect();
+    match khop.as_slice() {
+        [i] => Some(*i),
+        _ => None,
+    }
 }
 
 /// Phiên có đang chạy dở không, đọc từ màn hình.

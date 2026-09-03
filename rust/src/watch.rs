@@ -837,9 +837,66 @@ pub fn suggest_account(
         .filter(|a| a.name != limited && !dang_chan.contains(&a.name.as_str()))
         // Đã đo được là KỊCH TRẦN thì không phải một gợi ý, nó là cú chạm vô ích
         // thứ ba. Thà trả `None` và nói thẳng là không biết chuyển đi đâu.
-        .filter(|a| a.rank != crate::quota::Rank::Full)
+        //
+        // `Dead` đứng cùng cửa này chứ không cùng cửa `dang_chan` bên trên, và
+        // đó là cả bản vá 02/09: `dang_chan` đọc MÀN, nên nó chỉ biết chừng nào
+        // còn một cửa sổ mở. Hạng `Dead` tới từ SỔ (`quota::apply_dead_book`),
+        // nên nó còn đúng cả khi không phiên nào của tài khoản ấy còn sống.
+        .filter(|a| !matches!(a.rank, crate::quota::Rank::Full | crate::quota::Rank::Dead))
         .min_by_key(|a| a.rank)
         .map(|a| a.name.clone())
+}
+
+/// Đối chiếu MÀN với SỔ tài khoản chết: ghi cái vừa thấy, gỡ cái đã sống lại.
+///
+/// 🔴 Hai chiều, vì một cuốn sổ chỉ ghi thêm là một cuốn sổ không bao giờ sai
+/// được — tức không phải phép đo (§13①). Chiều gỡ mới là chiều khó, và nó KHÔNG
+/// đi bằng đồng hồ: khoá tổ chức không tự mở theo giờ, nên một hạn dùng kiểu
+/// *"quên sau 24 tiếng"* sẽ âm thầm hồi sinh một tài khoản vẫn đang chết và trả
+/// nguyên con bug về vào ngày thứ hai. Thứ chứng minh được tài khoản sống lại
+/// chỉ có một: **một phiên của nó ĐANG CHẠY**.
+///
+/// Ba trạng thái, và cửa giữa là cửa phải có:
+/// * phiên mang dấu khoá ⟹ GHI;
+/// * phiên đang CHẠY và không mang dấu ⟹ GỠ;
+/// * phiên im lặng (`working == false`, không dấu) ⟹ **không kết luận gì**. Một
+///   cửa sổ vừa mở chưa kịp in chữ nào trông y hệt một cửa sổ vừa chết — đọc nó
+///   thành "sống" là gỡ sổ đúng lúc không được gỡ.
+pub fn reconcile_dead_book(db: &crate::db::Db, now: &[LiveSession]) {
+    for s in now {
+        if s.account.is_empty() {
+            continue;
+        }
+        if let Some(why) = s.account_dead.as_deref() {
+            // Ghi lại mỗi vòng thì `updated_at` luôn tươi, nhưng chỉ NÓI lần
+            // đầu: một dòng log mỗi vòng về cùng một cái chết là tiếng ồn.
+            let da_biet = db.dead_accounts().contains_key(&s.account);
+            if let Err(e) = db.mark_account_dead(&s.account, why) {
+                crate::logging::error(
+                    "dead_book_write_failed",
+                    serde_json::json!({ "account": s.account, "err": e.to_string() }),
+                );
+            } else if !da_biet {
+                crate::logging::warn(
+                    "account_marked_dead",
+                    serde_json::json!({ "account": s.account, "why": why }),
+                );
+            }
+        } else if s.working {
+            match db.clear_account_dead(&s.account) {
+                // Chỉ nói khi THẬT SỰ vừa gỡ một dòng ra — xem `Db::del_cursor`.
+                Ok(true) => crate::logging::warn(
+                    "account_alive_again",
+                    serde_json::json!({ "account": s.account, "bang_chung": s.session_id }),
+                ),
+                Ok(false) => {}
+                Err(e) => crate::logging::error(
+                    "dead_book_clear_failed",
+                    serde_json::json!({ "account": s.account, "err": e.to_string() }),
+                ),
+            }
+        }
+    }
 }
 
 pub fn changes(

@@ -22,7 +22,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS cursors (
   v          TEXT,
   updated_at TEXT NOT NULL
 );
+
+-- Mỗi lượt gõ một lệnh để lại một dòng, kèm MỐC THỜI GIAN. Menu ☰ xếp bằng cách
+-- đếm 200 dòng gần nhất (Hà 2026-09-02). Một cuốn sổ chứ không phải một con số:
+-- con số cũ (điểm có suy giảm) không nói được "gần đây" nghĩa là gì, và nó gộp
+-- `/enter` với `/right` vào chung một ô vì nó đếm theo `kind`.
+CREATE TABLE IF NOT EXISTS cmd_log (
+  id   INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts   TEXT NOT NULL,
+  name TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cmd_log_id ON cmd_log(id DESC);
 
 "#;
 
@@ -328,6 +339,134 @@ impl Db {
             params![key, value, now()],
         )?;
         Ok(())
+    }
+
+    /// Xoá một mốc. `Ok(true)` = có xoá thật, `Ok(false)` = vốn không có.
+    ///
+    /// Hai câu trả lời phải phân biệt được, không gộp thành `()`: chỗ gọi duy
+    /// nhất hiện nay ([`crate::watch::reconcile_dead_book`]) chỉ được phép NÓI
+    /// *"tài khoản sống lại"* khi thật sự vừa gỡ một dòng ra khỏi sổ. Trả `()`
+    /// là biến mỗi vòng chạy thành một dòng log về một việc không xảy ra.
+    pub fn del_cursor(&self, key: &str) -> Result<bool> {
+        let n = self
+            .conn
+            .execute("DELETE FROM cursors WHERE k = ?1", params![key])?;
+        Ok(n > 0)
+    }
+
+    // ── sổ TÀI KHOẢN CHẾT ────────────────────────────────────────────────────
+    //
+    // 🔴 Hà 2026-09-02: `/new` lại mở một cửa sổ bằng acc1 trong khi tổ chức đã
+    // khoá tài khoản ấy. Cổng dựng 31/08 chặn đúng ca nó dựng ra và vẫn xanh —
+    // nó loại một tài khoản khi đang NHÌN THẤY một phiên của nó mang dấu khoá.
+    // Nhưng phiên bị khoá chết ngay dòng đầu, cửa sổ ấy đóng, và cùng lúc trí
+    // nhớ duy nhất về cái chết cũng biến mất. Vòng sau `quota` đọc `.claude.json`
+    // ra `92%` già ba ngày ⟹ `Unknown` ⟹ đứng TRƯỚC `Full` ⟹ chọn lại đúng nó.
+    //
+    // Nên cái chết phải nằm trong SỔ. `cursors` là chỗ đúng: nó đã là "thứ ít ỏi
+    // phải sống qua một lượt khởi động lại", và một tài khoản chết đúng là thế.
+
+    /// Tiền tố khoá của sổ. Một khoá một tài khoản, để `del_cursor` gỡ được
+    /// từng cái mà không phải đọc-sửa-ghi cả cuốn.
+    pub const ACC_DEAD_PREFIX: &'static str = "acc_dead:";
+
+    /// Ghi *"tài khoản này đã chết"*, kèm NGUYÊN VĂN dòng đọc được trên màn.
+    ///
+    /// Giữ nguyên văn vì đó là thứ duy nhất trả lời được câu *"chết kiểu gì"* —
+    /// và chủ máy đọc nó ở `/accounts` để tự phán lại luật chọn tài khoản.
+    pub fn mark_account_dead(&self, account: &str, why: &str) -> Result<()> {
+        self.set_cursor(&format!("{}{account}", Self::ACC_DEAD_PREFIX), why)
+    }
+
+    /// Gỡ khỏi sổ. `Ok(true)` = vừa có tên trong sổ và nay đã gỡ.
+    pub fn clear_account_dead(&self, account: &str) -> Result<bool> {
+        self.del_cursor(&format!("{}{account}", Self::ACC_DEAD_PREFIX))
+    }
+
+    /// Cả cuốn sổ: tên tài khoản → lý do.
+    ///
+    /// Đọc hỏng thì KÊU rồi trả sổ RỖNG, và chỗ này phải nói rõ hướng ngã của
+    /// nó: sổ rỗng nghĩa là "không loại tài khoản nào" — tức fail-OPEN. Chọn thế
+    /// có chủ ý, vì hướng ngã kia tệ hơn hẳn: một lượt đọc SQLite hỏng sẽ loại
+    /// sạch mọi tài khoản và huba thôi mở được phiên nào. Cái giá của hướng đã
+    /// chọn là một cú chạm vô ích; cái giá của hướng kia là huba đứng hình.
+    pub fn dead_accounts(&self) -> BTreeMap<String, String> {
+        let all = match self.all_cursors() {
+            Ok(v) => v,
+            Err(e) => {
+                crate::logging::error(
+                    "dead_book_read_failed",
+                    serde_json::json!({ "err": e.to_string() }),
+                );
+                return BTreeMap::new();
+            }
+        };
+        all.into_iter()
+            .filter_map(|(k, v)| {
+                k.strip_prefix(Self::ACC_DEAD_PREFIX)
+                    .map(|n| (n.to_string(), v))
+            })
+            .collect()
+    }
+
+    // ── sổ LƯỢT GÕ LỆNH (menu ☰) ────────────────────────────────────────────
+
+    /// Giữ lại bao nhiêu dòng. Cửa sổ đếm là 200; giữ gấp mấy lần để một lượt
+    /// dọn hụt không cắt mất ngay phần đang đếm.
+    const CMD_LOG_KEEP: i64 = 2_000;
+
+    /// Ghi một lượt gõ lệnh, kèm mốc thời gian.
+    ///
+    /// Chỉ ghi TÊN route — không ghi tham số. Tham số là chữ của chủ máy
+    /// (`/tell <câu>`, `/ask <câu hỏi>`), và sổ này nằm trên đĩa lâu dài; luật 5
+    /// cho phép huba KHÔNG giấu chữ trên màn, nhưng không ai yêu cầu nó chép
+    /// từng câu vào một cái bảng chỉ dùng để đếm.
+    pub fn log_command(&self, name: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO cmd_log (ts, name) VALUES (?1, ?2)",
+            params![now(), name],
+        )?;
+        // Cắt đuôi ngay tại chỗ ghi: một cái bảng chỉ để đếm mà lớn vô hạn thì
+        // sớm muộn thành thứ phải đi dọn bằng tay.
+        self.conn.execute(
+            "DELETE FROM cmd_log WHERE id <= (SELECT MAX(id) FROM cmd_log) - ?1",
+            params![Self::CMD_LOG_KEEP],
+        )?;
+        Ok(())
+    }
+
+    /// `limit` lượt gõ GẦN NHẤT, mới trước cũ sau.
+    ///
+    /// Đọc hỏng thì KÊU rồi trả rỗng — và rỗng ở đây nghĩa là "chưa đếm được",
+    /// tức menu giữ nguyên thứ tự đang có, không phải "mọi lệnh đều 0 lượt".
+    /// Chỗ gọi phải phân biệt hai câu ấy; xem `pipeline::menu_reorder_if_needed`.
+    pub fn recent_commands(&self, limit: i64) -> Vec<String> {
+        let mut stmt = match self
+            .conn
+            .prepare("SELECT name FROM cmd_log ORDER BY id DESC LIMIT ?1")
+        {
+            Ok(s) => s,
+            Err(e) => {
+                crate::logging::error(
+                    "cmd_log_read_failed",
+                    serde_json::json!({ "err": e.to_string() }),
+                );
+                return Vec::new();
+            }
+        };
+        // Gán vào biến rồi mới trả: `query_map` mượn `stmt`, nên để cái `match`
+        // làm biểu thức đuôi của hàm là bắt `stmt` sống lâu hơn chính nó.
+        let out: Vec<String> = match stmt.query_map(params![limit], |r| r.get::<_, String>(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                crate::logging::error(
+                    "cmd_log_read_failed",
+                    serde_json::json!({ "err": e.to_string() }),
+                );
+                Vec::new()
+            }
+        };
+        out
     }
 
     pub fn start_run(&self, adapter: &str, phase: &str) -> Result<i64> {

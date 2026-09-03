@@ -82,11 +82,17 @@ pub struct Quota {
 ///   còn chỗ (đừng đoán bừa khi đã có số thật trong tay) và TRƯỚC tài khoản đo
 ///   được là đã kịch trần (một ẩn số vẫn hơn một cánh cửa đã đóng).
 /// * [`Rank::Full`] — đo được, đã kịch trần. Không bao giờ chọn khi còn đường khác.
+/// * [`Rank::Dead`] — **tổ chức đã khoá**. Khác `Full` ở chỗ đắt nhất: `Full`
+///   chờ một cái đồng hồ rồi tự mở, cái này chờ bao lâu cũng vô ích. Không đọc
+///   ra từ sổ `.claude.json` bao giờ — nguồn của nó là MÀN, và vì màn chỉ nói
+///   khi còn một cửa sổ đang mở nên nó phải được GHI LẠI; xem
+///   [`crate::watch::reconcile_dead_book`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Rank {
     Free(i64),
     Unknown,
     Full,
+    Dead,
 }
 
 impl Rank {
@@ -96,8 +102,36 @@ impl Rank {
             Rank::Free(p) => format!("đã dùng {p}%"),
             Rank::Unknown => "chưa đo được".to_string(),
             Rank::Full => "ĐÃ KỊCH TRẦN".to_string(),
+            Rank::Dead => "TỔ CHỨC ĐÃ KHOÁ".to_string(),
         }
     }
+}
+
+/// Đóng dấu [`Rank::Dead`] lên những tài khoản có tên trong SỔ.
+///
+/// 🔴 Vì sao là một lượt riêng chứ không nằm trong [`rank_all`]: `rank_all` đọc
+/// ĐĨA (`.claude.json` của từng tài khoản) và không biết gì về cơ sở dữ liệu;
+/// cuốn sổ thì nằm trong `cursors`. Trộn hai nguồn vào một hàm là buộc mọi bài
+/// kiểm của `rank_all` phải dựng một `Db`. Tách ra thì phần "đo" vẫn thuần đĩa,
+/// phần "nhớ" thuần sổ, và chỗ gọi ghép hai cái lại — đúng ranh giới
+/// `accounts_text` đã tự đặt cho mình.
+///
+/// Dấu này ĐÈ lên mọi hạng đọc được từ đĩa, cố ý: sổ `.claude.json` của một tài
+/// khoản đã bị khoá vẫn ghi `92%` từ ba ngày trước và vẫn xếp ra `Unknown` —
+/// một con số đúng về một cánh cửa đã đóng.
+pub fn apply_dead_book(
+    ranked: Vec<Ranked>,
+    dead: &std::collections::BTreeMap<String, String>,
+) -> Vec<Ranked> {
+    ranked
+        .into_iter()
+        .map(|mut a| {
+            if dead.contains_key(&a.name) {
+                a.rank = Rank::Dead;
+            }
+            a
+        })
+        .collect()
 }
 
 impl Quota {

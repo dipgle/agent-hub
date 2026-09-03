@@ -2137,36 +2137,24 @@ pub fn quit_and_close(window: i64) -> Result<Closed> {
         // byte qua `do script` khi màn KHÔNG có hộp chọn. Có hộp chọn mà vẫn
         // ghi là đổi một lượt đóng cửa sổ lấy một câu trả lời sai trong việc của
         // chủ máy — thà để `/exit` nằm trong hàng chờ và báo thật.
-        let bang_phim_that = send_bare(window, &["esc".to_string()]);
-        match &bang_phim_that {
-            Ok(()) => logging::info(
+        // Luật "Esc phải là phím RỜI" nay sống ở MỘT chỗ: `press_escape`. Bản
+        // chép nằm ở đây từ 30/08 chính là bản không ai mang sang `/key`, và
+        // hôm 01/09 đúng cái bug ấy quay lại ở cửa bên cạnh.
+        match press_escape(window) {
+            EscHow::Bare => logging::info(
                 "close_interrupt_sent",
                 json!({ "window": window, "duong": "cgkeys (phím rời, không kèm CR)" }),
             ),
-            Err(e) => {
-                let co_hop_chon = screen_text(window)
-                    .map(|s| !parse_choices(&s).is_empty())
-                    .unwrap_or(true);
-                logging::warn(
-                    "close_interrupt_bare_failed",
-                    json!({ "window": window, "err": e.to_string(),
-                            "co_hop_chon": co_hop_chon,
-                            "effect": if co_hop_chon {
-                                "màn có hộp chọn ⟹ KHÔNG ghi byte qua do script (CR sẽ chốt hộ) — bỏ lượt cắt"
-                            } else {
-                                "rơi về ghi byte 0x1B qua do script; ô nhập rỗng nên CR đi kèm không gửi gì"
-                            } }),
-                );
-                if !co_hop_chon {
-                    if let Err(e2) = press(window, "esc") {
-                        logging::warn(
-                            "close_interrupt_failed",
-                            json!({ "window": window, "err": e2.to_string(),
-                                    "effect": "không cắt được lượt — vẫn thử gõ lại /exit" }),
-                        );
-                    }
-                }
-            }
+            EscHow::WrittenByte => logging::warn(
+                "close_interrupt_written_byte",
+                json!({ "window": window,
+                        "effect": "hụt phím rời ⟹ ghi byte 0x1B qua do script; màn không có hộp chọn nên CR đi kèm không chốt gì" }),
+            ),
+            EscHow::Skipped(why) => logging::warn(
+                "close_interrupt_skipped",
+                json!({ "window": window, "why": why,
+                        "effect": "bỏ lượt cắt — vẫn thử gõ lại /exit" }),
+            ),
         }
         std::thread::sleep(std::time::Duration::from_millis(1200));
         send_exit(window)?;
@@ -2523,6 +2511,65 @@ pub fn free_text_choice(label: &str) -> bool {
     }
     let l = l.trim_end_matches(['.', '…', ' ']).to_ascii_lowercase();
     l == "type something" || l == "type something else"
+}
+
+/// Cú Esc ấy đi bằng đường nào — hoặc vì sao KHÔNG đi.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EscHow {
+    /// Phím RỜI qua `cgkeys` — đúng một cú Escape, không kèm gì.
+    Bare,
+    /// Rơi về ghi byte `0x1B` qua `do_script`. Chỉ được phép khi màn KHÔNG có
+    /// hộp chọn, vì lượt ghi ấy kèm một CR và CR trên hộp chọn là một cú CHỐT.
+    WrittenByte,
+    /// KHÔNG gửi gì: hụt phím rời mà màn đang có hộp chọn (hoặc không đọc được
+    /// màn để mà biết). Trạng thái riêng, không được đọc thành "đã bấm".
+    Skipped(String),
+}
+
+/// Bấm Esc như người ngồi ở bàn phím bấm — phím RỜI, không kèm dấu xuống dòng.
+///
+/// 🔴 Hà 2026-09-01: `/key esc` vào phiên `projects-f8`, huba đáp *"đã bấm 'esc'
+/// nhưng màn KHÔNG đổi"*. Phím đã rời khỏi huba thật, mà màn `/usage` đứng
+/// nguyên.
+///
+/// Gốc: `do_script` **kèm một CR không tắt được**. Một Escape đứng MỘT MÌNH là
+/// phím Escape; `ESC` rồi tới ngay một byte khác thì terminal đọc thành một
+/// CHUỖI THOÁT (đúng cách `ESC[A` mang nghĩa mũi tên lên) — nên `ESC`+`CR` bị
+/// nuốt như một chuỗi lạ và **không có cú Escape nào tới nơi**.
+///
+/// Đo trên cửa sổ thật (`tests/bare_esc_live.rs`, 2026-09-01, cửa sổ 1131):
+/// màn `/usage` 2333 ký tự có `Esc to cancel` ⟹ bắn Esc RỜI ⟹ 1368 ký tự, dấu ấy
+/// biến mất. Khác đúng một thứ: đường gửi.
+///
+/// ⚠ **VÌ SAO LÀ MỘT HÀM, KHÔNG PHẢI HAI BẢN CHÉP.** Luật này đã được viết ra
+/// một lần rồi — ngày 2026-08-30, cho đường `/close`, đúng lúc Hà hỏi *"Nó có
+/// phải là bấm phím thực sự như tôi ngồi máy bấm ở bàn phím không"*. Nó nằm
+/// nguyên trong thân `close_window` và **không ai mang nó sang `/key`**, nên
+/// hôm nay đúng cái bug ấy quay lại ở cửa bên cạnh. Hai bản chép của một luật là
+/// hai bản sẽ lệch; chỗ duy nhất là đây.
+///
+/// Đường lùi có ĐIỀU KIỆN, không lùi bừa: hụt phím rời thì chỉ được ghi byte khi
+/// màn KHÔNG có hộp chọn. Có hộp chọn mà vẫn ghi là đổi một cú Esc lấy một câu
+/// trả lời sai trong việc của chủ máy — và "không đọc được màn" tính là CÓ.
+pub fn press_escape(window: i64) -> EscHow {
+    match send_bare(window, &["esc".to_string()]) {
+        Ok(()) => EscHow::Bare,
+        Err(e) => {
+            let co_hop_chon = screen_text(window)
+                .map(|s| !parse_choices(&s).is_empty())
+                .unwrap_or(true);
+            if co_hop_chon {
+                return EscHow::Skipped(format!(
+                    "hụt phím rời ({e}) và màn đang có hộp chọn (hoặc không đọc được) \
+                     ⟹ KHÔNG ghi byte qua do script, vì CR đi kèm sẽ chốt hộ một lựa chọn"
+                ));
+            }
+            match press(window, "esc") {
+                Ok(()) => EscHow::WrittenByte,
+                Err(e2) => EscHow::Skipped(format!("hụt cả hai đường: {e} · {e2}")),
+            }
+        }
+    }
 }
 
 /// Một phím điều khiển: `up` `down` `enter` `esc` `tab` `space`, hoặc `1`–`9`.
@@ -4438,11 +4485,49 @@ pub fn activity(screen: &str) -> Option<Activity> {
 /// phiên đang BÀN về hạn mức (đúng cái phiên này suốt hôm nay) nhắc chữ `limit`
 /// cả chục lần; bắt theo một chữ là dựng một phép đo kêu oan, và một cảnh báo
 /// kêu oan thì bị lướt qua.
+///
+/// 🔴 **VÀ TRẦN 120 KÝ TỰ KHÔNG ĐỦ — đo được hai lần trong một đêm, lần thứ hai
+/// giết đúng cái phiên đang viết bản vá cho lần thứ nhất** (2026-09-01):
+///
+/// ```text
+/// 19:50:21  mở phiên 34f57a63 mang bản bàn giao dựng từ nhật ký
+/// 19:52:39  auto_limit_firing session=34f57a63  khi="resets 11:50pm"   ← dây chuyền
+/// 22:05:13  auto_limit_firing session=5dac6ac5  khi="…` —"             ← phiên đang vá
+/// ```
+///
+/// Dòng khớp ở lượt 22:05 là một dòng **chú thích trong mã nguồn của chính bản
+/// vá** — `rust/tests/auto_limit_switch.rs:182`, 76 ký tự, tức LỌT trần 120 vì
+/// một câu TRÍCH bao giờ cũng ngắn hơn câu gốc nó trích. Cắt trần xuống nữa là
+/// vặn một con số cho vừa đúng một mẫu, và mẫu sau lại lọt — cùng cái bẫy đã
+/// ghi ở [`account_blocked_on_screen`] ngay dưới.
+///
+/// Nên nhận theo HÌNH DẠNG, hai cửa, cửa nào cũng đọc được bằng mắt:
+/// 1. **Dòng phải MỞ ĐẦU bằng chính câu CLI in ra.** Một câu văn nhắc tới nó thì
+///    câu ấy nằm giữa dòng — đúng hình dạng cả hai lượt nhận nhầm.
+/// 2. **Dòng có dấu nháy ngược thì không phải dòng trạng thái.** `claude` không
+///    in dấu ấy bao giờ; người TRÍCH thì luôn. Đây là cửa chặn ca mà cửa 1 để
+///    lọt: một dòng chú thích mở đầu bằng ``` `You've hit your …` ``` (đúng
+///    hình dạng đang nằm trong tệp này, mấy dòng phía trên).
+///
+/// ⚠ Còn một ca hai cửa này KHÔNG phân biệt được, và nói thẳng ra thay vì giấu:
+/// một dòng chép NGUYÊN VĂN câu CLI, không nháy, đứng đầu dòng. Nó không đọc
+/// khác được — kể cả người đọc cũng vậy. Phanh tuổi phiên
+/// ([`crate::pipeline::auto_limit_why`], `TooYoung`) là thứ đỡ ca đó.
 pub fn session_limit_on_screen(screen: &str) -> Option<String> {
+    // Nguyên văn CLI in ra, tính từ ĐẦU dòng. Chữ thường vì so sau `to_lowercase`.
+    const MO_DAU: &str = "you've hit your";
     for line in screen.lines() {
         let l = line.trim();
-        let low = l.to_lowercase();
-        if !(low.contains("hit your") && low.contains("limit")) {
+        // Cửa 2 — trích dẫn, không phải trạng thái.
+        if l.contains('`') {
+            continue;
+        }
+        // Bỏ dấu trang trí đầu dòng (`⏺`, `>`, `·`) trước khi so, y như
+        // `account_blocked_on_screen`: TUI hay chèn chúng.
+        let l = l.trim_start_matches(|c: char| !c.is_alphanumeric()).trim();
+        // Cửa 1 — mở đầu dòng. Dấu nháy cong `’` quy về `'` vì có bản CLI in nó.
+        let low = l.to_lowercase().replace('\u{2019}', "'");
+        if !(low.starts_with(MO_DAU) && low.contains("limit")) {
             continue;
         }
         // Dòng phải NGẮN như một dòng trạng thái. Một câu văn dài nhắc tới nó

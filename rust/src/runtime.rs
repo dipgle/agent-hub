@@ -135,12 +135,19 @@ fn daemon_block(now: i64) -> Value {
 /// Hạn mức lấy từ SỔ của chính CLI (`quota::read_all` — đọc tệp, không spawn) và
 /// từ bản dò đã đo sẵn (`usage_cached`, 5 phút một lượt). Không đẻ thêm một tiến
 /// trình `claude` nào cho một lệnh xem.
-pub fn accounts_say(cfg: &Config, live: &SessionsSnapshot, now: i64) -> String {
+pub fn accounts_say(
+    cfg: &Config,
+    live: &SessionsSnapshot,
+    now: i64,
+    dead: &std::collections::BTreeMap<String, String>,
+) -> String {
     accounts_text(
         cfg,
         live,
         &usage_cached(cfg, now),
         &crate::quota::read_all(cfg),
+        dead,
+        now,
     )
 }
 
@@ -161,6 +168,8 @@ pub fn accounts_text(
     live: &SessionsSnapshot,
     usage: &Value,
     quotas: &[crate::quota::Quota],
+    dead: &std::collections::BTreeMap<String, String>,
+    now_ms: i64,
 ) -> String {
     let pending = usage.get("pending").and_then(Value::as_bool) == Some(true);
     let per_acc = usage.get("accounts");
@@ -220,8 +229,37 @@ pub fn accounts_text(
         // đây là chỗ chủ máy soi lại luật chọn tài khoản (`watch::suggest_account`).
         // Không có bản đọc cho tài khoản này thì IM ở dòng ấy — im khác hẳn với
         // in ra một câu "chưa đo được" mà chính chỗ gọi chưa hề đi đo.
+        // 🔴 `now_ms` là THAM SỐ, không phải một lượt `quota::now_ms()` gọi tại
+        // chỗ — sửa 2026-09-02, và cái giá của bản cũ đã trả bằng một bài kiểm
+        // đỏ theo ĐỒNG HỒ.
+        //
+        // `quota_from_the_cli_book_reaches_the_line` dựng một bản đọc có
+        // `week_resets_at = 2026-09-02T10:59:59Z` rồi chấm *"đã dùng 22%"*. Hàm
+        // này lại hỏi đồng hồ THẬT, nên `rank` đọc mốc ấy là ĐÃ QUA kể từ
+        // 10:59:59Z sáng nay và trả `Unknown` ⟹ bài kiểm xanh suốt nhiều ngày
+        // rồi tự đỏ lúc 11 giờ, không ai đụng vào mã. Lượt full suite 07:26 hôm
+        // nay xanh cũng chỉ vì nó chạy TRƯỚC cái mốc ấy.
+        //
+        // Ranh giới tệp này tự đặt cho mình — *"phần dựng câu, tách khỏi phần đi
+        // đo"* — vốn đã kể tên `usage` và `quotas` là hai thứ phải truyền vào.
+        // Nó bỏ sót THỜI GIAN, mà thời gian cũng là một phép đo đi ra ngoài.
         if let Some(q) = quotas.iter().find(|q| q.account == acc.name) {
-            out.push_str(&format!("    hạn mức: {}\n", q.say(crate::quota::now_ms())));
+            out.push_str(&format!("    hạn mức: {}\n", q.say(now_ms)));
+        }
+        // 🔴 TỔ CHỨC KHOÁ — và dòng này phải đứng NGAY DƯỚI dòng hạn mức, vì
+        // hai dòng ấy hay mâu thuẫn nhau và người đọc cần thấy cả hai cùng lúc:
+        // sổ `.claude.json` của một tài khoản đã bị khoá vẫn ghi một con số cũ
+        // (đo 31/08: acc1 `92%`, `fetchedAtMs` già ba ngày), nên chỉ đọc dòng
+        // trên thì acc1 trông vẫn còn cửa.
+        //
+        // Không có dòng này thì `/accounts` im lặng bỏ một tài khoản ra khỏi
+        // luật chọn — mà `/accounts` chính là chỗ DUY NHẤT chủ máy soi lại luật
+        // ấy. Một tài khoản bị loại vĩnh viễn mà không nói vì sao là đúng thứ
+        // trạng thái câm mà điều lệ cấm.
+        if let Some(why) = dead.get(&acc.name) {
+            out.push_str(&format!(
+                "    ⛔ TỔ CHỨC ĐÃ KHOÁ — không được chọn nữa: {why}\n"
+            ));
         }
         let row = per_acc.and_then(|m| m.get(&acc.name));
         match row {

@@ -172,6 +172,18 @@ fn secrets_come_from_the_environment_never_the_config_file() {
 // mặc định. Màn phải nói ra điều đó, vì hậu quả (tuần cạn hạn mức) chỉ lộ về sau.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Mốc thời gian CỐ ĐỊNH cho mọi lượt gọi `accounts_text`: 2026-08-30T15:00:00Z.
+///
+/// 🔴 Trước 2026-09-02, `accounts_text` tự hỏi đồng hồ thật, nên bài kiểm không
+/// điều khiển được thời gian — và `quota_from_the_cli_book_reaches_the_line`
+/// (mốc mở lại `2026-09-02T10:59:59Z`) xanh nhiều ngày rồi **tự đỏ lúc 11 giờ
+/// sáng 02/09**, không ai đụng vào mã. Lượt full suite 07:26 cùng ngày xanh chỉ
+/// vì nó chạy trước cái mốc ấy — tức một lượt xanh đi mượn đồng hồ.
+///
+/// Nay thời gian là THAM SỐ. Bài kiểm nào cũng phải truyền mốc này vào, để hôm
+/// nay chạy sao thì sang năm chạy vậy.
+const MOC: i64 = 1_788_102_000_000;
+
 fn acc_cfg() -> huba::config::Config {
     let mut c = huba::config::Config::default();
     c.claude_accounts = vec![
@@ -214,7 +226,14 @@ fn row(account: &str, name: &str) -> huba::sessions::LiveSession {
 #[test]
 fn the_accounts_list_names_the_one_that_new_lands_on() {
     let live = snap_with(vec![row("acc1", "projects-7c")]);
-    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[]);
+    let said = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &serde_json::json!({}),
+        &[],
+        &Default::default(),
+        MOC,
+    );
     let line = said
         .lines()
         .find(|l| l.starts_with("acc1"))
@@ -245,7 +264,14 @@ fn a_blind_account_says_its_zero_is_not_trustworthy() {
     live.blind.push("acc2".into());
     live.notes
         .push("acc2: spawn claude failed: No such file or directory".into());
-    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[]);
+    let said = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &serde_json::json!({}),
+        &[],
+        &Default::default(),
+        MOC,
+    );
     assert!(
         said.contains("KHÔNG liệt kê được"),
         "không cảnh báo tài khoản mù:\n{said}"
@@ -265,6 +291,8 @@ fn usage_still_being_measured_says_so_instead_of_showing_zero() {
         &live,
         &serde_json::json!({ "pending": true }),
         &[],
+        &Default::default(),
+        MOC,
     );
     assert!(said.contains("đang đo"), "phải nói đang đo:\n{said}");
     assert!(!said.contains("0%"), "không được bịa 0%:\n{said}");
@@ -278,6 +306,8 @@ fn measured_quota_reaches_the_line() {
         &live,
         &serde_json::json!({ "accounts": { "acc1": { "week_pct": 98, "session_pct": 6 } } }),
         &[],
+        &Default::default(),
+        MOC,
     );
     assert!(said.contains("tuần 98%"), "thiếu hạn mức tuần:\n{said}");
     assert!(said.contains("phiên 6%"), "thiếu hạn mức phiên:\n{said}");
@@ -303,7 +333,14 @@ fn quota_from_the_cli_book_reaches_the_line() {
         fetched_at_ms: Some(now - 2 * 60 * 60 * 1000),
         why_unknown: None,
     };
-    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[q]);
+    let said = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &serde_json::json!({}),
+        &[q],
+        &Default::default(),
+        MOC,
+    );
     assert!(said.contains("tuần 22%"), "thiếu số tuần:\n{said}");
     assert!(
         said.contains("đã dùng 22%"),
@@ -324,7 +361,14 @@ fn quota_from_the_cli_book_reaches_the_line() {
 #[test]
 fn accounts_text_khong_tu_di_doc_o_dia() {
     let live = snap_with(vec![]);
-    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[]);
+    let said = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &serde_json::json!({}),
+        &[],
+        &Default::default(),
+        MOC,
+    );
     assert!(
         !said.contains("hạn mức:"),
         "không đưa bản đọc nào vào mà vẫn có dòng hạn mức ⟹ hàm đang tự đọc đĩa:\n{said}"
@@ -340,7 +384,14 @@ fn accounts_text_khong_tu_di_doc_o_dia() {
         fetched_at_ms: None,
         why_unknown: None,
     };
-    let said = huba::runtime::accounts_text(&acc_cfg(), &live, &serde_json::json!({}), &[q]);
+    let said = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &serde_json::json!({}),
+        &[q],
+        &Default::default(),
+        MOC,
+    );
     assert!(said.contains("hạn mức:"), "có bản đọc mà không in:\n{said}");
 }
 

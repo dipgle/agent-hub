@@ -52,6 +52,75 @@ fn prose_that_merely_talks_about_limits_is_not_a_limited_session() {
     }
 }
 
+/// 🔴 ĐỐI CHỨNG NGƯỢC LẦN HAI — trần 120 ký tự ở trên KHÔNG đỡ được, và đây
+/// không phải giả định: ba dòng dưới đây là hình dạng thật đã làm huba đóng sổ
+/// nhầm, đo trên `logs/huba.log` đêm 2026-09-01.
+///
+/// Dòng đầu là dòng khớp lúc **22:05:13Z** — sổ ghi `auto_limit_firing` với
+/// `session=5dac6ac5`, còn `khi` đọc ra đúng phần đuôi của nó. Nó là một dòng
+/// **chú thích trong mã nguồn của chính bản vá**,
+/// `rust/tests/auto_limit_switch.rs:182`, dài 76 ký tự nên lọt trần 120: một câu
+/// TRÍCH bao giờ cũng ngắn hơn câu gốc nó trích.
+///
+/// Phiên bị đóng sổ hôm ấy chính là phiên đang viết bản vá cho lượt dây chuyền
+/// 19:52 — nên nếu bài kiểm này đỏ trở lại, cái mất không phải một cửa sổ, mà
+/// là buổi làm việc đang sửa đúng chỗ ấy.
+#[test]
+fn a_line_that_merely_quotes_the_banner_is_not_the_banner() {
+    for trich in [
+        // Khớp thật lúc 22:05:13Z — câu trích nằm GIỮA dòng.
+        "/// của một phiên bị chặn chính là dòng `You've hit your session limit · …` —",
+        // Mở đầu bằng chính câu ấy, nhưng trong dấu nháy ngược: đây là ca cửa
+        // "mở đầu dòng" để lọt, và nó nằm sẵn trong `keys.rs`.
+        "/// `You've hit your session limit · resets 10:30pm (Asia/Saigon)`",
+        // Bản bàn giao dựng từ nhật ký kể lại sự cố.
+        "chép nguyên văn dòng `You've hit your session limit`, phiên mới hiện dòng ấy",
+    ] {
+        assert!(
+            session_limit_on_screen(trich).is_none(),
+            "đây là một câu TRÍCH, không phải dòng CLI vẽ ra: {trich:?}"
+        );
+    }
+}
+
+/// 🔴 Cửa "MỞ ĐẦU DÒNG" phải TỰ ĐỨNG ĐƯỢC — và bài kiểm này sinh ra vì lượt đo
+/// đầu tiên nói nó chưa đứng được.
+///
+/// Cấy lỗi lần một: nới cửa ấy về `contains("hit your")` ⟹ `RED_B_EXIT=0`,
+/// **không bài nào đỏ**. Lý do đọc ra ngay: cả ba mẫu ở bài trên đều mang dấu
+/// nháy ngược, nên cửa 2 bắt trọn và cửa 1 chưa một lần phải làm gì. Một cửa
+/// không ai chứng minh được thì con số của nó là lời đồn (§13①) — nên đây là
+/// mẫu **không có dấu nháy nào**, chỉ cửa 1 chặn nổi.
+///
+/// Hai mẫu đều là hình dạng THẬT: dòng dưới là đúng thứ
+/// [`huba::sessions::handover_from_journal`] dựng ra (`**Phiên:** …` + lượt nói
+/// nguyên văn), tức đúng thứ được dán vào cửa sổ vừa mở.
+#[test]
+fn prose_without_backticks_still_is_not_a_limit_line() {
+    for van_xuoi in [
+        "chép nguyên văn dòng You've hit your session limit rồi dán vào cửa sổ mới",
+        "**Phiên:** acc3 báo You've hit your session limit nên tôi dựng bản bàn giao",
+    ] {
+        assert!(
+            session_limit_on_screen(van_xuoi).is_none(),
+            "câu ấy nằm GIỮA dòng ⟹ là lời kể, không phải dòng trạng thái: {van_xuoi:?}"
+        );
+    }
+}
+
+/// Cấy ca LÀNH thì phải KHÔNG đỏ (§13①): hai cửa mới không được che mất dòng
+/// thật khi TUI chèn một dấu trang trí ở đầu.
+#[test]
+fn decoration_in_front_does_not_hide_a_real_limit_line() {
+    let khi =
+        session_limit_on_screen("· You've hit your session limit · resets 10:30pm (Asia/Saigon)")
+            .expect("dấu trang trí đầu dòng không được che mất dòng thật");
+    assert!(
+        khi.contains("10:30pm"),
+        "giờ mở lại phải đọc ra sau khi bỏ dấu trang trí, đọc ra: {khi:?}"
+    );
+}
+
 /// Trạng thái phải ĐỔI ĐƯỢC (§13①) — và phải đổi sang một ký hiệu RIÊNG, không
 /// mượn `💤 đứng chờ`: một phiên rảnh sẽ chạy tiếp khi được gõ, một phiên bị
 /// chặn thì không, dù gõ gì.

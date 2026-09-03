@@ -462,6 +462,70 @@ pub fn for_telegram() -> Vec<(&'static str, &'static str)> {
         .collect()
 }
 
+/// Lượt chạy này thuộc route NÀO — suy ngược từ chính bảng [`ROUTES`].
+///
+/// 🔴 Vì sao phải suy ngược thay vì mang sẵn cái tên: `ChannelCommand` chỉ chở
+/// `kind`, mà `kind` KHÔNG phân biệt được `/enter` với `/right` với `/ctrlc` —
+/// cả ba là [`CommandKind::Key`]. Đó đúng là chỗ hỏng Hà chỉ ra 2026-09-02: ba
+/// dòng menu dùng CHUNG một bộ đếm, điểm y hệt nhau (280.19), nên thứ tự giữa
+/// chúng là ngẫu nhiên vĩnh viễn — bấm `/right` bao nhiêu lần cũng không tách
+/// nổi nó khỏi `/enter`.
+///
+/// Phân biệt được là nhờ [`Arg::Fixed`]: `verbs::parse_command` đặt CHÍNH chuỗi
+/// ấy vào `arg` (`verbs.rs:372`), nên cặp `(kind, arg)` chỉ đúng một route.
+///
+/// ⚠ Đọc từ `ROUTES`, KHÔNG chép lại luật phân tích. Một bộ phân tích thứ hai
+/// là một bộ sẽ lệch — cùng lời cảnh báo đã ghi ở đầu tệp này.
+pub fn route_name_for(kind: CommandKind, arg: &str) -> Option<&'static str> {
+    let mine: Vec<&'static Route> = routes_of_kind(kind).collect();
+    // Route mang sẵn tham số: khớp đúng chuỗi ấy.
+    if let Some(r) = mine
+        .iter()
+        .find(|r| matches!(r.arg, Arg::Fixed(v) if v == arg))
+    {
+        return Some(r.name);
+    }
+    // Còn lại: lấy route KHÔNG mang sẵn tham số đầu tiên. Lấy `mine[0]` trần thì
+    // một kind có cả route Fixed lẫn route thường (đúng hình dạng `Key`) sẽ quy
+    // mọi lượt về cái Fixed đứng trước, tức đếm nhầm sang một dòng menu khác.
+    mine.iter()
+        .find(|r| !matches!(r.arg, Arg::Fixed(_)))
+        .map(|r| r.name)
+}
+
+/// Tên này có LÊN MENU không.
+///
+/// 🔴 Cửa của sổ đếm, và nó là cửa phải có: chữ thường chủ máy gõ vào phiên đi
+/// qua `CommandKind::Type`, mà `type` không nằm trong menu. Ghi cả nó thì cửa sổ
+/// 200 lượt bị chính nó chiếm gần hết — menu rốt cuộc xếp bằng một mẫu nhỏ xíu
+/// còn sót lại, tức một phép đo có mẫu số không ai khai.
+pub fn is_listed(name: &str) -> bool {
+    ROUTES.iter().any(|r| r.name == name && r.listed)
+}
+
+/// Danh sách khai với Telegram, **xếp theo số lượt dùng gần đây** — nhiều nhất
+/// lên đầu, hoà nhau thì giữ thứ tự trong bảng.
+///
+/// 🔴 Hà 2026-09-02: *"Mỗi lần gửi lệnh thì lưu timestamp lại, mỗi lần sắp xếp
+/// thì lấy ra 200 bản ghi gần nhất rồi counting rồi sắp xếp"*. Đây là phần
+/// "counting rồi sắp xếp"; phần "lưu timestamp" ở [`crate::db::Db::log_command`],
+/// phần "200 bản ghi gần nhất" ở [`crate::db::Db::recent_commands`].
+///
+/// Đếm theo TÊN route, không theo `kind` — xem [`route_name_for`].
+pub fn for_telegram_counted(
+    counts: &std::collections::BTreeMap<String, usize>,
+) -> Vec<(&'static str, &'static str)> {
+    let mut rows: Vec<(&'static str, &'static str, usize)> = ROUTES
+        .iter()
+        .filter(|r| r.listed)
+        .map(|r| (r.name, r.help, counts.get(r.name).copied().unwrap_or(0)))
+        .collect();
+    // `sort_by_key` của Rust ỔN ĐỊNH, nên hoà nhau là giữ nguyên thứ tự bảng —
+    // menu không tự đổi chỗ vì hai lệnh cùng đếm 0.
+    rows.sort_by_key(|(_, _, c)| std::cmp::Reverse(*c));
+    rows.into_iter().map(|(n, h, _)| (n, h)).collect()
+}
+
 /// Cùng danh sách ấy, **xếp theo tần suất dùng** — nhiều nhất lên đầu.
 ///
 /// 🔴 Hà 2026-08-17: *"Menu có sắp xếp tự động theo tần suất tương tác được
@@ -478,18 +542,11 @@ pub fn for_telegram() -> Vec<(&'static str, &'static str)> {
 /// nhảy loạn"*. Nên hàm này thôi tự quyết thứ tự — nó trả về ĐIỂM kèm hàng, và
 /// chỗ gọi (`pipeline::menu_settled_order`) mới là nơi quyết có đổi chỗ hay
 /// không. Xếp hạng và HÃM xếp hạng là hai việc, tách ra mới đo được từng cái.
-pub fn for_telegram_scored(
-    score_of: impl Fn(&Route) -> u64,
-) -> Vec<(&'static str, &'static str, u64)> {
-    let mut rows: Vec<(&'static str, &'static str, u64)> = ROUTES
-        .iter()
-        .filter(|r| r.listed)
-        .map(|r| (r.name, r.help, score_of(r)))
-        .collect();
-    rows.sort_by_key(|(_, _, s)| std::cmp::Reverse(*s));
-    rows
-}
-
+/// 🪦 `for_telegram_scored` đã gỡ 2026-09-02 cùng cả tầng điểm-có-suy-giảm, theo
+/// luật mới Hà đặt: đếm 200 lượt gần nhất rồi xếp. Xem [`for_telegram_counted`].
+/// Cái mất đi cùng nó là cửa HÃM 25% (`MENU_LEAD_MARGIN`) — ghi rõ ở
+/// `tests/menu_order.rs` để đừng ai tưởng nó rơi vì sơ ý.
+///
 /// Route nào mang `kind` này — dùng để quy một lượt chạy về đúng (các) tên lệnh.
 pub fn routes_of_kind(kind: CommandKind) -> impl Iterator<Item = &'static Route> {
     ROUTES.iter().filter(move |r| r.kind == kind)

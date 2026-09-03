@@ -1005,7 +1005,10 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     // 🔴 Và ở đây mới đọc được HẠN MỨC từng tài khoản (30/08): nó cần `Config`
     // để biết thư mục sổ của mỗi tài khoản. Đọc tệp, không spawn — xem
     // `quota::rank_all`.
-    let tai_khoan = crate::quota::rank_all(cfg, crate::quota::now_ms());
+    let tai_khoan = crate::quota::apply_dead_book(
+        crate::quota::rank_all(cfg, crate::quota::now_ms()),
+        &db.dead_accounts(),
+    );
     for mut c in changes {
         if let crate::watch::Change::Limited { acc, goi_y, .. } = &mut c {
             *goi_y = crate::watch::suggest_account(acc, &tai_khoan, live);
@@ -1675,6 +1678,16 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
         if s.host == "dead" || s.context_tokens == 0 {
             continue;
         }
+        // 🔴 PHIÊN BỊ CHẶN VÌ HẾT HẠN MỨC KHÔNG ĐI ĐƯỜNG NÀY — `auto_switch_on_limit`
+        // giữ nó (2026-09-01). Không phải để chia việc cho gọn: bàn giao ở đây
+        // là `sessions::handover` → `fork_call`, và lời gọi ấy ghim
+        // `CLAUDE_CONFIG_DIR` vào ĐÚNG tài khoản vừa hết hạn mức, nên nó chết ở
+        // bước ĐẦU — `sessions::handover_from_journal` sinh ra vì chuyện ấy.
+        // Trước lượt vá này phiên bị chặn vẫn lọt tới đây và để lại một dòng
+        // `auto_handover_failed`: một cánh cửa không bao giờ mở được.
+        if s.limited.is_some() {
+            continue;
+        }
         // Cửa sổ ngữ cảnh theo model; không biết model thì lấy mức phổ biến.
         let window: u64 = if s.model.as_deref().is_some_and(|m| m.contains("haiku")) {
             200_000
@@ -1840,7 +1853,10 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                 // KỊCH TRẦN. Còn chỗ, hay không đo được, thì giữ nguyên: bàn giao
                 // tự động vốn không phải chỗ để huba tự ý xáo tài khoản của chủ
                 // máy, và một ẩn số không phải một lý do.
-                let hang = crate::quota::rank_all(cfg, crate::quota::now_ms());
+                let hang = crate::quota::apply_dead_book(
+                    crate::quota::rank_all(cfg, crate::quota::now_ms()),
+                    &db.dead_accounts(),
+                );
                 let acc_cu_het = hang
                     .iter()
                     .find(|a| a.name == s.account)
@@ -1990,6 +2006,220 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
         break;
     }
     watching
+}
+
+/// **Hết hạn mức thì TỰ chuyển tài khoản** — không bắt chủ máy gõ (2026-09-01).
+///
+/// 🔴 Hà: *"Tại sao acc bị limit không tự chuyển mà bắt tôi gõ lệnh, sao không
+/// tạo lệnh để vào phiên đó chủ động gõ để chuyển"*.
+///
+/// Vế sau có một câu trả lời dứt khoát, ghi ra để đừng ai dựng lại đường ấy:
+/// **gõ vào phiên đang chạy KHÔNG đổi được tài khoản của nó.** Tài khoản gắn vào
+/// `CLAUDE_CONFIG_DIR` lúc KHỞI TIẾN TRÌNH (xem
+/// [`crate::sessions::account_launch`]) và hạn mức tính theo TÀI KHOẢN, không
+/// theo cửa sổ — nên một dòng gõ vào cái cửa sổ đã chết không đi tới đâu. Việc
+/// chủ máy làm khi ngồi ở máy là mở cửa sổ MỚI bằng `claude2`/`claude3` rồi mang
+/// việc sang, và đó đúng là `/handover -a`. Cái thiếu chưa bao giờ là cơ chế; là
+/// một cái cò.
+///
+/// Vì sao KHÔNG nhét vào [`auto_handover`]: cửa vào của nó là **% ngữ cảnh**, và
+/// mọi cửa GIỮ của nó (`Busy` · `Asking` · `TooFresh`) hỏi *"phiên có đang làm dở
+/// không"* — câu hỏi vô nghĩa với một phiên đã đứng chết. Nó cũng bàn giao bằng
+/// `fork_call`, thứ chạy bằng đúng tài khoản vừa hết hạn mức. Đường này dùng
+/// [`crate::sessions::handover_from_journal`]: **không gọi `claude`, không tốn
+/// một lượt nào** — nên nguyên tắc *"huba không tự tiêu hạn mức"* (`PLAN.md`)
+/// không bị vi phạm ở đây, khác với `auto_handover` vốn đã có ngoại lệ ấy.
+///
+/// Ba cái phanh, vì đây là thứ chạy khi không ai nhìn:
+/// 1. **Không có tài khoản để sang thì KHÔNG làm gì.** `suggest_account` trả
+///    `None` là một câu trả lời (fail-closed), không phải chỗ trống để đoán.
+/// 2. **Đồng hồ sắp mở lại thì chờ** — `on_limit_wait_min`.
+/// 3. **MỘT phiên mỗi vòng.** Bốn phiên acc3 cùng chết sáng 30/08 là hình dạng
+///    THẬT (`watch::suggest_account`); đổ cả bốn sang acc2 trong một nhịp là
+///    giết nốt acc2. Mỗi vòng đọc lại hạn mức và màn, nên ngay khi acc2 bắt đầu
+///    chặn thì phanh 1 tự đóng.
+///
+/// Cố ý KHÔNG trả về số phiên đang canh (khác [`auto_handover`]): con số ấy rút
+/// ngắn giấc ngủ của cả daemon (`watch_slice_sec`), mà không trạng thái nào ở
+/// đây lật trong vài giây — đồng hồ hạn mức đo bằng phút tới ngày. Đếm vào đó là
+/// bắt daemon quay nhanh suốt nửa tiếng để chờ một thứ không đổi.
+fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot) {
+    if !cfg.auto_handover.on_limit {
+        return;
+    }
+    // Rẻ khi không có ai bị chặn — đây là trạng thái thường ngày.
+    if !live.sessions.iter().any(|s| s.limited.is_some()) {
+        return;
+    }
+    let done: Vec<String> = db
+        .cursor_or_log(AUTO_LIMIT_DONE_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    // Đọc hạng hạn mức MỘT lần cho cả vòng: nó mở tệp sổ của từng tài khoản, và
+    // trong một vòng thì con số ấy không đổi.
+    let hang = crate::quota::apply_dead_book(
+        crate::quota::rank_all(cfg, crate::quota::now_ms()),
+        &db.dead_accounts(),
+    );
+    let now_min = {
+        use chrono::Timelike;
+        let t = chrono::Local::now();
+        t.hour() as u64 * 60 + t.minute() as u64
+    };
+    for s in &live.sessions {
+        if s.host == "dead" {
+            continue;
+        }
+        let Some(khi) = s.limited.as_deref() else {
+            continue;
+        };
+        let target = crate::watch::suggest_account(&s.account, &hang, &live.sessions);
+        let phut = minutes_until_reset(khi, now_min);
+        let age_sec =
+            ((chrono::Utc::now().timestamp_millis() - s.started_at_ms).max(0) / 1000) as u64;
+        let why = auto_limit_why(
+            Some(khi),
+            done.contains(&s.session_id),
+            age_sec,
+            crate::sessions::is_real_tty(&s.tty),
+            target.as_deref(),
+            phut,
+            cfg.auto_handover.on_limit_wait_min,
+        );
+        if why != LimitWhy::Do {
+            logging::info(
+                "auto_limit_held",
+                json!({ "session": s.session_id, "acc": s.account, "khi": khi,
+                        "phut_toi_reset": phut, "tuoi_giay": age_sec,
+                        "why": format!("{why:?}") }),
+            );
+            continue;
+        }
+        let acc_moi = target.unwrap_or_default();
+        // Bản bàn giao dựng TỪ NHẬT KÝ. Tài khoản của phiên này đang chết nên
+        // đường `fork_call` không đi được — xem `handover_from_journal`.
+        let Some(checkpoint) = crate::sessions::handover_from_journal(cfg, s) else {
+            // Chưa nói câu nào thì không có gì để mang sang. KHÔNG ghi vào sổ
+            // `done`: chủ máy vẫn gõ được vào cửa sổ ấy, và một câu nói ở lượt
+            // sau là đủ để nó lại có bản bàn giao.
+            logging::info(
+                "auto_limit_no_checkpoint",
+                json!({ "session": s.session_id, "acc": s.account,
+                        "why": "nhật ký chưa có lượt nói nào để mang sang" }),
+            );
+            continue;
+        };
+        logging::info(
+            "auto_limit_firing",
+            json!({ "session": s.session_id, "name": s.name, "acc_cu": s.account,
+                    "acc_moi": acc_moi, "khi": khi, "phut_toi_reset": phut,
+                    "hang": hang.iter()
+                        .map(|a| format!("{}={}", a.name, a.rank.say()))
+                        .collect::<Vec<_>>() }),
+        );
+        let moved =
+            crate::sessions::start_fresh_after_handover(cfg, s, &checkpoint, Some(&acc_moi));
+        let ngan: String = s.session_id.chars().take(8).collect();
+        let go_tay = format!("/handover -a {acc_moi} {ngan}");
+        let err_text;
+        let outcome = match &moved {
+            Ok(w) => {
+                // Cửa sổ ĐÃ mở ⟹ vào sổ ngay, kể cả khi phiên mới chưa kịp chào
+                // đời: mở thêm một cái nữa ở vòng sau là hai cửa sổ cho một việc.
+                let mut next = done.clone();
+                next.push(s.session_id.clone());
+                if next.len() > AUTO_LIMIT_KEEP {
+                    let cut = next.len() - AUTO_LIMIT_KEEP;
+                    next.drain(..cut);
+                }
+                match serde_json::to_string(&next) {
+                    Ok(v) => {
+                        if let Err(e) = db.set_cursor(AUTO_LIMIT_DONE_KEY, &v) {
+                            logging::error(
+                                "auto_limit_book_failed",
+                                json!({ "err": e.to_string() }),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        logging::error("auto_limit_book_failed", json!({ "err": e.to_string() }))
+                    }
+                }
+                match &w.new_id {
+                    Some(new_id) => {
+                        if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, new_id) {
+                            logging::error(
+                                "focus_after_limit_switch_failed",
+                                json!({ "err": e.to_string() }),
+                            );
+                        }
+                        // Đóng hụt thì giao cho sổ đóng, đừng bỏ đó — cùng lý lẽ
+                        // với `auto_handover`.
+                        if w.closed_err.is_some() {
+                            if let Ok(Some(old_w)) = crate::keys::window_of(&s.tty) {
+                                remember_closing(
+                                    db,
+                                    &s.session_id,
+                                    old_w,
+                                    &crate::sessions::shown(s),
+                                    chrono::Utc::now().timestamp(),
+                                );
+                            }
+                        }
+                        HandoverMove::Opened {
+                            tty: &w.tty,
+                            new_id,
+                            closed_err: w.closed_err.as_deref(),
+                        }
+                    }
+                    None => HandoverMove::Stalled {
+                        tty: &w.tty,
+                        asking: &w.asking,
+                    },
+                }
+            }
+            Err(e) => {
+                err_text = e.to_string();
+                logging::error(
+                    "auto_limit_failed",
+                    json!({ "session": s.session_id, "err": &err_text }),
+                );
+                HandoverMove::Failed {
+                    err: &err_text,
+                    resume_command: &go_tay,
+                }
+            }
+        };
+        let msg = auto_limit_notice(
+            &crate::sessions::shown(s),
+            &s.account,
+            &acc_moi,
+            khi,
+            &outcome,
+        );
+        let button = match &outcome {
+            HandoverMove::Opened { new_id, .. } => {
+                Some(("👁 Xem phiên mới".to_string(), format!("sess:{new_id}")))
+            }
+            _ => None,
+        };
+        match (crate::telegram::inbox(), button) {
+            (Some(tg), Some(b)) => {
+                if let Err(e) = tg.send_buttons(&msg, &[b]) {
+                    logging::error("auto_limit_telegram_failed", json!({ "err": e }));
+                }
+            }
+            // Không có nút (hoặc không có inbox — `huba once` chạy tay): vẫn phải
+            // tới điện thoại, thà một tin không nút còn hơn im.
+            _ => {
+                if let Err(e) = crate::confirm::tell(cfg, &msg) {
+                    logging::error("auto_limit_telegram_failed", json!({ "err": e }));
+                }
+            }
+        }
+        // MỘT phiên mỗi vòng — xem phanh 3 ở đầu hàm.
+        break;
+    }
 }
 
 /// Sổ những `(phiên, lệnh)` đã tự chạy — để không chạy lại cùng một dòng.
@@ -2401,6 +2631,249 @@ pub fn auto_handover_why(
         return AutoWhy::TooFresh(idle_sec);
     }
     AutoWhy::Do
+}
+
+/// Sổ những phiên đã được TỰ chuyển vì hết hạn mức — để không mở cửa sổ thứ hai.
+pub const AUTO_LIMIT_DONE_KEY: &str = "auto_limit:done";
+
+/// Nhớ chừng này lượt chuyển. Cắt từ ĐẦU (`Vec`), tức cũ-trước — cùng lý do
+/// `AUTO_DONE_KEY` phải cắt như thế và `AUTO_PCT_KEY` từng cắt sai.
+const AUTO_LIMIT_KEEP: usize = 50;
+
+/// Vì sao MỘT phiên bị chặn NÊN (hoặc chưa nên) đổi tài khoản lúc này.
+///
+/// Trả về lý do thành chữ, không phải `bool`: một cơ chế tự động mà không giải
+/// thích được vì sao nó im lặng là một cơ chế không ai dám tin.
+#[derive(Debug, PartialEq, Eq)]
+pub enum LimitWhy {
+    Do,
+    /// Phiên KHÔNG bị chặn. Cửa này nằm trong hàm chứ không nằm ở chỗ gọi có chủ
+    /// ý: một cổng chỉ là phép đo khi nó nói được cả câu "không" — đối chứng
+    /// ngược của luật 13① phải cấy được vào đúng hàm ra phán quyết.
+    NotLimited,
+    /// Đã chuyển rồi — sổ `AUTO_LIMIT_DONE_KEY`.
+    AlreadyDone,
+    /// Phiên vừa sinh ra — xem [`AUTO_LIMIT_MIN_AGE_SEC`]. Đây là phanh chống
+    /// DÂY CHUYỀN, và nó không phải đề phòng suông: đã đo được.
+    TooYoung(u64),
+    /// Không có cửa sổ thật để đóng, và không ai gõ được vào (`--bg`, `??`).
+    NoWindow,
+    /// Không còn tài khoản nào để sang — `watch::suggest_account` trả `None`.
+    NoAccount,
+    /// Đồng hồ mở lại còn chừng này phút: chờ rẻ hơn thay cả cửa sổ.
+    ResetsSoon(u64),
+    /// Mốc mở lại đọc ra XA hơn cả cửa sổ hạn mức ⟹ nó là mốc **đã qua**, tức
+    /// hạn mức đã tự mở và dòng chữ trên màn chỉ là vết cũ — xem
+    /// [`LIMIT_WINDOW_MAX_MIN`].
+    ResetAlreadyPassed(u64),
+}
+
+/// Trần của một cửa sổ hạn mức dạng ĐỒNG HỒ, tính bằng phút.
+///
+/// 🔴 Tìm ra bằng lượt chạy THẬT đầu tiên (2026-09-01 19:48Z = 02:48 giờ máy):
+/// phiên `[dwork/A-DDRIVE]` mang `resets 1:40am (Asia/Saigon)`, và
+/// [`minutes_until_reset`] trả **1372** — vì nó chỉ biết một đồng hồ 12 giờ nên
+/// một mốc đã qua 70 phút đọc lên y hệt một mốc còn 22 tiếng rưỡi. Cửa
+/// `ResetsSoon` vì thế mở toang đúng lúc đáng lẽ phải đóng.
+///
+/// Cái phân biệt được hai ca ấy KHÔNG nằm trong dòng chữ, nó nằm ở hình dạng của
+/// sản phẩm: cửa sổ hạn mức phiên là **5 giờ**, nên lúc vừa chạm trần thì mốc mở
+/// lại luôn ≤ 5 giờ nữa. Hạn mức TUẦN thì in NGÀY (`resets Sep 1`), không in
+/// đồng hồ, nên nó không đi qua đường này (`minutes_until_reset` trả `None`).
+/// ⟹ một mốc dạng đồng hồ đọc ra xa hơn 6 giờ là một mốc đã qua, không có ca thứ
+/// ba. Để 6 chứ không phải 5: chừa cho lệch đồng hồ và cho ngày CLI đổi cửa sổ.
+///
+/// ⚠ Và lúc ấy đúng việc là **KHÔNG chuyển**: hạn mức đã tự mở, phiên cũ còn
+/// nguyên ngữ cảnh của nó. Bàn giao lúc này là đổi một phiên 67% ngữ cảnh lấy
+/// một bản tóm thô — đúng cái giá mà `auto_handover` sinh ra để tránh.
+const LIMIT_WINDOW_MAX_MIN: u64 = 360;
+
+/// Phiên trẻ hơn chừng này giây thì KHÔNG bị tự chuyển. Phanh chống dây chuyền.
+///
+/// 🔴 Đo được trong đúng buổi dựng tính năng (2026-09-01), không phải đề phòng
+/// suông — và nó là một vòng lặp KÍN, không phải một lượt lỡ tay:
+///
+/// ```text
+/// 19:50:21  mở phiên 34f57a63 (acc3 → acc2), mang bản bàn giao từ nhật ký
+/// 19:52:39  auto_limit_firing session=34f57a63  khi="resets 11:50pm"
+/// 19:52:42  mở tiếp phiên 3360dcc9 (acc2 → acc3)
+/// ```
+///
+/// Gốc nằm ở chỗ không ai ngờ: [`crate::sessions::handover_from_journal`] chép
+/// **NGUYÊN VĂN** lượt nói cuối của phiên cũ, mà lượt nói cuối của một phiên bị
+/// chặn chính là dòng `You've hit your session limit · resets …`. Dòng ấy ngắn
+/// dưới 120 ký tự nên nó qua được cửa hình dạng của
+/// [`crate::keys::session_limit_on_screen`] — bản bàn giao vừa dán vào cửa sổ
+/// mới là phiên mới đọc lên "đang bị chặn", và cứ thế.
+///
+/// Sổ `AUTO_LIMIT_DONE_KEY` không đỡ được: mỗi vòng là một **id phiên MỚI**, nên
+/// cuốn sổ trả lời đúng câu của nó mà vẫn để dây chuyền chạy. Cái chặn được là
+/// TUỔI — cùng đúng cái phanh `auto_handover` đã phải dựng sau sự cố 12/08, kèm
+/// đúng lời ghi ở đó: *một cơ chế tự động thay cửa sổ của người khác thì phải có
+/// phanh RIÊNG, không dựa vào việc "gốc đã đúng rồi"*.
+const AUTO_LIMIT_MIN_AGE_SEC: u64 = 600;
+
+/// Quyết định thuần: không đọc đĩa, không gọi ai — để test được từng cửa.
+pub fn auto_limit_why(
+    limited: Option<&str>,
+    already_done: bool,
+    age_sec: u64,
+    has_window: bool,
+    target: Option<&str>,
+    mins_to_reset: Option<u64>,
+    wait_min: u64,
+) -> LimitWhy {
+    match limited {
+        None => return LimitWhy::NotLimited,
+        Some(k) if k.trim().is_empty() => return LimitWhy::NotLimited,
+        Some(_) => {}
+    }
+    if already_done {
+        return LimitWhy::AlreadyDone;
+    }
+    if age_sec < AUTO_LIMIT_MIN_AGE_SEC {
+        return LimitWhy::TooYoung(age_sec);
+    }
+    if !has_window {
+        return LimitWhy::NoWindow;
+    }
+    match target {
+        None => return LimitWhy::NoAccount,
+        Some(a) if a.trim().is_empty() => return LimitWhy::NoAccount,
+        Some(_) => {}
+    }
+    // 🔴 ĐỌC KHÔNG RA PHÚT NÀO ⟹ VẪN LÀM. Phải nói rõ vì sao đây không phải một
+    // lượt fail-open trá hình (luật 13②):
+    //
+    // Thứ đọc không ra là một con số PHỤ — *chờ hay chuyển* — chứ không phải sự
+    // kiện chính; sự kiện chính (`hit your … limit`) đã đọc được thành chữ rồi,
+    // nếu không thì đã không vào tới hàm này. Và hình dạng đọc-không-ra chính là
+    // hình dạng ĐẮT nhất: hạn mức TUẦN in `resets Sep 1`, tức còn nhiều ngày —
+    // đúng ca phải chuyển. Fail-closed ở đây nghĩa là để phiên chết đứng suốt
+    // mấy ngày chỉ để tránh một cửa sổ thừa.
+    if let Some(m) = mins_to_reset {
+        // Mốc đã qua ⟹ hạn mức đã tự mở, không có gì để chuyển.
+        if m > LIMIT_WINDOW_MAX_MIN {
+            return LimitWhy::ResetAlreadyPassed(m);
+        }
+        if m < wait_min {
+            return LimitWhy::ResetsSoon(m);
+        }
+    }
+    LimitWhy::Do
+}
+
+/// Còn bao nhiêu PHÚT nữa tới giờ mở lại, đọc từ chính dòng CLI in ra.
+///
+/// Đầu vào là thứ [`crate::keys::session_limit_on_screen`] trả về (phần sau dấu
+/// `·`). Hai dạng đo được trên máy này: `resets 10:30pm (Asia/Saigon)` và
+/// `resets Sep 1`. Dạng đầu ra được số; dạng sau **cố ý** trả `None` — nó là hạn
+/// mức tuần, còn hàng ngày, và một parser đoán ngày tháng ở đây đắt hơn nhiều so
+/// với việc thú nhận không biết. Xem [`auto_limit_why`] để biết `None` dẫn tới
+/// quyết định gì và vì sao.
+///
+/// 🔴 **Tên MÚI GIỜ chứa `am`** — `(America/New_York)` có `am` ngay sau dấu
+/// ngoặc — nên bản đầu cắt ở `(` trước khi tìm `am`/`pm`. Cấy lỗi để kiểm
+/// (2026-09-01, bỏ lượt cắt ấy đi): **bài kiểm KHÔNG đỏ**. Nó là một mutant
+/// TƯƠNG ĐƯƠNG, và lý do đo được: dấu `(` bao giờ cũng đứng TRƯỚC chữ `am` của
+/// múi giờ, nên lát cắt `&sau[..p]` luôn nuốt theo `" ("` và `parse` chết ở
+/// đúng chỗ ấy — `resets 10:30 (America/New_York)` ra `None` bằng cả hai đường.
+/// Nên lượt cắt đã bị GỠ: một hàng rào không bao giờ đổi được kết quả là một
+/// hàng rào kể một câu chuyện sai về vì sao chỗ này an toàn.
+///
+/// ⚠ Cái KHÔNG được bảo vệ, nói thẳng ra vì nó không có bài kiểm nào: một dòng
+/// dạng `resets 10:30 Amsterdam` (múi giờ KHÔNG ngoặc, giờ ≤ 12) sẽ đọc ra
+/// `10:30` như thể có `am` — lượt cắt cũ cũng không đỡ được ca ấy. CLI chưa in
+/// dạng đó lần nào; ngày nó in thì đây là chỗ sửa.
+///
+/// Múi giờ trong ngoặc bỏ qua: CLI in giờ ĐỊA PHƯƠNG của máy, và `now_min` cũng
+/// là giờ địa phương. Ghi ra vì đó là một GIẢ ĐỊNH, không phải một phép đo.
+///
+/// `now_min` = số phút kể từ nửa đêm; thuần để test được cả hai chiều.
+pub fn minutes_until_reset(when: &str, now_min: u64) -> Option<u64> {
+    let low = when.to_lowercase();
+    let sau = low
+        .split_once("resets")
+        .map(|(_, r)| r)
+        .unwrap_or(low.as_str());
+    let sau = sau.trim();
+    let (dong_ho, chieu) = match (sau.find("pm"), sau.find("am")) {
+        (Some(p), _) => (&sau[..p], 12u64),
+        (None, Some(p)) => (&sau[..p], 0u64),
+        (None, None) => return None,
+    };
+    let dong_ho = dong_ho.trim();
+    let (gio, phut) = match dong_ho.split_once(':') {
+        Some((g, p)) => (g.trim().parse::<u64>().ok()?, p.trim().parse::<u64>().ok()?),
+        None => (dong_ho.parse::<u64>().ok()?, 0),
+    };
+    // Đồng hồ 12 giờ: `12am` = 0h, `12pm` = 12h. Ngoài khoảng ấy là đọc nhầm cái
+    // gì đó, và đoán tiếp thì tệ hơn nhận là không biết.
+    if gio == 0 || gio > 12 || phut > 59 {
+        return None;
+    }
+    let dich = (gio % 12 + chieu) * 60 + phut;
+    Some((dich + 1440 - now_min % 1440) % 1440)
+}
+
+/// Câu huba nói khi nó TỰ chuyển một phiên bị chặn sang tài khoản khác.
+///
+/// Không mượn lời [`auto_handover_notice`] được, và chỗ khác nhau là chỗ đắt
+/// nhất: ở đó phiên cũ vẫn SỐNG (huba chủ động cắt ngang), nên câu *"cửa sổ cũ
+/// giữ nguyên — không mất gì"* là câu đúng. Ở đây phiên cũ đã CHẾT ĐỨNG; nói
+/// "không mất gì" là nói sai về đúng thứ chủ máy cần biết để quyết.
+pub fn auto_limit_notice(
+    name: &str,
+    acc_cu: &str,
+    acc_moi: &str,
+    khi: &str,
+    moved: &HandoverMove,
+) -> String {
+    let head =
+        format!("🚫→✅ {name} hết hạn mức ({acc_cu} · {khi}) — huba tự chuyển sang {acc_moi}.");
+    let than = match moved {
+        HandoverMove::Opened {
+            tty,
+            new_id,
+            closed_err,
+        } => {
+            let con_lai = closed_err
+                .map(|e| format!("\n⚠ cửa sổ cũ chưa đóng được: {e}"))
+                .unwrap_or_default();
+            format!(
+                "Phiên mới {new_id} đang chạy ở cửa sổ {tty} bằng {acc_moi}.\n\
+                 👁 Đang theo phiên mới — gõ thẳng vào đây là nói với nó.\n\
+                 ⚠ Bản bàn giao dựng TỪ NHẬT KÝ (không tốn hạn mức) nên nó THÔ: \
+                 việc còn dở phải tự đọc ra, phiên cũ không tự tóm tắt được.{con_lai}"
+            )
+        }
+        HandoverMove::Stalled { tty, asking } => {
+            let vi_sao = if asking.is_empty() {
+                "\nKhông đọc được màn của nó — xem cửa sổ ấy trên máy.".to_string()
+            } else {
+                format!(
+                    "\nNó đang DỪNG LẠI HỎI:\n{}",
+                    asking
+                        .iter()
+                        .map(|(n, l)| format!("  {n}. {l}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            };
+            format!(
+                "⚠ Cửa sổ mới ({acc_moi}) mở ở {tty} nhưng phiên CHƯA chào đời sau 12 giây.{vi_sao}\n\
+                 Cửa sổ CŨ vẫn còn — nhưng nó đang bị chặn, không làm tiếp được gì."
+            )
+        }
+        HandoverMove::Failed {
+            err,
+            resume_command,
+        } => format!(
+            "⚠ chưa mở được cửa sổ mới ({}) — phiên cũ vẫn đứng đó bị chặn. Gõ tay:\n{resume_command}",
+            crate::exec::truncate(err, 120)
+        ),
+    };
+    format!("{head}\n{than}")
 }
 
 /// Ids of the sessions THIS huba started, newest last.
@@ -4380,38 +4853,28 @@ fn remember_panel(db: &Db, sid: &str, message_id: Option<i64>) {
     }
 }
 
-/// Điểm dùng của từng loại lệnh, để xếp menu ☰ — xem [`menu_reorder_if_needed`].
-pub const MENU_KEY: &str = "menu:usage";
 /// Thứ tự menu đã khai với Telegram lần gần nhất (để biết khi nào phải khai lại).
 pub const MENU_ORDER_KEY: &str = "menu:order";
 
-/// Sau bao lâu thì một lượt dùng chỉ còn đáng NỬA.
+/// Đếm bao nhiêu lượt gõ gần nhất để xếp menu ☰.
 ///
-/// 🔴 Hà 2026-08-17, ngay sau khi hỏi menu có tự xếp theo tần suất được không:
-/// *"Nó tần suất phải gắn cả thời gian thì mới phản ánh đúng nó đc dùng nhiều
-/// thật hay chỉ là trong quá khứ"*.
+/// 🔴 Hà 2026-09-02: *"Mỗi lần gửi lệnh thì lưu timestamp lại, mỗi lần sắp xếp
+/// thì lấy ra 200 bản ghi gần nhất rồi counting rồi sắp xếp"*.
 ///
-/// Đúng, và đó là khác biệt giữa một cái đếm và một thước đo: đếm thuần thì một
-/// lệnh dùng 200 lần hồi tháng trước đứng đầu menu mãi mãi, kể cả khi nó chết
-/// hẳn — cùng hình dạng với `/win` và `/project` (0 lượt từ 26/07 mà vẫn nằm
-/// trong bảng tới 15/08). Bảy ngày là cỡ một nhịp làm việc: đủ dài để một lệnh
-/// dùng hằng ngày không tụt hạng vì nghỉ cuối tuần, đủ ngắn để thói quen tháng
-/// trước không quyết định menu tháng này.
-pub const MENU_HALF_LIFE_MS: i64 = 7 * 24 * 3_600_000;
+/// Cửa sổ ĐẾM chứ không phải điểm có suy giảm, và khác biệt không chỉ là cách
+/// tính: một cửa sổ trả lời được câu *"gần đây"* bằng một con số đọc ra được
+/// (200 lượt vừa rồi), còn điểm suy giảm chỉ trả lời được bằng một hàm mũ mà
+/// muốn kiểm phải đi tính tay. Sổ ở `cmd_log`; xem [`crate::db::Db::log_command`].
+pub const MENU_WINDOW: i64 = 200;
 
-/// Điểm cũ, nhìn từ HÔM NAY: mỗi `half_life_ms` trôi qua thì còn một nửa.
-///
-/// Hàm thuần để đo được: nó là toàn bộ phần "gắn thời gian" của tần suất, và
-/// một phép đo tính sai chỗ này thì menu xếp sai mà không ai thấy.
-pub fn decayed(score: f64, last_ms: i64, now_ms: i64, half_life_ms: i64) -> f64 {
-    if half_life_ms <= 0 || score <= 0.0 {
-        return 0.0;
-    }
-    // Đồng hồ chạy lùi (đổi giờ hệ thống, sổ chép từ máy khác) ⟹ coi như vừa
-    // dùng: thà giữ nguyên điểm còn hơn nhân nó lên bằng một số mũ dương.
-    let elapsed = (now_ms - last_ms).max(0) as f64;
-    score * 0.5f64.powf(elapsed / half_life_ms as f64)
-}
+// 🪦 `MENU_HALF_LIFE_MS` + `decayed` gỡ 2026-09-02, cùng cả tầng điểm-suy-giảm.
+//
+// Câu hỏi chúng sinh ra để trả lời vẫn còn nguyên giá trị — Hà 2026-08-17:
+// *"tần suất phải gắn cả thời gian thì mới phản ánh đúng nó đc dùng nhiều thật
+// hay chỉ là trong quá khứ"*. Cửa sổ 200 lượt trả lời đúng câu ấy theo cách
+// khác: một lệnh dùng 200 lần hồi tháng trước sẽ TRÔI RA KHỎI cửa sổ, không cần
+// hàm mũ nào. Cái được thêm là đọc ra được — "trong 200 lượt vừa rồi anh gõ
+// `/shot` 41 lần" là một câu kiểm lại được bằng mắt, còn "điểm 887.0" thì không.
 
 /// Nhớ các đường dẫn rồi dựng nút `📎 <tên file>`.
 ///
@@ -6814,108 +7277,67 @@ pub fn say_from_session_with(
     say_session_data(tg, text, &buttons, log_key, &data);
 }
 
-/// Ghi một lượt dùng, rồi khai lại menu ☰ NẾU thứ tự đổi.
+/// Ghi một lượt gõ lệnh, rồi khai lại menu ☰ NẾU thứ tự đổi.
 ///
-/// Điểm của mỗi loại lệnh suy giảm theo thời gian (xem [`decayed`]) và cộng 1
-/// cho lượt vừa chạy. Khai lại chỉ khi thứ tự khác lần trước: Telegram không có
-/// cách nào "sửa một dòng", mỗi lần khai là gửi cả danh sách, nên gửi mỗi lượt
-/// bấm là tốn một lượt HTTP cho một cái menu y hệt.
-/// Phải hơn kẻ đứng trên BAO NHIÊU thì mới được vượt mặt.
+/// 🔴 LUẬT MỚI, Hà 2026-09-02: *"Mỗi lần gửi lệnh thì lưu timestamp lại, mỗi lần
+/// sắp xếp thì lấy ra 200 bản ghi gần nhất rồi counting rồi sắp xếp"*.
 ///
-/// 🔴 Hà 2026-08-19: *"Sắp xếp ưu tiên menu đang theo flow nào mà tôi thấy cứ
-/// nhảy loạn lên"*. Flow thì đúng — tần suất có suy giảm theo thời gian, chính
-/// thứ anh đặt hôm 17/08 — nhưng nó thiếu cái hãm, nên **hai lệnh sát điểm nhau
-/// đổi chỗ sau MỖI lượt bấm**.
+/// Ba tầng cũ (điểm theo `kind` · suy giảm 7 ngày · hãm 25%) rút còn một: đếm
+/// [`MENU_WINDOW`] lượt gần nhất trong `cmd_log`, xếp giảm dần, hoà thì giữ thứ
+/// tự bảng `ROUTES`.
 ///
-/// 📐 Đo trên sổ thật (`cursors.menu:usage`, 19/08): `Session` **257,6** ·
-/// `Shot` **241,2** — hơn nhau **6,8%**. Mà bấm một phiên là chạy `/session`
-/// rồi `/shot` liền nhau, mỗi lượt +1 cho một bên, nên hai đứa **thay nhau dẫn
-/// đầu vĩnh viễn**. Log nói đúng điều đó: 48 lượt xếp lại trong hai ngày, và
-/// riêng cặp 1↔2 lật **bốn lần trong 13 phút** (08:34:35 → 08:34:38 → 08:45:17
-/// → 08:45:21), có lần **cách nhau 3 giây**. Cặp `Type` 100,7 / `Key` 97,3
-/// (3,5%) là cặp thứ hai đang chờ tới lượt.
+/// **Đếm theo TÊN route, không theo `kind`** — và đó là chỗ hỏng Hà chỉ ra cùng
+/// ngày. `/enter`, `/right`, `/ctrlc` đều là `CommandKind::Key`, nên luật cũ
+/// cho chúng CHUNG một bộ đếm: ba dòng menu, một con số (280.19 y hệt nhau),
+/// thứ tự giữa chúng là ngẫu nhiên vĩnh viễn vì không phép đo nào tách nổi.
+/// Xem [`crate::commands::route_name_for`].
 ///
-/// 1,25 ⟹ muốn vượt `Session` thì `Shot` phải đạt ~322 điểm, tức hơn hẳn vài
-/// chục lượt dùng chứ không phải một cú bấm. Nó KHÔNG đóng băng menu: một lệnh
-/// thật sự đang được dùng nhiều hơn vẫn leo, chỉ là leo vì đang được dùng nhiều
-/// hơn, không phải vì vừa được bấm sau.
-pub const MENU_LEAD_MARGIN: f64 = 1.25;
+/// ⚠ **Cái mất đi: cửa hãm 25%** (`MENU_LEAD_MARGIN`, dựng 19/08 sau câu *"menu
+/// cứ nhảy loạn lên"*). Luật mới xếp thẳng theo số đếm nên không còn chỗ cho
+/// nó, và hệ quả phải nói trước chứ không để tự lộ ra: `/session` với `/shot`
+/// chiếm gần nửa lưu lượng và luôn sát nhau, nên trong một cửa sổ 200 lượt,
+/// **một lệnh cũng đủ làm hai đứa đổi chỗ** — đúng cái đã thấy hồi 19/08. Cửa
+/// sổ 200 dập được dao động CHẬM (thói quen tháng trước trôi ra ngoài), không
+/// dập được cặp dẫn đầu. Muốn hãm lại thì thêm một dải hoà ở đây, đừng dựng lại
+/// cả tầng điểm.
+///
+/// Khai lại chỉ khi thứ tự khác lần trước: Telegram không có cách nào "sửa một
+/// dòng", mỗi lần khai là gửi cả danh sách, nên gửi mỗi lượt bấm là tốn một
+/// lượt HTTP cho một cái menu y hệt.
+pub fn menu_reorder_if_needed(db: &Db, route: &str, _now_ms: i64) {
+    // Chỉ ghi thứ CÓ THỂ lên menu — xem `commands::is_listed`. Sổ này tồn tại
+    // để xếp menu, nên ghi thêm thứ không bao giờ hiện ở đó chỉ làm loãng đúng
+    // 200 ô đang dùng để đếm.
+    if route.is_empty() || !crate::commands::is_listed(route) {
+        return;
+    }
+    if let Err(e) = db.log_command(route) {
+        logging::error(
+            "cmd_log_write_failed",
+            json!({ "route": route, "err": e.to_string() }),
+        );
+        return;
+    }
 
-/// Thứ tự menu ĐÃ HÃM: giữ nguyên thứ tự đang có, trừ chỗ kẻ dưới hơn hẳn kẻ trên.
-///
-/// Hàm thuần, và cố ý thế: đây là toàn bộ phần "có nên đổi chỗ không", nên nó
-/// phải kiểm được bằng đúng những con số đã làm menu nhảy — xem
-/// `tests/menu_order.rs`.
-///
-/// Đi từ thứ tự CŨ chứ không từ bảng điểm: cái người dùng đang nhớ là thứ tự cũ,
-/// nên nó là điểm xuất phát, còn điểm số chỉ được phép đẩy từng nấc. Lệnh mới
-/// (chưa từng có trong thứ tự cũ) xếp cuối theo điểm của nó — điểm 0 thì đứng
-/// cuối, đúng chỗ.
-pub fn menu_settled_order(
-    prev: &[String],
-    scored: &[(&'static str, &'static str, u64)],
-) -> Vec<(&'static str, &'static str)> {
-    let mut order: Vec<(&'static str, &'static str, u64)> = Vec::with_capacity(scored.len());
-    for name in prev {
-        if let Some(row) = scored.iter().find(|(n, _, _)| n == name) {
-            order.push(*row);
-        }
+    let recent = db.recent_commands(MENU_WINDOW);
+    // Sổ rỗng nghĩa là CHƯA ĐẾM ĐƯỢC, không phải "mọi lệnh đều 0 lượt". Vừa ghi
+    // xong một dòng ngay phía trên, nên rỗng ở đây chỉ có thể là đọc hỏng — và
+    // xếp lại menu bằng một bảng đếm rỗng là đẩy nó về đúng thứ tự bảng, tức
+    // xoá sạch thói quen của chủ máy vì một lượt đọc SQLite trượt.
+    if recent.is_empty() {
+        logging::warn("menu_counts_empty", json!({ "route": route }));
+        return;
     }
-    for row in scored {
-        if !order.iter().any(|(n, _, _)| *n == row.0) {
-            order.push(*row);
-        }
-    }
-    // Nổi bọt từng nấc một, và chỉ khi hơn đủ biên. Từng nấc là có chủ: một lệnh
-    // vừa sống lại thì leo dần, mắt còn theo kịp — nhảy tám bậc một lượt
-    // (`accounts` 12→8, đo 18/08 01:57) thì lần sau tìm nó ở đâu cũng sai.
-    let n = order.len();
-    for _ in 0..n {
-        let mut moved = false;
-        for i in 1..n {
-            let (up, down) = (order[i - 1].2 as f64, order[i].2 as f64);
-            if down > up * MENU_LEAD_MARGIN {
-                order.swap(i - 1, i);
-                moved = true;
-            }
-        }
-        if !moved {
-            break;
-        }
-    }
-    order.into_iter().map(|(n, h, _)| (n, h)).collect()
-}
 
-pub fn menu_reorder_if_needed(db: &Db, kind: CommandKind, now_ms: i64) {
-    let mut book: std::collections::BTreeMap<String, (f64, i64)> = db
-        .cursor_or_log(MENU_KEY)
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default();
-    let key = format!("{kind:?}");
-    let cur = book.get(&key).copied().unwrap_or((0.0, now_ms));
-    let score = decayed(cur.0, cur.1, now_ms, MENU_HALF_LIFE_MS) + 1.0;
-    book.insert(key, (score, now_ms));
-    if let Ok(v) = serde_json::to_string(&book) {
-        if let Err(e) = db.set_cursor(MENU_KEY, &v) {
-            logging::error("menu_usage_not_saved", json!({ "err": e.to_string() }));
-            return;
-        }
+    let mut counts: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for n in &recent {
+        *counts.entry(n.clone()).or_insert(0) += 1;
     }
-    let scored = crate::commands::for_telegram_scored(|r| {
-        let k = format!("{:?}", r.kind);
-        let (s, t) = book.get(&k).copied().unwrap_or((0.0, now_ms));
-        // Xếp bằng số nguyên để thứ tự không nhảy vì sai số dấu phẩy động; nhân
-        // 1000 giữ đủ phân giải cho những điểm đã mờ gần hết.
-        (decayed(s, t, now_ms, MENU_HALF_LIFE_MS) * 1000.0) as u64
-    });
-    let stored = db.cursor_or_log(MENU_ORDER_KEY);
-    let prev: Vec<String> = stored
-        .as_deref()
-        .map(|s| s.split(',').map(str::to_string).collect())
-        .unwrap_or_default();
-    let rows = menu_settled_order(&prev, &scored);
+
+    let rows = crate::commands::for_telegram_counted(&counts);
     let order: Vec<&str> = rows.iter().map(|(n, _)| *n).collect();
     let joined = order.join(",");
+    let stored = db.cursor_or_log(MENU_ORDER_KEY);
     if stored.as_deref() == Some(joined.as_str()) {
         return;
     }
@@ -6927,7 +7349,10 @@ pub fn menu_reorder_if_needed(db: &Db, kind: CommandKind, now_ms: i64) {
             if let Err(e) = db.set_cursor(MENU_ORDER_KEY, &joined) {
                 logging::error("menu_order_not_saved", json!({ "err": e.to_string() }));
             }
-            logging::info("menu_reordered", json!({ "order": order }));
+            logging::info(
+                "menu_reordered",
+                json!({ "order": order, "window": recent.len() }),
+            );
         }
         // Không khai được thì THÔI, và nói ra: menu cũ vẫn dùng được, đây là
         // tiện nghi chứ không phải đường đi của một mệnh lệnh nào.
@@ -9524,8 +9949,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // hiện tại. Hạn mức thì lấy bản đã đo sẵn (5 phút một lượt),
                 // nên lệnh này không đẻ thêm tiến trình `claude` nào.
                 let live = crate::sessions::snapshot(cfg);
-                let ack =
-                    crate::runtime::accounts_say(cfg, &live, chrono::Utc::now().timestamp_millis());
+                let ack = crate::runtime::accounts_say(
+                    cfg,
+                    &live,
+                    chrono::Utc::now().timestamp_millis(),
+                    &db.dead_accounts(),
+                );
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }
@@ -9994,7 +10423,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // như xưa — thà đi đường cũ còn hơn bịa một cái tên.
                 let account = match (&account, &bad_account) {
                     (None, None) => {
-                        let hang = crate::quota::rank_all(cfg, crate::quota::now_ms());
+                        let hang = crate::quota::apply_dead_book(
+                            crate::quota::rank_all(cfg, crate::quota::now_ms()),
+                            &db.dead_accounts(),
+                        );
                         // Ảnh chụp RIÊNG cho lượt này (~0,5 giây đo được:
                         // `sessions_snapshot_ms` 519–555ms). Đắt hơn đọc sổ,
                         // nhưng tín hiệu "tài khoản đã chết" chỉ nằm trên MÀN và
@@ -10203,7 +10635,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let ack = match account.as_deref() {
                     None => ack,
                     Some(a) => {
-                        let hang = crate::quota::rank_all(cfg, crate::quota::now_ms());
+                        let hang = crate::quota::apply_dead_book(
+                            crate::quota::rank_all(cfg, crate::quota::now_ms()),
+                            &db.dead_accounts(),
+                        );
                         match hang.iter().find(|r| r.name == a) {
                             Some(r) if r.rank == crate::quota::Rank::Full => {
                                 let khac = crate::watch::suggest_account(a, &hang, &[])
@@ -11350,6 +11785,37 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                         "plan": plan }),
                                             );
                                             crate::keys::press_writes(w, &plan)
+                                        }
+                                        // 🔴 `esc` PHẢI là phím RỜI — Hà
+                                        // 2026-09-01: *"Gửi lệnh không có tác
+                                        // dụng"*, ảnh `/key esc` vào
+                                        // `projects-f8` và màn `/usage` đứng
+                                        // nguyên. `do_script` kèm một CR, mà
+                                        // `ESC`+byte-khác là một CHUỖI THOÁT chứ
+                                        // không phải phím Escape — xem
+                                        // `keys::press_escape`, và bản đo trên
+                                        // cửa sổ thật ở `tests/bare_esc_live.rs`.
+                                        None if typed.trim() == "esc" => {
+                                            match crate::keys::press_escape(w) {
+                                                crate::keys::EscHow::Skipped(why) => {
+                                                    logging::warn(
+                                                        "key_esc_skipped",
+                                                        json!({ "session": s.session_id,
+                                                                "why": why }),
+                                                    );
+                                                    Err(anyhow::anyhow!(
+                                                        "không bấm được Esc: {why}"
+                                                    ))
+                                                }
+                                                duong => {
+                                                    logging::info(
+                                                        "key_esc_sent",
+                                                        json!({ "session": s.session_id,
+                                                                "duong": format!("{duong:?}") }),
+                                                    );
+                                                    Ok(())
+                                                }
+                                            }
                                         }
                                         None => crate::keys::press(w, typed.trim()),
                                     }
@@ -13115,7 +13581,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     "ms": cmd_started.elapsed().as_millis() }),
         );
         // Menu ☰ xếp theo cái thật sự đang được dùng — xem `menu_reorder_if_needed`.
-        menu_reorder_if_needed(db, cmd.kind, chrono::Utc::now().timestamp_millis());
+        //
+        // Quy về TÊN route trước khi ghi sổ: `cmd.kind` không phân biệt được
+        // `/enter` với `/right`, và đó đúng là con bug Hà đọc ra ở menu.
+        if let Some(route) = crate::commands::route_name_for(cmd.kind, &cmd.arg) {
+            menu_reorder_if_needed(db, route, chrono::Utc::now().timestamp_millis());
+        }
         if let Some(ack) = answered {
             logging::info(
                 "channel_command_handled",
@@ -13826,6 +14297,11 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     // hai lượt ảnh chụp để quyết định có nói hay không.
     let mut live = crate::sessions::snapshot(cfg);
     mark_started_by_hub(db, &mut live);
+    // Sổ tài khoản chết đi TRƯỚC mọi thứ đọc nó — cái loa gợi ý tài khoản
+    // (`announce_changes`) và hai cỗ máy tự chuyển ở dưới đều hỏi cuốn sổ này.
+    // Đặt sau `snapshot` vì nguồn của nó là màn, và đặt trên cùng ảnh chụp ấy
+    // vì dựng hai lần là hai câu trả lời lệch nhau.
+    crate::watch::reconcile_dead_book(db, &live.sessions);
     announce_changes(db, cfg, &live);
     // Giữ tin gim đúng với sự thật — xem `refresh_pin`. Đặt ngay sau cái loa vì
     // dùng CHUNG một ảnh chụp: dựng hai lần là hai câu trả lời lệch nhau.
@@ -13862,6 +14338,12 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     // trước khi quyết, còn hai tick `runin_*` tự chụp lại ảnh phiên của chúng.
     execute_telegram_commands(db, cfg);
     runin_inbox_tick(db, cfg);
+    // Phiên bị chặn vì hết hạn mức đi TRƯỚC. Hai nhánh làm việc trên hai tập
+    // phiên RỜI NHAU (`auto_handover` bỏ qua phiên `limited`), nên thứ tự không
+    // đổi kết quả — nó chỉ nói ra thứ tự ưu tiên: một phiên đã chết đứng gấp hơn
+    // một phiên còn chạy mà chỉ đầy ngữ cảnh. Nếu về sau hai tập giao nhau lại
+    // thì dòng này là chỗ đã chọn sẵn bên nào thắng.
+    auto_switch_on_limit(db, cfg, &live);
     let watching = auto_handover(db, cfg, &live);
     // …và phiên nào đang đứng chờ một lệnh CHỦ MÁY phải gõ thì gõ hộ, nếu lệnh
     // ấy nằm trong danh sách cho phép. Đứng SAU `auto_handover` có chủ ý: đóng

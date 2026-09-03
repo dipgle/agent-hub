@@ -37,6 +37,22 @@ pub struct AutoHandoverCfg {
     /// Chỉ nhìn màn hình là chưa đủ: giữa hai lệnh, màn cũng không có đồng hồ
     /// trong tích tắc. Đòi thêm nhật ký im lặng đủ lâu thì mới chắc.
     pub idle_sec: u64,
+    /// 🔴 Hết hạn mức thì TỰ chuyển tài khoản — Hà 2026-09-01: *"Tại sao acc bị
+    /// limit không tự chuyển mà bắt tôi gõ lệnh"*.
+    ///
+    /// Cờ RIÊNG, không nằm dưới `enabled`, vì hai nhánh trả lời hai câu khác
+    /// nhau: `enabled` gác việc đóng sổ khi **ngữ cảnh đầy** (huba cắt ngang một
+    /// phiên đang sống), còn cờ này gác việc chuyển tài khoản khi phiên **đã
+    /// chết đứng** — không còn gì để cắt ngang. Gộp làm một thì tắt cái nọ là
+    /// tắt luôn cái kia mà không ai cố ý.
+    pub on_limit: bool,
+    /// Đồng hồ mở lại còn dưới chừng này PHÚT thì CHỜ, đừng đốt một cửa sổ.
+    ///
+    /// Hạn mức 5 giờ hay tự mở lại sau ít phút; thay cửa sổ lúc ấy là mất phiên
+    /// cũ để đổi lấy vài phút. Hạn mức TUẦN (`resets Sep 1`) thì không đọc ra
+    /// phút nào — xem [`crate::pipeline::minutes_until_reset`], và đó đúng là ca
+    /// phải chuyển.
+    pub on_limit_wait_min: u64,
 }
 
 impl Default for AutoHandoverCfg {
@@ -45,6 +61,8 @@ impl Default for AutoHandoverCfg {
             enabled: true,
             at_percent: 80,
             idle_sec: 120,
+            on_limit: true,
+            on_limit_wait_min: 30,
         }
     }
 }

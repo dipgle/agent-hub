@@ -7094,7 +7094,7 @@ pub fn start_background(
 /// which huba logged as a warning while telling the owner the session had
 /// stopped. Everything else here keys on the full id, so the narrowing happens
 /// at the one call that needs it.
-fn short_id(session_id: &str) -> &str {
+pub fn short_id(session_id: &str) -> &str {
     session_id.split('-').next().unwrap_or(session_id)
 }
 

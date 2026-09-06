@@ -36,6 +36,8 @@ fn mark(state: &str, tty: &str, kind: &str) -> Mark {
         i: 4242,
         o: "terminal".to_string(),
         g: 0,
+        // Chưa từng báo mồ côi — mọi bài kiểm ở đây nói về chuyện khác.
+        m: false,
     }
 }
 fn working_long(id: &str) -> (String, Mark) {

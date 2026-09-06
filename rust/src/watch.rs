@@ -99,7 +99,7 @@ fn working_since(mark: &str) -> Option<i64> {
 /// vẫn mở, hoặc cửa sổ terminal đóng luôn. Phân biệt được cả ba — nhưng phải
 /// giữ `tty` và `kind` TỪ TRƯỚC, vì lúc phiên biến mất thì hàng của nó cũng đi
 /// theo và không còn gì để hỏi.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Mark {
     /// `working@<epoch>` · `idle`
     pub s: String,
@@ -220,6 +220,19 @@ pub struct Mark {
     /// "cửa sổ còn, chỉ CLI thoát" — phiên nền không có cửa sổ nào để hỏi lại.
     #[serde(default)]
     pub g: i64,
+    /// Đã báo phiên này MỒ CÔI chưa — nói MỘT lần, không tụng lại mỗi vòng.
+    ///
+    /// 🔴 Hà 2026-09-06: *"Màn mồ côi để làm gì, có thao tác được đâu"* · *"Đã
+    /// bảo ko chạy gì thì bỏ rồi"*. Mồ côi = không cửa sổ nào trên màn + cha
+    /// sinh ra nó đã thoát (`sessions::is_orphan`); đo hôm ấy hai cái giữ
+    /// **1203 MB** và không ghi thêm một byte nhật ký nào trong 4,5 tiếng.
+    ///
+    /// Vì sao phải là một CỜ TRONG SỔ chứ không phải một dòng in lại mỗi lượt:
+    /// luật 11 của dự án nói huba chỉ mở miệng khi CÓ THAY ĐỔI. Mồ côi *xuất
+    /// hiện* là một thay đổi; mồ côi *tồn tại* thì không, và một cái loa kêu
+    /// mỗi 20 giây là cái loa bị tắt tiếng, kéo theo mọi tin đáng đọc.
+    #[serde(default)]
+    pub m: bool,
 }
 
 /// Phải vắng mặt LIÊN TỤC chừng này giây trong `claude agents` thì cái chết
@@ -283,6 +296,17 @@ pub enum Change {
         /// Phiên cha, nếu có — xem `Mark::p`.
         parent: String,
     },
+    /// Phiên thành MỒ CÔI: không cửa sổ nào trên màn, và cha sinh ra nó đã thoát.
+    ///
+    /// Nói MỘT lần (xem `Mark::m`). Nó không phải một cái chết — tiến trình vẫn
+    /// sống, vẫn giữ RAM — nên `Ended` không tả đúng; và nó cũng không tự khỏi,
+    /// nên im luôn thì cái máy cứ thế đầy dần những thứ không ai còn dùng.
+    Orphaned {
+        id: String,
+        name: String,
+        /// pid của cha đã thoát — thứ biến "mồ côi" từ một nhãn thành một dữ kiện.
+        spawner: i64,
+    },
 }
 
 /// Phiên đang thật sự ở trạng thái nào lúc nó im — NHÌN, không đoán.
@@ -333,6 +357,7 @@ impl Change {
     /// Tên phiên, dùng cho nhãn nút "vào phiên" — mỗi biến thể đều mang sẵn.
     pub fn name(&self) -> &str {
         match self {
+            Change::Orphaned { name, .. } => name,
             Change::Limited { name, .. } | Change::Failed { name, .. } => name,
             Change::Finished { name, .. }
             | Change::Asking { name, .. }
@@ -537,6 +562,15 @@ impl Change {
                 out
             }
             Change::Ended { name, .. } => format!("{ST_DEAD} {name} — kết cục chưa xác định"),
+            // Nói ra CẢ ba thứ: nó là gì, vì sao thành ra thế, và làm gì với nó.
+            // Một tin báo không kèm đường đi thì chủ máy vẫn phải tự nhớ cú
+            // pháp, đúng lúc anh đang ở xa — cùng bài đã học ở `Change::Limited`.
+            Change::Orphaned { id, name, spawner } => format!(
+                "🌙 {name} thành MỒ CÔI — không còn cửa sổ nào trên màn, và phiên đẻ ra nó (pid {spawner}) đã thoát.\n\
+                 Nó không tự dừng, vẫn giữ RAM, và gõ vào thì không có chỗ nào để gõ.\n\
+                 Dọn: /stop {}",
+                crate::sessions::short_id(id)
+            ),
         }
     }
 }
@@ -973,6 +1007,28 @@ pub fn changes(
         } else {
             epoch_sec
         };
+        // MỒ CÔI — nói MỘT lần, xem `Mark::m`.
+        //
+        // `is_orphan` đòi CẢ hai vế đo được: không cửa sổ nào trên màn, VÀ
+        // `spawner_alive == Some(false)`. Vế sau là `Some(false)` chứ không phải
+        // `!= Some(true)` — "chưa đọc được cha" (`None`) là trạng thái riêng, và
+        // dán nhãn mồ côi cho nó là bịa ra một cái chết chưa hề đo.
+        //
+        // Ba cửa nữa, mỗi cửa là một bài đã trả giá trong tệp này:
+        // · `before.is_some()` — phải thấy nó ít nhất một vòng TRƯỚC. Sổ rỗng
+        //   nghĩa là huba vừa dậy, không phải mọi thứ vừa đổi (luật 11);
+        // · `!hub_own` — phép dò của chính huba không bao giờ được rung chuông
+        //   (xem `is_hub_own_probe`);
+        // · cờ `m` trong sổ — mồ côi *xuất hiện* là thay đổi, mồ côi *tồn tại*
+        //   thì không.
+        let orphan_now = crate::sessions::is_orphan(s);
+        if orphan_now && before.is_some_and(|b| !b.m) && !hub_own {
+            out.push(Change::Orphaned {
+                id: s.session_id.clone(),
+                name: crate::sessions::shown(s),
+                spawner: s.spawned_by_pid.unwrap_or_default(),
+            });
+        }
         // Phiên đã chết vẫn nằm trong danh sách vài giây; đừng ghi nó vào sổ
         // mới, nếu không lần sau nó lại "biến mất" và báo tắt lần thứ hai.
         match state {
@@ -1003,6 +1059,11 @@ pub fn changes(
                         // Thấy phiên còn sống ⟹ hết mọi nghi ngờ, kể cả nghi
                         // ngờ đã tích luỹ từ những vòng trước.
                         g: 0,
+                        // Thôi mồ côi (cha sống lại được thì hiếm, nhưng phiên
+                        // MỞ CỬA SỔ trở lại thì không hiếm) ⟹ cờ về `false`, để
+                        // lần sau nó thành mồ côi lại thì vẫn được báo. Cờ này
+                        // gác việc LẶP, không phải gác việc nói.
+                        m: orphan_now,
                     },
                 );
             }

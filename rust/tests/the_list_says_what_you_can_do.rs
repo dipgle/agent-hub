@@ -386,3 +386,208 @@ fn the_trunk_is_not_a_lane() {
     );
     assert_ne!(huba::sessions::lane_from_branch("///").as_deref(), Some(""));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mồ côi: nói MỘT lần, và chỉ khi đã ĐO được cả hai vế
+// ─────────────────────────────────────────────────────────────────────────────
+
+use huba::watch::{changes, Change, Mark};
+use std::collections::BTreeMap;
+
+const NOW: i64 = 1_788_600_000;
+
+fn mo_coi_that(id: &str) -> LiveSession {
+    let mut s = nen(id);
+    s.spawned_by_pid = Some(39500);
+    s.spawner_alive = Some(false);
+    s.name = "Fix mobile font size".into();
+    s.folder = "fbot".into();
+    s
+}
+
+/// Sổ đã thấy phiên này vòng trước, chưa từng báo mồ côi.
+fn so_da_thay(id: &str) -> BTreeMap<String, Mark> {
+    let mut m = BTreeMap::new();
+    m.insert(
+        id.to_string(),
+        Mark {
+            s: "idle".into(),
+            f: NOW - 3600,
+            m: false,
+            ..Default::default()
+        },
+    );
+    m
+}
+
+/// Hà 06/09: hai phiên mồ côi giữ 1203 MB, im 4,5 tiếng, không tự dừng. Nó phải
+/// được BÁO — nhưng đúng một lần (luật 11: nói khi có THAY ĐỔI, không tụng lại).
+#[test]
+fn an_orphan_is_announced_exactly_once() {
+    let s = mo_coi_that("b4182616-0000-0000-0000-000000000000");
+    let prev = so_da_thay(&s.session_id);
+
+    let (lan1, so_moi) = changes(&prev, &[s.clone()], NOW, &[]);
+    let bao: Vec<&Change> = lan1
+        .iter()
+        .filter(|c| matches!(c, Change::Orphaned { .. }))
+        .collect();
+    assert_eq!(bao.len(), 1, "không báo mồ côi: {lan1:?}");
+    match bao[0] {
+        Change::Orphaned { spawner, .. } => {
+            assert_eq!(*spawner, 39500, "báo mồ côi mà không nêu pid cha")
+        }
+        _ => unreachable!(),
+    }
+    // Câu nói ra phải mang sẵn đường dọn — tin không kèm cách đi tiếp thì chủ
+    // máy vẫn phải tự nhớ cú pháp, đúng lúc đang ở xa.
+    let cau = bao[0].say(&huba::watch::Idle::Prompt, None);
+    assert!(
+        cau.contains("/stop b4182616"),
+        "báo mà không kèm cách dọn: {cau}"
+    );
+
+    // 🔴 VÒNG HAI: sổ đã ghi `m = true` ⟹ IM. Một cái loa kêu mỗi 20 giây là
+    // cái loa bị tắt tiếng, kéo theo mọi tin đáng đọc.
+    let (lan2, _) = changes(&so_moi, &[s], NOW + 30, &[]);
+    assert!(
+        !lan2.iter().any(|c| matches!(c, Change::Orphaned { .. })),
+        "tụng lại tin mồ côi ở vòng sau: {lan2:?}"
+    );
+}
+
+/// ĐỐI CHỨNG NGƯỢC — ba ca KHÔNG được báo, mỗi ca một lý do khác nhau.
+#[test]
+fn three_things_that_look_like_orphans_but_are_not() {
+    let id = "b4182616-0000-0000-0000-000000000000";
+
+    // ① Chưa đọc được cha ⟹ chưa đo được, không phải mồ côi.
+    let mut chua_do = mo_coi_that(id);
+    chua_do.spawner_alive = None;
+    let (e, _) = changes(&so_da_thay(id), &[chua_do], NOW, &[]);
+    assert!(
+        !e.iter().any(|c| matches!(c, Change::Orphaned { .. })),
+        "dán nhãn mồ côi cho một phiên chỉ vì không đọc nổi argv: {e:?}"
+    );
+
+    // ② Cha còn sống ⟹ là CON, không phải mồ côi.
+    let mut con = mo_coi_that(id);
+    con.spawner_alive = Some(true);
+    let (e, _) = changes(&so_da_thay(id), &[con], NOW, &[]);
+    assert!(
+        !e.iter().any(|c| matches!(c, Change::Orphaned { .. })),
+        "{e:?}"
+    );
+
+    // ③ CÒN CỬA SỔ trên màn ⟹ chủ máy nhìn thấy nó, tự đứng được.
+    let mut co_man = mo_coi_that(id);
+    co_man.tty = "ttys003".into();
+    co_man.host = "terminal".into();
+    let (e, _) = changes(&so_da_thay(id), &[co_man], NOW, &[]);
+    assert!(
+        !e.iter().any(|c| matches!(c, Change::Orphaned { .. })),
+        "{e:?}"
+    );
+}
+
+/// Sổ RỖNG = huba vừa dậy, không phải mọi thứ vừa đổi (luật 11). Vòng đầu im.
+#[test]
+fn the_first_round_after_a_restart_says_nothing() {
+    let s = mo_coi_that("b4182616-0000-0000-0000-000000000000");
+    let (e, _) = changes(&BTreeMap::new(), &[s], NOW, &[]);
+    assert!(
+        !e.iter().any(|c| matches!(c, Change::Orphaned { .. })),
+        "vòng đầu sau khi khởi động lại đã rung chuông: {e:?}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// `/shot` phiên nền: chữ cũ phải TỰ KHAI là chữ cũ
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Ca nguyên hình của Hà: bấm 📷 lúc 04:10, lời cuối ghi lúc 01:45.
+#[test]
+fn old_words_must_say_how_old_they_are() {
+    // 2026-09-05T18:45:09Z = 01:45 giờ máy; đo lúc 04:10 cùng ngày ⟹ 2h25.
+    let luc_bam = chrono::DateTime::parse_from_rfc3339("2026-09-05T21:10:00Z")
+        .unwrap()
+        .timestamp_millis();
+    let cau = huba::pipeline::bg_shot_say(
+        "[fbot]",
+        "Quality-gate báo đỏ ở mục bí mật.",
+        Some("2026-09-05T18:45:09.664Z"),
+        luc_bam,
+    );
+
+    assert!(cau.contains("2h trước"), "không đóng mốc tuổi: {cau}");
+    // Và nói THẲNG nó không phải màn — đây mới là chỗ chữa cái hiểu nhầm, chứ
+    // không phải cái mốc: một đoạn chữ đặt sau biểu tượng máy ảnh đọc lên là màn.
+    assert!(cau.contains("KHÔNG phải màn"), "{cau}");
+    assert!(
+        cau.contains("Quality-gate báo đỏ"),
+        "mất luôn nội dung: {cau}"
+    );
+}
+
+/// ĐỐI CHỨNG NGƯỢC — hai ca không được đọc thành "2h trước".
+#[test]
+fn a_missing_timestamp_never_becomes_a_fake_age() {
+    let bay_gio = chrono::Utc::now().timestamp_millis();
+
+    // ① Không có mốc ⟹ IM, không bịa. Đây là con bug cũ mặc bộ đồ khác.
+    let khong_moc = huba::pipeline::bg_shot_say("[fbot]", "câu gì đó", None, bay_gio);
+    assert!(
+        !khong_moc.contains("trước"),
+        "bịa ra tuổi từ chỗ không có mốc: {khong_moc}"
+    );
+    assert!(!khong_moc.contains("vừa xong"), "{khong_moc}");
+
+    // ② Mốc HỎNG (không parse nổi) cũng là "chưa đo được", không phải "vừa xong".
+    let moc_hong = huba::pipeline::bg_shot_say("[fbot]", "câu gì đó", Some("hôm qua"), bay_gio);
+    assert!(
+        !moc_hong.contains("vừa xong"),
+        "mốc hỏng bị đọc thành mới tinh: {moc_hong}"
+    );
+    assert!(!moc_hong.contains("trước"), "{moc_hong}");
+
+    // ③ ĐỐI CHỨNG DƯƠNG: mốc vừa xong thì PHẢI nói vừa xong — dưới một phút là
+    //    tin đáng giá nhất ở đây, và `quiet_for` cố ý im ở ngưỡng ấy.
+    let vua_xong = huba::pipeline::bg_shot_say(
+        "[fbot]",
+        "câu gì đó",
+        Some(&chrono::Utc::now().to_rfc3339()),
+        bay_gio,
+    );
+    assert!(vua_xong.contains("vừa xong"), "{vua_xong}");
+}
+
+/// Chạy trên NHẬT KÝ THẬT của phiên `[fbot]` trên máy này — không fixture.
+///
+/// `#[ignore]` vì nó đọc đĩa và phụ thuộc máy. Chạy tay:
+/// `cargo test --offline --test the_list_says_what_you_can_do -- --ignored --nocapture`
+#[test]
+#[ignore = "đọc nhật ký thật trên máy — chạy tay bằng --ignored"]
+fn the_real_fbot_journal_still_carries_its_moment() {
+    let cfg = huba::config::load(None).expect("đọc được cấu hình");
+    let (said, at) = huba::sessions::last_say_at_by_id(
+        &cfg,
+        "b4182616-4c7b-440d-bf8e-d2b9959df6c0",
+        huba::sessions::SAY_MAX,
+    )
+    .expect("nhật ký [fbot] phải còn trên đĩa");
+
+    let at = at.expect("dòng lời cuối phải mang timestamp");
+    println!("lời cuối ghi lúc: {at}");
+    let cau = huba::pipeline::bg_shot_say(
+        "[fbot]",
+        &said,
+        Some(&at),
+        chrono::Utc::now().timestamp_millis(),
+    );
+    println!("---- 8< ---- (đây là chữ Telegram nhận)\n{cau}\n---- >8 ----");
+    assert!(cau.contains("KHÔNG phải màn"), "{cau}");
+    assert!(
+        cau.contains("trước"),
+        "nhật ký thật mà không ra tuổi: {cau}"
+    );
+}

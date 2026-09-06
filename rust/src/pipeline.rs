@@ -1028,6 +1028,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             crate::watch::Change::Finished { id, .. } => id.clone(),
             crate::watch::Change::Asking { id, .. } => id.clone(),
             crate::watch::Change::Ended { id, .. } => id.clone(),
+            crate::watch::Change::Orphaned { id, .. } => id.clone(),
         };
         let row = live.iter().find(|s| s.session_id == id);
 
@@ -3739,6 +3740,41 @@ fn close_and_say(db: &Db, cfg: &Config, s: &crate::sessions::LiveSession) -> Str
             crate::exec::truncate(&e.to_string(), 240)
         ),
     }
+}
+
+/// Câu trả lời cho `📷 /shot` khi phiên KHÔNG có cửa sổ nào để chụp.
+///
+/// 🔴 Hà 2026-09-06, bấm 📷 lúc 04:10 và nhận nguyên văn câu phiên nói lúc
+/// 01:45, không một chữ nào cho biết đó là chữ cũ: *"Ghi là phiên đang sống
+/// nhưng lại chỉ là lịch sử, thật buồn cười, tôi có cần cái này đâu"*.
+///
+/// Bản cũ không sai một chữ trong câu nó nói; nó sai ở chỗ **IM**. Một đoạn chữ
+/// không tuổi, đặt sau biểu tượng máy ảnh, đọc lên là một cái MÀN — mà thứ đứng
+/// sau nó già ba tiếng.
+///
+/// Ba điều hàm này giữ, và cả ba đều đo được:
+/// ① nói thẳng nó KHÔNG phải màn, trước khi đưa chữ ra;
+/// ② mốc đọc được ⟹ in tuổi. `quiet_for` cố ý im dưới một phút vì ở DANH SÁCH
+///    một dòng "0p" là dòng thừa — nhưng ở ĐÂY dưới một phút mới là tin đáng
+///    giá nhất, nên nói thẳng "vừa xong";
+/// ③ mốc KHÔNG đọc được ⟹ im hẳn. "Không biết tuổi" là một trạng thái RIÊNG, và
+///    đoán bù nó chính là con bug đang sửa, mặc bộ đồ khác.
+///
+/// Tách khỏi handler cùng ngày, vì nằm trong đó thì không bài kiểm nào với tới —
+/// và một câu chữ đã trả giá thì phải có cổng, không thể chỉ có chú thích.
+pub fn bg_shot_say(ten: &str, said: &str, at: Option<&str>, now_ms: i64) -> String {
+    let tuoi = match at.and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
+        Some(_) => match quiet_for(at, now_ms) {
+            Some(q) => format!(" · {q} trước"),
+            None => " · vừa xong".to_string(),
+        },
+        None => String::new(),
+    };
+    format!(
+        "🗣 {ten} là phiên NỀN — không có cửa sổ Terminal nào để chụp.\n\
+         ⚠ Đây KHÔNG phải màn của nó, mà là lời cuối nó ghi vào nhật ký{tuoi}:\n\n{}",
+        crate::exec::truncate(said, 1200)
+    )
 }
 
 /// Dòng chân cho những phiên KHÔNG có cửa sổ nào trên màn.
@@ -13392,46 +13428,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 .filter(|(t, _)| !t.is_empty())
                                 {
                                     Some((said, at)) => {
-                                        // 🔴 ĐÓNG MỐC — Hà 2026-09-06, bấm 📷
-                                        // lúc 04:10 và nhận nguyên văn câu phiên
-                                        // nói lúc 01:45, không một chữ nào cho
-                                        // biết đó là chữ cũ: *"Ghi là phiên đang
-                                        // sống nhưng lại chỉ là lịch sử, thật
-                                        // buồn cười, tôi có cần cái này đâu"*.
-                                        //
-                                        // Bản cũ không sai một chữ nào trong câu
-                                        // nó nói; nó sai ở chỗ IM. Một đoạn chữ
-                                        // không tuổi, đặt sau chữ "📷", đọc lên
-                                        // là một cái màn — mà thứ đứng sau nó
-                                        // già ba tiếng.
-                                        //
-                                        // Mốc đọc được ⟹ nói tuổi. `quiet_for`
-                                        // cố ý im dưới một phút (ở danh sách,
-                                        // "0p" là dòng thừa) — nhưng Ở ĐÂY dưới
-                                        // một phút mới là tin đáng giá nhất, nên
-                                        // nói thẳng "vừa xong".
-                                        //
-                                        // Mốc KHÔNG đọc được ⟹ im hẳn. "Không
-                                        // biết tuổi" là một trạng thái RIÊNG,
-                                        // và đoán bù nó chính là con bug đang
-                                        // sửa, mặc bộ đồ khác.
-                                        let now = crate::quota::now_ms();
-                                        let tuoi = match at
-                                            .as_deref()
-                                            .and_then(|t| {
-                                                chrono::DateTime::parse_from_rfc3339(t).ok()
-                                            }) {
-                                            Some(_) => match quiet_for(at.as_deref(), now) {
-                                                Some(q) => format!(" · {q} trước"),
-                                                None => " · vừa xong".to_string(),
-                                            },
-                                            None => String::new(),
-                                        };
-                                        format!(
-                                            "🗣 {ten} là phiên NỀN — không có cửa sổ Terminal nào để chụp.\n\
-                                             ⚠ Đây KHÔNG phải màn của nó, mà là lời cuối nó ghi vào nhật ký{tuoi}:\n\n{}",
-                                            crate::exec::truncate(&said, 1200)
-                                        )
+                                        bg_shot_say(&ten, &said, at.as_deref(), crate::quota::now_ms())
                                     }
                                     // Nhật ký rỗng là một sự thật khác hẳn "không
                                     // đọc được nhật ký", và khác hẳn "phiên chết".

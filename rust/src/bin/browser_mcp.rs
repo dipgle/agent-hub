@@ -230,7 +230,11 @@ fn req_uint(args: &Value, key: &str) -> Result<usize, RpcErr> {
     args.get(key)
         .and_then(Value::as_u64)
         .map(|n| n as usize)
-        .ok_or_else(|| invalid_params(format!("thiếu hoặc sai kiểu tham số `{key}` (cần số nguyên)")))
+        .ok_or_else(|| {
+            invalid_params(format!(
+                "thiếu hoặc sai kiểu tham số `{key}` (cần số nguyên)"
+            ))
+        })
 }
 
 /// Kết quả tool dạng CHỮ, đúng format MCP: `{content:[...], isError}`.
@@ -268,7 +272,10 @@ fn result_tabs() -> Value {
 fn result_open(url: &str) -> Value {
     match browser::mo(url) {
         Ok(tab) => text_result(
-            format!("Đã mở {}.{} — {} · {}", tab.win, tab.idx, tab.url, tab.title),
+            format!(
+                "Đã mở {}.{} — {} · {}",
+                tab.win, tab.idx, tab.url, tab.title
+            ),
             false,
         ),
         Err(e) => loi_result(e),
@@ -278,7 +285,10 @@ fn result_open(url: &str) -> Value {
 fn result_switch(win: usize, idx: usize) -> Value {
     match browser::chon(win, idx) {
         Ok(tab) => text_result(
-            format!("Đã chuyển sang {}.{} — {} · {}", tab.win, tab.idx, tab.url, tab.title),
+            format!(
+                "Đã chuyển sang {}.{} — {} · {}",
+                tab.win, tab.idx, tab.url, tab.title
+            ),
             false,
         ),
         Err(e) => loi_result(e),
@@ -334,7 +344,10 @@ fn result_screenshot() -> Value {
                     "isError": false
                 })
             }
-            Err(e) => text_result(format!("Đã chụp ảnh nhưng không đọc lại được tệp tạm: {e}"), true),
+            Err(e) => text_result(
+                format!("Đã chụp ảnh nhưng không đọc lại được tệp tạm: {e}"),
+                true,
+            ),
         },
         Err(e) => loi_result(e),
     };

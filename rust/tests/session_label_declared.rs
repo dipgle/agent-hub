@@ -261,7 +261,9 @@ fn declared_lanes_keep_the_lane_and_still_carry_the_task() {
     // Và KHÔNG hàng nào được rơi về mã id: id chỉ dành cho ca không còn gì để
     // phân biệt (xem `two_sessions_doing_the_same_thing_fall_back_to_the_id`).
     assert!(
-        !nhan.iter().any(|l| l.contains("00000000") || l.contains("11111111")),
+        !nhan
+            .iter()
+            .any(|l| l.contains("00000000") || l.contains("11111111")),
         "còn làn và còn việc thì đừng đeo id: {nhan:?}"
     );
 }
@@ -286,8 +288,16 @@ fn the_always_on_task_tail_does_not_erase_the_id_fallback() {
     // ① Nhãn TRÙNG + việc GIỐNG NHAU ⟹ tên việc không tách được ai với ai, phải
     //    về id — nếu không thì hai hàng in ra hai chuỗi y hệt.
     let mut rows = vec![
-        row("aaaaaaaa-0000-0000-0000-000000000000", "", "Chạy cổng chất lượng"),
-        row("bbbbbbbb-0000-0000-0000-000000000000", "", "Chạy cổng chất lượng"),
+        row(
+            "aaaaaaaa-0000-0000-0000-000000000000",
+            "",
+            "Chạy cổng chất lượng",
+        ),
+        row(
+            "bbbbbbbb-0000-0000-0000-000000000000",
+            "",
+            "Chạy cổng chất lượng",
+        ),
     ];
     huba::sessions::label_sessions(&mut rows, root);
     assert_eq!(rows[0].label, "[dwork]·aaaaaaaa");

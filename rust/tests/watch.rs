@@ -754,7 +754,10 @@ fn a_background_session_missing_once_is_not_reported_as_ended() {
         let carried = next.get("nen-1").unwrap_or_else(|| {
             panic!("host={host}: phải còn giữ trong sổ để thử lại vòng sau, không phải mất trắng")
         });
-        assert_eq!(carried.g, NOW, "host={host}: phải ghi lại mốc lần đầu vắng mặt");
+        assert_eq!(
+            carried.g, NOW,
+            "host={host}: phải ghi lại mốc lần đầu vắng mặt"
+        );
 
         // Vắng mặt tiếp, nhưng CHƯA đủ `BG_MISS_DEBOUNCE_SEC` kể từ mốc đầu — vẫn im.
         let (events2, next2) = changes(&next, &[], NOW + BG_MISS_DEBOUNCE_SEC - 1, &[]);

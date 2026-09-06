@@ -145,9 +145,15 @@ fn cmd_ask(cfg: &Config, session: &str, question: &str) -> Result<()> {
         .sessions
         .iter()
         .find(|s| s.session_id == session)
-        .or_else(|| snap.sessions.iter().find(|s| s.session_id.starts_with(session)))
+        .or_else(|| {
+            snap.sessions
+                .iter()
+                .find(|s| s.session_id.starts_with(session))
+        })
         .ok_or_else(|| {
-            anyhow::anyhow!("không thấy phiên khớp id/tiền tố '{session}' trong danh sách đang sống")
+            anyhow::anyhow!(
+                "không thấy phiên khớp id/tiền tố '{session}' trong danh sách đang sống"
+            )
         })?;
     let aside = huba::sessions::ask_aside(cfg, target, question)?;
     println!("{}", aside.answer);

@@ -96,7 +96,14 @@ fn the_web_route_says_what_the_machine_browser_has() {
 #[ignore = "nói chuyện với Chrome thật, và lượt đầu bật hộp xin quyền — chạy tay bằng --ignored"]
 fn the_real_chrome_clicks_body_or_says_exactly_why_not() {
     match huba::browser::bam("body") {
-        Ok(trung) => println!("click 'body': {}", if trung { "trúng" } else { "không thấy phần tử" }),
+        Ok(trung) => println!(
+            "click 'body': {}",
+            if trung {
+                "trúng"
+            } else {
+                "không thấy phần tử"
+            }
+        ),
         Err(e) => {
             // KHÔNG `panic!`: "Chrome đang tắt", "chưa cấp quyền", "Chrome
             // chặn JS từ Apple Events" đều là câu trả lời THẬT về thế giới —

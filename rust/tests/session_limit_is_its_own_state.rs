@@ -176,7 +176,13 @@ fn being_blocked_outranks_looking_busy() {
 /// ở đây.
 #[test]
 fn a_kept_window_is_announced_with_the_way_back() {
-    let cau = old_window_note(true, None, false, "/Users/hanguyen/projects/huba", "93479f95");
+    let cau = old_window_note(
+        true,
+        None,
+        false,
+        "/Users/hanguyen/projects/huba",
+        "93479f95",
+    );
     assert!(
         cau.contains("claude --resume 93479f95"),
         "giữ cửa sổ mà không đưa đường về thì chủ máy vẫn phải tự mò: {cau:?}"
@@ -344,7 +350,13 @@ fn dang_thu_lai_thi_dung_sai_chu_may_di_dong_tay() {
 #[test]
 fn a_closed_window_says_nothing_at_all() {
     assert_eq!(
-        old_window_note(false, None, false, "/Users/hanguyen/projects/huba", "93479f95"),
+        old_window_note(
+            false,
+            None,
+            false,
+            "/Users/hanguyen/projects/huba",
+            "93479f95"
+        ),
         "",
         "cửa sổ đã đóng mà còn mời gõ tiếp ở đó ⟹ sai một cách im lặng"
     );

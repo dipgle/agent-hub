@@ -37,7 +37,10 @@ impl Mcp {
     }
 
     fn send(&mut self, v: &Value) {
-        let stdin = self.stdin.as_mut().expect("stdin đã đóng — gọi send() sau close_stdin()?");
+        let stdin = self
+            .stdin
+            .as_mut()
+            .expect("stdin đã đóng — gọi send() sau close_stdin()?");
         let line = serde_json::to_string(v).expect("serialize request");
         writeln!(stdin, "{line}").expect("write to child stdin");
         stdin.flush().expect("flush child stdin");
@@ -51,9 +54,8 @@ impl Mcp {
             .read_line(&mut buf)
             .expect("read from child stdout");
         assert!(n > 0, "tiến trình con đóng stdout trước khi trả lời (EOF)");
-        serde_json::from_str(buf.trim_end()).unwrap_or_else(|e| {
-            panic!("dòng trả về không phải JSON hợp lệ: {e}\ndòng: {buf:?}")
-        })
+        serde_json::from_str(buf.trim_end())
+            .unwrap_or_else(|e| panic!("dòng trả về không phải JSON hợp lệ: {e}\ndòng: {buf:?}"))
     }
 
     /// Đóng đầu ghi — tiến trình con đọc `stdin.lock().lines()` sẽ gặp EOF và
@@ -88,7 +90,11 @@ fn tools_list_reports_exactly_the_seven_tools_with_schemas() {
     let tools = resp["result"]["tools"]
         .as_array()
         .unwrap_or_else(|| panic!("result.tools không phải mảng: {resp}"));
-    assert_eq!(tools.len(), 7, "phải đúng 7 tool, không hơn không kém: {tools:?}");
+    assert_eq!(
+        tools.len(),
+        7,
+        "phải đúng 7 tool, không hơn không kém: {tools:?}"
+    );
 
     let expected = [
         "browser_tabs",
@@ -111,7 +117,9 @@ fn tools_list_reports_exactly_the_seven_tools_with_schemas() {
             "tool thiếu inputSchema dạng object: {t}"
         );
         assert!(
-            t.get("description").and_then(Value::as_str).is_some_and(|d| !d.is_empty()),
+            t.get("description")
+                .and_then(Value::as_str)
+                .is_some_and(|d| !d.is_empty()),
             "tool thiếu description: {t}"
         );
     }
@@ -129,7 +137,10 @@ fn an_unknown_method_answers_method_not_found() {
 
     assert_eq!(resp["id"], 42, "{resp}");
     assert_eq!(resp["error"]["code"], -32601, "{resp}");
-    assert!(resp.get("result").is_none(), "lỗi thì không được có `result`: {resp}");
+    assert!(
+        resp.get("result").is_none(),
+        "lỗi thì không được có `result`: {resp}"
+    );
 
     mcp.close_stdin();
 }
@@ -204,8 +215,14 @@ fn initialize_reports_the_expected_handshake_shape() {
 
     assert_eq!(resp["id"], 1, "{resp}");
     assert!(resp["result"]["protocolVersion"].is_string(), "{resp}");
-    assert!(resp["result"]["capabilities"]["tools"].is_object(), "{resp}");
-    assert_eq!(resp["result"]["serverInfo"]["name"], "browser-mcp", "{resp}");
+    assert!(
+        resp["result"]["capabilities"]["tools"].is_object(),
+        "{resp}"
+    );
+    assert_eq!(
+        resp["result"]["serverInfo"]["name"], "browser-mcp",
+        "{resp}"
+    );
 
     mcp.close_stdin();
 }

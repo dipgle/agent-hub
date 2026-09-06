@@ -3574,9 +3574,10 @@ pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
 
             // MỘT phiên = MỘT hàng, dù CLI ghi nó vào CẢ HAI ngăn sổ — xem
             // `fold_job_into_session`.
-            if let Some(twin) = out.iter_mut().find(|r| {
-                r.get("sessionId").and_then(|s| s.as_str()) == Some(session_id)
-            }) {
+            if let Some(twin) = out
+                .iter_mut()
+                .find(|r| r.get("sessionId").and_then(|s| s.as_str()) == Some(session_id))
+            {
                 fold_job_into_session(twin, &row);
                 continue;
             }
@@ -4060,6 +4061,72 @@ fn mark_can_type(rows: &mut [LiveSession], tabs: &[crate::keys::Tab]) {
 /// đọc y hệt `0 gõ được` thật. Bằng chứng phép dò CÓ chạy là có ít nhất một hàng
 /// `can_type = true`; không có nó thì nguồn ② im, chỉ còn ①. **Chưa đo được thì
 /// đừng tô màu.**
+/// Tên LÀN suy từ nhánh git — `lan/a-chung` → `a-chung`, `main` → không có làn.
+///
+/// Tách riêng khỏi phần đọc tệp để bài kiểm với tới được: đây là toàn bộ phần
+/// có thể sai, và nó thuần.
+///
+/// `main`/`master` trả `None` chứ không phải chuỗi rỗng: cây chính KHÔNG PHẢI
+/// một làn, nên nhãn của nó là `[dwork]` — đúng thứ đang hiện cho `dwork/dev`.
+pub fn lane_from_branch(branch: &str) -> Option<String> {
+    let b = branch.trim().trim_matches('/');
+    if b.is_empty() || b == "main" || b == "master" || b == "HEAD" {
+        return None;
+    }
+    b.rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Điền `lane` từ SỔ RÀNG BUỘC PHIÊN khi phiên chưa tự khai.
+///
+/// 🔴 Hà 2026-09-06, ảnh danh sách có năm hàng `[dwork]` giống hệt nhau: *"Các
+/// phiên dwork mất tên làn rồi, ko phân biệt được"*.
+///
+/// Đo ba nhật ký ấy: **0 lời tự khai** trong 256 KB cuối — kể cả `[dwork]` trần.
+/// Nên `lane` rỗng, `base` ra `[dwork]` cho tất cả, và huba không hề hỏng: nó
+/// đang làm đúng thứ nó được bảo. Cái sai là nó chỉ có MỘT nguồn cho tên làn, và
+/// nguồn ấy là **lời khai** — thứ phụ thuộc vào việc mọi phiên khác cư xử đúng.
+///
+/// Sổ `scripts/.session-bind/<id>.info` thì là một PHÉP ĐO: hook ghi tệp đọc
+/// thẳng `.git/HEAD` của cây mà phiên ấy vừa ghi vào. Đo 06/09, bốn hàng, khớp
+/// cả bốn: `lan/a-chung` · `lan/a-ddoc` · `lan/a-dci` · `main`.
+///
+/// Chỉ điền khi phiên CHƯA khai (lời khai của chính nó vẫn thắng), và chỉ khi
+/// `project` trong sổ khớp `folder` đang có — sổ nói về một dự án khác thì đó là
+/// sổ cũ, không phải dữ kiện về hàng này.
+fn mark_lane_from_ledger(rows: &mut [LiveSession], workspace_root: &Path) {
+    let dir = workspace_root.join("scripts/.session-bind");
+    for r in rows.iter_mut() {
+        if !r.lane.is_empty() || r.session_id.is_empty() {
+            continue;
+        }
+        let path = dir.join(format!("{}.info", r.session_id));
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<Value>(&raw) else {
+            logging::warn(
+                "session_bind_info_unparsable",
+                json!({ "session": r.session_id, "path": path.display().to_string() }),
+            );
+            continue;
+        };
+        let du_an = v.get("project").and_then(Value::as_str).unwrap_or_default();
+        if du_an.is_empty() || du_an != r.folder.trim_matches('/') {
+            continue;
+        }
+        if let Some(lan) = v
+            .get("nhanh")
+            .and_then(Value::as_str)
+            .and_then(lane_from_branch)
+        {
+            r.lane = lan;
+        }
+    }
+}
+
 /// Phiên này có CỬA SỔ NÀO TRÊN MÀN không — thứ chủ máy ngồi trước máy nhìn thấy.
 ///
 /// 🔴 Hà 2026-09-06: *"Mọi thứ tôi bảo phải đọc ở terminal làm gốc cơ mà"* ·
@@ -4709,6 +4776,9 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     link_parents(&mut out.sessions, &procs);
     // Nhãn tính SAU khi đã có đủ mọi hàng: "có trùng ai không" là một câu hỏi
     // về cả tập, không hàng nào tự trả lời được.
+    // Điền làn TRƯỚC khi đặt nhãn: `label_sessions` đọc `lane`, nên nối sau đó
+    // là nối vào một câu đã nói xong.
+    mark_lane_from_ledger(&mut out.sessions, &cfg.workspace_root);
     label_sessions(&mut out.sessions, &cfg.workspace_root);
     out.hidden_editor = hidden_editor;
     if hidden_editor > 0 {

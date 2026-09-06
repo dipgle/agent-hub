@@ -1898,7 +1898,12 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                 let outcome = match &moved {
                     Ok(w) => match &w.new_id {
                         Some(new_id) => {
-                            remember_successor(db, &s.session_id, new_id, chrono::Utc::now().timestamp());
+                            remember_successor(
+                                db,
+                                &s.session_id,
+                                new_id,
+                                chrono::Utc::now().timestamp(),
+                            );
                             logging::info(
                                 "focus_kept_on_auto_handover",
                                 json!({ "focus": focus_id, "ended": s.session_id,
@@ -2145,7 +2150,12 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
                         // Con trỏ GIỮ NGUYÊN — cùng luật với `auto_handover`,
                         // xem [`FocusKept`]. Đây đúng là đường đã cướp con trỏ
                         // ba lượt chiều 03/09.
-                        remember_successor(db, &s.session_id, new_id, chrono::Utc::now().timestamp());
+                        remember_successor(
+                            db,
+                            &s.session_id,
+                            new_id,
+                            chrono::Utc::now().timestamp(),
+                        );
                         logging::info(
                             "focus_kept_on_auto_limit_switch",
                             json!({ "focus": focus_id, "ended": s.session_id, "new": new_id,
@@ -2705,10 +2715,12 @@ pub fn auto_handover_notice(name: &str, pct: u8, idle_sec: u64, moved: &Handover
     // *"chưa đóng được"* trơn đọc ra thành lời mời đi dọn tay, kể cả khi huba
     // đang thử lại — đúng lượt 03/09 Hà bỏ công đi kiểm bằng mắt.
     let tail = match leftover {
-        Some((e, true)) => format!(
-            "\n⏳ cửa sổ cũ chưa đóng ngay: {e}\nhuba đang tự thử lại — sẽ báo khi xong."
-        ),
-        Some((e, false)) => format!("\n⚠ cửa sổ cũ chưa đóng được: {e}\nNó sang tay anh: /close hoặc đóng tay."),
+        Some((e, true)) => {
+            format!("\n⏳ cửa sổ cũ chưa đóng ngay: {e}\nhuba đang tự thử lại — sẽ báo khi xong.")
+        }
+        Some((e, false)) => {
+            format!("\n⚠ cửa sổ cũ chưa đóng được: {e}\nNó sang tay anh: /close hoặc đóng tay.")
+        }
         None => String::new(),
     };
     format!("{head}\n{body}{tail}")
@@ -3666,30 +3678,26 @@ pub fn tap_rows_html(text: &str, taps: &[(String, String)]) -> (String, usize) {
 /// đây mỗi nhánh là một câu chữ đã trả giá riêng (`Hidden` ≠ `Closed`,
 /// `Exiting` còn ghi sổ chờ), nên bản chép thứ hai chỉ giống bản gốc CHO TỚI KHI
 /// ai đó sửa một bên — đúng tấm 🪦 ở `session_button_label`.
-fn close_and_say(
-    db: &Db,
-    cfg: &Config,
-    s: &crate::sessions::LiveSession,
-) -> String {
-        match crate::sessions::close_session(cfg, s) {
-            Ok(win) => {
-                remember_stopped(db, s);
-                logging::info(
-                    "session_closed",
-                    json!({ "session": s.session_id, "kind": s.kind,
+fn close_and_say(db: &Db, cfg: &Config, s: &crate::sessions::LiveSession) -> String {
+    match crate::sessions::close_session(cfg, s) {
+        Ok(win) => {
+            remember_stopped(db, s);
+            logging::info(
+                "session_closed",
+                json!({ "session": s.session_id, "kind": s.kind,
                             "window": match win {
                                 crate::sessions::Closing::Background => None,
                                 crate::sessions::Closing::Closed(w)
                                 | crate::sessions::Closing::Hidden(w)
                                 | crate::sessions::Closing::Exiting(w) => Some(w),
                             } }),
-                );
-                // Nói ĐÚNG cái vừa xảy ra, và ở đây "vừa
-                // xảy ra" mới là gõ `/exit` — cửa sổ chưa
-                // đóng, nó vào sổ chờ. Khai "đã đóng" lúc
-                // này là kể một việc chưa xảy ra, đúng thứ
-                // luật 3 của dự án cấm.
-                match win {
+            );
+            // Nói ĐÚNG cái vừa xảy ra, và ở đây "vừa
+            // xảy ra" mới là gõ `/exit` — cửa sổ chưa
+            // đóng, nó vào sổ chờ. Khai "đã đóng" lúc
+            // này là kể một việc chưa xảy ra, đúng thứ
+            // luật 3 của dự án cấm.
+            match win {
                     crate::sessions::Closing::Background => format!(
                         "⏹ Đã dừng phiên nền {} — nó không có cửa sổ nào để đóng. Hội thoại vẫn còn.",
                         crate::sessions::shown(s)
@@ -3725,12 +3733,12 @@ fn close_and_say(
                         )
                     }
                 }
-            }
-            Err(e) => format!(
-                "⚠ chưa đóng được: {}",
-                crate::exec::truncate(&e.to_string(), 240)
-            ),
         }
+        Err(e) => format!(
+            "⚠ chưa đóng được: {}",
+            crate::exec::truncate(&e.to_string(), 240)
+        ),
+    }
 }
 
 /// Dòng chân cho những phiên KHÔNG có cửa sổ nào trên màn.
@@ -4212,7 +4220,10 @@ pub fn remember_successor(db: &Db, old_id: &str, new_id: &str, now: i64) {
                 logging::error("successor_book_not_saved", json!({ "err": e.to_string() }));
             }
         }
-        Err(e) => logging::error("successor_book_not_encoded", json!({ "err": e.to_string() })),
+        Err(e) => logging::error(
+            "successor_book_not_encoded",
+            json!({ "err": e.to_string() }),
+        ),
     }
 }
 
@@ -4452,7 +4463,10 @@ const EXITED_CLI_MARK: &str = "claude --resume ";
 /// `screen == None` ⟹ **không kết luận gì**. `None` là "lượt dò này không xin
 /// chữ", không phải "màn trống" (xem [`crate::keys::Tab::screen`]) — đọc nó
 /// thành "không có dấu" là dựng đúng cái bẫy `screen_of → None` của luật 13.
-pub fn is_orphan_window(tab: &crate::keys::Tab, live_ttys: &std::collections::BTreeSet<String>) -> bool {
+pub fn is_orphan_window(
+    tab: &crate::keys::Tab,
+    live_ttys: &std::collections::BTreeSet<String>,
+) -> bool {
     if tab.busy || live_ttys.contains(&tab.tty) {
         return false;
     }
@@ -4474,7 +4488,12 @@ pub fn is_orphan_window(tab: &crate::keys::Tab, live_ttys: &std::collections::BT
 /// Đường đóng dùng lại đúng đường `/web` đã có — `wx_<tty>` → [`crate::verbs`] →
 /// `CommandKind::Close` trên một `win-<tty>`. Không thêm một đường ĐI nào, nên
 /// không có đường thứ hai để về sau lệch nhau.
-pub fn orphan_windows_tick(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot, now: i64) {
+pub fn orphan_windows_tick(
+    db: &Db,
+    cfg: &Config,
+    live: &crate::sessions::SessionsSnapshot,
+    now: i64,
+) {
     static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
     let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
     if now - last < ORPHAN_CHECK_SEC {
@@ -4510,12 +4529,14 @@ pub fn orphan_windows_tick(db: &Db, cfg: &Config, live: &crate::sessions::Sessio
     // Dọn sổ TRƯỚC khi so: cửa sổ đã đóng thì quên nó đi, để lần sau nó mọc lại
     // là một tin MỚI chứ không phải một dòng bị nuốt. Đây cũng là chỗ giữ cho sổ
     // không phình theo thời gian.
-    let dang_co: std::collections::BTreeSet<&str> =
-        mo_coi.iter().map(|t| t.tty.as_str()).collect();
+    let dang_co: std::collections::BTreeSet<&str> = mo_coi.iter().map(|t| t.tty.as_str()).collect();
     let truoc = so_da_noi.len();
     so_da_noi.retain(|tty, _| dang_co.contains(tty.as_str()));
 
-    let moi: Vec<&&crate::keys::Tab> = mo_coi.iter().filter(|t| !so_da_noi.contains_key(&t.tty)).collect();
+    let moi: Vec<&&crate::keys::Tab> = mo_coi
+        .iter()
+        .filter(|t| !so_da_noi.contains_key(&t.tty))
+        .collect();
     if moi.is_empty() {
         if so_da_noi.len() != truoc {
             luu_so_mo_coi(db, &so_da_noi);
@@ -10723,8 +10744,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     if c.is_empty() {
                                         "(trang không có chữ nào đọc được)".to_string()
                                     } else if c.chars().count() > WEB_TEXT_MAX {
-                                        let cut: String =
-                                            c.chars().take(WEB_TEXT_MAX).collect();
+                                        let cut: String = c.chars().take(WEB_TEXT_MAX).collect();
                                         format!("{cut}\n… cắt ở {WEB_TEXT_MAX} ký tự.")
                                     } else {
                                         c.to_string()
@@ -11570,7 +11590,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         if let Some(refusal) = refusal {
                             refusal
                         } else {
-close_and_say(db, cfg, s)
+                            close_and_say(db, cfg, s)
                         }
                     }
                 };

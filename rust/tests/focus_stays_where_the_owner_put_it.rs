@@ -74,7 +74,10 @@ fn tin_het_han_muc(focus: FocusKept) -> String {
 fn dang_theo_phien_khac_thi_tin_phai_noi_con_tro_khong_doi() {
     for (ten, tin) in [
         ("bàn giao", tin_ban_giao(FocusKept::Elsewhere("[fbot]"))),
-        ("hết hạn mức", tin_het_han_muc(FocusKept::Elsewhere("[fbot]"))),
+        (
+            "hết hạn mức",
+            tin_het_han_muc(FocusKept::Elsewhere("[fbot]")),
+        ),
     ] {
         assert!(
             tin.contains("Con trỏ KHÔNG đổi"),
@@ -145,7 +148,10 @@ fn hai_tin_tu_dong_noi_cung_mot_cau_ve_con_tro() {
 #[test]
 fn focus_kept_phan_biet_du_ba_ca() {
     assert!(matches!(focus_kept("", CU, "[fbot]"), FocusKept::Nowhere));
-    assert!(matches!(focus_kept("   ", CU, "[fbot]"), FocusKept::Nowhere));
+    assert!(matches!(
+        focus_kept("   ", CU, "[fbot]"),
+        FocusKept::Nowhere
+    ));
     assert!(matches!(focus_kept(CU, CU, "[fbot]"), FocusKept::OnEnded));
     // Khoảng trắng thừa quanh id không được đọc thành "một phiên khác" — đó là
     // cách một con trỏ trỏ đúng phiên vừa tắt lọt qua thành `Elsewhere`.
@@ -231,9 +237,9 @@ const SO_CHO_DAT_CON_TRO: usize = 9;
 /// Thiếu mỏ neo ⟹ **panic**, không phải bỏ qua: hàm bị đổi tên mà cổng vẫn xanh
 /// là cổng nói dối (§13②).
 fn than_ham(ten: &str) -> &'static str {
-    let dau = NGUON
-        .find(ten)
-        .unwrap_or_else(|| panic!("không thấy `{ten}` trong pipeline.rs — cổng này mù rồi, sửa mỏ neo"));
+    let dau = NGUON.find(ten).unwrap_or_else(|| {
+        panic!("không thấy `{ten}` trong pipeline.rs — cổng này mù rồi, sửa mỏ neo")
+    });
     let phan = &NGUON[dau..];
     let cuoi = phan
         .find("\n}\n")

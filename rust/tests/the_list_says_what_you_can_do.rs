@@ -112,7 +112,7 @@ fn a_failed_tab_probe_is_not_the_same_as_nothing_typeable() {
     let mut b = go_duoc("bbb", "ttys001");
     a.can_type = false;
     b.can_type = false;
-    let head = tieu_de(&vec![a.clone(), b.clone()]);
+    let head = tieu_de(&[a.clone(), b.clone()]);
 
     assert!(
         !head.contains("0 gõ được"),
@@ -128,7 +128,7 @@ fn a_failed_tab_probe_is_not_the_same_as_nothing_typeable() {
     // (Đây cũng đúng ca terminal tích hợp VS Code: `host: "terminal"`, tty thật,
     // nhưng Terminal.app không biết cái tty ấy.)
     b.can_type = true;
-    let head = tieu_de(&vec![a, b]);
+    let head = tieu_de(&[a, b]);
     assert!(
         head.contains("1 gõ được") && head.contains("1 chỉ đọc"),
         "phép dò đã chạy mà số đo của nó vẫn bị bỏ: {head}"
@@ -223,7 +223,10 @@ fn unknown_parentage_is_not_the_same_as_orphaned() {
     let mut mo_coi = nen("b4182616");
     mo_coi.spawned_by_pid = Some(39500);
     mo_coi.spawner_alive = Some(false);
-    assert!(huba::sessions::is_orphan(&mo_coi), "cha đã thoát mà không gọi là mồ côi");
+    assert!(
+        huba::sessions::is_orphan(&mo_coi),
+        "cha đã thoát mà không gọi là mồ côi"
+    );
 
     // ĐỐI CHỨNG: chưa đọc được `--spawned-by` ⟹ KHÔNG phải mồ côi.
     let mut chua_do = nen("b4182616");
@@ -273,11 +276,7 @@ fn the_footer_is_one_line_of_the_only_thing_you_can_do() {
     mo_coi2.spawned_by_pid = Some(28204);
     mo_coi2.spawner_alive = Some(false);
 
-    let note = huba::pipeline::offscreen_note(&[
-        go_duoc("aaa", "ttys000"),
-        mo_coi,
-        mo_coi2,
-    ]);
+    let note = huba::pipeline::offscreen_note(&[go_duoc("aaa", "ttys000"), mo_coi, mo_coi2]);
 
     assert!(note.contains("2 mồ côi"), "{note}");
     assert!(
@@ -287,7 +286,10 @@ fn the_footer_is_one_line_of_the_only_thing_you_can_do() {
     // GỌN là một yêu cầu đo được, không phải cảm giác: hai mồ côi ⟹ MỘT dòng.
     let so_dong = note.trim().lines().count();
     assert_eq!(so_dong, 1, "hai mồ côi mà tốn {so_dong} dòng: {note}");
-    assert!(!note.contains("aaa"), "phiên đang mở cửa sổ bị hạ xuống làm con: {note}");
+    assert!(
+        !note.contains("aaa"),
+        "phiên đang mở cửa sổ bị hạ xuống làm con: {note}"
+    );
 }
 
 /// Con của một phiên CÒN SỐNG không được lẫn vào dòng dọn — và "chưa đọc được
@@ -305,9 +307,15 @@ fn a_child_with_a_living_parent_is_never_offered_for_cleanup() {
 
     let note = huba::pipeline::offscreen_note(&[co_cha, chua_do, mo_coi]);
 
-    assert!(note.contains("1 mồ côi") && note.contains("/stop b4182616"), "{note}");
+    assert!(
+        note.contains("1 mồ côi") && note.contains("/stop b4182616"),
+        "{note}"
+    );
     assert!(note.contains("đừng dọn"), "{note}");
-    assert!(note.contains("dưới [dwork]"), "con không được xếp dưới cha: {note}");
+    assert!(
+        note.contains("dưới [dwork]"),
+        "con không được xếp dưới cha: {note}"
+    );
     assert!(note.contains("chưa đọc được cha"), "{note}");
     // 🔴 Vế quan trọng nhất: chỉ ĐÚNG MỘT id được đề nghị dọn.
     assert_eq!(
@@ -315,16 +323,66 @@ fn a_child_with_a_living_parent_is_never_offered_for_cleanup() {
         1,
         "đề nghị dọn cả thứ còn cha hoặc chưa đo được: {note}"
     );
-    assert!(!note.contains("/stop f0d2465a"), "suýt dọn nhầm con của [dwork]: {note}");
-    assert!(!note.contains("/stop cccccccc"), "suýt dọn nhầm thứ chưa đo được: {note}");
+    assert!(
+        !note.contains("/stop f0d2465a"),
+        "suýt dọn nhầm con của [dwork]: {note}"
+    );
+    assert!(
+        !note.contains("/stop cccccccc"),
+        "suýt dọn nhầm thứ chưa đo được: {note}"
+    );
 }
 
 /// ĐỐI CHỨNG NGƯỢC: mọi phiên đều có cửa sổ ⟹ KHÔNG có dòng chân nào.
 #[test]
 fn nothing_offscreen_means_no_footer_at_all() {
-    let note = huba::pipeline::offscreen_note(&[
-        go_duoc("aaa", "ttys000"),
-        go_duoc("bbb", "ttys001"),
-    ]);
+    let note =
+        huba::pipeline::offscreen_note(&[go_duoc("aaa", "ttys000"), go_duoc("bbb", "ttys001")]);
     assert!(note.is_empty(), "dựng một dòng chân rỗng nghĩa: {note:?}");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tên làn phải có một nguồn ĐO ĐƯỢC, không chỉ lời tự khai
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Hà 06/09, ảnh năm hàng `[dwork]` giống hệt nhau: *"Các phiên dwork mất tên
+/// làn rồi, ko phân biệt được"*. Đo ba nhật ký: 0 lời tự khai trong 256 KB cuối.
+/// Nhánh git thì đo được — và bốn ca dưới đây là bốn hàng thật trong sổ ràng
+/// buộc phiên lúc 07:2x.
+#[test]
+fn the_lane_is_read_from_the_git_branch() {
+    assert_eq!(
+        huba::sessions::lane_from_branch("lan/a-chung").as_deref(),
+        Some("a-chung")
+    );
+    assert_eq!(
+        huba::sessions::lane_from_branch("lan/a-ddoc").as_deref(),
+        Some("a-ddoc")
+    );
+    assert_eq!(
+        huba::sessions::lane_from_branch("lan/a-dci").as_deref(),
+        Some("a-dci")
+    );
+}
+
+/// ĐỐI CHỨNG NGƯỢC: cây CHÍNH không phải một làn — `[dwork]`, không `[dwork/main]`.
+#[test]
+fn the_trunk_is_not_a_lane() {
+    assert_eq!(huba::sessions::lane_from_branch("main"), None);
+    assert_eq!(huba::sessions::lane_from_branch("master"), None);
+    // Nhánh chưa đọc được ⟹ KHÔNG có làn, và không được thành chuỗi rỗng đội lốt.
+    assert_eq!(huba::sessions::lane_from_branch(""), None);
+    assert_eq!(huba::sessions::lane_from_branch("   "), None);
+    assert_eq!(huba::sessions::lane_from_branch("HEAD"), None);
+    // Dấu `/` thừa không được đẻ ra một làn RỖNG — đó mới là nguy cơ thật.
+    //
+    // Bản đầu của bài kiểm này đòi `None`, và nó SAI: `lan/` cắt đuôi ra nhánh
+    // tên `lan`, một làn hợp lệ theo luật chung (nhánh không phải trunk ⟹ làn là
+    // đoạn cuối). Git cũng không tạo nổi tên nhánh có `/` ở cuối, nên ca này chỉ
+    // là hình dạng méo. Thứ phải khoá là: không bao giờ ra `Some("")`.
+    assert_ne!(
+        huba::sessions::lane_from_branch("lan/").as_deref(),
+        Some("")
+    );
+    assert_ne!(huba::sessions::lane_from_branch("///").as_deref(), Some(""));
 }

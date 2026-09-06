@@ -463,7 +463,7 @@ fn auto_handover_only_fires_when_the_session_is_truly_done() {
 /// khớp id chính xác, nên dòng ấy vô dụng theo cả hai đường.
 #[test]
 fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
-    use huba::pipeline::{auto_handover_notice, HandoverMove};
+    use huba::pipeline::{auto_handover_notice, FocusKept, HandoverMove};
 
     let new_id = "86fe1666-5e87-4fa9-903a-ea21bfb48208";
     let fork_id = "f0883567-7eae-426b-8643-e56468a7de6e";
@@ -475,19 +475,34 @@ fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
             tty: "ttys001",
             new_id,
             closed_err: None,
+            retrying: false,
+            focus: FocusKept::Elsewhere("[fbot]"),
         },
     );
     // Id ĐẦY ĐỦ của phiên thật, và tuyệt đối không phải id bản fork.
     assert!(ok.contains(new_id), "{ok}");
     assert!(!ok.contains(fork_id), "{ok}");
-    // Trên Telegram chữ thường đi vào phiên ĐANG THEO — nên tin phải nói con
-    // trỏ đã sang phiên mới, không thì chủ máy gõ việc vào một phiên đã tắt.
-    assert!(ok.contains("Đang theo phiên mới"), "{ok}");
+    // 🔴 ĐẢO CHIỀU 2026-09-03 — Hà: *"việc chọn phiên làm việc chỉ được xuất
+    // phát từ phía tôi gửi lệnh"*. Bản cũ đòi tin phải khoe *"Đang theo phiên
+    // mới"*, tức khoá đúng cái hành vi vừa bị bỏ: huba tự kéo con trỏ trong một
+    // lượt không ai bấm gì, và chiều 03/09 hai tin của chủ máy đã rơi vào hai
+    // phiên anh không chọn (xem `pipeline::FocusKept`).
+    //
+    // Bài kiểm không xoá mà đổi chiều: chính câu ấy nay là DẤU HIỆU HỎNG.
+    assert!(
+        !ok.contains("Đang theo phiên mới"),
+        "huba lại tự nhận đã kéo con trỏ sang phiên mới: {ok}"
+    );
+    assert!(
+        ok.contains("Con trỏ KHÔNG đổi") && ok.contains("[fbot]"),
+        "phải nói rõ chữ chủ máy gõ vẫn đi vào phiên anh đang chọn: {ok}"
+    );
     assert!(ok.contains("[AI/huba]") && ok.contains("80%"), "{ok}");
     // Không có gì hỏng thì không bịa ra cảnh báo.
     assert!(!ok.contains("⚠"), "{ok}");
 
-    // Cửa sổ cũ chưa đóng được: nói ra, đừng để phát hiện bằng mắt.
+    // Cửa sổ cũ chưa đóng được VÀ không ai ngó lại nữa: nói ra, đừng để phát
+    // hiện bằng mắt — và nói thẳng rằng việc sang tay chủ máy.
     let leftover = auto_handover_notice(
         "[AI/huba]",
         80,
@@ -496,9 +511,48 @@ fn the_auto_handover_notice_names_the_session_you_can_actually_type_into() {
             tty: "ttys001",
             new_id,
             closed_err: Some("tab còn bận sau 10s"),
+            retrying: false,
+            focus: FocusKept::Elsewhere("[fbot]"),
         },
     );
     assert!(leftover.contains("cửa sổ cũ chưa đóng được"), "{leftover}");
+    assert!(
+        leftover.contains("sang tay anh"),
+        "mất dấu cửa sổ ⟹ phải nói rõ là không ai thử lại nữa: {leftover}"
+    );
+
+    // 🔴 ĐỐI CHỨNG NGƯỢC của chính vế ấy (§13①), thêm 2026-09-03.
+    //
+    // Cùng một `closed_err`, chỉ đổi `retrying`, thì câu PHẢI đọc khác — không
+    // đổi được thì cái cờ ấy không phải một phép đo, nó là một trường bị bỏ quên.
+    //
+    // Ca thật: 03/09 16:37:54 huba gửi *"chưa đóng được … đóng tay, hoặc /close
+    // sau"* rồi tự đóng xong lúc 16:40:07. Hà đi kiểm bằng mắt vì câu ấy sai —
+    // không sai về sự kiện, sai về VIỆC nó giao cho anh.
+    let dang_thu_lai = auto_handover_notice(
+        "[AI/huba]",
+        80,
+        126,
+        &HandoverMove::Opened {
+            tty: "ttys001",
+            new_id,
+            closed_err: Some("tab còn bận sau 10s"),
+            retrying: true,
+            focus: FocusKept::Elsewhere("[fbot]"),
+        },
+    );
+    assert!(
+        dang_thu_lai.contains("tab còn bận sau 10s"),
+        "vẫn phải mang LÝ DO đo được: {dang_thu_lai}"
+    );
+    assert!(
+        dang_thu_lai.contains("đang tự thử lại"),
+        "huba còn thử lại thì phải nói ra: {dang_thu_lai}"
+    );
+    assert!(
+        !dang_thu_lai.contains("sang tay anh") && !dang_thu_lai.contains("đóng tay"),
+        "đang tự thử lại mà vẫn sai chủ máy đi dọn tay ⟹ đúng con bug 03/09: {dang_thu_lai}"
+    );
 
     // Cửa sổ mở nhưng phiên mới KHÔNG chào đời (nó dừng ở hộp hỏi) — đo thật
     // 2026-08-13 04:31:37: `handover_window_opened session:""`, cửa sổ ấy đứng

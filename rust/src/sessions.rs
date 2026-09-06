@@ -336,6 +336,31 @@ pub struct LiveSession {
     pub parent_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_name: Option<String>,
+
+    /// Pid ĐÃ SINH RA phiên này, đọc từ `--spawned-by` trong argv của tổ tiên.
+    ///
+    /// 🔴 Dựng 2026-09-06 vì phép leo `ppid` ở trên **đã chết mà không ai hay**.
+    /// Chú thích ngay trên kia còn ghi *"Measured 2026-08-09, both background
+    /// sessions resolved in 3-4 hops"* — đúng vào hôm ấy, và sai từ khi CLI đổi
+    /// kiến trúc: nay phiên nền treo dưới một `--bg-pty-host`, dưới nữa là
+    /// `claude daemon run` đã **tách về launchd**. Đo 06/09 trên `[fbot]`:
+    /// `6112 → 6074 → 6036 → 1`. Tức với đúng loại hàng mà `link_parents` sinh
+    /// ra để phục vụ, chuỗi cha LUÔN kết thúc ở pid 1 ⟹ không bao giờ có cha.
+    ///
+    /// Mối liên kết thật nằm trong dòng lệnh của cái daemon ấy, và `ps -eo
+    /// command=` trả về nguyên vẹn (đo: 219 byte cho hàng 6036):
+    /// `--spawned-by {"label":"claude","cwd":"…/fbot","pid":39500}`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawned_by_pid: Option<i64>,
+
+    /// Cái pid ấy còn sống không — **ba trạng thái, không hai**.
+    ///
+    /// `Some(true)` cha còn chạy · `Some(false)` cha đã thoát (⟹ phiên này mồ
+    /// côi) · `None` **chưa đọc được `--spawned-by`**, khác hẳn "cha đã chết".
+    /// Gộp `None` vào `false` là dán nhãn mồ côi cho một phiên chỉ vì huba không
+    /// đo được — đúng con bug hôm nay, mặc bộ đồ khác.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawner_alive: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -688,8 +713,12 @@ pub fn label_sessions(rows: &mut [LiveSession], root: &Path) {
     //
     // Ba phiên `dwork` sống cùng lúc lúc ấy tự xưng `dwork/A-DSIGN` ·
     // `dwork/A-DDOC` · `dwork` — ngắn hơn, do chính chúng đặt, và **đã phân
-    // biệt sẵn**. Nhãn tự khai vào thẳng đây thì khúc `·<việc>` bên dưới
-    // thường không còn phải chạy: `same_base` rỗng.
+    // biệt sẵn**.
+    //
+    // ⚠ Câu tiếp theo ở bản cũ — *"nhãn tự khai vào thẳng đây thì khúc `·<việc>`
+    // bên dưới thường không còn phải chạy"* — nay chỉ còn đúng về `same_base`,
+    // KHÔNG còn đúng về cái đuôi: từ 05/09 đuôi việc không phụ thuộc vào việc
+    // có trùng nhãn hay không nữa (xem khối 🔄 trong vòng lặp).
     let base: Vec<String> = rows
         .iter()
         .map(|s| {
@@ -720,18 +749,38 @@ pub fn label_sessions(rows: &mut [LiveSession], root: &Path) {
             .filter(|(j, b)| *j != i && **b == base[i])
             .map(|(j, _)| j)
             .collect();
-        row.label = if !same_base.is_empty() {
+        // 🔄 ĐẢO CHIỀU 2026-09-05 — Hà chốt: **luôn** gắn đuôi việc, kể cả khi
+        // nhãn gốc đã phân biệt được. Trước lượt này, đuôi `·<việc>` chỉ mọc ra
+        // ở nhánh `same_base` (nhãn TRÙNG nhau), tức nó gánh HAI vai cùng lúc:
+        // vừa nói việc, vừa THAY tên làn — và nó chỉ gánh nổi vai thứ hai nhờ
+        // một sự trùng hợp, rằng 9 làn `dwork` khai sai nên đọc ra `[dwork]`
+        // giống hệt nhau. Khai đúng `[dwork/<làn>]` thì `same_base` rỗng và
+        // dòng việc **biến mất** — được cái tên, mất thứ Hà đòi 19/08.
+        //
+        // Cái giá đã biết trước khi chốt, không phải hồi quy: MỌI hàng dài
+        // thêm, kể cả dự án một mình một cõi (`[onghut]·Dựng lại trang giá`), ở
+        // khắp chỗ tiêu thụ `label` — danh sách, nút, tin báo, dòng `👁 Đang
+        // theo`, câu *"Đóng hẳn …?"*. Chỗ cắt 34 ký tự ở trên vẫn là chỗ cắt
+        // duy nhất cho mọi nơi dùng.
+        //
+        // 🪦 Luật cũ (22/08, `session_label_declared.rs`): *"làn đã phân biệt
+        // được rồi thì đừng mượn tên việc nữa"* — sinh ra từ câu *"Sao cái tên
+        // phiên ở trên không làm giống ở dưới vừa gọn vừa dễ hiểu"*. Nó không
+        // sai; nó trả lời câu hỏi *"lấy gì làm TÊN"*. Câu hôm nay là câu khác:
+        // *"tên rồi thì có được nói thêm việc không"*. Cổng khoá luật cũ được
+        // ĐẢO CHIỀU chứ không xoá — xem bài kiểm cùng tên.
+        let doing_tells_apart =
             // Việc đang làm chỉ dùng được khi nó THẬT SỰ tách được hai hàng:
             // hai phiên `dwork` cùng đọc ra `Tiếp tục DS04 …` thì cái nhãn ấy
             // nói dối y hệt cách `[dwork]` trần đã nói dối — và lần này còn khó
-            // ngờ hơn, vì nó nghe như một câu trả lời.
-            let unique = !doing[i].is_empty() && !same_base.iter().any(|j| doing[*j] == doing[i]);
-            if unique {
-                format!("{}·{}", base[i], doing[i])
-            } else {
-                let short = row.session_id.split('-').next().unwrap_or(&row.session_id);
-                format!("{}·{short}", base[i])
-            }
+            // ngờ hơn, vì nó nghe như một câu trả lời. Nhãn KHÔNG trùng thì
+            // không có ai để nói dối, nên vế này tự đúng.
+            !doing[i].is_empty() && !same_base.iter().any(|j| doing[*j] == doing[i]);
+        row.label = if doing_tells_apart {
+            format!("{}·{}", base[i], doing[i])
+        } else if !same_base.is_empty() {
+            let short = row.session_id.split('-').next().unwrap_or(&row.session_id);
+            format!("{}·{short}", base[i])
         } else {
             base[i].clone()
         };
@@ -2503,11 +2552,23 @@ pub fn last_say(cfg: &Config, session: &LiveSession, max_chars: usize) -> Option
 /// nhánh khớp phần đầu cho dòng bị bẻ). Rẻ và tất định: một lượt đọc tệp, không
 /// gọi model nào.
 pub fn last_say_by_id(cfg: &Config, session_id: &str, max_chars: usize) -> Option<String> {
+    last_say_at_by_id(cfg, session_id, max_chars).map(|(said, _)| said)
+}
+
+/// Cùng lời cuối ấy, kèm mốc ISO nó được ghi — xem `last_prose_at`.
+///
+/// Đường này là thứ `/shot` trên phiên NỀN phải đi: ở đó nhật ký KHÔNG phải bản
+/// bù cho màn, nó là thứ duy nhất có — nên tuổi của nó là một nửa của tin.
+pub fn last_say_at_by_id(
+    cfg: &Config,
+    session_id: &str,
+    max_chars: usize,
+) -> Option<(String, Option<String>)> {
     if session_id.is_empty() || is_shell_id(session_id) {
         return None;
     }
     let path = find_transcript(&cfg.claude_transcript_root(), session_id)?;
-    last_prose_of_file(&path, max_chars)
+    last_prose_of_file_at(&path, max_chars)
 }
 
 /// Lời cuối phiên NÓI, đọc ngược từ cuối tệp và **nới dần khung đọc**.
@@ -2526,11 +2587,16 @@ pub fn last_say_by_id(cfg: &Config, session_id: &str, max_chars: usize) -> Optio
 /// KB đầu tiên và dừng ở đó, chỉ ca hiếm mới trả giá đọc rộng hơn. Trần 16 MB là
 /// cái phanh cuối cho một nhật ký khổng lồ.
 pub fn last_prose_of_file(path: &Path, max_chars: usize) -> Option<String> {
+    last_prose_of_file_at(path, max_chars).map(|(said, _)| said)
+}
+
+/// Cùng phép nới khung ấy, kèm mốc — xem `last_prose_at`.
+pub fn last_prose_of_file_at(path: &Path, max_chars: usize) -> Option<(String, Option<String>)> {
     let len = std::fs::metadata(path).ok()?.len();
     for window in [TAIL_BYTES, 1 << 20, 4 << 20, 16 << 20] {
         let tail = read_tail_n(path, window).ok()?;
-        if let Some(said) = last_prose(&tail, max_chars) {
-            return Some(said);
+        if let Some(found) = last_prose_at(&tail, max_chars) {
+            return Some(found);
         }
         if len <= window {
             break;
@@ -2567,6 +2633,31 @@ pub fn last_prose_of_file(path: &Path, max_chars: usize) -> Option<String> {
 /// được GHI (`preview_risk_noted`) — một dữ kiện đáng biết thì nói ra, không
 /// dựng thành cánh cửa.
 pub fn last_prose(tail: &str, max_chars: usize) -> Option<String> {
+    last_prose_at(tail, max_chars).map(|(said, _)| said)
+}
+
+/// Cùng lời cuối ấy, kèm **mốc nó được ghi**.
+///
+/// 🔴 Hà 2026-09-06, bấm 📷 lúc 04:10 trên một phiên NỀN và nhận về nguyên văn
+/// câu phiên nói lúc 01:45: *"Ghi là phiên đang sống nhưng lại chỉ là lịch sử,
+/// thật buồn cười, tôi có cần cái này đâu"*. Chữ trả về không sai — thứ thiếu là
+/// TUỔI của nó. Không có tuổi thì một câu già ba tiếng đọc lên y hệt một câu vừa
+/// nói, mà người đọc lại dựa đúng vào đó để quyết định làm gì tiếp.
+///
+/// Bài này `quota.rs` đã học một lần rồi, nguyên văn ở `Quota::say`: *"Tuổi
+/// không phải phần trang trí… một con số già hai ngày đọc lên y hệt một con số
+/// vừa đo xong nếu không ai nói ra"*. Nó không lan được sang đây vì hai chỗ
+/// không dùng chung một dòng mã nào — bài học chép bằng tay thì dừng ở chỗ
+/// người chép mỏi tay.
+///
+/// Mốc luôn CÓ SẴN trên chính dòng vừa đọc: `timestamp` là trường chuẩn của bản
+/// ghi `.jsonl`, và hai chỗ khác trong đúng tệp này đọc đúng trường ấy trên đúng
+/// cấu trúc ấy (`summarize_tail`, `parse_stream`). Bản cũ đọc dòng, lấy chữ, rồi
+/// bỏ mốc lại trên sàn — nên tầng hiển thị không còn gì để mà bù.
+///
+/// `None` ở vế mốc là một sự thật RIÊNG (dòng nhật ký không khai `timestamp`),
+/// **không được** đọc thành "vừa xong": chỗ gọi phải im, không đoán bù.
+pub fn last_prose_at(tail: &str, max_chars: usize) -> Option<(String, Option<String>)> {
     for line in tail.lines().rev() {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -2582,7 +2673,11 @@ pub fn last_prose(tail: &str, max_chars: usize) -> Option<String> {
             continue;
         }
         note_preview_risk("last_prose", &prose);
-        return Some(truncate(&prose, max_chars));
+        let at = record
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        return Some((truncate(&prose, max_chars), at));
     }
     None
 }
@@ -3364,6 +3459,13 @@ const BG_ENDED: [&str; 3] = ["done", "stopped", "failed"];
 /// này* (`updatedAt` nhích theo từng lượt), cùng họ với nhật ký phiên — chứ
 /// không phải ảnh chụp huba tự cất như sổ `watch:sessions`.
 ///
+/// 🔴 **Câu "sessions/ = tương tác · jobs/ = nền" ở trên ĐÃ HẾT ĐÚNG** (đo
+/// 2026-09-05, CLI 2.1.228): một phiên nền nay có mặt ở **cả hai** ngăn — sổ
+/// phiên ghi `"kind":"bg"` kèm `"jobId"`, sổ việc ghi `state`. Hai cuốn, một
+/// phiên. Nên hàm này gộp theo `sessionId` (`fold_job_into_session`) và dịch
+/// `"bg"` → `"background"` (`bg_is_background`) ngay ở cửa vào, thay vì để cả
+/// đường dưới đoán.
+///
 /// Hình dạng trả về giữ nguyên như `claude agents --json` để chỗ đọc
 /// (`snapshot`) không phải biết nguồn nào; `host_of` vẫn là chỗ duy nhất quyết
 /// định "còn sống không", vì một tệp còn nằm đó không chứng minh tiến trình còn
@@ -3394,11 +3496,12 @@ pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
             .map_err(|e| e.to_string())
             .and_then(|s| serde_json::from_str::<Value>(&s).map_err(|e| e.to_string()))
         {
-            Ok(v)
+            Ok(mut v)
                 if v.get("sessionId")
                     .and_then(|s| s.as_str())
                     .is_some_and(|s| !s.is_empty()) =>
             {
+                bg_is_background(&mut v);
                 out.push(v)
             }
             Ok(v) => logging::warn(
@@ -3451,7 +3554,7 @@ pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
             let Some(session_id) = v.get("sessionId").and_then(|s| s.as_str()) else {
                 continue;
             };
-            out.push(json!({
+            let row = json!({
                 "sessionId": session_id,
                 "name": v.get("name").and_then(|s| s.as_str()).unwrap_or("(không tên)"),
                 "cwd": v.get("cwd").and_then(|s| s.as_str()).unwrap_or_default(),
@@ -3467,11 +3570,83 @@ pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
                 // Mốc để `drop_stale_dead` chấm tuổi khi phiên nền KHÔNG có
                 // nhật ký để đọc — xem `BG_ENDED`.
                 "updatedAt": v.get("updatedAt").cloned().unwrap_or(Value::Null),
-            }));
+            });
+
+            // MỘT phiên = MỘT hàng, dù CLI ghi nó vào CẢ HAI ngăn sổ — xem
+            // `fold_job_into_session`.
+            if let Some(twin) = out.iter_mut().find(|r| {
+                r.get("sessionId").and_then(|s| s.as_str()) == Some(session_id)
+            }) {
+                fold_job_into_session(twin, &row);
+                continue;
+            }
+            out.push(row);
         }
     }
 
     Ok(out)
+}
+
+/// CLI gọi phiên nền là `"bg"`; cả huba đọc `"background"`. Dịch ở CỬA VÀO.
+///
+/// 🔴 Đo 2026-09-05: hàng `sessions/91890.json` mang `"kind":"bg"` +
+/// `"jobId":"167252e2"`. Không dịch thì hàng ấy đi hết đường dưới với một chữ
+/// **không chỗ nào biết đọc**, và cái hỏng KHÔNG kêu: `classify_host` rơi về
+/// nhánh cuối ⟹ `"detached"`; `/stop` thì `stop_background` từ chối bằng câu
+/// *"phiên này chạy trong một cửa sổ Terminal"* — sai về thế giới, vì phiên nền
+/// không có cửa sổ nào; `/close` đi tìm một cửa sổ không tồn tại. Tức nút vẫn
+/// hiện, bấm vẫn có tiếng, mà việc thì không bao giờ xảy ra.
+fn bg_is_background(v: &mut Value) {
+    if v.get("kind").and_then(|k| k.as_str()) != Some("bg") {
+        return;
+    }
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert("kind".to_string(), json!("background"));
+    }
+}
+
+/// Gộp hàng `jobs/<id ngắn>/state.json` vào hàng `sessions/<pid>.json` của
+/// CÙNG một `sessionId` — vì chúng là **một phiên**, không phải hai.
+///
+/// 🔴 Hà 2026-09-05: *"tại sao danh sách lại có 2 mã phiên giống nhau"*. Đo
+/// ngay lúc ấy: `167252e2` nằm ở cả hai ngăn của acc1 — `sessions/91890.json`
+/// (`kind:"bg"`, pid 91890, `status:"busy"`) và `jobs/167252e2/state.json`
+/// (`state:"working"`). `list_account_books` đọc hai ngăn rồi đẩy cả hai, nên
+/// ảnh chụp ra **11 hàng cho 10 phiên**, hai hàng cùng một mã.
+///
+/// Chú thích cũ của hàm này khai `sessions/` là phiên TƯƠNG TÁC còn `jobs/` là
+/// phiên NỀN — đúng lúc viết (2026-08-15), sai từ lúc CLI 2.1.228 ghi phiên nền
+/// vào cả hai. Đây đúng hình dạng *"comment là mệnh đề, không phải bằng chứng"*.
+///
+/// Hàng nào thắng: hàng `sessions/` làm NỀN, vì chỉ nó mang **pid còn sống** —
+/// thứ duy nhất chứng minh phiên còn chạy, và thứ `link_parents` cần để chỉ ra
+/// ai đẻ ra nó. Hàng `jobs/` góp hai thứ nó có mà bên kia không:
+/// * `state` (`working`/`blocked`/…) — `state_of` đọc để vẽ trạng thái;
+/// * `updatedAt`, nhưng **chỉ khi mới hơn**: hai cuốn sổ nhích theo hai nhịp
+///   khác nhau (đo cùng lúc: sổ phiên 08:07:46Z, sổ việc 08:39:49Z), mà chỗ
+///   gọi chỉ hỏi *"phiên này động lần cuối lúc nào"*.
+///
+/// KHÔNG đụng `pid` · `kind` · `status` · `startedAt` của hàng nền — lấy `pid:0`
+/// của sổ việc đè lên pid thật là tự tay khai một phiên đang chạy thành "dead".
+fn fold_job_into_session(session_row: &mut Value, job_row: &Value) {
+    let job_is_newer = match (book_updated_at(session_row), book_updated_at(job_row)) {
+        // Cả hai đã được `book_updated_at` đưa về cùng một khuôn UTC
+        // (`…T…Z`, giây), nên so chuỗi ở đây LÀ so thời gian.
+        (Some(a), Some(b)) => b > a,
+        (None, Some(_)) => true,
+        _ => false,
+    };
+    let Some(obj) = session_row.as_object_mut() else {
+        return;
+    };
+    if let Some(state) = job_row.get("state").cloned() {
+        obj.insert("state".to_string(), state);
+    }
+    if job_is_newer {
+        if let Some(t) = job_row.get("updatedAt").cloned() {
+            obj.insert("updatedAt".to_string(), t);
+        }
+    }
 }
 
 /// Phiên đang sống của một tài khoản — sổ của CLI trước, hỏi CLI sau.
@@ -3872,6 +4047,74 @@ fn mark_can_type(rows: &mut [LiveSession], tabs: &[crate::keys::Tab]) {
     }
 }
 
+/// Bao nhiêu hàng trong danh sách này KHÔNG gõ vào được.
+///
+/// Hai nguồn ĐỘC LẬP, không nguồn nào được đoán:
+/// ① `!is_real_tty` — tty `??` hoặc rỗng: không có cửa sổ nào TỒN TẠI để mà gõ.
+///    Không phụ thuộc phép dò nào, nên nó vẫn đúng cả khi `osascript` chết.
+/// ② `can_type == false` trên hàng CÓ tty thật — ca terminal tích hợp VS Code:
+///    hàng khai `host: "terminal"` nên vẫn in `⌨` như thể gõ được.
+///
+/// Cửa `probed` là chỗ dễ bỏ sót nhất: `mark_can_type` để nguyên `false` cho MỌI
+/// hàng khi danh sách tab rỗng vì dò hỏng, nên `0 gõ được` của một lượt dò hỏng
+/// đọc y hệt `0 gõ được` thật. Bằng chứng phép dò CÓ chạy là có ít nhất một hàng
+/// `can_type = true`; không có nó thì nguồn ② im, chỉ còn ①. **Chưa đo được thì
+/// đừng tô màu.**
+/// Phiên này có CỬA SỔ NÀO TRÊN MÀN không — thứ chủ máy ngồi trước máy nhìn thấy.
+///
+/// 🔴 Hà 2026-09-06: *"Mọi thứ tôi bảo phải đọc ở terminal làm gốc cơ mà"* ·
+/// *"Cái mà nhìn thấy được trên màn hình"*. Đây là vị từ dựng danh sách
+/// `/session`, và nó phải là MỘT chỗ — chỗ gọi tự viết lại điều kiện là bản chép
+/// tay thứ hai, thứ tệp này đã trả giá hai lần trong đúng một ngày.
+///
+/// Đọc `tty` (từ `ps`), **không** đọc `can_type`: `can_type` phụ thuộc phép dò
+/// tab của Terminal, và `mark_can_type` để nguyên `false` cho MỌI hàng khi phép
+/// dò hỏng ⟹ lấy nó làm cửa thì một lượt `osascript` chết biến danh sách thành
+/// rỗng trơn, không một lời giải thích. `tty` thì có hay không có, không phụ
+/// thuộc phép dò nào.
+///
+/// Giữ được cả phiên chạy trong terminal tích hợp của VS Code: nó có tty thật,
+/// Terminal.app không biết cái tty ấy (nên `can_type = false`), nhưng chủ máy
+/// VẪN NHÌN THẤY nó trên màn — mà "nhìn thấy" mới là câu hỏi ở đây.
+pub fn on_screen(s: &LiveSession) -> bool {
+    is_real_tty(&s.tty)
+}
+
+pub fn read_only_count(rows: &[LiveSession]) -> usize {
+    let probed = rows.iter().any(|s| s.can_type);
+    rows.iter()
+        .filter(|s| !is_real_tty(&s.tty) || (probed && !s.can_type))
+        .count()
+}
+
+/// Câu mở đầu của MỌI danh sách phiên — Telegram lẫn `huba sessions`.
+///
+/// 🔴 MỘT nguồn cho cả hai cái mồm — Hà 2026-09-06, sau khi tiêu đề Telegram đã
+/// sửa xong: *"Vẫn nhìn thấy 3 phiên đang sống mà"*. Câu anh đang nhìn in ra từ
+/// `main.rs`, bản chép TAY thứ hai của cùng một phép đếm, và nó không đổi lấy
+/// một chữ khi `pipeline.rs` đổi.
+///
+/// Đúng thứ tấm 🪦 ở `pipeline::session_button_label` đã ghi rồi: *"Bản chép thứ
+/// hai của một bảng thì không bao giờ là 'cùng bộ'; nó chỉ là bộ giống nhau CHO
+/// TỚI KHI ai đó sửa một bên."* Lần này cái giá là chủ máy sửa xong vẫn thấy
+/// nguyên câu cũ, và phải tự đi tìm xem mình bị lừa ở đâu.
+///
+/// Nên chỗ này trả về CẢ CÂU, không phải con số: hai nơi tự ghép chữ là hai nơi
+/// trôi khỏi nhau lần nữa.
+pub fn drive_summary(rows: &[LiveSession]) -> String {
+    let chi_doc = read_only_count(rows);
+    if chi_doc == 0 {
+        format!("{} phiên đang sống", rows.len())
+    } else {
+        format!(
+            "{} phiên · {} gõ được · {} chỉ đọc",
+            rows.len(),
+            rows.len() - chi_doc,
+            chi_doc
+        )
+    }
+}
+
 /// Chép VIỆC ĐANG LÀM từ nhan đề tab sang từng hàng — xem `LiveSession::doing`.
 ///
 /// Cùng khuôn với `mark_can_type`, và cùng một lý do: dùng lại đúng cái danh
@@ -3932,7 +4175,71 @@ fn link_parents(rows: &mut [LiveSession], procs: &Procs) {
             }
             pid = ppid;
         }
+
+        // Đường HAI: `--spawned-by`. Chạy vô điều kiện, không phải chỉ khi
+        // đường một trượt — nó trả lời một câu khác: *cha là pid nào, và pid ấy
+        // còn sống không*. Đó mới là thứ phân biệt được **mồ côi** (cha đã
+        // thoát) với **chưa đo được** (không đọc nổi `--spawned-by`), hai thứ
+        // trông y hệt nhau nếu chỉ nhìn `parent_session_id == None`.
+        if let Some(sp) = spawner_of(procs, row.pid) {
+            row.spawned_by_pid = Some(sp);
+            row.spawner_alive = Some(procs.by_pid.contains_key(&sp));
+            if row.parent_session_id.is_none() {
+                if let Some((id, name)) = by_pid.get(&sp) {
+                    if *id != row.session_id {
+                        row.parent_session_id = Some(id.clone());
+                        row.parent_name = Some(name.clone());
+                    }
+                }
+            }
+        }
     }
+}
+
+/// Đọc `"pid":N` trong cụm `--spawned-by {…}` của một dòng lệnh.
+///
+/// KHÔNG parse bằng `serde_json`: `ps` trả về cả dòng lệnh chứ không phải một
+/// JSON, nên phải tự cắt tới dấu `}` — mà một dấu `}` nằm trong `cwd` là đủ cắt
+/// sai. Tìm thẳng khoá cần rồi đọc chữ số thì không có chỗ nào để "gần đúng".
+pub fn spawned_by_pid_in(command: &str) -> Option<i64> {
+    let after = command.split("--spawned-by").nth(1)?;
+    let digits: String = after
+        .split("\"pid\":")
+        .nth(1)?
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    digits.parse().ok()
+}
+
+/// Pid đã sinh ra phiên này: leo `ppid` tìm tổ tiên nào khai `--spawned-by`.
+///
+/// Với phiên nền của CLI hiện nay, cụm ấy nằm trên `claude daemon run` — tức
+/// **hai bậc trên** tiến trình phiên (`… → --bg-pty-host → daemon run`), nên
+/// không thể chỉ đọc argv của chính hàng ấy.
+fn spawner_of(procs: &Procs, pid: i64) -> Option<i64> {
+    let mut cur = pid;
+    for _ in 0..12 {
+        let p = procs.by_pid.get(&cur)?;
+        if let Some(sp) = spawned_by_pid_in(&p.command) {
+            return Some(sp);
+        }
+        if p.ppid <= 1 {
+            return None;
+        }
+        cur = p.ppid;
+    }
+    None
+}
+
+/// Phiên này có phải MỒ CÔI không — không cửa sổ, và cha sinh ra nó đã thoát.
+///
+/// `false` cho cả ca "chưa đo được cha" (`spawner_alive == None`): dán nhãn mồ
+/// côi cho một phiên chỉ vì huba không đọc nổi argv của nó là bịa ra một sự
+/// thật. Muốn phân biệt ba trạng thái thì đọc thẳng `spawner_alive`.
+pub fn is_orphan(s: &LiveSession) -> bool {
+    !on_screen(s) && s.spawner_alive == Some(false)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4123,6 +4430,11 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 model: None,
                 // Điền sau khi đã có đủ mọi hàng: quan hệ cha-con chỉ tra được
                 // khi biết pid của TẤT CẢ các phiên.
+                // Cả bốn trường quan hệ cha–con điền ở `link_parents`, sau khi
+                // MỌI hàng đã có mặt: "con của ai" là câu hỏi về cả tập, không
+                // hàng nào tự trả lời được.
+                spawned_by_pid: None,
+                spawner_alive: None,
                 parent_session_id: None,
                 parent_name: None,
             };
@@ -4627,6 +4939,22 @@ pub fn transcript_mtime(path: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(path).ok()?.modified().ok()
 }
 
+/// Nhật ký của một phiên đứng im bao nhiêu giây — dùng khi CHỈ có `session_id`,
+/// không có cả một `LiveSession` trong tay (đúng hình dạng của sổ đóng cửa sổ,
+/// `pipeline::closing_book`).
+///
+/// Sinh ra sau khi tự trải: `close_gave_up`/`handover_old_window_not_closed`
+/// (log thật, 14 + 31 lần) luôn dừng ở đúng một câu chung chung — *"CLI đang
+/// chạy dở một lượt"* — dù đã đợi 10+ phút, mà không nói được đây là một lượt
+/// build/test THẬT (nhật ký còn lớn) hay một ca đứng im thật sự. Trả `None`
+/// khi không tìm được nhật ký — chỗ gọi giữ câu cũ, đây là phần LÀM RÕ THÊM,
+/// không phải điều kiện để có câu trả lời.
+pub fn transcript_idle_seconds(cfg: &Config, session_id: &str) -> Option<i64> {
+    let path = find_transcript(&cfg.claude_transcript_root(), session_id)?;
+    let mtime = transcript_mtime(&path)?;
+    Some(mtime.elapsed().ok()?.as_secs() as i64)
+}
+
 /// The recent stream of one session, ready to render.
 pub fn stream(cfg: &Config, session_id: &str, cwd: &str, limit: usize) -> SessionStream {
     let mut out = SessionStream {
@@ -4942,8 +5270,19 @@ pub fn handover(cfg: &Config, session: &LiveSession) -> Result<Handover> {
 /// phiên từng nói. Bản dựng ra **thô hơn** bản phiên tự viết — nó không biết
 /// việc gì còn dở, không tự tóm ý — nên chỗ gọi phải NÓI RA điều đó thay vì
 /// đưa ra như nhau. Thô mà có, hơn tinh mà không bao giờ tới.
+///
+/// 🔴 Cửa sổ 40 → 160, đo được trên chính một lượt bàn giao thật (2026-09-05,
+/// huba): phiên `[huba]` sửa 16 tệp trải trên ba việc khác nhau (nhãn phiên,
+/// debounce, MCP trình duyệt), mà bản bàn giao chỉ còn ĐÚNG 3 LƯỢT NÓI để đọc.
+/// Lý do: 40 sự kiện cuối trong cửa sổ 256 KB (`read_tail`, không đổi) gần hết
+/// là `tool`/`result` — một lượt sửa nhiều tệp thì phần lớn nhật ký là
+/// `Edit`/`Bash`, không phải lời — nên lọc `kind == "say"` bào một mạch từ 40
+/// xuống 3. Phiên nhận bản ấy phải tự chạy `git status`/`git diff --stat` mới
+/// thấy ra việc thật đang dở; đúng thứ hàm này phải tự làm thay, xem
+/// [`working_tree_summary`]. Giữ nguyên 12 lượt GIỮ LẠI ở dưới — cái hẹp không
+/// nằm ở đó, nó nằm ở cửa sổ THÔ trước khi lọc.
 pub fn handover_from_journal(cfg: &Config, session: &LiveSession) -> Option<String> {
-    let st = stream(cfg, &session.session_id, &session.cwd, 40);
+    let st = stream(cfg, &session.session_id, &session.cwd, 160);
     // Chỉ giữ LỜI của phiên và của chủ máy; bỏ `tool`/`result` — chúng dài,
     // và một bản bàn giao cần "đã bàn gì", không cần "đã chạy lệnh gì".
     let mut dong: Vec<String> = Vec::new();
@@ -4961,14 +5300,82 @@ pub fn handover_from_journal(cfg: &Config, session: &LiveSession) -> Option<Stri
     }
     // Giữ phần CUỐI: gần hiện tại nhất là phần còn dùng được.
     let giu = dong.len().saturating_sub(12);
-    Some(format!(
+    let loi_ke = format!(
         "⚠ Bản bàn giao này dựng TỪ NHẬT KÝ, không phải do phiên cũ tự viết — tài khoản \
          của nó ({}) không gọi được. Nó là {} lượt nói cuối, nguyên văn, KHÔNG tóm tắt: \
          việc gì còn dở thì phải tự đọc ra.\n\n{}",
         session.account,
         dong.len() - giu,
         dong[giu..].join("\n\n")
-    ))
+    );
+    Some(match working_tree_summary(cfg, session) {
+        Some(cay) => format!("{loi_ke}\n\n---\n\n{cay}"),
+        None => loi_ke,
+    })
+}
+
+/// Trạng thái CÂY LÀM VIỆC thật lúc bàn giao, đọc bằng `git`, không suy từ lời
+/// phiên kể lại.
+///
+/// Sinh ra từ chính bài học ở [`handover_from_journal`]: lời kể — dù có mở
+/// rộng cửa sổ đến đâu — vẫn chỉ là những gì phiên NÓI, mà một lượt sửa nhiều
+/// tệp thường nói rất ít so với nó làm. Đĩa thì không nói dối theo cách ấy:
+/// `git status --short` trả đúng danh sách tệp đang dở tại đúng khoảnh khắc
+/// đóng sổ, bất kể phiên có kịp kể ra hay không.
+///
+/// 🔴 KHÔNG chạy trên `session.cwd` thẳng — đo trên chính workspace này
+/// (`huba sessions --json`, 2026-09-05): MỌI phiên báo `cwd:
+/// "/Users/hanguyen/projects"`, kể cả phiên đang sửa `huba` hay `dwork`,
+/// vì đó là cwd của TIẾN TRÌNH `claude` lúc khởi động (workspace này luôn mở
+/// phiên từ gốc), không đổi theo `cd` bên trong một lời gọi Bash — chính lý
+/// do `folder`/`lane` phải có một tầng SUY RA riêng (`declared_parts`,
+/// `folder_from_tail`) thay vì đọc thẳng `cwd`. `git status` cần đứng ĐÚNG
+/// cây mới có nghĩa, nên hàm này dùng lại đúng tầng suy ra ấy
+/// (`config::project_dir` từ `folder`), chỉ rơi về `cwd` khi `folder` rỗng
+/// hoặc không khớp dự án nào — cùng lắm thì bằng hành vi cũ, không tệ hơn.
+///
+/// Lỗi ở bất kỳ bước nào — không phải cây git, `git` không có, hết giờ, cwd
+/// không còn tồn tại — rơi về `None` một cách im lặng CÓ CHỦ Ý: đây là phần
+/// CỘNG THÊM cho bản bàn giao, không phải điều kiện để có bản bàn giao. Một
+/// bước phụ hỏng không được kéo cả lượt đóng sổ chết theo.
+fn working_tree_summary(cfg: &Config, session: &LiveSession) -> Option<String> {
+    let root = crate::config::project_dir(cfg, &session.folder)
+        .unwrap_or_else(|| crate::config::expand_home(Path::new(&session.cwd)));
+    if !root.is_dir() {
+        return None;
+    }
+    let opts = |timeout_sec: u64| RunOpts {
+        cwd: Some(root.as_path()),
+        timeout: Some(Duration::from_secs(timeout_sec)),
+        ..Default::default()
+    };
+    let status = run("git", &["status", "--short"], opts(5)).ok()?;
+    if !status.ok() {
+        // Không phải cây git (hoặc `git` lỗi vì lý do khác) — không phải lỗi
+        // của bản bàn giao, chỉ là không có gì để nói thêm ở mục này.
+        return None;
+    }
+    if status.stdout.trim().is_empty() {
+        // Cây sạch: lời phiên kể là đủ, không cần nói lại "không có gì đổi".
+        return None;
+    }
+    let diffstat = run("git", &["diff", "--stat", "HEAD"], opts(10))
+        .ok()
+        .filter(|o| o.ok())
+        .map(|o| o.stdout)
+        .unwrap_or_default();
+    let mut out = format!(
+        "**Cây làm việc THẬT lúc bàn giao** (đọc bằng `git`, không phải lời kể — \
+         lời kể có thể lạc sau lượt sửa cuối):\n\n`git status --short`:\n```\n{}\n```",
+        truncate(status.stdout.trim(), 1800)
+    );
+    if !diffstat.trim().is_empty() {
+        out.push_str(&format!(
+            "\n\n`git diff --stat HEAD`:\n```\n{}\n```",
+            truncate(diffstat.trim(), 1200)
+        ));
+    }
+    Some(out)
 }
 
 /// A question asked ALONGSIDE a running session, and its answer.

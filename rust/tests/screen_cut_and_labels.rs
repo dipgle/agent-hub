@@ -200,8 +200,12 @@ fn same_project_sessions_are_told_apart_by_what_they_are_doing() {
         "{}",
         rows[1].label
     );
-    // Một mình một dự án thì không cần vế phân biệt nào cả.
-    assert_eq!(rows[3].label, "[tcc/amm]");
+    // 🔄 ĐẢO CHIỀU 2026-09-05 (Hà chốt "luôn gắn đuôi việc"). Dòng cũ đòi
+    // `[tcc/amm]` TRẦN với lý do *"một mình một dự án thì không cần vế phân
+    // biệt nào cả"* — đúng nếu cái đuôi ấy chỉ để PHÂN BIỆT. Nay nó có vai
+    // riêng: nói phiên đang làm gì, và vai ấy không phụ thuộc vào việc có ai
+    // trùng tên hay không.
+    assert_eq!(rows[3].label, "[tcc/amm]·Chốt hướng authority cho AMM");
 }
 
 /// Không đọc được việc đang làm thì RƠI VỀ mã id, đừng bịa và đừng để trống.

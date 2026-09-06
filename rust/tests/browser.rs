@@ -263,3 +263,80 @@ fn a_quote_in_a_url_cannot_split_the_script() {
         "dấu nháy của URL chưa được thoát:\n{sc}"
     );
 }
+
+/// `sc_click`/`sc_fill` nhúng `selector`/`value` qua HAI tầng thoát:
+/// `serde_json::to_string` (JS-string-literal an toàn) rồi cả khối JS mới đi
+/// qua `as_string` (AppleScript). Một selector/value mang dấu nháy, dấu gạch
+/// chéo ngược, hay chuỗi `</script>` không được lọt ra CHƯA ĐƯỢC THOÁT ở tầng
+/// nào — bỏ sót một tầng là script hỏng cú pháp, hoặc tệ hơn: chạy được nhưng
+/// chạy SAI ý người gọi.
+///
+/// Cách kiểm: dựng tay đúng công thức thoát KÉP cho một dấu `"` và một dấu `\`
+/// độc lập trong `selector` (JSON thoát → AppleScript thoát lại chính ký tự
+/// thoát ấy), rồi `contains` đúng vị trí — cùng kiểu phép đo với
+/// `a_quote_in_a_url_cannot_split_the_script`, chỉ khác là ở đây có HAI tầng
+/// thay vì một. `</script>` thì không mang ký tự nào JSON hay AppleScript phải
+/// thoát (JSON không thoát `/`), nên nó phải đi qua NGUYÊN VĂN — bằng chứng
+/// cho việc hai tầng thoát chỉ đụng vào `"`/`\`, không đụng gì khác.
+#[test]
+fn a_quote_a_backslash_and_a_script_tag_cannot_leak_unescaped_into_click_or_fill() {
+    use huba::browser::{sc_click, sc_fill};
+    let selector = r#"div[data-x="y"]\z</script>"#;
+    let value = r#"a"b\c</script>"#;
+
+    let click = sc_click(selector);
+    let fill = sc_fill(selector, value);
+
+    for (ten, sc) in [("click", &click), ("fill", &fill)] {
+        assert!(
+            sc.starts_with("if application \"Google Chrome\" is running then"),
+            "{ten}: mở đầu sai:\n{sc}"
+        );
+        assert_eq!(sc.matches("tell application").count(), 1, "{ten}:\n{sc}");
+        assert_eq!(sc.matches("end tell").count(), 1, "{ten}:\n{sc}");
+        assert_eq!(sc.matches('"').count() % 2, 0, "{ten}: dấu nháy lẻ:\n{sc}");
+
+        // `data-x="y"`: JSON thoát mỗi `"` thành `\"` (backslash + quote), rồi
+        // AppleScript thoát LẠI cả hai ký tự ấy (`\`→`\\`, rồi `"`→`\"`) ⟹ một
+        // dấu nháy gốc trở thành BA dấu `\` liền trước một dấu `"`.
+        assert!(
+            sc.contains(r#"data-x=\\\"y\\\""#),
+            "{ten}: dấu nháy trong selector chưa qua đủ hai tầng thoát:\n{sc}"
+        );
+        // `\z`: JSON thoát `\` thành `\\` (hai ký tự), rồi AppleScript thoát
+        // lại cả hai thành bốn ⟹ một dấu `\` gốc trở thành BỐN dấu `\`.
+        assert!(
+            sc.contains(r#"\\\\z"#),
+            "{ten}: dấu \\ trong selector chưa qua đủ hai tầng thoát:\n{sc}"
+        );
+        assert!(
+            sc.contains("</script>"),
+            "{ten}: mất `</script>` của selector:\n{sc}"
+        );
+    }
+
+    // `value` chỉ `sc_fill` mới nhận — cùng công thức, cùng phải qua đủ hai tầng.
+    assert!(
+        fill.contains(r#"a\\\"b"#),
+        "value: dấu nháy chưa qua đủ hai tầng thoát:\n{fill}"
+    );
+    assert!(
+        fill.contains(r#"\\\\c"#),
+        "value: dấu \\ chưa qua đủ hai tầng thoát:\n{fill}"
+    );
+}
+
+/// `sc_fill` phải gửi CẢ HAI sự kiện `input` và `change` — thiếu một cái là
+/// điều một lượt sửa sau có thể vô tình làm, và framework nào chỉ lắng nghe
+/// MỘT trong hai thì ô nhập sẽ trông như đã điền mà state không hề đổi. Khoá
+/// lại bằng một bài kiểm riêng để không ai xoá mất một dòng `dispatchEvent` mà
+/// không ai hay.
+#[test]
+fn sc_fill_dispatches_both_input_and_change_events() {
+    use huba::browser::sc_fill;
+    let sc = sc_fill("#email", "a@b.test");
+    // Escape đơn (những dấu nháy này là của CHÍNH template JS, không phải của
+    // `value`) ⟹ một tầng AppleScript thôi: `"input"` → `\"input\"`.
+    assert!(sc.contains(r#"\"input\""#), "thiếu sự kiện input:\n{sc}");
+    assert!(sc.contains(r#"\"change\""#), "thiếu sự kiện change:\n{sc}");
+}

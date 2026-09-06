@@ -600,15 +600,40 @@ pub fn open_window(cmd: &str) -> Result<(i64, String)> {
     // Trả về cả cỡ THẬT sau khi đổi, không chỉ tty: "đã mở hết cỡ" là một mệnh
     // đề, và mệnh đề nào cũng phải có số đứng sau (luật 13). Terminal kẹp giùm
     // nên số nhận về là trần thật của màn hình này.
+    //
+    // 🔴 `on error` chứ không `try` TRẦN — Hà 2026-09-03, sau khi hỏi *"chiều
+    // cao của terminal … chỉ chiếm chưa đến nửa màn hình, sao không có chế độ
+    // full screen à"*.
+    //
+    // Cái `try` trần nuốt đúng một hình dạng hỏng, và nuốt nó vào chỗ tệ nhất:
+    // đổi cỡ trượt ⟹ cửa sổ nằm nguyên cỡ mặc định của hồ sơ `Basic` (24×80,
+    // **chưa tới nửa màn**) ⟹ mà dòng log vẫn mang tên
+    // `window_opened_full_screen`. Hai con số ở trong nó nói thật, nhưng cái TÊN
+    // nói dối, và người đọc nhật ký đọc cái tên. Đúng thứ luật 3 cấm: một `Err`
+    // gấp vào giá trị mặc định mà không để lại dòng nào.
+    //
+    // Vẫn KHÔNG ném ra ngoài — bài học của chính hàm này: cửa sổ đã dựng xong
+    // rồi mới tới mấy dòng sau, nên một lỗi ném ra ở đây là bỏ lại một cửa sổ mồ
+    // côi. Nên lỗi đi ra bằng một Ô THỨ TƯ trong chuỗi trả về: bắt được, nói ra,
+    // và phiên vẫn chạy.
+    //
+    // 📐 Đo 2026-09-03 trước khi đụng vào: xin 999 dòng/cột và `set zoomed to
+    // true` (đúng cái nhấp đúp thanh tiêu đề làm — cách Hà mô tả) cho ra **cùng
+    // một hình chữ nhật** `0,33 → 1463,972`, `61×206`, kể cả khi cửa sổ đang
+    // nằm lệch ở `{420,420,900,700}` trước đó. Nên chỗ hỏng không nằm ở phép
+    // chọn cỡ; nó nằm ở chỗ phép ấy trượt mà không ai biết.
     let script = format!(
         r#"tell application "Terminal"
   set w to do script {}
+  set szErr to ""
   try
     set number of rows of w to {rows}
     set number of columns of w to {cols}
+  on error e
+    set szErr to e
   end try
   delay 1
-  return (tty of w) & "|" & ((number of rows of w) as text) & "|" & ((number of columns of w) as text)
+  return (tty of w) & "|" & ((number of rows of w) as text) & "|" & ((number of columns of w) as text) & "|" & szErr
 end tell"#,
         as_string(cmd),
         rows = FULL_SCREEN_ASK,
@@ -625,14 +650,29 @@ end tell"#,
     // ra log bằng hai hình dạng khác nhau chứ không cùng một dòng.
     let rows = phan.next().and_then(|s| s.trim().parse::<i64>().ok());
     let cols = phan.next().and_then(|s| s.trim().parse::<i64>().ok());
+    // Ô thứ tư: lời than của chính AppleScript khi lượt đổi cỡ trượt. Rỗng =
+    // đặt được. Ba ca dưới là BA dòng log khác nhau, không phải một dòng có ba
+    // nghĩa — đặt được / đặt trượt / không đọc nổi cỡ.
+    let size_err = phan.next().map(str::trim).unwrap_or("");
     match (rows, cols) {
-        (Some(r), Some(c)) => logging::info(
+        (Some(r), Some(c)) if size_err.is_empty() => logging::info(
             "window_opened_full_screen",
             json!({ "tty": tty, "xin": FULL_SCREEN_ASK, "rows": r, "cols": c }),
+        ),
+        // Cỡ đọc được mà lệnh đặt thì trượt: cửa sổ đang mang cỡ mặc định của hồ
+        // sơ Terminal, KHÔNG phải trần màn hình. Nói ra bằng một cái tên khác —
+        // `window_opened_full_screen` mà đứng trên một cửa sổ 24×80 là một dòng
+        // nhật ký nói dối, và người đọc nhật ký đọc cái tên trước con số.
+        (Some(r), Some(c)) => logging::warn(
+            "window_size_not_applied",
+            json!({ "tty": tty, "xin": FULL_SCREEN_ASK, "rows": r, "cols": c,
+                    "err": crate::exec::truncate(size_err, 200),
+                    "effect": "cửa sổ mở ra ở cỡ mặc định của hồ sơ Terminal — đừng khai là đã hết cỡ" }),
         ),
         _ => logging::warn(
             "window_size_unread",
             json!({ "tty": tty, "raw": out.trim(),
+                    "err": crate::exec::truncate(size_err, 200),
                     "effect": "cửa sổ mở được nhưng không đọc được cỡ — đừng khai là đã hết cỡ" }),
         ),
     }

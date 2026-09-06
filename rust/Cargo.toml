@@ -40,5 +40,9 @@ path = "src/main.rs"
 name = "hubad"
 path = "src/bin/hubad.rs"
 
+[[bin]]
+name = "browser-mcp"
+path = "src/bin/browser_mcp.rs"
+
 [profile.release]
 strip = true

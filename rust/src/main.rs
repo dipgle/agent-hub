@@ -67,6 +67,24 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Hỏi MỘT phiên khác một câu KHÔNG làm phiền nó — fork đọc-thật
+    /// (`sessions::ask_aside`), không đụng bản gốc, không qua Telegram,
+    /// không cần là chủ máy.
+    ///
+    /// Dựng 2026-09-05 sau một lượt thật: một phiên Claude KHÁC (project
+    /// khác) hỏi thẳng qua `SendMessage` — tin đi thẳng vào giữa dòng hội
+    /// thoại chính của phiên nhận, đúng cái "chen ngang" Hà không muốn. Lệnh
+    /// này bọc CHÍNH cơ chế Telegram `/ask` đã dùng, chỉ đổi cửa vào: gọi
+    /// được từ Bash bởi bất kỳ phiên nào có mặt trên máy này, không cần
+    /// `chat_id` — không phải cửa mới, vì bất kỳ phiên nào đã có quyền chạy
+    /// `claude --fork-session --resume <id>` thẳng tay rồi, lệnh này chỉ gọn
+    /// hoá lại đúng việc đó. Xem `~/projects/GIAO-TIEP-LIEN-PHIEN.md`.
+    Ask {
+        /// id phiên cần hỏi — đủ hoặc rút gọn (khớp tiền tố)
+        session: String,
+        /// câu hỏi — một tham số, đặt trong dấu ngoặc kép ở shell
+        question: String,
+    },
 }
 
 fn main() {
@@ -114,7 +132,26 @@ fn real_main() -> Result<()> {
         }
         Command::Status => cmd_status(&db),
         Command::Sessions { json } => cmd_sessions(&db, &cfg, json),
+        Command::Ask { session, question } => cmd_ask(&cfg, &session, &question),
     }
+}
+
+/// `huba ask <id> "<câu hỏi>"` — xem doc-comment của `Command::Ask`. In ra
+/// ĐÚNG câu trả lời, không kèm gì khác, để gọi được thẳng từ script/phiên
+/// khác (`$(huba ask <id> "…")`).
+fn cmd_ask(cfg: &Config, session: &str, question: &str) -> Result<()> {
+    let snap = huba::sessions::snapshot(cfg);
+    let target = snap
+        .sessions
+        .iter()
+        .find(|s| s.session_id == session)
+        .or_else(|| snap.sessions.iter().find(|s| s.session_id.starts_with(session)))
+        .ok_or_else(|| {
+            anyhow::anyhow!("không thấy phiên khớp id/tiền tố '{session}' trong danh sách đang sống")
+        })?;
+    let aside = huba::sessions::ask_aside(cfg, target, question)?;
+    println!("{}", aside.answer);
+    Ok(())
 }
 
 /// What `claude` is doing on this machine right now. Read-only: this lists and
@@ -150,7 +187,10 @@ fn cmd_sessions(db: &huba::db::Db, cfg: &Config, as_json: bool) -> Result<()> {
             snap.hidden_dead
         ));
     }
-    println!("{} phiên đang sống  ({per}){hidden}\n", snap.sessions.len());
+    println!(
+        "{}  ({per}){hidden}\n",
+        huba::sessions::drive_summary(&snap.sessions)
+    );
 
     let now = chrono::Utc::now();
     for s in &snap.sessions {

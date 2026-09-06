@@ -216,3 +216,139 @@ fn a_recycled_pid_must_not_pass_as_a_live_session() {
         "một tiến trình bất kỳ giành được pid cũ thì KHÔNG được mượn tty của phiên đã chết"
     );
 }
+
+/// Nguyên văn `~/.claude/sessions/91890.json` lúc 2026-09-05 (bỏ id cầu nối).
+///
+/// Đây là hàng phá vỡ câu "sessions/ = tương tác": `kind:"bg"` + `jobId`.
+fn real_background_session() -> serde_json::Value {
+    json!({
+        "pid": 91890,
+        "sessionId": "167252e2-b2fb-4776-86a1-ba9faf8d14c0",
+        "cwd": "/Users/hanguyen/projects",
+        "startedAt": 1788581041472i64,
+        "procStart": "Sat Sep  5 04:04:01 2026",
+        "version": "2.1.228",
+        "peerProtocol": 1,
+        "kind": "bg",
+        "entrypoint": "cli",
+        "messagingSocketPath": "/tmp/cc-socks/91890.sock",
+        "name": "Test multiple Facebook bots with real accounts",
+        "jobId": "167252e2",
+        "status": "busy",
+        "updatedAt": 1788595666827i64,
+        "statusUpdatedAt": 1788595666827i64
+    })
+}
+
+/// Nguyên văn phần `jobs/167252e2/state.json` mà hàm này đọc, cùng lúc ấy.
+fn real_background_job() -> serde_json::Value {
+    json!({
+        "state": "working",
+        "detail": "deployed; testing mail.dipgle.com live",
+        "sessionId": "167252e2-b2fb-4776-86a1-ba9faf8d14c0",
+        "name": "Test multiple Facebook bots with real accounts",
+        "cwd": "/Users/hanguyen/projects",
+        "createdAt": "2026-09-04T10:57:02.411Z",
+        "updatedAt": "2026-09-05T08:39:49.458Z"
+    })
+}
+
+#[test]
+fn one_background_session_in_both_drawers_is_one_row_not_two() {
+    // 🔴 Hà 2026-09-05: *"tại sao danh sách lại có 2 mã phiên giống nhau"*.
+    // Đo lúc ấy: `huba sessions --json` ra 11 hàng cho 10 phiên — `167252e2`
+    // hai lần, vì CLI 2.1.228 ghi phiên nền vào CẢ HAI ngăn sổ.
+    let d = book_dir();
+    write_session(&d, 91890, real_background_session());
+    write_job(&d, "167252e2", real_background_job());
+
+    let rows = list_account_books(d.path()).unwrap();
+    assert_eq!(rows.len(), 1, "hai cuốn sổ, MỘT phiên — phải ra một hàng");
+    let r = &rows[0];
+
+    // Hàng thắng phải là hàng mang PID THẬT: mất nó thì `host_of` đọc `pid:0`
+    // thành "dead" và huba khai một phiên đang chạy là đã tắt.
+    assert_eq!(r["pid"], 91890);
+    assert_eq!(r["status"], "busy");
+    assert_eq!(r["startedAt"], 1788581041472i64);
+    // …và phải nói được nó là phiên NỀN bằng chữ huba đọc, không phải chữ
+    // `"bg"` của CLI: `/stop` (`stop_background`) gác đúng trên chữ này.
+    assert_eq!(r["kind"], "background");
+    // Thứ chỉ sổ VIỆC có, không được rơi mất khi gộp.
+    assert_eq!(r["state"], "working");
+    // Mốc mới hơn thắng: sổ phiên dừng ở 08:07:46Z, sổ việc 08:39:49Z.
+    assert_eq!(
+        book_updated_at(r).as_deref(),
+        Some("2026-09-05T08:39:49Z"),
+        "hai cuốn nhích theo hai nhịp — lấy cuốn động sau"
+    );
+}
+
+#[test]
+fn the_fold_joins_only_rows_that_are_the_same_session() {
+    // ĐỐI CHỨNG NGƯỢC cho bài trên: một phép gộp gộp bừa cũng ra "hết trùng".
+    // Hai phiên KHÁC nhau ở hai ngăn phải ở lại là hai hàng.
+    let d = book_dir();
+    write_session(&d, 91890, real_background_session());
+    write_job(
+        &d,
+        "c19b6a82",
+        json!({ "state": "blocked", "sessionId": "c19b6a82-4038-41bb-b9b0-586699a54458",
+                "name": "merge xem init-project", "cwd": "/Users/hanguyen/projects",
+                "createdAt": "2026-08-13T08:16:34.001Z", "updatedAt": "2026-08-13T08:30:33.340Z" }),
+    );
+
+    let rows = list_account_books(d.path()).unwrap();
+    assert_eq!(rows.len(), 2, "hai phiên khác nhau thì KHÔNG được gộp");
+    let bg = rows
+        .iter()
+        .find(|r| r["sessionId"] == "167252e2-b2fb-4776-86a1-ba9faf8d14c0")
+        .expect("hàng phiên nền còn nguyên");
+    assert_eq!(bg["pid"], 91890);
+    // Việc nền không có anh em ở sổ phiên thì vẫn là hàng `pid:0` như cũ.
+    let job = rows
+        .iter()
+        .find(|r| r["sessionId"] == "c19b6a82-4038-41bb-b9b0-586699a54458")
+        .expect("hàng việc nền còn nguyên");
+    assert_eq!(job["pid"], 0);
+    assert_eq!(job["state"], "blocked");
+}
+
+#[test]
+fn the_fold_carries_state_because_the_blocked_trap_is_read_from_it() {
+    // 🔴 Gộp bằng cách VỨT hàng sổ việc đi thì hết trùng — và giết luôn một cửa
+    // gác: `sessions::start_background` chờ tới 14 giây rồi hỏi
+    // `row.state == "blocked"` để bắt ca phiên nền chết đứng ở hộp duyệt MCP mà
+    // không ai bấm hộ được. Chữ `blocked` CHỈ có ở sổ việc. Mất nó thì huba báo
+    // "🚀 đã mở phiên" cho một phiên không bao giờ chạy — đúng cái tin xanh cho
+    // việc chưa chạy mà repo này cấm.
+    let d = book_dir();
+    let mut sess = real_background_session();
+    sess["status"] = json!("idle");
+    write_session(&d, 91890, sess);
+    let mut job = real_background_job();
+    job["state"] = json!("blocked");
+    write_job(&d, "167252e2", job);
+
+    let rows = list_account_books(d.path()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["state"], "blocked", "cửa gác đọc trường này");
+    assert_eq!(rows[0]["pid"], 91890);
+}
+
+#[test]
+fn a_bg_row_with_no_job_file_is_still_a_background_row() {
+    // Sổ việc có thể đã bị dọn (`claude stop` xong, hoặc thư mục `jobs/` chưa
+    // sinh) trong khi tiến trình nền vẫn chạy. Chữ `"bg"` đi lọt tới đường dưới
+    // là hỏng CÂM: nút `/stop` vẫn hiện, bấm vào thì `stop_background` trả lời
+    // *"phiên này chạy trong một cửa sổ Terminal"* cho một phiên không cửa sổ.
+    let d = book_dir();
+    write_session(&d, 91890, real_background_session());
+
+    let rows = list_account_books(d.path()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["kind"], "background");
+    assert_eq!(rows[0]["pid"], 91890);
+    // Không có sổ việc thì không có `state` để bịa ra.
+    assert!(rows[0].get("state").is_none());
+}

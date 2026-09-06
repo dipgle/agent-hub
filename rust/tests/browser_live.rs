@@ -83,3 +83,50 @@ fn the_web_route_says_what_the_machine_browser_has() {
         assert!(href.contains("?start=wb_"), "{href}");
     }
 }
+
+/// `bam` gọi được vào Chrome THẬT hay không, và nếu không thì lý do có đúng
+/// không — CHƯA TỪNG CHẠY THẬT cho tới khi Hà tự chạy `--ignored` trên máy.
+///
+/// `"body"` là selector an toàn nhất có thể chọn: mọi trang HTML đều có
+/// `<body>`, nên bài kiểm này không đòi hỏi một trang cụ thể nào đang mở — nó
+/// chỉ đo *"script CÓ BIÊN DỊCH VÀ CHẠY được không"*, đúng câu hai tầng thoát
+/// (`sc_click`) chỉ soi được hình dạng chứ không soi được việc AppleScript có
+/// nuốt lời hay không.
+#[test]
+#[ignore = "nói chuyện với Chrome thật, và lượt đầu bật hộp xin quyền — chạy tay bằng --ignored"]
+fn the_real_chrome_clicks_body_or_says_exactly_why_not() {
+    match huba::browser::bam("body") {
+        Ok(trung) => println!("click 'body': {}", if trung { "trúng" } else { "không thấy phần tử" }),
+        Err(e) => {
+            // KHÔNG `panic!`: "Chrome đang tắt", "chưa cấp quyền", "Chrome
+            // chặn JS từ Apple Events" đều là câu trả lời THẬT về thế giới —
+            // xem lý do y hệt ở bài kiểm `tabs()` phía trên.
+            println!("chưa click được, và lý do là:\n{e}");
+            let s = e.to_string();
+            assert!(
+                !s.contains("syntax error") && !s.contains("Expected"),
+                "AppleScript hỏng CÚ PHÁP — đây mới là lỗi của tôi:\n{s}"
+            );
+        }
+    }
+}
+
+/// `mang_ra_truoc` đưa Chrome ra trước mặt — không đọc/ghi gì của trang, nên
+/// đây là bài kiểm AN TOÀN NHẤT trong tệp này để đo riêng phần "gate chạy có
+/// đúng cú pháp AppleScript không", tách khỏi mọi thứ liên quan tới JavaScript
+/// (Allow JavaScript from Apple Events). CHƯA TỪNG CHẠY THẬT trên máy này.
+#[test]
+#[ignore = "đưa Chrome ra trước mặt thật — chạy tay bằng --ignored"]
+fn the_real_chrome_comes_to_front_or_says_exactly_why_not() {
+    match huba::browser::mang_ra_truoc() {
+        Ok(()) => println!("Chrome đã ra trước mặt"),
+        Err(e) => {
+            println!("chưa đưa ra trước được, và lý do là:\n{e}");
+            let s = e.to_string();
+            assert!(
+                !s.contains("syntax error") && !s.contains("Expected"),
+                "AppleScript hỏng CÚ PHÁP — đây mới là lỗi của tôi:\n{s}"
+            );
+        }
+    }
+}

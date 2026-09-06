@@ -176,7 +176,7 @@ fn being_blocked_outranks_looking_busy() {
 /// ở đây.
 #[test]
 fn a_kept_window_is_announced_with_the_way_back() {
-    let cau = old_window_note(true, None, "/Users/hanguyen/projects/huba", "93479f95");
+    let cau = old_window_note(true, None, false, "/Users/hanguyen/projects/huba", "93479f95");
     assert!(
         cau.contains("claude --resume 93479f95"),
         "giữ cửa sổ mà không đưa đường về thì chủ máy vẫn phải tự mò: {cau:?}"
@@ -240,6 +240,7 @@ fn dong_hut_thi_noi_thang_la_hut() {
     let cau = old_window_note(
         false,
         Some("sau 30 giây tab vẫn Busy"),
+        false,
         "/Users/hanguyen/projects/huba",
         "93479f95",
     );
@@ -261,6 +262,80 @@ fn dong_hut_thi_noi_thang_la_hut() {
     );
 }
 
+/// ĐANG-THỬ-LẠI PHẢI ĐỌC KHÁC SANG-TAY-ANH — thêm 2026-09-03.
+///
+/// 🔴 Hà: *"Đợi rất lâu nhưng cửa sổ terminal cũ không đóng mặc dù cli thoát hết
+/// rồi, đang ở dấu nhắc lệnh của terminal"*. Đọc nhật ký thì máy móc chạy đúng
+/// từ đầu tới cuối và không tin nào thất lạc:
+///
+/// ```text
+/// 16:37:53  handover_old_window_not_closed  → rồi NGAY SAU đó `remember_closing`
+/// 16:37:54  Telegram 17779: "chưa đóng được … đóng tay, hoặc /close sau"
+/// 16:40:07  close_done waited_sec=130
+/// 16:40:08  Telegram 17781: "⏹ … cửa sổ đã đóng (chờ 130s)"
+/// ```
+///
+/// Cái sai nằm ở tin 17779: huba sai chủ máy đi làm tay đúng việc nó đang làm.
+/// Một câu báo mâu thuẫn với việc mình đang làm tệ hơn im lặng — im lặng chỉ
+/// thiếu tin, câu này ĐIỀU một người đi làm việc thừa.
+///
+/// Bài kiểm giữ cả HAI vế trên cùng một `closed_err`, vì chỉ đổi mỗi cái cờ:
+/// không đổi được câu thì cờ ấy chưa phải một phép đo (§13①).
+#[test]
+fn dang_thu_lai_thi_dung_sai_chu_may_di_dong_tay() {
+    let ly_do = "sau 30 giây tab vẫn Busy";
+    let thu_lai = old_window_note(
+        false,
+        Some(ly_do),
+        true,
+        "/Users/hanguyen/projects/huba",
+        "93479f95",
+    );
+    let sang_tay = old_window_note(
+        false,
+        Some(ly_do),
+        false,
+        "/Users/hanguyen/projects/huba",
+        "93479f95",
+    );
+
+    assert_ne!(
+        thu_lai, sang_tay,
+        "cùng lý do, chỉ khác `retrying`, mà câu y hệt ⟹ cái cờ ấy không đo gì cả"
+    );
+    // Vế ĐANG THỬ LẠI: nói rõ huba đang làm, và TUYỆT ĐỐI không sai đi dọn tay.
+    assert!(
+        thu_lai.contains("đang tự thử lại"),
+        "phải nói ra là huba còn làm: {thu_lai:?}"
+    );
+    assert!(
+        thu_lai.contains("không phải làm gì"),
+        "phải nói thẳng chủ máy khỏi động tay — đây đúng chỗ tin 17779 nói ngược: {thu_lai:?}"
+    );
+    assert!(
+        !thu_lai.contains("đóng tay"),
+        "đúng con bug 03/09: đang thử lại mà vẫn mời đóng tay: {thu_lai:?}"
+    );
+    // Cả hai vế vẫn phải mang LÝ DO đo được và đường quay lại phiên.
+    for (ten, cau) in [("thu_lai", &thu_lai), ("sang_tay", &sang_tay)] {
+        assert!(cau.contains(ly_do), "{ten} mất lý do đo được: {cau:?}");
+        assert!(
+            cau.contains("claude --resume 93479f95"),
+            "{ten}: cửa sổ còn đó thì vẫn phải có đường về: {cau:?}"
+        );
+        assert!(
+            cau.contains("CHƯA đóng được"),
+            "{ten}: vẫn phải nói thẳng là chưa xong: {cau:?}"
+        );
+    }
+    // Vế SANG TAY giữ nguyên lời mời cũ — bản vá phải là CỘNG THÊM, không phải
+    // đổi hành vi của ca đã đúng.
+    assert!(
+        sang_tay.contains("đóng tay"),
+        "mất dấu cửa sổ thì đúng là việc của chủ máy: {sang_tay:?}"
+    );
+}
+
 /// ĐỐI CHỨNG NGƯỢC (§13①). Cửa sổ ĐÃ đóng mà vẫn mời `--resume` ở đó thì tệ hơn
 /// im lặng: chủ máy đi tìm một cửa sổ không còn.
 ///
@@ -269,7 +344,7 @@ fn dong_hut_thi_noi_thang_la_hut() {
 #[test]
 fn a_closed_window_says_nothing_at_all() {
     assert_eq!(
-        old_window_note(false, None, "/Users/hanguyen/projects/huba", "93479f95"),
+        old_window_note(false, None, false, "/Users/hanguyen/projects/huba", "93479f95"),
         "",
         "cửa sổ đã đóng mà còn mời gõ tiếp ở đó ⟹ sai một cách im lặng"
     );

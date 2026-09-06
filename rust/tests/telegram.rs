@@ -280,14 +280,23 @@ fn a_focus_that_no_longer_exists_is_said_out_loud() {
 /// Cắt bớt thì phải NÓI, không thì danh sách nói dối về số phiên đang chạy.
 #[test]
 fn a_truncated_list_says_how_many_it_hid() {
+    // Phiên "thường" ở đây phải là phiên GÕ ĐƯỢC. `sess()` để trống `tty`, mà
+    // tty rỗng nghĩa là phiên RỜI (`sessions::is_real_tty`) — dựng như thế thì
+    // 15 hàng đều chỉ-đọc, và tiêu đề ĐÚNG ra phải đổi sang dạng tách
+    // (`0 gõ được · 15 chỉ đọc`, thêm 2026-09-06). Bài kiểm này nói về việc CẮT
+    // danh sách, không nói về gõ được hay không, nên fixture phải mang đúng hình
+    // dạng nó định tả — sửa fixture, không nới câu assert.
     let live: Vec<LiveSession> = (0..MAX_SESSION_BUTTONS + 3)
         .map(|i| {
-            sess(
+            let mut s = sess(
                 &format!("{i:08}-0000-0000-0000-000000000000"),
                 &format!("p{i}"),
                 "acc1",
                 false,
-            )
+            );
+            s.tty = format!("ttys{i:03}");
+            s.can_type = true;
+            s
         })
         .collect();
     let text = session_list_text(&live, "", NOW);

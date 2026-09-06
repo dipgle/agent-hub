@@ -7,7 +7,9 @@
 use std::collections::BTreeMap;
 
 use huba::sessions::LiveSession;
-use huba::watch::{changes, Change, Idle, Mark, DEAD, IDLE, MIN_RUN_SEC, WORKING};
+use huba::watch::{
+    changes, Change, Idle, Mark, BG_MISS_DEBOUNCE_SEC, DEAD, IDLE, MIN_RUN_SEC, WORKING,
+};
 
 /// Mốc thời gian giả, để test không phụ thuộc đồng hồ thật.
 const NOW: i64 = 1_800_000_000;
@@ -33,6 +35,7 @@ fn mark(state: &str, tty: &str, kind: &str) -> Mark {
         c: "/Users/hanguyen/projects".to_string(),
         i: 4242,
         o: "terminal".to_string(),
+        g: 0,
     }
 }
 fn working_long(id: &str) -> (String, Mark) {
@@ -718,6 +721,66 @@ fn a_blind_account_does_not_gag_the_others() {
         1,
         "acc2 hỏng mà phiên acc1 tắt lại không báo: {events:?}"
     );
+}
+
+/// Phiên NỀN vắng mặt MỘT vòng chưa phải "đã tắt" — xem `Mark::g` +
+/// `BG_MISS_DEBOUNCE_SEC`. Chạy cho CẢ HAI giá trị `host` thật của "không cửa
+/// sổ" (`sessions.rs:3904`/`:3915`) — bản đầu của bài kiểm này (và của chính
+/// bản vá) chỉ thử `"background"`, xanh, rồi vẫn spam thật trên máy: sổ thật
+/// (`watch:sessions` trong sqlite, đọc tay 2026-09-05) ghi `"detached"` cho
+/// đúng phiên đã đo (`167252e2`), không phải `"background"`. Một bài kiểm chỉ
+/// thử MỘT trong hai giá trị đồng nghĩa là bài kiểm tự khớp giả định của
+/// người viết, không khớp thế giới thật.
+///
+/// 🔴 Đo thật 2026-09-04/05 (`167252e2`, dự án `fbot`): `session_busy_by_shell`
+/// xác nhận tiến trình gốc còn sống, đang bận — CÙNG GIÂY với một dòng "đã
+/// tắt hẳn". `claude agents` thỉnh thoảng không liệt kê ĐÚNG một phiên nền dù
+/// nó còn sống, trong khi các phiên khác CÙNG tài khoản vẫn liệt kê bình
+/// thường — nên cửa `blind` (cả tài khoản mù) không bắt được ca này, cần cửa
+/// riêng cho phiên nền.
+#[test]
+fn a_background_session_missing_once_is_not_reported_as_ended() {
+    for host in ["background", "detached"] {
+        let mut m = mark(IDLE, "", "background");
+        m.o = host.to_string();
+        let prev: BTreeMap<String, Mark> = [("nen-1".to_string(), m)].into_iter().collect();
+
+        // Vòng đầu vắng mặt: phải IM, và phải NHỚ vào sổ để thử lại vòng sau.
+        let (events, next) = changes(&prev, &[], NOW, &[]);
+        assert!(
+            events.is_empty(),
+            "host={host}: một vòng vắng mặt chưa đủ để kết luận đã tắt: {events:?}"
+        );
+        let carried = next.get("nen-1").unwrap_or_else(|| {
+            panic!("host={host}: phải còn giữ trong sổ để thử lại vòng sau, không phải mất trắng")
+        });
+        assert_eq!(carried.g, NOW, "host={host}: phải ghi lại mốc lần đầu vắng mặt");
+
+        // Vắng mặt tiếp, nhưng CHƯA đủ `BG_MISS_DEBOUNCE_SEC` kể từ mốc đầu — vẫn im.
+        let (events2, next2) = changes(&next, &[], NOW + BG_MISS_DEBOUNCE_SEC - 1, &[]);
+        assert!(
+            events2.is_empty(),
+            "host={host}: chưa đủ ngưỡng debounce mà đã kết luận: {events2:?}"
+        );
+        assert_eq!(
+            next2.get("nen-1").map(|m| m.g),
+            Some(NOW),
+            "host={host}: mốc lần đầu vắng mặt không được dời lại mỗi vòng"
+        );
+
+        // Vắng mặt đủ lâu — giờ mới được kết luận, và đúng MỘT lần.
+        let (events3, next3) = changes(&next2, &[], NOW + BG_MISS_DEBOUNCE_SEC + 1, &[]);
+        assert_eq!(
+            events3.len(),
+            1,
+            "host={host}: vắng đủ lâu mà không kết luận: {events3:?}"
+        );
+        assert!(matches!(&events3[0], Change::Ended { id, .. } if id == "nen-1"));
+        assert!(
+            !next3.contains_key("nen-1"),
+            "host={host}: đã kết luận thì rời sổ hẳn"
+        );
+    }
 }
 
 /// Và khi mọi tài khoản đều trả lời được, luật cũ giữ nguyên: vắng mặt = đã tắt.

@@ -204,7 +204,30 @@ pub struct Mark {
     /// sổ chứ không bằng ảnh chụp.
     #[serde(default)]
     pub o: String,
+    /// Epoch giây lần ĐẦU TIÊN không thấy phiên NỀN này trong `claude agents`
+    /// — của riêng debounce dưới đây. 0 = đang thấy bình thường.
+    ///
+    /// 🔴 Đo 2026-09-04 (`167252e2`, dự án `fbot`): `session_busy_by_shell`
+    /// xác nhận tiến trình gốc (`pid 68743`) còn sống, đang bận — CÙNG GIÂY
+    /// với một dòng "đã tắt hẳn". `claude agents` thỉnh thoảng không liệt kê
+    /// ĐÚNG một phiên nền, dù nó còn sống, trong khi các phiên khác CÙNG tài
+    /// khoản vẫn liệt kê bình thường — nên cửa `blind` (cả tài khoản mù) ở
+    /// trên không bắt được ca này. Xảy ra ít nhất 4 đợt trong một ngày
+    /// (11:01 · 14:02 · 15:00 · 17:20), luôn đúng phiên này.
+    ///
+    /// Chỉ phiên NỀN mới cần: phiên có cửa sổ đã có phép thử độc lập
+    /// (`keys::window_of`, nhánh phía trên) để phân biệt "rời danh sách" với
+    /// "cửa sổ còn, chỉ CLI thoát" — phiên nền không có cửa sổ nào để hỏi lại.
+    #[serde(default)]
+    pub g: i64,
 }
+
+/// Phải vắng mặt LIÊN TỤC chừng này giây trong `claude agents` thì cái chết
+/// của một phiên NỀN mới được tin — xem `Mark::g`. Gấp đôi nhịp quét thường
+/// thấy trong log (20–30 giây một vòng), để một lượt trượt đơn lẻ không đủ
+/// sức kết luận. Thà lỡ một tin còn hơn một tin sai — cùng lý do `MIN_LIFE_SEC`
+/// đã có.
+pub const BG_MISS_DEBOUNCE_SEC: i64 = 60;
 
 /// Một chuyện vừa xảy ra, đáng để làm phiền chủ máy.
 #[derive(Debug, Clone, PartialEq)]
@@ -977,6 +1000,9 @@ pub fn changes(
                         c: s.cwd.clone(),
                         i: s.pid,
                         o: s.host.clone(),
+                        // Thấy phiên còn sống ⟹ hết mọi nghi ngờ, kể cả nghi
+                        // ngờ đã tích luỹ từ những vòng trước.
+                        g: 0,
                     },
                 );
             }
@@ -1106,6 +1132,31 @@ pub fn changes(
                             "why": "tài khoản không liệt kê được phiên — vắng mặt KHÔNG phải là đã tắt" }),
                 );
                 continue;
+            }
+            // Cửa CHỚP TẮT của phiên NỀN — xem `Mark::g` và `BG_MISS_DEBOUNCE_SEC`.
+            // Khác cửa `blind` ở trên: đây là MỘT phiên vắng mặt trong khi cả
+            // tài khoản vẫn liệt kê bình thường, nên `blind` không bắt được.
+            //
+            // 🔴 LỖI ĐÃ TRẢ GIÁ CÙNG NGÀY: bản đầu viết `mark.o == "background"`
+            // — SAI, vì sổ thật ghi `"detached"` cho đúng phiên đã đo
+            // (`167252e2`, xác nhận bằng cách đọc thẳng cursor `watch:sessions`
+            // trong sqlite). Hai giá trị này KHÔNG đồng nghĩa nhưng CÙNG nghĩa
+            // "không cửa sổ" — `sessions.rs:3904`/`:3915` đã dùng đúng cặp
+            // `matches!(host, "background" | "detached")`, chỗ này copy lại
+            // đúng cặp ấy thay vì tự bịa một chuỗi chưa kiểm.
+            if matches!(mark.o.as_str(), "background" | "detached") {
+                let first_miss = if mark.g > 0 { mark.g } else { epoch_sec };
+                if epoch_sec - first_miss < BG_MISS_DEBOUNCE_SEC {
+                    let mut cho_no_song_lai = mark.clone();
+                    cho_no_song_lai.g = first_miss;
+                    next.insert(id.clone(), cho_no_song_lai);
+                    logging::info(
+                        "session_end_unknown",
+                        json!({ "session": id, "missing_sec": epoch_sec - first_miss,
+                                "why": "phiên nền vắng khỏi claude agents — chưa đủ lâu để kết luận đã tắt" }),
+                    );
+                    continue;
+                }
             }
             // Cửa TUỔI THỌ — xem `Mark::f`. Phiên sống chớp nhoáng (phép dò hạn
             // mức của chính huba, một `claude -p` bất kỳ) chết đi không phải tin;

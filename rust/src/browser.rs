@@ -80,6 +80,16 @@ pub enum Loi {
     ChuaCapQuyen,
     /// Chrome đang tắt *Allow JavaScript from Apple Events*.
     JsTat,
+    /// Khung hình chụp ra RỖNG (đen) — màn đang khoá HOẶC thiếu quyền Screen
+    /// Recording (KHÁC quyền Tự động hoá — `mang_ra_truoc` đã qua rồi mới tới
+    /// đây, nên Apple Events chắc chắn còn dùng được). Cả hai nguyên nhân đều
+    /// KHÔNG cản đường đọc chữ (`chu_trang`/`tabs`) — chữ đi qua Apple Events
+    /// riêng cho Chrome, không đụng khung hình toàn màn, nên macOS không khoá
+    /// nó theo màn hình. Hà hỏi thẳng 2026-09-04: *"màn khóa vẫn xem được tình
+    /// trạng trình duyệt chứ đưa ra thông báo làm gì"* — nên caller (route
+    /// `/web anh`, tool MCP) phải coi biến thể này là TÍN HIỆU rơi về chữ,
+    /// không phải một lỗi cụt. Mang theo lý do người-đọc-được.
+    AnhTrong(String),
     /// Mọi thứ còn lại — giữ NGUYÊN VĂN, không dịch, không đoán.
     Khac(String),
 }
@@ -103,6 +113,7 @@ impl std::fmt::Display for Loi {
                  Trên máy: Chrome → menu View → Developer → tích `Allow JavaScript from \
                  Apple Events`."
             ),
+            Loi::AnhTrong(s) => write!(f, "{s}"),
             Loi::Khac(s) => write!(f, "{s}"),
         }
     }
@@ -391,4 +402,181 @@ pub fn sc_text() -> String {
         "    execute front window's active tab javascript {js}",
         js = as_string("document.body ? document.body.innerText : ''"),
     ))
+}
+
+/// Đưa Chrome ra trước mặt, KHÔNG tự mở nó nếu đang tắt.
+///
+/// Script thân chỉ có `activate` — gate của [`script`] đã lo phần "Chrome có
+/// đang chạy không". Cùng lý do `mo`/`chon` không tự khởi động Chrome: một cửa
+/// sổ tự bật lên vì ai đó lỡ gõ một lệnh từ điện thoại là thứ ngồi ở máy không
+/// bao giờ xảy ra.
+pub fn mang_ra_truoc() -> Result<(), Loi> {
+    osa(&script("  activate\n  return \"ok\""))?;
+    Ok(())
+}
+
+/// Chụp ảnh MÀN HÌNH của máy, sau khi đưa Chrome ra trước mặt.
+///
+/// Nhịp giống hệt `keys::photograph_window` (đưa cửa sổ ra trước → đợi 700ms →
+/// `screencapture -x` → kiểm ảnh đen) — cùng một lý do: `screencapture` trả
+/// exit 0 ngay cả khi macOS âm thầm từ chối vì thiếu quyền Screen Recording, và
+/// một màn ĐANG KHOÁ ra đúng tấm ảnh đen y hệt. Tái dùng nguyên văn
+/// `keys::frame_is_blank` + `keys::screen_locked` + `keys::blank_frame_reason`
+/// thay vì viết lại phép đo ấy: nó đã trả giá một lần (đo 2026-08-18) để phân
+/// biệt hai nguyên nhân cùng ra một tấm ảnh đen, và trả về đúng kiểu lỗi
+/// [`Loi`] của tệp này thay vì `anyhow::Result` như bên `keys.rs`.
+/// Lý do ảnh ra rỗng — bằng đúng chữ của Chrome/`/web`, KHÔNG mượn câu của
+/// `keys::blank_frame_reason` (câu ấy nói về PHIÊN, nhắc `/anh`/`/shot` —
+/// nhắc nhầm lệnh khi đây là `/web anh`/`browser_screenshot` là tự làm rối
+/// người đọc). Cả ba nhánh đều nói rõ: đọc CHỮ vẫn được, khoá màn không cản.
+fn ly_do_anh_trong(locked: Option<bool>) -> String {
+    match locked {
+        Some(true) => "Chrome không cho ẢNH vì màn hình đang khoá — macOS chặn NỘI DUNG khung \
+             hình khi khoá màn, với MỌI tiến trình, không phân biệt đã có quyền hay chưa (đây là \
+             giới hạn của macOS, không phải huba chặn). Đọc CHỮ vẫn được: nó đi qua Apple Events \
+             riêng cho Chrome, không đụng khung hình toàn màn."
+            .to_string(),
+        Some(false) => "Chrome không cho ẢNH vì thiếu quyền Screen Recording (khác quyền Tự động \
+             hoá đang dùng để đọc chữ) — System Settings → Privacy & Security → Screen Recording \
+             → bật cho tiến trình đang gọi. Đọc CHỮ vẫn được trong lúc chờ cấp quyền này."
+            .to_string(),
+        None => "Chrome không cho ẢNH, và huba không đo được lý do (màn khoá hay thiếu quyền \
+             Screen Recording). Đọc CHỮ vẫn được — dùng nó trong lúc chờ kiểm tay."
+            .to_string(),
+    }
+}
+
+pub fn chup_anh(path: &std::path::Path) -> Result<(), Loi> {
+    // Chụp mù thì vô nghĩa: một Chrome đang nằm sau cửa sổ khác cho ra ảnh
+    // không trả lời được câu người dùng hỏi. Lỗi ở đây thì trả THẲNG, không
+    // chụp liều.
+    mang_ra_truoc()?;
+    std::thread::sleep(Duration::from_millis(700));
+    let out = run(
+        "screencapture",
+        &["-x", &path.display().to_string()],
+        RunOpts {
+            timeout: Some(Duration::from_secs(20)),
+            ..Default::default()
+        },
+    )
+    .map_err(|e| Loi::Khac(e.to_string()))?;
+    if out.code != Some(0) || !path.exists() {
+        logging::warn(
+            "browser_screenshot_failed",
+            json!({ "code": out.code, "stderr": crate::exec::truncate(out.stderr.trim(), 160) }),
+        );
+        return Err(Loi::Khac(format!(
+            "screencapture không chụp được ({}).",
+            crate::exec::truncate(out.stderr.trim(), 160)
+        )));
+    }
+    // Chụp được ≠ chụp thấy — xem doc-comment của `keys::frame_is_blank`.
+    let blank = crate::keys::frame_is_blank(path);
+    if blank == Some(true) {
+        let locked = crate::keys::screen_locked();
+        let _ = std::fs::remove_file(path);
+        let ly_do = ly_do_anh_trong(locked);
+        logging::warn(
+            "browser_screenshot_blank",
+            json!({ "screen_locked": locked }),
+        );
+        return Err(Loi::AnhTrong(ly_do));
+    }
+    logging::info(
+        "browser_screenshot",
+        json!({ "path": path.display().to_string() }),
+    );
+    Ok(())
+}
+
+/// Click một phần tử qua CSS selector. Script CỐ ĐỊNH — `selector` chỉ là DỮ
+/// LIỆU, không bao giờ là mã: nhúng qua `serde_json::to_string` (escape JS an
+/// toàn) rồi cả khối JS mới đi qua `as_string` (escape AppleScript). Hai tầng
+/// thoát, không được gộp hay bỏ tầng nào — cùng triết lý với [`dia_chi_hop_le`]
+/// về việc vì sao một đường chạy mã tuỳ ý không được phép tồn tại ở tệp này.
+pub fn sc_click(selector: &str) -> String {
+    let sel = serde_json::to_string(selector).unwrap_or_else(|_| "null".to_string());
+    let js = format!(
+        "(function(){{var el=document.querySelector({sel});if(!el)return \"0\";el.click();return \"1\";}})()"
+    );
+    script(&format!(
+        "    execute front window's active tab javascript {j}",
+        j = as_string(&js),
+    ))
+}
+
+/// Click, đọc kết quả `"1"`/`"0"` từ [`sc_click`].
+///
+/// `Ok(false)` = script chạy trót lọt nhưng KHÔNG tìm thấy phần tử — khác hẳn
+/// `Err` (script hỏng/Chrome tắt/thiếu quyền), và phải NÓI RA
+/// (`browser_click_missed`) chứ không lẫn vào "click trúng nhưng site không
+/// phản ứng".
+pub fn bam(selector: &str) -> Result<bool, Loi> {
+    // 🔴 CHẶN CHỦ ĐỘNG khi màn khoá — KHÔNG chờ macOS tự chặn, vì nó KHÔNG
+    // chặn: `execute javascript` đi qua Apple Events, không qua khung hình,
+    // nên vẫn chạy được khi màn khoá (đúng cơ chế Terminal `do script` đã đo
+    // là "khoá màn không cản"). Đúng lúc `chup_anh` mù (ảnh ra đen) thì phải
+    // ĐỒNG THỜI không làm gì — "mù nhưng vẫn động tay được" tệ hơn cả hai thái
+    // cực. `Some(false)`/`None` (mở/không đo được) thì đi tiếp như cũ.
+    if crate::keys::screen_locked() == Some(true) {
+        return Err(Loi::Khac(
+            "Màn đang khoá — huba từ chối click để tránh thao tác mà Hà không \
+             nhìn thấy được kết quả (ảnh chụp lúc này luôn ra đen, không kiểm \
+             lại được). Mở khoá máy rồi thử lại."
+                .to_string(),
+        ));
+    }
+    let out = osa(&sc_click(selector))?;
+    let trung = out.trim() == "1";
+    if trung {
+        logging::info("browser_click", json!({ "selector": selector }));
+    } else {
+        logging::warn("browser_click_missed", json!({ "selector": selector }));
+    }
+    Ok(trung)
+}
+
+/// Điền một ô nhập qua CSS selector, dùng "native value setter" để input kiểu
+/// React/controlled-component nhận đúng sự kiện — set `.value` trần không đủ:
+/// React theo dõi thay đổi qua setter GỐC của prototype, không phải property
+/// đã bị ghi đè trên instance. Cùng hai tầng thoát với [`sc_click`]:
+/// `selector`/`value` chỉ là DỮ LIỆU, không bao giờ là mã.
+pub fn sc_fill(selector: &str, value: &str) -> String {
+    let sel = serde_json::to_string(selector).unwrap_or_else(|_| "null".to_string());
+    let val = serde_json::to_string(value).unwrap_or_else(|_| "null".to_string());
+    let js = format!(
+        "(function(){{var el=document.querySelector({sel});if(!el)return \"0\";var proto=el.tagName===\"TEXTAREA\"?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;var d=Object.getOwnPropertyDescriptor(proto,\"value\");var setter=d&&d.set;if(setter){{setter.call(el,{val});}}else{{el.value={val};}}el.dispatchEvent(new Event(\"input\",{{bubbles:true}}));el.dispatchEvent(new Event(\"change\",{{bubbles:true}}));return \"1\";}})()"
+    );
+    script(&format!(
+        "    execute front window's active tab javascript {j}",
+        j = as_string(&js),
+    ))
+}
+
+/// Điền, đọc kết quả `"1"`/`"0"` từ [`sc_fill`].
+///
+/// KHÔNG log `value` — nó có thể mang một mật khẩu chủ máy vừa gõ trên điện
+/// thoại; chỉ `selector` là an toàn để lưu lại. `Ok(false)` cũng phải NÓI RA
+/// (`browser_fill_missed`), cùng lý do với [`bam`].
+pub fn dien(selector: &str, value: &str) -> Result<bool, Loi> {
+    // Cùng chốt với `bam` — xem chú thích ở đó. Đứng TRƯỚC `osa()` nên `value`
+    // (có thể mang mật khẩu Hà vừa gõ) không bao giờ chạm tới Chrome khi
+    // không ai nhìn thấy màn để kiểm lại.
+    if crate::keys::screen_locked() == Some(true) {
+        return Err(Loi::Khac(
+            "Màn đang khoá — huba từ chối điền để tránh thao tác mà Hà không \
+             nhìn thấy được kết quả (ảnh chụp lúc này luôn ra đen, không kiểm \
+             lại được). Mở khoá máy rồi thử lại."
+                .to_string(),
+        ));
+    }
+    let out = osa(&sc_fill(selector, value))?;
+    let trung = out.trim() == "1";
+    if trung {
+        logging::info("browser_fill", json!({ "selector": selector }));
+    } else {
+        logging::warn("browser_fill_missed", json!({ "selector": selector }));
+    }
+    Ok(trung)
 }

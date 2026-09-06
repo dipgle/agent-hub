@@ -1888,19 +1888,23 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                         acc_moi.as_deref(),
                     )
                 };
-                // Con trỏ chuyển sang phiên MỚI THẬT (id ghép từ nhật ký), không
-                // phải id bản fork: bản fork chỉ là chỗ lấy bản bàn giao, nó
-                // không có cửa sổ nào để gõ vào.
+                // 🔴 CON TRỎ GIỮ NGUYÊN — Hà 2026-09-03: *"việc chọn phiên làm
+                // việc chỉ được xuất phát từ phía tôi gửi lệnh"*. Xem
+                // [`FocusKept`] cho nhật ký đo được của ba lượt cướp con trỏ và
+                // hai tin đi lạc. Phiên mới vẫn được nói tên, vẫn có nút bấm.
+                let focus_id = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+                let focus_name = focus_label(&focus_id, live);
                 let err_text;
                 let outcome = match &moved {
                     Ok(w) => match &w.new_id {
                         Some(new_id) => {
-                            if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, new_id) {
-                                logging::error(
-                                    "focus_after_handover_failed",
-                                    json!({ "err": e.to_string() }),
-                                );
-                            }
+                            remember_successor(db, &s.session_id, new_id, chrono::Utc::now().timestamp());
+                            logging::info(
+                                "focus_kept_on_auto_handover",
+                                json!({ "focus": focus_id, "ended": s.session_id,
+                                        "new": new_id,
+                                        "why": "chỉ chủ máy mới chọn phiên — huba chỉ đưa nút" }),
+                            );
                             // 🔴 ĐÓNG HỤT THÌ GIAO CHO SỔ ĐÓNG, đừng bỏ đó.
                             //
                             // Hà 2026-08-15: *"cả 2 phiên hiện tại đều đang gần
@@ -1919,26 +1923,14 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                             // có sẵn từ `/close`: sổ đóng ngó lại mỗi 30 giây,
                             // nhắc ra chat mỗi 2 phút, bỏ cuộc ở phút thứ 10 và
                             // NÓI RA. Đưa cửa sổ hụt vào đúng cuốn sổ ấy.
-                            if w.closed_err.is_some() {
-                                if let Ok(Some(old_w)) = crate::keys::window_of(&s.tty) {
-                                    remember_closing(
-                                        db,
-                                        &s.session_id,
-                                        old_w,
-                                        &crate::sessions::shown(s),
-                                        chrono::Utc::now().timestamp(),
-                                    );
-                                    logging::info(
-                                        "handover_close_deferred",
-                                        json!({ "session": s.session_id, "window": old_w,
-                                                "why": "phiên cũ còn chạy dở — sổ đóng sẽ ngó lại" }),
-                                    );
-                                }
-                            }
+                            let retrying = w.closed_err.is_some()
+                                && defer_close_to_book(db, s, chrono::Utc::now().timestamp());
                             HandoverMove::Opened {
                                 tty: &w.tty,
                                 new_id,
                                 closed_err: w.closed_err.as_deref(),
+                                retrying,
+                                focus: focus_kept(&focus_id, &s.session_id, &focus_name),
                             }
                         }
                         // Phiên mới chưa chào đời ⟹ con trỏ KHÔNG chuyển: nó
@@ -2121,6 +2113,9 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
             crate::sessions::start_fresh_after_handover(cfg, s, &checkpoint, Some(&acc_moi));
         let ngan: String = s.session_id.chars().take(8).collect();
         let go_tay = format!("/handover -a {acc_moi} {ngan}");
+        // Đọc con trỏ TRƯỚC khi làm gì, và không đổi nó — xem [`FocusKept`].
+        let focus_id = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+        let focus_name = focus_label(&focus_id, live);
         let err_text;
         let outcome = match &moved {
             Ok(w) => {
@@ -2147,29 +2142,25 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
                 }
                 match &w.new_id {
                     Some(new_id) => {
-                        if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, new_id) {
-                            logging::error(
-                                "focus_after_limit_switch_failed",
-                                json!({ "err": e.to_string() }),
-                            );
-                        }
+                        // Con trỏ GIỮ NGUYÊN — cùng luật với `auto_handover`,
+                        // xem [`FocusKept`]. Đây đúng là đường đã cướp con trỏ
+                        // ba lượt chiều 03/09.
+                        remember_successor(db, &s.session_id, new_id, chrono::Utc::now().timestamp());
+                        logging::info(
+                            "focus_kept_on_auto_limit_switch",
+                            json!({ "focus": focus_id, "ended": s.session_id, "new": new_id,
+                                    "why": "chỉ chủ máy mới chọn phiên — huba chỉ đưa nút" }),
+                        );
                         // Đóng hụt thì giao cho sổ đóng, đừng bỏ đó — cùng lý lẽ
                         // với `auto_handover`.
-                        if w.closed_err.is_some() {
-                            if let Ok(Some(old_w)) = crate::keys::window_of(&s.tty) {
-                                remember_closing(
-                                    db,
-                                    &s.session_id,
-                                    old_w,
-                                    &crate::sessions::shown(s),
-                                    chrono::Utc::now().timestamp(),
-                                );
-                            }
-                        }
+                        let retrying = w.closed_err.is_some()
+                            && defer_close_to_book(db, s, chrono::Utc::now().timestamp());
                         HandoverMove::Opened {
                             tty: &w.tty,
                             new_id,
                             closed_err: w.closed_err.as_deref(),
+                            retrying,
+                            focus: focus_kept(&focus_id, &s.session_id, &focus_name),
                         }
                     }
                     None => HandoverMove::Stalled {
@@ -2426,14 +2417,50 @@ pub fn already_handed_over(
 /// Đo được vì sao ca ấy có thật: 30/08 lúc 07:27 và 07:40, đường `/close` gõ
 /// `/exit` rồi thấy `tab_state` = `Busy` bảy lượt liền, `close_gave_up` sau 650
 /// và 697 giây. Cùng cơ chế ấy chặn ở đây.
+/// 🔴 `retrying` — HUBA CÒN ĐANG TỰ THỬ LẠI HAY KHÔNG, và nó là cả bản vá
+/// 2026-09-03.
+///
+/// Hà, sau một lượt chuyển tài khoản: *"Đợi rất lâu nhưng cửa sổ terminal cũ
+/// không đóng mặc dù cli thoát hết rồi, đang ở dấu nhắc lệnh của terminal"*.
+/// Đọc lại nhật ký thì **cửa sổ ấy ĐÃ đóng** — và câu chữ mới là chỗ hỏng:
+///
+/// ```text
+/// 16:37:53  handover_old_window_not_closed   ← rồi NGAY SAU đó `remember_closing`
+/// 16:37:54  → Telegram: "⚠ cửa sổ cũ chưa đóng được … đóng tay, hoặc /close sau"
+/// 16:37:57  exit_dialog_answered  pressed=1
+/// 16:40:07  close_done  waited_sec=130       ← sổ đóng làm nốt, đúng như thiết kế
+/// 16:40:08  → Telegram: "⏹ … cửa sổ đã đóng (chờ 130s)"   (tin 17781, đã gửi thật)
+/// ```
+///
+/// Tức máy móc chạy ĐÚNG từ đầu tới cuối, và không tin nào thất lạc: huba bảo
+/// chủ máy *"đóng tay"* trong khi chính nó đang thử lại mỗi 30 giây. Anh đọc câu
+/// ấy nên đi kiểm bằng mắt — đúng việc huba sinh ra để anh khỏi phải làm. Một
+/// câu báo mâu thuẫn với việc mình đang làm thì tệ hơn im lặng: im lặng chỉ
+/// thiếu tin, còn câu này ĐIỀU một người đi làm việc thừa.
+///
+/// Nên hai ca phải đọc khác nhau, vì chúng đòi chủ máy hai việc khác nhau:
+/// * **`retrying`** — đã vào sổ đóng ⟹ *không phải làm gì*, sẽ có tin khi xong;
+/// * **không `retrying`** — mất dấu cửa sổ, không ai ngó lại nữa ⟹ *sang tay anh*.
+///
+/// Cờ này đi từ [`defer_close_to_book`], tức từ KẾT QUẢ THẬT của lượt ghi sổ,
+/// không phải một hằng số chỗ gọi gõ vào — đúng chỗ vế `auto` đã hở và bị Hà bỏ
+/// ngày 30/08 (xem [`crate::sessions::should_close_old_window`]).
 pub fn old_window_note(
     old_kept: bool,
     closed_err: Option<&str>,
+    retrying: bool,
     cwd: &str,
     session_id: &str,
 ) -> String {
     let ve = format!("cd {cwd} && claude --resume {session_id}");
     match (old_kept, closed_err) {
+        (_, Some(why)) if retrying => format!(
+            "⏳ Cửa sổ cũ CHƯA đóng được: {why}\nhuba đang tự thử lại mỗi {}s (bỏ cuộc ở phút thứ \
+             {}) và sẽ báo khi xong — anh không phải làm gì. Muốn vào lại phiên ấy trong lúc chờ:\
+             \n{ve}\n\n",
+            CLOSE_CHECK_SEC,
+            CLOSE_GIVE_UP_SEC / 60,
+        ),
         (_, Some(why)) => format!(
             "⚠ Cửa sổ cũ CHƯA đóng được: {why}\nNó vẫn còn đó — đóng tay, hoặc /close sau khi \
              phiên ấy rảnh. Mở lại bằng:\n{ve}\n\n"
@@ -2486,11 +2513,18 @@ const AUTO_RETRY_STEP: u8 = 10;
 /// `86fe1666` — và chính con trỏ `focus:session` đã trỏ đúng `86fe1666`. Tức tin
 /// nhắn và cuốn sổ nói hai thứ khác nhau về cùng một việc.
 pub enum HandoverMove<'a> {
-    /// Cửa sổ mới đã mở VÀ ghép được id phiên mới ⟹ con trỏ đã chuyển sang nó.
+    /// Cửa sổ mới đã mở VÀ ghép được id phiên mới. Con trỏ **không** chuyển —
+    /// xem [`FocusKept`].
     Opened {
         tty: &'a str,
         new_id: &'a str,
         closed_err: Option<&'a str>,
+        /// Đóng hụt NHƯNG đã vào sổ đóng ⟹ huba còn tự thử lại, chủ máy khỏi làm
+        /// gì. Chỉ có nghĩa khi `closed_err` là `Some` — xem [`old_window_note`].
+        retrying: bool,
+        /// Con trỏ "đang theo" nằm ở đâu SAU lượt tự động này — huba không đụng
+        /// vào nó nữa, nên câu báo phải nói ra chữ chủ máy gõ sẽ đi đâu.
+        focus: FocusKept<'a>,
     },
     /// Cửa sổ mở rồi nhưng phiên mới KHÔNG chào đời (không có nhật ký để ghép
     /// id sau 12 giây) — nên huba **giữ nguyên cửa sổ cũ**. `asking` là hộp chọn
@@ -2504,6 +2538,103 @@ pub enum HandoverMove<'a> {
         err: &'a str,
         resume_command: &'a str,
     },
+}
+
+/// Con trỏ "đang theo" nằm ở đâu sau một lượt bàn giao **TỰ ĐỘNG**.
+///
+/// 🔴 CẢ BẢN VÁ 2026-09-03 NẰM Ở CÁI TÊN NÀY: *Kept* — giữ nguyên, không chuyển.
+///
+/// Hà: *"Tại sao việc chuyển phiên tự động lại tự nhảy vào phiên đang làm việc
+/// … việc chọn phiên làm việc chỉ được xuất phát từ phía tôi gửi lệnh"*.
+///
+/// Nhật ký 03/09 nói đúng chuyện ấy, ba lượt trong năm phút, và đo được **hai
+/// tin đi lạc**:
+///
+/// ```text
+/// 19:04:49  auto_limit_firing  c68090e5 [huba]  → 19:05:01 phiên 95180f77 chào đời
+/// 19:06:42  telegram_text_as_typing → 95180f77   ← chữ của chủ máy rơi vào [huba]
+/// 19:07:01  auto_limit_firing  9df3b075         → 521f5c7c chào đời
+/// 19:07:10  telegram_text_as_typing → 521f5c7c   ← rơi tiếp vào [tafalo5]
+/// 19:09:32  auto_limit_firing  dbd80185 [fbot]  → 32fe99f0 chào đời
+/// 19:10:00  /session 32fe99f0…                   ← chủ máy tự đi tìm lại phiên mình
+/// 19:11:12  telegram_text_as_typing → 32fe99f0   ← ĐÚNG câu 59 ký tự ấy, gửi LẠI
+/// ```
+///
+/// Chỗ hỏng không phải việc bàn giao — bàn giao chạy đúng. Chỗ hỏng là hai dòng
+/// `set_cursor(FOCUS_SESSION_KEY, new_id)` ở [`auto_handover`] và
+/// [`auto_switch_on_limit`]: chúng đổi **NƠI CHỮ ANH GÕ SẼ ĐI TỚI** trong một
+/// lượt không ai bấm gì. Mọi chỗ đặt con trỏ còn lại của huba đều đi sau một
+/// lệnh của chủ máy (`/session`, `s_<id>`, `/new`, `/terminal`, `/handover`,
+/// "Xem đầy đủ") — hai chỗ này là hai chỗ duy nhất huba tự quyết.
+///
+/// Nút *"👁 Xem phiên mới"* vốn đã gắn sẵn ở cả hai tin ấy từ trước, nên đường
+/// cho chủ máy tự chọn không phải dựng mới: chỉ cần huba **thôi chọn trước**.
+///
+/// Ba ca vì chúng nói ba câu khác nhau về cùng một chuyện — chữ tiếp theo của
+/// chủ máy sẽ đi đâu:
+pub enum FocusKept<'a> {
+    /// Con trỏ đang ở một phiên KHÁC phiên vừa đóng sổ ⟹ chữ chủ máy gõ vẫn đi
+    /// đúng chỗ anh đã chọn. Đây là ca đã hỏng hôm 03/09.
+    Elsewhere(&'a str),
+    /// Con trỏ đang ở CHÍNH phiên vừa đóng sổ. Nó không dẫn đi đâu nữa — nhưng
+    /// huba vẫn KHÔNG tự chuyển: nó nói ra và đưa nút, chủ máy bấm.
+    OnEnded,
+    /// Chưa theo phiên nào.
+    Nowhere,
+}
+
+/// Thuần: so con trỏ với phiên vừa đóng sổ. Tách khỏi chỗ gọi để kiểm được mà
+/// không cần một cái máy đang chạy `claude`.
+///
+/// `ten` là nhãn ĐỌC ĐƯỢC của phiên đang theo (tên dự án, hoặc id ngắn) —
+/// dựng bằng [`focus_label`]. Truyền vào chứ không tra ở đây, vì tra tên là
+/// việc của ảnh chụp phiên còn so sánh thì không cần biết gì về nó.
+pub fn focus_kept<'a>(focus_id: &str, ended_id: &str, ten: &'a str) -> FocusKept<'a> {
+    if focus_id.trim().is_empty() {
+        FocusKept::Nowhere
+    } else if focus_id.trim() == ended_id.trim() {
+        FocusKept::OnEnded
+    } else {
+        FocusKept::Elsewhere(ten)
+    }
+}
+
+/// Nhãn đọc được của phiên đang theo: tên dự án nếu ảnh chụp còn thấy nó, không
+/// thì id ngắn.
+///
+/// Không bịa: một con trỏ trỏ vào phiên đã tắt vẫn phải in ra được cái gì đó gõ
+/// được — id ngắn chính là thứ `/session` nhận.
+pub fn focus_label(focus_id: &str, live: &crate::sessions::SessionsSnapshot) -> String {
+    live.sessions
+        .iter()
+        .find(|s| s.session_id == focus_id)
+        .map(crate::sessions::shown)
+        .unwrap_or_else(|| short_id(focus_id).to_string())
+}
+
+/// MỘT dòng nói con trỏ đang ở đâu — dùng chung cho cả hai tin tự động.
+///
+/// Một chỗ duy nhất vì hai tin ấy đã từng lệch nhau: chúng nói về cùng một
+/// chuyện (chữ chủ máy gõ sẽ đi đâu) nhưng được viết ở hai nơi cách nhau 300
+/// dòng, và bản cũ **cùng nói sai một câu** — *"👁 Đang theo phiên mới"* —
+/// trong khi câu ấy chính là thứ Hà bảo đừng làm.
+///
+/// Ba ca ra ba câu vì chúng đòi chủ máy ba việc khác nhau: không phải làm gì ·
+/// bấm để sang · chưa theo phiên nào thì chọn một cái.
+fn focus_line(focus: &FocusKept, new_id: &str) -> String {
+    match focus {
+        FocusKept::Elsewhere(ten) => format!(
+            "👁 Con trỏ KHÔNG đổi — chữ anh gõ vẫn đi vào {ten}. Muốn sang phiên mới thì bấm \
+             nút dưới (hoặc /session {new_id})."
+        ),
+        FocusKept::OnEnded => format!(
+            "👁 Con trỏ vẫn ở phiên VỪA ĐÓNG SỔ — huba không tự chọn phiên thay anh. Bấm nút \
+             dưới (hoặc /session {new_id}) rồi hãy gõ tiếp."
+        ),
+        FocusKept::Nowhere => format!(
+            "👁 Chưa theo phiên nào. Bấm nút dưới (hoặc /session {new_id}) để vào phiên mới."
+        ),
+    }
 }
 
 /// Câu huba nói khi nó vừa TỰ thay cửa sổ làm việc của chủ máy.
@@ -2527,12 +2658,14 @@ pub fn auto_handover_notice(name: &str, pct: u8, idle_sec: u64, moved: &Handover
             tty,
             new_id,
             closed_err,
+            retrying,
+            focus,
         } => (
             format!(
-                "Phiên mới {new_id} (TRẮNG ngữ cảnh, mang bản bàn giao) đang chạy ở cửa sổ {tty}.\n\
-                 👁 Đang theo phiên mới — gõ thẳng vào đây là nói với nó.",
+                "Phiên mới {new_id} (TRẮNG ngữ cảnh, mang bản bàn giao) đang chạy ở cửa sổ {tty}.\n{}",
+                focus_line(focus, new_id)
             ),
-            *closed_err,
+            closed_err.map(|e| (e, *retrying)),
         ),
         HandoverMove::Stalled { tty, asking } => {
             let why = if asking.is_empty() {
@@ -2567,9 +2700,17 @@ pub fn auto_handover_notice(name: &str, pct: u8, idle_sec: u64, moved: &Handover
             None,
         ),
     };
-    let tail = leftover
-        .map(|e| format!("\n⚠ cửa sổ cũ chưa đóng được: {e}"))
-        .unwrap_or_default();
+    // Cùng luật với `old_window_note`: "còn thử lại" và "sang tay anh" là hai
+    // việc khác nhau của CHỦ MÁY, nên phải là hai câu khác nhau. Một dòng
+    // *"chưa đóng được"* trơn đọc ra thành lời mời đi dọn tay, kể cả khi huba
+    // đang thử lại — đúng lượt 03/09 Hà bỏ công đi kiểm bằng mắt.
+    let tail = match leftover {
+        Some((e, true)) => format!(
+            "\n⏳ cửa sổ cũ chưa đóng ngay: {e}\nhuba đang tự thử lại — sẽ báo khi xong."
+        ),
+        Some((e, false)) => format!("\n⚠ cửa sổ cũ chưa đóng được: {e}\nNó sang tay anh: /close hoặc đóng tay."),
+        None => String::new(),
+    };
     format!("{head}\n{body}{tail}")
 }
 
@@ -2836,15 +2977,26 @@ pub fn auto_limit_notice(
             tty,
             new_id,
             closed_err,
+            retrying,
+            focus,
         } => {
-            let con_lai = closed_err
-                .map(|e| format!("\n⚠ cửa sổ cũ chưa đóng được: {e}"))
-                .unwrap_or_default();
+            // 🔴 ĐÂY là câu Hà đọc lúc 16:37:54 ngày 03/09 rồi đi kiểm bằng mắt,
+            // trong khi sổ đóng đang thử lại và đóng xong lúc 16:40:07. Xem
+            // `old_window_note`.
+            let con_lai = match (closed_err, retrying) {
+                (Some(e), true) => format!(
+                    "\n⏳ cửa sổ cũ chưa đóng ngay: {e}\nhuba đang tự thử lại — sẽ báo khi xong."
+                ),
+                (Some(e), false) => format!(
+                    "\n⚠ cửa sổ cũ chưa đóng được: {e}\nNó sang tay anh: /close hoặc đóng tay."
+                ),
+                (None, _) => String::new(),
+            };
             format!(
-                "Phiên mới {new_id} đang chạy ở cửa sổ {tty} bằng {acc_moi}.\n\
-                 👁 Đang theo phiên mới — gõ thẳng vào đây là nói với nó.\n\
+                "Phiên mới {new_id} đang chạy ở cửa sổ {tty} bằng {acc_moi}.\n{}\n\
                  ⚠ Bản bàn giao dựng TỪ NHẬT KÝ (không tốn hạn mức) nên nó THÔ: \
-                 việc còn dở phải tự đọc ra, phiên cũ không tự tóm tắt được.{con_lai}"
+                 việc còn dở phải tự đọc ra, phiên cũ không tự tóm tắt được.{con_lai}",
+                focus_line(focus, new_id)
             )
         }
         HandoverMove::Stalled { tty, asking } => {
@@ -3501,6 +3653,174 @@ pub fn tap_rows_html(text: &str, taps: &[(String, String)]) -> (String, usize) {
     (out, wrapped)
 }
 
+/// Đóng một phiên rồi NÓI ĐÚNG cái vừa xảy ra — dùng chung cho `/close` và cho
+/// `/stop` khi đích là một phiên có cửa sổ.
+///
+/// 🔴 Rút ra 2026-09-06. Trước đó khối này nằm lọt trong nhánh `/close`, nên
+/// `/stop` trên một phiên CÓ CỬA SỔ không có đường nào chạm tới nó và chỉ còn
+/// biết từ chối: *"dùng /close để thoát CLI và đóng hẳn cửa sổ"*. Hà đọc cái
+/// ngõ cụt ấy thành *"Stop chán rồi có được đâu?"* — huba biết thừa việc phải
+/// làm, rồi bắt người bấm đi tra tên một động từ khác.
+///
+/// Chép khối này sang nhánh thứ hai thì rẻ hơn, và sai: bốn nhánh `Closing` ở
+/// đây mỗi nhánh là một câu chữ đã trả giá riêng (`Hidden` ≠ `Closed`,
+/// `Exiting` còn ghi sổ chờ), nên bản chép thứ hai chỉ giống bản gốc CHO TỚI KHI
+/// ai đó sửa một bên — đúng tấm 🪦 ở `session_button_label`.
+fn close_and_say(
+    db: &Db,
+    cfg: &Config,
+    s: &crate::sessions::LiveSession,
+) -> String {
+        match crate::sessions::close_session(cfg, s) {
+            Ok(win) => {
+                remember_stopped(db, s);
+                logging::info(
+                    "session_closed",
+                    json!({ "session": s.session_id, "kind": s.kind,
+                            "window": match win {
+                                crate::sessions::Closing::Background => None,
+                                crate::sessions::Closing::Closed(w)
+                                | crate::sessions::Closing::Hidden(w)
+                                | crate::sessions::Closing::Exiting(w) => Some(w),
+                            } }),
+                );
+                // Nói ĐÚNG cái vừa xảy ra, và ở đây "vừa
+                // xảy ra" mới là gõ `/exit` — cửa sổ chưa
+                // đóng, nó vào sổ chờ. Khai "đã đóng" lúc
+                // này là kể một việc chưa xảy ra, đúng thứ
+                // luật 3 của dự án cấm.
+                match win {
+                    crate::sessions::Closing::Background => format!(
+                        "⏹ Đã dừng phiên nền {} — nó không có cửa sổ nào để đóng. Hội thoại vẫn còn.",
+                        crate::sessions::shown(s)
+                    ),
+                    // …và ca này thì ĐÃ đóng thật, đã kiểm
+                    // bằng số tab chứ không bằng mã trả về
+                    // (xem `keys::window_gone`). Cửa sổ trần
+                    // không có CLI nào để chờ, nên không có
+                    // gì phải hẹn.
+                    crate::sessions::Closing::Closed(_) => format!(
+                        "⏹ Đã đóng {} — cửa sổ trần, shell đã thoát từ trước nên không có gì để chờ.",
+                        crate::sessions::shown(s)
+                    ),
+                    // Ẩn ≠ đóng, và chủ máy phải biết đúng
+                    // cái vừa xảy ra với máy của mình.
+                    crate::sessions::Closing::Hidden(_) => format!(
+                        "⏹ Terminal KHÔNG chịu đóng {} (lỗi của nó, huba đã thử đủ cách) — nên huba ẩn cửa sổ ấy đi. \
+                         Nó biến mất khỏi mọi danh sách của huba; ⌘W khi anh ngồi máy là hết hẳn.",
+                        crate::sessions::shown(s)
+                    ),
+                    crate::sessions::Closing::Exiting(w) => {
+                        let now = chrono::Utc::now().timestamp();
+                        remember_closing(
+                            db,
+                            &s.session_id,
+                            w,
+                            &crate::sessions::shown(s),
+                            now,
+                        );
+                        format!(
+                            "⏳ Đã gõ /exit vào {} — chờ CLI chạy nốt lượt đang dở rồi mới đóng cửa sổ. Kiểm 30 giây một lần, xong tôi báo.",
+                            crate::sessions::shown(s)
+                        )
+                    }
+                }
+            }
+            Err(e) => format!(
+                "⚠ chưa đóng được: {}",
+                crate::exec::truncate(&e.to_string(), 240)
+            ),
+        }
+}
+
+/// Dòng chân cho những phiên KHÔNG có cửa sổ nào trên màn.
+///
+/// 🔴 Hà 2026-09-06: *"Mọi thứ tôi bảo phải đọc ở terminal làm gốc cơ mà"* ·
+/// *"Cái mà nhìn thấy được trên màn hình"* · *"lệnh chạy khác phát sinh từ mcp
+/// làm gì có cửa sổ để nhìn thấy, **nó đều là con hết chứ**"*.
+///
+/// Ba câu ấy dựng nên đúng một mô hình: thứ nhìn thấy trên màn là HÀNG GỐC, thứ
+/// không có cửa sổ là CON của một hàng gốc nào đó. Nên chỗ này không lọc bỏ —
+/// nó **hạ chúng xuống đúng vai**, và nói ra ba hình dạng khác nhau:
+///
+/// | cha | in ra |
+/// |---|---|
+/// | là một phiên đang liệt kê | `↳ dưới <tên cha>` |
+/// | còn sống, không phải phiên | `↳ con của pid N (còn chạy)` |
+/// | đã thoát | `⚠ MỒ CÔI` + lệnh dọn ngay tại chỗ |
+/// | chưa đọc được | `❓ chưa đọc được cha` |
+///
+/// Hàng cuối là chỗ dễ ăn gian nhất: gộp "chưa đọc được" vào "mồ côi" thì bảng
+/// gọn hơn một dòng và huba bịa ra một cái chết nó chưa hề đo.
+///
+/// Tách khỏi handler 06/09 vì nằm trong đó thì **không bài kiểm nào với tới**,
+/// đúng con bug vừa sửa ở `session_list_text` mặc bộ đồ khác.
+pub fn offscreen_note(rows: &[crate::sessions::LiveSession]) -> String {
+    let khuat: Vec<&crate::sessions::LiveSession> = rows
+        .iter()
+        .filter(|s| !crate::sessions::on_screen(s))
+        .collect();
+    if khuat.is_empty() {
+        return String::new();
+    }
+    // 🔴 MỘT DÒNG, KHÔNG MỘT KHỐI — Hà 2026-09-06, đọc khối sáu dòng trên điện
+    // thoại: *"Màn mồ côi để làm gì, có thao tác được đâu"* · *"Đã bảo ko chạy
+    // gì thì bỏ rồi"*.
+    //
+    // Anh đúng, và đo được: với một phiên mồ côi, `/shot` chỉ ra chữ cũ, `/ask`
+    // tiêu hạn mức để hỏi một bản fork, gõ thì không có cửa sổ. Còn ĐÚNG MỘT
+    // việc làm được — dừng nó — nên khối ấy chỉ nên to bằng đúng cái việc ấy.
+    // (Đo 06/09: hai phiên mồ côi giữ **1203 MB**, `claude stop <id ngắn>` giết
+    // được cả hai, RAM về 0. Nên dòng này không phải để đọc, nó là để dọn.)
+    //
+    // Vẫn KHÔNG gộp ba hình dạng: mồ côi thì dọn, con của phiên còn sống thì
+    // đừng đụng, chưa đọc được cha thì nói là chưa đọc được. Gộp lại cho gọn
+    // một dòng nữa là dọn nhầm thứ đang có người dùng.
+    let mo_coi: Vec<&&crate::sessions::LiveSession> = khuat
+        .iter()
+        .filter(|s| crate::sessions::is_orphan(s))
+        .collect();
+    let con: Vec<String> = khuat
+        .iter()
+        .filter(|s| !crate::sessions::is_orphan(s))
+        .map(|s| {
+            let vai = match (s.parent_name.as_deref(), s.spawner_alive) {
+                (Some(cha), _) => format!("dưới {cha}"),
+                (None, Some(true)) => {
+                    format!("con của pid {}", s.spawned_by_pid.unwrap_or_default())
+                }
+                _ => "chưa đọc được cha".to_string(),
+            };
+            format!(
+                "  ↳ {} · {} ({vai})",
+                crate::sessions::shown(s),
+                short_id(&s.session_id)
+            )
+        })
+        .collect();
+
+    let mut out = String::new();
+    if !mo_coi.is_empty() {
+        out.push_str(&format!(
+            "\n\n🌙 {} mồ côi (không cửa sổ, cha đã thoát) · dọn: /stop {}",
+            mo_coi.len(),
+            mo_coi
+                .iter()
+                .map(|s| short_id(&s.session_id).to_string())
+                .collect::<Vec<_>>()
+                .join(" /stop ")
+        ));
+    }
+    if !con.is_empty() {
+        out.push_str(&format!(
+            "\n\n🌙 {} phiên không có cửa sổ, nhưng CÒN CHA — đừng dọn:\n{}",
+            con.len(),
+            con.join("\n")
+        ));
+    }
+    out
+}
+
 pub fn session_list_text(
     sessions: &[crate::sessions::LiveSession],
     focus: &str,
@@ -3541,9 +3861,41 @@ pub fn session_list_text(
         .filter(|m| !m.is_empty())
         .collect();
     let one_mode = (modes.len() == 1).then(|| *modes.iter().next().unwrap());
+    // 🔴 "ĐANG SỐNG" TRẢ LỜI MỘT CÂU KHÔNG AI HỎI — Hà 2026-09-06, ảnh danh sách
+    // `2 phiên đang sống · đều tự duyệt`, bấm vào cả hai và không làm được gì:
+    // *"Ghi là phiên đang sống nhưng lại chỉ là lịch sử, thật buồn cười, tôi có
+    // cần cái này đâu"*.
+    //
+    // Cả hai hàng ấy đúng là tiến trình còn sống — `ps` xác nhận. Nhưng "còn
+    // sống" đo sự tồn tại của một TIẾN TRÌNH, còn thứ ngón tay sắp làm là GÕ.
+    // Đo lúc ấy: `can_type=false` cả hai, `working=false` cả hai, im 154 và 176
+    // phút, và một hàng có lời cuối đúng là *"Đã ghi và đóng phiên"*. Một con số
+    // không bao giờ ở trạng thái ngược với điều người đọc cần biết thì không
+    // phải phép đo — nó là lời đồn có phông chữ đẹp.
+    //
+    // HÀNG thì đã nói thật từ lâu (`source_icon` in 🌙 cho nền, 🔌 cho rời). Chỗ
+    // nói dối là con số TỔNG: nó gộp hai loại làm một rồi dán thêm "đều tự
+    // duyệt", nghe như cả ba đang chạy việc.
+    //
+    // Đếm "chỉ đọc" bằng HAI nguồn độc lập, không nguồn nào được đoán:
+    // ① `!is_real_tty` — tty `??`, không có cửa sổ nào TỒN TẠI để mà gõ. Đây
+    //    đúng là dữ kiện `source_icon` đọc để in 🌙/🔌, nên tiêu đề không thể
+    //    lệch khỏi hàng. (Bản chép thứ hai của một bảng thì chỉ giống nhau CHO
+    //    TỚI KHI ai đó sửa một bên — xem 🪦 ở `session_button_label`.)
+    // ② `can_type=false` trên hàng CÓ tty thật — ca terminal tích hợp VS Code,
+    //    hàng khai `host: "terminal"` nên vẫn in `⌨` như thể gõ được.
+    //
+    // Cửa `probed` là chỗ dễ bỏ sót nhất: `mark_can_type` để nguyên `false` cho
+    // MỌI hàng khi danh sách tab rỗng vì dò hỏng, nên "0 gõ được" của một lượt
+    // dò hỏng đọc y hệt "0 gõ được" thật. Bằng chứng phép dò CÓ chạy là có ít
+    // nhất một hàng `can_type=true`; không có nó thì nguồn ② im, chỉ còn ①
+    // (thứ không phụ thuộc phép dò nào). Tức: chưa đo được thì đừng tô màu.
+    // Phép đếm + câu chữ nằm ở `sessions::drive_summary` — MỘT nguồn cho cả
+    // Telegram lẫn `huba sessions`. Bản đầu của bản vá này chỉ sửa ở đây, và
+    // chủ máy vẫn nhìn thấy nguyên câu cũ in ra từ `main.rs`.
+    let dau = crate::sessions::drive_summary(sessions);
     let mut out = format!(
-        "📋 {} phiên đang sống{}\n",
-        sessions.len(),
+        "📋 {dau}{}\n",
         one_mode.map(|m| format!(" · đều {m}")).unwrap_or_default()
     );
     for s in shown_rows {
@@ -3801,6 +4153,97 @@ pub const SHOT_LINES_MAX: usize = 120;
 /// trong sổ, không sống trong một lời gọi hàm.
 pub const CLOSING_KEY: &str = "closing:windows";
 
+/// Sổ KẾ NHIỆM: phiên huba vừa đóng sổ → phiên nó mở thay.
+///
+/// 🔴 Sinh ra cùng [`FocusKept`] 2026-09-03, và chỉ có nghĩa vì con trỏ nay
+/// GIỮ NGUYÊN: nếu chủ máy đang theo đúng phiên vừa bị bàn giao, câu tiếp theo
+/// anh gõ sẽ nhắm vào một id không còn sống. Bản cũ trả lời *"⚠ không thấy phiên
+/// '…' trong danh sách"* — đúng sự thật và **vô dụng**: nó bắt anh tự đi tìm cái
+/// phiên mà chính huba vừa mở.
+///
+/// Sổ, chứ không phải một phép tra lúc cần: lúc chủ máy gõ thì phiên cũ đã biến
+/// khỏi mọi danh sách, nên thứ duy nhất còn biết đường nối là dòng huba tự ghi
+/// lúc bàn giao.
+pub const SUCCESSOR_KEY: &str = "handover:successor";
+
+/// Giữ tối đa ngần này mục — sổ này chỉ để trả lời câu gõ NGAY SAU một lượt bàn
+/// giao, không phải một cuốn lịch sử. Cắt mục CŨ NHẤT theo `at`.
+const SUCCESSOR_KEEP: usize = 64;
+
+/// Một mục kế nhiệm.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Successor {
+    /// id phiên kế nhiệm — đủ dài để `/session` khớp.
+    pub new_id: String,
+    /// Lúc bàn giao (epoch giây).
+    pub at: i64,
+}
+
+/// Ghi một lượt kế nhiệm. Không nuốt lỗi: mất dòng này thì câu trả lời cho chủ
+/// máy tụt về *"không thấy phiên"*, tức đúng cái vừa vá.
+pub fn remember_successor(db: &Db, old_id: &str, new_id: &str, now: i64) {
+    let mut book: BTreeMap<String, Successor> = db
+        .cursor_or_log(SUCCESSOR_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    book.insert(
+        old_id.to_string(),
+        Successor {
+            new_id: new_id.to_string(),
+            at: now,
+        },
+    );
+    while book.len() > SUCCESSOR_KEEP {
+        // Cũ nhất ra trước. `BTreeMap` xếp theo id nên phải tự tìm theo `at`.
+        let cu_nhat = book
+            .iter()
+            .min_by_key(|(_, v)| v.at)
+            .map(|(k, _)| k.clone());
+        match cu_nhat {
+            Some(k) => {
+                book.remove(&k);
+            }
+            None => break,
+        }
+    }
+    match serde_json::to_string(&book) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(SUCCESSOR_KEY, &v) {
+                logging::error("successor_book_not_saved", json!({ "err": e.to_string() }));
+            }
+        }
+        Err(e) => logging::error("successor_book_not_encoded", json!({ "err": e.to_string() })),
+    }
+}
+
+/// Phiên nào đã thay phiên này? `None` = không có dòng nào — và `None` ở đây
+/// nghĩa là **chưa từng ghi**, không phải "phiên ấy còn sống".
+pub fn successor_of(db: &Db, old_id: &str) -> Option<String> {
+    let book: BTreeMap<String, Successor> = db
+        .cursor_or_log(SUCCESSOR_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    successor_in(&book, old_id)
+}
+
+/// Nửa THUẦN của [`successor_of`] — tra được mà không cần một cuốn sổ trên đĩa.
+///
+/// Nhận cả id NGẮN (8 ký tự) vì chủ máy gõ id ngắn suốt: `/type f7612183 …`.
+/// Hẹp có chủ ý — phải khớp từ ĐẦU chuỗi, không phải "chứa ở đâu đó".
+pub fn successor_in(book: &BTreeMap<String, Successor>, old_id: &str) -> Option<String> {
+    let want = old_id.trim();
+    if want.is_empty() {
+        return None;
+    }
+    book.get(want)
+        .or_else(|| {
+            book.iter()
+                .find(|(k, _)| k.starts_with(want) && want.len() >= 8)
+                .map(|(_, v)| v)
+        })
+        .map(|v| v.new_id.clone())
+}
+
 /// Một cửa sổ đang chờ đóng.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Closing {
@@ -3866,6 +4309,58 @@ const CLOSE_HIDDEN_RETRY_SEC: i64 = 300;
 /// tức xây một cái máy thử-lại rồi tự tắt nó đúng lúc cần.
 const CLOSE_HIDDEN_GIVE_UP_SEC: i64 = 6 * 3600;
 
+/// Đóng hụt lúc bàn giao ⟹ giao cho sổ đóng, và TRẢ LỜI là có giao được không.
+///
+/// Một chỗ duy nhất, vì trước 2026-09-03 có ba đường bàn giao và chúng làm ba
+/// kiểu: `auto_handover` ghi sổ **và** ghi log; nhánh hết-hạn-mức ghi sổ **mà
+/// không** ghi log; còn route `/handover -a <acc>` chủ máy tự gõ thì **không ghi
+/// sổ gì cả** — cửa sổ hụt ở đường ấy nằm mở vĩnh viễn, đúng con bug 15/08 đã vá
+/// cho hai đường kia rồi bỏ quên đường thứ ba. Ba bản chép tay, hai bản thiếu.
+///
+/// Giá trị trả về là thứ [`old_window_note`] cần: *"huba còn thử lại"* và *"việc
+/// sang tay anh"* là hai câu khác nhau, và chỉ chỗ NÀY biết đúng câu nào —
+/// `window_of` trượt thì không ai ngó lại cửa sổ ấy nữa.
+pub fn defer_close_to_book(db: &Db, session: &crate::sessions::LiveSession, now: i64) -> bool {
+    match crate::keys::window_of(&session.tty) {
+        Ok(Some(w)) => {
+            remember_closing(
+                db,
+                &session.session_id,
+                w,
+                &crate::sessions::shown(session),
+                now,
+            );
+            logging::info(
+                "handover_close_deferred",
+                json!({ "session": session.session_id, "window": w,
+                        "why": "phiên cũ còn chạy dở — sổ đóng sẽ ngó lại" }),
+            );
+            true
+        }
+        // Mất dấu cửa sổ thì KHÔNG im: đây đúng là ca câu báo phải đổi giọng
+        // sang "sang tay anh", nên nó phải đọc được ở nhật ký khi có người hỏi
+        // vì sao huba thôi thử lại.
+        Ok(None) => {
+            logging::warn(
+                "handover_close_not_deferred",
+                json!({ "session": session.session_id, "tty": session.tty,
+                        "why": "không tìm thấy cửa sổ của phiên cũ",
+                        "effect": "không ai ngó lại nữa — câu báo phải nói là việc sang tay chủ máy" }),
+            );
+            false
+        }
+        Err(e) => {
+            logging::warn(
+                "handover_close_not_deferred",
+                json!({ "session": session.session_id, "tty": session.tty,
+                        "why": crate::logging::err_chain(&e),
+                        "effect": "không ai ngó lại nữa — câu báo phải nói là việc sang tay chủ máy" }),
+            );
+            false
+        }
+    }
+}
+
 /// Ghi một cửa sổ vào sổ chờ đóng.
 pub fn remember_closing(db: &Db, session_id: &str, window: i64, shown_name: &str, now: i64) {
     let mut book = closing_book(db);
@@ -3899,6 +4394,187 @@ fn save_closing(db: &Db, book: &BTreeMap<String, Closing>) {
             }
         }
         Err(e) => logging::error("closing_book_not_encoded", json!({ "err": e.to_string() })),
+    }
+}
+
+/// Cửa sổ mồ côi đã NÓI rồi (`tty` → epoch giây lúc nói).
+///
+/// Có sổ vì luật 11: huba nói khi có THAY ĐỔI, không nói một TRẠNG THÁI. Một
+/// cửa sổ rác nằm đó ba ngày mà cứ 5 phút nhắc một câu thì cái chuông bị tắt,
+/// và nó mang theo mọi tin đáng đọc — đúng lý lẽ của `watch.rs`.
+pub const ORPHAN_SAID_KEY: &str = "orphan:said";
+
+/// Bao lâu ngó một lượt. Thưa hơn hẳn nhịp 30 giây của `close_pending_tick`:
+/// không ai đang chờ một cửa sổ rác, và mỗi lượt là một `osascript` đọc màn của
+/// MỌI tab (đo 2026-08-16: 1,3 giây cho 11 tab) chen vào hàng đợi Apple Event
+/// chung với những việc CÓ người chờ.
+const ORPHAN_CHECK_SEC: i64 = 300;
+
+/// Dấu `claude` in ra khi nó THOÁT — bằng chứng dương rằng tab này từng có phiên.
+///
+/// 🔴 Đây là chỗ phép đo này khác hẳn một phép đo bằng SỰ VẮNG MẶT, và khác biệt
+/// ấy là cả thiết kế. "Tab không có tiến trình `claude`" đúng với cả cửa sổ chủ
+/// máy vừa tự mở để gõ vài câu lệnh — đi mách anh về chính cửa sổ anh đang dùng
+/// là quàng rào lên tay anh. Còn dòng dưới đây thì chỉ có một cách xuất hiện:
+/// một phiên đã chạy trong tab ấy và đã kết thúc.
+///
+/// ```text
+/// Resume this session with:
+///   claude --resume 9ba80be4-4c34-4650-9e03-8556e61f480a
+/// ```
+/// Và bắt bằng HÌNH DẠNG — dòng phải **MỞ ĐẦU** bằng đúng lệnh ấy, không phải
+/// "màn có chứa chuỗi này ở đâu đó". Cùng bài học với
+/// [`crate::keys::account_blocked_on_screen`] và với con bug 21/08 (*văn xuôi
+/// đánh số không phải hộp chọn*): một phiên đang BÀN về chuyện khôi phục phiên —
+/// chính phiên đang gõ những dòng này — chép nguyên văn `claude --resume <id>`
+/// vào giữa một đoạn văn là chuyện thường, và khi ấy `contains` bảo rằng cửa sổ
+/// đang làm việc là rác.
+const EXITED_CLI_MARK: &str = "claude --resume ";
+
+/// Tab này có phải một CỬA SỔ MỒ CÔI không — phiên chết rồi, cửa sổ còn.
+///
+/// 🔴 Hà 2026-09-03: *"Đợi rất lâu nhưng cửa sổ terminal cũ không đóng mặc dù
+/// cli thoát hết rồi, đang ở dấu nhắc lệnh của terminal"*.
+///
+/// Đo cùng lúc ấy: cửa sổ của lượt bàn giao vừa xong (`1586`/`ttys007`) ĐÃ đóng
+/// — nhưng còn **hai** cửa sổ khác đứng nguyên từ hôm trước (`1481`/`ttys008` mở
+/// 01/09 19:05, `1786`/`ttys003` mở 02/09 15:25), cả hai chỉ còn `login` + `-zsh`,
+/// `busy=false`, màn dừng ở dòng `claude --resume …`. huba **chỉ** dọn cửa sổ của
+/// phiên nó đang bàn giao; cửa sổ có CLI tự chết thì không cuốn sổ nào biết tới.
+///
+/// Ba điều kiện, và cả ba đều cần:
+/// * `!busy` — Terminal tự trả lời "còn chương trình nào chạy không". Còn bận
+///   thì đây là việc của [`close_pending_tick`], không phải của rác.
+/// * **không nằm trong ảnh chụp phiên** — một tty được DÙNG LẠI (luật 11b), nên
+///   "không có `claude` trong `procs`" chưa đủ; phải hỏi chính sổ phiên của huba.
+/// * `screen` mang [`EXITED_CLI_MARK`] — bằng chứng DƯƠNG, xem tấm bia ở đó.
+///
+/// `screen == None` ⟹ **không kết luận gì**. `None` là "lượt dò này không xin
+/// chữ", không phải "màn trống" (xem [`crate::keys::Tab::screen`]) — đọc nó
+/// thành "không có dấu" là dựng đúng cái bẫy `screen_of → None` của luật 13.
+pub fn is_orphan_window(tab: &crate::keys::Tab, live_ttys: &std::collections::BTreeSet<String>) -> bool {
+    if tab.busy || live_ttys.contains(&tab.tty) {
+        return false;
+    }
+    tab.screen.as_deref().is_some_and(|s| {
+        s.lines()
+            .any(|l| l.trim_start().starts_with(EXITED_CLI_MARK))
+    })
+}
+
+/// Mỗi 5 phút: cửa sổ nào còn đứng đó sau khi phiên của nó chết thì NÓI MỘT LẦN.
+///
+/// 🔴 **BÁO, KHÔNG TỰ ĐÓNG** — Hà chốt 2026-09-03 sau khi tôi đề nghị đúng hai
+/// đường ấy. Lý do không phải thận trọng chung chung: đóng một cửa sổ là việc
+/// **không lùi lại được**, và phép đo ở đây không phân biệt nổi *"cửa sổ huba mở
+/// rồi phiên chết"* với *"cửa sổ chủ máy tự mở, chạy xong một phiên, rồi giữ lại
+/// để gõ tiếp"*. Hai thứ ấy trông y hệt nhau trong `procs` lẫn trên màn. Cái nút
+/// thì trả quyền quyết định lại cho người biết câu trả lời.
+///
+/// Đường đóng dùng lại đúng đường `/web` đã có — `wx_<tty>` → [`crate::verbs`] →
+/// `CommandKind::Close` trên một `win-<tty>`. Không thêm một đường ĐI nào, nên
+/// không có đường thứ hai để về sau lệch nhau.
+pub fn orphan_windows_tick(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot, now: i64) {
+    static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+    if now - last < ORPHAN_CHECK_SEC {
+        return;
+    }
+    LAST.store(now, std::sync::atomic::Ordering::Relaxed);
+
+    let tabs = match crate::keys::terminal_screens() {
+        Ok(t) => t,
+        // Không dò được thì KHÔNG kết luận "không có cửa sổ rác nào" — đó là
+        // "chưa đo được", một trạng thái riêng (luật 13②).
+        Err(e) => {
+            logging::warn("orphan_tick_probe_failed", json!({ "err": e.to_string() }));
+            return;
+        }
+    };
+    let live_ttys: std::collections::BTreeSet<String> = live
+        .sessions
+        .iter()
+        .filter(|s| crate::sessions::is_real_tty(&s.tty))
+        .map(|s| s.tty.clone())
+        .collect();
+
+    let mo_coi: Vec<&crate::keys::Tab> = tabs
+        .iter()
+        .filter(|t| is_orphan_window(t, &live_ttys))
+        .collect();
+
+    let mut so_da_noi: BTreeMap<String, i64> = db
+        .cursor_or_log(ORPHAN_SAID_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    // Dọn sổ TRƯỚC khi so: cửa sổ đã đóng thì quên nó đi, để lần sau nó mọc lại
+    // là một tin MỚI chứ không phải một dòng bị nuốt. Đây cũng là chỗ giữ cho sổ
+    // không phình theo thời gian.
+    let dang_co: std::collections::BTreeSet<&str> =
+        mo_coi.iter().map(|t| t.tty.as_str()).collect();
+    let truoc = so_da_noi.len();
+    so_da_noi.retain(|tty, _| dang_co.contains(tty.as_str()));
+
+    let moi: Vec<&&crate::keys::Tab> = mo_coi.iter().filter(|t| !so_da_noi.contains_key(&t.tty)).collect();
+    if moi.is_empty() {
+        if so_da_noi.len() != truoc {
+            luu_so_mo_coi(db, &so_da_noi);
+        }
+        return;
+    }
+    for t in &moi {
+        so_da_noi.insert(t.tty.clone(), now);
+    }
+    luu_so_mo_coi(db, &so_da_noi);
+
+    let dong: Vec<String> = moi
+        .iter()
+        .map(|t| {
+            let dong_cuoi = last_screen_line(t.screen.as_deref())
+                .unwrap_or_else(|| "dấu nhắc trống".to_string());
+            match crate::telegram::deep_link(&format!("wx_{}", t.tty)) {
+                Some(link) => format!("⚪ {} — {dong_cuoi}\n    ⏹ đóng: {link}", t.tty),
+                // Chưa biết tên bot ⟹ không dựng được liên kết. Vẫn phải nói ra
+                // cửa sổ nào, kèm lệnh gõ tay — mất chỗ bấm không được thành mất
+                // cả tin.
+                None => format!(
+                    "⚪ {} — {dong_cuoi}\n    ⏹ đóng: /close {}{}",
+                    t.tty,
+                    crate::sessions::SHELL_ID_PREFIX,
+                    t.tty
+                ),
+            }
+        })
+        .collect();
+    logging::info(
+        "orphan_windows_found",
+        json!({ "moi": moi.iter().map(|t| &t.tty).collect::<Vec<_>>(),
+                "tong_mo_coi": mo_coi.len(), "tong_tab": tabs.len() }),
+    );
+    let text = format!(
+        "🧹 {} cửa sổ Terminal còn mở sau khi phiên của nó đã thoát — huba KHÔNG tự đóng \
+         (có thể anh đang giữ để gõ tiếp):\n\n{}\n\nCả danh sách: /web",
+        moi.len(),
+        dong.join("\n")
+    );
+    if let Some(tg) = crate::telegram::inbox() {
+        if let Err(e) = tg.send_text(&text) {
+            logging::error("orphan_say_failed", json!({ "err": e }));
+        }
+    }
+    let _ = cfg;
+}
+
+fn luu_so_mo_coi(db: &Db, book: &BTreeMap<String, i64>) {
+    match serde_json::to_string(book) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(ORPHAN_SAID_KEY, &v) {
+                // Mất sổ = nói lại từ đầu ở vòng sau, tức đúng cái chuông kêu
+                // mãi mà luật 11 cấm. Không nuốt.
+                logging::error("orphan_book_not_saved", json!({ "err": e.to_string() }));
+            }
+        }
+        Err(e) => logging::error("orphan_book_not_encoded", json!({ "err": e.to_string() })),
     }
 }
 
@@ -4199,11 +4875,27 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
                 // sống làm Terminal bật hộp thoại "terminate running processes?",
                 // mà một hộp thoại thì khoá mọi lệnh tự động sau nó (bài học
                 // 08-11, xem `keys::close_window`).
-                // Lý do đọc ĐƯỢC thì nói lý do đọc được; đọc không ra thì nói
-                // câu cũ — nó là phỏng đoán đúng cho ca thường gặp, và nay nó
-                // chỉ còn được nói khi màn thật sự không có hộp nào.
+                // Lý do đọc ĐƯỢC thì nói lý do đọc được; đọc không ra thì hỏi
+                // NHẬT KÝ trước khi phỏng đoán — xem
+                // `sessions::transcript_idle_seconds`. "CLI đang chạy dở một
+                // lượt" và "phiên có thể đã kẹt" là hai câu khác hẳn nhau, và
+                // tới giờ huba chỉ biết nói câu đầu, kể cả sau 10+ phút.
                 let vi_sao = vuong.unwrap_or_else(|| {
-                    "cửa sổ còn bận, tức CLI đang chạy dở một lượt và `/exit` nằm trong hàng chờ của nó".to_string()
+                    match crate::sessions::transcript_idle_seconds(cfg, id) {
+                        Some(giay) if giay < crate::sessions::WRITING_NOW_SEC => format!(
+                            "cửa sổ còn bận — nhật ký VỪA lớn lên {giay}s trước, tức CLI đang chạy \
+                             THẬT (không phải kẹt); `/exit` nằm trong hàng chờ, cứ để nó chạy tiếp"
+                        ),
+                        Some(giay) if giay >= crate::sessions::IDLE_AFTER_SEC => format!(
+                            "cửa sổ báo bận, nhưng nhật ký đã ĐỨNG IM {} phút — có thể một lệnh đang \
+                             chạy dài (build/test), hoặc phiên đang kẹt thật; đáng /shot xem thử",
+                            giay / 60
+                        ),
+                        // Khoảng giữa (15s–3 phút) hoặc không đọc được nhật ký:
+                        // chưa đủ dữ kiện để nói khác đi câu cũ.
+                        _ => "cửa sổ còn bận, tức CLI đang chạy dở một lượt và `/exit` nằm trong hàng \
+                              chờ của nó".to_string(),
+                    }
                 });
                 if waited >= CLOSE_GIVE_UP_SEC {
                     say_closed(cfg, &format!(
@@ -9986,7 +10678,65 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     arg.strip_prefix("an ").or_else(|| arg.strip_prefix("ẩn "))
                 };
                 let mut sent = false;
-                let ack = if an.is_none() {
+                let ack = if arg == "anh" || arg == "ảnh" {
+                    // 🔴 `/web anh` — ẢNH THẬT của Chrome đang mở, KHÔNG phải
+                    // bản ẩn. Cùng luật với `/anh` (ảnh cửa sổ phiên,
+                    // `keys::photograph_window`) và `/web an` (ảnh bản ẩn,
+                    // `crate::web::route`): ảnh trước, chữ là phương án lùi.
+                    // Đứng TRƯỚC nhánh `an.is_none()` nên chỉ khớp đúng Chrome
+                    // thật — không đụng cú pháp `/web an …` của bản ẩn.
+                    let path = std::env::temp_dir()
+                        .join(format!("huba-web-anh-{}.png", std::process::id()));
+                    match crate::browser::chup_anh(&path) {
+                        Ok(()) => match crate::telegram::inbox() {
+                            Some(tg) => {
+                                let cap = "🌐📸 Chrome thật — ảnh vừa chụp".to_string();
+                                let out = match tg.send_photo(&path, &cap) {
+                                    Ok(()) => {
+                                        sent = true;
+                                        "📸 Ảnh Chrome thật ở trên.".to_string()
+                                    }
+                                    Err(e) => format!(
+                                        "⚠ chụp được nhưng KHÔNG gửi được ảnh: {}",
+                                        crate::exec::truncate(&e, 200)
+                                    ),
+                                };
+                                let _ = std::fs::remove_file(&path);
+                                out
+                            }
+                            None => "⚠ chưa có kênh Telegram nào để gửi ảnh".to_string(),
+                        },
+                        // 🔴 Màn khoá (hay thiếu quyền Screen Recording) chặn
+                        // PIXEL, không chặn CHỮ — Hà 2026-09-04: *"màn khóa vẫn
+                        // xem được tình trạng trình duyệt chứ đưa ra thông báo
+                        // làm gì"*. Rơi về chữ NGAY, không bắt gõ thêm lệnh từ
+                        // điện thoại: danh sách tab + chữ tab đang xem, cùng
+                        // nguồn `/web` và `/web đọc` đã dùng.
+                        Err(crate::browser::Loi::AnhTrong(ly_do)) => {
+                            let tab_list = match crate::browser::tabs() {
+                                Ok(t) => web_list_text(&t),
+                                Err(e) => format!("(không đọc được danh sách tab: {e})"),
+                            };
+                            let trang = match crate::browser::chu_trang() {
+                                Ok(c) => {
+                                    let c = c.trim();
+                                    if c.is_empty() {
+                                        "(trang không có chữ nào đọc được)".to_string()
+                                    } else if c.chars().count() > WEB_TEXT_MAX {
+                                        let cut: String =
+                                            c.chars().take(WEB_TEXT_MAX).collect();
+                                        format!("{cut}\n… cắt ở {WEB_TEXT_MAX} ký tự.")
+                                    } else {
+                                        c.to_string()
+                                    }
+                                }
+                                Err(e) => format!("(không đọc được chữ trang: {e})"),
+                            };
+                            format!("🔒 {ly_do}\n\n{tab_list}\n— tab đang xem —\n{trang}")
+                        }
+                        Err(e) => format!("⚠ {}", crate::exec::truncate(&e.to_string(), 420)),
+                    }
+                } else if an.is_none() {
                     // Chrome TRÊN MÁY: danh sách tab, mỗi hàng một đích chạm —
                     // cùng bố cục danh sách phiên, dùng chung `tap_rows_html`.
                     let (ack, taps) = web_route(arg);
@@ -10197,13 +10947,21 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                     "acc_moi": acc, "tty": w.tty,
                                                     "new_id": w.new_id }),
                                         );
+                                        // 🔴 Đường bàn giao TAY cũng phải giao cửa
+                                        // sổ hụt cho sổ đóng. Trước 03/09 chỉ hai
+                                        // đường TỰ ĐỘNG làm việc này, nên một lượt
+                                        // `/handover -a acc` đóng hụt là bỏ lại cửa
+                                        // sổ mở vĩnh viễn — cùng con bug 15/08 đã vá
+                                        // cho hai đường kia. Xem `defer_close_to_book`.
+                                        let retrying = w.closed_err.is_some()
+                                            && defer_close_to_book(db, s, chrono::Utc::now().timestamp());
                                         match w.new_id.as_deref() {
                                             Some(id) => format!(
                                                 "📋 Đã đóng sổ {} và mở phiên mới bằng **{acc}** \
                                                  (cũ: {}) ở {} — đang theo phiên {}.\n\n{}{}",
                                                 h.source_name, s.account, w.tty,
                                                 id.chars().take(8).collect::<String>(),
-                                                old_window_note(w.old_kept, w.closed_err.as_deref(), &s.cwd, &s.session_id),
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id),
                                                 h.checkpoint
                                             ),
                                             // Cửa sổ mở rồi nhưng chưa ghép được
@@ -10215,7 +10973,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                  NHƯNG chưa ghép được id phiên mới — nhìn cửa sổ ấy giúp \
                                                  tôi (thường là nó đang hỏi một hộp xác nhận).\n\n{}{}",
                                                 h.source_name, w.tty,
-                                                old_window_note(w.old_kept, w.closed_err.as_deref(), &s.cwd, &s.session_id),
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id),
                                                 h.checkpoint
                                             ),
                                         }
@@ -10281,13 +11039,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                         "vi_sao": loi, "tty": w.tty,
                                                         "new_id": w.new_id }),
                                             );
+                                            let retrying = w.closed_err.is_some()
+                                                && defer_close_to_book(db, s, chrono::Utc::now().timestamp());
                                             format!(
                                                 "📋 {} không tự viết được bản bàn giao ({loi}), nên tôi dựng \
                                                  từ nhật ký và mở phiên mới bằng **{acc}** ở {}.\n\
                                                  Phiên cũ KHÔNG cạn — nó chỉ bị một cái đồng hồ chặn.\n\n{}{cp}",
                                                 s.name,
                                                 w.tty,
-                                                old_window_note(w.old_kept, w.closed_err.as_deref(), &s.cwd, &s.session_id)
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id)
                                             )
                                         }
                                         Err(e2) => format!(
@@ -10683,6 +11443,31 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         "⚠ không thấy phiên '{}' đang chạy",
                         crate::exec::truncate(&want, 40)
                     ),
+                    // 🔴 KHÔNG DẪN NGƯỜI BẤM VÀO NGÕ CỤT — Hà 2026-09-06:
+                    // *"Stop chán rồi có được đâu?"*. `stop_background` từ chối
+                    // thẳng phiên có cửa sổ (*"dùng /close…"*), tức huba biết
+                    // thừa việc phải làm rồi bắt người bấm đi tra tên một động
+                    // từ khác. Đo trong sổ: 36 lượt `session_stopped` thành
+                    // công, và 2 lượt hỏng đều từ 08/08 (bug id-đầy-đủ đã sửa) —
+                    // nên thứ Hà gặp không phải `stop` chết, mà là **cái cửa
+                    // này** đóng.
+                    //
+                    // Vẫn KHÔNG âm thầm làm thay: `/stop` và `/close` tách nhau
+                    // 13/08 đúng vì hai kết cục khác hẳn về mức mất mát, và lý
+                    // do tách, nguyên văn: *"Người bấm không có cách nào biết
+                    // mình sắp nhận cái nào"*. Nên hỏi ĐÚNG câu của kết cục sắp
+                    // xảy ra, rồi làm — không đổi động từ trong im lặng.
+                    Some(s) if s.kind != "background" => {
+                        let what = format!(
+                            "{} chạy trong một cửa sổ Terminal nên không có gì để 'dừng'. \
+                             ĐÓNG HẲN nó (thoát CLI + đóng cửa sổ)?",
+                            crate::sessions::shown(s)
+                        );
+                        match ask_owner(db, cfg, adapter, cmd, &what, "đóng phiên nào") {
+                            Some(refusal) => refusal,
+                            None => close_and_say(db, cfg, s),
+                        }
+                    }
                     Some(s) => {
                         // Chốt chặn thứ hai, qua Telegram (Hà 2026-08-10). Dừng
                         // một phiên là thứ không lùi lại được, và cái nút gây ra
@@ -10785,66 +11570,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         if let Some(refusal) = refusal {
                             refusal
                         } else {
-                            match crate::sessions::close_session(cfg, s) {
-                                Ok(win) => {
-                                    remember_stopped(db, s);
-                                    logging::info(
-                                        "session_closed",
-                                        json!({ "session": s.session_id, "kind": s.kind,
-                                                "window": match win {
-                                                    crate::sessions::Closing::Background => None,
-                                                    crate::sessions::Closing::Closed(w)
-                                                    | crate::sessions::Closing::Hidden(w)
-                                                    | crate::sessions::Closing::Exiting(w) => Some(w),
-                                                } }),
-                                    );
-                                    // Nói ĐÚNG cái vừa xảy ra, và ở đây "vừa
-                                    // xảy ra" mới là gõ `/exit` — cửa sổ chưa
-                                    // đóng, nó vào sổ chờ. Khai "đã đóng" lúc
-                                    // này là kể một việc chưa xảy ra, đúng thứ
-                                    // luật 3 của dự án cấm.
-                                    match win {
-                                        crate::sessions::Closing::Background => format!(
-                                            "⏹ Đã dừng phiên nền {} — nó không có cửa sổ nào để đóng. Hội thoại vẫn còn.",
-                                            crate::sessions::shown(s)
-                                        ),
-                                        // …và ca này thì ĐÃ đóng thật, đã kiểm
-                                        // bằng số tab chứ không bằng mã trả về
-                                        // (xem `keys::window_gone`). Cửa sổ trần
-                                        // không có CLI nào để chờ, nên không có
-                                        // gì phải hẹn.
-                                        crate::sessions::Closing::Closed(_) => format!(
-                                            "⏹ Đã đóng {} — cửa sổ trần, shell đã thoát từ trước nên không có gì để chờ.",
-                                            crate::sessions::shown(s)
-                                        ),
-                                        // Ẩn ≠ đóng, và chủ máy phải biết đúng
-                                        // cái vừa xảy ra với máy của mình.
-                                        crate::sessions::Closing::Hidden(_) => format!(
-                                            "⏹ Terminal KHÔNG chịu đóng {} (lỗi của nó, huba đã thử đủ cách) — nên huba ẩn cửa sổ ấy đi. \
-                                             Nó biến mất khỏi mọi danh sách của huba; ⌘W khi anh ngồi máy là hết hẳn.",
-                                            crate::sessions::shown(s)
-                                        ),
-                                        crate::sessions::Closing::Exiting(w) => {
-                                            let now = chrono::Utc::now().timestamp();
-                                            remember_closing(
-                                                db,
-                                                &s.session_id,
-                                                w,
-                                                &crate::sessions::shown(s),
-                                                now,
-                                            );
-                                            format!(
-                                                "⏳ Đã gõ /exit vào {} — chờ CLI chạy nốt lượt đang dở rồi mới đóng cửa sổ. Kiểm 30 giây một lần, xong tôi báo.",
-                                                crate::sessions::shown(s)
-                                            )
-                                        }
-                                    }
-                                }
-                                Err(e) => format!(
-                                    "⚠ chưa đóng được: {}",
-                                    crate::exec::truncate(&e.to_string(), 240)
-                                ),
-                            }
+close_and_say(db, cfg, s)
                         }
                     }
                 };
@@ -10995,10 +11721,34 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                          — nên tôi CHƯA gõ gì cả. Thử lại sau một nhịp.",
                         live.as_ref().map(|l| l.blind.join(", ")).unwrap_or_default()
                     ),
-                    None => format!(
-                        "⚠ không thấy phiên '{}' trong danh sách",
-                        crate::exec::truncate(&want, 40)
-                    ),
+                    // 🔴 Phiên KHÔNG còn, nhưng huba biết ai thay nó — 03/09,
+                    // đi cùng [`FocusKept`]. Từ khi con trỏ thôi tự nhảy, ca này
+                    // thành ca THƯỜNG GẶP: chủ máy đang theo một phiên, huba đóng
+                    // sổ phiên ấy, câu tiếp theo anh gõ nhắm vào một id đã tắt.
+                    // Trả lời *"không thấy phiên"* lúc ấy là đúng sự thật mà bắt
+                    // anh tự đi tìm cái phiên chính huba vừa mở.
+                    //
+                    // Vẫn KHÔNG tự chuyển con trỏ hộ: nói tên, đưa đường, anh
+                    // bấm. Đó là cả lý do bản vá này tồn tại.
+                    None => match successor_of(db, &want) {
+                        Some(new_id) => {
+                            let duong = match crate::telegram::deep_link(&format!("s_{new_id}")) {
+                                Some(link) => format!("👁 sang phiên mới: {link}"),
+                                None => format!("👁 sang phiên mới: /session {new_id}"),
+                            };
+                            format!(
+                                "⚠ phiên '{}' đã đóng sổ — huba bàn giao nó sang {}.\n\
+                                 Con trỏ vẫn ở phiên cũ (chỉ anh mới chọn phiên), nên câu vừa rồi \
+                                 CHƯA gõ vào đâu cả.\n{duong}\nRồi gửi lại câu ấy.",
+                                crate::exec::truncate(&want, 40),
+                                short_id(&new_id)
+                            )
+                        }
+                        None => format!(
+                            "⚠ không thấy phiên '{}' trong danh sách",
+                            crate::exec::truncate(&want, 40)
+                        ),
+                    },
                     Some(s) => match crate::keys::window_of(&s.tty) {
                         Ok(Some(w)) => {
                             // 🔴 `/tab <n>` chạy TRƯỚC cả khối dưới, rồi để
@@ -12613,19 +13363,56 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         Ok(None) => {
                             let ten = crate::sessions::shown(&s);
                             if matches!(cmd.kind, CommandKind::Shot | CommandKind::Photo) {
-                                match crate::sessions::last_say_by_id(
+                                match crate::sessions::last_say_at_by_id(
                                     cfg,
                                     &s.session_id,
                                     crate::sessions::SAY_MAX,
                                 )
-                                .map(|t| t.trim().to_string())
-                                .filter(|t| !t.is_empty())
+                                .map(|(t, at)| (t.trim().to_string(), at))
+                                .filter(|(t, _)| !t.is_empty())
                                 {
-                                    Some(said) => format!(
-                                        "🗣 {ten} là phiên NỀN — không có cửa sổ Terminal nào để chụp. \
-                                         Đây là lời cuối của nó, lấy từ nhật ký:\n\n{}",
-                                        crate::exec::truncate(&said, 1200)
-                                    ),
+                                    Some((said, at)) => {
+                                        // 🔴 ĐÓNG MỐC — Hà 2026-09-06, bấm 📷
+                                        // lúc 04:10 và nhận nguyên văn câu phiên
+                                        // nói lúc 01:45, không một chữ nào cho
+                                        // biết đó là chữ cũ: *"Ghi là phiên đang
+                                        // sống nhưng lại chỉ là lịch sử, thật
+                                        // buồn cười, tôi có cần cái này đâu"*.
+                                        //
+                                        // Bản cũ không sai một chữ nào trong câu
+                                        // nó nói; nó sai ở chỗ IM. Một đoạn chữ
+                                        // không tuổi, đặt sau chữ "📷", đọc lên
+                                        // là một cái màn — mà thứ đứng sau nó
+                                        // già ba tiếng.
+                                        //
+                                        // Mốc đọc được ⟹ nói tuổi. `quiet_for`
+                                        // cố ý im dưới một phút (ở danh sách,
+                                        // "0p" là dòng thừa) — nhưng Ở ĐÂY dưới
+                                        // một phút mới là tin đáng giá nhất, nên
+                                        // nói thẳng "vừa xong".
+                                        //
+                                        // Mốc KHÔNG đọc được ⟹ im hẳn. "Không
+                                        // biết tuổi" là một trạng thái RIÊNG,
+                                        // và đoán bù nó chính là con bug đang
+                                        // sửa, mặc bộ đồ khác.
+                                        let now = crate::quota::now_ms();
+                                        let tuoi = match at
+                                            .as_deref()
+                                            .and_then(|t| {
+                                                chrono::DateTime::parse_from_rfc3339(t).ok()
+                                            }) {
+                                            Some(_) => match quiet_for(at.as_deref(), now) {
+                                                Some(q) => format!(" · {q} trước"),
+                                                None => " · vừa xong".to_string(),
+                                            },
+                                            None => String::new(),
+                                        };
+                                        format!(
+                                            "🗣 {ten} là phiên NỀN — không có cửa sổ Terminal nào để chụp.\n\
+                                             ⚠ Đây KHÔNG phải màn của nó, mà là lời cuối nó ghi vào nhật ký{tuoi}:\n\n{}",
+                                            crate::exec::truncate(&said, 1200)
+                                        )
+                                    }
                                     // Nhật ký rỗng là một sự thật khác hẳn "không
                                     // đọc được nhật ký", và khác hẳn "phiên chết".
                                     // Nói đúng cái nào đang đúng.
@@ -13203,15 +13990,54 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         .filter(|s| s.host != "shell")
                         .cloned()
                         .collect();
+                    // 🔴 MÀN HÌNH SINH RA HÀNG, SỔ CHỈ CHÚ THÍCH — Hà 2026-09-06:
+                    // *"Mọi thứ tôi bảo phải đọc ở terminal làm gốc cơ mà"* ·
+                    // *"Cái mà nhìn thấy được trên màn hình"*.
+                    //
+                    // Đo được chiều đang chạy ngược (5 lượt `huba sessions`, 60
+                    // mẫu, rình con trực tiếp): tiến trình con DUY NHẤT là
+                    // `osascript … every window` và `ps`. Tức huba hỏi Terminal
+                    // ở MỌI lượt — nhưng câu trả lời ấy chỉ đi trang trí hàng
+                    // (cửa sổ nào · gõ được không · đang làm gì), còn thứ SINH
+                    // RA hàng là sổ của CLI đọc từ đĩa. Nên một phiên chỉ tồn
+                    // tại trong sổ, không có cửa sổ nào trên màn, vẫn đứng
+                    // trong danh sách như phiên anh đang nhìn thấy.
+                    //
+                    // Lọc bằng `is_real_tty` chứ KHÔNG bằng `can_type`: `can_type`
+                    // phụ thuộc phép dò tab, mà dò hỏng thì mọi hàng thành
+                    // `false` ⟹ danh sách rỗng trơn, đúng kiểu hỏng câm.
+                    // `is_real_tty` đọc `tty` từ `ps`, không phụ thuộc phép dò
+                    // nào, và nó cũng giữ được phiên chạy trong terminal tích
+                    // hợp của VS Code — thứ vẫn NHÌN THẤY ĐƯỢC trên màn.
+                    //
+                    // Và chúng KHÔNG biến mất không dấu vết: `khuat` đếm rồi nói
+                    // ra ở dòng chân. Một hàng bị bỏ mà im là đúng con bug vừa
+                    // sửa, chỉ đổi chiều — trước là hứa thừa, nay là giấu thiếu.
+                    let khuat_noi = offscreen_note(&cli_rows);
+                    let khuat_co = cli_rows.iter().any(|s| !crate::sessions::on_screen(s));
+                    let tren_man: Vec<crate::sessions::LiveSession> = cli_rows
+                        .iter()
+                        .filter(|s| crate::sessions::is_real_tty(&s.tty))
+                        .cloned()
+                        .collect();
                     let live = crate::sessions::SessionsSnapshot {
-                        sessions: cli_rows,
+                        sessions: tren_man,
                         ..live
                     };
-                    let mut ack = session_list_text(
-                        &live.sessions,
-                        &focus,
-                        chrono::Utc::now().timestamp_millis(),
-                    );
+                    // Danh sách rỗng vì LỌC khác hẳn rỗng vì KHÔNG CÓ PHIÊN NÀO.
+                    // `session_list_text` trả "Không có phiên nào đang sống." cho
+                    // ca rỗng — đúng với ca của nó, và là một câu nói dối ở đây
+                    // khi vẫn còn phiên sống, chỉ là không phiên nào có cửa sổ.
+                    let mut ack = if live.sessions.is_empty() && khuat_co {
+                        "📋 Không có phiên nào ĐANG MỞ CỬA SỔ trên màn.".to_string()
+                    } else {
+                        session_list_text(
+                            &live.sessions,
+                            &focus,
+                            chrono::Utc::now().timestamp_millis(),
+                        )
+                    };
+                    ack.push_str(&khuat_noi);
                     // Việc đang chạy nền cũng là thứ "máy này đang làm gì", nên
                     // nó thuộc về đúng cái danh sách người ta mở nhiều nhất —
                     // chứ không phải một route `/jobs` thứ hai phải nhớ tên.
@@ -14314,6 +15140,10 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     // Cửa sổ kẹt ở hộp tin-thư-mục: chưa có id phiên nên không route nào với
     // tới — phải có người ngó lại mỗi vòng (xem `trust_dialog_tick`).
     trust_dialog_tick(now_sec);
+    // Cửa sổ còn đứng đó sau khi phiên của nó đã thoát: NÓI một lần, không tự
+    // đóng (Hà 2026-09-03). Dùng chung ảnh chụp `live` để "phiên nào còn sống"
+    // trả lời từ đúng một nguồn — xem `orphan_windows_tick`.
+    orphan_windows_tick(db, cfg, &live, now_sec);
     // Kết quả `/runin` đã chạy xong mà chưa gõ vào phiên được: gõ lại. Đặt
     // cạnh hai cái tick trên vì cùng một hình dạng việc — thứ hỏng vì Terminal
     // bận một lúc, không hỏng vì sai.

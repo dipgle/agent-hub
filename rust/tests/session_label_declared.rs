@@ -208,10 +208,21 @@ fn a_declared_lane_keeps_the_project_and_carries_the_lane() {
     );
 }
 
-/// Ba phiên cùng dự án, ba làn tự khai ⟹ ba nhãn khác nhau, và KHÔNG cái nào
-/// phải mượn tên việc để phân biệt.
+/// Ba phiên cùng dự án, ba làn tự khai ⟹ ba nhãn khác nhau — **và mỗi cái vẫn
+/// nói việc nó đang làm**.
+///
+/// 🔄 ĐẢO CHIỀU 2026-09-05, không xoá. Bản trước khoá điều ngược lại
+/// (*"làn đã phân biệt được rồi thì đừng mượn tên việc nữa"*, Hà 22/08), và luật
+/// ấy đúng với câu hỏi của nó: *lấy gì làm TÊN*. Hôm nay Hà trả lời một câu
+/// khác — *có tên rồi thì có được nói thêm việc không* — và chốt **có**, sau khi
+/// phiên `[dwork/a-ddoc]` chỉ ra cái bẫy: đuôi `·<việc>` cũ chỉ mọc ở nhánh
+/// "nhãn TRÙNG nhau", nên nó sống được là nhờ 9 làn dwork khai sai mà đọc ra
+/// `[dwork]` giống hệt nhau. Khai đúng làn ⟹ hết trùng ⟹ mất dòng việc.
+///
+/// Vế PHẢI GIỮ của bài kiểm cũ không mất và nằm ngay dưới đây: cái làn tự khai
+/// vẫn phải có mặt nguyên vẹn trong nhãn, không bị tên việc đẩy ra.
 #[test]
-fn declared_lanes_replace_the_borrowed_task_title() {
+fn declared_lanes_keep_the_lane_and_still_carry_the_task() {
     let ws = workspace();
     let root = std::path::Path::new(&ws);
     let mut rows: Vec<huba::sessions::LiveSession> = ["A-DSIGN", "A-DDOC", ""]
@@ -224,17 +235,76 @@ fn declared_lanes_replace_the_borrowed_task_title() {
             };
             s.folder = "dwork".into();
             s.lane = (*lane).to_string();
-            // Tên việc DÀI và khác nhau: nếu bản vá không chạy thì nhãn sẽ mọc
-            // ra đúng những chuỗi này, nên bài kiểm phân biệt được hai đường.
+            // Tên việc DÀI và khác nhau — ba làn khác nhau nên không cái nào
+            // phải mượn của cái nào; đây đúng ca Hà chốt hôm 05/09.
             s.doing = format!("Quét GitHub làm design lượt {i}");
             s
         })
         .collect();
     huba::sessions::label_sessions(&mut rows, root);
     let nhan: Vec<String> = rows.iter().map(|s| s.label.clone()).collect();
-    assert_eq!(nhan, vec!["[dwork/A-DSIGN]", "[dwork/A-DDOC]", "[dwork]"]);
-    assert!(
-        !nhan.iter().any(|l| l.contains('·')),
-        "làn đã phân biệt được rồi thì đừng mượn tên việc nữa: {nhan:?}"
+    assert_eq!(
+        nhan,
+        vec![
+            "[dwork/A-DSIGN]·Quét GitHub làm design lượt 0",
+            "[dwork/A-DDOC]·Quét GitHub làm design lượt 1",
+            "[dwork]·Quét GitHub làm design lượt 2",
+        ]
     );
+    // Vế giữ lại từ bản 22/08: LÀN không được biến mất khỏi nhãn. Đây là thứ
+    // hỏng thật lần trước — `[dwork]·Quét GitHub làm design` cho một phiên tự
+    // xưng `[dwork/A-DSIGN]`.
+    assert!(
+        nhan[0].starts_with("[dwork/A-DSIGN]") && nhan[1].starts_with("[dwork/A-DDOC]"),
+        "làn tự khai phải còn nguyên trong ngoặc: {nhan:?}"
+    );
+    // Và KHÔNG hàng nào được rơi về mã id: id chỉ dành cho ca không còn gì để
+    // phân biệt (xem `two_sessions_doing_the_same_thing_fall_back_to_the_id`).
+    assert!(
+        !nhan.iter().any(|l| l.contains("00000000") || l.contains("11111111")),
+        "còn làn và còn việc thì đừng đeo id: {nhan:?}"
+    );
+}
+
+/// ĐỐI CHỨNG NGƯỢC cho lượt đảo chiều: đuôi việc KHÔNG được nuốt mất luật id.
+///
+/// Ba ca đứng cạnh nhau vì chúng là ba nhánh của cùng một quyết định, và một
+/// bản vá "luôn gắn đuôi" viết ẩu sẽ làm hỏng đúng hai ca sau mà ca đầu vẫn
+/// xanh.
+#[test]
+fn the_always_on_task_tail_does_not_erase_the_id_fallback() {
+    let ws = workspace();
+    let root = std::path::Path::new(&ws);
+    let row = |id: &str, lane: &str, doing: &str| huba::sessions::LiveSession {
+        session_id: id.to_string(),
+        folder: "dwork".into(),
+        lane: lane.to_string(),
+        doing: doing.to_string(),
+        ..Default::default()
+    };
+
+    // ① Nhãn TRÙNG + việc GIỐNG NHAU ⟹ tên việc không tách được ai với ai, phải
+    //    về id — nếu không thì hai hàng in ra hai chuỗi y hệt.
+    let mut rows = vec![
+        row("aaaaaaaa-0000-0000-0000-000000000000", "", "Chạy cổng chất lượng"),
+        row("bbbbbbbb-0000-0000-0000-000000000000", "", "Chạy cổng chất lượng"),
+    ];
+    huba::sessions::label_sessions(&mut rows, root);
+    assert_eq!(rows[0].label, "[dwork]·aaaaaaaa");
+    assert_eq!(rows[1].label, "[dwork]·bbbbbbbb");
+
+    // ② Nhãn TRÙNG + không đọc được việc ⟹ vẫn là id, y như trước lượt đảo.
+    let mut rows = vec![
+        row("cccccccc-0000-0000-0000-000000000000", "", ""),
+        row("dddddddd-0000-0000-0000-000000000000", "", ""),
+    ];
+    huba::sessions::label_sessions(&mut rows, root);
+    assert_eq!(rows[0].label, "[dwork]·cccccccc");
+    assert_eq!(rows[1].label, "[dwork]·dddddddd");
+
+    // ③ Một mình + không đọc được việc ⟹ nhãn TRẦN. Không dấu `·` cụt đuôi,
+    //    không id: ca hiếm không được làm phiền ca thường.
+    let mut rows = vec![row("eeeeeeee-0000-0000-0000-000000000000", "a-ddoc", "")];
+    huba::sessions::label_sessions(&mut rows, root);
+    assert_eq!(rows[0].label, "[dwork/a-ddoc]");
 }

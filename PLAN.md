@@ -76,6 +76,83 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
+- **Bản bàn giao từ nhật ký (`sessions::handover_from_journal`) mang thêm CÂY
+  LÀM VIỆC THẬT — VÁ XONG 2026-09-05, ĐÃ ĐO BẰNG DÒ THẬT, CHƯA QUA MỘT LƯỢT
+  HẾT HẠN MỨC THẬT.** Hà: *"Kiểm lại cách chuyển phiên khi bị limit, cần nhiều
+  thông tin hơn để phiên mới không bị đi lạc hay thiếu ngữ cảnh cũ, hiện tại
+  chỉ lấy log là chưa đủ"* — đúng sau một lượt bàn giao thật của chính huba:
+  phiên nhận chỉ có **3 lượt nói** để đọc, vì cửa sổ 40 sự kiện cuối gần hết là
+  `Edit`/`Bash`, và phải tự chạy `git status`/`git diff --stat` mới thấy ra 16
+  tệp sửa dở trải trên ba việc khác nhau. Hai vá: (1) cửa sổ đọc thô 40 → 160
+  sự kiện (cùng 256 KB tail, không đọc thêm byte nào, chỉ GIỮ nhiều hơn trước
+  khi lọc `kind == "say"`); (2) thêm `working_tree_summary`, chạy `git status
+  --short` + `git diff --stat HEAD` rồi nối vào bản bàn giao. Cái phải sửa
+  ngay khi viết: hàm ĐẦU TIÊN chạy trên `session.cwd` thẳng, và đo trên chính
+  workspace này (`huba sessions --json`) thì **mọi** phiên báo `cwd:
+  "/Users/hanguyen/projects"` — cwd của tiến trình `claude` lúc khởi động,
+  không đổi theo `cd` trong Bash — nên `git status` ở đó luôn trả "không phải
+  repo". Đổi sang `config::project_dir(cfg, &session.folder)`, đúng tầng suy
+  dự án đã có sẵn cho nhãn (`declared_parts`), chỉ rơi về `cwd` khi `folder`
+  rỗng — cùng lắm bằng hành vi cũ. **Đã đo:** `cargo build --offline --lib`
+  xanh 0 warning; bài DÒ thật `handover_from_journal_live` (`--ignored`) chạy
+  trên đúng phiên `[huba] 2d091ed0…` đang viết dòng này — bản bàn giao ra 4123
+  ký tự, phần cây làm việc khớp NGUYÊN VĂN `git status --short` +
+  `git diff --stat HEAD` chạy tay cùng lúc (16 tệp, đúng `PLAN.md`,
+  `sessions.rs`, `browser.rs`…). **CHƯA đo:** chưa thấy nó đi qua một lượt
+  `auto_switch_on_limit` THẬT — một tài khoản thật hết hạn mức, cửa sổ mới mở
+  ra, và bản bàn giao giàu hơn này thật sự giúp phiên mới không lạc — vì lượt
+  ấy tốn thật (đổi tài khoản, mở/đóng cửa sổ) nên không tự tạo ra để kiểm.
+
+- **`huba ask <id> "<câu hỏi>"` — VIẾT XONG 2026-09-05, CHƯA CHẠY THẬT LẦN
+  NÀO.** Bọc `sessions::ask_aside` (đúng cơ chế Telegram `/ask`, fork đọc-thật)
+  thành CLI, gọi được từ Bash bởi bất kỳ phiên nào trên máy — không cần
+  Telegram/chat_id. Dựng sau lượt phiên `A-dsign` hỏi thẳng qua `SendMessage`,
+  đẩy tin vào giữa dòng hội thoại chính của `hub`; Hà: *"các phiên hỏi nhau
+  phải hỏi riêng chứ không phải đẩy thẳng câu hỏi vào phiên"*. Tài liệu:
+  `hub/docs/lien-phien.md`. **Đã đo:** `cargo build --release --offline --bin
+  huba` xanh, `huba ask --help` in đúng. **CHƯA đo:** chưa gọi thật lên một
+  phiên đang sống (cố ý — mỗi lượt fork tốn hạn mức thật của Hà, không tiêu
+  thay khi chưa ai cần).
+
+- **Debounce "đã tắt hẳn" cho phiên NỀN — VÁ XONG 2026-09-04, CHƯA THẤY LẠI CA
+  THẬT ĐỂ ĐỐI CHỨNG.** Đo thật: `[fbot]·167252e2` báo "đã tắt hẳn" lặp lại
+  hàng chục lần trong một ngày (11:01 · 14:02 · 15:00 · 17:20), trong khi
+  `session_busy_by_shell` CÙNG GIÂY xác nhận tiến trình gốc (`pid 68743`) vẫn
+  sống, đang bận. `claude agents` thỉnh thoảng không liệt kê ĐÚNG một phiên
+  nền dù nó còn sống, trong khi các phiên khác CÙNG tài khoản vẫn liệt kê bình
+  thường — cửa `blind` (cả tài khoản mù, luật 11b) không bắt được ca này vì nó
+  chỉ soi theo TÀI KHOẢN, không soi theo TỪNG PHIÊN. Thêm `Mark::g` +
+  `watch::BG_MISS_DEBOUNCE_SEC` (60s, gấp đôi nhịp quét ~20-30s đo được): phiên
+  NỀN phải vắng mặt LIÊN TỤC đủ 60s mới bị kết luận "đã tắt", thay vì kết luận
+  ngay ở vòng đầu vắng mặt. Chỉ áp cho phiên nền (`o == "background"`) — phiên
+  có cửa sổ đã có phép thử riêng (`keys::window_of`) không cần debounce này.
+  **Đã đo:** test mới `a_background_session_missing_once_is_not_reported_as_ended`
+  (36/36 `watch.rs` xanh, dựng tay 3 vòng gọi `changes()` liên tiếp mô phỏng
+  đúng chuỗi sự kiện thật). Build lại + `self-install` đã chạy — daemon đang
+  chạy bản vá. **CHƯA đo:** chưa có thêm một đợt chớp-tắt thật nào của
+  `claude agents` xảy ra kể từ khi vá để xác nhận nó không còn spam nữa —
+  chỉ có thể verify khi ca thật lặp lại (không dựng lại được theo yêu cầu).
+
+- **Click/fill/chụp ảnh Chrome thật + MCP `browser-mcp` — VIẾT XONG 2026-09-04,
+  CHƯA CHẠM CHROME THẬT LẦN NÀO.** Hà: *"không dùng Playwright vì bị hạn chế
+  dịch vụ"* + *"nó đóng vai trò như 1 mcp mới, giống như claude extension"*.
+  Thêm vào `browser.rs`: `mang_ra_truoc`/`chup_anh` (chụp ảnh Chrome thật, tái
+  dùng `keys::frame_is_blank`/`screen_locked`/`blank_frame_reason`),
+  `bam`/`dien` (click/fill qua `execute javascript`, script CỐ ĐỊNH — selector
+  + value nhúng qua `serde_json::to_string` RỒI `as_string`, hai tầng thoát,
+  công thức đã kiểm tay khớp test). Thêm binary mới `browser-mcp` (tự viết tay
+  JSON-RPC stdio, không SDK — không có crate MCP nào trong cargo cache
+  offline), 7 tool 1-đối-1 với `browser::*`, không tool "chạy JS tuỳ ý". `/web
+  anh` (Telegram) gọi `chup_anh` + `send_photo`, cùng khuôn `/anh`/`/web an`.
+  **Đã đo:** `cargo test --offline` xanh, 0 warning (cả bộ, gồm test escape
+  hai tầng + 6 test giao thức MCP nói chuyện thật với binary đã build qua
+  stdin/stdout). **CHƯA đo — cần Hà tự chạy, sandbox không chạm được Chrome
+  thật:** quyền Tự động hoá `hubd → Google Chrome` (dòng trống lúc viết
+  `browser.rs` 23/08, chưa rõ đã cấp chưa) + `cargo test --offline --test
+  browser_live -- --ignored --nocapture` cho `bam`/`dien`/`chup_anh` +
+  `/web anh` thật qua Telegram + gọi tool MCP thật sau khi đăng ký
+  `hub/.mcp.json`. Đừng đọc "cargo test xanh" thành "đã chạy được trên Chrome
+  thật" — đúng luật honest-reporting của sổ này.
 - 💣 **Bẫy đang nằm chờ: huba gõ vào `selected tab`, không phải tab của phiên.**
   `keys::do_script` và `keys::screen_text` đều nhắm `selected tab of window id
   W`, trong khi `window_of` chỉ tìm ra CỬA SỔ chứa tty ấy. Đo 2026-08-12: cả 4

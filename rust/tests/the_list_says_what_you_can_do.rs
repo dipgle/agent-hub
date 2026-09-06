@@ -427,7 +427,7 @@ fn an_orphan_is_announced_exactly_once() {
     let s = mo_coi_that("b4182616-0000-0000-0000-000000000000");
     let prev = so_da_thay(&s.session_id);
 
-    let (lan1, so_moi) = changes(&prev, &[s.clone()], NOW, &[]);
+    let (lan1, so_moi) = changes(&prev, std::slice::from_ref(&s), NOW, &[]);
     let bao: Vec<&Change> = lan1
         .iter()
         .filter(|c| matches!(c, Change::Orphaned { .. }))

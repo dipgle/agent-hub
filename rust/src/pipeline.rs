@@ -9923,17 +9923,17 @@ pub fn screen_report(
                 }
                 _ => String::new(),
             };
-            // Hà 2026-09-07: *"thay 'màn của' = <acc> của nó"* — nhiều phiên
-            // cùng tên hiển thị đứng trên 3 tài khoản khác nhau (đúng lúc đang
-            // soi vụ dồn hạn mức), nên câu này phải nói được acc nào để phân
-            // biệt. Rỗng thì bỏ qua chứ không bịa — không phải phiên nào cũng
-            // có tài khoản (cửa sổ Terminal trần chẳng hạn).
-            let acc_note = if s.account.is_empty() {
-                String::new()
+            // Hà 2026-09-07: *"thay 'màn của' = <acc> của nó"* — THAY hẳn chữ
+            // "Màn của", không phải giữ nguyên rồi chèn thêm. Nhiều phiên cùng
+            // tên hiển thị đứng trên 3 tài khoản khác nhau (đúng lúc đang soi
+            // vụ dồn hạn mức), nên câu mở đầu phải nói ngay acc nào. Không có
+            // tài khoản (cửa sổ Terminal trần) thì lùi về câu cũ — thiếu dữ
+            // liệu không phải lý do in một câu cụt "  [tfl5]:".
+            let text = if s.account.is_empty() {
+                format!("📷 Màn của {what}:\n\n{body}{quick_note}{cut_note}")
             } else {
-                format!(" ({})", s.account)
+                format!("📷 {} {what}:\n\n{body}{quick_note}{cut_note}", s.account)
             };
-            let text = format!("📷 Màn của {what}{acc_note}:\n\n{body}{quick_note}{cut_note}");
             ScreenReport { text, choices }
         }
         Err(e) => ScreenReport {

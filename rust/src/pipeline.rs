@@ -2055,8 +2055,17 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
         .unwrap_or_default();
     // Đọc hạng hạn mức MỘT lần cho cả vòng: nó mở tệp sổ của từng tài khoản, và
     // trong một vòng thì con số ấy không đổi.
+    //
+    // Đè bằng phép dò SỐNG (`/usage`, cache 5 phút, không chặn vòng) trước khi
+    // đóng dấu Dead — xem `quota::overlay_live`. Tệp chỉ còn là đường lùi cho
+    // tài khoản phép dò sống chưa có số.
+    let now_ms = crate::quota::now_ms();
+    let usage_song = crate::runtime::usage_cached(cfg, now_ms);
     let hang = crate::quota::apply_dead_book(
-        crate::quota::rank_all(cfg, crate::quota::now_ms()),
+        crate::quota::overlay_live(
+            crate::quota::rank_all(cfg, now_ms),
+            usage_song.get("accounts").unwrap_or(&serde_json::Value::Null),
+        ),
         &db.dead_accounts(),
     );
     let now_min = {

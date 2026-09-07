@@ -107,6 +107,44 @@ impl Rank {
     }
 }
 
+/// Hạng từ phép dò SỐNG (`runtime::usage_cached`, `/usage` vừa chạy thật) —
+/// không cần `resets_at` như [`cua_so`]: phép đo vừa xảy ra đúng lúc này nên
+/// không có tuổi để mà cũ.
+///
+/// `None` = phép dò chưa có số (đang đo lần đầu, hết giờ, hoặc không đọc được
+/// câu trả lời) — gọi nơi khác lùi về tệp (`rank`).
+pub fn rank_from_live(session_pct: Option<i64>, week_pct: Option<i64>) -> Option<Rank> {
+    let p = session_pct.into_iter().chain(week_pct).max()?;
+    Some(if p >= 100 { Rank::Full } else { Rank::Free(p) })
+}
+
+/// Đè hạng bằng phép dò SỐNG khi có số — tệp chỉ còn dùng lúc chưa đo được.
+///
+/// Hà 2026-09-07, sau vụ dồn 4 phiên `acc2 → acc1` rồi chính acc1 hết hạn mức
+/// một tiếng sau: *"chạy luôn lệnh /usage có hơn không"*. Đúng — huba đã có
+/// phép dò này từ 10/08 (`runtime::usage_cached`, cache 5 phút, chạy nền không
+/// chặn vòng lặp), nhưng [`crate::watch::suggest_account`] chưa từng đọc nó,
+/// chỉ đọc tệp `.claude.json` qua [`rank_all`] — tệp CHỈ đổi khi chính CLI của
+/// tài khoản ấy chạm mạng, nên một tài khoản vừa bị khoá mà không phiên nào
+/// của nó gọi API tiếp thì tệp đứng yên ở con số CŨ vô thời hạn, đọc lên như
+/// còn rộng. Phép dò sống thì hỏi thẳng tài khoản đó, không cần đợi ai.
+///
+/// `usage_accounts` là khối `"accounts"` trong JSON của `usage_cached` — một
+/// object tên tài khoản → `{"session_pct":…, "week_pct":…}` hoặc `{"err":…}`.
+pub fn overlay_live(ranked: Vec<Ranked>, usage_accounts: &Value) -> Vec<Ranked> {
+    ranked
+        .into_iter()
+        .map(|mut r| {
+            let row = usage_accounts.get(&r.name);
+            let pct = |k: &str| row.and_then(|v| v.get(k)).and_then(Value::as_i64);
+            if let Some(live) = rank_from_live(pct("session_pct"), pct("week_pct")) {
+                r.rank = live;
+            }
+            r
+        })
+        .collect()
+}
+
 /// Đóng dấu [`Rank::Dead`] lên những tài khoản có tên trong SỔ.
 ///
 /// 🔴 Vì sao là một lượt riêng chứ không nằm trong [`rank_all`]: `rank_all` đọc
@@ -455,5 +493,48 @@ mod tests {
             v,
             vec![Rank::Free(5), Rank::Free(90), Rank::Unknown, Rank::Full]
         );
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Phép dò SỐNG (`/usage`) đè lên tệp — Hà 07/09: "chạy luôn /usage có hơn"
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn rank_from_live_lay_cua_so_chat_nhat() {
+        assert_eq!(rank_from_live(Some(10), Some(80)), Some(Rank::Free(80)));
+        assert_eq!(rank_from_live(Some(100), Some(10)), Some(Rank::Full));
+        assert_eq!(rank_from_live(None, Some(30)), Some(Rank::Free(30)));
+        assert_eq!(rank_from_live(Some(30), None), Some(Rank::Free(30)));
+        assert_eq!(rank_from_live(None, None), None);
+    }
+
+    /// Đúng ca gây ra bug 07/09: tệp còn ghi acc1 rảnh (22%), nhưng phiên vừa
+    /// dồn vào đã đẩy nó kịch trần THẬT — phép dò sống phải thắng.
+    #[test]
+    fn overlay_live_de_len_mot_con_so_te_cua_tep() {
+        let file_ranked = vec![Ranked {
+            name: "acc1".into(),
+            rank: Rank::Free(22),
+        }];
+        let live = json!({ "acc1": { "session_pct": 100, "week_pct": 40 } });
+        let out = overlay_live(file_ranked, &live);
+        assert_eq!(out[0].rank, Rank::Full);
+    }
+
+    /// Phép dò chưa có số (đang đo, hết giờ, hay không đọc được) ⟹ GIỮ NGUYÊN
+    /// hạng của tệp — đây là lùi về đường cũ, không phải một hạng bịa mới.
+    #[test]
+    fn overlay_live_lui_ve_tep_khi_chua_do_duoc() {
+        let file_ranked = vec![Ranked {
+            name: "acc1".into(),
+            rank: Rank::Free(22),
+        }];
+        let live = json!({ "acc1": { "err": "/usage hết giờ sau 60000ms" } });
+        let out = overlay_live(file_ranked.clone(), &live);
+        assert_eq!(out, file_ranked);
+
+        let live_rong = json!({});
+        let out2 = overlay_live(file_ranked.clone(), &live_rong);
+        assert_eq!(out2, file_ranked, "tài khoản vắng mặt trong phép dò cũng phải lùi về tệp");
     }
 }

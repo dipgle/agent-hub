@@ -9923,7 +9923,17 @@ pub fn screen_report(
                 }
                 _ => String::new(),
             };
-            let text = format!("📷 Màn của {what}:\n\n{body}{quick_note}{cut_note}");
+            // Hà 2026-09-07: *"thay 'màn của' = <acc> của nó"* — nhiều phiên
+            // cùng tên hiển thị đứng trên 3 tài khoản khác nhau (đúng lúc đang
+            // soi vụ dồn hạn mức), nên câu này phải nói được acc nào để phân
+            // biệt. Rỗng thì bỏ qua chứ không bịa — không phải phiên nào cũng
+            // có tài khoản (cửa sổ Terminal trần chẳng hạn).
+            let acc_note = if s.account.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", s.account)
+            };
+            let text = format!("📷 Màn của {what}{acc_note}:\n\n{body}{quick_note}{cut_note}");
             ScreenReport { text, choices }
         }
         Err(e) => ScreenReport {
@@ -13525,6 +13535,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // đúng thứ chủ máy muốn nói, không phải hai chữ huba đoán.
                     let stored = remember_quick(db, &shot_sid, &cmds);
                     quick.extend(stored.into_iter().take(n_cmds));
+                    // Hà 2026-09-07: *"chèn vào đó luôn link nhanh để bấm được
+                    // vào phiên đó"* — `/shot`/`/tab` cho xem màn một phiên
+                    // KHÁC phiên đang theo, nên cần một đường bấm thẳng vào nó
+                    // thay vì phải tự gõ `/session <id>`. Cùng route với
+                    // `enter_button` (`sess:<id>` → `/session <id>`), nhưng
+                    // dựng trực tiếp ở đây vì `enter_button` đòi một
+                    // `watch::Change` — thứ không có trong đường `/shot`.
+                    if !shot_sid.is_empty() {
+                        quick.push(("👁 Vào phiên".to_string(), format!("sess:{shot_sid}")));
+                    }
                     // 🪦 Dòng "⛔ N dòng lệnh xoá/ghi đè — huba cố ý KHÔNG dựng
                     // nút" sống đúng nửa tiếng (16/08, 16:45→17:15). Hà đọc nó
                     // trên điện thoại: *"cái này thằng nào tạo ra, thằng nào

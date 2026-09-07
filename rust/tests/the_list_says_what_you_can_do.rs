@@ -387,6 +387,22 @@ fn the_trunk_is_not_a_lane() {
     assert_ne!(huba::sessions::lane_from_branch("///").as_deref(), Some(""));
 }
 
+/// ĐỐI CHỨNG NGƯỢC: nhánh git-flow thường của project KHÁC (không theo quy ước
+/// `lan/` của dwork) không phải một làn — dù có dấu `/`.
+///
+/// Hà 2026-09-07: phiên tfl5 trên nhánh `fix/billing-catalog-content-sync` hiện
+/// `[tfl5/billing-catalog-content-sync]` — bản đầu lấy đoạn cuối của BẤT KỲ
+/// nhánh nào có `/`, không đòi tiền tố `lan/`.
+#[test]
+fn a_plain_feature_branch_is_not_a_lane() {
+    assert_eq!(
+        huba::sessions::lane_from_branch("fix/billing-catalog-content-sync"),
+        None
+    );
+    assert_eq!(huba::sessions::lane_from_branch("feature/x"), None);
+    assert_eq!(huba::sessions::lane_from_branch("release/2.0"), None);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Mồ côi: nói MỘT lần, và chỉ khi đã ĐO được cả hai vế
 // ─────────────────────────────────────────────────────────────────────────────

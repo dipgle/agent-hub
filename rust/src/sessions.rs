@@ -4061,7 +4061,16 @@ fn mark_can_type(rows: &mut [LiveSession], tabs: &[crate::keys::Tab]) {
 /// đọc y hệt `0 gõ được` thật. Bằng chứng phép dò CÓ chạy là có ít nhất một hàng
 /// `can_type = true`; không có nó thì nguồn ② im, chỉ còn ①. **Chưa đo được thì
 /// đừng tô màu.**
-/// Tên LÀN suy từ nhánh git — `lan/a-chung` → `a-chung`, `main` → không có làn.
+/// Tên LÀN suy từ nhánh git — CHỈ khi mang đúng quy ước `lan/<tên>` của
+/// dwork: `lan/a-chung` → `a-chung`, `main` → không có làn.
+///
+/// 🔴 Hà 2026-09-07: phiên tfl5 hiện `[tfl5/billing-catalog-content-sync]` —
+/// một mớ dài đằng sau tên dự án. Bản đầu (06/09, `8615985`) không đòi tiền tố
+/// `lan/`, chỉ lấy đoạn cuối sau `/` của BẤT KỲ nhánh nào; tfl5 không theo quy
+/// ước làn của dwork mà đặt tên nhánh kiểu git-flow thường (`fix/…`,
+/// `feature/…`), nên đoạn cuối của nhánh đó bị nhận nhầm thành một cái làn.
+/// Quy ước `lan/` là của MỘT dự án (dwork), không phải luật chung mọi nhánh có
+/// dấu `/` — nhánh không mang tiền tố ấy thì không có làn, y như `main`.
 ///
 /// Tách riêng khỏi phần đọc tệp để bài kiểm với tới được: đây là toàn bộ phần
 /// có thể sai, và nó thuần.
@@ -4073,7 +4082,8 @@ pub fn lane_from_branch(branch: &str) -> Option<String> {
     if b.is_empty() || b == "main" || b == "master" || b == "HEAD" {
         return None;
     }
-    b.rsplit('/')
+    b.strip_prefix("lan/")?
+        .rsplit('/')
         .next()
         .filter(|s| !s.is_empty())
         .map(str::to_string)

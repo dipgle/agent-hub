@@ -6713,10 +6713,18 @@ pub fn html_with_links_last(
         // cho mọi neo lấy từ `data.files`), không tự dựng lại phép "chuỗi này có
         // phải đường dẫn không" — hai bản chép của cùng một câu hỏi là hai chỉ
         // số lệch nhau, đúng thứ `remember_files`/`file_anchors` đã trả giá.
-        let anchor_is_file =
-            matches!(hit, Some((_, (_, links))) if links.iter().any(|(_, i)| i.trim() == "📎"));
+        //
+        // 🔴 2026-09-07: cùng hình dạng, thêm một icon — `👁` cho neo TÊN PHIÊN
+        // (`data.header`, xem `SessionData::header`). Tên phiên cũng đứng GIỮA
+        // dòng caption (`📷 acc2 [tfl5]:`), không phải cả dòng và không phải
+        // lệnh, nên nó cần đúng phép bọc-substring mà `📎` đã có sẵn — không
+        // phải một phép mới, chỉ là câu hỏi cũ nhận thêm một câu trả lời.
+        let anchor_wraps_substring = matches!(
+            hit,
+            Some((_, (_, links))) if links.iter().any(|(_, i)| matches!(i.trim(), "📎" | "👁"))
+        );
         let (head, cmd_part, tail) = match hit {
-            Some((_, (a, _))) if anchor_is_cmd || anchor_is_whole_line || anchor_is_file => {
+            Some((_, (a, _))) if anchor_is_cmd || anchor_is_whole_line || anchor_wraps_substring => {
                 split_at_anchor(line, a)
             }
             _ => (line, "", ""),
@@ -7897,6 +7905,14 @@ fn say_back(_cfg: &Config, adapter: &str, _chat_id: &str, text: &str) {
 pub struct SessionData {
     /// Mã phiên — mọi action phải tự mang nó (bấm lại tin cũ vẫn đúng phiên).
     pub sid: String,
+    /// Tên hiển thị của phiên → 👁, NGAY TẠI chỗ nó đứng trong chữ (thường là
+    /// dòng đầu của caption `/shot`). Bấm vào tên là vào thẳng phiên ấy.
+    ///
+    /// Hà 2026-09-07: *"Vẫn thiếu link bao tên phiên để bấm chọn vào phiên"* —
+    /// sau hai lượt vá hụt (đổi chữ đầu dòng, rồi thêm một nút RỜI ở đáy) mới
+    /// ra đúng ý: cái tên NẰM TRONG CÂU phải tự là đích chạm, không phải một
+    /// nút khác đứng cạnh nó.
+    pub header: Option<String>,
     /// Dòng lệnh phiên nhắc tới → ▶️ chạy.
     pub cmds: Vec<String>,
     /// Lựa chọn đang hiện trên màn → ☑ bấm chọn, NGAY TẠI dòng của nó.
@@ -8710,6 +8726,15 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     for (path, n) in &data.files {
         if let Some(href) = crate::telegram::deep_link(&format!("f_{n}")) {
             anchors.push((path.clone(), vec![(href, "📎".to_string())]));
+        }
+    }
+    // 👁 NGAY TẠI TÊN PHIÊN — cùng route với `s_<id>` mà `session_list_html`
+    // dùng cho hàng `/session` (`verbs.rs::"s_"` → `/session <id>`). Không có
+    // `sid` (chưa xác định được phiên nào) thì không neo gì — bịa một đích
+    // chạm cho một phiên chưa biết là bịa cả câu lệnh nó sẽ chạy.
+    if let (Some(h), false) = (&data.header, data.sid.is_empty()) {
+        if let Some(href) = crate::telegram::deep_link(&format!("s_{}", data.sid)) {
+            anchors.push((h.clone(), vec![(href, "👁".to_string())]));
         }
     }
     if let (Some(sid), Some(box_text)) = (&key_sid, box_anchor) {
@@ -11750,6 +11775,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     .as_ref()
                     .map(|s| s.session_id.clone())
                     .unwrap_or_default();
+                // Tên hiển thị, giữ TRƯỚC khi `match` nuốt mất `target` — cùng
+                // lý do với `shot_sid` ngay trên. Neo cho 👁 trong caption
+                // `/shot` (`SessionData::header`); áp dụng chung cho mọi route
+                // đi qua `SessionData` là vô hại, vì neo chỉ bám khi tên THẬT
+                // SỰ có mặt trong chữ — xem `session_layout`.
+                let shot_header = target.as_ref().map(crate::sessions::shown);
                 // Bảng hỏi đọc từ NHẬT KÝ, giữ lại trước khi `match` nuốt mất
                 // `target`. 🔴 Hà 2026-08-14, ảnh chụp `/shot` một phiên đang
                 // mở bảng: *"Màn này chưa chọn được gì"* — đúng, vì bộ nút số
@@ -13535,16 +13566,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // đúng thứ chủ máy muốn nói, không phải hai chữ huba đoán.
                     let stored = remember_quick(db, &shot_sid, &cmds);
                     quick.extend(stored.into_iter().take(n_cmds));
-                    // Hà 2026-09-07: *"chèn vào đó luôn link nhanh để bấm được
-                    // vào phiên đó"* — `/shot`/`/tab` cho xem màn một phiên
-                    // KHÁC phiên đang theo, nên cần một đường bấm thẳng vào nó
-                    // thay vì phải tự gõ `/session <id>`. Cùng route với
-                    // `enter_button` (`sess:<id>` → `/session <id>`), nhưng
-                    // dựng trực tiếp ở đây vì `enter_button` đòi một
-                    // `watch::Change` — thứ không có trong đường `/shot`.
-                    if !shot_sid.is_empty() {
-                        quick.push(("👁 Vào phiên".to_string(), format!("sess:{shot_sid}")));
-                    }
+                    // 🪦 Nút rời "👁 Vào phiên" (07/09) — GỠ ngay hôm sinh ra,
+                    // thay bằng neo NGAY TẠI tên phiên trong caption
+                    // (`shot_header` ở trên, xem `SessionData::header`). Hà:
+                    // *"Vẫn thiếu link bao tên phiên để bấm chọn vào phiên"* —
+                    // một nút rời phía dưới không phải cái anh xin, và giữ cả
+                    // hai là hai đường cho một việc (luật "MỘT CỬA" của tệp
+                    // này).
                     // 🪦 Dòng "⛔ N dòng lệnh xoá/ghi đè — huba cố ý KHÔNG dựng
                     // nút" sống đúng nửa tiếng (16/08, 16:45→17:15). Hà đọc nó
                     // trên điện thoại: *"cái này thằng nào tạo ra, thằng nào
@@ -13803,6 +13831,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         // duy nhất gắn action — xem `SessionData`.
                         let data = SessionData {
                             sid: shot_sid.clone(),
+                            header: shot_header.clone(),
                             cmds: cmd_lines.clone(),
                             choices: shot_choices.clone(),
                             // Màn có dòng `Submit` ⟹ gắn ✅ ngay tại đó (Hà

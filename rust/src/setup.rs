@@ -35,6 +35,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -298,7 +299,25 @@ fn save_env(env_path: &Path, form: &BTreeMap<String, String>) -> Result<Vec<Stri
     // một khoảnh khắc nào mà file mật nằm đó với quyền mặc định.
     let tmp: PathBuf = env_path.with_extension("env.tmp");
     std::fs::write(&tmp, text)?;
+    #[cfg(unix)]
     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    // Windows không có bit quyền kiểu Unix — `icacls` hạn chế đọc/ghi về
+    // đúng người dùng hiện tại, cùng tinh thần `chmod 600`. CHƯA đo trên máy
+    // Windows thật (xem đầu `keys_win.rs` cho tình trạng chung của cổng này).
+    #[cfg(windows)]
+    {
+        let user = std::env::var("USERNAME")
+            .map_err(|_| anyhow!("không đọc được biến môi trường USERNAME để hạn chế quyền tệp"))?;
+        let ok = std::process::Command::new("icacls")
+            .arg(&tmp)
+            .args(["/inheritance:r", "/grant:r", &format!("{user}:F")])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !ok {
+            return Err(anyhow!("icacls không hạn chế được quyền của {}", tmp.display()));
+        }
+    }
     std::fs::rename(&tmp, env_path)?;
     Ok(written)
 }

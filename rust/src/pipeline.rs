@@ -10317,7 +10317,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 // TRÌNH ĐANG HỎI, mà lệnh Telegram chạy bên trong `hubad` — đúng
                 // tiến trình cần quyền. Hỏi từ `huba` (CLI) là hỏi về một chương
                 // trình khác, và nhận một câu trả lời đúng cho câu hỏi sai.
-                let keys_line = if crate::cgkeys::trusted() {
+                let keys_line = if crate::keys::accessibility_trusted() {
                     "🔑 phím rời (Trợ năng): đã cấp — nút ↪ chuyển tab chạy được"
                 } else {
                     "🔑 phím rời (Trợ năng): CHƯA cấp — Cài đặt Hệ thống ▸ \
@@ -12399,7 +12399,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             // về `do script`: rơi về là mất câu
                                             // ấy, tức hỏng theo chiều không lùi
                                             // được. Nói ra và dừng.
-                                            if !crate::cgkeys::trusted() {
+                                            if !crate::keys::accessibility_trusted() {
                                                 logging::warn(
                                                     "free_text_no_accessibility",
                                                     json!({ "session": s.session_id, "muc": so,

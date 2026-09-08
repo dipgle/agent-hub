@@ -36,6 +36,133 @@ use serde_json::json;
 use crate::exec::{run, RunOpts};
 use crate::logging;
 
+// ─────────────────────────────────────────────────────────────────────────
+// Windows — mỗi hàm dưới đây có một bản `#[cfg(target_os = "macos")]` cùng
+// tên ngay trong tệp này (gọi `osascript`/`cgkeys`). Đây là TOÀN BỘ mặt tiếp
+// xúc với hệ điều hành của `keys.rs`; phần còn lại của tệp (phân tích chữ
+// trên màn, quyết định điều hướng…) thuần Rust và chạy y hệt trên mọi nền.
+//
+// Gộp các shim vào MỘT chỗ, đầu tệp, thay vì xen giữa từng hàm macOS: mỗi cặp
+// tên trùng nhau nằm CÁCH XA nhau hàng nghìn dòng nếu xen kẽ, và một người sửa
+// chữ ký một bên mà quên bên kia sẽ không thấy chữ ký kia ở gần đó để so.
+// Gộp lại thì `cargo check --target x86_64-pc-windows-gnu` là phép đối
+// chiếu chữ ký DUY NHẤT cần chạy.
+//
+// CHƯA CHẠY THỬ TRÊN WINDOWS THẬT — xem đầu `keys_win.rs`.
+#[cfg(windows)]
+pub fn open_window(cmd: &str) -> Result<(i64, String)> {
+    crate::keys_win::open_window(cmd)
+}
+#[cfg(windows)]
+pub fn window_size(window: i64) -> Result<(i64, i64)> {
+    crate::keys_win::window_size(window)
+}
+#[cfg(windows)]
+pub fn terminal_pid() -> Result<i32> {
+    crate::keys_win::terminal_pid()
+}
+#[cfg(windows)]
+pub fn focus_window(window: i64) -> Result<()> {
+    crate::keys_win::focus_window(window)
+}
+#[cfg(windows)]
+pub fn send_bare(window: i64, keys: &[String]) -> Result<()> {
+    crate::keys_win::send_bare(window, keys)
+}
+#[cfg(windows)]
+pub fn screen_scrollback(window: i64, steps: usize, du: impl Fn(&str) -> bool) -> Result<String> {
+    crate::keys_win::screen_scrollback(window, steps, du)
+}
+#[cfg(windows)]
+pub fn window_of(tty: &str) -> Result<Option<i64>> {
+    crate::keys_win::window_of(tty)
+}
+#[cfg(windows)]
+pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
+    crate::keys_win::window_of_any(tty)
+}
+#[cfg(windows)]
+pub fn tab_proc_count(window: i64) -> Result<usize> {
+    crate::keys_win::tab_proc_count(window)
+}
+#[cfg(windows)]
+pub fn tab_state(window: i64) -> Result<TabState> {
+    crate::keys_win::tab_state(window)
+}
+#[cfg(windows)]
+pub fn screen_locked() -> Option<bool> {
+    crate::keys_win::screen_locked()
+}
+#[cfg(windows)]
+pub fn frame_is_blank(path: &std::path::Path) -> Option<bool> {
+    crate::keys_win::frame_is_blank(path)
+}
+#[cfg(windows)]
+pub fn bring_to_front(window: i64) -> Result<()> {
+    crate::keys_win::bring_to_front(window)
+}
+#[cfg(windows)]
+pub fn front_window() -> Result<Option<i64>> {
+    crate::keys_win::front_window()
+}
+#[cfg(windows)]
+pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
+    crate::keys_win::photograph_window(window, path)
+}
+#[cfg(windows)]
+pub fn window_gone(window: i64) -> Result<bool> {
+    crate::keys_win::window_gone(window)
+}
+#[cfg(windows)]
+pub fn close_window(window: i64) -> Result<Closed> {
+    crate::keys_win::close_window(window)
+}
+#[cfg(windows)]
+pub fn tab_process_count(window: i64) -> Result<Option<usize>> {
+    crate::keys_win::tab_process_count(window)
+}
+#[cfg(windows)]
+pub fn close_hidden_again(window: i64) -> Result<bool> {
+    crate::keys_win::close_hidden_again(window)
+}
+#[cfg(windows)]
+pub fn type_into(window: i64, text: &str) -> Result<()> {
+    crate::keys_win::type_into(window, text)
+}
+#[cfg(windows)]
+pub fn clear_box(window: i64) -> Result<bool> {
+    crate::keys_win::clear_box(window)
+}
+#[cfg(windows)]
+pub fn clear_queue(window: i64) -> Result<(usize, usize)> {
+    crate::keys_win::clear_queue(window)
+}
+#[cfg(windows)]
+pub fn press_writes(window: i64, writes: &[Vec<String>]) -> Result<()> {
+    crate::keys_win::press_writes(window, writes)
+}
+#[cfg(windows)]
+pub fn screen_text(window: i64) -> Result<String> {
+    crate::keys_win::screen_text(window)
+}
+
+/// Có gửi được phím rời vào cửa sổ khác không — câu hỏi macOS trả lời bằng
+/// một QUYỀN hệ điều hành (`AXIsProcessTrusted`, xin ở Cài đặt ▸ Trợ năng);
+/// Windows không có quyền tương đương cho một tiến trình KHÔNG NÂNG QUYỀN gửi
+/// input tới cửa sổ khác cũng không nâng quyền, nên câu trả lời luôn "có" —
+/// TRỪ hàng rào UIPI khi đích chạy nâng quyền, thứ chưa đo được ở đây (xem
+/// đầu `keys_win.rs`). `pipeline.rs`/`runtime.rs` gọi qua đây, không gọi
+/// thẳng `cgkeys`/`keys_win`, để không phải tự rào `#[cfg]` ở bốn chỗ.
+#[cfg(target_os = "macos")]
+pub fn accessibility_trusted() -> bool {
+    crate::cgkeys::trusted()
+}
+#[cfg(windows)]
+pub fn accessibility_trusted() -> bool {
+    crate::keys_win::trusted()
+}
+// ─────────────────────────────────────────────────────────────────────────
+
 /// Trần cho một lượt `osascript` — **tuỳ ai đang chờ**.
 ///
 /// 🔴 Hà 2026-08-25, ảnh một tin mang `⚠ không đọc được màn: osascript quá
@@ -162,6 +289,7 @@ fn as_string(s: &str) -> String {
 /// Tách ra thành hàm THUẦN để kiểm được bằng test: lỗi đầu tiên của tính năng
 /// này là một dòng `return ""` thừa ở cuối, bị cú pháp chuỗi thô của Rust nuốt
 /// mất dấu nháy, và nó chỉ lộ khi chạy thật vì không có gì soi chuỗi sinh ra.
+#[cfg(target_os = "macos")]
 fn window_script(dev: &str) -> String {
     // `try` quanh vòng trong, KHÔNG phải cho đẹp: Terminal có những cửa sổ
     // không có tab nào (cửa sổ cài đặt, inspector), và hỏi `tabs of w` ở đó thì
@@ -559,6 +687,7 @@ pub fn landed(screen: &str, typed: &str) -> Landed {
 /// `tty` lấy NGAY sau khi dựng, vì đó là thứ duy nhất ghép được cửa sổ này với
 /// hàng mà `claude agents` sắp khai ra — tên phiên thì `claude` tự đặt, và id
 /// thì chưa tồn tại lúc này.
+#[cfg(target_os = "macos")]
 pub fn open_window(cmd: &str) -> Result<(i64, String)> {
     // 🔴 Bản cũ hỏi `id of window 1` — **cửa sổ đang ở TRƯỚC, không phải cửa sổ
     // vừa mở**. `do script` trả về một TAB, và tab ấy có thể nằm ở cửa sổ nào
@@ -688,6 +817,7 @@ end tell"#,
 /// đang sống nữa (xem tấm bia ở `screen_text_tall`), nên thứ nó còn được phép
 /// làm với một cái màn hẹp là **nói ra con số**. Một câu *"màn đang hẹp"* không
 /// có số thì chủ máy không biết nới bao nhiêu là đủ; `24×80` thì biết.
+#[cfg(target_os = "macos")]
 pub fn window_size(window: i64) -> Result<(i64, i64)> {
     let out = osascript(&format!(
         r#"tell application "Terminal"
@@ -717,6 +847,7 @@ end tell"#
 /// 2026-08-19) trong khi `ps aux` thấy tiến trình ấy rõ ràng — nên đừng đổi lại.
 /// Khớp theo ĐUÔI đường dẫn: `comm` là
 /// `/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal`.
+#[cfg(target_os = "macos")]
 pub fn terminal_pid() -> Result<i32> {
     let out = run(
         "ps",
@@ -752,6 +883,7 @@ pub fn terminal_pid() -> Result<i32> {
 ///
 /// Vẫn đi bằng AppleScript, và ở đây thì đúng chỗ: nó chỉ SẮP XẾP cửa sổ, không
 /// gửi phím nào, nên cái CR của `do script` không dính dáng gì.
+#[cfg(target_os = "macos")]
 pub fn focus_window(window: i64) -> Result<()> {
     osascript(&format!(
         "tell application \"Terminal\"\n\
@@ -797,6 +929,7 @@ pub fn tab_keys(tabs: usize, target: usize) -> Vec<String> {
 /// Hai bước, và bước đầu không phải thủ tục: [`focus_window`] quyết định phím
 /// rơi vào cửa sổ NÀO (xem chú thích ở đó), rồi [`crate::cgkeys::post`] mới đưa
 /// phím vào tiến trình Terminal.
+#[cfg(target_os = "macos")]
 pub fn send_bare(window: i64, keys: &[String]) -> Result<()> {
     let pid = terminal_pid()?;
     focus_window(window)?;
@@ -808,9 +941,11 @@ pub fn send_bare(window: i64, keys: &[String]) -> Result<()> {
 /// Nhỏ hơn chiều cao khung một chút để hai khung liên tiếp CHỒNG NHAU: chỗ ghép
 /// cần phần chồng ấy để biết nối vào đâu. Bằng đúng chiều cao là hai khung khít
 /// nhau, và một dòng rớt giữa hai lượt vẽ thì không gì phát hiện được.
+#[cfg(target_os = "macos")]
 const SCROLL_STEP: i32 = 8;
 /// Trần lượt cuộn: 40 × 8 = 320 dòng ngược. Có trần vì đây là cửa sổ chủ máy
 /// đang nhìn, và mỗi lượt tốn ~0,1 giây cộng một lượt đọc màn.
+#[cfg(target_os = "macos")]
 const SCROLL_MAX_STEPS: usize = 40;
 
 /// Ghép một khung CŨ HƠN vào phía trên phần đã có.
@@ -823,6 +958,7 @@ const SCROLL_MAX_STEPS: usize = 40;
 /// So bằng dòng đã cắt khoảng trắng: TUI vẽ lại có thể đổi phần đệm bên phải
 /// giữa hai lượt, mà một dấu cách thừa không được phép biến hai bản sao của
 /// cùng một dòng thành hai dòng khác nhau.
+#[cfg(target_os = "macos")]
 fn merge_above(older: &[String], have: &[String]) -> Vec<String> {
     let key = |s: &String| s.trim_end().to_string();
     let max = older.len().min(have.len());
@@ -870,6 +1006,7 @@ fn merge_above(older: &[String], have: &[String]) -> Vec<String> {
 /// * **dừng sớm khi không lấy thêm được gì** — hai lượt liên tiếp không thêm
 ///   dòng nào nghĩa là đã tới đầu lịch sử, và cuộn tiếp chỉ tốn thời gian của
 ///   người đang chờ trên điện thoại.
+#[cfg(target_os = "macos")]
 pub fn screen_scrollback(window: i64, steps: usize, du: impl Fn(&str) -> bool) -> Result<String> {
     let steps = steps.min(SCROLL_MAX_STEPS);
     // 🔴 LÀN GẤP, và đây không phải tinh chỉnh cho vui — đo 2026-08-20: vòng
@@ -943,6 +1080,7 @@ pub fn screen_scrollback(window: i64, steps: usize, du: impl Fn(&str) -> bool) -
 /// `Terminal` công bố `tty` của từng tab qua AppleScript (đo 2026-08-09:
 /// `/dev/ttys005, /dev/ttys000, …`), và huba đã biết `tty` của từng phiên từ
 /// `ps -o tty=`. Ghép hai đầu ấy lại là ra đúng cửa sổ của phiên.
+#[cfg(target_os = "macos")]
 pub fn window_of(tty: &str) -> Result<Option<i64>> {
     if tty.is_empty() || tty == "??" || tty == "-" {
         return Ok(None);
@@ -1014,6 +1152,7 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
 ///
 /// Thứ tự ưu tiên giữ nguyên như [`window_of`] — tab đang chạy chương trình,
 /// rồi tab còn sống — và chỉ khi không còn gì sống mới nhận tab chết.
+#[cfg(target_os = "macos")]
 pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
     if tty.is_empty() || tty == "??" || tty == "-" {
         return Ok(None);
@@ -1031,6 +1170,7 @@ pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
 
 /// Tách ra để KIỂM ĐƯỢC — cùng lý do với [`window_script`]: ba lỗi AppleScript
 /// đắt nhất của tệp này đều nằm trong một chuỗi mà không bài kiểm nào chạm tới.
+#[cfg(target_os = "macos")]
 fn window_any_script(dev: &str) -> String {
     format!(
         r#"tell application "Terminal"
@@ -1062,6 +1202,7 @@ end tell"#,
 /// Dùng để biết có gì để `exit` hay không: gõ `exit` vào một tab `[Process
 /// completed]` là gõ vào chỗ không ai đọc, rồi huba ngồi chờ một cú thoát không
 /// bao giờ tới.
+#[cfg(target_os = "macos")]
 pub fn tab_proc_count(window: i64) -> Result<usize> {
     let out = osascript(&format!(
         r#"tell application "Terminal"
@@ -1077,9 +1218,11 @@ end tell"#
 
 /// Sổ nhớ `tty → id cửa sổ`. Bé, và cố ý không có hạn dùng: id chỉ đổi khi cửa
 /// sổ đóng, và lúc ấy `do script` hỏng ra lỗi rõ ràng chứ không im.
+#[cfg(target_os = "macos")]
 static WINDOW_CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, i64>>> =
     std::sync::OnceLock::new();
 
+#[cfg(target_os = "macos")]
 fn remember_window(dev: &str, w: i64) {
     let m = WINDOW_CACHE.get_or_init(Default::default);
     if let Ok(mut g) = m.lock() {
@@ -1087,6 +1230,7 @@ fn remember_window(dev: &str, w: i64) {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn recall_window(dev: &str) -> Option<i64> {
     let m = WINDOW_CACHE.get_or_init(Default::default);
     let g = m.lock().ok()?;
@@ -1500,6 +1644,7 @@ pub fn alive_tab<'a>(tabs: &'a [Tab], tty: &str) -> Option<&'a Tab> {
 /// 2221 cửa sổ đang chạy `claude` → `true` · 2131 cửa sổ trong sổ chờ đóng →
 /// `gone` · 2158 cửa sổ đã ẩn còn tab chết → `false` · 2122 cửa sổ 0 tab →
 /// `gone` · 99999 id không tồn tại → `gone`.
+#[cfg(target_os = "macos")]
 pub fn tab_state(window: i64) -> Result<TabState> {
     let out = osascript(&format!(
         r#"tell application "Terminal"
@@ -1657,6 +1802,7 @@ pub fn queued_count(screen: &str) -> usize {
 ///
 /// `None` = không đo được (không có `ioreg`, hoặc nó đổi định dạng). Không đo
 /// được phải khác "đã đo, không khoá" — đúng luật 3.
+#[cfg(target_os = "macos")]
 pub fn screen_locked() -> Option<bool> {
     let out = crate::exec::run(
         "ioreg",
@@ -1734,6 +1880,7 @@ pub fn blank_frame_reason(locked: Option<bool>) -> String {
 /// ảnh nằm thẳng trong tệp) — không cần thư viện giải mã ảnh nào. Nó ĐỎ ĐƯỢC:
 /// cùng lệnh ấy trên `DefaultDesktop.heic` trả `93 7a 43`, còn trên tấm ảnh đen
 /// vừa chụp trả `00 00 00`.
+#[cfg(target_os = "macos")]
 pub fn frame_is_blank(path: &std::path::Path) -> Option<bool> {
     let bmp = path.with_extension("probe.bmp");
     let out = crate::exec::run(
@@ -1787,6 +1934,7 @@ pub fn frame_is_blank(path: &std::path::Path) -> Option<bool> {
 /// (ảnh gửi về Telegram đúng cửa sổ phiên). Không viết lại bằng cách khác:
 /// hôm nay đã trả giá một lần cho việc có hai bản chép của cùng một phép
 /// (`runtime::SIGNING_CN`), nên chỗ này là MỘT hàm, hai người gọi.
+#[cfg(target_os = "macos")]
 pub fn bring_to_front(window: i64) -> Result<()> {
     osascript(&format!(
         r#"tell application "Terminal"
@@ -1806,6 +1954,7 @@ end tell"#
 ///
 /// `None` = Terminal không có cửa sổ nào — một câu trả lời thật, khác hẳn
 /// `Err` (không hỏi được).
+#[cfg(target_os = "macos")]
 pub fn front_window() -> Result<Option<i64>> {
     let out = osascript(
         r#"tell application "Terminal"
@@ -1816,6 +1965,7 @@ end tell"#,
     Ok(out.trim().parse::<i64>().ok())
 }
 
+#[cfg(target_os = "macos")]
 pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
     // Không đưa ra trước được thì vẫn chụp — một tấm ảnh cả màn hình còn hơn
     // không có gì, và câu trả lời sẽ nói rõ là chưa focus được.
@@ -1872,6 +2022,7 @@ pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
 /// Tôi đã tin cái danh sách ấy đúng một lượt, và nó dẫn tôi tới một kết luận
 /// SAI ("máy khoá màn hình nên `close` không chạy") mà tôi đã nói ra với chủ
 /// máy trước khi kiểm lại. Thứ nói đúng chuyện là **số tab** và **`visible`**.
+#[cfg(target_os = "macos")]
 pub fn window_gone(window: i64) -> Result<bool> {
     let out = osascript(&format!(
         r#"tell application "Terminal"
@@ -1941,6 +2092,7 @@ pub fn exit_and_close_shell(window: i64, cho: std::time::Duration) -> Result<Clo
     close_window(window)
 }
 
+#[cfg(target_os = "macos")]
 pub fn close_window(window: i64) -> Result<Closed> {
     osascript(&format!(
         r#"tell application "Terminal" to close (first window whose id is {window})"#
@@ -2007,6 +2159,7 @@ end tell"#
 /// Đo 2026-08-17: cửa sổ chết `2150` → `0` · hai cửa sổ phiên đang sống →
 /// `6` (`login-zsh claude project-agent node caffeinate`). Một phiên thật luôn
 /// có ít nhất cái shell, nên `Some(0)` là "không còn gì để mất".
+#[cfg(target_os = "macos")]
 pub fn tab_process_count(window: i64) -> Result<Option<usize>> {
     let out = osascript(&format!(
         r#"tell application "Terminal"
@@ -2042,6 +2195,7 @@ end tell"#
 /// (`1/false` → `0/false`). Nên lời từ chối kia là NHẤT THỜI, không phải thuộc
 /// tính của mấy cửa sổ đó — và thứ chữa một lời từ chối nhất thời là thử lại,
 /// chứ không phải bỏ nó nằm đó khuất mắt mãi mãi.
+#[cfg(target_os = "macos")]
 pub fn close_hidden_again(window: i64) -> Result<bool> {
     osascript(&format!(
         r#"tell application "Terminal" to close (first window whose id is {window})"#
@@ -2239,6 +2393,7 @@ pub fn quit_and_close(window: i64) -> Result<Closed> {
 /// 2026-08-15, sau khi chính tôi đọc `type_into(w, task, true)` ở một chỗ gọi
 /// MỚI và tin là nó đã bấm Enter hộ. Một tham số nói dối nguy hơn một tham số
 /// thiếu: cái thiếu thì trình dịch kêu, cái nói dối thì không.
+#[cfg(target_os = "macos")]
 pub fn type_into(window: i64, text: &str) -> Result<()> {
     osascript(&do_script(window, &as_string(text)))?;
     Ok(())
@@ -2264,6 +2419,7 @@ pub fn type_into(window: i64, text: &str) -> Result<()> {
 ///
 /// Trả `Ok(true)` khi ô đã sạch, `Ok(false)` khi còn chữ — KHÔNG tự khen: chỗ
 /// gọi phải nói đúng thứ đã xảy ra.
+#[cfg(target_os = "macos")]
 pub fn clear_box(window: i64) -> Result<bool> {
     // 🔴 NHIỀU VÒNG, vì phép đếm chỉ thấy phần HIỆN RA — Hà 2026-08-19, bấm ⊠
     // hai lần liền trên `[dwork]` và cả hai lần `keys_clear_incomplete`.
@@ -2314,6 +2470,7 @@ pub fn clear_box(window: i64) -> Result<bool> {
 }
 
 /// Trần số vòng của [`clear_queue`] — hàng chờ dài hơn thế thì nói ra, đừng quay mãi.
+#[cfg(target_os = "macos")]
 const CLEAN_MAX_ROUNDS: usize = 25;
 
 /// Xoá SẠCH hàng chờ của một phiên: `(đã xoá, còn lại)`.
@@ -2335,6 +2492,7 @@ const CLEAN_MAX_ROUNDS: usize = 25;
 ///   được CR ở ô nhập (đo trong `clear_box`).
 /// - **Không đụng vào lượt đang chạy.** Chỉ hàng chờ; phiên vẫn chạy tiếp việc
 ///   nó đang làm. Muốn cắt lượt ấy thì đó là `/key esc`, một lệnh khác.
+#[cfg(target_os = "macos")]
 pub fn clear_queue(window: i64) -> Result<(usize, usize)> {
     let mut left = queued_count(&screen_text(window)?);
     let start = left;
@@ -2493,6 +2651,7 @@ pub enum Delivered {
 /// ⚠ `do script` LUÔN kèm một dấu xuống dòng — không tắt được. Với ô nhập của
 /// `claude` thì đó đúng là điều ta muốn (gõ xong là gửi), nhưng nó cũng có
 /// nghĩa: không có cách "gõ mà chưa gửi" qua đường này.
+#[cfg(target_os = "macos")]
 fn do_script(window: i64, applescript_string: &str) -> String {
     format!(
         r#"tell application "Terminal"
@@ -2692,6 +2851,7 @@ fn key_payload(keyname: &str) -> Result<String> {
 ///
 /// Đủ để TUI vẽ xong lượt trước (đo trên máy: một bước điều hướng của `claude`
 /// mất chừng 30–60 ms), và đủ ngắn để ba lượt không thành một lượt chờ dài.
+#[cfg(target_os = "macos")]
 const SEQ_GAP_MS: u64 = 120;
 
 /// Gửi từng LƯỢT GHI một — mỗi lượt là đúng một `do script`.
@@ -2724,6 +2884,7 @@ const SEQ_GAP_MS: u64 = 120;
 ///
 /// Hàm này KHÔNG tự quyết được dãy ấy có an toàn không — chỗ gọi phải tự chịu
 /// trách nhiệm, cùng luật với `arrow_verdict`.
+#[cfg(target_os = "macos")]
 pub fn press_writes(window: i64, writes: &[Vec<String>]) -> Result<()> {
     if writes.is_empty() {
         return Err(anyhow!("không có lượt ghi nào để gửi"));
@@ -2739,6 +2900,7 @@ pub fn press_writes(window: i64, writes: &[Vec<String>]) -> Result<()> {
 ///
 /// Dãy RỖNG là một lượt hợp lệ và có nghĩa — chuỗi rỗng, tức lượt ấy chỉ mang
 /// đúng cái CR mà `do script` kèm sẵn.
+#[cfg(target_os = "macos")]
 fn write_payload(keys: &[String]) -> Result<String> {
     let mut out = String::from("\"\"");
     for k in keys {
@@ -2773,6 +2935,7 @@ fn write_payload(keys: &[String]) -> Result<String> {
 /// Và hoá ra không cần ảnh: Terminal cho đọc thẳng `contents of selected tab`,
 /// tức đúng chữ đang hiện. Không OCR, không vài trăm KB base64, và chữ thì đi
 /// qua được `redaction::leak_scan` — ảnh thì không.
+#[cfg(target_os = "macos")]
 pub fn screen_text(window: i64) -> Result<String> {
     let script = format!(
         r#"tell application "Terminal"

@@ -830,7 +830,7 @@ pub fn announce_boot(db: &crate::db::Db, cfg: &Config, signature: &str) {
     // mỗi lần cài lại, câu chào tự khai luôn nó còn tay hay không. Không có
     // dòng này thì cách duy nhất biết là đi bấm một cái nút CẦN quyền rồi đọc
     // lỗi — bắt người ta thử cửa để biết cửa khoá.
-    let keys = if crate::cgkeys::trusted() {
+    let keys = if crate::keys::accessibility_trusted() {
         "🔑 phím rời: có quyền"
     } else {
         "🔑 phím rời: CHƯA có quyền (Cài đặt Hệ thống ▸ Quyền riêng tư & Bảo mật ▸ Trợ năng ▸ bật hubad)"
@@ -847,7 +847,7 @@ pub fn announce_boot(db: &crate::db::Db, cfg: &Config, signature: &str) {
         Ok(()) => crate::logging::info(
             "hubd_boot_announced",
             json!({ "binary": now, "signature": signature,
-                    "accessibility": crate::cgkeys::trusted() }),
+                    "accessibility": crate::keys::accessibility_trusted() }),
         ),
         // Không nói được thì phải để lại dấu: đây đúng là lúc chủ máy đang ngồi
         // chờ một câu trả lời.

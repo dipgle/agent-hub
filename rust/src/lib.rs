@@ -23,6 +23,12 @@ pub mod adapters;
 /// Vì sao phải có: `do script` kèm một CR không tắt được, nên trên hộp chọn huba
 /// không có phím nào chỉ DI mà không CHỐT. Đọc đầu `cgkeys.rs` trước khi sửa.
 pub mod browser;
+/// `unsafe`-CoreGraphics, chỉ build trên macOS — `keys.rs` gọi qua các hàm
+/// `#[cfg(target_os = "macos")]` của chính nó, không gọi thẳng từ nơi khác.
+/// Bản Windows tương đương: `keys_win::send_raw` (SendInput, không `unsafe`
+/// ngoài binding của crate `windows`, không cần quyền hệ điều hành nào cho
+/// một tiến trình KHÔNG NÂNG QUYỀN — xem đầu `keys_win.rs`).
+#[cfg(target_os = "macos")]
 pub mod cgkeys;
 pub mod commands;
 pub mod config;
@@ -37,6 +43,11 @@ pub mod exec;
 /// thấy một phiên đang dừng lại hỏi — câu hỏi ấy nằm trên màn hình chứ chưa vào
 /// nhật ký.
 pub mod keys;
+/// Windows — cùng vai trò với `keys.rs`, khác cơ chế. CHƯA CHẠY THỬ TRÊN
+/// WINDOWS THẬT (phiên viết nó không có máy Windows để đo) — đọc mục "Chưa đo
+/// được" ở đầu tệp trước khi tin.
+#[cfg(windows)]
+pub mod keys_win;
 pub mod logging;
 pub mod pipeline;
 /// Tài khoản nào còn nhiều hạn mức nhất — đọc `cachedUsageUtilization` trong

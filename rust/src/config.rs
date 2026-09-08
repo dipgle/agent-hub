@@ -107,6 +107,23 @@ impl Default for AutoRunCfg {
     }
 }
 
+/// Tự bấm Enter khi chữ đứng ổn định trong ô nhập của một phiên bất kỳ — bù
+/// cho những nguồn không đi qua `do script`/`cgkeys` của huba (ví dụ
+/// `SendMessage` giữa hai phiên Claude Code), nên chưa từng chạm safety-net
+/// gõ-xong-kiểm-lại của `keys::type_and_send`. Xem
+/// [`crate::pipeline::auto_unstick_box`].
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct AutoUnstickCfg {
+    pub enabled: bool,
+}
+
+impl Default for AutoUnstickCfg {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Xác nhận lần hai qua Telegram cho những lệnh KHÔNG lùi lại được.
 ///
 /// Hà 2026-08-10: *"riêng một số lệnh dừng hoặc tắt phiên cần có xác thực qua
@@ -273,6 +290,8 @@ pub struct Config {
     /// Tự đóng sổ khi ngữ cảnh đầy — xem [`AutoHandoverCfg`].
     pub auto_handover: AutoHandoverCfg,
     pub auto_run: AutoRunCfg,
+    #[serde(default)]
+    pub auto_unstick: AutoUnstickCfg,
     /// Xác nhận lần hai cho lệnh không lùi lại được — xem [`ConfirmCfg`].
     #[serde(default)]
     pub confirm: ConfirmCfg,
@@ -361,6 +380,7 @@ impl Default for Config {
             call: CallCfg::default(),
             auto_handover: AutoHandoverCfg::default(),
             auto_run: AutoRunCfg::default(),
+            auto_unstick: AutoUnstickCfg::default(),
             confirm: ConfirmCfg::default(),
             projects: BTreeMap::new(),
             notify: NotifyCfg::default(),

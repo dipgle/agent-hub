@@ -231,6 +231,15 @@ pub struct LiveSession {
     /// được) — xem [`ChoiceKind::from_screen`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub screen_multi: bool,
+    /// Chữ đang NẰM TRONG Ô NHẬP của màn, đọc cùng lượt với `screen_choices`
+    /// (không tốn thêm một lời gọi `osascript` nào) — dùng cho
+    /// [`crate::pipeline::auto_unstick_box`]: chữ do BẤT KỲ nguồn nào để lại
+    /// (kể cả `SendMessage` giữa hai phiên Claude Code, thứ không đi qua
+    /// `do script`/`cgkeys` của huba nên safety-net gõ-xong-kiểm-lại của
+    /// `type_and_send` chưa từng chạy tới nó) mà đứng ỔN ĐỊNH qua nhiều lượt
+    /// quét thì coi như đang kẹt, cần một cú Enter bù.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_text: Option<String>,
     /// Số **monitor** của `claude` còn chạy trong phiên này — đọc từ CHÂN MÀN.
     ///
     /// 🔴 Hà 2026-08-27: *"Một phiên đang có monitor thì luôn chèn thêm icon eye
@@ -4467,6 +4476,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 account_dead: None,
                 screen_choices: 0,
                 screen_multi: false,
+                // Điền ở khúc đọc màn bên dưới, cùng chỗ với `screen_choices`.
+                box_text: None,
                 account: account.name.clone(),
                 name: s
                     .get("name")
@@ -4732,6 +4743,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     row.screen_choices = man
                         .map(|t| crate::keys::parse_choices(t).len())
                         .unwrap_or(0);
+                    row.box_text = man.and_then(crate::keys::input_box_text);
                     // Hai hình dạng của "chọn nhiều", nhận cả hai — xem
                     // `LiveSession::screen_multi`. `has_submit` chỉ thấy hộp MỘT
                     // câu; bảng nhiều câu thì `Submit` nằm trong thanh tab.

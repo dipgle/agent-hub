@@ -2391,6 +2391,152 @@ fn auto_run(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot) -> 
     fired
 }
 
+/// Nhớ nội dung ô nhập lần quét TRƯỚC, theo phiên — để [`auto_unstick_box`] đo
+/// "đứng ổn định". Trong bộ nhớ, không cần sống qua việc khởi động lại daemon:
+/// lỡ mất thì chỉ chậm thêm đúng MỘT ngưỡng trước khi nó tự bắt kịp lại, không
+/// mất gì cả.
+static STUCK_BOX_SEEN: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, (String, i64)>>,
+> = std::sync::OnceLock::new();
+
+/// Ngưỡng ổn định (giây) — chữ phải đứng NGUYÊN qua chừng này rồi mới coi là
+/// kẹt, không phải người đang gõ dở. Gần gấp đôi nhịp quét thường (~10s một
+/// vòng), để một lượt trượt đơn lẻ không đủ sức kết luận — cùng lý lẽ
+/// `watch::BG_MISS_DEBOUNCE_SEC` đã dùng cho phiên nền.
+const STUCK_BOX_STABLE_SEC: i64 = 18;
+
+/// Ba kết cục KHÔNG bấm, và một kết cục bấm — xem [`auto_unstick_box`] cho
+/// chú thích đầy đủ của từng phanh.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnstickWhy {
+    Do,
+    NoText,
+    HasChoices,
+    NotRealTty,
+    HubOwnProbe,
+    TooYoung(i64),
+}
+
+/// Phần THUẦN của [`auto_unstick_box`] — tách ra để bài kiểm với tới được mà
+/// không cần một `LiveSession`/cửa sổ thật nào. `stable_sec` là "chữ này đã
+/// đứng nguyên bao lâu", tính SẴN ở chỗ gọi (đọc từ sổ trong bộ nhớ).
+pub fn unstick_why(
+    real_tty: bool,
+    own_probe: bool,
+    screen_choices: usize,
+    box_text: Option<&str>,
+    stable_sec: i64,
+) -> UnstickWhy {
+    if !real_tty {
+        return UnstickWhy::NotRealTty;
+    }
+    if own_probe {
+        return UnstickWhy::HubOwnProbe;
+    }
+    if screen_choices > 0 {
+        return UnstickWhy::HasChoices;
+    }
+    if box_text.is_none_or(|t| t.trim().is_empty()) {
+        return UnstickWhy::NoText;
+    }
+    if stable_sec < STUCK_BOX_STABLE_SEC {
+        return UnstickWhy::TooYoung(stable_sec);
+    }
+    UnstickWhy::Do
+}
+
+/// Tự bấm Enter khi CHỮ đứng ỔN ĐỊNH trong ô nhập của MỘT phiên bất kỳ — bù
+/// cho những nguồn không đi qua `do script`/`cgkeys` của huba nên chưa từng
+/// chạm safety-net cũ.
+///
+/// 🔴 Hà 2026-09-08: phiên `[dwork/a-chung]` nhận `/btw` — `SendMessage` giữa
+/// hai phiên Claude Code, tiêm thẳng qua chính CLI `claude`, KHÔNG qua
+/// `do script`/`cgkeys` của huba — rồi đứng im, Hà phải tự gõ `/enter`. Tra
+/// log: huba không hề gõ chữ nào vào phiên ấy trong cả khoảng đó. Gốc: an
+/// toàn cũ (`keys::type_and_send`'s `still_in_box` check) chỉ chạy NGAY SAU
+/// lượt CHÍNH HUBA gõ — một nguồn khác để chữ lại thì không ai kiểm lại, vì
+/// huba còn không biết chuyện đó vừa xảy ra.
+///
+/// Ba phanh, vì đây là việc bấm phím KHÔNG AI RA LỆNH TRỰC TIẾP:
+/// 1. **Chữ phải đứng NGUYÊN qua ít nhất [`STUCK_BOX_STABLE_SEC`] giây.** Một
+///    người đang gõ dở thì nội dung đổi giữa hai lượt quét — bấm Enter vào
+///    giữa câu chưa gõ xong là gửi hộ một câu chưa xong. Khác `type_and_send`:
+///    hàm đó BIẾT chính xác lúc nào huba vừa gõ nên không có khoảng "người
+///    đang gõ dở" phải né; ở đây thì có, vì chữ có thể tới từ bất kỳ đâu.
+/// 2. **Không hộp chọn nào đang mở** (`screen_choices == 0`) — CR trên hộp
+///    chọn là một cú CHỐT/BẬT-TẮT, không phải gửi (cùng luật `type_and_send`).
+/// 3. **Không phải máy móc của chính huba** (`is_hub_own_probe`) và **phải có
+///    cửa sổ thật** (`is_real_tty`) — bấm vào chỗ không có cửa sổ là bấm vào
+///    hư vô.
+///
+/// Bấm xong thì XOÁ dấu vết khỏi sổ ngay, không đợi chữ biến mất: nếu vẫn còn
+/// kẹt, lượt sau đọc lại đúng chữ ấy như một quan sát MỚI và phải tính lại đủ
+/// [`STUCK_BOX_STABLE_SEC`] giây trước khi bấm tiếp — nên không có đường nào
+/// bắn Enter liên tục vào cùng một chỗ.
+fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_sec: i64) {
+    if !cfg.auto_unstick.enabled {
+        return;
+    }
+    let seen = STUCK_BOX_SEEN.get_or_init(Default::default);
+    let alive: std::collections::HashSet<&str> = live
+        .sessions
+        .iter()
+        .map(|s| s.session_id.as_str())
+        .collect();
+    if let Ok(mut g) = seen.lock() {
+        g.retain(|k, _| alive.contains(k.as_str()));
+    }
+    for s in &live.sessions {
+        // Chưa có chữ thì bỏ dấu vết cũ (nếu có) rồi thôi — không cần hỏi
+        // `unstick_why` cho ca này, vì nó chỉ đọc lại đúng điều vừa kiểm.
+        let Some(text) = s.box_text.as_deref().filter(|t| !t.trim().is_empty()) else {
+            if let Ok(mut g) = seen.lock() {
+                g.remove(&s.session_id);
+            }
+            continue;
+        };
+        let stable_sec = {
+            let Ok(mut g) = seen.lock() else { continue };
+            match g.get(&s.session_id) {
+                Some((prev, at)) if prev == text => now_sec - at,
+                _ => {
+                    g.insert(s.session_id.clone(), (text.to_string(), now_sec));
+                    0
+                }
+            }
+        };
+        let why = unstick_why(
+            crate::sessions::is_real_tty(&s.tty),
+            crate::sessions::is_hub_own_probe(s),
+            s.screen_choices,
+            Some(text),
+            stable_sec,
+        );
+        if why != UnstickWhy::Do {
+            continue;
+        }
+        let Ok(Some(window)) = crate::keys::window_of(&s.tty) else {
+            continue;
+        };
+        logging::info(
+            "auto_unstick_box_firing",
+            json!({ "session": s.session_id, "name": s.name,
+                    "stable_sec": stable_sec, "text_len": text.chars().count(),
+                    "why": "chữ đứng im trong ô nhập, không phải huba gõ (SendMessage giữa \
+                            phiên, hay nguồn khác) — bấm Enter bù" }),
+        );
+        if let Err(e) = crate::keys::press(window, "enter") {
+            logging::warn(
+                "auto_unstick_box_failed",
+                json!({ "session": s.session_id, "err": e.to_string() }),
+            );
+        }
+        if let Ok(mut g) = seen.lock() {
+            g.remove(&s.session_id);
+        }
+    }
+}
+
 /// Phiên này đã bàn giao rồi VÀ chưa leo thêm một mốc ⟹ thôi hỏi lại.
 ///
 /// 🔴 TÁCH RA THÀNH HÀM THUẦN 2026-08-25, theo luật §13 vừa thêm vào
@@ -15255,6 +15401,11 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     // sổ là việc đổi cả cửa sổ, còn đây chỉ là gõ một dòng — thứ nặng tay hơn
     // được nhìn phiên ở trạng thái chưa ai đụng vào.
     auto_run(db, cfg, &live);
+    // Chữ đứng im trong ô nhập vì một nguồn KHÔNG PHẢI huba (SendMessage giữa
+    // hai phiên, hay bất kỳ ai khác) — bù đúng lỗ hổng ngày 2026-09-08. Đứng
+    // cuối nhóm `auto_*` vì nó không đổi trạng thái phiên nào, chỉ gửi một
+    // phím RỜI vào một ô nhập đã đứng im đủ lâu.
+    auto_unstick_box(cfg, &live, now_sec);
     // No triage, and nothing to flush. huba used to spend money on its own here:
     // every line typed in the room went through a `claude -p` call to be sorted
     // into an inbox, and a daily ceiling existed to stop that from running away.

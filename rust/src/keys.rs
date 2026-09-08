@@ -4716,10 +4716,34 @@ pub fn activity(screen: &str) -> Option<Activity> {
 /// một dòng chép NGUYÊN VĂN câu CLI, không nháy, đứng đầu dòng. Nó không đọc
 /// khác được — kể cả người đọc cũng vậy. Phanh tuổi phiên
 /// ([`crate::pipeline::auto_limit_why`], `TooYoung`) là thứ đỡ ca đó.
+/// Cỡ "gần đây" cho [`session_limit_on_screen`] và [`account_blocked_on_screen`].
+///
+/// 🔴 Hà 2026-09-08, ảnh buồng chat: phiên `[dwork/a-chung]` đang chạy THẬT
+/// (`Proofing… 2m 48s`, tin nhắn chân trang `esc to interrupt`) mà tin gim vẫn
+/// đọc 🚫 hết hạn mức — sau khi đã chờ qua giờ reset và chạy lại bình thường.
+///
+/// Gốc: `contents of tab` trả về TOÀN BỘ scrollback Terminal.app đang giữ
+/// (không có `characters -N thru -1` nào ở `probe_tabs`), mà cả hai hàm dưới
+/// đây quét TỚI (`for line in screen.lines()`) và trả ở LẦN KHỚP ĐẦU TIÊN. Câu
+/// *"You've hit your limit"* chỉ in đúng MỘT lần rồi không lặp lại — kể cả sau
+/// khi phiên chạy lại — nên một khi nó từng xuất hiện, hai hàm này thấy nó ở
+/// MỌI lượt quét sau đó cho tới khi Terminal tự dọn buffer (không bao giờ,
+/// trong một phiên dài). `.rev()` không cứu được: đảo chiều tìm vẫn tìm THẤY
+/// đúng dòng ấy vì không có gì phủ định nó cả — cái thiếu là một GIỚI HẠN gần
+/// đây, không phải HƯỚNG quét.
+///
+/// Cùng luật `activity`/`screen_running` đã áp cho "trạng thái HIỆN TẠI": chỉ
+/// những dòng còn nằm trong khung mà một người xem `/shot` sẽ thấy
+/// (`pipeline::SHOT_LINES` = 40) mới còn tính là hiện tại — dòng cũ hơn bị
+/// chôn dưới đủ nội dung mới thì không còn là trạng thái nữa, nó là LỊCH SỬ.
+const RECENT_STATUS_LINES: usize = 40;
+
 pub fn session_limit_on_screen(screen: &str) -> Option<String> {
     // Nguyên văn CLI in ra, tính từ ĐẦU dòng. Chữ thường vì so sau `to_lowercase`.
     const MO_DAU: &str = "you've hit your";
-    for line in screen.lines() {
+    let lines: Vec<&str> = screen.lines().collect();
+    let recent = lines.len().saturating_sub(RECENT_STATUS_LINES);
+    for line in &lines[recent..] {
         let l = line.trim();
         // Cửa 2 — trích dẫn, không phải trạng thái.
         if l.contains('`') {
@@ -4786,7 +4810,10 @@ pub fn session_limit_on_screen(screen: &str) -> Option<String> {
 /// Bỏ dấu trang trí ở đầu (`⏺`, `>`, `·`) trước khi so, vì TUI hay chèn chúng.
 pub fn account_blocked_on_screen(screen: &str) -> Option<String> {
     const MO_DAU: &str = "Your organization has disabled";
-    for line in screen.lines() {
+    // Cùng bẫy, cùng vá — xem [`RECENT_STATUS_LINES`].
+    let lines: Vec<&str> = screen.lines().collect();
+    let recent = lines.len().saturating_sub(RECENT_STATUS_LINES);
+    for line in &lines[recent..] {
         let l = line
             .trim()
             .trim_start_matches(|c: char| !c.is_alphanumeric())

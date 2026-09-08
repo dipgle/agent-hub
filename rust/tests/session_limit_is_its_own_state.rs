@@ -121,6 +121,41 @@ fn decoration_in_front_does_not_hide_a_real_limit_line() {
     );
 }
 
+/// 🔴 Hà 2026-09-08, ảnh buồng chat: phiên `[dwork/a-chung]` đang chạy THẬT
+/// (`Proofing… 2m 48s`, chân trang `esc to interrupt`) — nhưng tin gim vẫn
+/// đọc 🚫 hết hạn mức, sau khi đã chờ qua giờ reset và chạy lại bình thường.
+///
+/// Gốc: `contents of tab` trả cả scrollback, dòng chặn chỉ in MỘT lần rồi
+/// không lặp — nên một khi từng in ra, phép quét-tới-lần-khớp-đầu-tiên (cũ)
+/// thấy nó ở MỌI lượt sau, mãi mãi, kể cả khi 40 dòng hoạt động MỚI đã chạy
+/// đè lên trên nó. Dòng chặn còn nằm trong 40 dòng gần nhất thì vẫn tính —
+/// chôn sâu hơn thì không còn là trạng thái, nó là lịch sử.
+#[test]
+fn a_stale_limit_line_buried_under_new_activity_is_not_current() {
+    let mut man = String::from("You've hit your session limit · resets 10:30pm (Asia/Saigon)\n");
+    for i in 0..50 {
+        man.push_str(&format!("dòng hoạt động mới số {i}\n"));
+    }
+    assert!(
+        session_limit_on_screen(&man).is_none(),
+        "dòng chặn đã bị chôn dưới 50 dòng mới ⟹ không còn là trạng thái HIỆN TẠI"
+    );
+}
+
+/// ĐỐI CHỨNG NGƯỢC của bài trên: dòng chặn còn nằm trong khung gần đây (dưới
+/// 40 dòng mới) thì VẪN phải tính — phiên vừa bị chặn, chưa kịp có gì mới.
+#[test]
+fn a_limit_line_still_within_the_recent_window_still_counts() {
+    let mut man = String::from("You've hit your session limit · resets 10:30pm (Asia/Saigon)\n");
+    for i in 0..5 {
+        man.push_str(&format!("dòng {i}\n"));
+    }
+    assert!(
+        session_limit_on_screen(&man).is_some(),
+        "chỉ mới 5 dòng sau dòng chặn ⟹ vẫn phải tính là ĐANG bị chặn"
+    );
+}
+
 /// Trạng thái phải ĐỔI ĐƯỢC (§13①) — và phải đổi sang một ký hiệu RIÊNG, không
 /// mượn `💤 đứng chờ`: một phiên rảnh sẽ chạy tiếp khi được gõ, một phiên bị
 /// chặn thì không, dù gõ gì.

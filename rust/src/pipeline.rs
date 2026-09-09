@@ -2088,7 +2088,9 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
     let hang = crate::quota::apply_dead_book(
         crate::quota::overlay_live(
             crate::quota::rank_all(cfg, now_ms),
-            usage_song.get("accounts").unwrap_or(&serde_json::Value::Null),
+            usage_song
+                .get("accounts")
+                .unwrap_or(&serde_json::Value::Null),
         ),
         &db.dead_accounts(),
     );
@@ -7050,7 +7052,9 @@ pub fn html_with_links_last(
             Some((_, (_, links))) if links.iter().any(|(_, i)| matches!(i.trim(), "📎" | "👁"))
         );
         let (head, cmd_part, tail) = match hit {
-            Some((_, (a, _))) if anchor_is_cmd || anchor_is_whole_line || anchor_wraps_substring => {
+            Some((_, (a, _)))
+                if anchor_is_cmd || anchor_is_whole_line || anchor_wraps_substring =>
+            {
                 split_at_anchor(line, a)
             }
             _ => (line, "", ""),

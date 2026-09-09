@@ -315,7 +315,10 @@ fn save_env(env_path: &Path, form: &BTreeMap<String, String>) -> Result<Vec<Stri
             .map(|s| s.success())
             .unwrap_or(false);
         if !ok {
-            return Err(anyhow!("icacls không hạn chế được quyền của {}", tmp.display()));
+            return Err(anyhow!(
+                "icacls không hạn chế được quyền của {}",
+                tmp.display()
+            ));
         }
     }
     std::fs::rename(&tmp, env_path)?;

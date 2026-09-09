@@ -82,13 +82,15 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetWindowRect, IsWindow, IsWindowVisible,
-    PostMessageW, SetForegroundWindow, ShowWindow, SW_HIDE, WM_CLOSE,
+    EnumWindows, GetForegroundWindow, GetWindowRect, IsWindow, IsWindowVisible, PostMessageW,
+    SetForegroundWindow, ShowWindow, SW_HIDE, WM_CLOSE,
 };
 
 use crate::keys::{Closed, TabState};
 
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+};
 
 /// Lớp cửa sổ thật của Windows Terminal — CHƯA xác nhận lại trên máy thật, chỉ
 /// dựa trên tài liệu công khai. Xem mục "Chưa đo được" ở đầu tệp.
@@ -105,7 +107,15 @@ fn hwnd_of(window: i64) -> HWND {
 pub fn open_window(cmd: &str) -> Result<(i64, String)> {
     let before = list_terminal_windows();
     std::process::Command::new("wt.exe")
-        .args(["-w", "new", "powershell", "-NoLogo", "-NoExit", "-Command", cmd])
+        .args([
+            "-w",
+            "new",
+            "powershell",
+            "-NoLogo",
+            "-NoExit",
+            "-Command",
+            cmd,
+        ])
         .spawn()
         .map_err(|e| anyhow!("không chạy được wt.exe: {e}"))?;
     // wt.exe bàn giao cho tiến trình chủ (monarch) rồi tự thoát ngay — PID của
@@ -131,9 +141,7 @@ fn list_terminal_windows() -> Vec<i64> {
     unsafe extern "system" fn cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let out = &mut *(lparam.0 as *mut Vec<i64>);
         let mut cls = [0u16; 256];
-        let n = unsafe {
-            windows::Win32::UI::WindowsAndMessaging::GetClassNameW(hwnd, &mut cls)
-        };
+        let n = unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(hwnd, &mut cls) };
         if n > 0 {
             let name = String::from_utf16_lossy(&cls[..n as usize]);
             if name == TERMINAL_WINDOW_CLASS {
@@ -181,7 +189,9 @@ pub fn bring_to_front(window: i64) -> Result<()> {
     if ok.as_bool() {
         Ok(())
     } else {
-        Err(anyhow!("SetForegroundWindow từ chối — cửa sổ có thể đã đóng"))
+        Err(anyhow!(
+            "SetForegroundWindow từ chối — cửa sổ có thể đã đóng"
+        ))
     }
 }
 
@@ -203,7 +213,11 @@ pub fn tab_state(window: i64) -> Result<TabState> {
         return Ok(TabState::Gone);
     }
     let screen = screen_text(window)?;
-    let last = screen.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let last = screen
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("");
     let looks_idle = last.trim_end().ends_with('>');
     Ok(if looks_idle {
         TabState::Idle
@@ -268,7 +282,7 @@ fn key_to_input(name: &str) -> Result<Vec<INPUT>> {
             return Ok(vk_pair_with_modifier(
                 windows::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL,
                 VIRTUAL_KEY(0x43), // 'C'
-            ))
+            ));
         }
         d if d.len() == 1 && d.chars().all(|c| c.is_ascii_digit()) => {
             return Ok(unicode_input(d));
@@ -389,7 +403,10 @@ pub fn window_size(window: i64) -> Result<(i64, i64)> {
     // gọi hiện chỉ dùng số này để GHI SỔ chứ không tính bố cục, nên tạm chấp
     // nhận đơn vị khác — nhưng đây là một khoảng lệch thật, ghi rõ để không
     // ai đọc nhầm "61" là 61 CỘT.
-    Ok(((rect.bottom - rect.top) as i64, (rect.right - rect.left) as i64))
+    Ok((
+        (rect.bottom - rect.top) as i64,
+        (rect.right - rect.left) as i64,
+    ))
 }
 
 /// Không có khái niệm "tiến trình Terminal.app" trên Windows — trả lỗi rõ
@@ -445,7 +462,9 @@ pub fn screen_locked() -> Option<bool> {
 /// "không còn tiến trình nào".
 pub fn tab_proc_count(window: i64) -> Result<usize> {
     let _ = window;
-    Err(anyhow!("chưa cài: đếm tiến trình trong console trên Windows"))
+    Err(anyhow!(
+        "chưa cài: đếm tiến trình trong console trên Windows"
+    ))
 }
 
 pub fn tab_process_count(window: i64) -> Result<Option<usize>> {

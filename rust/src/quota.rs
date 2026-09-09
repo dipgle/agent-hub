@@ -535,6 +535,9 @@ mod tests {
 
         let live_rong = json!({});
         let out2 = overlay_live(file_ranked.clone(), &live_rong);
-        assert_eq!(out2, file_ranked, "tài khoản vắng mặt trong phép dò cũng phải lùi về tệp");
+        assert_eq!(
+            out2, file_ranked,
+            "tài khoản vắng mặt trong phép dò cũng phải lùi về tệp"
+        );
     }
 }

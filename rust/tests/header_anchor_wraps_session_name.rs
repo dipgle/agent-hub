@@ -43,7 +43,10 @@ fn no_header_means_no_anchor() {
     let mut d = data();
     d.header = None;
     let html = render_session_data(SCREEN, &d);
-    assert!(!html.contains("s_7bdb4f41"), "mọc neo dù không khai header:\n{html}");
+    assert!(
+        !html.contains("s_7bdb4f41"),
+        "mọc neo dù không khai header:\n{html}"
+    );
 }
 
 /// Tên phiên không rỗng nhưng KHÔNG có sid (chưa xác định được phiên nào)

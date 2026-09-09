@@ -22,13 +22,20 @@ const NGUONG: i64 = 18;
 #[test]
 fn text_stable_past_the_threshold_fires() {
     assert_eq!(
-        unstick_why(true, false, 0, Some("nội dung đứng im"), NGUONG),
+        unstick_why(true, false, false, 0, Some("nội dung đứng im"), NGUONG),
         UnstickWhy::Do,
         "đủ mọi điều kiện — cửa sổ thật, không phải huba, không hộp chọn, đứng \
          đủ lâu — mà vẫn không bấm"
     );
     assert_eq!(
-        unstick_why(true, false, 0, Some("nội dung đứng im"), NGUONG + 100),
+        unstick_why(
+            true,
+            false,
+            false,
+            0,
+            Some("nội dung đứng im"),
+            NGUONG + 100
+        ),
         UnstickWhy::Do,
         "đứng lâu HƠN ngưỡng vẫn phải nổ — không phải một cửa sổ thời gian hẹp"
     );
@@ -41,13 +48,13 @@ fn text_stable_past_the_threshold_fires() {
 #[test]
 fn still_typing_never_fires() {
     assert_eq!(
-        unstick_why(true, false, 0, Some("đang gõ dở"), 0),
+        unstick_why(true, false, false, 0, Some("đang gõ dở"), 0),
         UnstickWhy::TooYoung(0),
         "vừa thấy chữ lần đầu (0 giây ổn định) mà đã nổ thì không phân biệt \
          được người đang gõ với chữ kẹt thật"
     );
     assert_eq!(
-        unstick_why(true, false, 0, Some("đang gõ dở"), NGUONG - 1),
+        unstick_why(true, false, false, 0, Some("đang gõ dở"), NGUONG - 1),
         UnstickWhy::TooYoung(NGUONG - 1),
         "chưa đủ ngưỡng dù chỉ thiếu 1 giây thì vẫn phải chờ, không làm tròn"
     );
@@ -58,7 +65,14 @@ fn still_typing_never_fires() {
 #[test]
 fn an_open_choice_dialog_never_fires() {
     assert_eq!(
-        unstick_why(true, false, 3, Some("☐ lựa chọn nào đó"), NGUONG + 50),
+        unstick_why(
+            true,
+            false,
+            false,
+            3,
+            Some("☐ lựa chọn nào đó"),
+            NGUONG + 50
+        ),
         UnstickWhy::HasChoices,
         "hộp chọn đang mở mà vẫn bấm Enter là chốt nhầm một lựa chọn"
     );
@@ -68,7 +82,7 @@ fn an_open_choice_dialog_never_fires() {
 #[test]
 fn no_real_window_never_fires() {
     assert_eq!(
-        unstick_why(false, false, 0, Some("chữ gì đó"), NGUONG + 50),
+        unstick_why(false, false, false, 0, Some("chữ gì đó"), NGUONG + 50),
         UnstickWhy::NotRealTty,
         "không có cửa sổ thật thì bấm vào hư vô"
     );
@@ -79,9 +93,54 @@ fn no_real_window_never_fires() {
 #[test]
 fn hubs_own_probe_never_fires() {
     assert_eq!(
-        unstick_why(true, true, 0, Some("chữ gì đó"), NGUONG + 50),
+        unstick_why(true, true, false, 0, Some("chữ gì đó"), NGUONG + 50),
         UnstickWhy::HubOwnProbe,
         "máy móc của chính huba không phải một phiên của người"
+    );
+}
+
+/// Phiên đang bị chặn hạn mức thì CLI không nhận input — bấm Enter là bắn vào
+/// chỗ ĐÃ BIẾT TRƯỚC là không phản hồi.
+///
+/// 🔴 Đo trên máy thật 2026-09-09, đêm bản vá "đọc lại ô nhập" lên daemon: 27
+/// lượt bấm, **26** lượt đọc lại thấy chữ vẫn nằm nguyên, đúng **1** lượt đi
+/// được. Mở màn một trong số ấy (`projects-0b`, cửa sổ 9783) thì thấy ngay
+/// *"You've hit your session limit · resets 9:10pm"* nằm ngay trên ô nhập, còn
+/// trong ô là câu 30 ký tự — khớp `text_len` trong log. Trạng thái ấy huba đã
+/// đọc sẵn (`LiveSession::limited`) và còn in ra mỗi ~2 phút cho CHÍNH phiên ấy
+/// (`auto_limit_held`); chỉ mỗi cái cò này chưa hỏi.
+#[test]
+fn a_rate_limited_session_never_fires() {
+    assert_eq!(
+        unstick_why(
+            true,
+            false,
+            true,
+            0,
+            Some("tiếp tục quét việc và làm tiếp"),
+            NGUONG + 50
+        ),
+        UnstickWhy::Limited,
+        "màn khai phiên bị chặn hạn mức mà vẫn bấm Enter thì lượt nào cũng hụt"
+    );
+}
+
+/// Đối chứng ngược của chính cái phanh trên: bỏ MỖI cờ `limited` ra thì cùng
+/// bộ đầu vào ấy phải nổ trở lại. Thiếu ca này thì một cái phanh chặn tất cũng
+/// làm bài kiểm trên xanh y hệt.
+#[test]
+fn the_same_box_fires_when_the_session_is_not_limited() {
+    assert_eq!(
+        unstick_why(
+            true,
+            false,
+            false,
+            0,
+            Some("tiếp tục quét việc và làm tiếp"),
+            NGUONG + 50
+        ),
+        UnstickWhy::Do,
+        "không bị chặn hạn mức thì đúng bộ đầu vào ấy vẫn phải bấm"
     );
 }
 
@@ -89,11 +148,11 @@ fn hubs_own_probe_never_fires() {
 #[test]
 fn an_empty_box_never_fires() {
     assert_eq!(
-        unstick_why(true, false, 0, None, NGUONG + 50),
+        unstick_why(true, false, false, 0, None, NGUONG + 50),
         UnstickWhy::NoText
     );
     assert_eq!(
-        unstick_why(true, false, 0, Some("   "), NGUONG + 50),
+        unstick_why(true, false, false, 0, Some("   "), NGUONG + 50),
         UnstickWhy::NoText,
         "toàn khoảng trắng cũng không phải một câu chờ gửi"
     );

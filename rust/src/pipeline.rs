@@ -2458,7 +2458,7 @@ const STUCK_BOX_MAX_TRIES: u32 = 3;
 /// luận "không đổi", đúng cái bẫy `tab_moved` đã dính.
 const STUCK_BOX_SETTLE_MS: u64 = 600;
 
-/// Ba kết cục KHÔNG bấm, và một kết cục bấm — xem [`auto_unstick_box`] cho
+/// Năm kết cục KHÔNG bấm, và một kết cục bấm — xem [`auto_unstick_box`] cho
 /// chú thích đầy đủ của từng phanh.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnstickWhy {
@@ -2467,6 +2467,11 @@ pub enum UnstickWhy {
     HasChoices,
     NotRealTty,
     HubOwnProbe,
+    /// Màn đang khai phiên bị chặn hạn mức ([`crate::sessions::LiveSession::limited`],
+    /// đọc từ `keys::session_limit_on_screen`). CLI không nhận input ở trạng
+    /// thái ấy, nên cú Enter nào cũng hụt — bấm là bắn vào chỗ đã biết trước
+    /// là không phản hồi.
+    Limited,
     TooYoung(i64),
 }
 
@@ -2476,6 +2481,7 @@ pub enum UnstickWhy {
 pub fn unstick_why(
     real_tty: bool,
     own_probe: bool,
+    limited: bool,
     screen_choices: usize,
     box_text: Option<&str>,
     stable_sec: i64,
@@ -2485,6 +2491,21 @@ pub fn unstick_why(
     }
     if own_probe {
         return UnstickWhy::HubOwnProbe;
+    }
+    // 🔴 Phiên đang bị chặn hạn mức thì CLI không nhận input — đo trên máy thật
+    // 2026-09-09, ngay đêm bản vá "đọc lại ô nhập" lên daemon: 27 lượt bấm, 26
+    // lượt đọc lại thấy chữ VẪN nằm nguyên (`auto_unstick_box_stuck`), đúng 1
+    // lượt đi được. Mở màn một trong số ấy (`projects-0b`, cửa sổ 9783) ra thì
+    // thấy ngay lý do: *"You've hit your session limit · resets 9:10pm"*, còn
+    // câu `❯ tiếp tục quét việc và làm tiếp` (30 ký tự — khớp `text_len` trong
+    // log) nằm chờ trong ô. huba đã BIẾT trạng thái ấy từ trước
+    // (`LiveSession::limited`, và `auto_limit_held` in ra cho CHÍNH phiên ấy
+    // mỗi ~2 phút), chỉ là cái cò này chưa hỏi.
+    //
+    // Trần 3 lượt (`STUCK_BOX_MAX_TRIES`) chặn được vòng lặp vô hạn, nhưng nó
+    // là cái phanh cuối; đây là chỗ đúng để không đạp ga.
+    if limited {
+        return UnstickWhy::Limited;
     }
     if screen_choices > 0 {
         return UnstickWhy::HasChoices;
@@ -2594,12 +2615,14 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
             }
             continue;
         };
-        // `None` ⟹ chữ này đã bấm hụt đủ trần rồi: thôi, không bấm nữa.
-        let Some(stable_sec) = ({
+        // `None` ⟹ chữ này đã bấm hụt đủ trần rồi: thôi, không bấm nữa. Cờ thứ
+        // hai (`moi`) = lần đầu thấy CHÍNH chữ này ở phiên này — dùng để nói ra
+        // MỘT lần khi có phanh giữ lại, thay vì mỗi vòng.
+        let Some((stable_sec, moi)) = ({
             let Ok(mut g) = seen.lock() else { continue };
             match g.get(&s.session_id) {
                 Some(m) if m.text == text => {
-                    (m.tries < STUCK_BOX_MAX_TRIES).then_some(now_sec - m.at)
+                    (m.tries < STUCK_BOX_MAX_TRIES).then_some((now_sec - m.at, false))
                 }
                 // Chữ khác đi (hoặc chưa từng thấy) ⟹ một quan sát MỚI, và số
                 // lượt hụt của chữ cũ không theo sang.
@@ -2612,7 +2635,7 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                             tries: 0,
                         },
                     );
-                    Some(0)
+                    Some((0, true))
                 }
             }
         }) else {
@@ -2621,11 +2644,25 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
         let why = unstick_why(
             crate::sessions::is_real_tty(&s.tty),
             crate::sessions::is_hub_own_probe(s),
+            s.limited.is_some(),
             s.screen_choices,
             Some(text),
             stable_sec,
         );
         if why != UnstickWhy::Do {
+            // Phanh "phiên bị chặn hạn mức" phải NÓI RA, vì nó giải thích đúng
+            // cái người đọc log sẽ thắc mắc: ô nhập có chữ, đứng im hàng giờ,
+            // mà huba không đụng vào. Một lần cho mỗi chữ — in mỗi vòng (~2
+            // phút) thì chính nó thành tiếng ồn nuốt mất mình.
+            if moi && why == UnstickWhy::Limited {
+                logging::info(
+                    "auto_unstick_box_held",
+                    json!({ "session": s.session_id, "name": s.name,
+                            "text_len": text.chars().count(), "khi": s.limited,
+                            "why": "phiên đang bị chặn hạn mức — CLI không nhận input, \
+                                    cú Enter nào cũng hụt" }),
+                );
+            }
             continue;
         }
         let Ok(Some(window)) = crate::keys::window_of(&s.tty) else {

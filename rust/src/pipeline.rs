@@ -2396,14 +2396,41 @@ fn auto_run(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot) -> 
 /// lỡ mất thì chỉ chậm thêm đúng MỘT ngưỡng trước khi nó tự bắt kịp lại, không
 /// mất gì cả.
 static STUCK_BOX_SEEN: std::sync::OnceLock<
-    std::sync::Mutex<std::collections::HashMap<String, (String, i64)>>,
+    std::sync::Mutex<std::collections::HashMap<String, StuckMark>>,
 > = std::sync::OnceLock::new();
+
+/// Dấu vết MỘT ô nhập đang bị theo dõi: chữ nằm trong ô, lúc đầu tiên thấy đúng
+/// chữ ấy, và đã bấm HỤT mấy lượt cho chính chữ ấy.
+///
+/// `tries` sinh ra ngày 2026-09-08 cùng phép kiểm sau cú bấm: trước đó không có
+/// gì đếm, nên một ô không chịu nhúc nhích thì huba bấm vào nó **mãi mãi**.
+#[derive(Debug, Clone)]
+struct StuckMark {
+    text: String,
+    at: i64,
+    tries: u32,
+}
 
 /// Ngưỡng ổn định (giây) — chữ phải đứng NGUYÊN qua chừng này rồi mới coi là
 /// kẹt, không phải người đang gõ dở. Gần gấp đôi nhịp quét thường (~10s một
 /// vòng), để một lượt trượt đơn lẻ không đủ sức kết luận — cùng lý lẽ
 /// `watch::BG_MISS_DEBOUNCE_SEC` đã dùng cho phiên nền.
 const STUCK_BOX_STABLE_SEC: i64 = 18;
+
+/// Bấm hụt bao nhiêu lượt cho CÙNG một chữ thì thôi, đừng bấm nữa.
+///
+/// 🔴 Đo 2026-09-08, ngay lượt đầu tính năng chạy thật: 25 lượt bấm trong 11
+/// phút vào 7 phiên, `auto_unstick_box_failed` **0 lần**, mà ba ô nhập
+/// (`projects-3d` 18 ký tự · `projects-fe` 24 · `projects-ef` 55) đọc lại vẫn
+/// nguyên si từng chữ một. Cú bấm không ăn, và huba không có cách nào biết —
+/// nên nó bấm lại, đều đặn, không có điểm dừng. Một cú Enter không lùi lại
+/// được, nên "bắn mãi vào chỗ không phản hồi" là thứ phải có trần.
+const STUCK_BOX_MAX_TRIES: u32 = 3;
+
+/// Chờ TUI vẽ lại rồi mới đọc ô nhập. Cùng nhịp `keys::type_and_send` đã đo cho
+/// lượt đọc CUỐI của nó — đọc ngay sau cú bấm là đọc lại cái màn cũ rồi kết
+/// luận "không đổi", đúng cái bẫy `tab_moved` đã dính.
+const STUCK_BOX_SETTLE_MS: u64 = 600;
 
 /// Ba kết cục KHÔNG bấm, và một kết cục bấm — xem [`auto_unstick_box`] cho
 /// chú thích đầy đủ của từng phanh.
@@ -2445,6 +2472,36 @@ pub fn unstick_why(
     UnstickWhy::Do
 }
 
+/// Cú Enter vừa bấm ĐI ĐƯỢC chưa — ba kết cục, không gộp.
+///
+/// Cùng hình dạng `keys::Delivered`, và vì đúng một lý do: `osascript` trả 0
+/// chỉ nói **byte đã tới cái tab**, không nói TUI đã nhận nó như một phím. Đọc
+/// mã trả về ấy thành "xong" là đọc mã thoát của thứ mới chỉ KHỞI CHẠY.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnstickDone {
+    /// Chữ đã rời ô nhập — đo bằng chính ô nhập.
+    Sent,
+    /// Chữ VẪN nằm nguyên đó. Cú bấm không ăn.
+    StillThere,
+    /// Không đọc lại được màn ⟹ **KHÔNG** được đọc thành "xong".
+    Unverified,
+}
+
+/// Phần THUẦN của phép kiểm sau cú bấm — tách ra để bài kiểm với tới được mà
+/// không cần cửa sổ thật nào.
+///
+/// `box_after` là ô nhập ĐỌC LẠI sau cú bấm: `None` = ô trống, `Some(t)` = còn
+/// chữ. So sau khi cắt hai đầu, vì TUI vẽ lại có thể đổi phần đệm bên phải.
+///
+/// Ô đổi sang chữ KHÁC cũng tính là `Sent`: chữ cũ đã đi, thứ nằm đó bây giờ là
+/// một quan sát mới và vòng quét sau sẽ tự tính lại từ đầu cho nó.
+pub fn unstick_done(sent_text: &str, box_after: Option<&str>) -> UnstickDone {
+    match box_after {
+        Some(t) if t.trim() == sent_text.trim() => UnstickDone::StillThere,
+        _ => UnstickDone::Sent,
+    }
+}
+
 /// Tự bấm Enter khi CHỮ đứng ỔN ĐỊNH trong ô nhập của MỘT phiên bất kỳ — bù
 /// cho những nguồn không đi qua `do script`/`cgkeys` của huba nên chưa từng
 /// chạm safety-net cũ.
@@ -2469,10 +2526,26 @@ pub fn unstick_why(
 ///    cửa sổ thật** (`is_real_tty`) — bấm vào chỗ không có cửa sổ là bấm vào
 ///    hư vô.
 ///
-/// Bấm xong thì XOÁ dấu vết khỏi sổ ngay, không đợi chữ biến mất: nếu vẫn còn
-/// kẹt, lượt sau đọc lại đúng chữ ấy như một quan sát MỚI và phải tính lại đủ
-/// [`STUCK_BOX_STABLE_SEC`] giây trước khi bấm tiếp — nên không có đường nào
-/// bắn Enter liên tục vào cùng một chỗ.
+/// **Bấm xong thì ĐỌC LẠI ô nhập rồi mới nói** ([`unstick_done`]) — thêm
+/// 2026-09-08, sau khi tính năng chạy thật đúng một lượt.
+///
+/// Bản đầu xoá dấu vết khỏi sổ NGAY sau cú bấm, không đợi chữ biến mất, và tin
+/// rằng như thế thì "không có đường nào bắn Enter liên tục vào cùng một chỗ".
+/// Đo lại trên máy thật ngày hôm ấy: có, và nó đang chạy — 25 lượt bấm / 11
+/// phút / 7 phiên, `auto_unstick_box_failed` **0 lần**, ba ô nhập đọc lại vẫn
+/// nguyên si từng chữ. Xoá dấu vết chỉ làm mỗi lượt bấm phải chờ lại
+/// [`STUCK_BOX_STABLE_SEC`] giây, chứ không hề DỪNG được cái gì: chữ có đi đâu
+/// mà đổi, nên vòng sau nó lại đủ điều kiện, mãi mãi.
+///
+/// Gốc của cái sai ấy là **không có phép đo**: đường thất bại duy nhất là
+/// `osascript` trả lỗi, mà `osascript` trả 0 khi byte tới được tab — nó không
+/// biết TUI có nhận byte ấy như một phím hay không. Nên "hụt" và "trúng" cho ra
+/// **cùng một dòng log**, và một tín hiệu không đổi được trạng thái thì không
+/// phải tín hiệu (`CLAUDE.md` §13).
+///
+/// Nay ba kết cục đi ba đường riêng, và [`STUCK_BOX_MAX_TRIES`] đặt trần cho
+/// cái vòng lặp ấy: hụt đủ số lần cho CÙNG một chữ thì huba thôi bấm và nói ra
+/// một lần, thay vì bắn Enter vào một cửa sổ không phản hồi cho tới hết ngày.
 fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_sec: i64) {
     if !cfg.auto_unstick.enabled {
         return;
@@ -2495,15 +2568,29 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
             }
             continue;
         };
-        let stable_sec = {
+        // `None` ⟹ chữ này đã bấm hụt đủ trần rồi: thôi, không bấm nữa.
+        let Some(stable_sec) = ({
             let Ok(mut g) = seen.lock() else { continue };
             match g.get(&s.session_id) {
-                Some((prev, at)) if prev == text => now_sec - at,
+                Some(m) if m.text == text => {
+                    (m.tries < STUCK_BOX_MAX_TRIES).then_some(now_sec - m.at)
+                }
+                // Chữ khác đi (hoặc chưa từng thấy) ⟹ một quan sát MỚI, và số
+                // lượt hụt của chữ cũ không theo sang.
                 _ => {
-                    g.insert(s.session_id.clone(), (text.to_string(), now_sec));
-                    0
+                    g.insert(
+                        s.session_id.clone(),
+                        StuckMark {
+                            text: text.to_string(),
+                            at: now_sec,
+                            tries: 0,
+                        },
+                    );
+                    Some(0)
                 }
             }
+        }) else {
+            continue;
         };
         let why = unstick_why(
             crate::sessions::is_real_tty(&s.tty),
@@ -2530,10 +2617,79 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                 "auto_unstick_box_failed",
                 json!({ "session": s.session_id, "err": e.to_string() }),
             );
+            // Không gửi được thì cũng là một lượt hụt — đếm nó, hoặc cái trần
+            // không bao giờ tới nơi ở đúng ca hỏng nhất.
+            bump_stuck_try(seen, &s.session_id);
+            continue;
         }
-        if let Ok(mut g) = seen.lock() {
-            g.remove(&s.session_id);
+        // Cú bấm mới chỉ ĐẨY BYTE tới tab. Đọc lại ô nhập rồi mới nói.
+        std::thread::sleep(std::time::Duration::from_millis(STUCK_BOX_SETTLE_MS));
+        let done = match crate::keys::screen_text(window) {
+            Ok(scr) => unstick_done(text, crate::keys::input_box_text(&scr).as_deref()),
+            Err(e) => {
+                logging::warn(
+                    "auto_unstick_box_unverified",
+                    json!({ "session": s.session_id, "err": e.to_string(),
+                            "effect": "không đọc lại được ô nhập ⟹ KHÔNG kết luận đã gửi" }),
+                );
+                UnstickDone::Unverified
+            }
+        };
+        match done {
+            UnstickDone::Sent => {
+                logging::info(
+                    "auto_unstick_box_sent",
+                    json!({ "session": s.session_id, "name": s.name,
+                            "text_len": text.chars().count() }),
+                );
+                if let Ok(mut g) = seen.lock() {
+                    g.remove(&s.session_id);
+                }
+            }
+            // Mù cũng đếm như hụt: một lượt không đo được không được phép vừa
+            // giữ chỗ vừa khỏi trả giá — nếu không, màn đọc hỏng kéo dài là một
+            // đường bắn Enter vô hạn khác, chỉ khác cái tên.
+            UnstickDone::StillThere | UnstickDone::Unverified => {
+                let tries = bump_stuck_try(seen, &s.session_id);
+                logging::warn(
+                    "auto_unstick_box_stuck",
+                    json!({ "session": s.session_id, "name": s.name,
+                            "tries": tries, "max": STUCK_BOX_MAX_TRIES,
+                            "verified": done == UnstickDone::StillThere,
+                            "text_len": text.chars().count(),
+                            "effect": "bấm Enter xong chữ VẪN nằm trong ô nhập — cú bấm không ăn" }),
+                );
+                if tries >= STUCK_BOX_MAX_TRIES {
+                    logging::warn(
+                        "auto_unstick_box_gave_up",
+                        json!({ "session": s.session_id, "name": s.name,
+                                "tries": tries,
+                                "effect": "thôi bấm cho chữ này; chủ máy phải tự gửi (/enter) \
+                                           hoặc đổi chữ trong ô thì huba mới thử lại" }),
+                    );
+                }
+            }
         }
+    }
+}
+
+/// Ghi thêm MỘT lượt bấm hụt cho phiên ấy, trả về tổng số lượt hụt.
+///
+/// Dấu vết mất giữa chừng (phiên vừa rời danh sách) thì coi như đã tới trần:
+/// thà thôi bấm còn hơn bấm mù vào một chỗ không còn theo dõi được.
+fn bump_stuck_try(
+    seen: &std::sync::Mutex<std::collections::HashMap<String, StuckMark>>,
+    session_id: &str,
+) -> u32 {
+    let Ok(mut g) = seen.lock() else {
+        return STUCK_BOX_MAX_TRIES;
+    };
+    match g.get_mut(session_id) {
+        Some(m) => {
+            m.tries += 1;
+            m.tries
+        }
+        None => STUCK_BOX_MAX_TRIES,
     }
 }
 

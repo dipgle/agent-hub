@@ -10,7 +10,7 @@
 //! cổng phải có đối chứng ngược — cấy ca hỏng ⇒ phải nổ (`Do`); cấy ca lành ⇒
 //! phải KHÔNG nổ, và phải nói ĐÚNG vì sao.
 
-use huba::pipeline::{unstick_why, UnstickWhy};
+use huba::pipeline::{unstick_done, unstick_why, UnstickDone, UnstickWhy};
 
 /// Ngưỡng ổn định thật của mã (`STUCK_BOX_STABLE_SEC` = 18s, riêng tư trong
 /// `pipeline.rs`) — chép lại đây, cùng cách `auto_limit_switch.rs` chọn số đủ
@@ -88,10 +88,66 @@ fn hubs_own_probe_never_fires() {
 /// Ô nhập trống hoặc chỉ toàn khoảng trắng thì không có gì để gửi.
 #[test]
 fn an_empty_box_never_fires() {
-    assert_eq!(unstick_why(true, false, 0, None, NGUONG + 50), UnstickWhy::NoText);
+    assert_eq!(
+        unstick_why(true, false, 0, None, NGUONG + 50),
+        UnstickWhy::NoText
+    );
     assert_eq!(
         unstick_why(true, false, 0, Some("   "), NGUONG + 50),
         UnstickWhy::NoText,
         "toàn khoảng trắng cũng không phải một câu chờ gửi"
+    );
+}
+
+// ─────────────── phép kiểm SAU cú bấm: cú Enter ấy có đi được không ─────────
+//
+// 🔴 Vì sao có mục này, đo 2026-09-08 ngay lượt tính năng chạy thật đầu tiên:
+// 25 lượt `auto_unstick_box_firing` trong 11 phút vào 7 phiên,
+// `auto_unstick_box_failed` **0 lần** — mà đọc thẳng màn ba cửa sổ ấy
+// (`contents of selected tab`, đúng đường `keys::screen_text` đi) thì chữ vẫn
+// nằm nguyên si trong ô: `projects-3d` 18 ký tự, `projects-fe` 24, `projects-ef`
+// 55, khớp từng con số với `text_len` đã ghi trong log.
+//
+// Tức "trúng" và "hụt" cho ra CÙNG một dòng log, vì đường thất bại duy nhất là
+// `osascript` trả lỗi — mà `osascript` trả 0 ngay khi byte tới được tab, nó
+// không biết TUI có nhận byte ấy như một phím hay không. Một tín hiệu không bao
+// giờ ở trạng thái ngược lại thì không phải phép đo (`CLAUDE.md` §13).
+
+/// Cấy ca HỎNG: đọc lại thấy đúng chữ ấy còn nguyên ⇒ phải là `StillThere`.
+/// Đây là ca đã xảy ra thật, nên nó là đối chứng ngược của cả tính năng.
+#[test]
+fn text_still_sitting_in_the_box_is_not_sent() {
+    assert_eq!(
+        unstick_done("tiếp tục quét việc", Some("tiếp tục quét việc")),
+        UnstickDone::StillThere,
+        "chữ còn nguyên trong ô mà đọc thành đã gửi — đúng lỗi 2026-09-08"
+    );
+    // TUI vẽ lại đổi phần đệm hai bên; một dấu cách không được biến "còn kẹt"
+    // thành "đã đi".
+    assert_eq!(
+        unstick_done("tiếp tục quét việc", Some("  tiếp tục quét việc  ")),
+        UnstickDone::StillThere,
+        "khoảng trắng hai đầu không phải một thay đổi"
+    );
+}
+
+/// Cấy ca LÀNH: ô trống sau cú bấm ⇒ phải là `Sent`, cổng KHÔNG được đỏ.
+#[test]
+fn an_empty_box_after_the_press_means_sent() {
+    assert_eq!(
+        unstick_done("tiếp tục quét việc", None),
+        UnstickDone::Sent,
+        "ô đã trống thì cú Enter ấy đi được — không được báo hụt"
+    );
+}
+
+/// Ô mang chữ KHÁC ⇒ chữ cũ đã đi. Thứ nằm đó bây giờ là quan sát mới, và vòng
+/// quét sau tự tính lại `stable_sec` từ đầu cho nó.
+#[test]
+fn different_text_in_the_box_means_the_old_one_left() {
+    assert_eq!(
+        unstick_done("tiếp tục quét việc", Some("câu chủ máy vừa gõ")),
+        UnstickDone::Sent,
+        "chữ cũ không còn ở đó nữa — đừng đếm nó là một lượt bấm hụt"
     );
 }

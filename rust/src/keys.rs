@@ -435,9 +435,17 @@ pub fn body_before_box(screen: &str) -> String {
 /// hai lần đều không sạch (`keys_clear_incomplete` ×2). Hà, ảnh chụp: *"nội
 /// dung sao bị chèn lung tung ở đâu vào ô chat"*.
 ///
-/// Nên neo phải nhận CẢ HAI hình dạng, và khi cả hai đều không có thì đường lùi
-/// vẫn còn đó — chỉ là nó thôi làm đường chính.
-fn box_start(screen: &str) -> Option<usize> {
+/// Nên neo phải nhận CẢ HAI hình dạng. Còn khi cả hai đều không có, câu trả lời
+/// là `None` — *"màn này không có ô nhập"* — và đó là một KẾT CỤC, không phải
+/// chỗ để đoán: `still_in_box` trả `false` từ trước, `input_box_text` im từ
+/// 2026-09-09 (trước đó nó gói cái đuôi màn tĩnh thành "câu đang chờ gửi", và
+/// `auto_unstick_box` bắn 197 cú Enter vào đó trong 2h15). Đường lùi "bốn dòng
+/// cuối" của [`box_region`] vẫn còn cho những phép ĐẾM không hỏi "có ô nhập
+/// không" (`queued_count`).
+///
+/// `pub` vì nó là cái neo DUY NHẤT cho câu hỏi ấy — chỗ nào cần biết "màn có ô
+/// nhập không" thì hỏi đây, đừng tự dò lấy một hình dạng thứ ba.
+pub fn box_start(screen: &str) -> Option<usize> {
     if let Some(i) = screen.rfind('╭') {
         return Some(i);
     }
@@ -507,6 +515,26 @@ pub fn box_region(screen: &str) -> String {
 /// Trả về chữ đã dọn (bỏ khung, dấu nhắc, dòng trạng thái), để chỗ gọi vừa
 /// dựng được nhãn nút vừa biết có đáng dựng hay không.
 pub fn input_box_text(screen: &str) -> Option<String> {
+    // 🔴 KHÔNG CÓ Ô NHẬP thì trả `None` — đó là một câu trả lời, không phải một
+    // chỗ để đoán (vá 2026-09-09).
+    //
+    // `box_region` có đường lùi "bốn dòng không rỗng cuối màn" cho trường hợp
+    // `box_start` không nhận ra khung. Với `still_in_box` thì vô hại (nó đã tự
+    // gác `box_start(screen).is_none()` từ trước); với hàm NÀY thì nó bịa: một
+    // màn không có ô nhập nào vẫn trả về `Some(<đuôi màn>)`, và chữ tĩnh ấy
+    // được đọc thành "câu đang nằm chờ gửi".
+    //
+    // Đo được, `logs/huba.log` 08/09 13:22→15:37: `auto_unstick_box` bấm Enter
+    // **197 lượt** vào 5 phiên, `auto_unstick_box_failed` **0 lần**, và
+    // `text_len` của `projects-ef` đứng nguyên **55** suốt 2h15 — vì thứ nó
+    // "thấy trong ô" là một băng chữ tĩnh, không phải input, nên không cú Enter
+    // nào làm nó đổi được. Cùng phiên ấy `keys_typed` vẫn chạy tốt 11 lượt, tức
+    // cửa sổ/cơ chế đều lành.
+    //
+    // Luật này `CLAUDE.md` đã ghi rồi (*"rơi âm thầm về đường lùi bốn dòng
+    // cuối — đủ để mọi thứ trông vẫn chạy, và đã trả giá"* · *"Một cái neo duy
+    // nhất: `keys::box_start`"*); chỗ thiếu chỉ là hàm này chưa nhận nó.
+    box_start(screen)?;
     let mut buf = String::new();
     for line in box_region(screen).lines() {
         let t = line.trim();

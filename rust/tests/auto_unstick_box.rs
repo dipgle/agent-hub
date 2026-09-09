@@ -10,7 +10,7 @@
 //! cổng phải có đối chứng ngược — cấy ca hỏng ⇒ phải nổ (`Do`); cấy ca lành ⇒
 //! phải KHÔNG nổ, và phải nói ĐÚNG vì sao.
 
-use huba::pipeline::{unstick_done, unstick_why, UnstickDone, UnstickWhy};
+use huba::pipeline::{limit_still_biting, unstick_done, unstick_why, UnstickDone, UnstickWhy};
 
 /// Ngưỡng ổn định thật của mã (`STUCK_BOX_STABLE_SEC` = 18s, riêng tư trong
 /// `pipeline.rs`) — chép lại đây, cùng cách `auto_limit_switch.rs` chọn số đủ
@@ -142,6 +142,50 @@ fn the_same_box_fires_when_the_session_is_not_limited() {
         UnstickWhy::Do,
         "không bị chặn hạn mức thì đúng bộ đầu vào ấy vẫn phải bấm"
     );
+}
+
+// ────────── dòng banner CÒN CẮN hay chỉ là vết cũ: `limit_still_biting` ──────
+//
+// 🔴 Cái cổng ở trên chỉ đúng khi câu hỏi *"phiên có đang bị chặn không"* được
+// trả lời đúng. Lấy `limited.is_some()` làm câu trả lời là sai, và sai theo
+// hướng tệ nhất: đo 2026-09-09, phiên `702acdc7` mang `resets 9:10pm` mà tới
+// **21:46 giờ máy** — 36 phút SAU mốc ấy — `limited` vẫn `Some`, vì phiên bị
+// chặn thì không in thêm gì nên banner nằm nguyên dưới đáy màn. Cổng đọc theo
+// sự CÓ MẶT của dòng chữ sẽ khoá đúng vào phút hạn mức tự mở lại.
+
+/// Mốc mở lại còn ở phía trước ⟹ còn cắn thật.
+#[test]
+fn a_reset_mark_still_ahead_is_still_biting() {
+    assert!(
+        limit_still_biting(Some("resets 9:10pm (Asia/Saigon)"), 20 * 60),
+        "20:00 mà mốc mở lại là 21:10 thì còn 70 phút nữa — vẫn đang bị chặn"
+    );
+}
+
+/// Đối chứng ngược, và là CHÍNH ca đo được: cùng dòng chữ ấy, đọc lúc 21:46 thì
+/// mốc 21:10 đã qua ⟹ vết cũ, không được coi là còn bị chặn.
+#[test]
+fn a_reset_mark_already_passed_is_only_an_old_line() {
+    assert!(
+        !limit_still_biting(Some("resets 9:10pm (Asia/Saigon)"), 21 * 60 + 46),
+        "mốc đã qua 36 phút mà vẫn đọc thành 'đang bị chặn' thì huba thôi bấm \
+         đúng lúc phiên gõ được trở lại"
+    );
+}
+
+/// Hạn mức TUẦN in NGÀY (`resets Sep 1`), không in đồng hồ ⟹ `minutes_until_reset`
+/// trả `None`. Fail-closed: coi như còn cắn, vì nó còn cắn thật, hàng ngày.
+#[test]
+fn a_weekly_limit_has_no_clock_and_stays_biting() {
+    assert!(limit_still_biting(Some("resets Sep 1"), 12 * 60));
+}
+
+/// Không có dòng nào (hoặc dòng rỗng) ⟹ không bị chặn. Ca này phải ĐÚNG, nếu
+/// không thì mọi phiên bình thường đều bị cái phanh mới khoá lại.
+#[test]
+fn no_limit_line_means_not_limited() {
+    assert!(!limit_still_biting(None, 12 * 60));
+    assert!(!limit_still_biting(Some("   "), 12 * 60));
 }
 
 /// Ô nhập trống hoặc chỉ toàn khoảng trắng thì không có gì để gửi.

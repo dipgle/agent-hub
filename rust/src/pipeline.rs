@@ -2467,12 +2467,43 @@ pub enum UnstickWhy {
     HasChoices,
     NotRealTty,
     HubOwnProbe,
-    /// Màn đang khai phiên bị chặn hạn mức ([`crate::sessions::LiveSession::limited`],
-    /// đọc từ `keys::session_limit_on_screen`). CLI không nhận input ở trạng
-    /// thái ấy, nên cú Enter nào cũng hụt — bấm là bắn vào chỗ đã biết trước
-    /// là không phản hồi.
+    /// Phiên đang bị chặn hạn mức THẬT SỰ — CLI không nhận input ở trạng thái
+    /// ấy, nên cú Enter nào cũng hụt; bấm là bắn vào chỗ đã biết trước là
+    /// không phản hồi.
+    ///
+    /// ⚠ "Thật sự" là phần quan trọng: chỗ gọi phải hỏi [`limit_still_biting`],
+    /// KHÔNG được đưa thẳng `LiveSession::limited.is_some()` vào đây — dòng
+    /// banner nằm lại dưới đáy màn sau khi hạn mức đã tự mở, và lấy sự có mặt
+    /// của nó làm cổng thì đúng lúc phiên gõ được trở lại là lúc huba thôi bấm.
     Limited,
     TooYoung(i64),
+}
+
+/// Dòng hạn mức đọc được trên màn CÒN CẮN, hay chỉ là vết cũ nằm lại?
+///
+/// 🔴 Phải hỏi câu này, không được lấy `limited.is_some()` làm câu trả lời. Đo
+/// 2026-09-09: phiên `702acdc7` mang `resets 9:10pm`, và tới **21:46 giờ máy**
+/// — 36 phút SAU mốc ấy — `limited` vẫn còn `Some`, vì một phiên đang bị chặn
+/// thì không in thêm gì, nên dòng banner nằm nguyên dưới đáy màn và
+/// [`crate::keys::session_limit_on_screen`] vẫn nhặt được nó.
+///
+/// Lấy `is_some()` làm cổng cho [`auto_unstick_box`] thì đúng cái phút hạn mức
+/// TỰ MỞ LẠI lại là phút huba thôi bấm — vá một vòng lặp vô ích bằng một cái
+/// khoá vĩnh viễn, tệ hơn cả lỗi ban đầu.
+///
+/// Cách phân biệt đã có sẵn, dùng lại nguyên si của [`auto_limit_why`]: cửa sổ
+/// hạn mức phiên là 5 giờ ([`LIMIT_WINDOW_MAX_MIN`] = 360 phút, chừa lệch), nên
+/// một mốc dạng ĐỒNG HỒ đọc ra xa hơn thế là một mốc **đã qua**. Còn đọc không
+/// ra đồng hồ (`resets Sep 1` — hạn mức TUẦN) thì fail-closed: coi như còn cắn,
+/// vì nó còn cắn thật, hàng ngày.
+pub fn limit_still_biting(limited: Option<&str>, now_min: u64) -> bool {
+    let Some(khi) = limited.map(str::trim).filter(|k| !k.is_empty()) else {
+        return false;
+    };
+    // Đọc: "CÒN cắn, trừ khi mốc đọc ra xa hơn cả cửa sổ hạn mức". Nhánh `_`
+    // gom hai ca cố ý: mốc còn ở phía trước, và mốc đọc KHÔNG ra đồng hồ (hạn
+    // mức TUẦN) — cả hai đều là còn cắn.
+    !matches!(minutes_until_reset(khi, now_min), Some(m) if m > LIMIT_WINDOW_MAX_MIN)
 }
 
 /// Phần THUẦN của [`auto_unstick_box`] — tách ra để bài kiểm với tới được mà
@@ -2606,6 +2637,13 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
     if let Ok(mut g) = seen.lock() {
         g.retain(|k, _| alive.contains(k.as_str()));
     }
+    // Giờ ĐỊA PHƯƠNG, cùng quy ước `auto_switch_on_limit` dùng cho
+    // `minutes_until_reset`: CLI in mốc mở lại theo giờ máy.
+    let now_min = {
+        use chrono::Timelike;
+        let t = chrono::Local::now();
+        t.hour() as u64 * 60 + t.minute() as u64
+    };
     for s in &live.sessions {
         // Chưa có chữ thì bỏ dấu vết cũ (nếu có) rồi thôi — không cần hỏi
         // `unstick_why` cho ca này, vì nó chỉ đọc lại đúng điều vừa kiểm.
@@ -2644,7 +2682,7 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
         let why = unstick_why(
             crate::sessions::is_real_tty(&s.tty),
             crate::sessions::is_hub_own_probe(s),
-            s.limited.is_some(),
+            limit_still_biting(s.limited.as_deref(), now_min),
             s.screen_choices,
             Some(text),
             stable_sec,

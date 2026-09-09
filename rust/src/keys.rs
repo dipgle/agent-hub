@@ -2799,10 +2799,99 @@ pub fn press_escape(window: i64) -> EscHow {
     }
 }
 
+/// Cú Enter ấy đi bằng đường nào — phím RỜI trước, byte sau.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EnterHow {
+    /// Phím rời qua [`crate::cgkeys`] — thứ TUI đọc như người ngồi bấm.
+    Bare,
+    /// Byte CR qua `do script`. TUI đọc một lượt ghi trọn gói như một lượt
+    /// **DÁN**, nên CR có thể thành NỘI DUNG thay vì thành cú gửi.
+    WrittenByte,
+    /// Không cú Enter nào tới nơi — và đây là một KẾT CỤC, không phải `Ok(())`.
+    Failed(String),
+}
+
+/// Phần THUẦN của [`press_enter`]: hai lượt gửi ra kết cục nào. Tách ra để bài
+/// kiểm với tới được mà không cần cửa sổ thật, và để cái mapping ấy chỉ có MỘT
+/// bản.
+pub fn enter_verdict(bare_err: Option<&str>, byte_err: Option<&str>) -> EnterHow {
+    match (bare_err, byte_err) {
+        (None, _) => EnterHow::Bare,
+        (Some(_), None) => EnterHow::WrittenByte,
+        (Some(a), Some(b)) => EnterHow::Failed(format!("hụt cả hai đường: {a} · {b}")),
+    }
+}
+
+/// Bấm Enter vào một cửa sổ — **phím rời trước**, byte chỉ là đường lùi.
+///
+/// 🔴 Cùng MỘT luật với [`press_escape`], ở cái cửa thứ ba. Chú thích của hàm
+/// ấy đã cảnh báo đúng chuyện này: luật "phím rời trước" viết cho `/close`
+/// 2026-08-30, không ai mang sang `/key`, nên bug quay lại ở cửa bên cạnh. Đây
+/// là lần thứ ba, và lần này có số:
+///
+/// Đo trên máy thật (log `hubd.err`, 08–10/09): `auto_unstick_box` bấm Enter
+/// bằng đường BYTE **31 lượt, 30 lượt đọc lại thấy chữ vẫn nằm nguyên trong ô**
+/// — trong đó 4 lượt cuối rơi vào ba phiên `limited = None`, tức không phải do
+/// hạn mức. Một trong ba (`projects-ef`, `ttys000`) mang đúng một câu 55 ký tự
+/// trong ô nhập **từ 08/09 tới 10/09**, không cú Enter nào đẩy nổi. Cùng khoảng
+/// ấy, đường phím RỜI có 31 lượt ĂN THẬT ở hai cửa khác (`trust_dialog_answered`
+/// 24 · `free_text_opened_by_bare_key` 7).
+///
+/// Vì sao byte hụt: `do_script` ghi cả gói một lần, TUI đọc thành một lượt DÁN,
+/// và trong lượt dán thì CR là một ký tự xuống dòng của nội dung — đúng thứ
+/// `CLAUDE.md` §13 đã ghi cho lượt gõ chữ, chỉ chưa ai đọc nó cho lượt Enter
+/// trần.
+///
+/// Đường lùi có ĐIỀU KIỆN, chép đúng của `press_escape`: hụt phím rời thì chỉ
+/// được ghi byte khi màn KHÔNG có hộp chọn — ở đó Enter là CHỐT một lựa chọn,
+/// thứ không lùi lại được. "Không đọc được màn" tính là CÓ hộp chọn.
+///
+/// Tiêu điểm: [`send_bare`] phải đưa cửa sổ ra trước mới gửi được phím, nên hàm
+/// này **trả lại cửa sổ đang đứng trước** sau khi gửi. Không trả là mỗi lượt
+/// huba tự chữa một ô nhập lại giật màn hình của chủ máy một cái.
+pub fn press_enter(window: i64) -> EnterHow {
+    let truoc = front_window().ok().flatten();
+    let bare_err = send_bare(window, &["enter".to_string()])
+        .err()
+        .map(|e| e.to_string());
+    let byte_err = match &bare_err {
+        None => None,
+        Some(e) => {
+            let co_hop_chon = screen_text(window)
+                .map(|s| !parse_choices(&s).is_empty())
+                .unwrap_or(true);
+            if co_hop_chon {
+                Some(format!(
+                    "màn đang có hộp chọn (hoặc không đọc được) ⟹ KHÔNG ghi byte, \
+                     vì CR đi kèm sẽ chốt hộ một lựa chọn (hụt phím rời: {e})"
+                ))
+            } else {
+                press(window, "enter").err().map(|e2| e2.to_string())
+            }
+        }
+    };
+    let how = enter_verdict(bare_err.as_deref(), byte_err.as_deref());
+    if let Some(w) = truoc {
+        if w != window {
+            if let Err(e) = focus_window(w) {
+                crate::logging::warn(
+                    "focus_restore_failed",
+                    serde_json::json!({ "window": w, "err": e.to_string(),
+                            "effect": "cửa sổ đang đứng trước không được trả lại chỗ cũ" }),
+                );
+            }
+        }
+    }
+    how
+}
+
 /// Một phím điều khiển: `up` `down` `enter` `esc` `tab` `space`, hoặc `1`–`9`.
 ///
 /// Hộp chọn của `claude` đi bằng mũi tên + Enter, và gửi chữ "xuống" vào đó thì
 /// nó gõ ra chữ chứ không di chuyển.
+///
+/// ⚠ Đây là đường BYTE (`do script`), không phải phím rời. Cần một cú Enter
+/// THẬT thì gọi [`press_enter`] — xem chú thích ở đó cho số đo 30/31 lượt hụt.
 pub fn press(window: i64, keyname: &str) -> Result<()> {
     press_writes(window, &[vec![keyname.to_string()]])
 }

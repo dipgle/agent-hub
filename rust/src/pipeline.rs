@@ -2713,16 +2713,20 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                     "why": "chữ đứng im trong ô nhập, không phải huba gõ (SendMessage giữa \
                             phiên, hay nguồn khác) — bấm Enter bù" }),
         );
-        if let Err(e) = crate::keys::press(window, "enter") {
+        // Phím RỜI trước, byte chỉ là đường lùi — `keys::press_enter` giữ cả
+        // luật ấy lẫn số đo 30/31 lượt hụt của đường byte.
+        let how = crate::keys::press_enter(window);
+        if let crate::keys::EnterHow::Failed(vi_sao) = &how {
             logging::warn(
                 "auto_unstick_box_failed",
-                json!({ "session": s.session_id, "err": e.to_string() }),
+                json!({ "session": s.session_id, "err": vi_sao }),
             );
             // Không gửi được thì cũng là một lượt hụt — đếm nó, hoặc cái trần
             // không bao giờ tới nơi ở đúng ca hỏng nhất.
             bump_stuck_try(seen, &s.session_id);
             continue;
         }
+        let duong = format!("{how:?}");
         // Cú bấm mới chỉ ĐẨY BYTE tới tab. Đọc lại ô nhập rồi mới nói.
         std::thread::sleep(std::time::Duration::from_millis(STUCK_BOX_SETTLE_MS));
         let done = match crate::keys::screen_text(window) {
@@ -2741,6 +2745,7 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                 logging::info(
                     "auto_unstick_box_sent",
                     json!({ "session": s.session_id, "name": s.name,
+                            "duong": duong,
                             "text_len": text.chars().count() }),
                 );
                 if let Ok(mut g) = seen.lock() {
@@ -2756,7 +2761,7 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                     "auto_unstick_box_stuck",
                     json!({ "session": s.session_id, "name": s.name,
                             "tries": tries, "max": STUCK_BOX_MAX_TRIES,
-                            "verified": done == UnstickDone::StillThere,
+                            "verified": done == UnstickDone::StillThere, "duong": duong,
                             "text_len": text.chars().count(),
                             "effect": "bấm Enter xong chữ VẪN nằm trong ô nhập — cú bấm không ăn" }),
                 );

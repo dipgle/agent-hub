@@ -741,6 +741,25 @@ pub fn callback_to_command(data: &str) -> Option<String> {
         }
         return Some(format!("/session {sid}"));
     }
+    // `ho:<acc>:<id>` — nút "chuyển tài khoản, giữ nguyên việc" trên tin hết hạn
+    // mức (2026-09-09).
+    //
+    // 🔴 Hà: *"Tại sao mấy tin này soạn không bao thành link 1 click để chạy"* ·
+    // *"Rất nhiều tin kiểu như vậy"*. Tin ấy đã mang sẵn câu trả lời
+    // (`/handover -a acc3 <id>`) mà chỉ là CHỮ, nên chủ máy phải gõ tay đúng lúc
+    // đang ở xa — mà để nguyên dạng chữ thì không có đường nào thành 1-click:
+    // Telegram chỉ nhận diện token `/handover`, bấm vào là gửi lệnh RỤNG HẾT
+    // tham số, tức tệ hơn không có nút.
+    //
+    // Đi đúng route `/handover -a` sẵn có, không đẻ lối riêng — cùng lý lẽ với
+    // `sess:` và `key:`.
+    if let Some(rest) = data.strip_prefix("ho:") {
+        let (acc, sid) = rest.split_once(':')?;
+        if acc.is_empty() || sid.is_empty() {
+            return None;
+        }
+        return Some(format!("/handover -a {acc} {sid}"));
+    }
     // `close:<id>` — nút ⏹ ngay trên hàng của cửa sổ trong `/terminal`.
     //
     // 🔴 Hà 2026-08-16: *"danh sách terminal thêm nút close để đóng nhanh"*.

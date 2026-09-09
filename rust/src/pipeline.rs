@@ -1369,6 +1369,30 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 quick.push(b);
             }
         }
+        // 🔴 Lệnh nằm TRONG CHÍNH TIN HẾT HẠN MỨC cũng phải bấm chạy được —
+        // Hà 2026-09-09: *"Tại sao mấy tin này soạn không bao thành link 1 click
+        // để chạy"* · *"Rất nhiều tin kiểu như vậy"*.
+        //
+        // Tin ấy đã mang sẵn câu trả lời (`/handover -a acc3 <id>`, dựng ở
+        // `watch.rs`) nhưng chỉ là CHỮ, nên đúng lúc chủ máy ở xa thì anh phải gõ
+        // tay một dòng có tham số. Lớp nút cũ chỉ nối cho hai ca: bảng hỏi
+        // (`key:`/`pick:`) và đường vào phiên (`sess:`) — còn ca "lệnh của chính
+        // huba" thì chưa ai nối. Cơ chế `run:` sẵn có KHÔNG nhận nó, và đúng như
+        // vậy: `run:` gõ lệnh VÀO PHIÊN, mà `/handover` là lệnh của bot, hơn nữa
+        // phiên ấy đang bị chặn nên gõ vào cũng vô nghĩa.
+        //
+        // Chỉ gắn khi có tài khoản gợi ý THẬT: nhánh `None` của `watch.rs` cố ý
+        // in `<tài khoản>` cho chủ máy tự chọn, và một cái nút không hỏi được thì
+        // không có gì để điền vào đó.
+        if let crate::watch::Change::Limited {
+            goi_y: Some(acc), ..
+        } = &c
+        {
+            // Id NGẮN, đúng bằng thứ câu lệnh trong tin đang hiện: nút phải làm
+            // đúng cái nó nói, không phải một biến thể khác.
+            let ngan: String = id.chars().take(8).collect();
+            quick.push((format!("🔄 Chuyển sang {acc}"), format!("ho:{acc}:{ngan}")));
+        }
         match (buttons, crate::telegram::inbox()) {
             (Some((opts, multi, rest)), Some(tg)) => {
                 // 🔴 ☑ NGAY TẠI DÒNG LỰA CHỌN — Hà 2026-08-17, ảnh một tin tự

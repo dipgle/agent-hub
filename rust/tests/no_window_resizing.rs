@@ -31,6 +31,38 @@ fn dem_lenh_doi_co(text: &str) -> usize {
     SETTERS.iter().map(|s| text.matches(s).count()).sum()
 }
 
+/// Câu mở đầu kịch bản AppleScript — dấu nhận biết bản `open_window` THẬT.
+const NEO_APPLESCRIPT: &str = "tell application \"Terminal\"";
+
+/// Thân của `open_window` bản AppleScript (macOS) — bản DUY NHẤT dựng cửa sổ
+/// Terminal thật, nên cũng là bản duy nhất mà luật "chỉ được đổi cỡ lúc dựng"
+/// nói tới.
+///
+/// Tách thành hàm thuần để ĐỐI CHỨNG NGƯỢC với tới được: bài kiểm cuối tệp bơm
+/// vào đây một tệp giả có shim đứng TRƯỚC và đòi nó vẫn nhặt đúng bản
+/// AppleScript. Không có bước ấy thì một hàm luôn trả về hàm đầu tiên cũng làm
+/// cả tệp này xanh — đúng cái bẫy vừa trả giá.
+///
+/// `None` = không tìm thấy ⟹ chỗ gọi phải ĐỎ. "Không đo được" là một trạng thái
+/// riêng, không được trộn vào "sạch".
+fn than_open_window_applescript(text: &str) -> Option<&str> {
+    let mut at = 0usize;
+    while let Some(i) = text[at..].find("pub fn open_window") {
+        let dau = at + i;
+        // Thân hàm = từ đầu `open_window` tới `pub fn` kế tiếp.
+        let sau = text[dau + 1..]
+            .find("\npub fn ")
+            .map(|k| dau + 1 + k)
+            .unwrap_or(text.len());
+        let than = &text[dau..sau];
+        if than.contains(NEO_APPLESCRIPT) {
+            return Some(than);
+        }
+        at = dau + 1;
+    }
+    None
+}
+
 fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
@@ -102,16 +134,20 @@ fn doi_co_chi_duoc_nam_trong_open_window() {
         text.contains("contents of selected tab"),
         "keys.rs không còn câu AppleScript đọc màn — phép quét đang nhìn nhầm chỗ"
     );
-    let dau = text
-        .find("pub fn open_window")
-        .expect("keys.rs phải còn `open_window` — nó là chỗ dựng cửa sổ mới");
-
-    // Thân hàm = từ đầu `open_window` tới `pub fn` kế tiếp.
-    let sau = text[dau + 1..]
-        .find("\npub fn ")
-        .map(|i| dau + 1 + i)
-        .unwrap_or(text.len());
-    let than = &text[dau..sau];
+    // 🔴 KHÔNG lấy `open_window` ĐẦU TIÊN — vá 2026-09-09.
+    //
+    // Từ `b94e5f8` (bản đóng gói Windows), `keys.rs` có HAI hàm cùng tên: shim
+    // `#[cfg(windows)]` ở ĐẦU tệp, thân chỉ gọi sang `keys_win` và không có câu
+    // AppleScript nào; bản `#[cfg(target_os = "macos")]` thật thì nằm giữa tệp.
+    // Cổng cũ neo theo VỊ TRÍ nên nó lặng lẽ đổi mục tiêu sang cái shim, đếm ra
+    // 0 rồi ĐỎ — đỏ vì mất mục tiêu, trong khi luật không hề bị vi phạm. Một
+    // phép đo đỏ sai chỗ còn tệ hơn xanh giả: nó bắt người đọc đi sửa đúng cái
+    // đang chạy đúng.
+    //
+    // Neo theo NỘI DUNG: thân nào mang câu AppleScript dựng cửa sổ thì đó mới là
+    // chỗ luật này nói tới. Thêm một hàm cùng tên nữa cũng không xê dịch được.
+    let than = than_open_window_applescript(&text)
+        .expect("keys.rs phải còn `open_window` bản AppleScript — nó là chỗ dựng cửa sổ mới");
 
     let trong_ham = dem_lenh_doi_co(than);
     let ca_tep = dem_lenh_doi_co(&text);
@@ -200,5 +236,56 @@ fn cua_so_moi_mo_ra_da_het_co() {
         rows > 24 && cols > 80,
         "cửa sổ mới ra {rows}×{cols} — vẫn là cỡ mặc định, tức lượt xin hết cỡ trong \
          `open_window` không ăn"
+    );
+}
+
+// ───────── đối chứng ngược cho CÁCH NEO (thêm 2026-09-09) ─────────
+//
+// Cổng này từng ĐỎ SAI CHỖ: `b94e5f8` chèn một `pub fn open_window` thứ hai
+// (shim Windows, thân rỗng) lên TRƯỚC bản AppleScript, và phép neo theo vị trí
+// im lặng đổi mục tiêu — đếm ra 0 rồi báo "thiếu lệnh đổi cỡ" trong khi nguồn
+// vẫn đúng. Hai bài dưới đây khoá đúng hình dạng ấy lại.
+
+/// Tệp giả dựng đúng thứ tự đã trả giá: shim đứng TRƯỚC, bản thật đứng SAU.
+const TEP_GIA: &str = r#"
+#[cfg(windows)]
+pub fn open_window(cmd: &str) -> Result<(i64, String)> {
+    crate::keys_win::open_window(cmd)
+}
+#[cfg(target_os = "macos")]
+pub fn open_window(cmd: &str) -> Result<(i64, String)> {
+    let script = r"tell application "Terminal"
+    set number of rows of w to 200
+    set number of columns of w to 500
+    end tell";
+    run(script)
+}
+pub fn sau_do() {}
+"#;
+
+/// Cấy ĐÚNG ca hỏng: có shim đứng trước ⇒ vẫn phải nhặt bản AppleScript.
+#[test]
+fn neo_bo_qua_shim_dung_truoc() {
+    let than = than_open_window_applescript(TEP_GIA).expect("phải tìm ra bản AppleScript");
+    assert!(
+        than.contains(NEO_APPLESCRIPT),
+        "nhặt nhầm thân — đây đúng là lỗi 08/09:\n{than}"
+    );
+    assert_eq!(
+        dem_lenh_doi_co(than),
+        2,
+        "thân AppleScript phải còn đủ hai chiều; nhặt nhầm shim thì ra 0"
+    );
+}
+
+/// Chiều còn lại: KHÔNG có bản AppleScript nào ⇒ `None` ⇒ chỗ gọi ĐỎ. Cấm trả
+/// về một thân bất kỳ rồi để cổng đọc thành "sạch".
+#[test]
+fn khong_co_ban_applescript_thi_khong_do_duoc() {
+    let chi_co_shim =
+        "#[cfg(windows)]\npub fn open_window(c: &str) {\n    keys_win::open_window(c)\n}\n";
+    assert!(
+        than_open_window_applescript(chi_co_shim).is_none(),
+        "không có bản AppleScript thì phải trả None, không được nhặt bừa cái shim"
     );
 }

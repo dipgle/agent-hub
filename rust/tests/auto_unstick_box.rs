@@ -10,7 +10,9 @@
 //! cổng phải có đối chứng ngược — cấy ca hỏng ⇒ phải nổ (`Do`); cấy ca lành ⇒
 //! phải KHÔNG nổ, và phải nói ĐÚNG vì sao.
 
-use huba::pipeline::{limit_still_biting, unstick_done, unstick_why, UnstickDone, UnstickWhy};
+use huba::pipeline::{
+    limit_still_biting, stuck_next, unstick_done, unstick_why, StuckNext, UnstickDone, UnstickWhy,
+};
 
 /// Ngưỡng ổn định thật của mã (`STUCK_BOX_STABLE_SEC` = 18s, riêng tư trong
 /// `pipeline.rs`) — chép lại đây, cùng cách `auto_limit_switch.rs` chọn số đủ
@@ -252,5 +254,53 @@ fn different_text_in_the_box_means_the_old_one_left() {
         unstick_done("tiếp tục quét việc", Some("câu chủ máy vừa gõ")),
         UnstickDone::Sent,
         "chữ cũ không còn ở đó nữa — đừng đếm nó là một lượt bấm hụt"
+    );
+}
+
+// ────────── sau cú Enter mà chữ y nguyên: chẩn đoán, không phải bắn tiếp ─────
+//
+// 🔴 Đo 09–10/09: 31 lượt bấm, 30 lượt chữ y nguyên. Không phải sai đường gửi —
+// `do script` vẫn đẩy đúng một `^M` tới tty (đo bằng cửa sổ nháp chạy
+// `cat -vet`, kể cả lúc màn hình khoá). Chữ ấy KHÔNG nằm trong ô nhập: ghi
+// `xin chao` vào cửa sổ `projects-ef` thì lượt gửi đi là đúng `❯ xin chao`, còn
+// câu 55 ký tự "nằm trong ô" từ 08/09 biến mất mà không được gửi, và nhật ký
+// `45101666-….jsonl` không có nó ở bất kỳ lượt nhập nào ⟹ nó là GỢI Ý MỜ.
+
+#[test]
+fn an_unchanged_box_on_an_idle_session_is_a_ghost() {
+    assert_eq!(
+        stuck_next(None, false),
+        StuckNext::StopGhost,
+        "Enter đã đo xong: không bị chặn hạn mức, không đang chạy, mà màn không \
+         đổi ⟹ ô rỗng thật. Bắn tiếp là bắn vào chỗ không có gì để gửi"
+    );
+}
+
+/// Đối chứng ngược thứ nhất: phiên ĐANG CHẠY thì "màn không đổi" chưa nói được
+/// gì — TUI đang vẽ dở, chữ có thể đã vào hàng chờ. Ca này phải còn thử lại.
+#[test]
+fn a_working_session_still_gets_its_retries() {
+    assert_eq!(stuck_next(None, true), StuckNext::Retry);
+}
+
+/// Đối chứng ngược thứ hai: bị chặn hạn mức là một chẩn đoán KHÁC (và cổng
+/// `UnstickWhy::Limited` đã chặn từ trước) — không được đọc thành gợi ý mờ.
+#[test]
+fn a_limited_session_is_not_a_ghost() {
+    assert_eq!(
+        stuck_next(Some("resets 10:30pm (Asia/Saigon)"), false),
+        StuckNext::Retry
+    );
+    assert_eq!(stuck_next(Some("resets Sep 1"), true), StuckNext::Retry);
+}
+
+/// Và ba đầu vào ấy phải cho ra ĐÚNG hai kết cục phân biệt được — một hàm trả
+/// hằng số làm bài đầu xanh y hệt.
+#[test]
+fn the_ghost_call_is_not_a_constant() {
+    assert_ne!(stuck_next(None, false), stuck_next(None, true));
+    assert_ne!(
+        stuck_next(None, false),
+        stuck_next(Some("resets 1pm"), false)
     );
 }

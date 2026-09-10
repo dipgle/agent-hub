@@ -130,3 +130,21 @@ fn the_call_site_probe_can_see_a_bare_byte_press() {
     // Và phép cắt phải DỪNG ở hàm kế tiếp, không nuốt cả tệp.
     assert!(!than.contains("fn khac"), "cắt lố sang hàm sau: {than}");
 }
+
+/// Và chẩn đoán "gợi ý mờ" cũng phải được NỐI vào, không chỉ tồn tại: hàm thuần
+/// `stuck_next` đúng mà thân `auto_unstick_box` không hỏi nó thì ngoài kia huba
+/// vẫn bắn nốt hai lượt còn lại của cái trần vào một ô rỗng.
+#[test]
+fn the_ghost_diagnosis_is_wired_into_the_loop() {
+    let src = nguon_pipeline();
+    let than = than_auto_unstick_box(&src).expect("cắt được thân `auto_unstick_box`");
+    assert!(
+        than.contains("stuck_next("),
+        "thân `auto_unstick_box` phải hỏi `stuck_next` sau khi Enter không đổi được màn:\n{than}"
+    );
+    assert!(
+        than.contains("stop_stuck_tries("),
+        "có chẩn đoán gợi ý mờ mà không DỪNG lượt bấm thì chẩn đoán ấy không đổi \
+         được trạng thái nào:\n{than}"
+    );
+}

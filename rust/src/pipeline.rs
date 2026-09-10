@@ -2765,6 +2765,27 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                             "text_len": text.chars().count(),
                             "effect": "bấm Enter xong chữ VẪN nằm trong ô nhập — cú bấm không ăn" }),
                 );
+                // Cú Enter vừa rồi là một PHÉP ĐO, không chỉ một lượt hụt: màn
+                // KHÔNG đổi mà phiên không bị chặn hạn mức, cũng không đang
+                // chạy ⟹ ô nhập rỗng thật, chữ đang thấy là GỢI Ý MỜ. Đã có
+                // bằng chứng ấy thì thôi bấm — bắn nốt hai lượt còn lại của cái
+                // trần là bắn vào chỗ đã biết là không có gì để gửi.
+                if done == UnstickDone::StillThere
+                    && stuck_next(s.limited.as_deref(), s.working) == StuckNext::StopGhost
+                {
+                    stop_stuck_tries(seen, &s.session_id);
+                    logging::warn(
+                        "auto_unstick_box_ghost",
+                        json!({ "session": s.session_id, "name": s.name,
+                                "text_len": text.chars().count(),
+                                "effect": "chữ trong ô là GỢI Ý MỜ của TUI, ô nhập rỗng thật — \
+                                           huba thôi bấm. Muốn gửi câu ấy thì `/right` để nhận \
+                                           gợi ý rồi `/enter`",
+                                "why": "Enter đã đo: màn không đổi, phiên không bị chặn hạn mức \
+                                        và không đang chạy" }),
+                    );
+                    continue;
+                }
                 if tries >= STUCK_BOX_MAX_TRIES {
                     logging::warn(
                         "auto_unstick_box_gave_up",
@@ -2775,6 +2796,60 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                     );
                 }
             }
+        }
+    }
+}
+
+/// Sau một cú Enter mà chữ KHÔNG nhúc nhích: lượt sau nên làm gì.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StuckNext {
+    /// Còn lý do để thử lại (tới trần) — phiên đang chạy, hoặc không đo được.
+    Retry,
+    /// Chữ đang thấy là **gợi ý mờ**, ô nhập rỗng thật ⟹ THÔI bấm cho chữ này.
+    StopGhost,
+}
+
+/// Phần THUẦN của phán quyết ấy.
+///
+/// 🔴 Vì sao phải có, đo 2026-09-09/10 trên máy thật: `auto_unstick_box` bấm
+/// Enter **31 lượt, 30 lượt đọc lại thấy chữ y nguyên**. Không phải sai đường
+/// gửi — đo thẳng thì `do script` VẪN đẩy đúng một `^M` tới tty kể cả lúc màn
+/// hình khoá (cửa sổ nháp chạy `cat -vet`: `abc^M` rồi `^M`), và hai lượt ghi
+/// khác của cùng đường ấy gửi được thật.
+///
+/// Chữ ấy **không nằm trong ô nhập**. Phiên `projects-ef` mang một câu 55 ký tự
+/// suốt từ 08/09; ghi `xin chao` vào cửa sổ đó thì lượt gửi đi là ĐÚNG
+/// `❯ xin chao` — câu 55 ký tự biến mất mà không được gửi, và nhật ký
+/// `45101666-…jsonl` không có nó ở bất kỳ lượt nhập nào. Nó là **gợi ý mờ** của
+/// TUI: nhìn thì có chữ, bộ đệm nhập thì rỗng. Enter vào ô rỗng không đổi gì —
+/// nên "cú bấm không ăn" là một chẩn đoán SAI của phép đo cũ.
+///
+/// Luật thứ tự đã có sẵn trong repo (`keys::ghost_verdict`, Hà 2026-08-16:
+/// *"phải bấm nút right trước thì nó mới điền text theo gợi ý"*): **Enter đi
+/// trước như một PHÉP ĐO** — màn không đổi ⟹ ô rỗng thật. Chỗ này chỉ đọc nốt
+/// kết luận ấy: đã có bằng chứng ô rỗng thì thôi bấm, đừng bắn nốt hai lượt còn
+/// lại của cái trần vào một chỗ đã biết là không có gì để gửi.
+///
+/// 🔴 Và CỐ Ý KHÔNG tự bấm `→` để nhận gợi ý rồi gửi hộ: câu ấy là bản nháp chủ
+/// máy **đã chọn không gửi** (có khi từ nhiều ngày trước). Gửi hộ là một hành
+/// động không lùi được, nhân danh người khác. huba nói ra, và `/right` +
+/// `/enter` vẫn nằm sẵn trong tay chủ máy.
+pub fn stuck_next(limited: Option<&str>, working: bool) -> StuckNext {
+    match crate::keys::no_effect_reason(limited, working, None) {
+        crate::keys::NoEffect::Ghost => StuckNext::StopGhost,
+        _ => StuckNext::Retry,
+    }
+}
+
+/// Đặt số lượt hụt lên TRẦN — dùng khi đã có chẩn đoán chắc chắn, để lượt sau
+/// không bấm nữa mà không cần thêm hai lượt bắn mù.
+fn stop_stuck_tries(
+    seen: &std::sync::Mutex<std::collections::HashMap<String, StuckMark>>,
+    session_id: &str,
+) {
+    if let Ok(mut g) = seen.lock() {
+        if let Some(m) = g.get_mut(session_id) {
+            m.tries = STUCK_BOX_MAX_TRIES;
         }
     }
 }

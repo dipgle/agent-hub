@@ -956,6 +956,71 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     // tắt trong 8 giây.
     let (changes, next) =
         crate::watch::changes(&prev, live, chrono::Utc::now().timestamp(), &snap.blind);
+
+    // TERMINAL.APP CHẾT THÌ MỌI PHIÊN TRONG NÓ CHẾT THEO — và đó là MỘT tin,
+    // không phải N tin. Xem `watch::terminal_restart_text` cho ca 10/09.
+    //
+    // Ghi pid mới TRƯỚC khi nói, cùng lý do với `save_watch_book`: nói xong mới
+    // ghi mà sập giữa chừng thì vòng sau nói lại y hệt.
+    let pid_truoc = db
+        .cursor_or_log(TERMINAL_PID_KEY)
+        .and_then(|v| v.trim().parse::<u32>().ok());
+    if let Some(p) = snap.terminal_pid {
+        if let Err(e) = db.set_cursor(TERMINAL_PID_KEY, &p.to_string()) {
+            logging::error("terminal_pid_save_failed", json!({ "err": e.to_string() }));
+        }
+    }
+    let fate = crate::watch::terminal_fate(pid_truoc, snap.terminal_pid);
+
+    // Phiên đã tắt: tên NÀO thuộc về đợt này. Chỉ gom khi Terminal thật sự khởi
+    // động lại — không thì đây là một danh sách rỗng và vòng dưới chạy y như cũ.
+    let mut cuon_theo: BTreeMap<String, (String, bool)> = BTreeMap::new();
+    if let crate::watch::TerminalFate::KhoiDongLai { truoc, sau } = fate {
+        for c in &changes {
+            if let crate::watch::Change::Ended {
+                id,
+                name,
+                was_working,
+                tty,
+                kind,
+                ..
+            } = c
+            {
+                // Phiên NỀN không sống trong cửa sổ nào, nên Terminal chết không
+                // giết nó — gán cớ này cho nó là nói sai. Cùng phép thử mà tin
+                // lẻ đang dùng để chọn giữa "tắt hẳn" và "cửa sổ còn mở".
+                if kind == "background" || !crate::sessions::is_real_tty(tty) {
+                    continue;
+                }
+                cuon_theo.insert(id.clone(), (name.clone(), *was_working));
+            }
+        }
+        logging::info(
+            "terminal_restarted",
+            json!({ "pid_truoc": truoc, "pid_sau": sau,
+                    "phien_cuon_theo": cuon_theo.len(),
+                    "why": "pid Terminal.app đổi giữa hai vòng ⟹ mọi cửa sổ của vòng trước đã đi theo nó" }),
+        );
+        // pid ĐỔI mà không phiên nào tắt là chuyện thường (chủ máy thoát rồi mở
+        // lại Terminal lúc rảnh) — im, và cửa này là chỗ giữ cho nó im.
+        if !cuon_theo.is_empty() {
+            let mut dang_cham: Vec<String> = Vec::new();
+            let mut con_lai: Vec<String> = Vec::new();
+            for (ten, working) in cuon_theo.values() {
+                if *working {
+                    dang_cham.push(ten.clone());
+                } else {
+                    con_lai.push(ten.clone());
+                }
+            }
+            let text = crate::watch::terminal_restart_text(truoc, sau, &dang_cham, &con_lai);
+            logging::info("session_change", json!({ "text": text }));
+            if let Err(e) = crate::confirm::tell(cfg, &text) {
+                logging::error("session_change_telegram_failed", json!({ "err": e }));
+            }
+        }
+    }
+
     // Phiên đang theo — để biết tin nào cần kèm nút "vào phiên".
     let focused = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
     // Phiên do CHÍNH huba đóng sổ thì cái chết của nó KHÔNG phải tin.
@@ -1054,6 +1119,27 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 "session_end_muted",
                 json!({ "session": id,
                         "why": "huba vừa tự đóng sổ phiên này — cái chết của nó là kế hoạch" }),
+            );
+            continue;
+        }
+
+        // …và phiên bị CUỐN THEO cú khởi động lại của Terminal.app: đợt này đã
+        // có đúng MỘT tin nói cả nguyên nhân lẫn danh sách (ở đầu hàm). Mười ba
+        // tin lẻ chỉ dìm cái tin ấy xuống, đúng thứ Hà đã bắt hai lần rồi
+        // ("Đóng 1 phiên mà lắm thông báo thế", 2026-08-13).
+        //
+        // Vẫn GHI SỔ trước khi im — `remember_ended` là thứ duy nhất giữ `cwd`
+        // và tài khoản lại sau khi cuốn theo dõi đã bỏ hàng này, tức là thứ cho
+        // phép hỏi tiếp về một phiên đã chết. Im ở cái loa không được kéo theo
+        // im ở cuốn sổ.
+        if cuon_theo.contains_key(&id) {
+            if let Some(m) = prev.get(&id) {
+                remember_ended(db, &id, m, chrono::Utc::now().timestamp());
+            }
+            logging::info(
+                "session_end_muted",
+                json!({ "session": id,
+                        "why": "Terminal.app khởi động lại — đã nói một tin chung cho cả đợt" }),
             );
             continue;
         }
@@ -1554,6 +1640,15 @@ pub fn cmd_report(code: Option<i32>, timed_out: bool, out: &str, err: &str, ms: 
 /// Khác một chỗ: `STOPPED_KEY` chỉ nhớ phiên do CHÍNH huba dừng, còn sổ này nhớ
 /// mọi phiên vừa rời danh sách, vì thứ Hà hỏi là phiên anh tự đóng.
 pub const ENDED_KEY: &str = "ended:recent";
+
+/// PID của Terminal.app ở vòng TRƯỚC — vế còn lại của `watch::terminal_fate`.
+///
+/// Một con số, không phải một cấu trúc, và đó là chủ ý: thứ duy nhất cần so là
+/// "có còn là cùng một tiến trình không". Sổ trống (bản mới cài, hoặc vòng đầu
+/// sau khi hubd khởi động) ⟹ `None` ⟹ `ChuaDoDuoc` ⟹ **im** — vòng đầu tiên
+/// không bao giờ được phép kết luận Terminal vừa chết, cùng luật với
+/// `watch_book_usable`.
+pub const TERMINAL_PID_KEY: &str = "terminal:pid";
 
 /// Giữ bao lâu. Đủ dài cho "phiên vừa tắt lúc nãy", đủ ngắn để `/ask` không âm
 /// thầm chạy trên một phiên của tuần trước khi con trỏ bị bỏ quên.

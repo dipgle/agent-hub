@@ -418,6 +418,27 @@ pub struct SessionsSnapshot {
     /// nó. Xem `watch::Mark::a`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blind: Vec<String>,
+    /// PID của Terminal.app tại ĐÚNG khoảnh khắc của ảnh chụp này.
+    ///
+    /// 🔴 Sinh ra từ sự cố 2026-09-10 10:03:57. Terminal.app (chạy liên tục từ
+    /// 30/08) bị kernel giết — `EXC_BREAKPOINT` / `PAC_EXCEPTION` ngay trong
+    /// `aeProcessAppleEvent` — và **13 phiên chết cùng nó trong một vòng**
+    /// (`sessions_snapshot_ms` 13 → 0 giữa 10:03:57 và 10:04:02). huba bắn 13
+    /// tin "⚫ … đã tắt", không tin nào nói vì sao, nên Hà phải hỏi *"Máy vừa
+    /// bị sao mà thoát hết cli"* — trong khi chính huba đã ghi `terminal_alive:
+    /// false` năm giây trước đó. Dữ kiện có sẵn, chỉ chưa ai nối vào cái loa.
+    ///
+    /// Đo bằng `pgrep`, KHÔNG bằng AppleEvent: hỏi Terminal bằng AppleEvent lúc
+    /// Terminal đang chết thì câu hỏi ngã cùng lý do với thứ nó điều tra.
+    /// `None` = **chưa đo được**, và nó là trạng thái RIÊNG — xem
+    /// `watch::terminal_fate`, chỗ duy nhất được kết luận từ hai giá trị này.
+    ///
+    /// Đo ở đây chứ không ở `announce_changes` vì cùng một lý do `ps` và
+    /// `terminal_screens` được đọc một lượt cho cả ảnh chụp: mọi hàng phải được
+    /// chấm trên CÙNG một khoảnh khắc. Hỏi muộn hơn thì Terminal có thể đã khởi
+    /// động lại SAU lúc đếm phiên, và cái loa sẽ gán một cái cớ vào nhầm vòng.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_pid: Option<u32>,
 }
 
 /// Phiên khác đang chiếm đúng cửa sổ (tty) của phiên vừa tắt — nếu có.
@@ -3827,6 +3848,15 @@ fn since_probe_ok_sec() -> Option<u64> {
 /// cái nó đang điều tra, và trả về một dấu hỏi thứ hai thay vì một dữ kiện.
 /// `None` = không chạy nổi `pgrep`, và KHÔNG được đọc thành "đã chết".
 fn terminal_process_alive() -> Option<bool> {
+    // `None` ở đây vẫn là "không hỏi được", KHÔNG phải "đã chết" — khác hẳn
+    // `Some(false)`. `terminal_pid` gộp hai ca ấy vì nó chỉ cần một con số;
+    // câu hỏi này thì không được gộp, nên nó đọc thẳng `pgrep_terminal`.
+    Some(!pgrep_terminal()?.trim().is_empty())
+}
+
+/// Một lượt `pgrep -x Terminal`. `None` = KHÔNG hỏi được (hết giờ, hoặc không
+/// spawn nổi) — cố ý khác với `Some("")` là hỏi được và Terminal không chạy.
+fn pgrep_terminal() -> Option<String> {
     let out = crate::exec::run(
         "pgrep",
         &["-x", "Terminal"],
@@ -3839,7 +3869,26 @@ fn terminal_process_alive() -> Option<bool> {
     if out.timed_out {
         return None;
     }
-    Some(!out.stdout.trim().is_empty())
+    Some(out.stdout)
+}
+
+/// PID của Terminal.app — con số mà `watch::terminal_fate` so giữa hai vòng.
+///
+/// `None` gộp ba ca thành một, cố ý: không hỏi được · Terminal không chạy ·
+/// nhiều tiến trình `Terminal` cùng lúc. Cả ba đều dẫn tới cùng một kết luận
+/// duy nhất được phép rút ra — **chưa đo được, đừng nói gì** — nên tách chúng ở
+/// đây chỉ đẻ thêm nhánh mà không đẻ thêm hành động. Ca "nhiều tiến trình" là
+/// thật: `pgrep` in mỗi pid một dòng, và một bản `Terminal` thứ hai (hoặc một
+/// tiến trình trùng tên) sẽ làm con số này nhảy qua nhảy lại giữa hai vòng —
+/// đúng hình dạng đẻ ra một lời báo động sai mỗi hai phút.
+pub fn terminal_pid() -> Option<u32> {
+    let out = pgrep_terminal()?;
+    let mut lines = out.split_whitespace().filter(|l| !l.is_empty());
+    let first = lines.next()?.parse::<u32>().ok()?;
+    if lines.next().is_some() {
+        return None;
+    }
+    Some(first)
 }
 
 /// Cửa sổ Terminal ĐANG MỞ mà không chạy CLI nào — cũng là một phiên.
@@ -4373,6 +4422,12 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     // Cùng lý do với `ps` ở trên, và nó là lý do mạnh hơn cả tốc độ: mọi hàng
     // phải được chấm trên CÙNG một khoảnh khắc, chứ không phải mỗi hàng một
     // khoảnh khắc cách nhau một giây.
+    // Terminal.app đang là tiến trình NÀO — hỏi cùng lúc với `ps`, vì cái loa
+    // dùng nó để trả lời "vòng này có phải Terminal vừa chết và mang theo mọi
+    // phiên không". Hỏi muộn hơn thì con số thuộc về một khoảnh khắc khác với
+    // số phiên vừa đếm. Xem `SessionsSnapshot::terminal_pid`.
+    out.terminal_pid = terminal_pid();
+
     let probe_started = std::time::Instant::now();
     let tabs = match crate::keys::terminal_screens() {
         Ok(t) => {

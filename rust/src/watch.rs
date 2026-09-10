@@ -780,6 +780,80 @@ fn plain(s: &str) -> String {
         .join(" ")
 }
 
+/// Số phận của Terminal.app giữa HAI vòng — ba trạng thái, không phải hai.
+///
+/// 🔴 `ChuaDoDuoc` là một trạng thái RIÊNG, không được gộp vào `Same`. Gộp nó
+/// vào "y nguyên" nghĩa là mỗi lần `pgrep` hết giờ, huba lại im lặng khẳng định
+/// Terminal vẫn thế — đúng hình dạng "tín hiệu không bao giờ ở trạng thái ngược
+/// lại" mà luật 13 gọi là không phải phép đo. Ở đây fail-closed nghiêng về phía
+/// IM: không đo được thì đừng gán cớ, vì một cái cớ sai còn tệ hơn không có cớ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalFate {
+    /// Hai vòng, hai pid khác nhau ⟹ Terminal.app đã chết (hoặc bị thoát) và
+    /// mở lại. Mọi cửa sổ của vòng trước đã đi theo nó.
+    KhoiDongLai { truoc: u32, sau: u32 },
+    /// Cùng một tiến trình ⟹ phiên nào tắt là tự nó tắt.
+    NguyenVen,
+    /// Một trong hai vòng không đo được pid — không kết luận gì.
+    ChuaDoDuoc,
+}
+
+/// So pid Terminal của vòng trước với vòng này.
+///
+/// Hàm thuần, và đó là chủ ý: đây là chỗ DUY NHẤT được rút ra kết luận từ hai
+/// con số ấy, nên nó phải cấy lỗi được mà không cần Terminal thật.
+///
+/// Chiều ngược lại cũng phải đúng và có bài kiểm riêng: pid ĐỔI mà không phiên
+/// nào tắt thì không có tin nào được bắn (chủ máy thoát Terminal lúc không có
+/// phiên nào chạy là chuyện thường) — cửa ấy nằm ở `pipeline::announce_changes`,
+/// không nằm ở đây.
+pub fn terminal_fate(truoc: Option<u32>, sau: Option<u32>) -> TerminalFate {
+    match (truoc, sau) {
+        (Some(a), Some(b)) if a != b => TerminalFate::KhoiDongLai { truoc: a, sau: b },
+        (Some(_), Some(_)) => TerminalFate::NguyenVen,
+        _ => TerminalFate::ChuaDoDuoc,
+    }
+}
+
+/// MỘT tin cho cả đợt, thay vì N tin báo tử không có cớ.
+///
+/// 🔴 Đây là câu Hà đã phải tự đi hỏi. 10/09 lúc 10:06, huba gửi **13 tin**
+/// `⚫ … đã tắt (thoát CLI, cửa sổ terminal còn mở)` liền nhau; không tin nào
+/// nói rằng Terminal.app vừa bị kernel giết lúc 10:03:57 và mang cả 13 phiên
+/// đi cùng. Câu hỏi nhận lại: *"Máy vừa bị sao mà thoát hết cli"*. Mười ba tin
+/// đúng từng cái một mà vẫn để người đọc không biết chuyện gì xảy ra — vì cái
+/// người ta cần là **một nguyên nhân**, không phải mười ba triệu chứng.
+///
+/// Hai nhóm tên, cố ý tách: phiên đang CHẠY DỞ là phần đòi người ta làm gì
+/// (cùng luật với `was_working` ở tin lẻ), phần còn lại chỉ để biết. Gộp chung
+/// thì việc cần xem lại chìm trong danh sách.
+pub fn terminal_restart_text(
+    truoc: u32,
+    sau: u32,
+    dang_cham: &[String],
+    con_lai: &[String],
+) -> String {
+    let tong = dang_cham.len() + con_lai.len();
+    let mut s = format!(
+        "🔴 Terminal.app khởi động lại (pid {truoc} → {sau}) — {tong} phiên tắt theo nó, \
+         KHÔNG phải {tong} sự cố riêng."
+    );
+    if !dang_cham.is_empty() {
+        s.push_str(&format!(
+            "\n⚠ Đang chạy dở, nên xem lại: {}",
+            dang_cham.join(" · ")
+        ));
+    }
+    if !con_lai.is_empty() {
+        s.push_str(&format!("\n⚫ Còn lại: {}", con_lai.join(" · ")));
+    }
+    // Chỗ đọc nguyên nhân THẬT, không phải suy đoán của huba: nếu là một cú
+    // sập thì macOS để lại báo cáo, nếu chủ máy tự thoát thì không có tệp nào.
+    // Hai ca ấy huba không phân biệt được, nên nó chỉ ra chỗ phân biệt được.
+    s.push_str("\n📄 Sập hay tự thoát: ls -t ~/Library/Logs/DiagnosticReports/Terminal-*.ips");
+    s
+}
+
 /// Gọi tên một phiên ĐÃ BIẾN MẤT, bằng những gì sổ còn giữ.
 ///
 /// Ba dữ kiện xếp theo thứ người ta nhận ra: **tên** phiên · **dự án** nó đang

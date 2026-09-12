@@ -137,7 +137,11 @@ or drive a session from a phone?** If not, it does not belong here.
   1,626 `warn` · 120 `error`. So this panel means *errors*, not *all trouble* —
   most of huba's trouble lives at `warn` and deliberately stays there. An empty
   block reads "no ERRORS", never "nothing worth looking at".
-- Tests: `cd rust && cargo test --offline` → 263 tests, 0 warnings.
+- Tests: `cd rust && cargo test --offline --no-fail-fast` → **922 tests across 146
+  targets, 0 warnings** (measured 2026-09-12, 4h10m wall clock). `--no-fail-fast`
+  is not optional: plain `cargo test` stops at the first red target, and the run
+  that taught us printed `66 ok / 1 failed` having touched **67 of 141** test
+  files — a denominator that reads like a verdict.
 - `./huba …` is a wrapper that builds on first use then execs `rust/target/release/huba`.
 
 ## Gốc workspace: `~/projects` — và đừng gõ nó vào mã (2026-08-12)
@@ -723,7 +727,7 @@ phải gọi `forget_ack_live()` trong đó — thiếu một cửa là sửa m�
   which session). *An assertion tests what you thought to check; a picture shows
   what you didn't.*
   That whole layer is gone with the page: no `fe-*.mjs`, no screenshots, no
-  Playwright, no `HUB_UC_MAX_USD` gate. What is left is 263 Rust tests, and Rust
+  Playwright, no `HUB_UC_MAX_USD` gate. What is left is 922 Rust tests, and Rust
   tests are exactly the kind that were green both of those times. **So the honest
   bar is now: run the thing in the real Telegram chat and look at the reply.**
   Do not write "verified" off a green `cargo test` — that was never sufficient

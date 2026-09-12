@@ -237,7 +237,7 @@ thứ phải phát hiện ra điều đó — lại là thứ ít được chạ
 ## Test
 
 ```bash
-cd rust && cargo test --offline           # 263 test
+cd rust && cargo test --offline --no-fail-fast   # 922 test / 146 target
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```

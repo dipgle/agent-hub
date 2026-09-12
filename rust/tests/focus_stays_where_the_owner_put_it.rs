@@ -32,6 +32,7 @@ use huba::pipeline::{
     auto_handover_notice, auto_limit_notice, focus_kept, successor_in, FocusKept, HandoverMove,
     Successor,
 };
+use huba::sessions::tty_of_window_id;
 use std::collections::BTreeMap;
 
 const MOI: &str = "32fe99f0-ec86-4dfd-bfc3-4408ded8ded9";
@@ -223,14 +224,27 @@ const NGUON: &str = include_str!("../src/pipeline.rs");
 
 /// Số chỗ đặt con trỏ CÒN LẠI trong `pipeline.rs`, khai MẪU SỐ (§13③).
 ///
-/// 9 chỗ, và cả 9 đều đi sau một lệnh của chủ máy: `/new` · `/term run` ·
+/// 10 chỗ, và cả 10 đều đi sau một lệnh của chủ máy: `/new` · `/term run` ·
 /// `/handover -a` (hai nhánh) · `/terminal` trần · `shot_<id>` · `/follow` bỏ
-/// theo · `/follow <id>` · `s_<id>`.
+/// theo · `/follow <id>` · `s_<id>` · **nâng cấp con trỏ cửa-sổ→phiên**.
+///
+/// 🔴 Chỗ thứ 10 thêm 2026-09-12, và cổng này bắt được nó đúng như thiết kế —
+/// nó ĐỎ trên full suite trước khi ai kịp nói "xong" (`10 ≠ 9`). Trả lời đúng
+/// câu cổng hỏi: đường ấy xuất phát từ **một lệnh bất kỳ của chủ máy đang thao
+/// tác trên cửa sổ mình đã chọn**. Chuỗi đo được: `/new acc4` không ghép được id
+/// ⟹ huba đặt tên tạm `win-ttys018` và trỏ con trỏ vào đó; Hà bấm `esc`,
+/// `claude` chạy tiếp và sinh nhật ký ⟹ hàng `win-ttys018` biến khỏi danh sách
+/// (tab ấy nay đã `taken` bởi một phiên thật) ⟹ con trỏ thành cái trỏ treo và
+/// mọi lệnh sau đó báo *"không thấy phiên"* — Hà 2026-09-12: *"thao tác 1 hồi
+/// lại báo không tồn tại, không hiểu cách quản lý phiên kiểu gì nữa?"*.
+/// Nó KHÔNG phạm luật `FocusKept`: vẫn đúng CÁI CỬA SỔ chủ máy đã chọn, chỉ là
+/// thứ bên trong nó nay có tên (`focus_window_grew_a_session`). Chuyển sang một
+/// phiên KHÁC thì vẫn phải do chủ máy bấm.
 ///
 /// Con số này là một CỔNG, không phải trang trí: thêm một đường đặt con trỏ mà
 /// không sửa số ⟹ đỏ, và người sửa phải nói ra đường mới ấy xuất phát từ lệnh
 /// nào của chủ máy. Đó đúng là câu hỏi Hà đặt ra ngày 03/09.
-const SO_CHO_DAT_CON_TRO: usize = 9;
+const SO_CHO_DAT_CON_TRO: usize = 10;
 
 /// Cắt thân một hàm cấp cao nhất: từ dòng khai báo tới dấu `}` ở cột 0.
 ///
@@ -277,5 +291,63 @@ fn duong_tu_dong_khong_duoc_tu_chon_phien() {
         tong, SO_CHO_DAT_CON_TRO,
         "số đường đặt con trỏ đổi ({tong} ≠ {SO_CHO_DAT_CON_TRO}). Nếu là đường MỚI: nó xuất \
          phát từ lệnh nào của chủ máy? Trả lời được thì sửa hằng số và ghi vào doc của nó."
+    );
+}
+
+// ───────── chỗ thứ 10: tên cửa sổ → tty, và nó phải là chỗ DUY NHẤT cắt ────────
+
+/// `win-ttys018` → `ttys018`, và chỉ thế.
+#[test]
+fn ten_cua_so_doc_ra_dung_tty() {
+    assert_eq!(tty_of_window_id("win-ttys018").as_deref(), Some("ttys018"));
+    assert_eq!(tty_of_window_id("win-ttys007").as_deref(), Some("ttys007"));
+}
+
+/// Không phải id CỬA SỔ thì trả `None` — một uuid phiên thật đi qua đây mà ra
+/// `Some(...)` là mở đường cho phép tìm cửa sổ đi tìm một cái tty không tồn tại.
+#[test]
+fn khong_phai_id_cua_so_thi_khong_co_tty() {
+    assert_eq!(tty_of_window_id("ttys018"), None, "thiếu tiền tố");
+    assert_eq!(
+        tty_of_window_id("54bd8153-4dfb-49f1-ad29-6ec1d551c035"),
+        None,
+        "uuid của một phiên thật không phải tên cửa sổ"
+    );
+    assert_eq!(tty_of_window_id(""), None);
+}
+
+/// `??` · rỗng · `-` không phải cửa sổ (luật 11b) — cùng phép `is_real_tty` với
+/// chỗ đi so, không phải một bản chép thứ hai của cùng luật.
+#[test]
+fn tty_khong_that_thi_khong_phai_cua_so() {
+    for xau in ["win-", "win-??", "win--", "win-   "] {
+        assert_eq!(
+            tty_of_window_id(xau),
+            None,
+            "`{xau}` không trỏ tới cửa sổ nào"
+        );
+    }
+}
+
+/// 🔴 Vì sao hàm này phải là chỗ DUY NHẤT cắt cái tên ấy: một lượt cắt 8 ký tự
+/// (`SessionData::short()` từng làm, xem doc của `tty_of_window_id`) biến
+/// `win-ttys018` thành `win-ttys` ⟹ hàm vẫn trả về một chuỗi TRÔNG hợp lệ, chỉ
+/// là nó mất đúng cái số phân biệt cửa sổ này với cửa sổ khác. Cái sai ấy không
+/// kêu ở đây — nó kêu ở chỗ đi tìm cửa sổ, dưới dạng "không thấy phiên".
+#[test]
+fn cat_8_ky_tu_lam_mat_so_tty_ma_khong_bao_loi() {
+    let day_du = "win-ttys018";
+    let bi_cat = &day_du[..8];
+    assert_eq!(bi_cat, "win-ttys", "mốc: 8 ký tự đầu của một tên cửa sổ");
+    assert_eq!(tty_of_window_id(day_du).as_deref(), Some("ttys018"));
+    assert_eq!(
+        tty_of_window_id(bi_cat).as_deref(),
+        Some("ttys"),
+        "bản bị cắt vẫn ra một chuỗi hợp lệ — đây là lý do không được cắt ở nơi khác"
+    );
+    assert_ne!(
+        tty_of_window_id(bi_cat),
+        tty_of_window_id(day_du),
+        "hai cái tên ấy đọc ra hai cửa sổ khác nhau, nên một lượt cắt là một lượt đổi đích"
     );
 }

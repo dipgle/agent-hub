@@ -70,6 +70,14 @@ pub struct Quota {
     pub fetched_at_ms: Option<i64>,
     /// Vì sao không đọc được — `None` là đọc được. Chuỗi này đi ra tin nhắn.
     pub why_unknown: Option<String>,
+    /// Tài khoản **chưa mở cửa sổ được**, kèm lý do. `None` = dùng được.
+    ///
+    /// 🔴 Khác hẳn `why_unknown`, và trộn hai thứ này là con bug ngày 12/09:
+    /// `why_unknown` nói *"chưa biết còn bao nhiêu hạn mức"* — một tài khoản
+    /// vẫn chạy được, chỉ là sổ chưa có số. Trường này nói *"mở cửa sổ ra là nó
+    /// đứng ngay"*, và không đồng hồ nào chữa được, chỉ có người.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chua_dung_duoc: Option<String>,
 }
 
 /// Xếp hạng một tài khoản để CHỌN. Thứ tự của `derive(Ord)` chính là thứ tự ưu tiên.
@@ -87,11 +95,16 @@ pub struct Quota {
 ///   ra từ sổ `.claude.json` bao giờ — nguồn của nó là MÀN, và vì màn chỉ nói
 ///   khi còn một cửa sổ đang mở nên nó phải được GHI LẠI; xem
 ///   [`crate::watch::reconcile_dead_book`].
+/// * [`Rank::NotReady`] — **chưa dùng được**: chưa đăng nhập, hoặc đăng nhập
+///   rồi mà lượt chạy đầu chưa xong (`claude` còn hỏi giao diện). Đứng cạnh
+///   `Dead` chứ không cạnh `Unknown`, và đó là cả bản vá 12/09 — xem
+///   [`account_not_ready`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Rank {
     Free(i64),
     Unknown,
     Full,
+    NotReady,
     Dead,
 }
 
@@ -102,6 +115,7 @@ impl Rank {
             Rank::Free(p) => format!("đã dùng {p}%"),
             Rank::Unknown => "chưa đo được".to_string(),
             Rank::Full => "ĐÃ KỊCH TRẦN".to_string(),
+            Rank::NotReady => "CHƯA DÙNG ĐƯỢC".to_string(),
             Rank::Dead => "TỔ CHỨC ĐÃ KHOÁ".to_string(),
         }
     }
@@ -242,9 +256,25 @@ pub fn read(account: &str, dir: Option<&Path>) -> Quota {
         hour5_resets_at: None,
         fetched_at_ms: None,
         why_unknown: Some(why),
+        chua_dung_duoc: None,
     };
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
+        // 🔴 KHÔNG CÓ TỆP và ĐỌC HỎNG là hai chuyện, và chúng dẫn tới hai kết
+        // luận ngược nhau. Không có tệp ⟹ chưa lượt `claude` nào từng chạy
+        // trong thư mục ấy ⟹ chắc chắn chưa dùng được, phải fail-closed. Đọc
+        // hỏng vì quyền/đĩa ⟹ một trục trặc có thể tự qua, và đóng vĩnh viễn
+        // một tài khoản đang tốt vì một lượt đọc hụt thì tệ hơn.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            logging::warn(
+                "quota_book_missing",
+                json!({ "account": account, "path": path.display().to_string(),
+                        "why": "chưa có sổ ⟹ thư mục cấu hình này chưa chạy `claude` lần nào" }),
+            );
+            let mut q = trong(format!("chưa có {}", path.display()));
+            q.chua_dung_duoc = Some("chưa đăng nhập (chưa có sổ .claude.json)".to_string());
+            return q;
+        }
         Err(e) => {
             logging::warn(
                 "quota_book_unreadable",
@@ -265,13 +295,26 @@ pub fn read(account: &str, dir: Option<&Path>) -> Quota {
             return trong("sổ tài khoản không đọc ra JSON".to_string());
         }
     };
+    // Hỏi TRƯỚC câu hạn mức: "tài khoản này mở cửa sổ ra có chạy được không".
+    // Hai câu ấy nghe giống nhau ở chỗ cùng ra `None`, nhưng chúng đi hai đường
+    // — xem [`account_not_ready`].
+    let chua_dung_duoc = account_not_ready(&doc);
+    if let Some(why) = &chua_dung_duoc {
+        logging::warn(
+            "account_not_ready",
+            json!({ "account": account, "path": path.display().to_string(), "why": why,
+                    "hau_qua": "KHÔNG gợi ý tài khoản này — mở cửa sổ ra là nó đứng" }),
+        );
+    }
     let Some(u) = doc.get("cachedUsageUtilization") else {
         // KHÔNG phải lỗi: một tài khoản chưa gọi API lần nào thì chưa có khoá này.
         logging::info(
             "quota_not_cached_yet",
             json!({ "account": account, "path": path.display().to_string() }),
         );
-        return trong("CLI chưa ghi số hạn mức nào cho tài khoản này".to_string());
+        let mut q = trong("CLI chưa ghi số hạn mức nào cho tài khoản này".to_string());
+        q.chua_dung_duoc = chua_dung_duoc;
+        return q;
     };
     let buckets = u.get("utilization");
     let doc_pct = |ten: &str| -> (Option<i64>, Option<String>) {
@@ -293,6 +336,7 @@ pub fn read(account: &str, dir: Option<&Path>) -> Quota {
         hour5_resets_at,
         fetched_at_ms: u.get("fetchedAtMs").and_then(Value::as_i64),
         why_unknown: None,
+        chua_dung_duoc,
     }
 }
 
@@ -324,7 +368,49 @@ fn cua_so(pct: Option<i64>, resets_at: Option<&str>, now_ms: i64) -> Option<i64>
 }
 
 /// Xếp hạng một bản đọc tại thời điểm `now_ms`.
+/// Tài khoản này mở cửa sổ ra có chạy được không — đọc từ chính sổ của CLI.
+///
+/// 🔴 Ca đo được 2026-09-12, và nó tốn một lượt bàn giao thật: acc4 vừa được
+/// khai vào config nhưng CHƯA đăng nhập. Sổ của nó không có số hạn mức ⟹ hạng
+/// `Unknown` ⟹ mà `Unknown` đứng **TRƯỚC** `Full` (*"một ẩn số vẫn hơn một cánh
+/// cửa đã đóng"*) ⟹ đúng lúc acc2 kịch trần, `watch::suggest_account` chọn acc4,
+/// mở cửa sổ `ttys007`, và cửa sổ ấy đứng ở hộp chọn giao diện lần đầu. huba
+/// báo trung thực *"phiên CHƯA chào đời sau 12 giây"* — nhưng phiên cũ thì đã
+/// bị bỏ lại, đang bị chặn, không làm tiếp được gì.
+///
+/// Câu ấy KHÔNG phải "chưa đo được hạn mức": nó là "chưa có ai ngồi vào máy
+/// này". Một đồng hồ chữa được cái thứ nhất; cái thứ hai chỉ người chữa được —
+/// nên nó thuộc về họ `Dead`, không thuộc họ `Unknown`.
+///
+/// Hai mốc, và cả hai đều cần, đo hai chiều trên bốn tài khoản thật:
+///
+/// | | oauthAccount | hasCompletedOnboarding |
+/// |---|---|---|
+/// | acc1 · acc2 · acc3 (đang chạy) | ✓ | ✓ |
+/// | acc4 **trước** khi đăng nhập | ✗ | ✗ |
+/// | acc4 **sau** khi đăng nhập | ✓ | ✗ ← vẫn treo ở hộp chọn giao diện |
+///
+/// Hàng cuối là hàng dạy được nhiều nhất: có credential **chưa đủ**. Lượt chạy
+/// đầu của một thư mục cấu hình mới còn một cái hộp hỏi nữa, và huba mở cửa sổ
+/// lúc không có ai ngồi đó để trả lời.
+pub fn account_not_ready(doc: &Value) -> Option<String> {
+    if doc.get("oauthAccount").is_none() {
+        return Some("chưa đăng nhập (sổ không có oauthAccount)".to_string());
+    }
+    if doc.get("hasCompletedOnboarding").and_then(Value::as_bool) != Some(true) {
+        return Some(
+            "đăng nhập rồi nhưng lượt chạy đầu chưa xong — `claude` còn hỏi giao diện".to_string(),
+        );
+    }
+    None
+}
+
 pub fn rank(q: &Quota, now_ms: i64) -> Rank {
+    // Đứng TRƯỚC mọi phép tính phần trăm: còn chưa mở được cửa sổ thì con số
+    // hạn mức nói về một cánh cửa chưa ai bước qua.
+    if q.chua_dung_duoc.is_some() {
+        return Rank::NotReady;
+    }
     let w = cua_so(q.week_pct, q.week_resets_at.as_deref(), now_ms);
     let h = cua_so(q.hour5_pct, q.hour5_resets_at.as_deref(), now_ms);
     // KỊCH TRẦN thắng mọi thứ, kể cả một cửa sổ khác không đọc được: một cánh
@@ -407,6 +493,7 @@ mod tests {
             hour5_resets_at: h5_r.map(str::to_string),
             fetched_at_ms: None,
             why_unknown: None,
+            chua_dung_duoc: None,
         }
     }
 

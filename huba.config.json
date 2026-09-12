@@ -61,6 +61,10 @@
       "name": "acc3",
       "config_dir": "~/.claude-acc3",
       "launch": "claude3"
+    },
+    {
+      "name": "acc4",
+      "config_dir": "~/.claude-acc4"
     }
   ]
 }

@@ -1230,36 +1230,110 @@ impl Inbox {
             None => return,
         };
         // 1. Hỏi Telegram đường dẫn tạm của tệp.
-        let path = client
+        //
+        // 🔴 Hà 2026-09-11: *"Sao gửi ảnh qua tele tự nhiên lại lỗi này"* — rồi
+        // *"Chả nhẽ do trong ảnh có chuỗi gì đặc biệt?"*. Không phải, và câu hỏi
+        // ấy chỉ nảy ra vì câu trả lời ĐÃ NẰM TRONG TAY huba mà bị vứt đi:
+        // chuỗi `.ok()` cũ gộp **bốn** kết cục khác hẳn nhau thành một dòng
+        // *"không hỏi được"* — mạng hỏng · Telegram từ chối (HTTP 400 kèm
+        // `description` nói rõ vì sao) · thân trả về không phải JSON · JSON
+        // không có `result.file_path`. Ba dòng log của cả đời huba
+        // (16/08 · 04/09 · 11/09) vì thế không dòng nào chẩn đoán được, và người
+        // đọc phải đi đoán về NỘI DUNG tấm ảnh — thứ mà tới bước này huba chưa
+        // tải về một byte nào.
+        //
+        // Đo 2026-09-11 bằng chính token đang chạy: `getMe` → HTTP 200
+        // `@ai_angles_bot`; `getFile` với id sai → **HTTP 400 · "Bad Request:
+        // invalid file_id"**. `reqwest` coi 400 là một PHẢN HỒI chứ không phải
+        // `Err`, nên câu giải thích ấy đã về tới đây rồi mới bị `and_then` bỏ.
+        let path = match client
             .post(self.api("getFile"))
             .json(&json!({ "file_id": file_id }))
             .send()
-            .ok()
-            .and_then(|r| r.json::<Value>().ok())
-            .and_then(|v| {
-                v.pointer("/result/file_path")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            });
-        let Some(path) = path else {
-            logging::error("telegram_getfile_failed", json!({ "name": name }));
-            let _ = self.send_text("\u{26a0} không hỏi được Telegram đường dẫn của tệp ấy.");
-            return;
+        {
+            // Mạng không tới được Telegram — trạng thái RIÊNG, không phải "tệp hỏng".
+            Err(e) => {
+                logging::error(
+                    "telegram_getfile_failed",
+                    json!({ "name": name, "vi_sao": "mạng", "err": e.to_string(),
+                            "file_id_dau": crate::exec::truncate(file_id, 12) }),
+                );
+                let _ = self.send_text(&format!(
+                    "\u{26a0} không hỏi được Telegram đường dẫn của tệp ấy — không gọi tới \
+                     được api.telegram.org: {}",
+                    crate::exec::truncate(&e.to_string(), 120)
+                ));
+                return;
+            }
+            Ok(r) => {
+                let status = r.status();
+                let than = r.text().unwrap_or_default();
+                match getfile_verdict(&than) {
+                    Ok(p) => p,
+                    Err(vi_sao) => {
+                        logging::error(
+                            "telegram_getfile_failed",
+                            json!({ "name": name, "http": status.as_u16(), "vi_sao": vi_sao,
+                                    "file_id_dau": crate::exec::truncate(file_id, 12),
+                                    "file_id_len": file_id.len() }),
+                        );
+                        let _ = self.send_text(&format!(
+                            "\u{26a0} Telegram không cho đường dẫn của tệp ấy (HTTP {}): {}\n\
+                             Chưa tải về byte nào, nên nội dung tệp KHÔNG phải nguyên nhân.",
+                            status.as_u16(),
+                            crate::exec::truncate(&vi_sao, 160)
+                        ));
+                        return;
+                    }
+                }
+            }
         };
-        // 2. Tải về.
+        // 2. Tải về. Cùng luật với bước 1: ba kết cục, ba câu khác nhau. Câu cũ
+        //    đoán sẵn hộ Telegram rằng "chắc là quá 20 MB" — mà trần ấy thực ra
+        //    bị chặn ở `getFile` (bước 1, `file is too big`), nên nó gợi ý sai
+        //    chỗ đúng lúc người ta cần đi đúng chỗ.
         let url = format!("https://api.telegram.org/file/bot{}/{}", self.token, path);
-        let bytes = client
-            .get(&url)
-            .send()
-            .ok()
-            .filter(|r| r.status().is_success())
-            .and_then(|r| r.bytes().ok());
-        let Some(bytes) = bytes else {
-            logging::error("telegram_file_download_failed", json!({ "name": name }));
-            let _ = self.send_text(
-                "\u{26a0} tải tệp về không được (Telegram chỉ cho bot tải tệp ≤ 20 MB).",
-            );
-            return;
+        let bytes = match client.get(&url).send() {
+            Err(e) => {
+                logging::error(
+                    "telegram_file_download_failed",
+                    json!({ "name": name, "vi_sao": "mạng", "err": e.to_string() }),
+                );
+                let _ = self.send_text(&format!(
+                    "\u{26a0} tải tệp về không được — không gọi tới được api.telegram.org: {}",
+                    crate::exec::truncate(&e.to_string(), 120)
+                ));
+                return;
+            }
+            Ok(r) if !r.status().is_success() => {
+                let st = r.status().as_u16();
+                let than = r.text().unwrap_or_default();
+                logging::error(
+                    "telegram_file_download_failed",
+                    json!({ "name": name, "http": st,
+                            "than": crate::exec::truncate(than.trim(), 160) }),
+                );
+                let _ = self.send_text(&format!(
+                    "\u{26a0} tải tệp về không được (HTTP {st}): {}",
+                    crate::exec::truncate(than.trim(), 160)
+                ));
+                return;
+            }
+            Ok(r) => match r.bytes() {
+                Ok(b) => b,
+                Err(e) => {
+                    logging::error(
+                        "telegram_file_download_failed",
+                        json!({ "name": name, "vi_sao": "đứt giữa chừng",
+                                "err": e.to_string() }),
+                    );
+                    let _ = self.send_text(&format!(
+                        "\u{26a0} tệp đứt giữa chừng khi đang tải: {}",
+                        crate::exec::truncate(&e.to_string(), 120)
+                    ));
+                    return;
+                }
+            },
         };
         // 3. Chỗ để: thư mục dự án của phiên đang theo, `.inbox/`.
         let db = crate::db::Db::open(&self.cfg.db).ok();
@@ -3250,6 +3324,38 @@ impl Drop for ConfirmWait<'_> {
 ///
 /// Ảnh tới dưới dạng MẢNG nhiều cỡ — lấy cỡ CUỐI (to nhất), vì cỡ đầu là bản
 /// xem trước vài KB, gửi cho phiên đọc thì chẳng thấy gì.
+/// Đọc câu trả lời của `getFile`: ra **đường dẫn**, hoặc ra **lý do**.
+///
+/// Tách thành hàm thuần để bài kiểm với tới được: chỗ gọi nó nằm sau một lời
+/// gọi mạng thật, nên chừng nào câu chữ còn nằm trong `take_file` thì không có
+/// cách nào chấm nó mà không có Telegram.
+///
+/// Ba kết cục, và chúng KHÔNG được gộp (§13②):
+/// - có `result.file_path` ⟹ `Ok`;
+/// - Telegram từ chối ⟹ `Err(description)` — nguyên văn của Telegram, vì đó là
+///   thứ duy nhất nói được *vì sao*;
+/// - thân không đọc ra được (không phải JSON, hoặc `ok:true` mà rỗng ruột) ⟹
+///   `Err` kèm chính cái thân ấy. "Không hiểu Telegram nói gì" là một trạng
+///   thái khác "Telegram nói không", và đọc nhầm cái này thành cái kia là đi
+///   sửa nhầm chỗ.
+pub fn getfile_verdict(than: &str) -> Result<String, String> {
+    let body: Value = serde_json::from_str(than).unwrap_or(Value::Null);
+    if let Some(p) = body
+        .pointer("/result/file_path")
+        .and_then(Value::as_str)
+        .filter(|p| !p.is_empty())
+    {
+        return Ok(p.to_string());
+    }
+    match body.get("description").and_then(Value::as_str) {
+        Some(d) => Err(d.to_string()),
+        None => Err(format!(
+            "thân trả về không có description: {}",
+            crate::exec::truncate(than.trim(), 160)
+        )),
+    }
+}
+
 fn attachment_of(msg: &Value) -> Option<(String, String)> {
     if let Some(d) = msg.get("document") {
         let id = d.get("file_id").and_then(Value::as_str)?;

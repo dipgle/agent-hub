@@ -919,9 +919,10 @@ fn state_of(s: &LiveSession) -> &'static str {
 ///
 /// Ba cửa, theo thứ tự:
 /// 1. bỏ chính tài khoản đang bị chặn;
-/// 2. bỏ mọi tài khoản mà huba ĐANG NHÌN THẤY một phiên bị chặn — đo được sáng
-///    30/08: acc3 đứng `weekly limit · resets Sep 1` trên BỐN phiên cùng lúc, nên
-///    gợi ý sang đó là gợi ý một cú chạm vô ích thứ hai;
+/// 2. bỏ mọi tài khoản mà huba ĐANG NHÌN THẤY một phiên bị chặn **và mốc mở lại
+///    còn ở phía trước** — đo được sáng 30/08: acc3 đứng `weekly limit · resets
+///    Sep 1` trên BỐN phiên cùng lúc, nên gợi ý sang đó là gợi ý một cú chạm vô
+///    ích thứ hai. Mốc đã qua thì dòng banner chỉ là một cái VẾT, xem thân hàm;
 /// 3. trong số còn lại, lấy cái CÒN NHIỀU CHỖ NHẤT ([`crate::quota::Rank`]).
 ///
 /// 🔴 Cửa 3 là chỗ vá ngày 2026-08-30, và nó vá đúng câu Hà hỏi: *"mở phiên mới ở
@@ -949,6 +950,7 @@ pub fn suggest_account(
     limited: &str,
     accounts: &[crate::quota::Ranked],
     now: &[LiveSession],
+    now_min: u64,
 ) -> Option<String> {
     // Hai cửa đọc từ MÀN, gộp làm một danh sách "đừng gợi ý":
     // · `limited` — hết hạn mức, chờ đồng hồ thì tự mở;
@@ -958,9 +960,30 @@ pub fn suggest_account(
     // Cái thứ hai KHÔNG có trong sổ `.claude.json` — đo được cùng lúc: acc1 ở đó
     // vẫn ghi `92%` với `fetchedAtMs` già ba ngày, nên `quota` xếp nó `Unknown`
     // chứ không phải "đã chết". Màn là nguồn duy nhất.
+    //
+    // 🔴 Cửa `limited` hỏi **MỐC**, không hỏi sự có mặt — 2026-09-10, và đây là
+    // tầng mà bản vá 09/09 (`80598be`) cố ý chừa lại với lời biện hộ *"ở những
+    // chỗ ấy một cái vết cũ chỉ làm huba dè dặt lâu hơn vài phút"*. Câu ấy đo
+    // được là SAI, ngay tại đây:
+    //
+    // Lúc 19:11 ngày 10/09, hai phiên acc2 còn mang banner `resets 3pm` — mốc ĐÃ
+    // QUA 4 tiếng, dòng chữ nằm lại vì phiên bị chặn thì không in thêm gì. Sổ
+    // hạn mức cùng lượt đọc acc2 = **week 37% · 5h 32%**, tức còn chỗ. Nhưng
+    // `is_some()` đọc cái vết ấy thành "acc2 đang bị chặn" ⟹ acc2 bị loại ⟹
+    // `suggest_account` trả `None` cho **cả 8 phiên acc1** đang kịch trần (acc1
+    // 100% tới 13/09, acc3 100% tới 15/09) ⟹ `auto_limit_held … why:"NoAccount"`
+    // lặp mỗi vòng, và **không phiên nào được chuyển đi đâu cả**.
+    //
+    // Không phải "dè dặt lâu hơn vài phút": cái vết chỉ biến mất khi phiên in
+    // thêm chữ, mà phiên bị chặn thì không in — nên nó khoá VĨNH VIỄN đúng cái
+    // tài khoản duy nhất còn sống. `account_dead` giữ nguyên `is_some()`: khoá
+    // tổ chức không có đồng hồ nào để hỏi.
     let dang_chan: Vec<&str> = now
         .iter()
-        .filter(|s| s.limited.is_some() || s.account_dead.is_some())
+        .filter(|s| {
+            crate::pipeline::limit_still_biting(s.limited.as_deref(), now_min)
+                || s.account_dead.is_some()
+        })
         .map(|s| s.account.as_str())
         .collect();
     accounts
@@ -973,7 +996,17 @@ pub fn suggest_account(
         // đó là cả bản vá 02/09: `dang_chan` đọc MÀN, nên nó chỉ biết chừng nào
         // còn một cửa sổ mở. Hạng `Dead` tới từ SỔ (`quota::apply_dead_book`),
         // nên nó còn đúng cả khi không phiên nào của tài khoản ấy còn sống.
-        .filter(|a| !matches!(a.rank, crate::quota::Rank::Full | crate::quota::Rank::Dead))
+        // `NotReady` vào cùng cửa này ngày 12/09, và nó là cái cửa đã thiếu:
+        // acc4 khai vào config lúc chưa đăng nhập ⟹ hạng `Unknown` ⟹ đứng
+        // TRƯỚC `Full` ⟹ được chọn đúng lúc acc2 kịch trần ⟹ cửa sổ `ttys007`
+        // mở ra rồi đứng ở hộp chọn giao diện lần đầu, còn phiên cũ thì đã bị
+        // bỏ lại. Xem `quota::account_not_ready`.
+        .filter(|a| {
+            !matches!(
+                a.rank,
+                crate::quota::Rank::Full | crate::quota::Rank::NotReady | crate::quota::Rank::Dead
+            )
+        })
         .min_by_key(|a| a.rank)
         .map(|a| a.name.clone())
 }

@@ -20,6 +20,15 @@ use huba::quota::{Rank, Ranked};
 use huba::sessions::{settle_limit, state_of, LiveSession, ST_ERR, ST_LIMIT};
 use huba::watch::{suggest_account, Change, Idle};
 
+/// Giờ máy dùng cho mọi lượt gọi `suggest_account` trong tệp này: **12:45**.
+///
+/// Cố định, không bao giờ `Local::now()` — `suggest_account` từ 10/09 hỏi MỐC
+/// mở lại của dòng hạn mức, nên một bài kiểm lấy giờ thật sẽ đổi phán quyết
+/// theo lúc chạy. Ở 12:45 thì `resets 1pm/2pm/3pm` đều còn ở phía trước (dưới
+/// trần 360 phút của `pipeline::limit_still_biting`) ⟹ đọc ra là CÒN cắn, đúng
+/// ý mọi bài đã viết trước đó.
+const LUC_12_45: u64 = 12 * 60 + 45;
+
 /// Ba tài khoản mà huba KHÔNG đo được hạn mức — tức mọi bài dưới đây chấm đúng
 /// hai cửa đầu (bỏ tài khoản chết · bỏ tài khoản đang thấy phiên bị chặn) và
 /// phép phá hoà theo thứ tự cấu hình. Cửa thứ ba (còn nhiều chỗ nhất) có bài
@@ -59,7 +68,7 @@ fn phien(account: &str, limited: Option<&str>) -> LiveSession {
 fn the_dead_account_is_never_the_one_suggested() {
     let ba = acc(&["acc1", "acc2", "acc3"]);
     for chan in ["acc1", "acc2", "acc3"] {
-        let goi_y = suggest_account(chan, &ba, &[phien(chan, Some("resets 1pm"))])
+        let goi_y = suggest_account(chan, &ba, &[phien(chan, Some("resets 1pm"))], LUC_12_45)
             .expect("còn hai tài khoản khác thì phải gợi ý được một cái");
         assert_ne!(
             goi_y, chan,
@@ -81,7 +90,7 @@ fn an_account_already_blocked_elsewhere_is_skipped() {
         phien("acc3", None),
     ];
     assert_eq!(
-        suggest_account("acc2", &ba, &dang_song).as_deref(),
+        suggest_account("acc2", &ba, &dang_song, LUC_12_45).as_deref(),
         Some("acc3"),
         "acc1 đang có phiên bị chặn ⟹ phải nhảy qua nó, dù nó đứng trước trong cấu hình"
     );
@@ -98,12 +107,12 @@ fn nothing_free_says_so_instead_of_naming_a_dead_account() {
         phien("acc3", Some("resets 3pm")),
     ];
     assert_eq!(
-        suggest_account("acc1", &ba, &het),
+        suggest_account("acc1", &ba, &het, LUC_12_45),
         None,
         "cả ba đều chặn thì không được trả về cái nào"
     );
     assert_eq!(
-        suggest_account("acc1", &acc(&["acc1"]), &[]),
+        suggest_account("acc1", &acc(&["acc1"]), &[], LUC_12_45),
         None,
         "máy chỉ có MỘT tài khoản thì cũng không có gì để gợi ý"
     );
@@ -236,7 +245,7 @@ fn con_nhieu_cho_nhat_thang_thu_tu_cau_hinh() {
         ("acc3", Rank::Full),
     ]);
     assert_eq!(
-        suggest_account("acc3", &hang, &[]).as_deref(),
+        suggest_account("acc3", &hang, &[], LUC_12_45).as_deref(),
         Some("acc2"),
         "acc1 đứng trước trong cấu hình nhưng đã dùng 92% — cửa rộng hơn là acc2"
     );
@@ -250,13 +259,16 @@ fn con_nhieu_cho_nhat_thang_thu_tu_cau_hinh() {
 fn tai_khoan_da_kich_tran_khong_bao_gio_duoc_goi_y() {
     let hang = xep(&[("acc1", Rank::Full), ("acc2", Rank::Full)]);
     assert_eq!(
-        suggest_account("acc3", &hang, &[]),
+        suggest_account("acc3", &hang, &[], LUC_12_45),
         None,
         "không còn cửa nào thì nói thẳng là không biết chuyển đi đâu"
     );
     // Và một ẩn số vẫn hơn một cánh cửa đã đóng.
     let hang = xep(&[("acc1", Rank::Full), ("acc2", Rank::Unknown)]);
-    assert_eq!(suggest_account("acc3", &hang, &[]).as_deref(), Some("acc2"));
+    assert_eq!(
+        suggest_account("acc3", &hang, &[], LUC_12_45).as_deref(),
+        Some("acc2")
+    );
 }
 
 /// Hoà thì lấy cái chủ máy xếp trước — thứ tự cấu hình vẫn là phép phá hoà, chỉ
@@ -264,7 +276,10 @@ fn tai_khoan_da_kich_tran_khong_bao_gio_duoc_goi_y() {
 #[test]
 fn hoa_thi_lay_cai_dung_truoc_trong_cau_hinh() {
     let hang = xep(&[("acc1", Rank::Free(30)), ("acc2", Rank::Free(30))]);
-    assert_eq!(suggest_account("acc3", &hang, &[]).as_deref(), Some("acc1"));
+    assert_eq!(
+        suggest_account("acc3", &hang, &[], LUC_12_45).as_deref(),
+        Some("acc1")
+    );
 }
 
 /// Hai cửa cũ KHÔNG bị cửa mới nuốt: một tài khoản đang thấy phiên bị chặn thì
@@ -278,8 +293,58 @@ fn man_dang_bao_bi_chan_thi_thang_ca_con_so_dep_trong_tep() {
     let hang = xep(&[("acc1", Rank::Free(5)), ("acc2", Rank::Free(60))]);
     let dang_song = [phien("acc1", Some("resets Sep 1 at 1pm"))];
     assert_eq!(
-        suggest_account("acc3", &hang, &dang_song).as_deref(),
+        suggest_account("acc3", &hang, &dang_song, LUC_12_45).as_deref(),
         Some("acc2"),
         "màn nói acc1 vừa bị chặn ⟹ con số 5% trong tệp là số đã cũ"
     );
+}
+
+/// 🔴 Nhưng cửa ấy phải hỏi **MỐC**, không hỏi sự có mặt của dòng chữ — ca đo
+/// được lúc **19:11 ngày 2026-09-10**, và nó khoá chết đúng cái tài khoản duy
+/// nhất còn sống:
+///
+/// acc1 kịch trần tới 13/09 · acc3 kịch trần tới 15/09 · acc2 còn `week 37% ·
+/// 5h 32%`. Hai phiên acc2 vẫn mang banner `resets 3pm` — mốc ĐÃ QUA 4 tiếng,
+/// dòng chữ nằm lại vì phiên bị chặn thì không in thêm gì để đẩy nó đi. Bản cũ
+/// đọc cái VẾT ấy thành "acc2 đang bị chặn" ⟹ loại acc2 ⟹ trả `None` cho **cả 8
+/// phiên acc1** ⟹ `auto_limit_held … why:"NoAccount"` mỗi vòng, không phiên nào
+/// được chuyển đi đâu.
+///
+/// Bài này đỏ được theo CẢ HAI chiều, nên nó là phép đo chứ không phải lời đồn:
+/// bỏ phép hỏi mốc đi thì vế đầu đỏ; hỏi mốc sai chiều (coi mọi mốc là đã qua)
+/// thì vế sau đỏ.
+#[test]
+fn mot_moc_da_qua_khong_con_khoa_tai_khoan_ay() {
+    let hang = xep(&[("acc1", Rank::Full), ("acc2", Rank::Free(37))]);
+    let dang_song = [
+        phien("acc1", Some("resets Sep 13 at 3pm (Asia/Saigon)")),
+        phien("acc2", Some("resets 3pm (Asia/Saigon)")),
+    ];
+
+    // 19:11 — mốc 3pm đã qua 4 tiếng ⟹ banner của acc2 chỉ là một cái vết.
+    assert_eq!(
+        suggest_account("acc1", &hang, &dang_song, 19 * 60 + 11).as_deref(),
+        Some("acc2"),
+        "acc2 còn 63% hạn mức tuần mà bị loại vì một dòng chữ cũ ⟹ 8 phiên acc1 \
+         đứng chết với `NoAccount`"
+    );
+
+    // 14:30 — cũng dòng chữ ấy, đọc TRƯỚC mốc 30 phút: acc2 còn bị chặn THẬT,
+    // và gợi ý sang đó là cú chạm vô ích. Không có vế này thì bản vá có thể đã
+    // đi quá tay thành "mốc nào cũng coi là đã qua".
+    assert_eq!(
+        suggest_account("acc1", &hang, &dang_song, 14 * 60 + 30),
+        None,
+        "mốc 3pm còn 30 phút nữa ⟹ acc2 đang bị chặn thật, không được gợi ý"
+    );
+
+    // Hạn mức TUẦN (`resets Sep 13 at 3pm`) không đọc ra đồng hồ ⟹ fail-closed:
+    // acc1 còn cắn ở CẢ HAI mốc giờ, nên nó không bao giờ là câu trả lời.
+    for luc in [19 * 60 + 11, 14 * 60 + 30] {
+        assert_ne!(
+            suggest_account("acc2", &hang, &dang_song, luc).as_deref(),
+            Some("acc1"),
+            "mốc dạng tuần không có đồng hồ để hỏi ⟹ phải coi như còn cắn"
+        );
+    }
 }

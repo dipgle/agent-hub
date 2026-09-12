@@ -232,6 +232,23 @@ pub const ROUTES: &[Route] = &[
         help: "Gửi chữ đang nằm trong ô nhập của phiên",
         listed: true,
     },
+    // 🔴 Hà 2026-09-12: *"Tạo thêm lệnh esc đi đỡ phải gõ dài"* — sau một buổi
+    // gõ `/key esc` liên tục, vì mọi cửa sổ acc4 vừa mở đều đón bằng một hộp
+    // hỏi (tin thư mục · tiện ích Chrome · giao diện). `esc` là phím đóng hộp,
+    // tức phím hay phải bấm nhất trên một phiên vừa sinh ra.
+    //
+    // Đi ĐÚNG route `/key` như `enter`/`right`: cùng phép đọc màn, cùng cổng an
+    // toàn. Không đẻ nhánh xử lý mới — một cái tên ngắn, không phải một cơ chế.
+    Route {
+        name: "esc",
+        aliases: &["thoat", "huy"],
+        legacy: &[],
+        kind: CommandKind::Key,
+        arg: Arg::Fixed("esc"),
+        usage: "",
+        help: "Đóng hộp thoại đang mở trên màn của phiên",
+        listed: true,
+    },
     Route {
         name: "right",
         aliases: &["goiy"],

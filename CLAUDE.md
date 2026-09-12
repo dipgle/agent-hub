@@ -737,7 +737,7 @@ huba.config.json         config (no secrets — only env var NAMES)
 install_update.sh       build → install a SIGNED hubad where launchd runs it
 sign.sh                 re-sign one binary with the stable identity
 make-signing-cert.sh    create that identity — ONCE, ever
-rust/src/main.rs        CLI: doctor self-install setup init once status sessions
+rust/src/main.rs        CLI: doctor self-install setup init once status sessions ask handover
 rust/src/bin/hubad.rs    daemon loop (pid lock, exponential backoff, local alarm)
 rust/src/{config,db}.rs config + validation + secret_from_env() · runs/cursors/spend
 rust/src/pipeline.rs    one cycle: run the orders that arrived, answer, keep books

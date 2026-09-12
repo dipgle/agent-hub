@@ -1094,7 +1094,64 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
         )));
     }
     std::fs::rename(&tmp, &dest)?;
-    Ok(format!("đã cài {}", dest.display()))
+    // 6. Và cái CLI cũng phải với tới được từ mọi cửa sổ. `hubad` là thứ launchd
+    //    chạy; `huba` là thứ CHỦ MÁY gõ — mà tới 10/09 nó chỉ gọi được bằng
+    //    `./huba` từ đúng thư mục này, nên `huba handover` (lệnh dựng đúng hôm
+    //    ấy để gỡ một phiên kẹt hạn mức) không gõ được từ chính phiên đang kẹt.
+    let cli_note = link_cli_onto_path(&rust_dir);
+    Ok(format!("đã cài {}\n{cli_note}", dest.display()))
+}
+
+/// Trỏ `~/.local/bin/huba` vào bản release vừa build, để gõ `huba …` được ở mọi
+/// cửa sổ.
+///
+/// **Liên kết mềm, không phải bản chép** — cố ý ngược với `hubad`: bản chép của
+/// `hubad` tồn tại để đứng NGOÀI tầm với của cargo (một lượt `cargo test
+/// --release` ký đè ad-hoc lên nó là mất sạch quyền TCC, đo 2026-08-10). CLI
+/// không mang quyền nào, nên nó chỉ cần luôn là bản mới nhất — mà liên kết mềm
+/// thì đúng thế, còn bản chép lại đẻ ra đúng con bug "daemon chạy mã hôm qua"
+/// ở một chỗ mới.
+///
+/// Không bao giờ đè lên một tệp KHÔNG phải liên kết của chính mình: chỗ đó có
+/// thể là thứ chủ máy tự đặt. Nói ra rồi thôi.
+fn link_cli_onto_path(rust_dir: &Path) -> String {
+    let bin = rust_dir.join("target/release/huba");
+    if !bin.exists() {
+        return format!("⚠ chưa thấy {} — `huba` chưa lên PATH", bin.display());
+    }
+    let dir = crate::config::expand_home(Path::new("~/.local/bin"));
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return format!("⚠ không tạo được {}: {e}", dir.display());
+    }
+    let link = dir.join("huba");
+    match std::fs::symlink_metadata(&link) {
+        // Đã là liên kết (của mình hay của ai) ⟹ trỏ lại cho tươi.
+        Ok(m) if m.file_type().is_symlink() => {
+            if let Err(e) = std::fs::remove_file(&link) {
+                return format!("⚠ không gỡ được liên kết cũ {}: {e}", link.display());
+            }
+        }
+        // Một tệp THẬT nằm đó: không đụng. Đây là chỗ duy nhất hàm này có thể
+        // phá thứ của người khác, nên nó là chỗ duy nhất phải im tay.
+        Ok(_) => {
+            return format!(
+                "⚠ {} đã là một tệp thật (không phải liên kết) — KHÔNG đè. \
+                 Tự trỏ nếu muốn: ln -sf {} {}",
+                link.display(),
+                bin.display(),
+                link.display()
+            )
+        }
+        Err(_) => {}
+    }
+    match std::os::unix::fs::symlink(&bin, &link) {
+        Ok(()) => format!(
+            "`huba` gõ được ở mọi cửa sổ: {} → {}",
+            link.display(),
+            bin.display()
+        ),
+        Err(e) => format!("⚠ không tạo được liên kết {}: {e}", link.display()),
+    }
 }
 
 /// Bảo launchd nạp lại hubad. Gọi SAU khi đã trả lời, vì nó giết chính mình.

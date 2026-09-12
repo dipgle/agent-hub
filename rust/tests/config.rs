@@ -332,6 +332,7 @@ fn quota_from_the_cli_book_reaches_the_line() {
         hour5_resets_at: None,
         fetched_at_ms: Some(now - 2 * 60 * 60 * 1000),
         why_unknown: None,
+        chua_dung_duoc: None,
     };
     let said = huba::runtime::accounts_text(
         &acc_cfg(),
@@ -383,6 +384,7 @@ fn accounts_text_khong_tu_di_doc_o_dia() {
         hour5_resets_at: None,
         fetched_at_ms: None,
         why_unknown: None,
+        chua_dung_duoc: None,
     };
     let said = huba::runtime::accounts_text(
         &acc_cfg(),

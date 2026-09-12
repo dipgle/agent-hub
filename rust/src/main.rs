@@ -85,6 +85,33 @@ enum Command {
         /// câu hỏi — một tham số, đặt trong dấu ngoặc kép ở shell
         question: String,
     },
+    /// Đổi tài khoản cho phiên NÀY: đóng sổ, mở cửa sổ mới bằng tài khoản còn chỗ
+    ///
+    /// 🔴 Hà 2026-09-10, khi một phiên đứng chết vì hết hạn mức: *"Giờ phiên
+    /// đang bị kẹt vì limit làm thế nào, tôi đã bảo làm lệnh để chuyển tài khoản
+    /// khi đang đứng ở phiên đó"*.
+    ///
+    /// Cùng ĐƯỜNG với `/handover` trên Telegram — một lõi duy nhất
+    /// (`pipeline::handover_now`), khác mỗi cửa vào. Cửa này là cái terminal,
+    /// nên nó đi được đúng lúc điện thoại không tiện: gõ `!huba handover` ngay
+    /// trong phiên đang kẹt (chế độ bash của Claude Code không gọi model, nên
+    /// một phiên hết hạn mức vẫn chạy được lệnh này).
+    ///
+    /// Phiên nào là "phiên này" thì ĐO, không hỏi: lệnh chạy như con của tiến
+    /// trình `claude` ấy — xem `sessions::session_of_this_terminal`.
+    Handover {
+        /// id phiên (đủ hoặc rút gọn). Bỏ trống = phiên đang chạy ở terminal này
+        session: Option<String>,
+        /// tài khoản mới. `auto` (mặc định) = huba chọn cái còn nhiều chỗ nhất
+        #[arg(short = 'a', long = "acc", default_value = "auto")]
+        acc: String,
+        /// CHỈ đóng sổ, không mở phiên mới — in ra dòng `claude --resume …`
+        #[arg(long)]
+        no_switch: bool,
+        /// In ra phiên + tài khoản sẽ chọn rồi DỪNG — không gọi `claude`, không tốn gì
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn main() {
@@ -133,7 +160,141 @@ fn real_main() -> Result<()> {
         Command::Status => cmd_status(&db),
         Command::Sessions { json } => cmd_sessions(&db, &cfg, json),
         Command::Ask { session, question } => cmd_ask(&cfg, &session, &question),
+        Command::Handover {
+            session,
+            acc,
+            no_switch,
+            dry_run,
+        } => cmd_handover(&db, &cfg, session.as_deref(), &acc, no_switch, dry_run),
     }
+}
+
+/// `huba handover [id] [-a acc] [--no-switch]` — xem doc-comment của
+/// `Command::Handover`.
+///
+/// Thứ tự ba câu hỏi, và không câu nào được đoán:
+/// 1. **Phiên nào** — id gõ vào thắng; không gõ thì đo từ dây tổ tiên.
+/// 2. **Tài khoản nào** — `auto` hỏi `watch::suggest_account`; tên gõ tay phải
+///    có thật trong cấu hình.
+/// 3. **Có đáng đi tiếp không** — không tìm được tài khoản nào còn chỗ thì DỪNG
+///    ở đây, TRƯỚC lượt gọi `claude`. Đúng luật của `PLAN.md`: một lượt bàn giao
+///    tốn hạn mức thật, và nó sẽ tốn cho một cái đích không tồn tại.
+fn cmd_handover(
+    db: &Db,
+    cfg: &Config,
+    session: Option<&str>,
+    acc: &str,
+    no_switch: bool,
+    dry_run: bool,
+) -> Result<()> {
+    let snap = huba::sessions::snapshot(cfg);
+    let target = match session {
+        Some(want) => snap
+            .sessions
+            .iter()
+            .find(|s| s.session_id == want)
+            .or_else(|| {
+                snap.sessions
+                    .iter()
+                    .find(|s| s.session_id.starts_with(want))
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "không thấy phiên khớp id/tiền tố '{want}' trong danh sách đang sống"
+                )
+            })?,
+        None => huba::sessions::session_of_this_terminal(&snap.sessions).ok_or_else(|| {
+            // KHÔNG bốc bừa một phiên: in ra cái đang có rồi để chủ máy chỉ.
+            let danh_sach = snap
+                .sessions
+                .iter()
+                .map(|s| {
+                    format!(
+                        "  {} · {} · {}",
+                        &s.session_id[..8.min(s.session_id.len())],
+                        s.account,
+                        s.name
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            anyhow::anyhow!(
+                "không đo được phiên nào đang chạy ở terminal này (lệnh phải gõ TRONG phiên \
+                 ấy — trong Claude Code là `!huba handover`). Gõ kèm id một trong số \
+                 này:\n{danh_sach}"
+            )
+        })?,
+    };
+
+    let acc_moi: Option<String> = if no_switch {
+        None
+    } else if acc.eq_ignore_ascii_case("auto") {
+        let hang = huba::quota::apply_dead_book(
+            huba::quota::rank_all(cfg, huba::quota::now_ms()),
+            &db.dead_accounts(),
+        );
+        let chon = huba::watch::suggest_account(
+            &target.account,
+            &hang,
+            &snap.sessions,
+            huba::pipeline::now_local_min(),
+        );
+        let bang = hang
+            .iter()
+            .map(|a| format!("{}={}", a.name, a.rank.say()))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        match chon {
+            Some(c) => {
+                println!(
+                    "→ chuyển {} ({}) sang {c}   [{bang}]",
+                    target.name, target.account
+                );
+                Some(c)
+            }
+            // "Không còn chỗ" là một câu trả lời, không phải chỗ trống (§13②).
+            None => anyhow::bail!(
+                "không có tài khoản nào còn chỗ để chuyển sang — {bang}.\n\
+                 Muốn vẫn đóng sổ để lấy bản bàn giao thì thêm --no-switch."
+            ),
+        }
+    } else {
+        let biet: Vec<String> = cfg
+            .claude_accounts_or_ambient()
+            .into_iter()
+            .map(|a| a.name)
+            .collect();
+        if !biet.iter().any(|b| b == acc) {
+            anyhow::bail!(
+                "không có tài khoản '{}'. Máy này khai: {}.",
+                truncate(acc, 24),
+                biet.join(" · ")
+            );
+        }
+        println!("→ chuyển {} ({}) sang {acc}", target.name, target.account);
+        Some(acc.to_string())
+    };
+
+    // `--dry-run` dừng ở ĐÂY, sau khi cả hai câu hỏi đã có câu trả lời thật và
+    // trước lượt gọi `claude` duy nhất. Nó là cái thước để nói "lệnh này nhận ra
+    // đúng phiên" mà không phải tiêu một lượt hạn mức để chứng minh.
+    if dry_run {
+        println!(
+            "🔎 (dry-run) phiên: {} · {} · {} ({})\n   tài khoản mới: {}\n   chưa gọi claude, chưa đổi gì.",
+            &target.session_id[..8.min(target.session_id.len())],
+            target.name,
+            target.account,
+            if target.tty.is_empty() { "không tty" } else { &target.tty },
+            acc_moi.as_deref().unwrap_or("(không đổi — chỉ đóng sổ)")
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{}",
+        huba::pipeline::handover_now(db, cfg, target, acc_moi.as_deref())
+    );
+    Ok(())
 }
 
 /// `huba ask <id> "<câu hỏi>"` — xem doc-comment của `Command::Ask`. In ra

@@ -26,6 +26,15 @@ use huba::quota::{Rank, Ranked};
 use huba::sessions::LiveSession;
 use huba::watch::suggest_account;
 
+/// Giờ máy dùng cho mọi lượt gọi `suggest_account` trong tệp này: **12:45**.
+///
+/// Cố định, không bao giờ `Local::now()` — `suggest_account` từ 10/09 hỏi MỐC
+/// mở lại của dòng hạn mức, nên một bài kiểm lấy giờ thật sẽ đổi phán quyết
+/// theo lúc chạy. Ở 12:45 thì `resets 1pm/2pm/3pm` đều còn ở phía trước (dưới
+/// trần 360 phút của `pipeline::limit_still_biting`) ⟹ đọc ra là CÒN cắn, đúng
+/// ý mọi bài đã viết trước đó.
+const LUC_12_45: u64 = 12 * 60 + 45;
+
 fn xep(rows: &[(&str, Rank)]) -> Vec<Ranked> {
     rows.iter()
         .map(|(n, r)| Ranked {
@@ -47,7 +56,7 @@ fn a_dead_account_stays_dead_after_its_window_closes() {
     // bài dưới có thể xanh vì một lý do khác (acc1 bị loại sẵn), và cổng thành
     // lời đồn (§13①).
     assert_eq!(
-        suggest_account("", &hang, &[]).as_deref(),
+        suggest_account("", &hang, &[], LUC_12_45).as_deref(),
         Some("acc1"),
         "sổ trống ⟹ `Unknown` vẫn hơn `Full`, acc1 là câu trả lời đúng"
     );
@@ -68,7 +77,7 @@ fn a_dead_account_stays_dead_after_its_window_closes() {
         "sổ ghi acc1 chết ⟹ hạng của nó phải đọc ra là chết, không phải `Unknown`"
     );
     assert_eq!(
-        suggest_account("", &hang_co_so, &[]),
+        suggest_account("", &hang_co_so, &[], LUC_12_45),
         None,
         "acc1 chết trong sổ + acc3 kịch trần ⟹ KHÔNG có gì để gợi ý, và nói thẳng"
     );

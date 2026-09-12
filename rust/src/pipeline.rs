@@ -1076,7 +1076,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     );
     for mut c in changes {
         if let crate::watch::Change::Limited { acc, goi_y, .. } = &mut c {
-            *goi_y = crate::watch::suggest_account(acc, &tai_khoan, live);
+            *goi_y = crate::watch::suggest_account(acc, &tai_khoan, live, now_local_min());
             logging::info(
                 "limited_suggested_account",
                 json!({ "acc_chan": acc, "goi_y": goi_y,
@@ -1982,7 +1982,12 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                     .find(|a| a.name == s.account)
                     .is_some_and(|a| a.rank == crate::quota::Rank::Full);
                 let acc_moi = if acc_cu_het {
-                    let m = crate::watch::suggest_account(&s.account, &hang, &live.sessions);
+                    let m = crate::watch::suggest_account(
+                        &s.account,
+                        &hang,
+                        &live.sessions,
+                        now_local_min(),
+                    );
                     logging::info(
                         "auto_handover_account_switch",
                         json!({ "session": s.session_id, "acc_cu": s.account, "acc_moi": m,
@@ -2189,11 +2194,7 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
         ),
         &db.dead_accounts(),
     );
-    let now_min = {
-        use chrono::Timelike;
-        let t = chrono::Local::now();
-        t.hour() as u64 * 60 + t.minute() as u64
-    };
+    let now_min = now_local_min();
     for s in &live.sessions {
         if s.host == "dead" {
             continue;
@@ -2201,7 +2202,7 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
         let Some(khi) = s.limited.as_deref() else {
             continue;
         };
-        let target = crate::watch::suggest_account(&s.account, &hang, &live.sessions);
+        let target = crate::watch::suggest_account(&s.account, &hang, &live.sessions, now_min);
         let phut = minutes_until_reset(khi, now_min);
         let age_sec =
             ((chrono::Utc::now().timestamp_millis() - s.started_at_ms).max(0) / 1000) as u64;
@@ -2601,6 +2602,204 @@ pub fn limit_still_biting(limited: Option<&str>, now_min: u64) -> bool {
     !matches!(minutes_until_reset(khi, now_min), Some(m) if m > LIMIT_WINDOW_MAX_MIN)
 }
 
+/// Bây giờ là phút thứ mấy của ngày, theo giờ **ĐỊA PHƯƠNG**.
+///
+/// Một chỗ duy nhất vì mọi mốc hạn mức mà huba đọc đều do CLI in ra theo giờ
+/// máy (`resets 3pm (Asia/Saigon)`) — đưa giờ UTC vào [`minutes_until_reset`] là
+/// lệch 7 tiếng mà vẫn "chạy", tức sai không kêu. Đã có hai bản chép tay của
+/// dòng này trong tệp; bản thứ ba (`suggest_account`) là lúc gom lại.
+pub fn now_local_min() -> u64 {
+    use chrono::Timelike;
+    let t = chrono::Local::now();
+    t.hour() as u64 * 60 + t.minute() as u64
+}
+
+/// Lõi của một lượt **bàn giao**: đóng sổ phiên `s`, và nếu có `acc_moi` thì mở
+/// luôn cửa sổ mới bằng tài khoản ấy. Trả về đúng câu chủ máy sẽ đọc.
+///
+/// Tách khỏi arm `CommandKind::Handover` ngày 2026-09-10 để `huba handover`
+/// (CLI) và `/handover` (Telegram) đi CHUNG một đường. Hà: *"tôi đã bảo làm
+/// lệnh để chuyển tài khoản khi đang đứng ở phiên đó"* — cửa mới là cái
+/// terminal, không phải cái điện thoại, nhưng câu trả lời phải y hệt. Chính arm
+/// này đã trả giá một lần cho luật ấy: `/new` gác tên tài khoản không có thật
+/// từ lâu, `/handover -a` thì không, nên một cái tên gõ sai lặng lẽ mở cửa sổ
+/// bằng tài khoản MẶC ĐỊNH (vá 30/08).
+///
+/// Cái KHÔNG nằm trong đây, cố ý: câu hỏi xác nhận. Trên Telegram một cú chạm
+/// nhầm trong danh sách là một lượt `claude` bị tiêu, nên `ask_owner` đứng
+/// TRƯỚC lời gọi này; ở CLI thì chính việc gõ ra dòng lệnh đã là câu xác nhận.
+pub fn handover_now(
+    db: &Db,
+    cfg: &Config,
+    s: &crate::sessions::LiveSession,
+    acc_moi: Option<&str>,
+) -> String {
+    match crate::sessions::handover(cfg, s) {
+        Ok(h) => {
+            if let Err(e) = db.record_spend(
+                "handover",
+                &h.source_id,
+                h.cost_usd,
+                &format!("→ {}", h.new_session_id),
+            ) {
+                logging::error(
+                    "spend_record_failed",
+                    json!({ "kind": "handover", "err": e.to_string() }),
+                );
+            }
+            let line = serde_json::to_string(&h).unwrap_or_default();
+            if let Err(e) = db.set_cursor(HANDOVER_KEY, &line) {
+                logging::error("handover_store_failed", json!({ "err": e.to_string() }));
+            }
+            logging::info(
+                "handover_done",
+                json!({ "from": h.source_id, "to": h.new_session_id, "cost_usd": h.cost_usd }),
+            );
+            match acc_moi {
+                None => format!(
+                    "📋 Đã đóng sổ phiên {}. Tiếp tục bằng:\n{}\n\n{}",
+                    h.source_name, h.resume_command, h.checkpoint
+                ),
+                // Mở cửa sổ mới trên tài khoản KHÁC. Nói ra kết
+                // cục ĐO ĐƯỢC, đừng khai "đã chuyển": cửa sổ mở
+                // được mà phiên chưa kịp sinh nhật ký thì chưa
+                // có gì để trỏ tới (xem `FreshWindow::new_id`).
+                // Cửa sổ cũ ĐÓNG sau khi phiên mới chào đời —
+                // Hà 2026-08-30: *"chuyển xong cửa sổ cũ không
+                // đóng được"*. Đóng hụt thì `w.closed_err` nói ra,
+                // xem `old_window_note`.
+                Some(acc) => match crate::sessions::start_fresh_after_handover(
+                    cfg,
+                    s,
+                    &h.checkpoint,
+                    Some(acc),
+                ) {
+                    Ok(w) => {
+                        if let Some(id) = w.new_id.as_deref() {
+                            if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, id) {
+                                logging::error(
+                                    "focus_after_handover_failed",
+                                    json!({ "err": e.to_string() }),
+                                );
+                            }
+                        }
+                        logging::info(
+                            "handover_switched_account",
+                            json!({ "from": h.source_id, "acc_cu": s.account,
+                                                    "acc_moi": acc, "tty": w.tty,
+                                                    "new_id": w.new_id }),
+                        );
+                        // 🔴 Đường bàn giao TAY cũng phải giao cửa
+                        // sổ hụt cho sổ đóng. Trước 03/09 chỉ hai
+                        // đường TỰ ĐỘNG làm việc này, nên một lượt
+                        // `/handover -a acc` đóng hụt là bỏ lại cửa
+                        // sổ mở vĩnh viễn — cùng con bug 15/08 đã vá
+                        // cho hai đường kia. Xem `defer_close_to_book`.
+                        let retrying = w.closed_err.is_some()
+                            && defer_close_to_book(db, s, chrono::Utc::now().timestamp());
+                        match w.new_id.as_deref() {
+                                            Some(id) => format!(
+                                                "📋 Đã đóng sổ {} và mở phiên mới bằng **{acc}** \
+                                                 (cũ: {}) ở {} — đang theo phiên {}.\n\n{}{}",
+                                                h.source_name, s.account, w.tty,
+                                                id.chars().take(8).collect::<String>(),
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id),
+                                                h.checkpoint
+                                            ),
+                                            // Cửa sổ mở rồi nhưng chưa ghép được
+                                            // id ⟹ nói đúng thế, đừng trỏ con trỏ
+                                            // vào chỗ trống. Và nhánh này GIỮ cửa
+                                            // sổ cũ (`old_kept`) — nay nói ra.
+                                            None => format!(
+                                                "📋 Đã đóng sổ {} và mở cửa sổ mới bằng **{acc}** ở {}, \
+                                                 NHƯNG chưa ghép được id phiên mới — nhìn cửa sổ ấy giúp \
+                                                 tôi (thường là nó đang hỏi một hộp xác nhận).\n\n{}{}",
+                                                h.source_name, w.tty,
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id),
+                                                h.checkpoint
+                                            ),
+                                        }
+                    }
+                    Err(e) => format!(
+                        "📋 Đã đóng sổ {} nhưng KHÔNG mở được cửa sổ bằng {acc}: {}\n\
+                                         Bản bàn giao vẫn còn đây, mở tay bằng:\n{}\n\n{}",
+                        h.source_name,
+                        crate::exec::truncate(&e.to_string(), 160),
+                        h.resume_command,
+                        h.checkpoint
+                    ),
+                },
+            }
+        }
+        // 🔴 TÀI KHOẢN HẾT HẠN MỨC THÌ BƯỚC VIẾT BÀN GIAO CHẾT
+        // TRƯỚC — và đó đúng là lúc chủ máy cần bàn giao nhất.
+        //
+        // Đo 2026-08-28: acc3 trả *"You've hit your session limit
+        // · resets 10:30pm"*, mà mọi phiên `[dwork]` chạy acc3.
+        // `fork_call` ghim `CLAUDE_CONFIG_DIR` vào tài khoản của
+        // PHIÊN, nên nó gọi đúng cái tài khoản đã chết.
+        //
+        // Đường lui KHÔNG hỏi mô hình câu nào: nhật ký đã có sẵn
+        // mọi lượt phiên từng nói. Thô hơn hẳn bản phiên tự viết
+        // — và `handover_from_journal` nói thẳng điều đó ngay
+        // trong chữ, chứ không đưa ra như thể chúng ngang nhau.
+        Err(e) => {
+            let loi = crate::exec::truncate(&e.to_string(), 200);
+            match crate::sessions::handover_from_journal(cfg, s) {
+                None => format!(
+                    "⚠ bàn giao hỏng: {loi}\nVà nhật ký của phiên cũng không có \
+                                     lượt nói nào để dựng bản thay thế."
+                ),
+                Some(cp) => match acc_moi {
+                    // Không xin đổi tài khoản thì chỉ đưa bản
+                    // bàn giao ra — chủ máy tự quyết làm gì.
+                    None => format!("⚠ bàn giao hỏng: {loi}\n\n{cp}"),
+                    // Tới được nhánh này nghĩa là tài khoản cũ
+                    // không GỌI được — bản bàn giao dựng từ nhật
+                    // ký. Việc đã sang phiên mới, nên cửa sổ cũ
+                    // vẫn đóng (Hà 2026-08-30).
+                    Some(acc) => {
+                        match crate::sessions::start_fresh_after_handover(cfg, s, &cp, Some(acc)) {
+                            Ok(w) => {
+                                if let Some(id) = w.new_id.as_deref() {
+                                    if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, id) {
+                                        logging::error(
+                                            "focus_after_handover_failed",
+                                            json!({ "err": e.to_string() }),
+                                        );
+                                    }
+                                }
+                                logging::warn(
+                                    "handover_from_journal_used",
+                                    json!({ "session": s.session_id,
+                                                        "acc_cu": s.account, "acc_moi": acc,
+                                                        "vi_sao": loi, "tty": w.tty,
+                                                        "new_id": w.new_id }),
+                                );
+                                let retrying = w.closed_err.is_some()
+                                    && defer_close_to_book(db, s, chrono::Utc::now().timestamp());
+                                format!(
+                                                "📋 {} không tự viết được bản bàn giao ({loi}), nên tôi dựng \
+                                                 từ nhật ký và mở phiên mới bằng **{acc}** ở {}.\n\
+                                                 Phiên cũ KHÔNG cạn — nó chỉ bị một cái đồng hồ chặn.\n\n{}{cp}",
+                                                s.name,
+                                                w.tty,
+                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id)
+                                            )
+                            }
+                            Err(e2) => format!(
+                                "⚠ bàn giao hỏng ({loi}) và cũng KHÔNG mở được cửa sổ bằng \
+                                             {acc}: {}\n\n{cp}",
+                                crate::exec::truncate(&e2.to_string(), 160)
+                            ),
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
 /// Phần THUẦN của [`auto_unstick_box`] — tách ra để bài kiểm với tới được mà
 /// không cần một `LiveSession`/cửa sổ thật nào. `stable_sec` là "chữ này đã
 /// đứng nguyên bao lâu", tính SẴN ở chỗ gọi (đọc từ sổ trong bộ nhớ).
@@ -2734,11 +2933,7 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
     }
     // Giờ ĐỊA PHƯƠNG, cùng quy ước `auto_switch_on_limit` dùng cho
     // `minutes_until_reset`: CLI in mốc mở lại theo giờ máy.
-    let now_min = {
-        use chrono::Timelike;
-        let t = chrono::Local::now();
-        t.hour() as u64 * 60 + t.minute() as u64
-    };
+    let now_min = now_local_min();
     for s in &live.sessions {
         // Chưa có chữ thì bỏ dấu vết cũ (nếu có) rồi thôi — không cần hỏi
         // `unstick_why` cho ca này, vì nó chỉ đọc lại đúng điều vừa kiểm.
@@ -11569,177 +11764,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         "đóng sổ phiên nào",
                     ) {
                         Some(refusal) => refusal,
-                        None => match crate::sessions::handover(cfg, s) {
-                        Ok(h) => {
-                            if let Err(e) = db.record_spend(
-                                "handover",
-                                &h.source_id,
-                                h.cost_usd,
-                                &format!("→ {}", h.new_session_id),
-                            ) {
-                                logging::error(
-                                    "spend_record_failed",
-                                    json!({ "kind": "handover", "err": e.to_string() }),
-                                );
-                            }
-                            let line = serde_json::to_string(&h).unwrap_or_default();
-                            if let Err(e) = db.set_cursor(HANDOVER_KEY, &line) {
-                                logging::error(
-                                    "handover_store_failed",
-                                    json!({ "err": e.to_string() }),
-                                );
-                            }
-                            logging::info(
-                                "handover_done",
-                                json!({ "from": h.source_id, "to": h.new_session_id, "cost_usd": h.cost_usd }),
-                            );
-                            match acc_moi.as_deref() {
-                                None => format!(
-                                    "📋 Đã đóng sổ phiên {}. Tiếp tục bằng:\n{}\n\n{}",
-                                    h.source_name, h.resume_command, h.checkpoint
-                                ),
-                                // Mở cửa sổ mới trên tài khoản KHÁC. Nói ra kết
-                                // cục ĐO ĐƯỢC, đừng khai "đã chuyển": cửa sổ mở
-                                // được mà phiên chưa kịp sinh nhật ký thì chưa
-                                // có gì để trỏ tới (xem `FreshWindow::new_id`).
-                                // Cửa sổ cũ ĐÓNG sau khi phiên mới chào đời —
-                                // Hà 2026-08-30: *"chuyển xong cửa sổ cũ không
-                                // đóng được"*. Đóng hụt thì `w.closed_err` nói ra,
-                                // xem `old_window_note`.
-                                Some(acc) => match crate::sessions::start_fresh_after_handover(
-                                    cfg,
-                                    s,
-                                    &h.checkpoint,
-                                    Some(acc),
-                                ) {
-                                    Ok(w) => {
-                                        if let Some(id) = w.new_id.as_deref() {
-                                            if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, id) {
-                                                logging::error(
-                                                    "focus_after_handover_failed",
-                                                    json!({ "err": e.to_string() }),
-                                                );
-                                            }
-                                        }
-                                        logging::info(
-                                            "handover_switched_account",
-                                            json!({ "from": h.source_id, "acc_cu": s.account,
-                                                    "acc_moi": acc, "tty": w.tty,
-                                                    "new_id": w.new_id }),
-                                        );
-                                        // 🔴 Đường bàn giao TAY cũng phải giao cửa
-                                        // sổ hụt cho sổ đóng. Trước 03/09 chỉ hai
-                                        // đường TỰ ĐỘNG làm việc này, nên một lượt
-                                        // `/handover -a acc` đóng hụt là bỏ lại cửa
-                                        // sổ mở vĩnh viễn — cùng con bug 15/08 đã vá
-                                        // cho hai đường kia. Xem `defer_close_to_book`.
-                                        let retrying = w.closed_err.is_some()
-                                            && defer_close_to_book(db, s, chrono::Utc::now().timestamp());
-                                        match w.new_id.as_deref() {
-                                            Some(id) => format!(
-                                                "📋 Đã đóng sổ {} và mở phiên mới bằng **{acc}** \
-                                                 (cũ: {}) ở {} — đang theo phiên {}.\n\n{}{}",
-                                                h.source_name, s.account, w.tty,
-                                                id.chars().take(8).collect::<String>(),
-                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id),
-                                                h.checkpoint
-                                            ),
-                                            // Cửa sổ mở rồi nhưng chưa ghép được
-                                            // id ⟹ nói đúng thế, đừng trỏ con trỏ
-                                            // vào chỗ trống. Và nhánh này GIỮ cửa
-                                            // sổ cũ (`old_kept`) — nay nói ra.
-                                            None => format!(
-                                                "📋 Đã đóng sổ {} và mở cửa sổ mới bằng **{acc}** ở {}, \
-                                                 NHƯNG chưa ghép được id phiên mới — nhìn cửa sổ ấy giúp \
-                                                 tôi (thường là nó đang hỏi một hộp xác nhận).\n\n{}{}",
-                                                h.source_name, w.tty,
-                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id),
-                                                h.checkpoint
-                                            ),
-                                        }
-                                    }
-                                    Err(e) => format!(
-                                        "📋 Đã đóng sổ {} nhưng KHÔNG mở được cửa sổ bằng {acc}: {}\n\
-                                         Bản bàn giao vẫn còn đây, mở tay bằng:\n{}\n\n{}",
-                                        h.source_name,
-                                        crate::exec::truncate(&e.to_string(), 160),
-                                        h.resume_command, h.checkpoint
-                                    ),
-                                },
-                            }
-                        }
-                        // 🔴 TÀI KHOẢN HẾT HẠN MỨC THÌ BƯỚC VIẾT BÀN GIAO CHẾT
-                        // TRƯỚC — và đó đúng là lúc chủ máy cần bàn giao nhất.
-                        //
-                        // Đo 2026-08-28: acc3 trả *"You've hit your session limit
-                        // · resets 10:30pm"*, mà mọi phiên `[dwork]` chạy acc3.
-                        // `fork_call` ghim `CLAUDE_CONFIG_DIR` vào tài khoản của
-                        // PHIÊN, nên nó gọi đúng cái tài khoản đã chết.
-                        //
-                        // Đường lui KHÔNG hỏi mô hình câu nào: nhật ký đã có sẵn
-                        // mọi lượt phiên từng nói. Thô hơn hẳn bản phiên tự viết
-                        // — và `handover_from_journal` nói thẳng điều đó ngay
-                        // trong chữ, chứ không đưa ra như thể chúng ngang nhau.
-                        Err(e) => {
-                            let loi = crate::exec::truncate(&e.to_string(), 200);
-                            match crate::sessions::handover_from_journal(cfg, s) {
-                                None => format!(
-                                    "⚠ bàn giao hỏng: {loi}\nVà nhật ký của phiên cũng không có \
-                                     lượt nói nào để dựng bản thay thế."
-                                ),
-                                Some(cp) => match acc_moi.as_deref() {
-                                    // Không xin đổi tài khoản thì chỉ đưa bản
-                                    // bàn giao ra — chủ máy tự quyết làm gì.
-                                    None => format!("⚠ bàn giao hỏng: {loi}\n\n{cp}"),
-                                    // Tới được nhánh này nghĩa là tài khoản cũ
-                                    // không GỌI được — bản bàn giao dựng từ nhật
-                                    // ký. Việc đã sang phiên mới, nên cửa sổ cũ
-                                    // vẫn đóng (Hà 2026-08-30).
-                                    Some(acc) => match crate::sessions::start_fresh_after_handover(
-                                        cfg,
-                                        s,
-                                        &cp,
-                                        Some(acc),
-                                    ) {
-                                        Ok(w) => {
-                                            if let Some(id) = w.new_id.as_deref() {
-                                                if let Err(e) =
-                                                    db.set_cursor(FOCUS_SESSION_KEY, id)
-                                                {
-                                                    logging::error(
-                                                        "focus_after_handover_failed",
-                                                        json!({ "err": e.to_string() }),
-                                                    );
-                                                }
-                                            }
-                                            logging::warn(
-                                                "handover_from_journal_used",
-                                                json!({ "session": s.session_id,
-                                                        "acc_cu": s.account, "acc_moi": acc,
-                                                        "vi_sao": loi, "tty": w.tty,
-                                                        "new_id": w.new_id }),
-                                            );
-                                            let retrying = w.closed_err.is_some()
-                                                && defer_close_to_book(db, s, chrono::Utc::now().timestamp());
-                                            format!(
-                                                "📋 {} không tự viết được bản bàn giao ({loi}), nên tôi dựng \
-                                                 từ nhật ký và mở phiên mới bằng **{acc}** ở {}.\n\
-                                                 Phiên cũ KHÔNG cạn — nó chỉ bị một cái đồng hồ chặn.\n\n{}{cp}",
-                                                s.name,
-                                                w.tty,
-                                                old_window_note(w.old_kept, w.closed_err.as_deref(), retrying, &s.cwd, &s.session_id)
-                                            )
-                                        }
-                                        Err(e2) => format!(
-                                            "⚠ bàn giao hỏng ({loi}) và cũng KHÔNG mở được cửa sổ bằng \
-                                             {acc}: {}\n\n{cp}",
-                                            crate::exec::truncate(&e2.to_string(), 160)
-                                        ),
-                                    },
-                                },
-                            }
-                        }
-                        },
+                        None => handover_now(db, cfg, s, acc_moi.as_deref()),
                     },
                 };
                 // Bản bàn giao là CHỮ CỦA PHIÊN — đi qua cửa định dạng, nên
@@ -11872,7 +11897,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         // nhưng tín hiệu "tài khoản đã chết" chỉ nằm trên MÀN và
                         // nó phải là màn LÚC NÀY — `/new` vốn đã tốn 15–60 giây.
                         let live = crate::sessions::snapshot(cfg);
-                        let chon = crate::watch::suggest_account("", &hang, &live.sessions);
+                        let chon = crate::watch::suggest_account(
+                            "",
+                            &hang,
+                            &live.sessions,
+                            now_local_min(),
+                        );
                         logging::info(
                             "new_account_chosen",
                             json!({ "chon": chon, "vi_sao": "không gõ -a — lấy cái còn cửa nhất",
@@ -12081,11 +12111,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         );
                         match hang.iter().find(|r| r.name == a) {
                             Some(r) if r.rank == crate::quota::Rank::Full => {
-                                let khac = crate::watch::suggest_account(a, &hang, &[])
-                                    .map(|m| format!(" Còn cửa: {m}."))
-                                    .unwrap_or_else(|| {
-                                        " Và huba không thấy tài khoản nào còn cửa.".to_string()
-                                    });
+                                let khac =
+                                    crate::watch::suggest_account(a, &hang, &[], now_local_min())
+                                        .map(|m| format!(" Còn cửa: {m}."))
+                                        .unwrap_or_else(|| {
+                                            " Và huba không thấy tài khoản nào còn cửa.".to_string()
+                                        });
                                 format!("{ack}\n⚠ {a} ĐÃ KỊCH TRẦN hạn mức — phiên này nhiều khả năng chết ngay lượt đầu.{khac}")
                             }
                             _ => ack,
@@ -12340,14 +12371,54 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     Some(_) => None,
                     None => Some(crate::sessions::snapshot(cfg)),
                 };
-                let target = booked.or_else(|| {
-                    live.as_ref().and_then(|l| {
-                        l.sessions
-                            .iter()
-                            .find(|s| same_session(&s.session_id, &want))
-                            .cloned()
+                let target = booked
+                    .or_else(|| {
+                        live.as_ref().and_then(|l| {
+                            l.sessions
+                                .iter()
+                                .find(|s| same_session(&s.session_id, &want))
+                                .cloned()
+                        })
                     })
-                });
+                    // 🔴 Con trỏ đang trỏ vào một CỬA SỔ (`win-ttys018`) mà cửa
+                    // sổ ấy vừa mọc ra một phiên thật ⟹ theo nó, đừng báo "không
+                    // thấy". Hà 2026-09-12: *"thao tác 1 hồi lại báo không tồn
+                    // tại, không hiểu cách quản lý phiên kiểu gì nữa?"*
+                    //
+                    // Đúng chuỗi đo được: `/new acc4` không ghép được id ⟹ huba
+                    // đặt tên tạm `win-ttys018` và trỏ con trỏ vào đó; Hà bấm
+                    // `esc`, `claude` chạy tiếp và sinh nhật ký ⟹ hàng
+                    // `win-ttys018` BIẾN MẤT khỏi danh sách (tab ấy nay đã
+                    // `taken` bởi một phiên thật) ⟹ con trỏ thành một cái trỏ
+                    // treo, và mọi lệnh sau đó đều "không thấy phiên".
+                    //
+                    // Đây KHÔNG phải "tự chuyển con trỏ hộ" (luật `FocusKept`):
+                    // vẫn đúng CÁI CỬA SỔ chủ máy đã chọn, chỉ là thứ bên trong
+                    // nó nay có tên. Chuyển sang một phiên KHÁC mới cần anh bấm.
+                    .or_else(|| {
+                        let tty = crate::sessions::tty_of_window_id(&want)?;
+                        let s = live
+                            .as_ref()?
+                            .sessions
+                            .iter()
+                            .find(|s| {
+                                crate::sessions::is_real_tty(&s.tty)
+                                    && s.tty.trim_start_matches("/dev/") == tty
+                            })?
+                            .clone();
+                        logging::info(
+                            "focus_window_grew_a_session",
+                            json!({ "cua_so": want, "session": s.session_id, "tty": tty,
+                                    "why": "cùng cửa sổ, nay đã có id — theo tiếp thay vì báo không thấy" }),
+                        );
+                        if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, &s.session_id) {
+                            logging::error(
+                                "focus_upgrade_failed",
+                                json!({ "err": e.to_string() }),
+                            );
+                        }
+                        Some(s)
+                    });
                 // Id của phiên ĐANG được thao tác — giữ TRƯỚC khi `match` nuốt mất
                 // `target`. Mọi cái nút dựng bên dưới phải buộc vào phiên này, không
                 // phải con trỏ focus lúc bấm (xem `remember_quick`).

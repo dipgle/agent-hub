@@ -17,6 +17,15 @@ use huba::quota::{Rank, Ranked};
 use huba::sessions::LiveSession;
 use huba::watch::suggest_account;
 
+/// Giờ máy dùng cho mọi lượt gọi `suggest_account` trong tệp này: **12:45**.
+///
+/// Cố định, không bao giờ `Local::now()` — `suggest_account` từ 10/09 hỏi MỐC
+/// mở lại của dòng hạn mức, nên một bài kiểm lấy giờ thật sẽ đổi phán quyết
+/// theo lúc chạy. Ở 12:45 thì `resets 1pm/2pm/3pm` đều còn ở phía trước (dưới
+/// trần 360 phút của `pipeline::limit_still_biting`) ⟹ đọc ra là CÒN cắn, đúng
+/// ý mọi bài đã viết trước đó.
+const LUC_12_45: u64 = 12 * 60 + 45;
+
 /// Nguyên văn màn của phiên `projects-a4`, ảnh Hà gửi 2026-08-31 08:29.
 const MAN_KHOA: &str = "\
 Claude Code v2.1.228
@@ -85,7 +94,7 @@ fn tai_khoan_bi_khoa_khong_bao_gio_duoc_chon() {
     ];
     let live = [phien("acc1", true), phien("acc2", false)];
     assert_eq!(
-        suggest_account("", &hang, &live).as_deref(),
+        suggest_account("", &hang, &live, LUC_12_45).as_deref(),
         Some("acc2"),
         "acc1 màn báo bị khoá ⟹ phải nhảy qua, dù hạng của nó (`Unknown`) đứng trước acc3"
     );
@@ -104,12 +113,12 @@ fn tai_khoan_bi_khoa_khong_bao_gio_duoc_chon() {
         },
     ];
     assert_eq!(
-        suggest_account("", &hai, &[phien("acc1", false)]).as_deref(),
+        suggest_account("", &hai, &[phien("acc1", false)], LUC_12_45).as_deref(),
         Some("acc1"),
         "acc1 còn sống ⟹ `Unknown` vẫn hơn `Full`"
     );
     assert_eq!(
-        suggest_account("", &hai, &[phien("acc1", true)]),
+        suggest_account("", &hai, &[phien("acc1", true)], LUC_12_45),
         None,
         "acc1 chết + acc3 kịch trần ⟹ KHÔNG có gì để gợi ý, và nói thẳng là không có"
     );

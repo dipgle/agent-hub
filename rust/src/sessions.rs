@@ -1013,6 +1013,83 @@ pub fn is_real_tty(tty: &str) -> bool {
     !(tty.is_empty() || tty == "??" || tty == "-")
 }
 
+/// Dây TỔ TIÊN của chính tiến trình đang chạy, gần nhất đứng trước.
+///
+/// Đọc bằng `ps -o ppid=`, leo từng bậc và có TRẦN: một cây tiến trình hỏng (hay
+/// một `ppid` trỏ vòng) không được biến phép đo này thành vòng lặp vô tận. Dừng
+/// ở `1` (`launchd`) vì trên đó không còn gì để hỏi.
+fn ancestor_pids(max_bac: usize) -> Vec<i64> {
+    let mut day = Vec::new();
+    let mut pid = std::process::id() as i64;
+    for _ in 0..max_bac {
+        let p = pid.to_string();
+        let Ok(out) = crate::exec::run(
+            "ps",
+            &["-o", "ppid=", "-p", &p],
+            crate::exec::RunOpts {
+                timeout: Some(std::time::Duration::from_secs(5)),
+                ..Default::default()
+            },
+        ) else {
+            break;
+        };
+        let Ok(cha) = out.stdout.trim().parse::<i64>() else {
+            break;
+        };
+        if cha <= 1 {
+            break;
+        }
+        day.push(cha);
+        pid = cha;
+    }
+    day
+}
+
+/// Phiên `claude` đang chạy ở **chính cái terminal vừa gõ lệnh này**.
+///
+/// 🔴 Hà 2026-09-10: *"tôi đã bảo làm lệnh để chuyển tài khoản khi đang đứng ở
+/// phiên đó"*. "Đứng ở phiên đó" là một sự thật ĐO ĐƯỢC, không phải một tham số
+/// phải gõ: lệnh gõ trong một phiên Claude (`!huba handover`) chạy như CON của
+/// tiến trình `claude` ấy, nên phiên nào là "phiên này" đọc thẳng ra từ dây tổ
+/// tiên.
+///
+/// Hai đường, và thứ tự là quan trọng:
+/// 1. **Dây tổ tiên** — bằng chứng cứng, không nhầm được sang phiên khác.
+/// 2. **Cùng `tty`** — đường lùi cho lượt gõ từ một shell thường trong cùng cửa
+///    sổ. Yếu hơn hẳn: tty là con số ĐƯỢC DÙNG LẠI (§11b), nên chỉ nhận khi
+///    đúng MỘT phiên đang mang tty ấy. Hai phiên cùng tty ⟹ trả `None` và để
+///    chủ máy gõ id, chứ không bốc bừa một cái.
+///
+/// `None` = không chứng minh được, và đó là một câu trả lời: chỗ gọi phải in
+/// danh sách phiên ra chứ không được đoán.
+pub fn session_of_this_terminal(live: &[LiveSession]) -> Option<&LiveSession> {
+    let day = ancestor_pids(12);
+    if let Some(s) = live.iter().find(|s| s.pid > 0 && day.contains(&s.pid)) {
+        return Some(s);
+    }
+    let toi = crate::exec::run(
+        "ps",
+        &["-o", "tty=", "-p", &std::process::id().to_string()],
+        crate::exec::RunOpts {
+            timeout: Some(std::time::Duration::from_secs(5)),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    let toi = toi.stdout.trim().trim_start_matches("/dev/").to_string();
+    if !is_real_tty(&toi) {
+        return None;
+    }
+    let mut khop = live
+        .iter()
+        .filter(|s| s.tty.trim_start_matches("/dev/") == toi);
+    let dau = khop.next()?;
+    match khop.next() {
+        None => Some(dau),
+        Some(_) => None,
+    }
+}
+
 pub fn window_taken_over<'a>(
     id: &str,
     tty: &str,
@@ -6075,6 +6152,66 @@ fn ready_to_type(window: i64) -> Ready {
 ///
 /// Trả `None` khi cửa sổ chưa có phiên — đúng nghĩa: phiên còn đang dựng, hoặc
 /// đang kẹt ở hộp tin-thư-mục nên CHƯA có `sessionId` nào cả.
+/// Phần THUẦN của [`id_bound_elsewhere`]: `so` là các cặp `(sessionId, tty)`
+/// đọc được từ sổ của CLI, `want` là cửa sổ vừa mở.
+///
+/// Tách ra để kiểm được, vì cái sai ở đây KHÔNG kêu: nó chỉ hiện ra dưới dạng
+/// "con trỏ của điện thoại nhảy vào phiên của người khác".
+pub fn id_bound_elsewhere_in(so: &[(String, String)], id: &str, want: &str) -> bool {
+    let want = want.trim_start_matches("/dev/");
+    so.iter().any(|(sid, tty)| {
+        let tty = tty.trim_start_matches("/dev/");
+        sid == id && is_real_tty(tty) && tty != want
+    })
+}
+
+/// Id này có đang là phiên của **một cửa sổ KHÁC** không.
+///
+/// 🔴 Ca đo được 2026-09-12 18:36, và nó là ca tệ nhất trong họ này vì nó IM:
+/// `/new acc4` mở `ttys017`, `session_on_tty` chưa trả lời được (phiên mới chưa
+/// kịp ghi sổ, nó còn đang đứng ở một hộp hỏi), nên lượt đoán theo nhật ký chạy
+/// — và nó trả về `54bd8153`, **phiên `[huba]` đang chạy ở `ttys009`**, chỉ vì
+/// phiên ấy đang gõ liên tục nên tệp nhật ký của nó luôn là tệp mới nhất.
+///
+/// Hậu quả không dừng ở một dòng sai: huba nhắn *"Nay đang theo phiên này"* rồi
+/// trỏ con trỏ điện thoại vào đó, nên mọi câu chủ máy gõ tiếp đi thẳng vào một
+/// phiên KHÁC đang làm việc dở. Và trong danh sách thì phiên vừa mở biến mất —
+/// đúng câu Hà hỏi: *"danh sách phiên cũng không thấy phiên mới đâu"*.
+///
+/// Chú thích ngay trên `newest_transcript_since` đã kể đúng con bug này từ
+/// 2026-08-15 (ba lượt ghép nhầm liên tiếp) và đã vá bằng cách **hỏi tty
+/// trước**. Nhưng lối đoán cũ vẫn nằm đó làm đường lui, nên nó quay lại nguyên
+/// vẹn ở đúng cái ngày phép hỏi-theo-tty chậm một nhịp. Một tầng được gác không
+/// nói gì về tầng còn lại.
+///
+/// Fail-CLOSED: `ps` không đọc được ⟹ coi như KHÔNG chứng minh được nó rảnh ⟹
+/// từ chối. Cái giá của từ chối là một cái tên tạm `win-ttysNNN`; cái giá của
+/// nhận bừa là gõ vào việc của người khác.
+fn id_bound_elsewhere(cfg: &Config, id: &str, want_tty: &str) -> bool {
+    let procs = Procs::read();
+    if !procs.ok {
+        return true;
+    }
+    let mut so: Vec<(String, String)> = Vec::new();
+    for account in &cfg.claude_accounts_or_ambient() {
+        let Ok(rows) = list_account_books(&account_book_dir(account)) else {
+            continue;
+        };
+        for r in rows {
+            let (Some(sid), Some(pid)) = (
+                r.get("sessionId").and_then(Value::as_str),
+                r.get("pid").and_then(Value::as_i64),
+            ) else {
+                continue;
+            };
+            if let Some(p) = procs.by_pid.get(&pid) {
+                so.push((sid.to_string(), p.tty.clone()));
+            }
+        }
+    }
+    id_bound_elsewhere_in(&so, id, want_tty)
+}
+
 pub fn session_on_tty(cfg: &Config, tty_short: &str) -> Option<String> {
     let want = tty_short.trim_start_matches("/dev/");
     if !is_real_tty(want) {
@@ -6178,6 +6315,24 @@ fn wait_for_new_session_id(
             .or_else(|| {
                 newest_transcript_since(&cfg.claude_transcript_root(), root, opened_at)
                     .filter(|id| exclude.is_none_or(|old| id != old))
+                    // 🔴 Cửa thêm 12/09 — xem `id_bound_elsewhere`. Lượt đoán
+                    // này hỏi *"tệp nào vừa được ghi"*, mà mọi tài khoản dùng
+                    // CHUNG một gốc nhật ký (`projects` của acc2·acc3·acc4 đều
+                    // là liên kết về `~/.claude/projects`), nên một phiên khác
+                    // đang gõ dở luôn thắng cuộc đua. Phải chứng minh được cái
+                    // id ấy KHÔNG phải cửa sổ của ai khác mới được nhận.
+                    .filter(|id| {
+                        let cuop = id_bound_elsewhere(cfg, id, tty_short);
+                        if cuop {
+                            logging::warn(
+                                "transcript_guess_rejected",
+                                json!({ "session": id, "tty": tty_short,
+                                        "why": "id này đang là phiên của một cửa sổ KHÁC — \
+                                                đoán theo nhật ký mới nhất là cướp phiên đang chạy" }),
+                            );
+                        }
+                        !cuop
+                    })
             })
     };
 
@@ -6198,7 +6353,14 @@ fn wait_for_new_session_id(
             std::thread::sleep(Duration::from_millis(500));
             if let Some(id) = look(()) {
                 logging::info(
-                    "new_session_matched_by_transcript",
+                    // Tên cũ là `new_session_matched_by_transcript`, và nó nói
+                    // dối: dòng này in cho CẢ HAI đường, kể cả lượt ghép đúng
+                    // bằng tty (đường ấy đã tự in `new_session_matched_by_tty`
+                    // ngay trước). Đọc log ngày 12/09 thấy "by_transcript" thì
+                    // tưởng lối đoán luôn chạy — trong khi nó chỉ chạy khi
+                    // không có dòng `by_tty` đứng cạnh. Một cái tên sai làm hỏng
+                    // đúng phép đo dùng để chẩn đoán chính nó.
+                    "new_session_matched",
                     json!({ "session": id, "tty": tty_short, "round": round }),
                 );
                 return Some(id);
@@ -6754,6 +6916,16 @@ pub const BARE_TERMINAL_CMD: &str = "cd ~/";
 /// "đây là cửa sổ hay là phiên" đọc chung một câu trả lời, thay vì mỗi chỗ tự
 /// so chuỗi — đúng con đường đã đẻ ra bốn bản chép của luật "tên để đọc".
 pub const SHELL_ID_PREFIX: &str = "win-";
+
+/// `win-ttys018` → `ttys018`. `None` nếu không phải một id CỬA SỔ.
+///
+/// Một chỗ duy nhất vì cái tên ấy đã bị cắt nhầm một lần rồi (`SessionData::short()`
+/// lấy 8 ký tự đầu ⟹ `win-ttys`, mất số tty, tức mất đúng cái phân biệt cửa sổ
+/// này với cửa sổ khác — xem `verbs.rs`).
+pub fn tty_of_window_id(id: &str) -> Option<String> {
+    let tty = id.strip_prefix(SHELL_ID_PREFIX)?.trim();
+    is_real_tty(tty).then(|| tty.to_string())
+}
 
 pub fn is_shell_id(id: &str) -> bool {
     id.starts_with(SHELL_ID_PREFIX)

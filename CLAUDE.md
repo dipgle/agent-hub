@@ -143,26 +143,39 @@ or drive a session from a phone?** If not, it does not belong here.
   test` stops at the first red target, and the run that taught us printed
   `66 ok / 1 failed` having touched **67 of 141** test files — a denominator that
   reads like a verdict.
-  🔴 **The "4h10m wall clock" this line used to carry was not the tests.** Same
-  day, the same suite behind a full gate took **5h18m** — and 55 seconds of that
-  was testing. The rest is `syspolicyd` assessing each freshly-built binary:
-  **~125 seconds per binary, `user 0.00 sys 0.00`** (waiting, not computing).
-  Measured 2026-09-13, so nobody re-derives it: independent of size (1.5 MB
-  stalls as long as 9.2 MB) and of path (`/private/tmp` same as `~/projects`);
-  `codesign -f -s -` does NOT help (178s · 166s on re-signed fresh binaries),
-  because the cache is keyed on CONTENT — a copy of an already-scanned binary
-  runs in 0.46s, so every rebuild pays again. Running the binaries **24 at a
-  time changes nothing** (they still finish ~128s apart: 111 · 210 · 319 · 441 ·
-  548 · 645 · 777 · 920), so `syspolicyd` serialises absolutely — do not "fix"
-  this with parallelism, and read any past "2x from parallel" as a suite that
-  happened to contain already-scanned binaries. `com.apple.provenance` cannot be
-  stripped (`xattr -c` leaves it — system xattr), so that door does not open
-  either.
-  ⇒ The ONE thing that cuts it is outside the code, and only the owner can type
-  it: `sudo spctl developer-mode enable-terminal`, then reopen Terminal — the
-  grant is read when a process starts, so a window opened earlier keeps the old
-  answer. Until it is granted, budget a full gate at **hours**, and never read a
-  slow gate as a slow test suite.
+  🔴 **A gate that takes hours is not a slow test suite — it is
+  `target/debug/deps/`.** The first run of a freshly-built test binary stalls
+  **~125 seconds with `user 0.00 sys 0.00`** (waiting, not computing) — but ONLY
+  while it sits in `deps/`. Measured 2026-09-13; same bytes, four places, same
+  minute, first execution of each:
+
+  | where the identical bytes sat | first run |
+  |---|---|
+  | `.tmp/verbs_copy` — outside `target/` | **1s** |
+  | `target/debug/deps/verbs-7c82…` | **103s** |
+  | `target/debug/deps/zz_probe_dir` — same bytes, new name, still `deps/` | **121s** |
+  | `target/debug/zz_thu/zz_probe_sach` — `target/debug/`, empty dir | **0s** |
+
+  `deps/` held **1,375,586 entries** when that was measured. Four things it is
+  NOT, each measured, so nobody re-derives them: not the binary's size
+  (1,584,920 B stalls as long as 9,182,112 B), not the signature (`codesign -f
+  -s -` on fresh binaries still took 178s · 166s), not `cargo` (a 9.9 MB
+  `rustc`-built binary outside `deps/` runs in 2s, with or without `-C
+  debuginfo=2`), and not `com.apple.provenance` (a system xattr — `xattr -c`
+  leaves it in place). Running them **24 at a time changes nothing**: they still
+  finish ~128s apart (111 · 210 · 319 · 441 · 548 · 645 · 777 · 920), so whatever
+  does this serialises absolutely. Do not "fix" this with parallelism, and read
+  any past "2x from parallel" as a suite that happened to hold binaries already
+  run once.
+  ⇒ **The fix costs two seconds: copy the test binaries out of `deps/` and run
+  the copies.** `./gate.sh` does that. End-to-end on a fully fresh build of all
+  147 binaries, same tree, same day: **in place 5h18m (`SUITE_WALL=13570s`) →
+  from a clean directory 39m48s (`CHEP_WALL=2s`, `SUITE_WALL=79s`)**. What is
+  left is compile and nothing else (clippy 1207s + build 1086s). Granting the
+  Terminal developer-tool exemption (`sudo spctl developer-mode
+  enable-terminal`, then reopen Terminal — the grant is read when a process
+  starts) should help too and is still worth having, but it is no longer the
+  only door.
 - `./huba …` is a wrapper that builds on first use then execs `rust/target/release/huba`.
 
 ## Gốc workspace: `~/projects` — và đừng gõ nó vào mã (2026-08-12)
@@ -759,6 +772,8 @@ phải gọi `forget_ack_live()` trong đó — thiếu một cửa là sửa m�
 ```
 huba                     wrapper script → rust/target/release/huba
 huba.config.json         config (no secrets — only env var NAMES)
+gate.sh                 full gate: fmt · clippy · build · run every test binary
+                        FROM A CLEAN DIR (see the Tests bullet) · doctest
 install_update.sh       build → install a SIGNED hubad where launchd runs it
 sign.sh                 re-sign one binary with the stable identity
 make-signing-cert.sh    create that identity — ONCE, ever

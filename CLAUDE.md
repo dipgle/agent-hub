@@ -137,11 +137,31 @@ or drive a session from a phone?** If not, it does not belong here.
   1,626 `warn` · 120 `error`. So this panel means *errors*, not *all trouble* —
   most of huba's trouble lives at `warn` and deliberately stays there. An empty
   block reads "no ERRORS", never "nothing worth looking at".
-- Tests: `cd rust && cargo test --offline --no-fail-fast` → **922 tests across 146
-  targets, 0 warnings** (measured 2026-09-12, 4h10m wall clock). `--no-fail-fast`
-  is not optional: plain `cargo test` stops at the first red target, and the run
-  that taught us printed `66 ok / 1 failed` having touched **67 of 141** test
-  files — a denominator that reads like a verdict.
+- Tests: `cd rust && cargo test --offline --no-fail-fast` → **953 tests across 148
+  blocks (147 test binaries + doctests), 0 warnings** — and it runs in **55
+  seconds** (measured 2026-09-13). `--no-fail-fast` is not optional: plain `cargo
+  test` stops at the first red target, and the run that taught us printed
+  `66 ok / 1 failed` having touched **67 of 141** test files — a denominator that
+  reads like a verdict.
+  🔴 **The "4h10m wall clock" this line used to carry was not the tests.** Same
+  day, the same suite behind a full gate took **5h18m** — and 55 seconds of that
+  was testing. The rest is `syspolicyd` assessing each freshly-built binary:
+  **~125 seconds per binary, `user 0.00 sys 0.00`** (waiting, not computing).
+  Measured 2026-09-13, so nobody re-derives it: independent of size (1.5 MB
+  stalls as long as 9.2 MB) and of path (`/private/tmp` same as `~/projects`);
+  `codesign -f -s -` does NOT help (178s · 166s on re-signed fresh binaries),
+  because the cache is keyed on CONTENT — a copy of an already-scanned binary
+  runs in 0.46s, so every rebuild pays again. Running the binaries **24 at a
+  time changes nothing** (they still finish ~128s apart: 111 · 210 · 319 · 441 ·
+  548 · 645 · 777 · 920), so `syspolicyd` serialises absolutely — do not "fix"
+  this with parallelism, and read any past "2x from parallel" as a suite that
+  happened to contain already-scanned binaries. `com.apple.provenance` cannot be
+  stripped (`xattr -c` leaves it — system xattr), so that door does not open
+  either.
+  ⇒ The ONE thing that cuts it is outside the code and needs the owner's
+  password: `sudo spctl developer-mode enable-terminal`, then reopen Terminal.
+  Until that is granted, budget a full gate at **hours**, and never read a slow
+  gate as a slow test suite.
 - `./huba …` is a wrapper that builds on first use then execs `rust/target/release/huba`.
 
 ## Gốc workspace: `~/projects` — và đừng gõ nó vào mã (2026-08-12)

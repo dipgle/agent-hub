@@ -158,10 +158,11 @@ or drive a session from a phone?** If not, it does not belong here.
   happened to contain already-scanned binaries. `com.apple.provenance` cannot be
   stripped (`xattr -c` leaves it — system xattr), so that door does not open
   either.
-  ⇒ The ONE thing that cuts it is outside the code and needs the owner's
-  password: `sudo spctl developer-mode enable-terminal`, then reopen Terminal.
-  Until that is granted, budget a full gate at **hours**, and never read a slow
-  gate as a slow test suite.
+  ⇒ The ONE thing that cuts it is outside the code, and only the owner can type
+  it: `sudo spctl developer-mode enable-terminal`, then reopen Terminal — the
+  grant is read when a process starts, so a window opened earlier keeps the old
+  answer. Until it is granted, budget a full gate at **hours**, and never read a
+  slow gate as a slow test suite.
 - `./huba …` is a wrapper that builds on first use then execs `rust/target/release/huba`.
 
 ## Gốc workspace: `~/projects` — và đừng gõ nó vào mã (2026-08-12)

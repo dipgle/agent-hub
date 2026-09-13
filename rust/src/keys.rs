@@ -234,7 +234,241 @@ pub fn osa_budget(lane: crate::exec::Lane, last_ok: Duration) -> Duration {
     (last_ok * 6).clamp(san, tran)
 }
 
+/// Ngân sách hỏi Terminal cho **MỘT vòng nền** — tổng, không phải trần mỗi lượt.
+///
+/// 🔴 Hà 2026-09-13: *"Tại sao thi thoảng bị treo chờ rất lâu lệnh mới phản
+/// hồi… chạy đơn luồng bị nghẽn đọc ghi?"*. Đo trên nhật ký trước khi trả lời,
+/// và câu trả lời không phải đĩa cũng không phải CPU:
+///
+/// ```text
+/// 02:49:53  terminal_probe_failed                     ← khe 14,9s
+/// 02:49:53  sessions_snapshot_ms  ms=45311            ← bình thường 890ms
+/// 02:50:14  terminal_probe_failed                     ← khe 18,6s
+/// 02:50:35  trust_tick_probe_failed                   ← khe 20,1s
+/// 02:50:41  window_of_from_cache  "hỏi Terminal hết giờ"
+/// 02:50:49  cycle_done  ms=101463
+/// ```
+///
+/// Bước đọc ảnh chụp phiên **đọc tệp**, p50 của nó ổn định 1–2,7 giây suốt hai
+/// tuần. Nó phình lên 45 giây vì mỗi lượt hỏi Terminal không được trả lời thì
+/// đốt trọn trần của [`osa_budget`]. Vòng > 30 giây theo ngày, kèm mẫu số:
+/// `0/131` (30/08) · `22/1081` (01/09) · **`70/857` (09/09)** · **`73/733`
+/// (10/09)** · `61/881` (12/09); chậm nhất **448,2 giây**.
+///
+/// ⚠ Ngân sách này **KHÔNG rút ngắn một lượt hỏi nào** — luật của `osa_budget`
+/// (*"chỉ được NỚI, không được rút ngắn thứ đang chạy đúng"*) vẫn nguyên. Nó
+/// chặn việc hỏi **lượt thứ N** sau khi vòng đã tiêu hết chừng này. Hai chiều
+/// khác nhau: một cái là *một câu hỏi được chờ bao lâu*, cái này là *một vòng
+/// được phép chờ tổng cộng bao lâu*.
+///
+/// 10 giây: ảnh chụp phiên (0,9–2,7s ở p50) luôn lọt, vì nó chạy ĐẦU vòng; còn
+/// những phép dò tuỳ chọn chạy sau nó thì bị bỏ đúng vào những vòng mà Terminal
+/// đang câm — tức đúng lúc chúng cũng sẽ không đọc được gì.
+pub const PROBE_BUDGET_MS: u64 = 10_000;
+
+/// Sau một lượt hỏi GẤP, việc nền nhường Terminal bao lâu.
+///
+/// Terminal.app trả lời AppleScript **tuần tự**, nên huba có bao nhiêu luồng
+/// cũng vô ích: hai bên cùng hỏi thì ngón tay chủ máy xếp hàng sau vòng quét.
+/// [`crate::exec::Lane`] đã hứa *"chúng nhường đường"* từ 14/08, nhưng nó mới
+/// nhường ở tầng QoS của CPU (`taskpolicy -b`) — thứ khan hiếm ở đây không phải
+/// CPU, mà là **lượt nói chuyện với Terminal**.
+///
+/// Cửa sổ nhường bám theo **lượt hỏi Terminal gấp gần nhất**, không bám theo
+/// tuổi thọ của `exec::urgent()`: một việc dài (`watch_long_job` giữ hạng gấp cả
+/// tiếng) sẽ bỏ đói vòng quét vĩnh viễn nếu tính theo tuổi thọ.
+pub const PROBE_YIELD_MS: i64 = 2_000;
+
+static PROBE_SPENT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PROBE_SKIPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PROBE_TIMEOUTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Mốc (ms epoch) một lượt hỏi Terminal GẤP vừa chạy xong.
+static URGENT_TERMINAL_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Ba kết cục của câu hỏi *"lượt dò này có được chạy không"*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeVerdict {
+    /// Hỏi đi.
+    Hoi,
+    /// Vòng nền đã tiêu hết ngân sách — **không đo được**, không phải "không có".
+    HetNganSach { da_tieu_ms: u64 },
+    /// Có người đang chờ một câu trả lời từ Terminal — nhường.
+    Nhuong { con_ms: i64 },
+}
+
+/// Phần THUẦN của hai cửa ① và ② — tách ra để kiểm được mà không cần một máy
+/// đang tải nặng và một Terminal đang câm.
+///
+/// Thứ tự hai cửa có ý nghĩa: **nhường trước, ngân sách sau**. Một vòng còn dư
+/// ngân sách mà chen ngang ngón tay chủ máy vẫn là chen ngang; còn một vòng hết
+/// ngân sách thì nó nghỉ dù có ai chờ hay không.
+///
+/// Hạng GẤP không bao giờ bị chặn bởi cả hai: người đang nhìn màn hình chờ câu
+/// trả lời thì không có ngân sách nào đáng hơn.
+pub fn probe_verdict(
+    lane: crate::exec::Lane,
+    da_tieu_ms: u64,
+    ngan_sach_ms: u64,
+    bay_gio_ms: i64,
+    gap_luc_ms: i64,
+    cua_so_nhuong_ms: i64,
+) -> ProbeVerdict {
+    if lane == crate::exec::Lane::Urgent {
+        return ProbeVerdict::Hoi;
+    }
+    let con = gap_luc_ms + cua_so_nhuong_ms - bay_gio_ms;
+    // 🪦 Ở đây từng có thêm một chốt `gap_luc_ms > 0`, với lời giải thích *"mốc
+    // 0 nghĩa là chưa có lượt gấp nào, đừng để nó cộng cửa sổ ra một khoảng còn
+    // nhường"*. **Đối chứng ngược đo được nó là mutant TƯƠNG ĐƯƠNG** (`RED_G5=0`,
+    // 13/09): mốc chưa dùng là `0`, còn `bay_gio_ms` là giờ epoch thật (~1,79e12),
+    // nên `con` luôn âm sâu và nhánh dưới không bao giờ chạm tới. Chốt ấy chưa
+    // từng chặn một lượt nào.
+    //
+    // Gỡ chứ không giữ — cùng lựa chọn đã ghi trong PLAN.md cho mutant *"bỏ lượt
+    // cắt `(` trong `minutes_until_reset`"*: một dòng mã không đỏ được kèm một
+    // câu chuyện nghe hợp lý là thứ tệ hơn cả hai vế của nó.
+    if con > 0 {
+        return ProbeVerdict::Nhuong { con_ms: con };
+    }
+    if da_tieu_ms >= ngan_sach_ms {
+        return ProbeVerdict::HetNganSach { da_tieu_ms };
+    }
+    ProbeVerdict::Hoi
+}
+
+/// Vòng vừa rồi đã tiêu bao nhiêu, bỏ qua bao nhiêu, hết giờ mấy lượt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ProbeUsed {
+    pub da_tieu_ms: u64,
+    pub bo_qua: u64,
+    pub het_gio: u64,
+}
+
+pub fn probe_used() -> ProbeUsed {
+    use std::sync::atomic::Ordering::Relaxed;
+    ProbeUsed {
+        da_tieu_ms: PROBE_SPENT_MS.load(Relaxed),
+        bo_qua: PROBE_SKIPPED.load(Relaxed),
+        het_gio: PROBE_TIMEOUTS.load(Relaxed),
+    }
+}
+
+/// Mở ngân sách cho một vòng mới. Gọi ở ĐẦU [`crate::pipeline::run_once`].
+pub fn probe_budget_reset() {
+    use std::sync::atomic::Ordering::Relaxed;
+    PROBE_SPENT_MS.store(0, Relaxed);
+    PROBE_SKIPPED.store(0, Relaxed);
+    PROBE_TIMEOUTS.store(0, Relaxed);
+}
+
+/// Máy đang thế nào, đo bằng nguồn **KHÔNG phải AppleScript**.
+///
+/// 🔴 Bắt buộc phải là nguồn khác: chỗ gọi nó là chỗ vừa hỏi Terminal mà không
+/// được trả lời, nên hỏi thêm một câu AppleScript nữa để chẩn đoán là hỏi đúng
+/// cái miệng vừa câm — và treo thêm một trần nữa.
+///
+/// Trả `(cpu Terminal, cpu WindowServer, load 1 phút)`; `-1.0` = không đọc được,
+/// **không phải 0** (§13②: "không đo được" là một trạng thái riêng).
+#[cfg(target_os = "macos")]
+fn may_dang_the_nao() -> (f64, f64, f64) {
+    // `RunOpts` không `Clone` được (nó mượn), nên dựng lại cho từng lượt — hai
+    // dòng thừa còn hơn một `derive` mở rộng ra cả tệp vì một chỗ dùng.
+    let ngan = || RunOpts {
+        timeout: Some(Duration::from_secs(3)),
+        ..Default::default()
+    };
+    let (mut term, mut ws) = (-1.0, -1.0);
+    if let Ok(o) = run("ps", &["-Aceo", "pcpu,comm"], ngan()) {
+        for dong in o.stdout.lines() {
+            let mut it = dong.split_whitespace();
+            let (Some(cpu), Some(ten)) = (it.next(), it.next()) else {
+                continue;
+            };
+            let Ok(v) = cpu.parse::<f64>() else { continue };
+            // Cộng dồn: Terminal có thể có nhiều dòng, và WindowServer thì tên
+            // đầy đủ dài hơn cái ta so.
+            if ten == "Terminal" {
+                term = if term < 0.0 { v } else { term + v };
+            } else if ten == "WindowServer" {
+                ws = if ws < 0.0 { v } else { ws + v };
+            }
+        }
+    }
+    let load = run("sysctl", &["-n", "vm.loadavg"], ngan())
+        .ok()
+        .and_then(|o| {
+            o.stdout
+                .split_whitespace()
+                .nth(1)
+                .and_then(|x| x.parse::<f64>().ok())
+        })
+        .unwrap_or(-1.0);
+    (term, ws, load)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn may_dang_the_nao() -> (f64, f64, f64) {
+    (-1.0, -1.0, -1.0)
+}
+
+/// Một câu đọc được về hoàn cảnh của lượt hết giờ. Thuần, để kiểm được.
+///
+/// `-1.0` phải đọc ra **"?"**, không đọc ra `-1.0%` — một con số âm trên màn là
+/// một phép đo hỏng đội lốt một phép đo.
+pub fn timeout_context(
+    terminal_cpu: f64,
+    ws_cpu: f64,
+    load1: f64,
+    het_gio_vong_nay: u64,
+    last_ok_ms: u64,
+) -> String {
+    let so = |v: f64, don_vi: &str| -> String {
+        if v < 0.0 {
+            "?".to_string()
+        } else {
+            format!("{v:.0}{don_vi}")
+        }
+    };
+    format!(
+        "Terminal {} · WindowServer {} · load {} · hết giờ lượt thứ {} của vòng này · lượt đọc trót lọt gần nhất {:.1}s",
+        so(terminal_cpu, "%"),
+        so(ws_cpu, "%"),
+        so(load1, ""),
+        het_gio_vong_nay,
+        last_ok_ms as f64 / 1000.0
+    )
+}
+
 fn osascript(script: &str) -> Result<String> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let lane = crate::exec::lane();
+    // Hai cửa ① + ② — xem `probe_verdict`. Cả hai trả `Err`, và đó là ĐÚNG hình
+    // dạng: mọi chỗ gọi ở đây đã đọc `Err` thành *"huba mù"* (luật 11b), tức
+    // fail-closed. Không cửa nào biến một lượt không-đo-được thành một sự thật.
+    match probe_verdict(
+        lane,
+        PROBE_SPENT_MS.load(Relaxed),
+        PROBE_BUDGET_MS,
+        crate::quota::now_ms(),
+        URGENT_TERMINAL_MS.load(Relaxed),
+        PROBE_YIELD_MS,
+    ) {
+        ProbeVerdict::Hoi => {}
+        ProbeVerdict::HetNganSach { da_tieu_ms } => {
+            PROBE_SKIPPED.fetch_add(1, Relaxed);
+            return Err(anyhow!(
+                "vòng nền đã tiêu hết ngân sách hỏi Terminal ({:.1}s/{:.1}s) — KHÔNG hỏi lượt này",
+                da_tieu_ms as f64 / 1000.0,
+                PROBE_BUDGET_MS as f64 / 1000.0
+            ));
+        }
+        ProbeVerdict::Nhuong { con_ms } => {
+            PROBE_SKIPPED.fetch_add(1, Relaxed);
+            return Err(anyhow!(
+                "nhường Terminal cho một lượt hỏi đang có người chờ (còn {con_ms}ms)"
+            ));
+        }
+    }
     let tran = osa_timeout();
     let bat_dau = std::time::Instant::now();
     let out = run(
@@ -244,8 +478,19 @@ fn osascript(script: &str) -> Result<String> {
             timeout: Some(tran),
             ..Default::default()
         },
-    )?;
+    );
+    // Tính giờ TRƯỚC khi phán: một lượt hỏng vẫn đã tiêu thời gian của vòng, và
+    // bỏ nó khỏi sổ là để ngân sách không bao giờ cạn ở đúng những vòng tệ nhất.
+    PROBE_SPENT_MS.fetch_add(
+        bat_dau.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        Relaxed,
+    );
+    if lane == crate::exec::Lane::Urgent {
+        URGENT_TERMINAL_MS.store(crate::quota::now_ms(), Relaxed);
+    }
+    let out = out?;
     if out.timed_out {
+        PROBE_TIMEOUTS.fetch_add(1, Relaxed);
         // 🔴 NÓI RA VÌ SAO, đừng chỉ nói con số — Hà 2026-08-25 nhận hàng loạt
         // `⚠ không đọc được màn: osascript quá 20s` và không có cách nào biết đó
         // là máy bận hay cửa sổ chết. Hai chuyện ấy cần hai hành động khác nhau.
@@ -261,6 +506,22 @@ fn osascript(script: &str) -> Result<String> {
         } else {
             String::new()
         };
+        // ③ Ghi lại MÁY đang thế nào, bằng nguồn không phải AppleScript — xem
+        // `may_dang_the_nao`. Chỉ ghi log, không đưa vào câu trả lời: câu ấy đi
+        // ra Telegram, và một dòng số liệu hệ thống ở đó là chữ không ai dùng.
+        let (tcpu, wscpu, load) = may_dang_the_nao();
+        crate::logging::warn(
+            "osa_timeout_context",
+            serde_json::json!({
+                "tran_giay": tran.as_secs(),
+                "lane": format!("{lane:?}"),
+                "hoan_canh": timeout_context(
+                    tcpu, wscpu, load,
+                    PROBE_TIMEOUTS.load(Relaxed),
+                    truoc,
+                ),
+            }),
+        );
         return Err(anyhow!("osascript quá {}s{vi}", tran.as_secs()));
     }
     // Chỉ ghi lượt THÀNH CÔNG: một lượt quá hạn không nói được nó "mất bao lâu",

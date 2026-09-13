@@ -6136,6 +6136,179 @@ pub fn remember_runin_pending_for(cfg: &Config, sid: &str, line: &str, block: &s
     }
 }
 
+/// Sổ **N lượt `/runin` gần nhất** — để `quiet` không đồng nghĩa với MẤT DẤU.
+///
+/// 🔴 Hà 2026-09-13: *"vậy quiet thì sao tôi biết phiên nào nhờ chạy gì"*. Câu
+/// hỏi ấy đo được là ĐÚNG, và đây là số: cửa `quiet` (25/08) tắt tin PUSH, còn
+/// người báo tin `⏳` chỉ mở miệng sau [`LONG_JOB_TICK_SEC`] = 90 giây — nên **ba
+/// lượt hòm thư ngày 12/09 (0,06s · 0,36s · 2,58s) không để lại một dấu nào
+/// trên điện thoại**, chỉ `logs/huba.log` biết. Hai chỗ đang đọc được —
+/// `/doctor` và chân danh sách `/sessions` — đều chỉ nói về việc ĐANG chạy, nên
+/// một việc 2,6 giây thì tới lúc mở ra xem đã xong từ lâu.
+///
+/// Không đổi `quiet` (Hà đã bảo im, và 21 tin một buổi là lý do), không đẻ route
+/// mới (chính repo này đã chốt *"chứ không phải một route `/jobs` thứ hai phải
+/// nhớ tên"*). Sổ này đổi câu hỏi từ PUSH sang PULL: im lúc chạy, **tra được
+/// sau**, ở đúng chỗ chủ máy đang mở.
+pub const RUNIN_DONE_KEY: &str = "runin:recent";
+
+/// Giữ bao nhiêu lượt. Sổ này giữ MỘT DÒNG mỗi lượt — không giữ cả khối kết quả
+/// như [`RUNIN_PENDING_KEY`] — nên nó nhẹ hơn hẳn và trần cao hơn được.
+const RUNIN_DONE_KEEP: usize = 20;
+
+/// In ra bao nhiêu dòng. Ít hơn trần giữ, và cố ý: `/doctor` đã có năm khối trên
+/// một màn 390px.
+const RUNIN_DONE_SHOW: usize = 5;
+
+/// Một lượt `/runin` đã chạy xong.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RuninDone {
+    /// Phiên đã nhờ, **đã thành tên đọc được** ([`job_who`]) — không phải uuid
+    /// trần. Câu hỏi là *"phiên nào nhờ"*, mà `5a7f2f4a` thì còn phải đi tra
+    /// tiếp; cùng lý lẽ đã chọn cho `Job::label`.
+    pub w: String,
+    /// Dòng lệnh, đã cắt.
+    pub l: String,
+    /// Mã thoát. `None` = **không có mã**, tức bị trần thời gian cắt — một
+    /// trạng thái riêng, không được đọc thành `0`.
+    pub c: Option<i32>,
+    /// Chạy bao lâu, ms.
+    pub ms: u64,
+    /// Lúc xong, giây epoch.
+    pub t: i64,
+}
+
+/// Đọc sổ. `pub` vì bài kiểm phải đi được TRỌN VÒNG (ghi → đọc → dựng chữ):
+/// một phép đo chỉ chấm phần dựng chữ sẽ xanh y nguyên cả khi không ai ghi.
+pub fn runin_done_book(db: &Db) -> Vec<RuninDone> {
+    db.cursor_or_log(RUNIN_DONE_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default()
+}
+
+fn save_runin_done(db: &Db, book: &[RuninDone]) {
+    match serde_json::to_string(book) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(RUNIN_DONE_KEY, &v) {
+                // Không nuốt: mất sổ này là trả `quiet` về đúng cái lỗ vừa vá.
+                logging::error("runin_done_not_saved", json!({ "err": e.to_string() }));
+            }
+        }
+        Err(e) => logging::error("runin_done_not_encoded", json!({ "err": e.to_string() })),
+    }
+}
+
+/// Ghi một lượt vào sổ. `who` là nhãn đã dựng, KHÔNG phải uuid.
+pub fn remember_runin_done(
+    db: &Db,
+    who: &str,
+    line: &str,
+    code: Option<i32>,
+    ms: u64,
+    timed_out: bool,
+    now: i64,
+) {
+    let mut book = runin_done_book(db);
+    book.push(RuninDone {
+        w: who.to_string(),
+        l: crate::exec::truncate(line, 120),
+        // Trần thời gian cắt ⟹ KHÔNG có mã thoát, và `Some(0)` ở đây sẽ đọc ra
+        // "xong tốt" cho đúng cái ca tệ nhất.
+        c: if timed_out { None } else { code },
+        ms,
+        t: now,
+    });
+    while book.len() > RUNIN_DONE_KEEP {
+        book.remove(0);
+    }
+    save_runin_done(db, &book);
+}
+
+/// Như [`remember_runin_done`], nhưng TỰ MỞ kết nối DB — cùng lý do với
+/// [`remember_runin_pending_for`]: luồng nền của `/runin` chỉ nuốt `Config`.
+pub fn remember_runin_done_for(
+    cfg: &Config,
+    who: &str,
+    line: &str,
+    code: Option<i32>,
+    ms: u64,
+    timed_out: bool,
+    now: i64,
+) {
+    match Db::open(&cfg.db) {
+        Ok(db) => remember_runin_done(&db, who, line, code, ms, timed_out, now),
+        Err(e) => logging::error(
+            "runin_done_db_failed",
+            json!({ "who": who, "err": e.to_string(),
+                    "effect": "lượt này KHÔNG vào sổ — `/doctor` sẽ không kể lại nó" }),
+        ),
+    }
+}
+
+/// `137` → `2 phút trước`. Chỉ dùng cho sổ này.
+///
+/// ⚠ `quota::Quota::say` có một bản riêng, và hai bản KHÔNG gộp được: bản kia
+/// nói về một lượt ĐO (`đo 5 phút trước`) và làm tròn theo phút từ ms. Gộp là
+/// đổi câu chữ của một chỗ đang đúng để tiết kiệm bốn dòng.
+pub fn truoc_day(giay: i64) -> String {
+    match giay.max(0) {
+        0..=59 => "vừa xong".to_string(),
+        g @ 60..=5399 => format!("{} phút trước", g / 60),
+        g @ 5400..=86_399 => format!("{} tiếng trước", g / 3600),
+        g => format!("{} ngày trước", g / 86_400),
+    }
+}
+
+/// Dấu mở đầu một dòng sổ: kết cục của lượt ấy, đọc được không cần chú giải.
+fn dau_runin(r: &RuninDone) -> String {
+    match r.c {
+        None => "⏱ hết giờ".to_string(),
+        Some(0) => "✅".to_string(),
+        Some(c) => format!("❌ exit {c}"),
+    }
+}
+
+/// Khối `/doctor`. `None` = sổ rỗng, và khi ấy **không in gì** — một dòng "chưa
+/// có lượt nào" trên màn 390px là chỗ trống trả bằng chỗ, cùng lựa chọn đã làm
+/// cho [`jobs_line`] ở chân `/sessions`.
+///
+/// Thuần, nhận `now` làm THAM SỐ: một hàm dựng chữ mà tự đi hỏi đồng hồ thì bài
+/// kiểm của nó tự đỏ theo giờ chạy — cây này đã trả giá đúng một lần cho chuyện
+/// ấy (`accounts_text`, PLAN.md 02/09).
+pub fn runin_done_text(rows: &[RuninDone], now: i64) -> Option<String> {
+    if rows.is_empty() {
+        return None;
+    }
+    let mut out = String::from("🧾 vừa chạy hộ (mới nhất trước):");
+    for r in rows.iter().rev().take(RUNIN_DONE_SHOW) {
+        // 🔴 BÓC `cd <thư mục> &&` TRƯỚC KHI CẮT. Bài kiểm bắt được trên đúng
+        // lượt thật của `[dwork/dev]` ngày 12/09: trần 60 ký tự ăn hết động từ
+        // và đích của lệnh (`… && git merge origin/ma…`) vì đường dẫn tuyệt đối
+        // chiếm 42 ký tự đầu. Thư mục thì nhãn phiên đã nói rồi; thứ không chỗ
+        // nào khác nói là LỆNH. Nới trần không cứu được — dòng sau lại dài hơn.
+        let (_, lenh) = boc_cd(&r.l);
+        out.push_str(&format!(
+            "\n  {} · {} · {} · {}",
+            dau_runin(r),
+            truoc_day(now - r.t),
+            if r.w.is_empty() {
+                "[phiên không rõ]"
+            } else {
+                &r.w
+            },
+            crate::exec::truncate(lenh, 60)
+        ));
+    }
+    if rows.len() > RUNIN_DONE_SHOW {
+        // MẪU SỐ: "5 dòng" mà không nói còn bao nhiêu thì đọc ra "chỉ có 5 lượt".
+        out.push_str(&format!(
+            "\n  (còn {} lượt nữa trong sổ)",
+            rows.len() - RUNIN_DONE_SHOW
+        ));
+    }
+    Some(out)
+}
+
 /// Gõ lại những kết quả còn nợ. Chạy mỗi vòng, rẻ khi sổ rỗng.
 pub fn runin_pending_tick(db: &Db, cfg: &Config, now: i64) {
     let mut book = runin_pending_book(db);
@@ -8323,6 +8496,17 @@ fn watch_long_job(
                         json!({ "session": s.session_id, "code": r.code,
                                 "timed_out": r.timed_out, "ms": r.ms, "n": n,
                                 "cmd": crate::exec::truncate(&line, 120) }),
+                    );
+                    // Vào sổ ở ĐÂY, không ở nhánh trả lời: nhánh trả lời chia
+                    // đôi theo `quiet`, và cái lỗ Hà chỉ ra nằm đúng ở nửa im.
+                    remember_runin_done_for(
+                        &cfg,
+                        &job_who(&s.label, &s.session_id),
+                        &line,
+                        r.code,
+                        r.ms as u64,
+                        r.timed_out,
+                        chrono::Utc::now().timestamp(),
                     );
                     let report = cmd_report(r.code, r.timed_out, &r.stdout, &r.stderr, r.ms);
                     // 🔴 Khối dán vào phiên phải NGẮN NHẤT có thể — Hà
@@ -11099,7 +11283,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                      Quyền riêng tư & Bảo mật ▸ Trợ năng ▸ bật `hubad`. \
                      Không có nó thì nút ↪ chuyển tab không đi đâu cả."
                 };
-                let probe = format!(
+                let mut probe = format!(
                     "🩺 {} phiên đang sống{}\n⚡ lệnh chạy nền:\n{}\n📟 hubad: {}\n{keys_line}\n{}",
                     live.sessions.len(),
                     if live.blind.is_empty() {
@@ -11119,6 +11303,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     },
                     recent_errors_line(db),
                 );
+                // Việc ĐANG chạy trả lời "bây giờ máy làm gì"; sổ này trả lời
+                // "vừa rồi ai nhờ chạy gì" — hai câu khác nhau, và câu thứ hai
+                // là câu `quiet` đã lấy đi (xem `RUNIN_DONE_KEY`).
+                if let Some(vua) =
+                    runin_done_text(&runin_done_book(db), chrono::Utc::now().timestamp())
+                {
+                    probe.push('\n');
+                    probe.push_str(&vua);
+                }
                 reply_in_channel(db, cfg, adapter, cmd, &probe);
                 Some(probe)
             }
@@ -15222,6 +15415,13 @@ pub fn run_telegram_now(cfg: &Config) {
 ///   `parse_command`) đi cùng phòng chat — xem `verbs::parse_command`.
 /// * **Chỗ trả lời:** ack đi ngược về Telegram (`adapter = "telegram"`).
 fn execute_telegram_commands(db: &Db, cfg: &Config) {
+    // 🔴 HẠNG GẤP ĐẶT Ở NGUỒN, không ở từng chỗ gọi — cùng lý lẽ với `CMD_LOCK`
+    // ngay dưới. Hàm này chạy ở HAI chỗ: đầu mỗi vòng (luồng nền) và ngay lúc
+    // bấm (`run_telegram_now`, đã tự nâng hạng). Trước lượt này chỉ đường thứ
+    // hai là gấp, nên **cùng một lệnh của chủ máy chạy ở hai hạng khác nhau tuỳ
+    // nó tới bằng cửa nào** — và từ 13/09 vế nền còn bị ngân sách hỏi Terminal
+    // chặn, tức lệnh gõ vào lúc Terminal đang câm sẽ im lặng không đọc được màn.
+    let _lane = crate::exec::urgent();
     let _guard = CMD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let Some(inbox) = crate::telegram::inbox() else {
         return;
@@ -15797,6 +15997,10 @@ pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String>
 
 pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     let started = std::time::Instant::now();
+    // Mở ngân sách hỏi Terminal cho vòng này — xem `keys::PROBE_BUDGET_MS`.
+    // Lệnh của chủ máy KHÔNG bị ngân sách chạm tới: `execute_telegram_commands`
+    // tự nâng hạng GẤP, và hạng gấp đi thẳng qua cửa.
+    crate::keys::probe_budget_reset();
     // 🔴 Dòng `runs` nay do CHÍNH VÒNG ghi, 2026-08-14 — trước đó nó là của
     // chặng hỏi vòng, và chặng ấy đi cùng tfl5.
     //
@@ -15943,6 +16147,17 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
         ) {
             logging::error("cycle_run_row_unclosed", json!({ "err": e.to_string() }));
         }
+    }
+    // Vòng nào phải bỏ bớt phép dò thì NÓI RA — im ở đây là để một vòng thiếu
+    // thông tin đọc y hệt một vòng đầy đủ.
+    let probe = crate::keys::probe_used();
+    if probe.bo_qua > 0 || probe.het_gio > 0 {
+        logging::warn(
+            "probe_budget_spent",
+            json!({ "da_tieu_ms": probe.da_tieu_ms, "bo_qua": probe.bo_qua,
+                    "het_gio": probe.het_gio, "ngan_sach_ms": crate::keys::PROBE_BUDGET_MS,
+                    "hau_qua": "vòng này KHÔNG đo hết — đừng đọc nó như một vòng đầy đủ" }),
+        );
     }
     logging::info("cycle_done", serde_json::to_value(&summary)?);
     Ok(summary)

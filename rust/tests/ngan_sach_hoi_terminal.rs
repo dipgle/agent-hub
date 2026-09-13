@@ -30,15 +30,33 @@
 //! **448,2 giây**.
 
 use huba::exec::Lane;
-use huba::keys::{probe_verdict, timeout_context, ProbeVerdict, PROBE_BUDGET_MS, PROBE_YIELD_MS};
+use huba::keys::{
+    core_probe, dang_la_loi, probe_verdict, timeout_context, ProbeVerdict, PROBE_BUDGET_MS,
+    PROBE_YIELD_MS,
+};
 
 /// Mốc giả, ms epoch. Cố định — hàm thuần nhận `now` làm tham số đúng để bài
 /// kiểm không tự đỏ theo đồng hồ.
 const BAY_GIO: i64 = 1_789_264_800_000;
 
+/// Một phép dò nền **tuỳ chọn**.
 fn nen(da_tieu: u64, gap_luc: i64) -> ProbeVerdict {
     probe_verdict(
         Lane::Background,
+        false,
+        da_tieu,
+        PROBE_BUDGET_MS,
+        BAY_GIO,
+        gap_luc,
+        PROBE_YIELD_MS,
+    )
+}
+
+/// Một phép dò nền **LÕI** — `terminal_screens`, thứ cả danh sách phiên dựng lên.
+fn loi(da_tieu: u64, gap_luc: i64) -> ProbeVerdict {
+    probe_verdict(
+        Lane::Background,
+        true,
         da_tieu,
         PROBE_BUDGET_MS,
         BAY_GIO,
@@ -146,6 +164,7 @@ fn hang_gap_di_thang_qua_ca_hai_cua() {
         assert_eq!(
             probe_verdict(
                 Lane::Urgent,
+                false,
                 tieu,
                 PROBE_BUDGET_MS,
                 BAY_GIO,
@@ -227,5 +246,115 @@ fn lenh_cua_chu_may_luon_o_hang_gap() {
     assert!(
         nang < 900,
         "lượt nâng hạng phải nằm ngay đầu hàm (cách {nang} ký tự)"
+    );
+}
+
+// ───────────── phép dò LÕI: miễn cửa nhường, KHÔNG miễn ngân sách ────────────
+
+/// 🔴 Đo được trên bản vừa cài lúc 09:11–09:15, và nó ngược hẳn ý định: trong
+/// số lượt bị bỏ, **32 là NHƯỜNG · 23 là hết ngân sách**, và lượt nhường trúng
+/// đúng `terminal_screens` — phép dò dựng nên CẢ danh sách phiên:
+///
+/// ```text
+/// "err":    "nhường Terminal cho một lượt hỏi đang có người chờ (còn 947ms)"
+/// "msg":    "terminal_probe_failed"
+/// "effect": "cửa sổ rảnh không lên danh sách · mọi phiên tạm coi là không gõ
+///            vào được · không đọc được dòng đang-làm-gì"
+/// ```
+///
+/// Tức nó làm hỏng đúng cái màn Hà đang nhìn, đúng lúc Hà đang bấm. Nhường một
+/// phép dò tuỳ chọn là mất một dòng chi tiết; nhường phép dò lõi là trả về một
+/// danh sách SAI.
+#[test]
+fn phep_do_loi_khong_nhuong_duong() {
+    let vua_xong = BAY_GIO - 500;
+    assert!(
+        matches!(nen(0, vua_xong), ProbeVerdict::Nhuong { .. }),
+        "đối chứng: phép dò TUỲ CHỌN thì vẫn nhường"
+    );
+    assert_eq!(
+        loi(0, vua_xong),
+        ProbeVerdict::Hoi,
+        "phép dò LÕI phải đi thẳng — nhường nó là trả về một danh sách phiên sai"
+    );
+}
+
+/// Nhưng lõi KHÔNG được miễn ngân sách: một vòng mà riêng ảnh chụp đã đốt 45
+/// giây thì vẫn phải nghỉ, không thì cửa ① mất tác dụng ở đúng vòng tệ nhất.
+#[test]
+fn phep_do_loi_van_bi_ngan_sach_chan() {
+    assert_eq!(loi(0, 0), ProbeVerdict::Hoi, "còn ngân sách thì cứ hỏi");
+    assert_eq!(
+        loi(45_311, 0),
+        ProbeVerdict::HetNganSach { da_tieu_ms: 45_311 },
+        "lõi cũng phải nghỉ khi vòng đã tiêu hết"
+    );
+}
+
+/// 🔴 CỔNG: `terminal_screens` phải được đánh dấu là LÕI tại chỗ gọi. Không bài
+/// kiểm nào gọi được nó (nó cần một Terminal thật), nên cổng đọc-mã là cổng duy
+/// nhất với tới — và thiếu dấu ấy thì lỗi 09:11 quay lại nguyên vẹn, im lặng.
+#[test]
+fn anh_chup_phien_phai_duoc_danh_dau_la_loi() {
+    const NGUON: &str = include_str!("../src/sessions.rs");
+    let goi = NGUON
+        .find("crate::keys::terminal_screens()")
+        .expect("không thấy `terminal_screens()` — cổng này mù rồi, sửa mỏ neo");
+    let truoc = &NGUON[..goi];
+    let dau = truoc
+        .rfind("crate::keys::core_probe()")
+        .expect("`terminal_screens` không được đánh dấu là phép dò lõi");
+    assert!(
+        goi - dau < 400,
+        "dấu lõi phải đứng NGAY TRƯỚC lượt gọi (cách {} ký tự)",
+        goi - dau
+    );
+}
+
+/// 🔴 Đo được 13/09 `09:34–09:53`: cấy `CoreGuard::drop` đặt `true` thay vì trả
+/// cờ về ⇒ **`RED_L6 = 0`** — không bài nào trong 14 bài đỏ. Mutant ấy im lặng
+/// vì nó chỉ hỏng KỂ TỪ lượt lõi thứ nhất: sau đó mọi phép dò tuỳ chọn đều đội
+/// lốt lõi, cửa nhường không chặn ai nữa, còn dòng `probe_budget_spent` vẫn in
+/// ra một con số trông bình thường. Nên cổng phải hỏi cả ba vế: ĐẶT · LỒNG ·
+/// TRẢ VỀ.
+#[test]
+fn dau_loi_tra_co_ve_khi_roi_tam() {
+    assert!(!dang_la_loi(), "mặc định: một luồng không phải phép dò lõi");
+    {
+        let _ngoai = core_probe();
+        assert!(dang_la_loi(), "trong tầm guard thì là lõi");
+        {
+            let _trong = core_probe();
+            assert!(dang_la_loi(), "guard lồng vẫn là lõi");
+        }
+        assert!(
+            dang_la_loi(),
+            "guard LỒNG rời tầm không được tắt cờ của guard đang bao ngoài"
+        );
+    }
+    assert!(
+        !dang_la_loi(),
+        "rời tầm phải trả cờ về — không thì mọi phép dò sau đều đội lốt lõi"
+    );
+}
+
+/// 🔴 CỔNG: lượt gọi thật trong `osascript` phải ĐỌC cờ, không truyền hằng số.
+/// Đo 13/09: cấy `false` vào đúng chỗ ấy ⇒ **`RED_L5 = 0`** — cả tính năng chết
+/// mà 14 bài vẫn xanh, vì `osascript` đòi một Terminal thật nên không bài kiểm
+/// nào gọi tới. Cùng họ `feedback_parity_gate_blind_to_call_sites`: một khối mã
+/// đúng KHÔNG nói rằng người gọi truyền đúng.
+///
+/// Cổng này và [`dau_loi_tra_co_ve_khi_roi_tam`] bọc nhau: truyền `dang_la_loi()`
+/// mà hàm ấy luôn trả `false` thì bài kia đỏ.
+#[test]
+fn cho_goi_that_phai_doc_co_loi() {
+    const NGUON: &str = include_str!("../src/keys.rs");
+    let goi = NGUON.find("match probe_verdict(").expect(
+        "không thấy lượt gọi `probe_verdict` trong `osascript` — cổng này mù rồi, sửa mỏ neo",
+    );
+    let than = &NGUON[goi..(goi + 300).min(NGUON.len())];
+    assert!(
+        than.contains("dang_la_loi()"),
+        "lượt gọi thật phải truyền `dang_la_loi()`, không phải một hằng số:\n{than}"
     );
 }

@@ -16155,6 +16155,8 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
         logging::warn(
             "probe_budget_spent",
             json!({ "da_tieu_ms": probe.da_tieu_ms, "bo_qua": probe.bo_qua,
+                    "bo_qua_nhuong": probe.bo_qua_nhuong,
+                    "bo_qua_het_ngan_sach": probe.bo_qua - probe.bo_qua_nhuong,
                     "het_gio": probe.het_gio, "ngan_sach_ms": crate::keys::PROBE_BUDGET_MS,
                     "hau_qua": "vòng này KHÔNG đo hết — đừng đọc nó như một vòng đầy đủ" }),
         );

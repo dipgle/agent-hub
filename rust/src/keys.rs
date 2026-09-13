@@ -281,9 +281,62 @@ pub const PROBE_YIELD_MS: i64 = 2_000;
 
 static PROBE_SPENT_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static PROBE_SKIPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// Trong số bị bỏ, bao nhiêu là do NHƯỜNG (phần còn lại là hết ngân sách).
+///
+/// 🔴 Tách ra vì chính tôi vừa vấp: dòng `probe_budget_spent` bản đầu chỉ có một
+/// con số `bo_qua`, nên đọc `bo_qua=15 · da_tieu_ms=4952` xong vẫn phải đi
+/// `grep` chuỗi lỗi mới biết cửa nào đang bắn. Một phép đếm gộp hai nguyên nhân
+/// là một phép đo thiếu mẫu số.
+static PROBE_SKIPPED_YIELD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static PROBE_TIMEOUTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Mốc (ms epoch) một lượt hỏi Terminal GẤP vừa chạy xong.
 static URGENT_TERMINAL_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+thread_local! {
+    /// Lượt dò đang chạy có phải phép dò **LÕI** không.
+    ///
+    /// 🔴 Dựng 13/09 ngay sau khi cài bản đầu, vì bản ấy đo được là sai hướng:
+    /// cửa nhường trúng `terminal_screens` — phép dò dựng nên CẢ danh sách phiên
+    /// — nên nó làm hỏng đúng cái màn Hà đang nhìn, đúng lúc Hà đang bấm. Log
+    /// `09:11–09:15`: **32 lượt nhường · 23 lượt hết ngân sách**, và lượt nhường
+    /// mang nguyên hậu quả `"cửa sổ rảnh không lên danh sách · mọi phiên tạm coi
+    /// là không gõ vào được · không đọc được dòng đang-làm-gì"`.
+    ///
+    /// Phân biệt LÕI ↔ TUỲ CHỌN là có thật và đã ngầm có: ngân sách cố ý cho ảnh
+    /// chụp lọt bằng cách để nó chạy ĐẦU vòng. Đây chỉ là nói ra điều ấy thành
+    /// một cái cờ, thay vì trông vào thứ tự.
+    ///
+    /// Lõi vẫn TÍNH vào ngân sách — nó chỉ được miễn cửa nhường. Một vòng mà
+    /// riêng ảnh chụp đã đốt 45 giây thì vẫn phải nghỉ.
+    static LOI_COI: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Đánh dấu: lượt dò trong tầm guard này là **LÕI** — xem [`LOI_COI`].
+pub struct CoreGuard(bool);
+
+impl Drop for CoreGuard {
+    fn drop(&mut self) {
+        LOI_COI.with(|c| c.set(self.0));
+    }
+}
+
+/// Lượt dò đang chạy có nằm trong tầm một [`core_probe`] không.
+///
+/// 🔴 Công khai vì bài kiểm cần với tới: `LOI_COI` là thread-local riêng tư, và
+/// chỗ đọc nó thật (`osascript`) thì đòi một Terminal thật nên không bài kiểm
+/// nào gọi được. Đo 13/09 `09:34–09:53`, cấy `CoreGuard::drop` đặt `true` thay
+/// vì trả cờ về ⇒ **`RED_L6 = 0`**: cả 14 bài vẫn xanh. Mutant ấy im lặng biến
+/// MỌI phép dò sau lượt lõi đầu tiên thành "lõi" ⇒ cửa nhường chết hẳn, mà
+/// `probe_budget_spent` vẫn in ra một dòng trông bình thường.
+pub fn dang_la_loi() -> bool {
+    LOI_COI.with(|c| c.get())
+}
+
+pub fn core_probe() -> CoreGuard {
+    let truoc = LOI_COI.with(|c| c.get());
+    LOI_COI.with(|c| c.set(true));
+    CoreGuard(truoc)
+}
 
 /// Ba kết cục của câu hỏi *"lượt dò này có được chạy không"*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -307,6 +360,7 @@ pub enum ProbeVerdict {
 /// trả lời thì không có ngân sách nào đáng hơn.
 pub fn probe_verdict(
     lane: crate::exec::Lane,
+    la_loi_coi: bool,
     da_tieu_ms: u64,
     ngan_sach_ms: u64,
     bay_gio_ms: i64,
@@ -315,6 +369,16 @@ pub fn probe_verdict(
 ) -> ProbeVerdict {
     if lane == crate::exec::Lane::Urgent {
         return ProbeVerdict::Hoi;
+    }
+    // Phép dò LÕI được miễn cửa nhường, KHÔNG được miễn ngân sách — xem
+    // [`LOI_COI`]. Nhường một phép dò tuỳ chọn là mất một dòng chi tiết; nhường
+    // phép dò lõi là trả về một danh sách phiên SAI.
+    if la_loi_coi {
+        return if da_tieu_ms >= ngan_sach_ms {
+            ProbeVerdict::HetNganSach { da_tieu_ms }
+        } else {
+            ProbeVerdict::Hoi
+        };
     }
     let con = gap_luc_ms + cua_so_nhuong_ms - bay_gio_ms;
     // 🪦 Ở đây từng có thêm một chốt `gap_luc_ms > 0`, với lời giải thích *"mốc
@@ -341,6 +405,9 @@ pub fn probe_verdict(
 pub struct ProbeUsed {
     pub da_tieu_ms: u64,
     pub bo_qua: u64,
+    /// Trong `bo_qua`, bao nhiêu là do nhường. `bo_qua - bo_qua_nhuong` = hết
+    /// ngân sách. Hai nguyên nhân, hai bản vá khác nhau — đừng gộp.
+    pub bo_qua_nhuong: u64,
     pub het_gio: u64,
 }
 
@@ -349,6 +416,7 @@ pub fn probe_used() -> ProbeUsed {
     ProbeUsed {
         da_tieu_ms: PROBE_SPENT_MS.load(Relaxed),
         bo_qua: PROBE_SKIPPED.load(Relaxed),
+        bo_qua_nhuong: PROBE_SKIPPED_YIELD.load(Relaxed),
         het_gio: PROBE_TIMEOUTS.load(Relaxed),
     }
 }
@@ -358,6 +426,7 @@ pub fn probe_budget_reset() {
     use std::sync::atomic::Ordering::Relaxed;
     PROBE_SPENT_MS.store(0, Relaxed);
     PROBE_SKIPPED.store(0, Relaxed);
+    PROBE_SKIPPED_YIELD.store(0, Relaxed);
     PROBE_TIMEOUTS.store(0, Relaxed);
 }
 
@@ -447,6 +516,7 @@ fn osascript(script: &str) -> Result<String> {
     // fail-closed. Không cửa nào biến một lượt không-đo-được thành một sự thật.
     match probe_verdict(
         lane,
+        dang_la_loi(),
         PROBE_SPENT_MS.load(Relaxed),
         PROBE_BUDGET_MS,
         crate::quota::now_ms(),
@@ -464,6 +534,7 @@ fn osascript(script: &str) -> Result<String> {
         }
         ProbeVerdict::Nhuong { con_ms } => {
             PROBE_SKIPPED.fetch_add(1, Relaxed);
+            PROBE_SKIPPED_YIELD.fetch_add(1, Relaxed);
             return Err(anyhow!(
                 "nhường Terminal cho một lượt hỏi đang có người chờ (còn {con_ms}ms)"
             ));

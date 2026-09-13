@@ -4506,6 +4506,10 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     out.terminal_pid = terminal_pid();
 
     let probe_started = std::time::Instant::now();
+    // 🔴 Phép dò LÕI: cả danh sách phiên dựng trên nó, nên nó KHÔNG được nhường
+    // đường cho một lượt hỏi gấp — xem `keys::LOI_COI`. Nhường ở đây là trả về
+    // một danh sách SAI, đúng ba hậu quả kể trong nhánh `Err` ngay dưới.
+    let _loi = crate::keys::core_probe();
     let tabs = match crate::keys::terminal_screens() {
         Ok(t) => {
             note_probe_ok();

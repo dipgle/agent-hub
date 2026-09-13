@@ -4574,14 +4574,106 @@ pub fn bg_shot_say(ten: &str, said: &str, at: Option<&str>, now_ms: i64) -> Stri
 /// | là một phiên đang liệt kê | `↳ dưới <tên cha>` |
 /// | còn sống, không phải phiên | `↳ con của pid N (còn chạy)` |
 /// | đã thoát | `⚠ MỒ CÔI` + lệnh dọn ngay tại chỗ |
-/// | chưa đọc được | `❓ chưa đọc được cha` |
+/// | chưa đọc được | khối RIÊNG, tiêu đề tự nói "chưa đọc được cha" |
 ///
 /// Hàng cuối là chỗ dễ ăn gian nhất: gộp "chưa đọc được" vào "mồ côi" thì bảng
 /// gọn hơn một dòng và huba bịa ra một cái chết nó chưa hề đo.
 ///
 /// Tách khỏi handler 06/09 vì nằm trong đó thì **không bài kiểm nào với tới**,
 /// đúng con bug vừa sửa ở `session_list_text` mặc bộ đồ khác.
-pub fn offscreen_note(rows: &[crate::sessions::LiveSession]) -> String {
+/// Bề ngang dành cho câu cuối trên một hàng 🌙.
+///
+/// 56 vì hàng này đã tiêu ~34 cột cho id · acc · cây · "im bao lâu"; trên một
+/// màn điện thoại Telegram tự xuống dòng, và hai dòng còn đọc được, ba thì bắt
+/// đầu đẩy hàng khác ra khỏi tầm mắt.
+const LOI_CUOI_COT: usize = 56;
+
+/// Nhãn dự án (+ đoạn cây), đã BỎ phần mượn id.
+///
+/// 🔴 `label_sessions` mượn id làm đuôi phân biệt khi không đọc được việc đang
+/// làm (nhánh `same_base`) — mà phiên không có cửa sổ thì KHÔNG BAO GIỜ đọc
+/// được việc, vì việc đọc từ MÀN. Nên với đúng nhóm hàng này, cái đuôi ấy luôn
+/// mọc ra, rồi hàng bên dưới in thêm một cột id nữa: `[dwork]·46c050f3 ·
+/// 46c050f3`. Hai bộ phận cùng chống trùng mà không ai biết ai.
+///
+/// Đoạn CÂY đi kèm vì năm vai của một đội dwork cùng khai `[dwork]` và chỉ khác
+/// nhau ở cây (`dev-gate` · `dev-code` · `dev-test-uc` …); thiếu nó thì năm hàng
+/// giống hệt nhau, và cái id vừa gỡ ra lại thành thứ duy nhất phân biệt được.
+fn noi_lam(s: &crate::sessions::LiveSession) -> String {
+    let day_du = crate::sessions::shown(s);
+    let duoi = format!("·{}", short_id(&s.session_id));
+    let nhan = day_du.strip_suffix(&duoi).unwrap_or(&day_du).to_string();
+    let cay = s
+        .cwd
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .unwrap_or_default();
+    // Cây trùng tên với nhãn thì thôi nói hai lần — `[huba]` đứng ở `…/huba`.
+    if cay.is_empty() || nhan.to_lowercase().contains(&cay.to_lowercase()) {
+        return nhan;
+    }
+    format!("{nhan} {cay}")
+}
+
+/// Câu cuối phiên ấy nói, gộp về MỘT dòng.
+///
+/// Nguồn là NHẬT KÝ phiên (`sessions::snapshot` đọc `last_text` từ tệp
+/// transcript, hỏng thì kêu `claude_transcript_read_failed`), không phải màn —
+/// nên đúng những phiên KHÔNG có cửa sổ mới là chỗ nó có ích nhất. "Không có
+/// cửa sổ" không đồng nghĩa với "mù": đường đọc qua màn đứt, đường đọc qua nhật
+/// ký vẫn thông.
+///
+/// Gộp khoảng trắng vì `last_text` giữ nguyên xuống dòng và markdown — một câu
+/// ba dòng thả vào danh sách là đẩy ba hàng khác ra khỏi màn.
+fn loi_cuoi(s: &crate::sessions::LiveSession) -> String {
+    let mot_dong = s
+        .last_text
+        .as_deref()
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if mot_dong.is_empty() {
+        return String::new();
+    }
+    crate::exec::truncate(&mot_dong, LOI_CUOI_COT)
+}
+
+/// Một hàng của khối 🌙 — và nó phải nói được phiên ấy LÀ AI.
+///
+/// 🔴 Hà 2026-09-13, ảnh chụp danh sách: *"Tại sao ds phiên không có cửa sổ lại
+/// hiện 2 lần mã"* · *"ghi thông tin khác vào còn biết đường theo dõi"* · *"Còn
+/// ko biết nó chạy acc nào"*. Hàng cũ in `[dwork]·46c050f3 · 46c050f3 (chưa đọc
+/// được cha)`: hai cột tiêu cho cùng một cái id, không cột nào nói acc, cây hay
+/// việc — trong khi năm hàng ấy chính là đội vai `dwork` đang chạy thật.
+///
+/// `account` có sẵn trên hàng vì huba liệt kê TỪNG tài khoản một rồi đóng dấu
+/// (`sessions::list_account`); nó không suy ra được từ đường dẫn nhật ký —
+/// `~/.claude-acc*/projects` đều là symlink về cùng một chỗ.
+///
+/// Ô rỗng bị loại thay vì in ra chỗ trống: một hàng `· · ·` nói rằng có bốn thứ
+/// và ba thứ hỏng, trong khi sự thật chỉ là phiên chưa nói câu nào.
+fn hang_khuat(s: &crate::sessions::LiveSession, cha: Option<String>, now_ms: i64) -> String {
+    let cot = [
+        short_id(&s.session_id).to_string(),
+        s.account.clone(),
+        noi_lam(s),
+        cha.unwrap_or_default(),
+        quiet_for(s.last_activity.as_deref(), now_ms).unwrap_or_default(),
+        loi_cuoi(s),
+    ];
+    format!(
+        "  ↳ {}",
+        cot.iter()
+            .filter(|x| !x.is_empty())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" · ")
+    )
+}
+
+pub fn offscreen_note(rows: &[crate::sessions::LiveSession], now_ms: i64) -> String {
     let khuat: Vec<&crate::sessions::LiveSession> = rows
         .iter()
         .filter(|s| !crate::sessions::on_screen(s))
@@ -4606,23 +4698,34 @@ pub fn offscreen_note(rows: &[crate::sessions::LiveSession]) -> String {
         .iter()
         .filter(|s| crate::sessions::is_orphan(s))
         .collect();
-    let con: Vec<String> = khuat
+    // 🔴 HAI NHÓM, không một khối với chú thích ở đuôi. Tiêu đề cũ khẳng định
+    // `CÒN CHA` cho CẢ những hàng mà chính dòng của chúng nói "chưa đọc được
+    // cha" — tức huba bịa ra một ông cha nó chưa hề đo. Đúng cái lỗi chú thích
+    // ngay trên kia cấm, chỉ lật ngược chiều: bịa ra một sự SỐNG thay vì một
+    // cái chết. Đo 13/09 trên ảnh Hà gửi: **5/5 hàng** nằm dưới tiêu đề ấy đều
+    // là "chưa đọc được cha", nên câu khẳng định sai ở đúng 100% số hàng.
+    let con: Vec<&crate::sessions::LiveSession> = khuat
         .iter()
+        .copied()
         .filter(|s| !crate::sessions::is_orphan(s))
-        .map(|s| {
-            let vai = match (s.parent_name.as_deref(), s.spawner_alive) {
+        .collect();
+    let co_cha: Vec<String> = con
+        .iter()
+        .filter_map(|s| {
+            let cha = match (s.parent_name.as_deref(), s.spawner_alive) {
                 (Some(cha), _) => format!("dưới {cha}"),
                 (None, Some(true)) => {
                     format!("con của pid {}", s.spawned_by_pid.unwrap_or_default())
                 }
-                _ => "chưa đọc được cha".to_string(),
+                _ => return None,
             };
-            format!(
-                "  ↳ {} · {} ({vai})",
-                crate::sessions::shown(s),
-                short_id(&s.session_id)
-            )
+            Some(hang_khuat(s, Some(cha), now_ms))
         })
+        .collect();
+    let chua_ro: Vec<String> = con
+        .iter()
+        .filter(|s| s.parent_name.is_none() && s.spawner_alive != Some(true))
+        .map(|s| hang_khuat(s, None, now_ms))
         .collect();
 
     let mut out = String::new();
@@ -4637,11 +4740,18 @@ pub fn offscreen_note(rows: &[crate::sessions::LiveSession]) -> String {
                 .join(" /stop ")
         ));
     }
-    if !con.is_empty() {
+    if !co_cha.is_empty() {
         out.push_str(&format!(
             "\n\n🌙 {} phiên không có cửa sổ, nhưng CÒN CHA — đừng dọn:\n{}",
-            con.len(),
-            con.join("\n")
+            co_cha.len(),
+            co_cha.join("\n")
+        ));
+    }
+    if !chua_ro.is_empty() {
+        out.push_str(&format!(
+            "\n\n🌙 {} phiên không có cửa sổ, chưa đọc được cha — đừng dọn vội:\n{}",
+            chua_ro.len(),
+            chua_ro.join("\n")
         ));
     }
     out
@@ -14932,7 +15042,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // Và chúng KHÔNG biến mất không dấu vết: `khuat` đếm rồi nói
                     // ra ở dòng chân. Một hàng bị bỏ mà im là đúng con bug vừa
                     // sửa, chỉ đổi chiều — trước là hứa thừa, nay là giấu thiếu.
-                    let khuat_noi = offscreen_note(&cli_rows);
+                    let khuat_noi = offscreen_note(&cli_rows, crate::quota::now_ms());
                     let khuat_co = cli_rows.iter().any(|s| !crate::sessions::on_screen(s));
                     let tren_man: Vec<crate::sessions::LiveSession> = cli_rows
                         .iter()

@@ -276,7 +276,7 @@ fn the_footer_is_one_line_of_the_only_thing_you_can_do() {
     mo_coi2.spawned_by_pid = Some(28204);
     mo_coi2.spawner_alive = Some(false);
 
-    let note = huba::pipeline::offscreen_note(&[go_duoc("aaa", "ttys000"), mo_coi, mo_coi2]);
+    let note = huba::pipeline::offscreen_note(&[go_duoc("aaa", "ttys000"), mo_coi, mo_coi2], now());
 
     assert!(note.contains("2 mồ côi"), "{note}");
     assert!(
@@ -305,7 +305,7 @@ fn a_child_with_a_living_parent_is_never_offered_for_cleanup() {
     mo_coi.spawned_by_pid = Some(39500);
     mo_coi.spawner_alive = Some(false);
 
-    let note = huba::pipeline::offscreen_note(&[co_cha, chua_do, mo_coi]);
+    let note = huba::pipeline::offscreen_note(&[co_cha, chua_do, mo_coi], now());
 
     assert!(
         note.contains("1 mồ côi") && note.contains("/stop b4182616"),
@@ -336,8 +336,10 @@ fn a_child_with_a_living_parent_is_never_offered_for_cleanup() {
 /// ĐỐI CHỨNG NGƯỢC: mọi phiên đều có cửa sổ ⟹ KHÔNG có dòng chân nào.
 #[test]
 fn nothing_offscreen_means_no_footer_at_all() {
-    let note =
-        huba::pipeline::offscreen_note(&[go_duoc("aaa", "ttys000"), go_duoc("bbb", "ttys001")]);
+    let note = huba::pipeline::offscreen_note(
+        &[go_duoc("aaa", "ttys000"), go_duoc("bbb", "ttys001")],
+        now(),
+    );
     assert!(note.is_empty(), "dựng một dòng chân rỗng nghĩa: {note:?}");
 }
 
@@ -605,5 +607,94 @@ fn the_real_fbot_journal_still_carries_its_moment() {
     assert!(
         cau.contains("trước"),
         "nhật ký thật mà không ra tuổi: {cau}"
+    );
+}
+
+// ───────── hàng 🌙 phải nói được phiên ấy LÀ AI (Hà 13/09, ảnh danh sách) ─────
+
+/// Mốc cố định — hàm nhận `now` làm tham số đúng để bài kiểm không tự đỏ theo
+/// đồng hồ.
+const BAY_GIO_MS: i64 = 1_789_264_800_000;
+
+fn vai_dwork(id: &str, cay: &str, acc: &str, noi: &str, im_phut: i64) -> LiveSession {
+    let mut s = nen(id);
+    s.account = acc.into();
+    s.cwd = format!("/Users/hanguyen/projects/dwork/{cay}");
+    // Đúng thứ `label_sessions` đúc ra khi không đọc được việc (không cửa sổ ⟹
+    // không bao giờ đọc được) và nhãn gốc trùng với làn khác.
+    s.label = format!("[dwork]·{id}");
+    s.last_text = Some(noi.into());
+    s.last_activity = Some(
+        chrono::DateTime::from_timestamp_millis(BAY_GIO_MS - im_phut * 60_000)
+            .expect("mốc hợp lệ")
+            .to_rfc3339(),
+    );
+    s
+}
+
+/// 🔴 Hà 2026-09-13, ảnh chụp: `↳ [dwork]·46c050f3 · 46c050f3 (chưa đọc được
+/// cha)` — *"Tại sao ds phiên không có cửa sổ lại hiện 2 lần mã"* · *"ghi thông
+/// tin khác vào còn biết đường theo dõi"* · *"Còn ko biết nó chạy acc nào"*.
+///
+/// Năm hàng ấy là đội vai `dwork` đang chạy thật (gate · code · test-uc · …),
+/// và khối 🌙 là chỗ DUY NHẤT Hà nhìn thấy cả đội.
+#[test]
+fn hang_khuat_noi_acc_cay_va_cau_cuoi_va_chi_in_id_mot_lan() {
+    let s = vai_dwork(
+        "46c050f3",
+        "dev-gate",
+        "acc4",
+        "54/54 but I caught\na false green in my own layer",
+        5,
+    );
+    let note = huba::pipeline::offscreen_note(&[s], BAY_GIO_MS);
+
+    assert_eq!(
+        note.matches("46c050f3").count(),
+        1,
+        "mã vẫn hiện hai lần: {note}"
+    );
+    assert!(note.contains("acc4"), "hàng không nói chạy acc nào: {note}");
+    assert!(
+        note.contains("dev-gate"),
+        "năm vai cùng khai [dwork] — thiếu cây thì không phân biệt được: {note}"
+    );
+    assert!(
+        note.contains("54/54 but I caught a false green"),
+        "câu cuối phải có, và phải gộp về MỘT dòng: {note}"
+    );
+    assert!(note.contains("5p"), "thiếu 'im bao lâu': {note}");
+    assert_eq!(
+        note.trim().lines().count(),
+        2,
+        "một phiên phải gọn trong tiêu đề + một hàng: {note}"
+    );
+}
+
+/// 🔴 Tiêu đề từng khẳng định `CÒN CHA` cho cả hàng mà chính dòng của nó nói
+/// "chưa đọc được cha" — bịa ra một ông cha chưa hề đo, đúng cái lỗi bảng ở đầu
+/// `offscreen_note` cấm, chỉ lật ngược chiều.
+///
+/// Đo 13/09: cả 5 hàng Hà chụp đều "chưa đọc được cha" (`ppid = 1`, không tiến
+/// trình nào trên máy mang `--spawned-by`) ⟹ câu khẳng định sai ở 100% số hàng.
+#[test]
+fn tieu_de_khong_khang_dinh_con_cha_cho_hang_chua_do_duoc() {
+    let chua_ro = vai_dwork("cccccccc", "dev-code", "acc1", "đang chạy", 1);
+    let note = huba::pipeline::offscreen_note(&[chua_ro], BAY_GIO_MS);
+    assert!(note.contains("chưa đọc được cha"), "{note}");
+    assert!(
+        !note.contains("CÒN CHA"),
+        "khẳng định một ông cha chưa hề đo: {note}"
+    );
+
+    // ĐỐI CHỨNG NGƯỢC cùng chỗ: cha ĐO ĐƯỢC thì câu khẳng định phải quay lại.
+    let mut co_cha = vai_dwork("dddddddd", "dev-gate", "acc1", "đang chạy", 1);
+    co_cha.parent_name = Some("[dwork]".into());
+    let note2 = huba::pipeline::offscreen_note(&[co_cha], BAY_GIO_MS);
+    assert!(note2.contains("CÒN CHA"), "{note2}");
+    assert!(note2.contains("dưới [dwork]"), "{note2}");
+    assert!(
+        !note2.contains("chưa đọc được cha"),
+        "trộn hai nhóm vào nhau: {note2}"
     );
 }

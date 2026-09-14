@@ -27,45 +27,130 @@ use huba::pipeline::{close_step, hidden_next, CloseStep, HiddenNext};
 const UNDER: i64 = 300;
 const OVER: i64 = 1200;
 
+/// `/exit` ĐÃ được gõ — trạng thái của mọi mục vào sổ qua route `/close`, và là
+/// tiền đề ngầm của cả tệp này trước 13/09.
+const DA_GO: bool = true;
+/// Sổ CHƯA thấy `/exit` đi lần nào — ca của nhánh bàn giao khi `quit_and_close`
+/// chết ngay ở `send_exit`.
+const CHUA_GO: bool = false;
+
 /// Cái đã hỏng: cửa sổ không còn thì việc XONG — đóng sổ, không hỏi lại nữa.
 #[test]
 fn a_window_that_is_gone_closes_the_book() {
-    assert_eq!(close_step(Some(TabState::Gone), 30), CloseStep::Gone);
+    assert_eq!(close_step(Some(TabState::Gone), 30, DA_GO), CloseStep::Gone);
     // Và không đổi ý theo thời gian chờ: "không còn" là một sự thật, không phải
     // một sự kiên nhẫn.
-    assert_eq!(close_step(Some(TabState::Gone), OVER), CloseStep::Gone);
+    assert_eq!(
+        close_step(Some(TabState::Gone), OVER, DA_GO),
+        CloseStep::Gone
+    );
+    // Cũng không đổi ý theo việc đã gõ `/exit` hay chưa: cửa sổ không còn thì
+    // gõ vào đâu.
+    assert_eq!(
+        close_step(Some(TabState::Gone), 30, CHUA_GO),
+        CloseStep::Gone
+    );
 }
 
 /// Không hỏi được thì GIỮ trong sổ — luật `Look::Blind`, và nó không được đổi
 /// chiều nhân lượt sửa này.
 #[test]
 fn a_blind_check_keeps_the_entry() {
-    assert_eq!(close_step(None, 30), CloseStep::Blind);
-    assert_eq!(close_step(None, UNDER), CloseStep::Blind);
+    assert_eq!(close_step(None, 30, DA_GO), CloseStep::Blind);
+    assert_eq!(close_step(None, UNDER, DA_GO), CloseStep::Blind);
+    // Mù thì KHÔNG gõ bừa: `SendExit` phải đứng sau một câu trả lời `Busy` thật,
+    // không phải sau một lượt hỏi hỏng. Gõ vào chỗ mình không nhìn thấy là đúng
+    // thứ luật `Look::Blind` cấm.
+    assert_eq!(close_step(None, UNDER, CHUA_GO), CloseStep::Blind);
 }
 
 /// Giữ mãi mà im chính là 190 dòng warn kia. Mù quá trần thì nói một câu rồi
 /// buông — cùng trần với "còn bận quá lâu", vì cùng một lý lẽ.
 #[test]
 fn blind_forever_is_not_an_answer_either() {
-    assert_eq!(close_step(None, OVER), CloseStep::GiveUpBlind);
+    assert_eq!(close_step(None, OVER, DA_GO), CloseStep::GiveUpBlind);
+    assert_eq!(close_step(None, OVER, CHUA_GO), CloseStep::GiveUpBlind);
 }
 
 /// Rảnh thì đóng. Đây là đường thường ngày, và nó không được lẫn với ba đường kia.
 #[test]
 fn an_idle_tab_gets_closed() {
-    assert_eq!(close_step(Some(TabState::Idle), 0), CloseStep::Close);
-    assert_eq!(close_step(Some(TabState::Idle), OVER), CloseStep::Close);
+    assert_eq!(close_step(Some(TabState::Idle), 0, DA_GO), CloseStep::Close);
+    assert_eq!(
+        close_step(Some(TabState::Idle), OVER, DA_GO),
+        CloseStep::Close
+    );
+    // 🔴 `Idle` THẮNG `chưa gõ`: tab đã rảnh thì việc cần làm là đóng, không
+    // phải gõ thêm chữ vào một cửa sổ sắp biến mất. Nếu ai đó đảo thứ tự hai
+    // nhánh trong `close_step`, chỗ này đỏ.
+    assert_eq!(
+        close_step(Some(TabState::Idle), 0, CHUA_GO),
+        CloseStep::Close
+    );
 }
 
 /// Còn bận thì chờ — và chỉ tới trần, vì `/exit` gõ vào một phiên đang chạy có
 /// thể nằm trong hàng chờ của TUI mãi mãi.
 #[test]
 fn a_busy_tab_waits_then_gives_up_out_loud() {
-    assert_eq!(close_step(Some(TabState::Busy), UNDER), CloseStep::Wait);
     assert_eq!(
-        close_step(Some(TabState::Busy), OVER),
+        close_step(Some(TabState::Busy), UNDER, DA_GO),
+        CloseStep::Wait
+    );
+    assert_eq!(
+        close_step(Some(TabState::Busy), OVER, DA_GO),
         CloseStep::GiveUpBusy
+    );
+}
+
+// ── Sổ đóng phải biết GÕ, không chỉ biết CHỜ ────────────────────────────────
+//
+// 🔴 Hà 2026-09-13, ảnh danh sách: *"Vẫn còn hiện tượng chuyển phiên nhưng phiên
+// cũ vẫn không đóng được"*. Chữ **vẫn** là điểm chính — cùng triệu chứng đã nghe
+// 19/08, và lượt ấy vá "tab còn bận có bốn nghĩa", không phải gốc.
+//
+// Gốc đo được trên phiên `53a0683e`: `handover_old_window_not_closed` —
+// *"vòng nền đã tiêu hết ngân sách hỏi Terminal (11.9s/10.0s)"* ⇒ `send_exit`
+// chết trước khi chạm bàn phím. Trong **cả 12** dòng `keys_exit_sent` của 30 MB
+// nhật ký có `451` và `455`, **không có `452`**. Sổ ngồi đợi một chữ `Idle`
+// không thể tới, `close_gave_up waited_sec=713`, mục rời sổ, `pid 14131` sống
+// tiếp hơn 12 tiếng.
+
+/// Khoá hồi quy cho đúng ca ấy: bận + sổ chưa thấy `/exit` ⇒ GÕ, đừng chờ.
+#[test]
+fn a_busy_tab_that_never_got_exit_gets_one() {
+    assert_eq!(
+        close_step(Some(TabState::Busy), UNDER, CHUA_GO),
+        CloseStep::SendExit
+    );
+    // Ngay lượt hỏi đầu tiên, không phải sau một hạn kiên nhẫn nào: chờ một việc
+    // chưa ai bắt đầu thì chờ bao lâu cũng thế.
+    assert_eq!(
+        close_step(Some(TabState::Busy), 0, CHUA_GO),
+        CloseStep::SendExit
+    );
+}
+
+/// Và nó KHÔNG gõ mãi: quá trần thì vẫn buông, không thử lại vô tận.
+///
+/// Ca này là cái phanh của ca trên. Một nhánh "cứ gõ khi chưa gõ được" mà không
+/// có trần thì mỗi 30 giây một lượt `osascript` vào một cửa sổ không bao giờ
+/// nhận — đúng hình dạng 190 dòng warn mà tệp này sinh ra để chặn, chỉ đổi tên.
+#[test]
+fn it_does_not_type_forever() {
+    assert_eq!(
+        close_step(Some(TabState::Busy), OVER, CHUA_GO),
+        CloseStep::GiveUpBusy
+    );
+}
+
+/// Đã gõ rồi thì THÔI gõ — nếu không, mỗi 30 giây một `/exit` nữa vào cùng một
+/// TUI, và cái thứ hai rơi xuống shell sau khi cái thứ nhất ăn.
+#[test]
+fn a_tab_that_already_got_exit_is_not_typed_into_again() {
+    assert_eq!(
+        close_step(Some(TabState::Busy), UNDER, DA_GO),
+        CloseStep::Wait
     );
 }
 
@@ -135,22 +220,39 @@ fn an_old_book_row_still_parses() {
     assert_eq!(c.h, 0);
     assert_eq!(c.r, 0);
     assert_eq!(hidden_next(c.h, c.r, 1_800_000_000), HiddenNext::NotHidden);
+    // 🔴 Và mục cũ = "sổ CHƯA thấy `/exit` đi" — đây là mặc định fail-closed về
+    // phía LÀM. Một mục viết trước lượt vá này không mang `x`, nên nếu `serde`
+    // mặc định nó thành "đã gõ" thì đúng những cửa sổ đang kẹt lúc nâng cấp sẽ
+    // kẹt tiếp, im lặng. `0` khiến sổ gõ hộ ngay lượt hỏi đầu.
+    assert_eq!(c.x, 0);
 }
 
-/// Bốn kết cục PHẢI phân biệt được nhau. Bài kiểm này tồn tại vì lỗi vừa sửa
-/// đúng là hai kết cục bị gộp làm một: nếu ai đó gộp lại lần nữa cho gọn, chỗ
-/// này đỏ trước khi cửa sổ nào kẹt trong sổ 5 tiếng.
+/// Các kết cục PHẢI phân biệt được nhau. Bài kiểm này tồn tại vì lỗi 17/08 đúng
+/// là hai kết cục bị gộp làm một: nếu ai đó gộp lại lần nữa cho gọn, chỗ này đỏ
+/// trước khi cửa sổ nào kẹt trong sổ 5 tiếng.
+///
+/// 13/09 thêm một kết cục thứ năm (`SendExit`) và một chiều thứ hai (đã gõ
+/// `/exit` hay chưa) — nên bảng phải phủ CẢ HAI chiều, không chỉ `TabState`.
+/// Một ma trận chỉ quét một chiều đọc ra như đã phủ hết trong khi nửa kia chưa
+/// ai chạm tới.
 #[test]
-fn the_four_outcomes_are_four() {
+fn the_outcomes_stay_distinct() {
     let all = [
-        close_step(Some(TabState::Gone), 30),
-        close_step(Some(TabState::Idle), 30),
-        close_step(Some(TabState::Busy), 30),
-        close_step(None, 30),
+        close_step(Some(TabState::Gone), 30, DA_GO),
+        close_step(Some(TabState::Idle), 30, DA_GO),
+        close_step(Some(TabState::Busy), 30, DA_GO),
+        close_step(Some(TabState::Busy), 30, CHUA_GO),
+        close_step(Some(TabState::Busy), OVER, DA_GO),
+        close_step(None, 30, DA_GO),
+        close_step(None, OVER, DA_GO),
     ];
     for (i, a) in all.iter().enumerate() {
         for b in all.iter().skip(i + 1) {
             assert_ne!(a, b, "hai kết cục khác nhau lại ra cùng một nước đi");
         }
     }
+    // MẪU SỐ: bảy ô trên phải là bảy nước đi khác nhau, tức đúng bằng số biến
+    // thể của `CloseStep`. Thiếu một ô thì vòng lặp trên vẫn xanh mà chiều kia
+    // không ai đo — nên khai thẳng con số.
+    assert_eq!(all.len(), 7, "bảng phủ thiếu một kết cục");
 }

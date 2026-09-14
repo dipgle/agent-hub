@@ -4503,11 +4503,15 @@ fn close_and_say(db: &Db, cfg: &Config, s: &crate::sessions::LiveSession) -> Str
                     ),
                     crate::sessions::Closing::Exiting(w) => {
                         let now = chrono::Utc::now().timestamp();
+                        // `Exiting` CHỈ ra đời sau một `send_exit` trả `Ok`
+                        // (`sessions::close_session`), nên đường này biết chắc —
+                        // khai mốc thật, và sổ khỏi gõ lần hai.
                         remember_closing(
                             db,
                             &s.session_id,
                             w,
                             &crate::sessions::shown(s),
+                            now,
                             now,
                         );
                         format!(
@@ -5205,6 +5209,40 @@ pub struct Closing {
     /// Lần thử đóng LẠI gần nhất sau khi ẩn (epoch giây; 0 = chưa thử lần nào).
     #[serde(default)]
     pub r: i64,
+    /// Lúc `/exit` được gõ vào cửa sổ ấy (epoch giây; **0 = sổ chưa thấy lần nào**).
+    ///
+    /// 🔴 Vì sao phải có — Hà 2026-09-13, ảnh danh sách: *"Vẫn còn hiện tượng
+    /// chuyển phiên nhưng phiên cũ vẫn không đóng được"*. Chữ **vẫn** là điểm
+    /// chính: cùng triệu chứng đã nghe 19/08 (*"Chuyển phiên xong phiên cũ bị
+    /// kẹt như này làm sao qua được"*, chú thích ở nhánh `Wait` bên dưới), và
+    /// lượt ấy vá phần "tab còn bận có bốn nghĩa" — đúng, nhưng không phải gốc.
+    ///
+    /// Gốc: **sổ này là một máy CHỜ, không phải máy ĐÓNG.** Cả `close_pending_tick`
+    /// không có lấy một lượt gọi `send_exit`; nó chỉ hỏi `tab_state` rồi đóng khi
+    /// `Idle`. Nó cho rằng `/exit` đã được gõ TRƯỚC khi mục vào sổ — đúng với
+    /// route `/close` (`sessions::close_session` gõ rồi mới trả `Exiting`), SAI
+    /// với nhánh hết-hạn-mức: `keys::quit_and_close` có thể chết ngay ở bước
+    /// `send_exit`, và khi ấy mục vào sổ trong khi cửa sổ chưa hề nhận `/exit`.
+    ///
+    /// Đo 13/09 trên chính phiên `53a0683e`, ba số:
+    /// · `handover_old_window_not_closed` — *"vòng nền đã tiêu hết ngân sách hỏi
+    ///   Terminal (11.9s/10.0s) — KHÔNG hỏi lượt này"*;
+    /// · trong **cả 12** dòng `keys_exit_sent` của 30 MB nhật ký có `451` và
+    ///   `455`, **không có `452`** — cửa sổ ấy chưa bao giờ nhận `/exit`;
+    /// · `close_gave_up waited_sec=713` rồi mục rời sổ.
+    /// Sổ ngồi đợi một chữ `Idle` không thể tới, đủ trần thì buông; còn
+    /// `AUTO_LIMIT_DONE_KEY` đã ghi tên phiên từ lúc cửa sổ MỚI mở, nên
+    /// `LimitWhy::AlreadyDone` chặn mọi lượt ngó lại. Tiến trình cũ sống tiếp —
+    /// `pid 14131` đứng trên `ttys001` hơn 12 tiếng.
+    ///
+    /// `0` KHÔNG phải một phỏng đoán, nó là một trạng thái đọc được: *"sổ chưa
+    /// tự tay gửi, và chưa ai khai là đã gửi"*. Đường nào biết chắc đã gõ thì
+    /// khai mốc thật (route `/close`); đường nào không biết thì để `0` và sổ sẽ
+    /// tự gõ. Fail-closed về phía LÀM, vì cái giá của gõ thừa một lần là một
+    /// dòng `command not found` trong cửa sổ sắp đóng, còn cái giá của không gõ
+    /// là cái Hà vừa chụp.
+    #[serde(default)]
+    pub x: i64,
 }
 
 /// Bao lâu ngó lại một lần. Hà nói thẳng con số này.
@@ -5262,12 +5300,20 @@ const CLOSE_HIDDEN_GIVE_UP_SEC: i64 = 6 * 3600;
 pub fn defer_close_to_book(db: &Db, session: &crate::sessions::LiveSession, now: i64) -> bool {
     match crate::keys::window_of(&session.tty) {
         Ok(Some(w)) => {
+            // 🔴 `0` — đường này KHÔNG biết `/exit` đã đi hay chưa.
+            // `quit_and_close` trả `Err` cho cả hai ca: chết ngay ở `send_exit`
+            // (ca 13/09, cạn ngân sách hỏi Terminal) và gõ được nhưng tab vẫn
+            // bận sau 2×30 giây. Khai bừa "đã gõ" ở đây là dựng lại đúng con bug
+            // vừa vá, nên khai `0` và để sổ tự gõ. Gõ thừa một lần thì mất một
+            // dòng `command not found` trong cửa sổ sắp đóng; khai bừa thì mất
+            // cả cửa sổ.
             remember_closing(
                 db,
                 &session.session_id,
                 w,
                 &crate::sessions::shown(session),
                 now,
+                0,
             );
             logging::info(
                 "handover_close_deferred",
@@ -5301,7 +5347,20 @@ pub fn defer_close_to_book(db: &Db, session: &crate::sessions::LiveSession, now:
 }
 
 /// Ghi một cửa sổ vào sổ chờ đóng.
-pub fn remember_closing(db: &Db, session_id: &str, window: i64, shown_name: &str, now: i64) {
+/// `exit_sent_at`: mốc `/exit` THẬT SỰ đã được gõ, hoặc **0 nếu không biết chắc**.
+///
+/// Tham số này cố ý bắt người gọi trả lời, thay vì để `remember_closing` đoán:
+/// hai đường ghi sổ có hai sự thật khác nhau, và bản trước gộp chúng làm một nên
+/// sổ tin rằng cửa sổ nào vào sổ cũng đã nhận `/exit` — xem `Closing::x`.
+/// Không biết thì khai `0`; sổ sẽ tự gõ, chứ không ngồi đợi hộ.
+pub fn remember_closing(
+    db: &Db,
+    session_id: &str,
+    window: i64,
+    shown_name: &str,
+    now: i64,
+    exit_sent_at: i64,
+) {
     let mut book = closing_book(db);
     book.insert(
         session_id.to_string(),
@@ -5312,6 +5371,7 @@ pub fn remember_closing(db: &Db, session_id: &str, window: i64, shown_name: &str
             c: 0,
             h: 0,
             r: 0,
+            x: exit_sent_at,
         },
     );
     save_closing(db, &book);
@@ -5589,10 +5649,23 @@ pub fn trust_dialog_tick(now: i64) {
 ///   có tiếng nói**: cùng cái trần đã dùng cho "còn bận quá lâu"
 ///   (`CLOSE_GIVE_UP_SEC`), cùng lý lẽ — huba thôi canh thì phải nói là thôi,
 ///   chứ không lặng lẽ hỏi tới vô tận.
-pub fn close_step(seen: Option<crate::keys::TabState>, waited_sec: i64) -> CloseStep {
+pub fn close_step(
+    seen: Option<crate::keys::TabState>,
+    waited_sec: i64,
+    exit_sent: bool,
+) -> CloseStep {
     match seen {
         Some(crate::keys::TabState::Gone) => CloseStep::Gone,
+        // `Idle` THẮNG `!exit_sent`, cố ý: tab đã rảnh thì việc cần làm là đóng,
+        // không phải gõ thêm chữ vào một cửa sổ sắp biến mất.
         Some(crate::keys::TabState::Idle) => CloseStep::Close,
+        // 🔴 Nhánh MỚI, và nó đứng TRƯỚC cửa bỏ cuộc — thứ tự ấy chính là bản vá.
+        // Chưa ai gõ `/exit` thì "chờ CLI thoát" là chờ hư không, và đếm đủ trần
+        // rồi buông là buông một việc chưa từng bắt đầu. Ca thật 13/09: mục ngồi
+        // 713 giây trong sổ, `/exit` chưa bao giờ đi, rồi mục bị xoá.
+        Some(crate::keys::TabState::Busy) if !exit_sent && waited_sec < CLOSE_GIVE_UP_SEC => {
+            CloseStep::SendExit
+        }
         Some(crate::keys::TabState::Busy) if waited_sec >= CLOSE_GIVE_UP_SEC => {
             CloseStep::GiveUpBusy
         }
@@ -5647,6 +5720,11 @@ pub enum HiddenNext {
 pub enum CloseStep {
     /// Còn bận, chưa tới trần: chờ tiếp (và nhắc thưa thớt).
     Wait,
+    /// Còn bận, và sổ **chưa thấy `/exit` đi bao giờ**: gõ nó, rồi mới chờ.
+    ///
+    /// Kết cục này tồn tại vì chờ và gõ là hai việc khác nhau, và trước 13/09
+    /// sổ chỉ biết làm việc thứ nhất — xem `Closing::x`.
+    SendExit,
     /// Còn bận quá lâu: nói ra, trả quyền quyết định lại cho chủ máy.
     GiveUpBusy,
     /// Rảnh rồi: đóng.
@@ -5780,7 +5858,35 @@ pub fn close_pending_tick(db: &Db, cfg: &Config, now: i64) {
                 None
             }
         };
-        match close_step(seen, waited) {
+        match close_step(seen, waited, c.x != 0) {
+            // Sổ tự gõ `/exit` cho cửa sổ chưa bao giờ nhận nó. Hai điều phải
+            // giữ, cả hai đều là phép đo chứ không phải lời hứa:
+            // · gõ ĐƯỢC thì đặt lại đồng hồ chờ (`c.t = now`) — trần
+            //   `CLOSE_GIVE_UP_SEC` được định nghĩa là "chờ bao lâu SAU `/exit`",
+            //   nên đếm nó từ một mốc trước khi `/exit` đi là đếm sai thứ;
+            // · gõ KHÔNG được thì `c.x` ở nguyên 0 để lượt sau thử lại, và vẫn
+            //   có trần: nhánh trên chỉ chọn `SendExit` khi còn dưới trần, nên
+            //   một cửa sổ không bao giờ gõ được sẽ rơi sang `GiveUpBusy` chứ
+            //   không thử lại vô tận.
+            CloseStep::SendExit => match crate::keys::send_exit(c.w) {
+                Ok(()) => {
+                    c.x = now;
+                    c.t = now;
+                    logging::info(
+                        "close_exit_sent_by_book",
+                        json!({ "session": id, "window": c.w, "waited_sec": waited,
+                                "why": "mục vào sổ mà cửa sổ chưa hề nhận /exit — sổ gõ hộ rồi mới chờ" }),
+                    );
+                }
+                Err(e) => {
+                    logging::warn(
+                        "close_exit_send_failed",
+                        json!({ "session": id, "window": c.w, "waited_sec": waited,
+                                "err": crate::logging::err_chain(&e),
+                                "effect": "giữ trong sổ, lượt sau gõ lại — vẫn dưới trần CLOSE_GIVE_UP_SEC" }),
+                    );
+                }
+            },
             CloseStep::Wait | CloseStep::GiveUpBusy => {
                 logging::info(
                     "close_still_busy",

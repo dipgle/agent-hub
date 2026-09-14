@@ -5241,6 +5241,29 @@ pub struct Closing {
     /// tự gõ. Fail-closed về phía LÀM, vì cái giá của gõ thừa một lần là một
     /// dòng `command not found` trong cửa sổ sắp đóng, còn cái giá của không gõ
     /// là cái Hà vừa chụp.
+    ///
+    /// ✅ CHẠY THẬT trên đúng cửa sổ ấy, 14/09 — không phải bài kiểm, không phải
+    /// suy luận. Gieo vào sổ một mục đúng hình dạng nhánh bàn giao ghi ra
+    /// (`w=452`, `x=0`) rồi để daemon tự xử; ba dòng nhật ký nối nhau:
+    ///
+    /// ```text
+    /// 05:43:51.877Z  close_exit_sent_by_book  window=452  waited_sec=243
+    /// 05:43:51.877Z  keys_exit_sent           window=452  landed="Gone"
+    /// 05:45:59.652Z  close_done               window=452  waited_sec=127  hidden=false
+    /// ```
+    ///
+    /// `pid 14131` — phiên đứng trên `ttys001` suốt 14 tiếng — tắt hẳn. Trước đó
+    /// đã kiểm BA chiều rằng `452` vẫn là cửa sổ ấy (tty `/dev/ttys001` · tên cửa
+    /// sổ · `ps -t ttys001`), vì id cửa sổ Terminal **bị dùng lại** và gõ `/exit`
+    /// nhầm cửa sổ là một lỗi không hoàn lại.
+    ///
+    /// 🔴 Nó trả lời luôn một câu trước đó CHƯA AI ĐO: **phiên đang hiện "You've
+    /// hit your session limit" VẪN nhận `/exit`**. Chú thích ở `auto_unstick_box`
+    /// nói *"CLI không nhận input"* — câu ấy đúng về ô nhập tự do, và sai nếu đọc
+    /// rộng ra thành "mọi phím đều hụt". Còn `waited_sec=127` ở dòng cuối chính
+    /// là chỗ `c.t = now` hiện ra: đồng hồ đếm từ lúc `/exit` ĐI, không phải từ
+    /// lúc mục vào sổ — nếu không đặt lại, mục ấy đã bị buông ở giây 600 tính từ
+    /// lúc gieo, tức trước khi CLI kịp thoát.
     #[serde(default)]
     pub x: i64,
 }

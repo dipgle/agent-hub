@@ -2838,6 +2838,48 @@ pub fn task_for_new(project: &str, task: &str) -> String {
     }
 }
 
+/// Bảo phiên mới ĐỌC luật của dự án — vì nó mở ở GỐC, không ở cây dự án.
+///
+/// 🔴 Hà 2026-09-15: *"khi một phiên bị hết hạn mức thì việc chuyển phiên mới có
+/// nạp lại luật như cách tôi mở bằng tay không?"*. Không, và đo được ngay trong
+/// phiên đang trả lời câu ấy: nhật ký `975277d1` (cwd = `~/projects`, 874 dòng)
+/// có nội dung `huba/CLAUDE.md` xuất hiện lần đầu ở **dòng 27** — tức luật của
+/// dự án con **không nạp lúc khởi động**, nó chỉ được kéo vào khi phiên CHẠM
+/// một tệp trong cây ấy. Đối chứng cùng lượt: `6b16e2a0` — phiên do lượt tự bàn
+/// giao 11:10 hôm ấy sinh ra, cùng cwd gốc — có **0** dấu vết, vì nó chưa chạm
+/// tệp nào của huba. Chủ máy mở tay (`cd ~/projects/<dự án> && claude`) thì luật
+/// có từ lượt đầu.
+///
+/// Vì sao không chữa bằng cách đổi `cwd`: [`start_background`] ép gốc workspace
+/// có lý do đã trả giá — thư mục con chưa được tài khoản duyệt thì phiên kẹt ở
+/// hộp thoại MCP rồi chết. Ràng buộc ấy không gỡ được từ đây, nên bản vá đi
+/// đường khác: **ép phiên tự đọc tệp luật ở lượt đầu**, đúng bằng cơ chế đã đo
+/// ở dòng 27.
+///
+/// ⚠ Nói cho đúng phạm vi: câu này đưa NỘI DUNG tệp vào ngữ cảnh qua một lượt
+/// đọc, chứ không dựng lại đường nạp chính thức của CLI. Cái nó KHÔNG kéo theo:
+/// `.mcp.json`, `.claude/settings*.json`, skill/command/agent riêng của dự án —
+/// những thứ ấy gắn với `cwd` và vẫn thiếu. Đừng đọc bản vá này thành "đã bằng
+/// mở tay".
+///
+/// Đề bài RỖNG phải ở nguyên rỗng: [`start_background`] không truyền tham số vị
+/// trí nào khi đề bài rỗng, và đó là cách "mở cửa sổ rồi gõ sau" hoạt động —
+/// nhét một câu nhắc vào đấy là biến nó thành phiên có đề bài.
+pub fn nhac_luat_du_an(task_with_project: &str, dir: &Path) -> String {
+    if task_with_project.trim().is_empty() {
+        return String::new();
+    }
+    let luat = dir.join("CLAUDE.md");
+    if !luat.is_file() {
+        return task_with_project.to_string();
+    }
+    format!(
+        "{task_with_project}\n\nTRƯỚC KHI LÀM: đọc {} — phiên này mở ở gốc \
+         `~/projects` nên luật riêng của dự án chưa nằm trong ngữ cảnh.",
+        luat.display()
+    )
+}
+
 /// Những DÒNG LỆNH của lượt cuối một phiên — lấy NGUYÊN VĂN từ nhật ký.
 ///
 /// 🔴 2026-08-15, và đây là một lượt đổi NGUỒN chứ không phải một bản vá.
@@ -5252,11 +5294,14 @@ pub struct Handover {
 
 const HANDOVER_PROMPT: &str = "\
 Phiên này sắp được đóng lại để mở một phiên mới làm tiếp. Viết BÀN GIAO ngắn gọn \
-bằng tiếng Việt cho người sẽ tiếp quản, đúng 4 mục, không quá 200 từ:\n\
+bằng tiếng Việt cho người sẽ tiếp quản, đúng 5 mục, không quá 240 từ:\n\
 1. Đang làm gì (mục tiêu của phiên)\n\
 2. Đã xong tới đâu — nêu file:dòng hoặc lệnh cụ thể, không nói chung chung\n\
 3. Đang dở cái gì, kẹt ở đâu\n\
 4. Việc kế tiếp nên làm ngay\n\
+5. ĐANG CHẠY NỀN / cần chạy lại: tiến trình nền đã khởi động, subagent đã \
+spawn, cửa sổ hay vai đã mở, việc đã hẹn giờ. Mỗi cái kèm LỆNH chạy lại. \
+Không có gì thì ghi đúng chữ \"không có\".\n\
 Chỉ viết bàn giao. Không chạy công cụ, không sửa file.";
 
 /// What a fork opened from the phone is allowed to touch: reading, nothing else.
@@ -7126,7 +7171,9 @@ pub fn start_background(
     // chọn acc2. Việc thuộc dự án nào thì nói trong ĐỀ BÀI, chứ không cần đổi
     // thư mục làm việc: `claude` đọc `CLAUDE.md` của cả cây từ gốc.
     let root = cfg.workspace_root.clone();
-    let task_with_project = task_for_new(project, task);
+    // Mở ở gốc ⟹ luật riêng của dự án chưa nằm trong ngữ cảnh. Bù bằng một câu
+    // nhắc đọc, không bằng cách đổi `cwd` — xem [`nhac_luat_du_an`].
+    let task_with_project = nhac_luat_du_an(&task_for_new(project, task), dir);
 
     // Lý do trượt đường chính, giữ lại để CÂU CHÀO nói ra được — xem
     // `Started::fallback_why`.

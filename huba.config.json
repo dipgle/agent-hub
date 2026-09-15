@@ -65,6 +65,10 @@
     {
       "name": "acc4",
       "config_dir": "~/.claude-acc4"
+    },
+    {
+      "name": "acc5",
+      "config_dir": "~/.claude-acc5"
     }
   ]
 }

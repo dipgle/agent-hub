@@ -411,7 +411,12 @@ fn slow_block(cfg: &Config, now: i64) -> Value {
 ///
 /// Một số liệu trễ 5 phút mà màn vẫn mượt thì tốt hơn một số liệu tươi mà cả
 /// huba khựng lại.
-pub(crate) fn usage_cached(cfg: &Config, now: i64) -> Value {
+///
+/// 🔴 `pub` từ 15/09, không phải `pub(crate)`: `huba handover -a auto` sống trong
+/// nhị phân `main.rs` — một crate KHÁC — và nó cũng phán "acc cũ đã kịch trần
+/// chưa". Để nó ngoài tầm với nghĩa là đúng cái lệnh chủ máy gõ khi đang kẹt lại
+/// là cái duy nhất quyết định bằng tỉ lệ đông cứng trong tệp.
+pub fn usage_cached(cfg: &Config, now: i64) -> Value {
     let cell = USAGE_CACHE.get_or_init(|| Mutex::new(None));
     let cached = cell.lock().ok().and_then(|g| g.clone());
     if let Some((at, v)) = &cached {

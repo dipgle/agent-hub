@@ -229,8 +229,18 @@ fn cmd_handover(
     let acc_moi: Option<String> = if no_switch {
         None
     } else if acc.eq_ignore_ascii_case("auto") {
+        // Đè bằng phép dò SỐNG y như hai đường trong `pipeline.rs` (15/09):
+        // `-a auto` là lệnh chủ máy gõ khi đang kẹt, nên nó là chỗ ÍT được phép
+        // trả lời bằng một tỉ lệ đông cứng nhất. Xem `quota::kich_tran_can_xac_nhan`.
+        let now_ms = huba::quota::now_ms();
+        let usage_song = huba::runtime::usage_cached(cfg, now_ms);
         let hang = huba::quota::apply_dead_book(
-            huba::quota::rank_all(cfg, huba::quota::now_ms()),
+            huba::quota::overlay_live(
+                huba::quota::rank_all(cfg, now_ms),
+                usage_song
+                    .get("accounts")
+                    .unwrap_or(&serde_json::Value::Null),
+            ),
             &db.dead_accounts(),
         );
         let chon = huba::watch::suggest_account(

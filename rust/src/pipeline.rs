@@ -1070,8 +1070,20 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     // 🔴 Và ở đây mới đọc được HẠN MỨC từng tài khoản (30/08): nó cần `Config`
     // để biết thư mục sổ của mỗi tài khoản. Đọc tệp, không spawn — xem
     // `quota::rank_all`.
+    // 🔴 Đè bằng phép dò SỐNG trước khi gợi ý (15/09). Trước lượt này đường gợi
+    // ý ở ĐÂY đọc thuần tệp, trong khi `auto_limit` (cùng tệp, dòng ~2190) đã đè
+    // từ 07/09 — hai đường trả lời cùng một câu *"acc nào còn chỗ"* bằng hai
+    // nguồn khác nhau, và cái đọc tệp là cái tựa vào con số CŨ.
+    // Xem `quota::kich_tran_can_xac_nhan`.
+    let now_ms = crate::quota::now_ms();
+    let usage_song = crate::runtime::usage_cached(cfg, now_ms);
     let tai_khoan = crate::quota::apply_dead_book(
-        crate::quota::rank_all(cfg, crate::quota::now_ms()),
+        crate::quota::overlay_live(
+            crate::quota::rank_all(cfg, now_ms),
+            usage_song
+                .get("accounts")
+                .unwrap_or(&serde_json::Value::Null),
+        ),
         &db.dead_accounts(),
     );
     for mut c in changes {
@@ -1973,8 +1985,18 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                 // KỊCH TRẦN. Còn chỗ, hay không đo được, thì giữ nguyên: bàn giao
                 // tự động vốn không phải chỗ để huba tự ý xáo tài khoản của chủ
                 // máy, và một ẩn số không phải một lý do.
+                // Cùng lý do với đường gợi ý ở trên: `acc_cu_het` là một phán
+                // quyết KỊCH TRẦN, nên nó không được tựa vào tỉ lệ đông cứng
+                // trong tệp một mình. Xem `quota::kich_tran_can_xac_nhan`.
+                let now_ms = crate::quota::now_ms();
+                let usage_song = crate::runtime::usage_cached(cfg, now_ms);
                 let hang = crate::quota::apply_dead_book(
-                    crate::quota::rank_all(cfg, crate::quota::now_ms()),
+                    crate::quota::overlay_live(
+                        crate::quota::rank_all(cfg, now_ms),
+                        usage_song
+                            .get("accounts")
+                            .unwrap_or(&serde_json::Value::Null),
+                    ),
                     &db.dead_accounts(),
                 );
                 let acc_cu_het = hang

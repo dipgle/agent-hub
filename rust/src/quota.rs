@@ -30,10 +30,26 @@
 //! văn dòng `keys::session_limit_on_screen` cào được từ bốn cửa sổ sáng hôm ấy.
 //! Tệp và màn khớp nhau; tệp chỉ hơn ở chỗ **không cần một cửa sổ nào đang mở**.
 //!
-//! Vì sao KHÔNG đi đường `claude -p "/usage"`: nó treo tới trần 60 giây, 0 byte,
-//! chưa tìm ra thủ phạm (`PLAN.md`, mục còn nợ; `usage_probe_unparsed` lần cuối
-//! 14/08). Đọc tệp tốn ~0 giây, không tốn một lượt quota nào, và không có gì để
-//! mà treo.
+//! Vì sao tệp là lớp NỀN: đọc nó tốn ~0 giây, không spawn, không tốn một lượt
+//! quota nào, và không có gì để mà treo.
+//!
+//! ⚠ **Dòng này trước viết rằng `claude -p "/usage"` "treo tới trần 60 giây, 0
+//! byte" — ĐO LẠI 2026-09-15 thì KHÔNG CÒN ĐÚNG**, và cái sai ấy đắt hơn một
+//! dòng chú thích lạc hậu: nó là lý do người đọc sẽ tránh phép dò sống, đúng thứ
+//! [`overlay_live`] cần để chữa con số chết.
+//!
+//! ```text
+//! claude -p /usage --output-format json   (acc3)
+//! exit 0 · 4,2 giây · stdout 1793 B · num_turns 0 · total_cost_usd 0
+//! ```
+//!
+//! Khớp với log: `usage_probe_unparsed` = 0 và `usage_probe_failed` = 0 trong
+//! phần nhật ký quét được (60 MB cuối của 139 MB — **mẫu số chưa phủ hết**, nên
+//! đọc là "không thấy lần hỏng nào", không phải "chưa hỏng lần nào").
+//!
+//! Nên hai lớp ấy **không thay nhau, chúng bổ cho nhau**: tệp trả lời tức thì và
+//! luôn có mặt, phép dò trả lời ĐÚNG LÚC NÀY. Xem [`kich_tran_can_xac_nhan`] —
+//! chỗ quyết định khi nào phải hỏi tới lớp thứ hai.
 //!
 //! # Cái nó KHÔNG đo được, ghi ra để đừng ai tưởng là kín
 //!
@@ -227,7 +243,20 @@ impl Quota {
         if p.is_empty() {
             p.push("sổ không có con số nào".to_string());
         }
-        p.push(format!("hạng: {}", rank(self, now_ms).say()));
+        let hang = rank(self, now_ms);
+        p.push(format!("hạng: {}", hang.say()));
+        // 🔴 Hà 15/09: kịch trần phải kèm MỐC MỞ LẠI. Không có mốc thì dòng ấy
+        // chỉ nói "đừng dùng", không nói "chờ bao lâu" — mà đó mới là câu chủ
+        // máy cần để chọn giữa chờ và chuyển.
+        if hang == Rank::Full {
+            if let Some(m) = mo_lai_luc(self, now_ms) {
+                p.push(format!("mở lại {m}"));
+            }
+        }
+        // Điều kiện kiểm tra THỨ HAI, đứng cạnh tỉ lệ chứ không thay nó.
+        if let Some(canh) = kich_tran_can_xac_nhan(self, now_ms) {
+            p.push(format!("⚠ {canh}"));
+        }
         if let Some(t) = self.fetched_at_ms {
             let phut = (now_ms - t).max(0) / 60_000;
             p.push(match phut {
@@ -423,6 +452,107 @@ pub fn account_not_ready(doc: &Value) -> Option<String> {
         );
     }
     None
+}
+
+/// Bản đọc của một cửa sổ đã **CŨ** chưa — thước đo là chính cái đồng hồ của nó.
+///
+/// 🔴 Hà 2026-09-15: *"thêm vào phần kịch trần thời gian reset để thêm điều kiện
+/// kiểm tra chứ chỉ dựa vào tỉ lệ là không đủ"* · *"vì tỉ lệ là số chết chưa
+/// chắc đúng"*.
+///
+/// Đúng, và [`cua_so`] mới hỏi được một NỬA câu: *mốc mở lại đã qua chưa*. Qua
+/// rồi thì nó trả `None`; chưa qua thì nó lấy NGUYÊN con số và **không hỏi con
+/// số ấy già bao nhiêu**. Mà con số ấy chỉ do **phiên tương tác** ghi — đo hai
+/// chiều 15/09: `claude -p` chạy trót lọt (exit 0, 38–41 giây), `mtime` của
+/// `.claude.json` ĐỔI, mà `cachedUsageUtilization` không nhúc nhích ở CẢ tài
+/// khoản đã có số LẪN tài khoản chưa có. Nên nó nằm im được vô thời hạn: đúng
+/// nghĩa "số chết".
+///
+/// Ca thật đang sống trên máy đúng lúc viết dòng này:
+///
+/// ```text
+/// acc2  fetched 2026-09-14T07:32Z (già 27,8h)  seven_day 100%  resets 09-16T11:00Z (còn 23,7h)
+/// ```
+///
+/// Tuổi 27,8h > còn lại 23,7h ⟹ **CŨ**. Thước "tuổi > thời gian còn lại" là Hà
+/// chọn (15/09) và nó **tự co giãn theo vị trí trong cửa sổ**: cùng một bản đọc
+/// 3 tiếng là mới toanh với cửa sổ tuần còn 5 ngày, và đã cũ mèm với cửa sổ 5
+/// tiếng chỉ còn 30 phút. Một ngưỡng phút cứng thì hoặc quá chặt cho tuần, hoặc
+/// quá lỏng cho 5 tiếng — hai thang khác nhau hai bậc độ lớn.
+///
+/// Không đo được tuổi (`fetched_at_ms` rỗng, hoặc mốc không parse ra) ⟹ **CŨ**,
+/// fail-closed. Ở đây "cũ" nghĩa là *đi hỏi lại đi*, KHÔNG phải *loại tài khoản
+/// này* — nên fail-closed ở đây không đóng cửa của ai.
+fn ban_doc_cu(fetched_at_ms: Option<i64>, resets_at: Option<&str>, now_ms: i64) -> bool {
+    let Some(t) = fetched_at_ms else {
+        return true;
+    };
+    let Some(moc) = resets_at.and_then(|r| chrono::DateTime::parse_from_rfc3339(r).ok()) else {
+        return true;
+    };
+    (now_ms - t) > (moc.timestamp_millis() - now_ms)
+}
+
+/// Verdict [`Rank::Full`] này có đang tựa vào một con số CŨ không — nói ra bằng số.
+///
+/// `None` = không phải `Full`, hoặc cửa sổ làm nên verdict ấy còn tươi. `Some(câu)`
+/// = nó cũ; câu ấy đi thẳng ra `/accounts` và là tín hiệu cho chỗ gọi đi hỏi
+/// [`crate::runtime::usage_cached`].
+///
+/// 🔴 **Nó KHÔNG hạ hạng, và đó là cả quyết định.** Hà chốt 15/09 giữa ba nhánh
+/// hỏng ngược chiều nhau: *dò sống TRƯỚC, **hết cách mới giữ `Full`***. Hạ xuống
+/// `Unknown` thì tự phục hồi được, nhưng `Unknown` đứng **TRƯỚC** `Full` trong
+/// thứ tự chọn ⟹ huba sẽ mở một cửa sổ chết đúng vào lúc mọi tài khoản khác kịch
+/// trần — đúng ca acc4 ngày 12/09, và cái giá của nó là một phiên đang làm việc
+/// bị bỏ lại. Nên mặc định ở đây là **GIỮ**, còn đường sửa là [`overlay_live`].
+///
+/// Chỉ hỏi tuổi của **cửa sổ đã làm nên verdict**, không hỏi cửa sổ kia: một bản
+/// đọc có thể tươi với cửa sổ tuần và cũ với cửa sổ 5 tiếng cùng một lúc, và lấy
+/// nhầm cửa sổ là cảnh báo sai chỗ.
+pub fn kich_tran_can_xac_nhan(q: &Quota, now_ms: i64) -> Option<String> {
+    if rank(q, now_ms) != Rank::Full {
+        return None;
+    }
+    for (ten, pct, resets) in [
+        ("tuần", q.week_pct, q.week_resets_at.as_deref()),
+        ("5 tiếng", q.hour5_pct, q.hour5_resets_at.as_deref()),
+    ] {
+        if cua_so(pct, resets, now_ms).is_some_and(|p| p >= 100)
+            && ban_doc_cu(q.fetched_at_ms, resets, now_ms)
+        {
+            return Some(match q.fetched_at_ms {
+                Some(t) => format!(
+                    "kịch trần {ten} theo bản đọc già {} tiếng — cần xác nhận",
+                    (now_ms - t).max(0) / 3_600_000
+                ),
+                None => format!("kịch trần {ten} theo bản đọc không rõ tuổi — cần xác nhận"),
+            });
+        }
+    }
+    None
+}
+
+/// Mốc mở lại của cửa sổ đang chặn — `None` khi không cửa sổ nào chặn.
+///
+/// "ĐÃ KỊCH TRẦN" mà không nói **mở lại lúc nào** thì chủ máy không có cơ sở
+/// chọn giữa *chờ* và *chuyển tài khoản*, và đó đúng là câu hỏi anh đang đứng
+/// trước mỗi lần đọc dòng ấy. Lấy mốc SỚM NHẤT trong những cửa sổ đã ≥100: đó là
+/// lúc tài khoản dùng lại được.
+pub fn mo_lai_luc(q: &Quota, now_ms: i64) -> Option<String> {
+    [
+        (q.week_pct, q.week_resets_at.as_deref()),
+        (q.hour5_pct, q.hour5_resets_at.as_deref()),
+    ]
+    .into_iter()
+    .filter(|(pct, resets)| cua_so(*pct, *resets, now_ms).is_some_and(|p| p >= 100))
+    .filter_map(|(_, resets)| resets)
+    .filter_map(|r| chrono::DateTime::parse_from_rfc3339(r).ok())
+    .min()
+    .map(|t| {
+        t.with_timezone(&chrono::Local)
+            .format("%H:%M %d/%m")
+            .to_string()
+    })
 }
 
 pub fn rank(q: &Quota, now_ms: i64) -> Rank {

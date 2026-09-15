@@ -584,12 +584,21 @@ pub fn rank_all(cfg: &crate::config::Config, now_ms: i64) -> Vec<Ranked> {
         .into_iter()
         .map(|q| {
             let r = rank(&q, now_ms);
+            // 🔴 Điều kiện thứ hai phải có mặt Ở ĐÂY, không chỉ ở `/accounts`.
+            // Log là bề mặt pháp y của repo này — mọi mục PLAN.md đều dựng từ
+            // nó — nên một cảnh báo chỉ hiện trên điện thoại là cảnh báo mới làm
+            // được một nửa (luật 13②: thứ người đọc phán quyết không thấy thì
+            // không tính là cảnh báo). Đo 15/09 ngay sau lượt cài đầu tiên: dòng
+            // `quota_read` của acc2 in `rank:"ĐÃ KỊCH TRẦN"` trong khi verdict ấy
+            // tựa vào bản đọc già 27,8 tiếng, và **không một trường nào nói ra**.
             logging::info(
                 "quota_read",
                 json!({ "account": q.account, "week_pct": q.week_pct,
                         "week_resets_at": q.week_resets_at, "hour5_pct": q.hour5_pct,
                         "fetched_at_ms": q.fetched_at_ms, "why_unknown": q.why_unknown,
-                        "rank": r.say() }),
+                        "rank": r.say(),
+                        "can_xac_nhan": kich_tran_can_xac_nhan(&q, now_ms),
+                        "mo_lai_luc": mo_lai_luc(&q, now_ms) }),
             );
             Ranked {
                 name: q.account,

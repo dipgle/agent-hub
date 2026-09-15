@@ -217,6 +217,17 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
   vẫn treo: **ép số tươi lại theo yêu cầu**. Tệp chỉ đổi khi chính CLI của tài
   khoản ấy chạy — đo được ngay 30/08: bản đọc của acc1 già hai ngày.
 
+  🔴 **Và đường tắt ai cũng nghĩ tới đầu tiên đã bị loại bằng đo, 2026-09-15:
+  `claude -p` KHÔNG hâm được số.** Hai vế, cùng một lệnh
+  `claude -p "tra loi dung mot tu: ok"`: acc3 (đang có số 3%) → exit 0, mtime
+  của `.claude.json` **ĐỔI**, `fetchedAtMs` **y nguyên**; acc5 (chưa có số) →
+  exit 0, mtime **ĐỔI**, `utilization` **vẫn null**. Nên không phải "CLI không
+  chạy" (nó chạy, 38–41 giây, không treo) và cũng không phải "CLI không ghi tệp"
+  (nó ghi) — nó ghi khoá khác và **không đụng `cachedUsageUtilization`**. Vế
+  acc3 loại giả thuyết *"tại tài khoản mới quá"*. ⟹ Món nợ này **không** đóng
+  được bằng một lượt `-p` rẻ tiền; muốn số tươi thì phải có phiên TƯƠNG TÁC gõ
+  một câu. Đo trong lượt thêm acc5 (`quota.rs`, mục *"Cái nó KHÔNG đo được"*).
+
 - ~~Chưa quan sát được một tin Telegram THẬT mang thông tin chốt (S18)~~ →
   **đã có, 18:17:13**: `⏸ projects-7c dừng, đang chờ bạn — sau 16 phút chạy` kèm
   nguyên khối thông tin chốt (mở bằng kết luận, có dấu đứt `⋯`, và **ba dòng

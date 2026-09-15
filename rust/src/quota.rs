@@ -39,9 +39,29 @@
 //!
 //! * **Số token tuyệt đối.** `limit_dollars` · `used_dollars` ·
 //!   `remaining_dollars` đều `null` trên cả ba tài khoản. Chỉ có phần trăm.
-//! * **Số MỚI theo yêu cầu.** Tệp chỉ đổi khi chính CLI của tài khoản ấy chạy.
-//!   Muốn ép nó tươi lại thì phải chạy `claude` dưới tài khoản ấy — tức về đúng
-//!   phép dò đang treo.
+//! * **Số MỚI theo yêu cầu — và `claude -p` KHÔNG ép được.** Dòng này trước
+//!   viết *"muốn ép nó tươi lại thì phải chạy `claude` dưới tài khoản ấy"*. Đo
+//!   hai chiều 2026-09-15 thì câu ấy sai đúng ở chỗ đắt nhất: một lượt
+//!   `claude -p` **chạy trót lọt** — exit 0, có câu trả lời, 38–41 giây, KHÔNG
+//!   treo — và nó **CÓ ghi** `.claude.json` (`mtime` đổi ở cả hai vế), nhưng
+//!   `cachedUsageUtilization` thì không nhúc nhích:
+//!
+//!   ```text
+//!   acc3 (đang có số 3%)  exit 0 · mtime ĐỔI · fetchedAtMs 1789461853704 → y nguyên
+//!   acc5 (chưa có số)     exit 0 · mtime ĐỔI · utilization null        → vẫn null
+//!   ```
+//!
+//!   Vế acc3 là vế phải có: một tài khoản ĐÃ có số mà vẫn không tươi lại thì
+//!   loại được giả thuyết *"tại acc5 mới quá"*. Và `mtime` đổi loại nốt giả
+//!   thuyết *"CLI không ghi gì"* — nó ghi, chỉ không ghi khoá này. ⟹ Khoá ấy do
+//!   **phiên tương tác** ghi, không phải mọi lượt CLI nói chuyện với API.
+//!
+//!   Hệ quả, và đây là chỗ đừng ai đi lại: `Unknown` của một tài khoản vừa dựng
+//!   **không có đường rẻ nào chữa**. Không bắn `-p` để hâm số được — phải có
+//!   người gõ một câu trong cửa sổ thật. Ca thật: acc5 thêm 15/09, onboard xong
+//!   mà sổ vẫn rỗng, nên nó ngồi ở `Unknown` — hạng đứng TRƯỚC `Full`, tức vẫn
+//!   được gợi ý khi các tài khoản khác kịch trần, và lần này cửa sổ mở ra chạy
+//!   được (khác hẳn ca acc4 12/09, xem [`account_not_ready`]).
 //! * **Việc tiêu hạn mức ở nơi khác** (claude.ai trên trình duyệt) không đi qua
 //!   tệp này.
 

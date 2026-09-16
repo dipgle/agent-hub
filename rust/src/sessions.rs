@@ -1767,6 +1767,74 @@ fn remember_lane(session_id: &str, lane: &str) {
     }
 }
 
+/// Bao nhiêu lượt nói gần nhất được soi khi đếm lời tự khai — xem
+/// [`declared_in_tail_counted`].
+const KHAI_QUET_LUOT: usize = 12;
+
+/// Lời tự khai mới nhất **kèm SỐ LƯỢT đồng ý với nó** trong `KHAI_QUET_LUOT`
+/// lượt nói gần nhất.
+///
+/// 🔴 Hà 2026-09-16, ảnh danh sách: *"Phiên main chạy một hồi nhắc đến huba thì
+/// tên bị nhảy sang luôn, không hiểu đang bắt kiểu gì"*. Phiên `1249d1ef` (việc
+/// của nó là sửa lỗi bàn giao của dwork) hiện ra thành `[huba]`.
+///
+/// Đo trên chính nhật ký ấy: dòng kích hoạt là **lượt nói của chính phiên** —
+///
+/// ```text
+/// `[huba]` xác nhận chẩn đoán mới (11/162 = 6,8 %, cùng dân số) — và **bắt được…
+/// ```
+///
+/// Phiên ấy đang **nói VỀ** huba (hai phiên nhắn cho nhau), còn bộ dò đọc thành
+/// *"tôi LÀ huba"*. Hai cổng cũ đều không đỡ được: nó nằm ở ĐẦU lượt nói, và
+/// `huba` là thư mục CÓ THẬT. Cái nới bỏ dấu ``` ` ``` bọc ngoài — thêm vào vì
+/// phiên huba tự viết `` `[huba]` `` — chính là chỗ mở cửa.
+///
+/// **Không có cách nào phân biệt bằng HÌNH DẠNG**, và đây là số đo chứ không
+/// phải phỏng đoán: lời khai thật (`` `[huba]` Chốt phiên. ``) và lời nhắc
+/// (`` `[huba]` xác nhận chẩn đoán… ``) giống nhau từng ký tự ở phần bộ dò nhìn.
+/// Nên cổng phải là **SỐ LẦN**: theo luật của `CLAUDE.md` workspace, phiên tự
+/// khai ở **MỌI** lượt nói, nên một cái tên chỉ xuất hiện MỘT lần trong cả cửa
+/// sổ đuôi là một cái tên được NHẮC, không phải được KHAI.
+///
+/// ⚠ Hai đường sửa hiển nhiên đã bị ĐO RA LÀ SAI, ghi ra để đừng ai thử lại:
+/// · *"lấy nhãn xuất hiện nhiều nhất"* — trong 256 KB đuôi của `1249d1ef` có
+///   **đúng một** dòng tự khai, và nó là dòng sai; đa số của một tập một phần tử
+///   vẫn là phần tử ấy.
+/// · *"đối chiếu sổ `scripts/.session-bind`"* — phiên ấy **không có** bản ghi
+///   nào (sổ ghi theo lượt GHI TỆP qua hook, mà nó chỉ đang đọc).
+fn declared_in_tail_counted(tail: &str, workspace_root: &str) -> Option<(String, String, usize)> {
+    let mut moi_nhat: Option<(String, String)> = None;
+    let mut dong_y = 0usize;
+    let mut da_soi = 0usize;
+    for line in tail.lines().rev() {
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if record.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(text) = text_of(&record) else {
+            continue;
+        };
+        da_soi += 1;
+        if da_soi > KHAI_QUET_LUOT {
+            break;
+        }
+        let Some((duan, lan)) = declared_parts(&text, workspace_root) else {
+            continue;
+        };
+        match &moi_nhat {
+            None => {
+                dong_y = 1;
+                moi_nhat = Some((duan, lan));
+            }
+            Some((d0, _)) if *d0 == duan => dong_y += 1,
+            Some(_) => {}
+        }
+    }
+    moi_nhat.map(|(d, l)| (d, l, dong_y))
+}
+
 /// Lời tự khai MỚI NHẤT trong đuôi nhật ký, đã tách dự án / làn.
 fn declared_in_tail(tail: &str, workspace_root: &str) -> Option<(String, String)> {
     for line in tail.lines().rev() {
@@ -1875,7 +1943,27 @@ pub fn folder_for_session(
     workspace_root: &str,
     census_head: impl FnOnce() -> Option<String>,
 ) -> Option<String> {
-    if let Some((declared, lane)) = declared_in_tail(tail, workspace_root) {
+    if let Some((declared, lane, dong_y)) = declared_in_tail_counted(tail, workspace_root) {
+        // 🔴 MỘT LẦN LÀ NHẮC, HAI LẦN MỚI LÀ KHAI — cổng chống LẬT nhãn, thêm
+        // 2026-09-16. Xem [`declared_in_tail_counted`] cho ca thật: một phiên
+        // dwork nhắc tên `huba` đúng một lần ở đầu lượt nói và bị đổi tên luôn.
+        //
+        // Cổng chỉ chặn việc LẬT, không chặn việc ĐẶT: phiên chưa có nhãn nào
+        // thì một lời khai vẫn đủ để gieo, nếu không thì mọi phiên mới đều
+        // không tên cho tới lượt nói thứ hai — đổi một cái nhãn sai lấy một cái
+        // nhãn trống là đổi ngang, không phải sửa.
+        let cu = recall_declared(session_id);
+        let lat = cu.as_deref().is_some_and(|c| c != declared);
+        if lat && dong_y < 2 {
+            logging::info(
+                "folder_label_flip_refused",
+                json!({ "session": session_id, "dang_giu": cu, "vua_thay": declared,
+                        "dong_y": dong_y, "quet_luot": KHAI_QUET_LUOT,
+                        "why": "tên mới chỉ xuất hiện MỘT lần trong cửa sổ đuôi — phiên tự khai ở \
+                                MỌI lượt nói, nên một lần là NHẮC tên dự án khác, không phải tự khai" }),
+            );
+            return cu;
+        }
         remember_folder_ranked(session_id, &declared, &lane, true);
         return Some(declared);
     }
@@ -4337,17 +4425,84 @@ fn mark_lane_from_ledger(rows: &mut [LiveSession], workspace_root: &Path) {
             );
             continue;
         };
-        let du_an = v.get("project").and_then(Value::as_str).unwrap_or_default();
-        if du_an.is_empty() || du_an != r.folder.trim_matches('/') {
-            continue;
-        }
-        if let Some(lan) = v
-            .get("nhanh")
-            .and_then(Value::as_str)
-            .and_then(lane_from_branch)
-        {
+        if let Some(lan) = lan_tu_so_rang_buoc(&v, &r.folder, &r.session_id) {
             r.lane = lan;
         }
+    }
+}
+
+/// Sổ ràng buộc có nói được LÀN của phiên này không — phần THUẦN, kiểm được.
+///
+/// Tách khỏi [`mark_lane_from_ledger`] vì quyết định nằm gọn ở đây, còn phần
+/// kia là vòng lặp và đọc đĩa — thứ không bài kiểm nào chạm tới được mà không
+/// cần cả một cái máy đang chạy.
+pub fn lan_tu_so_rang_buoc(v: &Value, folder: &str, session_id: &str) -> Option<String> {
+    {
+        let du_an = v.get("project").and_then(Value::as_str).unwrap_or_default();
+        if du_an.is_empty() || du_an != folder.trim_matches('/') {
+            return None;
+        }
+        // 🔴 PHIÊN GHI VÀO NHIỀU CÂY THÌ KHÔNG CÓ LÀN — Hà 2026-09-16, ảnh thứ
+        // hai trong ngày: *"Giờ nhảy thành account rồi"*. Hàng `1249d1ef` (phiên
+        // ĐIỀU PHỐI của dwork) hiện `[dwork/account]`, trong khi nó không thuộc
+        // làn nào.
+        //
+        // Đo trên chính sổ ấy:
+        //
+        // ```json
+        // {"cay":"dwork/dev-account", "nhanh":"lan/account",
+        //  "paths":["dwork/dev/bo-moi","dwork/dev-tochuc/.tmp","dwork/dev-account/.tmp"]}
+        // ```
+        //
+        // Nó ghi vào **ba** cây làn khác nhau — đúng việc của một phiên điều
+        // phối (gộp, chạy cổng hộ, để lại ghi chú) — còn `cay`/`nhanh` chỉ giữ
+        // cây **ghi GẦN NHẤT**. Nên cái làn kia không phải danh tính của phiên;
+        // nó là dấu chân của lượt ghi cuối cùng.
+        //
+        // Đây đúng họ với ca `onghut` 18/08 ở [`folder_from_tail`]: phép đo
+        // không hỏng, nó trả lời đúng câu hỏi *"phiên này vừa ghi vào cây nào"*
+        // — chỉ có điều đó không phải câu hỏi *"phiên này thuộc làn nào"*.
+        // ⇒ Ghi rải nhiều cây thì để làn TRỐNG: **chưa đo được** là một trạng
+        // thái riêng, và một cái nhãn sai đọc tệ hơn hẳn một cái nhãn thiếu —
+        // nhãn thiếu thì chủ máy biết mình chưa biết.
+        let cay: std::collections::BTreeSet<&str> = v
+            .get("paths")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .filter_map(cay_cua_duong_dan)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if cay.len() > 1 {
+            logging::info(
+                "session_bind_lane_skipped",
+                json!({ "session": session_id, "so_cay": cay.len(),
+                        "cay": cay.iter().collect::<Vec<_>>(),
+                        "why": "phiên ghi vào NHIỀU cây làn (điều phối) — `cay`/`nhanh` chỉ là lượt \
+                                ghi gần nhất, không phải danh tính; để làn trống thay vì đoán" }),
+            );
+            return None;
+        }
+        v.get("nhanh")
+            .and_then(Value::as_str)
+            .and_then(lane_from_branch)
+    }
+}
+
+/// `dwork/dev-account/.tmp` → `dwork/dev-account`; hai tầng đầu là CÂY.
+///
+/// Tách thuần để kiểm được: `paths` của sổ ràng buộc là đường dẫn tương đối tính
+/// từ gốc workspace, nên cây làn luôn nằm ở đúng hai tầng đầu
+/// (`<dự án>/<cây>`). Đường dẫn nông hơn hai tầng thì không nói được nó thuộc
+/// cây nào ⟹ `None`, không đoán.
+fn cay_cua_duong_dan(p: &str) -> Option<&str> {
+    let mut it = p.trim_matches('/').match_indices('/');
+    it.next()?;
+    match it.next() {
+        Some((i, _)) => Some(&p.trim_matches('/')[..i]),
+        None => Some(p.trim_matches('/')),
     }
 }
 

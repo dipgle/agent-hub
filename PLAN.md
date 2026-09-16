@@ -129,6 +129,50 @@ Terminal.app trả lời AppleScript **TUẦN TỰ** (xem `keys::PROBE_YIELD_MS`
 hỏi-Terminal-theo-phiên vào vòng chạy sẽ làm chậm **cả danh sách phiên**, không
 chỉ phần của mình.
 
+**Nhãn phiên thôi nhảy sang dự án được NHẮC TỚI, và thôi đoán làn từ lượt ghi
+cuối (2026-09-16, hai ảnh chụp của Hà trong một buổi).**
+
+*Ảnh 1 — `"Phiên main chạy một hồi nhắc đến huba thì tên bị nhảy sang luôn,
+không hiểu đang bắt kiểu gì"`.* Hàng `1249d1ef` (phiên điều phối dwork) hiện
+`[huba]`. Dòng kích hoạt, đo trong nhật ký phiên ấy lúc 07:07:18Z, là lượt nói
+của **chính nó**: `` `[huba]` xác nhận chẩn đoán mới (11/162 = 6,8 %)… `` — hai
+phiên đang nhắn cho nhau, nên nó **nói VỀ** huba, còn bộ dò đọc thành *"tôi LÀ
+huba"*. Hai cổng cũ bó tay: chuỗi ấy **ở đầu lượt nói**, và `huba` là **thư mục
+có thật**. Và nhãn sai **không tự lành** — lời khai vào sổ nhớ rồi từ đó luôn
+thắng phép đếm (`recall_declared` đứng trên `counted`).
+⇒ Vá: **một lần là NHẮC, hai lần mới là KHAI**. Tên mới chỉ xuất hiện MỘT lần
+trong `KHAI_QUET_LUOT = 12` lượt nói gần nhất thì **không lật** được nhãn đang
+giữ (`folder_label_flip_refused`). Cổng chỉ chặn việc LẬT, không chặn việc ĐẶT —
+phiên chưa có nhãn thì một lời khai vẫn gieo được, vì đổi một nhãn sai lấy một
+nhãn trống là đổi ngang.
+⚠ **Hai đường sửa hiển nhiên đã ĐO RA LÀ SAI** — đừng thử lại: *"lấy nhãn xuất
+hiện nhiều nhất"* (trong 256 KB đuôi ấy có **đúng một** dòng tự khai, và nó là
+dòng sai) · *"đối chiếu sổ `scripts/.session-bind`"* (lúc đó phiên ấy **chưa
+có** bản ghi nào — sổ ghi theo lượt GHI TỆP).
+
+*Ảnh 2 — `"Giờ nhảy thành account rồi"`.* Dự án đã đúng, sai ở **làn**:
+`[dwork/account]`. Sổ ràng buộc đọc nguyên văn lúc 07:31:18Z —
+`{"cay":"dwork/dev-account","nhanh":"lan/account","paths":["dwork/dev/bo-moi",
+"dwork/dev-tochuc/.tmp","dwork/dev-account/.tmp"]}`. Phiên điều phối ghi vào
+**ba** cây làn (đúng việc của nó), còn sổ chỉ giữ cây **ghi GẦN NHẤT**.
+⇒ Vá: ghi rải **nhiều cây** thì để làn **TRỐNG** (`session_bind_lane_skipped`).
+Một nhãn thiếu thì chủ máy biết mình chưa biết; một nhãn sai thì không.
+
+⚠ **Một cửa BÊN CẠNH vẫn hở, cố ý chưa vá vì chưa đo được ca thật:**
+`lane_for_session` đọc lời khai bằng `declared_in_tail` **không qua cổng đếm**,
+nên một lượt nhắc dạng `[dwork/account] đã xong` (phiên điều phối nói về làn
+khác) vẫn đặt được **làn** sai, dù cổng chống lật đã chặn phần **dự án**. Đường
+này có thật về hình dạng nhưng **chưa quan sát được lần nào** — vá mù là đoán,
+nên ghi ra đây chờ một ca đo được. Ai gặp thì áp đúng luật *"một lần là nhắc"*
+sang `lane_for_session`, mẫu có sẵn ở `declared_in_tail_counted`.
+
+🔴 Cả hai là **cùng một bài học, ba tầng khác nhau**, và tầng đầu đã ghi sẵn
+trong tệp này từ 18/08 (ca `onghut`): *phép đo không hỏng — nó trả lời đúng câu
+hỏi của nó, chỉ là câu ấy không phải câu đang hỏi.* `folder_from_tail` trả lời
+*"đụng vào thư mục nào nhiều nhất"*; lời khai trả lời *"đầu lượt nói có tên
+nào"*; sổ ràng buộc trả lời *"vừa ghi vào cây nào"*. Không câu nào là *"phiên
+này LÀ gì"*.
+
 **Mỗi hàng `/accounts` nói được GIỜ SẮP RESET (2026-09-16).** Hà, ảnh chụp
 Telegram 07:46: *"Danh sách acc thiếu giờ sắp reset"* — trong năm hàng chỉ acc2
 (đã kịch trần) mang `mở lại 17:59 16/09`, bốn hàng còn lại trắng giờ, tức đúng

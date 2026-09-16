@@ -74,7 +74,7 @@ fn ghi_vao_mot_cay_thi_van_lay_duoc_lan() {
 /// Câu hỏi đúng ngắn hơn: sổ đã ghi sẵn `cay`, nên chỉ cần hỏi *"có đường nào
 /// nằm NGOÀI cây ấy không"*.
 #[test]
-fn ghi_rai_nhieu_thu_muc_CON_cua_cung_mot_cay_thi_van_lay_duoc_lan() {
+fn ghi_rai_nhieu_thu_muc_con_cua_cung_mot_cay_thi_van_lay_duoc_lan() {
     let so = json!({
         "project": "huba",
         "cay": "huba",

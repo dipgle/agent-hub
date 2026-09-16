@@ -234,36 +234,51 @@ impl Quota {
             return format!("chưa đo được — {why}");
         }
         let mut p: Vec<String> = Vec::new();
+        // 🔴 MỖI CỬA SỔ MANG MỐC CỦA CHÍNH NÓ — Hà 2026-09-16, lượt thứ hai:
+        // *"Vẫn thiếu giờ reset của phiên"*. Bản trước in **một** mốc, của cửa
+        // sổ CHẬT NHẤT, nên hễ cửa sổ tuần chật hơn là giờ quay vòng của cửa sổ
+        // PHIÊN (5 tiếng) biến mất — mà đó mới đúng là con số chủ máy cần khi
+        // câu hỏi là *"mở phiên ngay bây giờ được không"*. Hai cửa sổ, hai con
+        // số phần trăm đứng cạnh nhau trên cùng một dòng, thì mỗi con số phải
+        // kéo theo cái đồng hồ của nó: một dòng in 62% và 19% mà chỉ có một mốc
+        // thì người đọc không có cách nào biết mốc ấy thuộc về số nào.
         if let Some(w) = self.week_pct {
-            p.push(format!("tuần {w}%"));
+            p.push(
+                match moc_cua_so(self.week_pct, self.week_resets_at.as_deref(), now_ms, false) {
+                    Some(m) => format!("tuần {w}% ↻ {m}"),
+                    None => format!("tuần {w}%"),
+                },
+            );
         }
         if let Some(h) = self.hour5_pct {
-            p.push(format!("5 tiếng {h}%"));
+            p.push(
+                match moc_cua_so(
+                    self.hour5_pct,
+                    self.hour5_resets_at.as_deref(),
+                    now_ms,
+                    true,
+                ) {
+                    Some(m) => format!("5 tiếng {h}% ↻ {m}"),
+                    None => format!("5 tiếng {h}%"),
+                },
+            );
         }
         if p.is_empty() {
             p.push("sổ không có con số nào".to_string());
         }
         let hang = rank(self, now_ms);
         p.push(format!("hạng: {}", hang.say()));
-        // 🔴 Hà 15/09: kịch trần phải kèm MỐC MỞ LẠI. Không có mốc thì dòng ấy
-        // chỉ nói "đừng dùng", không nói "chờ bao lâu" — mà đó mới là câu chủ
-        // máy cần để chọn giữa chờ và chuyển.
-        if hang == Rank::Full {
-            if let Some(m) = mo_lai_luc(self, now_ms) {
-                p.push(format!("mở lại {m}"));
-            }
-        } else if let Some(r) = sap_reset(self, now_ms) {
-            // 🔴 Hà 2026-09-16, ảnh chụp `/accounts` lúc 07:46: *"Danh sách acc
-            // thiếu giờ sắp reset"*. Đúng, và chỗ thiếu nằm ngay tại đây: mốc
-            // mở lại chỉ được in khi tài khoản ĐÃ kịch trần, tức đúng lúc nó
-            // không còn giúp gì cho việc chọn nữa. Câu chủ máy hỏi khi nhìn
-            // danh sách là *"mở phiên bằng acc nào"*, và một tài khoản 61% tuần
-            // đáng chọn hay không phụ thuộc hẳn vào việc nó reset sau 4 ngày
-            // hay sau 4 tiếng — dữ kiện ấy huba ĐÃ CÓ trong tay (`week_resets_at`
-            // của cả năm tài khoản đều nằm trong `quota_read` mỗi vòng), chỉ là
-            // chưa bao giờ đi ra tới màn.
-            p.push(r);
-        }
+        // 🪦 Ở đây từng có `mở lại {mốc}` cho hàng KỊCH TRẦN (15/09) rồi thêm
+        // `reset {cửa sổ chật nhất}` cho hàng còn lại (16/09, lượt đầu). Cả hai
+        // đi cùng bản vá trên: khi **mỗi** con số phần trăm đã kéo theo đồng hồ
+        // của chính nó, một trường thứ ba ở cuối dòng chỉ lặp lại một trong hai
+        // mốc ấy dưới một cái tên khác — và lặp bằng một cái tên khác là cách
+        // rẻ nhất để hai chỗ về sau nói lệch nhau.
+        //
+        // ⚠ Hàng kịch trần KHÔNG mất thông tin: `hạng: ĐÃ KỊCH TRẦN` nói cửa
+        // đang đóng, còn `tuần 100% ↻ 17:59 16/09 (còn 9 tiếng)` nói đóng tới
+        // bao giờ — và nói ĐÚNG cửa sổ nào đang đóng, thứ mà một dòng "mở lại"
+        // gộp chung không phân biệt được khi cả hai cửa sổ cùng chặn.
         // Điều kiện kiểm tra THỨ HAI, đứng cạnh tỉ lệ chứ không thay nó.
         if let Some(canh) = kich_tran_can_xac_nhan(self, now_ms) {
             p.push(format!("⚠ {canh}"));
@@ -587,12 +602,41 @@ pub fn sap_reset(q: &Quota, now_ms: i64) -> Option<String> {
     let h = cua_so(q.hour5_pct, q.hour5_resets_at.as_deref(), now_ms);
     // Hoà thì lấy TUẦN: nó là cửa sổ đắt hơn (5 tiếng tự mở lại trong ngày),
     // nên khi hai con số bằng nhau thì mốc tuần là mốc đáng biết hơn.
-    let (ten, moc) = match (w, h) {
-        (Some(a), Some(b)) if b > a => ("5 tiếng", q.hour5_resets_at.as_deref()?),
-        (Some(_), Some(_)) => ("tuần", q.week_resets_at.as_deref()?),
+    let (ten, pct, moc, ngan_gon) = match (w, h) {
+        (Some(a), Some(b)) if b > a => {
+            ("5 tiếng", q.hour5_pct, q.hour5_resets_at.as_deref(), false)
+        }
+        (Some(_), Some(_)) => ("tuần", q.week_pct, q.week_resets_at.as_deref(), false),
         _ => return None,
     };
-    let khi = chrono::DateTime::parse_from_rfc3339(moc).ok()?;
+    Some(format!(
+        "reset {ten} {}",
+        moc_cua_so(pct, moc, now_ms, ngan_gon)?
+    ))
+}
+
+/// Đồng hồ của MỘT cửa sổ hạn mức: `"15:00 20/09 (còn 4 ngày)"`.
+///
+/// Một nguồn duy nhất cho mọi chỗ in mốc quay vòng — dòng `/accounts`
+/// ([`Quota::say`]) và dòng log ([`sap_reset`]) đọc chung hàm này. Hai bản chép
+/// của cùng một phép dựng chuỗi là hai câu trả lời cho cùng một câu hỏi, và
+/// chúng chỉ cần một lượt sửa lệch nhau là bắt đầu nói khác nhau về cùng một
+/// tài khoản.
+///
+/// `ngan_gon` bỏ phần NGÀY: cửa sổ 5 tiếng luôn quay vòng trong vòng 5 giờ tới
+/// (đã qua [`cua_so`] nên mốc chắc chắn còn ở phía trước), nên `09:50` là đủ và
+/// `09:50 16/09` chỉ làm dòng dài thêm ở đúng chỗ màn hình điện thoại hẹp nhất.
+///
+/// `None` = **chưa đọc được cửa sổ này** (thiếu số, mốc hỏng, hay mốc đã qua —
+/// luật fail-closed của [`cua_so`]), KHÔNG phải *"cửa sổ này không quay vòng"*.
+pub fn moc_cua_so(
+    pct: Option<i64>,
+    resets_at: Option<&str>,
+    now_ms: i64,
+    ngan_gon: bool,
+) -> Option<String> {
+    cua_so(pct, resets_at, now_ms)?;
+    let khi = chrono::DateTime::parse_from_rfc3339(resets_at?).ok()?;
     let phut = (khi.timestamp_millis() - now_ms) / 60_000;
     // 🔴 `phut == 0` là *"còn DƯỚI một phút"*, không phải *"đã qua"* — [`cua_so`]
     // ở trên đã loại mọi mốc quá khứ (fail-closed), nên tới được đây là mốc còn
@@ -610,9 +654,10 @@ pub fn sap_reset(q: &Quota, now_ms: i64) -> Option<String> {
         91..=1439 => format!("còn {} tiếng", phut / 60),
         _ => format!("còn {} ngày", phut / 1440),
     };
+    let khuon = if ngan_gon { "%H:%M" } else { "%H:%M %d/%m" };
     Some(format!(
-        "reset {ten} {} ({con})",
-        khi.with_timezone(&chrono::Local).format("%H:%M %d/%m")
+        "{} ({con})",
+        khi.with_timezone(&chrono::Local).format(khuon)
     ))
 }
 

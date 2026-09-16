@@ -134,9 +134,34 @@ Telegram 07:46: *"Danh sách acc thiếu giờ sắp reset"* — trong năm hàn
 (đã kịch trần) mang `mở lại 17:59 16/09`, bốn hàng còn lại trắng giờ, tức đúng
 lúc con số còn dùng để CHỌN thì nó im. Dữ kiện vốn đã có (`week_resets_at` của
 cả năm tài khoản nằm trong `quota_read` mỗi vòng), chỉ chưa đi ra tới màn.
-`quota::sap_reset` lấy mốc của **cửa sổ chật nhất** — đúng cửa sổ mà `rank` dùng
-để chấm hạng, nếu không thì con số và cái hẹn nói về hai thứ khác nhau. Đo trên
-sổ THẬT, vòng đầu sau khi cài (`quota_read`, 01:39:23Z):
+🔴 **LƯỢT ĐẦU CHỈ VÁ ĐƯỢC MỘT NỬA, Hà bắt lại cùng ngày: *"Vẫn thiếu giờ reset
+của phiên"*.** Bản ấy in **một** mốc — của cửa sổ CHẬT NHẤT (`sap_reset`) — nên
+hễ cửa sổ tuần chật hơn là đồng hồ của cửa sổ **PHIÊN (5 tiếng) biến mất**. Mà
+đó đúng là ca hay gặp nhất *và* là con số cần khi câu hỏi là *"mở phiên NGAY BÂY
+GIỜ được không"*. Bài học ghi ra vì nó lặp lại được: một dòng in **hai** con số
+phần trăm cạnh nhau mà chỉ có **một** cái đồng hồ thì người đọc không có cách
+nào biết đồng hồ ấy thuộc về số nào — chọn hộ họ một cửa sổ là giấu mất cửa kia.
+
+**Nay mỗi cửa sổ kéo theo đồng hồ của chính nó** (`quota::moc_cua_so`, một nguồn
+duy nhất dùng chung cho dòng màn lẫn dòng log):
+
+```text
+tuần 62% ↻ 15:00 20/09 (còn 4 ngày) · 5 tiếng 19% ↻ 09:50 (còn 40 phút) · hạng: … · đo …
+```
+
+Cửa sổ 5 tiếng in **giờ trần**, không kèm ngày: nó luôn quay vòng trong 5 giờ
+tới nên phần ngày chỉ làm dài dòng ở đúng chỗ màn điện thoại hẹp nhất.
+🪦 Hai trường đuôi dòng đi theo bản vá này: `mở lại {mốc}` (15/09, cho hàng kịch
+trần) và `reset {cửa sổ chật nhất}` (16/09 lượt đầu) — khi mỗi con số đã có đồng
+hồ riêng thì một trường thứ ba ở cuối chỉ lặp lại một trong hai mốc dưới cái tên
+khác, và lặp bằng tên khác là cách rẻ nhất để hai chỗ về sau nói lệch nhau. Hàng
+kịch trần **không mất gì**: `hạng: ĐÃ KỊCH TRẦN` nói cửa đang đóng, còn
+`tuần 100% ↻ 17:59 16/09` nói đóng tới bao giờ — và nói ĐÚNG cửa sổ nào đang
+đóng, thứ mà một dòng `mở lại` gộp chung không phân biệt được.
+
+`sap_reset` (vẫn chọn cửa sổ chật nhất) ở lại **trong log** `quota_read`, vì ở
+đó câu hỏi khác: *cửa nào sẽ chặn trước*. Đo trên sổ THẬT, vòng đầu sau khi cài
+lượt một (`quota_read`, 01:39:23Z):
 
 | acc | hạng | giờ đưa ra màn |
 |---|---|---|
@@ -146,22 +171,33 @@ sổ THẬT, vòng đầu sau khi cài (`quota_read`, 01:39:23Z):
 | acc4 | đã dùng 46% | `reset 5 tiếng 09:50 16/09 (còn 70 phút)` ← 5 tiếng 46% > tuần 16% |
 | acc5 | đã dùng 18% | `reset tuần 16:00 21/09 (còn 5 ngày)` |
 
-7 bài kiểm thuần + 1 bài DÒ trên sổ thật (`gio_reset_tren_so_that_live`,
+10 bài kiểm thuần + 1 bài DÒ trên sổ thật (`gio_reset_tren_so_that_live`,
 `--ignored`) — bài dò in nguyên năm dòng sẽ đi ra Telegram và khai **MẪU SỐ
-5/5 hàng mang được giờ**, chạy 02:09:20Z:
+theo TỪNG cửa sổ**, không gộp. Đếm gộp là phép đo không phân biệt được bản vá
+đủ với bản vá thiếu: lượt đầu 16/09 đã đạt *"hàng nào cũng có giờ"* trong khi
+cửa sổ phiên vẫn trắng ở mọi hàng mà tuần chật hơn.
 
-```text
-acc1  tuần 62% · 5 tiếng 19% · hạng: đã dùng 62% · reset tuần 15:00 20/09 (còn 4 ngày)  · đo 11 phút trước
-acc2  tuần 100% · 5 tiếng 0% · hạng: ĐÃ KỊCH TRẦN · mở lại 17:59 16/09                  · đo 11 phút trước
-acc4  tuần 16% · 5 tiếng 46% · hạng: đã dùng 46% · reset 5 tiếng 09:50 16/09 (còn 40 phút) · đo 10 phút trước
-```
+🔴 **TẦNG ĐỐI CHỨNG NGƯỢC BẮT ĐƯỢC BA LỖI TRONG CHÍNH CỔNG NÀY, trong một
+ngày.** Ghi cả ba vì mỗi cái là một HÌNH DẠNG khác nhau, và không cái nào lộ ra
+khi chạy bài kiểm — cả 10 bài đều xanh ở mọi lượt:
 
-Đối chứng ngược lôi ra một điểm mù
-trong chính cổng ấy: mutant *"bỏ cửa `..=0 => return None`"* ra **XANH** ⟹ không
-bài nào chạm tới dòng đó, và đọc lại thì dòng đó còn sai hướng — `cua_so` đã loại
-mốc quá khứ, nên `phut == 0` nghĩa là *"còn dưới một phút"*, mà bản cũ lại làm
-hàng ấy **biến mất khỏi màn đúng phút đáng nói nhất**. Nay in `còn dưới 1 phút`,
-và mutant được nhắm lại vào đúng cửa thi hành mệnh đề (`cua_so`).
+1. **Mutant ra XANH vì bài kiểm đứng sai cửa.** *"Bỏ cửa `..=0 => return None`"*
+   không đỏ ⟹ không bài nào chạm tới dòng ấy; bài mang tên *"mốc đã qua thì im"*
+   thật ra đang chứng minh cửa `cua_so`. Đọc kỹ thì dòng ấy còn **sai hướng**:
+   `cua_so` đã loại mốc quá khứ nên `phut == 0` nghĩa là *"còn dưới một phút"*,
+   mà bản cũ làm hàng ấy biến mất khỏi màn **đúng phút đáng nói nhất**. Nay in
+   `còn dưới 1 phút`.
+2. **Cùng hình dạng, lần thứ hai, ở một cửa khác** (mutant M): bỏ cửa `cua_so`
+   nằm TRONG `moc_cua_so` ⟹ **XANH**, vì bài đang kiểm nó đi qua `sap_reset`,
+   nơi có cửa `cua_so` của RIÊNG nó chặn trước. *Một bài kiểm đi qua cửa A không
+   nói được gì về cửa B, dù hai cửa canh cùng một mệnh đề.* Lỗ có thật: `say()`
+   gọi thẳng `moc_cua_so`, nên bỏ cửa ấy là **in một cái hẹn đã hết hạn ra màn**.
+3. **Mutant KHÔNG CẤY ĐƯỢC ≠ mutant đã qua** (mutant J): `cargo fmt` bọc lại lời
+   gọi `moc_cua_so` của cửa sổ 5 tiếng (dài hơn nên xuống dòng, cửa sổ tuần thì
+   không), mẫu cấy trượt, script in `‼ KHÔNG CẤY ĐƯỢC`. Đó là một cửa **chưa đo
+   được**, và nó lại đúng là cửa Hà vừa bắt. Dựng lại mẫu, chạy riêng ⟹ ĐỎ.
+
+Kết: **J · K · L · M đều ĐỎ**, phục hồi khớp SHA-256, bài xanh trở lại.
 
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
 

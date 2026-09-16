@@ -237,6 +237,19 @@ fn hai_cua_so_cung_chan_thi_lay_moc_som_nhat() {
 /// Dòng cho người đọc phải MANG cả hai thứ mới: mốc mở lại, và lời cảnh báo khi
 /// verdict tựa vào số cũ. `/accounts` là chỗ duy nhất chủ máy soi lại được luật
 /// chọn tài khoản, nên thiếu một trong hai là soi hụt.
+///
+/// 🔴 **ĐỔI CHỮ, GIỮ Ý — 2026-09-16.** Bài này khoá ý ấy bằng chuỗi `"mở lại"`,
+/// một TRƯỜNG RIÊNG ở cuối dòng. Trường ấy đã bỏ khi mỗi cửa sổ hạn mức bắt đầu
+/// mang đồng hồ của chính nó (Hà: *"Vẫn thiếu giờ reset của phiên"*), nên bài
+/// kiểm đỏ — đúng việc của nó.
+///
+/// Ý thì KHÔNG mất, và dạng mới còn đúng hơn ở đúng chỗ dạng cũ sai: `mở lại`
+/// gộp cả hai cửa sổ thành MỘT mốc, lấy mốc SỚM NHẤT trong các cửa sổ đã ≥100%.
+/// Khi cả hai cùng chặn (tuần tới 20/09, 5 tiếng tới 13:30 hôm nay) thì "sớm
+/// nhất" = 13:30 — trong khi tài khoản vẫn bị cửa sổ tuần chặn thêm bốn ngày.
+/// Một đồng hồ đi kèm TỪNG con số không có chỗ cho sự mơ hồ ấy.
+/// ⚠ Cái bug min/max ấy vẫn còn trong [`huba::quota::mo_lai_luc`] (nay chỉ còn
+/// đi vào log, không còn lên màn) — chưa sửa, đã báo chủ máy.
 #[test]
 fn dong_cho_nguoi_doc_mang_ca_moc_lan_canh_bao() {
     let q = doc(
@@ -248,6 +261,10 @@ fn dong_cho_nguoi_doc_mang_ca_moc_lan_canh_bao() {
     );
     let s = q.say(ms(BAY_GIO));
     assert!(s.contains("ĐÃ KỊCH TRẦN"), "{s}");
-    assert!(s.contains("mở lại"), "thiếu mốc mở lại: {s}");
+    assert!(
+        s.contains("tuần 100% ↻ "),
+        "hàng kịch trần vẫn phải nói ĐÓNG TỚI BAO GIỜ, nay bằng đồng hồ nằm cạnh \
+         chính con số 100% đang chặn: {s}"
+    );
     assert!(s.contains("cần xác nhận"), "thiếu cảnh báo số cũ: {s}");
 }

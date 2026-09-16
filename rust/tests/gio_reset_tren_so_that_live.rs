@@ -25,24 +25,41 @@ fn moi_tai_khoan_that_deu_ra_duoc_mot_dong() {
     let doc = huba::quota::read_all(&cfg);
     assert!(!doc.is_empty(), "không tài khoản nào trong cấu hình");
 
-    let mut co_gio_reset = 0usize;
+    // Đếm RIÊNG từng cửa sổ, không gộp: lượt vá đầu 16/09 đạt "hàng nào cũng
+    // có giờ" mà vẫn thiếu đúng cái Hà hỏi lần thứ hai — giờ của cửa sổ PHIÊN.
+    // Một phép đếm gộp hai cửa sổ sẽ xanh trong cả hai ca, tức nó không phân
+    // biệt được bản vá đủ với bản vá thiếu.
+    let mut co_tuan = 0usize;
+    let mut co_phien = 0usize;
     for q in &doc {
         let dong = q.say(now);
         println!("{:<6} {dong}", q.account);
-        if dong.contains("reset ") || dong.contains("mở lại ") {
-            co_gio_reset += 1;
+        for o in dong.split(" · ") {
+            if o.starts_with("tuần ") && o.contains(" ↻ ") {
+                co_tuan += 1;
+            }
+            if o.starts_with("5 tiếng ") && o.contains(" ↻ ") {
+                co_phien += 1;
+            }
         }
     }
     println!(
-        "\nMẪU SỐ: {}/{} hàng mang được giờ mở lại / giờ reset",
-        co_gio_reset,
+        "\nMẪU SỐ: {}/{} hàng có đồng hồ cửa sổ TUẦN · {}/{} hàng có đồng hồ cửa sổ PHIÊN",
+        co_tuan,
+        doc.len(),
+        co_phien,
         doc.len()
     );
     // Không đòi 100%: một tài khoản chưa đăng nhập thì sổ của nó KHÔNG có cửa
-    // sổ nào để mà nói giờ, và ép nó phải có là ép huba bịa. Đòi đúng cái đã
-    // hỏng: trước bản vá, MỌI hàng chưa kịch trần đều trắng giờ.
+    // sổ nào để mà nói giờ, và ép nó phải có là ép huba bịa. Đòi đúng hai thứ
+    // đã hỏng, mỗi thứ một lần: trước lượt vá đầu MỌI hàng chưa kịch trần đều
+    // trắng giờ; sau lượt ấy, cửa sổ phiên vẫn trắng ở mọi hàng mà tuần chật hơn.
     assert!(
-        co_gio_reset > 0,
-        "không hàng nào nói được giờ — đúng cái Hà đã chụp màn 16/09"
+        co_tuan > 0,
+        "không hàng nào nói được giờ cửa sổ tuần — đúng cái Hà chụp màn lúc 07:46"
+    );
+    assert!(
+        co_phien > 0,
+        "không hàng nào nói được giờ cửa sổ PHIÊN — đúng cái Hà bắt lần thứ hai"
     );
 }

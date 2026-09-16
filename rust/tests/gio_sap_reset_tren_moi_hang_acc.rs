@@ -77,6 +77,32 @@ fn moc_da_qua_thi_khong_in_gi() {
     assert_eq!(sap_reset(&q(61, 4 * 1440, 16, -5), BAY_GIO), None);
 }
 
+/// Cửa fail-closed nằm TRONG `moc_cua_so` phải có bài của RIÊNG nó.
+///
+/// 🔴 Tầng đối chứng ngược 2026-09-16 bắt được đúng lỗ này: mutant *"bỏ cửa
+/// `cua_so` trong `moc_cua_so`"* ra **XANH**. Lý do đọc ra ngay khi nhìn kỹ —
+/// bài `moc_da_qua_thi_khong_in_gi` đi qua [`sap_reset`], mà hàm ấy có cửa
+/// `cua_so` của RIÊNG nó ở trên, nên nó chặn trước và cửa bên trong không bao
+/// giờ được chạm tới. Một bài kiểm đi qua cửa A không nói được gì về cửa B, dù
+/// hai cửa canh cùng một mệnh đề.
+///
+/// Và lỗ ấy có thật, không phải chuyện sạch sẽ: [`Quota::say`] gọi thẳng
+/// `moc_cua_so`, nên bỏ cửa ấy là **in một cái hẹn đã hết hạn ra màn** — đúng
+/// ca acc1 ngày 2026-08-30 (`92%` kèm `resets_at` cũ hơn cả lúc đọc).
+#[test]
+fn cua_so_co_moc_da_qua_thi_dong_tren_man_khong_deo_dong_ho() {
+    // Tuần đã quay vòng 10 phút trước; 5 tiếng còn 200 phút nữa.
+    let s = q(61, -10, 16, 200).say(BAY_GIO);
+    assert!(s.contains("tuần 61%"), "{s}");
+    assert!(
+        !s.contains("tuần 61% ↻"),
+        "mốc đã qua mà vẫn đeo đồng hồ ⟹ màn đang hứa một cái hẹn hết hạn: {s}"
+    );
+    // …còn cửa sổ đọc được thì vẫn phải có đồng hồ: bài này chứng minh cửa
+    // fail-closed, không phải chứng minh "im hết cho lành".
+    assert!(s.contains("5 tiếng 16% ↻ "), "{s}");
+}
+
 /// Mốc còn DƯỚI một phút vẫn phải nói — đây là phút đáng nói nhất.
 ///
 /// 🔴 Bài này sinh ra từ tầng đối chứng ngược 2026-09-16: mutant *"bỏ cửa `..=0
@@ -114,25 +140,68 @@ fn thieu_so_thi_im() {
 #[test]
 fn cau_di_ra_man_phai_mang_gio_reset() {
     let s = q(61, 4 * 1440, 16, 200).say(BAY_GIO);
-    assert!(s.contains("tuần 61%"), "{s}");
+    assert!(s.contains("tuần 61% ↻ "), "{s}");
     assert!(s.contains("hạng:"), "{s}");
-    assert!(
-        s.contains("reset tuần "),
-        "dòng `/accounts` vẫn thiếu đúng thứ Hà hỏi: {s}"
-    );
 }
 
-/// Hàng ĐÃ KỊCH TRẦN giữ nguyên chữ `mở lại` — không được đổi thành `reset`.
+/// 🔴 BÀI CHÍNH CỦA LƯỢT THỨ HAI. Hà 2026-09-16, sau khi đọc bản vá đầu:
+/// *"Vẫn thiếu giờ reset của phiên"*.
 ///
-/// Hai câu khác nhau: `mở lại` nói *"đang chặn, chờ tới lúc ấy"*, `reset` nói
-/// *"còn dùng được, và đồng hồ quay vòng lúc ấy"*. Gộp một chữ là xoá mất phân
-/// biệt mà chính dòng ấy sinh ra để giữ (15/09).
+/// Bản ấy in **một** mốc — của cửa sổ CHẬT NHẤT — nên hễ tuần chật hơn là đồng
+/// hồ của cửa sổ PHIÊN (5 tiếng) biến mất khỏi dòng. Mà đúng ca này mới là ca
+/// hay gặp nhất: tuần 62% · phiên 19%, tuần chật hơn, và câu chủ máy đang hỏi
+/// lại là *"mở phiên NGAY BÂY GIỜ được không"* — tức hỏi về cái cửa sổ vừa bị
+/// giấu đi.
 #[test]
-fn hang_kich_tran_giu_nguyen_chu_mo_lai() {
-    let s = q(100, 620, 0, 90).say(BAY_GIO);
-    assert!(s.contains("mở lại "), "{s}");
+fn gio_reset_cua_phien_khong_duoc_bien_mat_khi_cua_so_tuan_chat_hon() {
+    // tuần 62% (reset sau 4 ngày) · 5 tiếng 19% (reset sau 40 phút)
+    let s = q(62, 4 * 1440, 19, 40).say(BAY_GIO);
+    assert!(s.contains("tuần 62% ↻ "), "thiếu đồng hồ cửa sổ tuần: {s}");
     assert!(
-        !s.contains("reset "),
-        "hàng kịch trần không được mang thêm chữ `reset`: {s}"
+        s.contains("5 tiếng 19% ↻ "),
+        "ĐÂY là chỗ Hà bắt lần thứ hai — cửa sổ phiên mất đồng hồ: {s}"
     );
+    assert!(s.contains("còn 40 phút"), "{s}");
+    assert!(s.contains("còn 4 ngày"), "{s}");
+}
+
+/// Cửa sổ 5 tiếng in GIỜ TRẦN, không kèm ngày: nó luôn quay vòng trong 5 giờ
+/// tới, nên phần ngày chỉ làm dài dòng ở đúng chỗ màn điện thoại hẹp nhất.
+#[test]
+fn cua_so_phien_in_gio_tran_con_cua_so_tuan_kem_ngay() {
+    let s = q(62, 4 * 1440, 19, 40).say(BAY_GIO);
+    let phien = s
+        .split(" · ")
+        .find(|x| x.starts_with("5 tiếng "))
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        !phien.contains('/'),
+        "cửa sổ phiên không cần phần ngày: {phien}"
+    );
+    let tuan = s
+        .split(" · ")
+        .find(|x| x.starts_with("tuần "))
+        .unwrap_or_default()
+        .to_string();
+    assert!(tuan.contains('/'), "cửa sổ tuần phải kèm ngày: {tuan}");
+}
+
+/// Hàng ĐÃ KỊCH TRẦN vẫn nói được ĐÓNG TỚI BAO GIỜ — nay bằng đồng hồ nằm ngay
+/// cạnh con số 100%, không bằng một trường `mở lại` riêng ở cuối dòng.
+///
+/// 🔴 Bài này ĐẢO một bài viết sáng cùng ngày (*"kịch trần giữ nguyên chữ mở
+/// lại"*), và lý do đáng ghi: trường `mở lại` gộp cả hai cửa sổ thành MỘT mốc,
+/// nên khi cả hai cùng chặn nó không nói được cửa nào đang đóng. Đồng hồ đi kèm
+/// từng con số thì không có chỗ cho sự mơ hồ ấy. Cái phải giữ — *"đang chặn"*
+/// khác *"còn dùng được"* — nay do `hạng:` mang, đúng chỗ của nó.
+#[test]
+fn hang_kich_tran_van_noi_duoc_dong_toi_bao_gio() {
+    let s = q(100, 620, 0, 90).say(BAY_GIO);
+    assert!(s.contains("hạng: ĐÃ KỊCH TRẦN"), "{s}");
+    assert!(
+        s.contains("tuần 100% ↻ "),
+        "kịch trần mà không nói đóng tới bao giờ thì chỉ nói được nửa câu: {s}"
+    );
+    assert!(s.contains("còn 10 tiếng"), "{s}");
 }

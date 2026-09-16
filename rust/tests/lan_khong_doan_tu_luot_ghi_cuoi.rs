@@ -62,6 +62,58 @@ fn ghi_vao_mot_cay_thi_van_lay_duoc_lan() {
     );
 }
 
+/// 🔴 BÀI SINH RA TỪ MỘT LƯỢT CHẠY THẬT, bốn phút sau khi cài bản vá đầu.
+///
+/// Bản đầu cắt **hai tầng đầu** của mỗi đường dẫn làm "cây" — đúng cho cây làn
+/// (`dwork/dev-account/.tmp`), **sai cho mọi dự án không có cây làn**. Đo trên
+/// nhật ký lúc 08:15:23Z: `session_bind_lane_skipped` bắn **42 lượt**, trong đó
+/// có chính phiên huba (`huba/rust` · `huba/memory` · `huba/.tmp` đọc ra BA
+/// "cây") và một phiên aihub (năm "cây"), kèm câu giải thích *"ghi vào nhiều cây
+/// làn (điều phối)"* **sai sự thật**.
+///
+/// Câu hỏi đúng ngắn hơn: sổ đã ghi sẵn `cay`, nên chỉ cần hỏi *"có đường nào
+/// nằm NGOÀI cây ấy không"*.
+#[test]
+fn ghi_rai_nhieu_thu_muc_CON_cua_cung_mot_cay_thi_van_lay_duoc_lan() {
+    let so = json!({
+        "project": "huba",
+        "cay": "huba",
+        "nhanh": "lan/thu",
+        "paths": ["huba/rust/src", "huba/rust/tests", "huba", "huba/memory", "huba/.tmp"]
+    });
+    assert_eq!(
+        huba::sessions::lan_tu_so_rang_buoc(&so, "huba", "test-cung-cay").as_deref(),
+        Some("thu"),
+        "năm thư mục CON của cùng một cây không phải là năm cây — cổng đang bắn oan"
+    );
+}
+
+/// Ranh giới ĐOẠN, không phải tiền tố chuỗi: `dwork/dev` không được nuốt
+/// `dwork/dev-account`, và đó đúng là cặp đang đứng cạnh nhau trong kho này.
+///
+/// 🔴 **Bài này lúc đầu MÙ, và tầng đối chứng ngược bắt được** (mutant R ra
+/// XANH). Fixture bản đầu dùng `"nhanh": "main"` — mà `main` không sinh ra làn
+/// nào, nên hàm trả `None` **vì lý do khác** với lý do bài khẳng định: hạ luật
+/// xuống tiền tố chuỗi thì cả hai đường vẫn cùng ra `None` và bài vẫn xanh.
+/// Nhánh phải là một nhánh LÀN THẬT (`lan/…`) thì hai hành vi mới tách ra được.
+/// Cùng hình dạng với mutant H sáng nay: *một bài kiểm đi qua cửa A không nói
+/// được gì về cửa B* — ở đây là "cửa" thứ hai nằm ngay trong cùng một hàm.
+#[test]
+fn cay_anh_em_cung_tien_to_khong_duoc_tinh_la_trong_cay() {
+    let so = json!({
+        "project": "dwork",
+        "cay": "dwork/dev",
+        "nhanh": "lan/a-chung",
+        "paths": ["dwork/dev/bo-moi", "dwork/dev-account/.tmp"]
+    });
+    assert_eq!(
+        huba::sessions::lan_tu_so_rang_buoc(&so, "dwork", "test-anh-em"),
+        None,
+        "`dwork/dev-account` chỉ TRÙNG TIỀN TỐ với `dwork/dev`, nó là cây khác — \
+         so khớp bằng tiền tố chuỗi thì nó bị nuốt và làn `a-chung` lọt ra màn"
+    );
+}
+
 /// Sổ nói về DỰ ÁN KHÁC thì không phải dữ kiện về hàng này — luật cũ, khoá lại
 /// vì bản vá này viết lại đúng đoạn ấy.
 #[test]

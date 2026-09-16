@@ -155,8 +155,43 @@ có** bản ghi nào — sổ ghi theo lượt GHI TỆP).
 `{"cay":"dwork/dev-account","nhanh":"lan/account","paths":["dwork/dev/bo-moi",
 "dwork/dev-tochuc/.tmp","dwork/dev-account/.tmp"]}`. Phiên điều phối ghi vào
 **ba** cây làn (đúng việc của nó), còn sổ chỉ giữ cây **ghi GẦN NHẤT**.
-⇒ Vá: ghi rải **nhiều cây** thì để làn **TRỐNG** (`session_bind_lane_skipped`).
-Một nhãn thiếu thì chủ máy biết mình chưa biết; một nhãn sai thì không.
+⇒ Vá: còn ghi vào cây **KHÁC** ngoài cây đã ghi sổ thì để làn **TRỐNG**
+(`session_bind_lane_skipped`). Một nhãn thiếu thì chủ máy biết mình chưa biết;
+một nhãn sai thì không.
+
+🔴 **BẢN VÁ ẤY SAI Ở LƯỢT ĐẦU, VÀ CHẠY THẬT BẮT ĐƯỢC TRONG BỐN PHÚT.** Bản đầu
+hỏi *"paths có trải trên nhiều cây không"* bằng cách cắt **HAI TẦNG ĐẦU** của
+mỗi đường dẫn làm "cây" — đúng cho cây làn (`dwork/dev-account/.tmp`) và **sai
+cho mọi dự án không có cây làn**. Đo trên nhật ký lúc 08:15:23Z, bốn phút sau khi
+cài: `session_bind_lane_skipped` bắn **42 lượt**, gồm chính phiên huba
+(`huba/rust` · `huba/memory` · `huba/.tmp` đọc ra **ba** "cây") và một phiên
+aihub (**năm** "cây") — kèm câu giải thích *"ghi vào nhiều cây làn (điều phối)"*
+**sai sự thật** cho gần hết số ấy.
+Câu đúng ngắn hơn, và dữ kiện đã nằm sẵn trong sổ: nó ghi cả `cay`, nên chỉ cần
+hỏi *"có đường nào nằm NGOÀI cây ấy không"*. So khớp theo **ranh giới đoạn**,
+không theo tiền tố chuỗi — `dwork/dev` không được nuốt `dwork/dev-account`, và
+đó đúng là cặp đang đứng cạnh nhau trong kho này.
+📌 Bài học ở tầng phương pháp: **cổng mới phải được nhìn khi nó ĐANG CHẠY THẬT,
+không chỉ khi bài kiểm xanh.** 6/6 bài của bản đầu đều xanh — chúng chỉ mang
+những ca tôi nghĩ tới, mà ca tôi không nghĩ tới là ca thường gặp nhất trên máy
+này. Cái lộ ra nó là **số lần cổng bắn** trong log, không phải một bài kiểm.
+Đo lại sau bản sửa, cùng máy: mỗi vòng chỉ còn **đúng hai** phiên bị bỏ làn —
+`c0b51f9f` (ghi vào 9 cây khác) và `1249d1ef` (5 cây khác), cả hai là phiên điều
+phối thật; **0 lượt** cho `huba`/`aihub`/`fbot`.
+
+**Đối chứng ngược N·O·P·Q·R đều ĐỎ**, và nó bắt thêm **hai lỗi trong chính cổng
+này** — nâng tổng số lượt "tầng đối chứng ngược tìm ra lỗi của cổng vừa dựng"
+trong ngày 16/09 lên **bốn**:
+· **R ra XANH lượt đầu** ⟹ bài *"cây anh em cùng tiền tố"* đang mù: fixture dùng
+  `"nhanh":"main"`, mà `main` không sinh ra làn nào, nên bài trả `None` **vì lý
+  do khác** với lý do nó khẳng định — hạ luật xuống tiền tố chuỗi thì cả hai
+  đường vẫn cùng `None`. Đổi sang nhánh làn thật (`lan/a-chung`) thì hai hành vi
+  mới tách ra. *Cùng hình dạng với mutant H sáng nay: một bài kiểm đi qua cửa A
+  không nói được gì về cửa B — ở đây hai "cửa" nằm trong cùng một hàm.*
+· **R chết vì lỗi cú pháp shell** ở lượt trước đó (mẫu cấy chứa `'/'` nằm trong
+  một chuỗi shell cũng quây bằng nháy đơn) ⟹ script đứt, cửa ấy **chưa đo được**
+  chứ không phải đã qua. Viết lại bằng Python (`.tmp/doi-chung-R.py`) để mẫu cấy
+  không phải đi qua lớp nháy nào.
 
 ⚠ **Một cửa BÊN CẠNH vẫn hở, cố ý chưa vá vì chưa đo được ca thật:**
 `lane_for_session` đọc lời khai bằng `declared_in_tail` **không qua cổng đếm**,

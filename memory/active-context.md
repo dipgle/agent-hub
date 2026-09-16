@@ -5608,3 +5608,43 @@ tới 13:30 hôm nay ⟹ nó báo *"mở lại 13:30"* trong khi tuần còn ch�
 Nay chỉ còn đi vào log (đồng hồ theo từng cửa sổ đã thay chỗ trên màn). Sửa
 `.min()` → `.max()` là một dòng — nhưng nó đảo một bài kiểm có lý lẽ viết sẵn,
 nên để chủ máy quyết.
+
+### LƯỢT BA — nhãn phiên nhảy lung tung (Hà chụp màn hai lần trong một buổi)
+
+*"Phiên main chạy một hồi nhắc đến huba thì tên bị nhảy sang luôn, không hiểu
+đang bắt kiểu gì, như thế này làm sao tôi biết thế nào để quản lý"* → rồi
+*"Giờ nhảy thành account rồi"*. Cùng một hàng (`1249d1ef`, phiên điều phối
+dwork): `[huba]` → `[dwork/account]`.
+
+**Hai họ lỗi khác nhau, cùng một gốc nhận thức.**
+
+① Bộ dò nhãn đọc lượt nói mở đầu bằng `[tên]`. Phiên dwork viết
+`` `[huba]` xác nhận chẩn đoán mới… `` — **nói VỀ** huba (hai phiên đang nhắn
+cho nhau), bộ dò đọc thành *"tôi LÀ huba"*. Lời khai thật và lời nhắc **giống
+nhau từng ký tự** ở phần bộ dò nhìn, nên không có cách nào phân biệt bằng HÌNH
+DẠNG. Vá bằng **SỐ LẦN**: luật workspace bắt tự khai ở MỌI lượt nói, nên một cái
+tên xuất hiện đúng một lần trong cả cửa sổ đuôi là tên được NHẮC.
+
+② Làn lấy từ `scripts/.session-bind`, trường `cay`/`nhanh` = cây **ghi gần
+nhất**. Phiên điều phối ghi vào ba cây (`dev`, `dev-tochuc`, `dev-account`) nên
+làn hoá ra `account`. Vá: rải nhiều cây thì để làn **TRỐNG**.
+
+🔴 **Bài học trung tâm, và nó đã lặp BA TẦNG trong kho này** — tầng đầu ghi từ
+18/08 (ca `onghut`): *phép đo không hỏng, nó trả lời đúng câu hỏi CỦA NÓ, chỉ là
+câu ấy không phải câu đang hỏi.* Đếm đường dẫn trả lời *"đụng thư mục nào nhiều
+nhất"* · lời tự khai trả lời *"đầu lượt nói có tên nào"* · sổ ràng buộc trả lời
+*"vừa ghi vào cây nào"*. **Không câu nào là *"phiên này LÀ gì"***. Lần sau gặp
+một nhãn/nhận dạng sai, hỏi câu này TRƯỚC khi sửa phép đo.
+
+⚠ **Và hai đường sửa hiển nhiên đều ĐO RA LÀ SAI** — cả hai đều nghe rất hợp lý,
+nên ghi để khỏi ai đi lại: *"lấy nhãn xuất hiện nhiều nhất"* (đuôi ấy có **đúng
+một** dòng tự khai, và nó là dòng sai — đa số của tập một phần tử vẫn là phần tử
+ấy) · *"đối chiếu sổ `.session-bind`"* (phiên ấy lúc đó **chưa có** bản ghi nào).
+
+**Đã cài + đo trên máy thật:** `1249d1ef → folder='dwork' lane=''`,
+`10344229 → folder='huba'`. Khởi động lại daemon cũng xoá luôn nhãn sai nằm
+trong sổ nhớ, nên hàng ấy đúng ngay.
+
+📌 Tôi góp phần dựng ra ca ① : các tin tôi gửi sang phiên khác đều mở đầu bằng
+`[huba]`. Hai phiên nhắn cho nhau là nếp làm việc bình thường ở đây, nên lớp lỗi
+này sẽ còn gặp.

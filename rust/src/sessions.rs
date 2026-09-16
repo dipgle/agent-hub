@@ -4465,23 +4465,23 @@ pub fn lan_tu_so_rang_buoc(v: &Value, folder: &str, session_id: &str) -> Option<
         // ⇒ Ghi rải nhiều cây thì để làn TRỐNG: **chưa đo được** là một trạng
         // thái riêng, và một cái nhãn sai đọc tệ hơn hẳn một cái nhãn thiếu —
         // nhãn thiếu thì chủ máy biết mình chưa biết.
-        let cay: std::collections::BTreeSet<&str> = v
+        let cay_da_ghi = v.get("cay").and_then(Value::as_str).unwrap_or_default();
+        let ngoai: Vec<&str> = v
             .get("paths")
             .and_then(Value::as_array)
             .map(|a| {
                 a.iter()
                     .filter_map(Value::as_str)
-                    .filter_map(cay_cua_duong_dan)
+                    .filter(|p| !thuoc_cay(p, cay_da_ghi))
                     .collect()
             })
             .unwrap_or_default();
-        if cay.len() > 1 {
+        if !ngoai.is_empty() {
             logging::info(
                 "session_bind_lane_skipped",
-                json!({ "session": session_id, "so_cay": cay.len(),
-                        "cay": cay.iter().collect::<Vec<_>>(),
-                        "why": "phiên ghi vào NHIỀU cây làn (điều phối) — `cay`/`nhanh` chỉ là lượt \
-                                ghi gần nhất, không phải danh tính; để làn trống thay vì đoán" }),
+                json!({ "session": session_id, "cay": cay_da_ghi, "ngoai_cay": ngoai,
+                        "why": "phiên còn ghi vào cây KHÁC ngoài cây đã ghi sổ — `cay`/`nhanh` chỉ \
+                                là lượt ghi GẦN NHẤT, không phải danh tính; để làn trống thay vì đoán" }),
             );
             return None;
         }
@@ -4491,19 +4491,36 @@ pub fn lan_tu_so_rang_buoc(v: &Value, folder: &str, session_id: &str) -> Option<
     }
 }
 
-/// `dwork/dev-account/.tmp` → `dwork/dev-account`; hai tầng đầu là CÂY.
+/// Đường dẫn `p` có nằm trong cây `cay` không.
 ///
-/// Tách thuần để kiểm được: `paths` của sổ ràng buộc là đường dẫn tương đối tính
-/// từ gốc workspace, nên cây làn luôn nằm ở đúng hai tầng đầu
-/// (`<dự án>/<cây>`). Đường dẫn nông hơn hai tầng thì không nói được nó thuộc
-/// cây nào ⟹ `None`, không đoán.
-fn cay_cua_duong_dan(p: &str) -> Option<&str> {
-    let mut it = p.trim_matches('/').match_indices('/');
-    it.next()?;
-    match it.next() {
-        Some((i, _)) => Some(&p.trim_matches('/')[..i]),
-        None => Some(p.trim_matches('/')),
+/// 🔴 Bản đầu của cổng này hỏi sai câu, và **chạy thật bắt được trong vòng bốn
+/// phút** (2026-09-16 08:15). Nó cắt HAI TẦNG ĐẦU của mỗi đường dẫn làm "cây",
+/// đúng cho một cây làm việc (`dwork/dev-account/.tmp` → `dwork/dev-account`) và
+/// **sai cho mọi dự án không có cây làn**: `huba/rust` · `huba/memory` ·
+/// `huba/.tmp` đọc ra BA "cây", nên cổng bắn cho cả những phiên chỉ đang làm
+/// việc bình thường trong dự án của mình — `session_bind_lane_skipped` **42
+/// lượt**, kèm câu giải thích *"ghi vào nhiều cây làn (điều phối)"* **sai sự
+/// thật** cho gần hết số ấy.
+///
+/// Câu đúng ngắn hơn: sổ đã ghi sẵn cây (`cay`), nên chỉ cần hỏi *"có đường nào
+/// nằm NGOÀI cây ấy không"*. Đo trên hai bản ghi thật:
+/// · `cay="huba"` · paths `huba/rust`, `huba/memory`, `huba/.tmp` ⟹ **trong hết**
+///   ⟹ giữ làn;
+/// · `cay="dwork/dev-account"` · paths có `dwork/dev/bo-moi`,
+///   `dwork/dev-tochuc/.tmp` ⟹ **ngoài cây** ⟹ bỏ làn.
+///
+/// So khớp theo RANH GIỚI ĐOẠN, không theo tiền tố chuỗi: `dwork/dev` không được
+/// nuốt `dwork/dev-account` (tiền tố chuỗi thì có, ranh giới đoạn thì không), và
+/// đó đúng là cặp đang đứng cạnh nhau trong kho này.
+fn thuoc_cay(p: &str, cay: &str) -> bool {
+    let p = p.trim_matches('/');
+    let cay = cay.trim_matches('/');
+    if cay.is_empty() {
+        // Sổ không nói cây nào thì không có gì để so — đừng dựng ra một phán
+        // quyết từ chỗ trống.
+        return true;
     }
+    p == cay || p.strip_prefix(cay).is_some_and(|r| r.starts_with('/'))
 }
 
 /// Phiên này có CỬA SỔ NÀO TRÊN MÀN không — thứ chủ máy ngồi trước máy nhìn thấy.

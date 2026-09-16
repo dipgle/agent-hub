@@ -162,7 +162,11 @@ fn tran_cat_phan_chua_cham_duoc_va_noi_ra_phan_bi_cat() {
     let (ung_vien, mu, bo_qua, tong) = quet(&tabs);
     assert_eq!(tong, 21);
     assert_eq!(mu, 20);
-    assert_eq!(bo_qua, 20 - TRUST_FRESH_MAX, "phần bị trần cắt phải đếm được");
+    assert_eq!(
+        bo_qua,
+        20 - TRUST_FRESH_MAX,
+        "phần bị trần cắt phải đếm được"
+    );
     assert_eq!(
         ung_vien.len(),
         TRUST_FRESH_MAX + 1,
@@ -198,11 +202,8 @@ fn anh_chup_khong_mang_bang_tab_thi_khong_duoc_ket_luan_gi() {
 /// kiểm này ĐỎ ĐƯỢC — trả `terminal_tabs()` về trong thân hàm là đỏ.
 #[test]
 fn tick_khong_duoc_mo_luot_do_rieng() {
-    let src = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/pipeline.rs"
-    ))
-    .expect("đọc được src/pipeline.rs");
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/pipeline.rs"))
+        .expect("đọc được src/pipeline.rs");
     for (ten, vi_sao) in [
         (
             "pub fn trust_dialog_tick(",

@@ -60,7 +60,10 @@ fn moc_phai_theo_cua_so_chat_nhat_chu_khong_phai_luon_la_tuan() {
 #[test]
 fn hoa_thi_lay_cua_so_tuan() {
     let s = sap_reset(&q(40, 2 * 1440, 40, 90), BAY_GIO).expect("phải có giờ reset");
-    assert!(s.starts_with("reset tuần "), "hoà phải nghiêng về tuần: {s}");
+    assert!(
+        s.starts_with("reset tuần "),
+        "hoà phải nghiêng về tuần: {s}"
+    );
 }
 
 /// Mốc đã QUA thì thà im còn hơn in một cái hẹn hết hạn — luật `cua_so`,

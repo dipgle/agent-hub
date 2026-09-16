@@ -5648,3 +5648,99 @@ trong sổ nhớ, nên hàng ấy đúng ngay.
 📌 Tôi góp phần dựng ra ca ① : các tin tôi gửi sang phiên khác đều mở đầu bằng
 `[huba]`. Hai phiên nhắn cho nhau là nếp làm việc bình thường ở đây, nên lớp lỗi
 này sẽ còn gặp.
+
+---
+
+## 2026-09-16 · `ac4a883` — Sổ "đã bàn giao" ghi ở bước MỞ (phiên `4d69319b`)
+
+**Đã đo được, không phải dự định.** Cổng `QG_EXIT=0` trên `ac4a883`
+(`MAU_SO=154 · DA_CHEP=154 · DA_CHAY=154 · FAILED=0`), đã cài (`pid 4342`,
+chữ ký `cert`, `--verify` KHỚP `57bc002476…`, `find rust/src -newer hubd` rỗng).
+
+### Gốc — `PLAN.md` hôm qua có MẪU SỐ mà không có NGUYÊN NHÂN
+
+Bản cũ ghi *"có một nhánh sinh cửa sổ mới mà không ghi `handover_window_opened`"*
+và dừng ở đó. Nhánh ấy không bí ẩn, nó là ba dòng mã:
+
+* `keys.rs:1127` `let out = osascript(&script)?;` — kịch bản chạy
+  `set w to do script <cmd>` **trước** (cửa sổ + `claude` sống từ dòng ấy), rồi
+  mới `delay 1` và `return (tty of w)`. `osascript` có hạn **20 giây**;
+  `osa_timeout_context` nổ **đúng hai lần bao quanh lượt 18:45** (`load 36`).
+  ⇒ `?` ném `Err` **trong khi cửa sổ đã dựng xong**.
+* nhánh `Err` của `moved` **không ghi dòng log nào** ⇒ *"KHÔNG có lỗi"* trong
+  `PLAN.md` là đọc đúng nhật ký và hiểu sai sự việc: **lỗi không có mồm**.
+* `AUTO_DONE_KEY` đã ghi từ bước MỞ ⇒ `AlreadyDone` khoá thêm 10 điểm.
+
+Lượt `1aac8d22`: bắn 80 % lúc `18:45:33.601Z`, **83 giây im**, `cycle_done
+ms=87565`; cửa sổ mồ côi tự nhận lời nhắc lúc 18:48:45; thoát ra ở 93 % lúc
+`00:03:43Z` — **5 giờ 19 phút**. Sổ thật xác nhận: `auto_handover:done` chứa
+`1aac8d22` **hai lần**.
+
+📌 Hình dạng có **bia sẵn** ở `keys.rs:1051-1070` (ca `[AI/tfl5]` 13/08). Lần ấy
+vá cái **câu hỏi**; lần này chết vì **hết giờ**. Đúng câu tấm bia tự viết: *một
+cái chốt đặt sau chỗ hỏng là một cái chốt không tồn tại.*
+
+### Bài học phương pháp — đắt hơn cả bản vá
+
+**Tầng đối chứng ngược bắt được một lỗ trong CHÍNH TẦNG KIỂM vừa viết.** Lượt
+chạy thứ nhất: mutant *"sổ `done` thôi nhận phiên mới"* đi lọt qua **cả 7 bài
+kiểm**, tất cả xanh. Lý do gọn bằng một câu — cả 7 đều **nắn sổ bằng tay** rồi
+đưa cho `already_handed_over`, nên chúng khoá được **người ĐỌC** và chưa hề chạm
+**người GHI**. Bịt bằng bài **đường tròn** (ghi bằng `ghi_so_ban_giao` thật, đọc
+bằng `doc_so_ban_giao` thật, trên `Db` tạm); lượt hai ĐỎ. Chốt:
+**một cuốn sổ có hai đầu — kiểm một đầu là kiểm một nửa.**
+Đây là lượt thứ **năm** trong hai ngày mà tầng ấy tìm ra lỗi của cổng vừa dựng.
+
+Kết: `MAU_SO=11 · DUNG_KY_VONG=11 · XANH_MU=0 · KHONG_DO_DUOC=0`
+(`.tmp/doi-chung-nguoc-ban-giao.sh`, có một ca LÀNH phải KHÔNG đỏ).
+
+⚠ Tệp ấy nằm trong `.tmp/` — **gitignored**. `PLAN.md` trỏ vào nó, nên sau một
+lượt clone thì cái trỏ ấy rỗng. Nếp sẵn có của kho (`.tmp/doi-chung-R.py`,
+`.tmp/final5.log` trong các commit trước) cũng vậy. Chưa đổi, nhưng nó có nghĩa
+là **tầng đối chứng ngược chỉ sống trên máy này**.
+
+### Thứ canh THỨ TỰ là kiểu dữ liệu, không phải chú thích
+
+`ghi_so_ban_giao` nhận `mo_duoc` từ `mo_duoc_khong(&moved)`, mà `moved` **chưa
+tồn tại** ở bước MỞ ⇒ dời lời gọi lên trên là **không dịch nổi**. Đáng chép lại
+khi cần bắt một thứ tự: một ràng buộc trình biên dịch giữ được, một câu chú
+thích thì không.
+
+### Chạy thật, đo trên daemon thật (`18:57:09.280Z`, ~2 phút sau khi cài)
+
+```
+auto_handover_book_unreadable · so="auto_handover:pct" · bytes=2059
+  err="invalid type: integer `71`, expected struct MocBanGiao at line 1 column 42"
+  effect="quên sổ ⟹ mọi phiên được HỎI LẠI từ đầu (hướng an toàn)"
+```
+Đúng đường di trú đã đoán trước khi cài, và nó **NÓI RA** thay vì lặng lẽ quên —
+đó là cả lý do đổi `unwrap_or_default()` trần thành `doc_so`. Giá thật **0**:
+16 phiên đang sống ∩ 49 id trong `auto_handover:done` = **rỗng**.
+
+### Hai thứ bàn giao 15:58 nói sai (đo lại lúc tiếp quản)
+
+* *"Cổng chất lượng đã mất dấu sau khi phiên đóng"* — **không**. `gate.sh` pid
+  46974 vẫn sống, `ppid 1`, đang ở `cargo test --no-run`. Và có **lượt thứ hai**
+  (pid 97906) chạy chồng — đúng hình dạng làm hỏng mẫu số mà `PLAN.md` đã ghi
+  sổ. ⇒ *Trước khi tin "việc nền đã chết", `ps` một lượt.*
+* Tôi tự gây thêm một cái: lệnh đầu tiên ghi `> .tmp/qg-nhan2.log` **đúng tệp
+  lượt cũ đang mở** ⇒ kết quả lượt cổng trước **mất hẳn**. Cùng họ với luật
+  *"`ket-qua-main.txt` phải NỐI, không GHI ĐÈ"* — chỉ khác là ở đây nạn nhân là
+  một tệp log đang có tiến trình cầm.
+
+### Còn nợ (chi tiết + `file:line` ở `PLAN.md` §"Còn nợ")
+
+① **huba vẫn bỏ rơi cửa sổ mồ côi** — nay mới thôi tự khoá mình. Đường đi: nhánh
+`Err` gọi `wait_for_new_session_id(deep = true)` để nhận nuôi id; lý lẽ *"không
+có id nghĩa là giữ cửa sổ cũ, kết cục an toàn"* ở `sessions.rs:7055` **không còn
+đúng cho nhánh ấy**.
+② `AUTO_RETRY_STEP_HUT = 2` là con số **tôi chọn**, chưa qua Hà.
+③ Bất biến *"số phiên cùng nhãn sống đồng thời ≤ 1 sau chồng lấn 5 phút"*.
+④ Sổ `done` đếm **lượt**, không đếm **phiên**, khi có bản trùng.
+
+### Quan sát rời, chưa truy (mở ra lúc đo bản vá)
+
+Ba phiên ≥ ngưỡng bị giữ bằng `why="NoWindow"` lúc `18:57:09Z` —
+`8a022ece` 83 % · `036b0024` 84 % · `b906489b` 79 %. `NoWindow` nghĩa là huba
+**không thấy cửa sổ terminal của chúng**, nên không bàn giao được. Có thể cùng
+gốc với cái vừa vá (phép dò Terminal hết giờ). Chưa đo.

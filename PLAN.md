@@ -213,6 +213,28 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
+- ⚠ **`gate.sh` KHÔNG có khoá: hai lượt chạy chồng thì mẫu số hỏng** — đo hai
+  lần trong sáng 2026-09-16. Cả hai lượt ghi chung `.tmp/cong-sach-{bin,dachep,
+  ket}.txt`, mỗi lượt `: >` cắt tệp của lượt kia giữa chừng rồi cùng nối tiếp
+  vào ⟹ `MAU_SO=152` mà `DA_CHEP=277` · `DA_CHAY=553`, và cổng **fail-closed**
+  (`DA_CHAY` phải bằng `MAU_SO`). Cổng xử đúng; cái sai là cách chạy nó. Lần thứ
+  hai còn có một bài học riêng: `pkill -f <tên-vỏ>` **không giết tiến trình
+  con** — cái vỏ chết, `quality-gate.sh` bên trong vẫn sống và vẫn ghi.
+  ⇒ Vá đúng: một `flock`/tệp khoá ở đầu `gate.sh`, từ chối chạy khi đã có lượt
+  khác. Chưa làm, vì nó là cái cổng chấm mọi thứ khác nên không sửa vội cuối
+  một mạch việc dài. Cho tới lúc ấy: **kiểm `pgrep -f 'gate\.sh|quality-gate'`
+  trước khi chạy** (`.tmp/cong-mot-luot.sh` làm sẵn việc đó).
+
+- 🔴 **`quota::mo_lai_luc` lấy mốc SỚM NHẤT — sai khi CẢ HAI cửa sổ cùng chặn**
+  (đo 2026-09-16, chưa sửa, đã báo chủ máy). Lời giải thích viết kèm là *"đó mới
+  là lúc tài khoản dùng lại được"*, nhưng tuần khoá tới 20/09 + 5 tiếng khoá tới
+  13:30 hôm nay ⟹ nó báo *"mở lại 13:30"* trong khi tuần còn chặn thêm bốn ngày.
+  Tài khoản dùng lại được khi cửa sổ chặn **CUỐI CÙNG** mở, tức `.max()` chứ
+  không phải `.min()`. Nay nó **không còn lên màn** (mỗi cửa sổ đã mang đồng hồ
+  riêng), chỉ còn đi vào log `quota_read`. Một dòng sửa, nhưng nó đảo một bài
+  kiểm có lý lẽ viết sẵn (`hai_cua_so_cung_chan_thi_lay_moc_som_nhat`) nên để
+  chủ máy quyết.
+
 - 🔴 **Phép dò GỘP của ảnh chụp một mình đã ăn hết ngân sách vòng — đo
   2026-09-16, CHƯA vá.** `keys::PROBE_BUDGET_MS` là 10 giây cho cả một vòng,
   còn `sessions_snapshot_ms.ms_terminal_probe` (445 lượt, 31 giờ) ra

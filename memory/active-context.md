@@ -5570,3 +5570,41 @@ kịch trần giữ nguyên chữ *"mở lại"*.
   phép dò LÕI của ảnh chụp là p50 **5.147ms** / p90 **26.600ms** trên ngân sách
   10.000ms (445 lượt). Bản vá này **gỡ hai cỗ máy ra khỏi ngân sách**, nó không
   làm ngân sách rộng ra.
+
+### LƯỢT HAI cùng ngày — Hà bắt lại: *"Vẫn thiếu giờ reset của phiên"*
+
+Bản vá ② ở trên **mới đúng một nửa**, và cách nó sai đáng nhớ hơn cả bản vá:
+nó in **một** mốc, của cửa sổ CHẬT NHẤT, nên hễ cửa sổ tuần chật hơn là đồng hồ
+của cửa sổ **PHIÊN (5 tiếng) biến mất** — đúng ca hay gặp nhất, và đúng con số
+cần khi câu hỏi là *"mở phiên NGAY BÂY GIỜ được không"*.
+
+🔴 **Luật rút ra, áp cho mọi dòng trạng thái về sau:** một dòng in **N** con số
+thì phải có **N** cái đồng hồ. Chọn hộ người đọc một cửa sổ là giấu mất cửa kia,
+và tệ hơn: khi hai con số đứng cạnh nhau mà chỉ có một mốc, **không ai biết mốc
+ấy thuộc về số nào**. Nay `quota::moc_cua_so` là **một nguồn duy nhất** dựng
+chuỗi đồng hồ cho cả dòng màn lẫn dòng log.
+
+Số thật, đọc từ sổ máy qua đúng hàm dựng dòng `/accounts` (06:06Z):
+`acc1 tuần 63% ↻ 14:59 20/09 (còn 4 ngày) · 5 tiếng 5% ↻ 16:29 (còn 3 tiếng)` —
+**MẪU SỐ 5/5 cửa sổ tuần · 4/5 cửa sổ phiên** (acc2 không có mốc 5 tiếng trong
+sổ vì cửa ấy đang 0%, chưa chạy vòng nào ⇒ im là đúng, bịa ra một cái hẹn mới
+là sai).
+
+**Ba lỗi nữa trong cổng của chính tôi, do tầng đối chứng ngược bắt** — cùng
+ngày, ba hình dạng khác nhau, **không cái nào lộ ra khi chạy bài kiểm** (10/10
+xanh ở mọi lượt):
+1. Mutant XANH vì **bài kiểm đứng sai cửa**, và dòng nó nhắm còn **sai hướng**.
+2. Cùng hình dạng, lần hai, ở cửa khác: bài đi qua `sap_reset` **không nói được
+   gì** về cửa nằm TRONG `moc_cua_so` — *một bài kiểm đi qua cửa A không chứng
+   minh được cửa B, dù hai cửa canh cùng một mệnh đề*.
+3. **Mutant KHÔNG CẤY ĐƯỢC ≠ mutant đã qua**: `cargo fmt` bọc lại đúng lời gọi
+   ấy (cửa sổ 5 tiếng dài hơn nên xuống dòng, cửa sổ tuần thì không) ⇒ mẫu cấy
+   trượt. Đó là cửa **chưa đo được**, và nó lại đúng là cửa Hà vừa bắt.
+
+⚠ **Nợ mở, CHƯA sửa, đã báo chủ máy:** `quota::mo_lai_luc` lấy mốc **SỚM NHẤT**
+trong các cửa sổ ≥100%, kèm lời giải thích *"đó mới là lúc tài khoản dùng lại
+được"*. Sai khi **cả hai** cửa sổ cùng chặn: tuần khoá tới 20/09, 5 tiếng khoá
+tới 13:30 hôm nay ⟹ nó báo *"mở lại 13:30"* trong khi tuần còn chặn bốn ngày.
+Nay chỉ còn đi vào log (đồng hồ theo từng cửa sổ đã thay chỗ trên màn). Sửa
+`.min()` → `.max()` là một dòng — nhưng nó đảo một bài kiểm có lý lẽ viết sẵn,
+nên để chủ máy quyết.

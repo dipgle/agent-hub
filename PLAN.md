@@ -340,13 +340,85 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
   **11/162 = 6,8 %**, gồm đúng lượt `1aac8d22` 18:45:33. Đây là **dân số của
   lỗi**, không phải một ca lẻ.
 
-  **Việc phải làm, chưa làm:** ① đừng ghi `AUTO_DONE_KEY` ở bước MỞ — ghi khi
-  **đo được phiên cũ đã chết**, hoặc ghi kèm cờ *"chưa đóng xong"* để
-  `already_handed_over` trả `false`; ② nhánh sinh cửa sổ mới ngoài
-  `handover_window_opened` thì hoặc bịt, hoặc bắt nó gọi đủ ba việc kia;
-  ③ bất biến cho chính nó: **"số phiên cùng nhãn sống đồng thời ≤ 1 sau chồng
-  lấn 5 phút"**, và **đối chứng ngược có sẵn trong nhật ký lịch sử** — cấy lại
-  lượt 18:45 thì phải ĐỎ, cấy lượt chồng lấn 136 giây đóng sạch thì phải KHÔNG đỏ.
+  🔴 **GỐC ĐÃ TRUY RA 2026-09-16 — mục này trước đó chỉ có TRIỆU CHỨNG.**
+  Bản trên tả đúng *"có một nhánh sinh cửa sổ mới mà không ghi
+  `handover_window_opened`"* nhưng để trống câu **vì sao**. Đây là nó, đủ
+  `file:line`:
+
+  * `keys.rs:1127` `let out = osascript(&script)?;` — kịch bản AppleScript chạy
+    `set w to do script <cmd>` **trước** (cửa sổ + `claude` sống từ dòng ấy), rồi
+    mới `delay 1` và `return (tty of w)`. `osascript` có hạn **20 giây**, và
+    `osa_timeout_context` nổ **đúng hai lần bao quanh lượt 18:45** (`load 36`).
+    ⇒ `?` ném `Err` **trong khi cửa sổ đã dựng xong** ⇒ `sessions.rs:7067`
+    `handover_window_opened` không bao giờ chạy tới.
+  * `pipeline.rs` nhánh `Err(e)` của `moved` **không ghi một dòng log nào**. Nên
+    *"KHÔNG có lỗi"* ở dòng thời gian trên là đọc đúng nhật ký và hiểu sai sự
+    việc: không phải không có lỗi, mà là **lỗi không có mồm**.
+  * Cửa sổ mồ côi ấy tự chạy tiếp — `d1cdcd48` nhận lời nhắc lúc **18:48:45**,
+    3 phút sau khi huba đã bỏ cuộc.
+
+  📌 Hình dạng này **có bia sẵn** ở `keys.rs:1051-1070` (ca `[AI/tfl5]` 13/08:
+  *"`do script` đã dựng xong cửa sổ rồi mới chết ở dòng đọc id"*). Lần ấy vá cái
+  **câu hỏi**; lần này chết vì **hết giờ** — một cửa bản vá cũ không với tới.
+
+  **ĐÃ VÁ (cùng ngày):**
+  ① `AUTO_DONE_KEY` + `AUTO_PCT_KEY` thôi ghi ở bước MỞ — nay ghi trong
+     `pipeline::ghi_so_ban_giao`, gọi **sau** khi `moved` đã có câu trả lời. Phép
+     suy tách thành hàm thuần `pipeline::mo_duoc_khong` (3 kết cục, chỉ `Ok` +
+     `new_id.is_some()` là "mở được"), nên cấy ca hỏng vào được.
+     *Và thứ canh THỨ TỰ là kiểu dữ liệu, không phải một chú thích:* tham số
+     `mo_duoc` lấy từ `mo_duoc_khong(&moved)`, mà `moved` chưa tồn tại ở bước MỞ
+     ⇒ dời lời gọi lên trên là **không dịch nổi**.
+  ② Sổ mốc mang thêm cờ: `MocBanGiao { pct, mo_duoc }`. Lượt **mở được** vẫn khoá
+     `AUTO_RETRY_STEP` = 10 điểm như cũ; lượt **mở hụt** chỉ khoá
+     `AUTO_RETRY_STEP_HUT` = **2 điểm**. Không phải 0: mỗi lượt là một `fork_call`
+     (ước tính đo được **8,30 USD**) và có thể đẻ thêm một cửa sổ mồ côi. Trên
+     chính lượt `1aac8d22`, 80 → 81 % mất **3′49″**, nên 2 điểm ≈ **8 phút** thay
+     cho **5 giờ 19 phút**.
+  ③ Hai nhánh câm nay có mồm: `auto_handover_window_failed` (`error`, vào
+     `runs.err` + `/doctor`) và `auto_handover_window_stalled` (`warn`). Cộng
+     `auto_handover_booked` mỗi lượt ghi sổ, nên **11/162 đếm được ở lượt sau mà
+     không phải đào lại 148 MB nhật ký**.
+  ④ Bốn chỗ `let _ = db.set_cursor(…)` / `from_str(..).ok()` nuốt lỗi trong khối
+     này đã thay bằng đường có log (luật 3).
+
+  **Đối chứng ngược — `.tmp/doi-chung-nguoc-ban-giao.sh`, `MAU_SO=11 ·
+  DUNG_KY_VONG=11 · XANH_MU=0 · KHONG_DO_DUOC=0`.** Và nó **đã bắt được một lỗ
+  trong chính tầng kiểm tôi vừa viết**: lượt chạy thứ nhất, mutant M7 (*"sổ
+  `done` thôi nhận phiên mới"*) đi **lọt qua cả 7 bài kiểm**, vì cả 7 đều nắn sổ
+  bằng tay rồi đưa cho `already_handed_over` — tức khoá được người ĐỌC, chưa
+  chạm người GHI. Bịt bằng bài **đường tròn**
+  `the_book_the_writer_leaves_is_the_book_the_reader_believes` (ghi bằng
+  `ghi_so_ban_giao` thật, đọc bằng `doc_so_ban_giao` thật, trên `Db` tạm); lượt
+  hai M7 ĐỎ. *Một cuốn sổ có hai đầu; kiểm một đầu là kiểm một nửa.*
+
+  **CHƯA LÀM, còn nợ tiếp:**
+  ⓐ **Nhặt lại cửa sổ mồ côi.** Nay huba mới thôi tự khoá mình; nó vẫn **bỏ rơi**
+     cái cửa sổ `open_window` đã dựng. Đường đi có sẵn: khi `open_window` ném
+     `Err`, vẫn gọi `wait_for_new_session_id` với `deep = true` (hỏi
+     `claude agents`, 40 giây) để nhận nuôi id ấy, rồi gọi đủ ba việc
+     (`handover_window_opened` · `remember_successor` · sổ đóng). Chú thích tại
+     `sessions.rs:7055` chọn `deep = false` với lý lẽ *"không có id nghĩa là GIỮ
+     cửa sổ cũ — kết cục an toàn"*, và lý lẽ ấy **không còn đúng cho nhánh `Err`**:
+     ở đó cửa sổ mới CÓ THẬT.
+  ⓑ **Bất biến cho chính nó:** *"số phiên cùng nhãn sống đồng thời ≤ 1 sau chồng
+     lấn 5 phút"*, cấy từ nhật ký lịch sử — lượt 18:45 phải ĐỎ, lượt chồng lấn
+     136 giây đóng sạch phải KHÔNG đỏ.
+  ⓒ **`AUTO_RETRY_STEP_HUT = 2` là con số TÔI chọn, chưa qua chủ máy.** Hai đầu
+     khoảng đều đo được (0 = một `fork_call` mỗi ~30 giây; 10 = 5h19′), nhưng
+     điểm ở giữa thì không.
+  ⓓ **Sổ `done` có bản trùng:** `1aac8d22` nằm **hai lần** liền nhau trong sổ
+     thật (lượt 18:45 hụt + lượt 00:03 thoát ra), nên nó ăn 2 trong 50 ô. Chú
+     thích nói *"nhớ 50 phiên gần nhất"* — với bản trùng thì là 50 **lượt**, không
+     phải 50 **phiên**. Vô hại hôm nay, nhưng lệch giữa chữ và mã.
+
+  📐 **Đường di trú, đo trước khi cài:** sổ `auto_handover:pct` trên đĩa đang là
+  `{sid: u8}`, bản mới đọc ra `{sid: {pct, mo_duoc}}` ⇒ lượt đọc đầu **không phân
+  giải được và quên cả cuốn** — hướng AN TOÀN theo đúng luật đã viết sẵn (*quên
+  mốc ⟹ HỎI LẠI*), và nay **nói ra** bằng `auto_handover_book_unreadable`. Giá
+  thật: **0**. Đo 16/09 — 16 phiên đang sống (`huba sessions --json`) ∩ 49 id
+  trong `auto_handover:done` = **rỗng**, mà `already_handed_over` đòi có mặt ở
+  CẢ HAI sổ, nên không phiên sống nào đổi phán quyết.
 
   ⚠ `at_percent` **KHÔNG phải chỗ cần động**: với gốc ở đây thì ngưỡng cao hơn
   chỉ làm lỗi **thưa hơn**, không mất đi. (Đề nghị `88` đã được chính phiên

@@ -1785,10 +1785,6 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
         return 0;
     }
     let mut watching = 0usize;
-    let done: Vec<String> = db
-        .cursor_or_log(AUTO_DONE_KEY)
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default();
     // 🔴 Ngữ cảnh LÚC BÀN GIAO của từng phiên — để "đã bàn giao" thôi là một
     // bản án chung thân.
     //
@@ -1801,10 +1797,7 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
     // Cái sổ ấy trả lời đúng câu "đã bàn giao chưa", nhưng câu cần hỏi là "còn
     // cần bàn giao nữa không". Nay: đã bàn giao mà ngữ cảnh vẫn leo thêm một
     // mốc thì hỏi lại từ đầu.
-    let done_at: std::collections::BTreeMap<String, u8> = db
-        .cursor_or_log(AUTO_PCT_KEY)
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default();
+    let (done, done_at) = doc_so_ban_giao(db);
 
     for s in &live.sessions {
         if s.host == "dead" || s.context_tokens == 0 {
@@ -1915,53 +1908,13 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
         );
         match crate::sessions::handover(cfg, s) {
             Ok(h) => {
-                let mut next = done.clone();
-                next.push(s.session_id.clone());
-                if next.len() > 50 {
-                    let cut = next.len() - 50;
-                    next.drain(..cut);
-                }
-                if let Ok(v) = serde_json::to_string(&next) {
-                    let _ = db.set_cursor(AUTO_DONE_KEY, &v);
-                }
-                // Ghi luôn ngữ cảnh lúc này, để lần sau biết nó đã leo thêm
-                // bao nhiêu kể từ lần bàn giao ấy.
-                {
-                    let mut at: std::collections::BTreeMap<String, u8> = db
-                        .cursor_or_log(AUTO_PCT_KEY)
-                        .and_then(|v| serde_json::from_str(&v).ok())
-                        .unwrap_or_default();
-                    at.insert(s.session_id.clone(), pct);
-                    // 🔴 CẮT THEO SỔ `done`, KHÔNG CẮT THEO THỨ TỰ KHOÁ.
-                    //
-                    // Hà 2026-08-24: *"Trong danh sách phiên tôi thấy có 1 phiên
-                    // 64% rồi tại sao chưa tự chuyển, tôi thấy vấn đề này chạy
-                    // không được ổn định"*. Anh mô tả đúng cả triệu chứng lẫn
-                    // tính chất: nó KHÔNG ổn định, và cái quyết định phiên nào
-                    // hỏng là **thứ tự chữ cái của uuid**.
-                    //
-                    // Bản cũ cắt bằng `at.keys().next()` — khoá NHỎ NHẤT của
-                    // `BTreeMap`, tức uuid xếp trước theo bảng chữ cái, chẳng
-                    // liên quan gì tới tuổi. Chú thích ngay trên nó viết "nhớ 50
-                    // phiên gần nhất"; mã thì nhớ 50 phiên có uuid LỚN NHẤT.
-                    //
-                    // Đo được trên DB thật lúc phát hiện: `auto_handover:pct`
-                    // mở đầu bằng khoá `5a7f2f4a` — **mọi khoá bắt đầu bằng 0–4
-                    // đã bị xoá sạch**, trong khi `auto_handover:done` (một
-                    // `Vec`, cắt từ đầu nên đúng là cũ-trước) vẫn giữ chúng.
-                    // Phiên `1ad3e613` rơi đúng khe ấy: có trong `done`, mất
-                    // trong `pct` ⟹ `AlreadyDone` với mốc sai, đứng im ở 63%
-                    // suốt nhiều giờ.
-                    //
-                    // Gốc sâu hơn một tầng: **hai cuốn sổ cho một sự thật, cắt
-                    // bằng hai luật khác nhau** thì sớm muộn cũng lệch. Nay
-                    // cuốn `pct` bám hẳn vào `done` — cùng danh sách, nên không
-                    // còn hai luật để mà lệch.
-                    at.retain(|k, _| next.contains(k));
-                    if let Ok(v) = serde_json::to_string(&at) {
-                        let _ = db.set_cursor(AUTO_PCT_KEY, &v);
-                    }
-                }
+                // 🔴 HAI CUỐN SỔ KHÔNG CÒN GHI Ở ĐÂY NỮA — xem [`ghi_so_ban_giao`],
+                // gọi bên dưới, SAU KHI đã biết cửa sổ mới có chào đời hay không.
+                //
+                // Chỗ này là **bước MỞ**: `handover` mới chỉ trả về bản bàn giao,
+                // chưa cửa sổ nào tồn tại. Ghi "đã xong" ở đây là gốc đo được của
+                // 11/162 lượt bàn giao hỏng (6,8 %) — tấm bia đầy đủ nằm trong
+                // [`ghi_so_ban_giao`].
                 if let Err(e) =
                     db.record_spend("auto_handover", &h.new_session_id, h.cost_usd, &s.name)
                 {
@@ -2088,19 +2041,57 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                         // Phiên mới chưa chào đời ⟹ con trỏ KHÔNG chuyển: nó
                         // phải trỏ vào một phiên gõ được, mà ở đây chưa có phiên
                         // nào cả — và cửa sổ cũ thì huba đã giữ lại.
-                        None => HandoverMove::Stalled {
-                            tty: &w.tty,
-                            asking: &w.asking,
-                        },
+                        None => {
+                            // 🔴 NÓI RA. Luật 3 (*no silent failure*) nói đúng ca
+                            // này, và nhánh này im suốt từ lúc ra đời.
+                            logging::warn(
+                                "auto_handover_window_stalled",
+                                json!({ "session": s.session_id, "pct": pct, "tty": w.tty,
+                                        "hoi": w.asking.len(),
+                                        "effect": "cửa sổ mới mở nhưng chưa khai id — cửa sổ CŨ giữ nguyên" }),
+                            );
+                            HandoverMove::Stalled {
+                                tty: &w.tty,
+                                asking: &w.asking,
+                            }
+                        }
                     },
                     Err(e) => {
                         err_text = e.to_string();
+                        // 🔴 CHỖ NÀY TỪNG CÂM, VÀ SỰ CÂM ẤY ĐO ĐƯỢC GIÁ.
+                        //
+                        // Lượt `1aac8d22` ngày 2026-09-15: `auto_handover_firing`
+                        // 18:45:33.601Z, rồi **83 giây không một dòng nào** của
+                        // phiên ấy, rồi `cycle_done ms=87565`. Bản `PLAN.md` đọc
+                        // nhật ký ấy và kết luận *"KHÔNG có lỗi"* — sai, và sai
+                        // theo đúng hướng nguy hiểm nhất: không phải không có
+                        // lỗi, mà là **lỗi không có mồm**.
+                        //
+                        // Gốc nằm ở `keys::open_window`: kịch bản AppleScript chạy
+                        // `do script` (⟹ cửa sổ + `claude` đã sống) TRƯỚC, rồi mới
+                        // `return tty of w`. `osascript` hết hạn 20 giây — và
+                        // `osa_timeout_context` nổ đúng hai lần bao quanh lượt ấy,
+                        // `load 36` — nên `?` ném `Err` **trong khi cửa sổ đã có
+                        // thật**. Cửa sổ mồ côi ấy tự chạy tiếp: phiên `d1cdcd48`
+                        // nhận lời nhắc *"Tiếp quản phiên trước…"* lúc 18:48:45.
+                        //
+                        // `error` chứ không `warn`: `runs.err` + `/doctor` đếm
+                        // dòng `error`, và một lượt bàn giao bỏ lại cửa sổ mồ côi
+                        // đúng là thứ phải lên bảng đỏ.
+                        logging::error(
+                            "auto_handover_window_failed",
+                            json!({ "session": s.session_id, "pct": pct, "err": err_text,
+                                    "effect": "không mở nổi cửa sổ mới — CÓ THỂ đã bỏ lại một cửa sổ mồ côi \
+                                               (do script dựng cửa sổ TRƯỚC khi osascript trả lời)" }),
+                        );
                         HandoverMove::Failed {
                             err: &err_text,
                             resume_command: &h.resume_command,
                         }
                     }
                 };
+                // Giờ mới biết lượt này đi tới đâu, nên giờ mới ghi sổ.
+                ghi_so_ban_giao(db, &s.session_id, pct, mo_duoc_khong(&moved), &done);
                 let msg = auto_handover_notice(&crate::sessions::shown(s), pct, idle_sec, &outcome);
                 // …và CÙNG CÂU ẤY sang Telegram (luật 11: hai cái mồm nói một
                 // câu, không thì về sau không ai đối chiếu được).
@@ -3202,12 +3193,191 @@ pub fn already_handed_over(
     sid: &str,
     pct: u8,
     done: &[String],
-    done_at: &std::collections::BTreeMap<String, u8>,
+    done_at: &std::collections::BTreeMap<String, MocBanGiao>,
 ) -> bool {
     done.iter().any(|d| d == sid)
         && done_at
             .get(sid)
-            .is_some_and(|d| pct < d.saturating_add(AUTO_RETRY_STEP))
+            .is_some_and(|m| pct < m.pct.saturating_add(m.buoc_hoi_lai()))
+}
+
+/// Lượt thay cửa sổ ấy có **đẻ ra được một phiên mới** không.
+///
+/// Hàm thuần, và tách ra khỏi chỗ gọi có chủ ý — đây là phép quyết định mà cả
+/// bản vá 2026-09-16 dựa vào, nên nó phải cấy ca hỏng vào được. Một `matches!`
+/// nằm trong thân vòng lặp thì không bài kiểm nào với tới, và khi ấy tầng kiểm
+/// chỉ còn khoá được phép TÍNH của [`already_handed_over`] chứ không khoá được
+/// phép ĐỌC sinh ra đầu vào cho nó.
+///
+/// Ba kết cục, và chỉ MỘT là "mở được":
+/// * `Ok` + `new_id = Some` — đã **thấy id** phiên mới trong nhật ký.
+/// * `Ok` + `new_id = None` — cửa sổ mở rồi nhưng chưa khai id (`Stalled`).
+/// * `Err` — `keys::open_window` ném ra, **có thể đã bỏ lại một cửa sổ mồ côi**
+///   (kịch bản dựng cửa sổ trước khi `osascript` trả lời). Đây đúng là ca
+///   `1aac8d22` 2026-09-15.
+pub fn mo_duoc_khong(moved: &anyhow::Result<crate::sessions::FreshWindow>) -> bool {
+    matches!(moved, Ok(w) if w.new_id.is_some())
+}
+
+/// Mốc của MỘT lượt bàn giao: ngữ cảnh lúc ấy, **và** lượt ấy có thật sự đẻ ra
+/// được một phiên mới hay không.
+///
+/// 🔴 Vì sao trường thứ hai phải có (đo 2026-09-16). Sổ cũ chỉ nhớ `pct`, nên
+/// một lượt **mở hụt** và một lượt **mở xong** để lại dấu vết giống hệt nhau —
+/// và cả hai đều bị khoá lại đúng [`AUTO_RETRY_STEP`] = 10 điểm. Với lượt mở
+/// xong, 10 điểm là đúng. Với lượt mở hụt, nó là một bản án: lượt `1aac8d22`
+/// bắn ở 80 % lúc 18:45:33, hụt, rồi nằm im tới 93 % — **5 giờ 19 phút** với hai
+/// cửa sổ cùng sống, thoát ra chỉ nhờ ngữ cảnh tự bò thêm 13 điểm.
+///
+/// Giữ MỘT cuốn sổ, thêm một trường — không mở cuốn thứ hai. Bài học của chính
+/// khối này, 2026-08-24: *hai cuốn sổ cho một sự thật, cắt bằng hai luật khác
+/// nhau, thì sớm muộn cũng lệch.*
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MocBanGiao {
+    /// Ngữ cảnh (%) lúc lượt bàn giao ấy nổ.
+    pub pct: u8,
+    /// Lượt ấy **đo được** một phiên mới chào đời (`FreshWindow::new_id` có giá
+    /// trị) hay không. Không phải "đã gửi lệnh mở" — là "đã thấy id".
+    pub mo_duoc: bool,
+}
+
+impl MocBanGiao {
+    /// Leo thêm bao nhiêu điểm thì HỎI LẠI phiên này.
+    fn buoc_hoi_lai(&self) -> u8 {
+        if self.mo_duoc {
+            AUTO_RETRY_STEP
+        } else {
+            AUTO_RETRY_STEP_HUT
+        }
+    }
+}
+
+/// Đọc cuốn sổ mốc — và **nói ra** khi không đọc được.
+///
+/// `unwrap_or_default()` trần ở đây là một lượt quên IM LẶNG: cuốn sổ cũ mang
+/// kiểu `u8`, nên lượt chạy đầu sau bản vá này sẽ không phân giải được và cả
+/// cuốn rơi về rỗng. Rỗng là hướng AN TOÀN (*quên mốc ⟹ hỏi lại*, xem chỗ gọi),
+/// nhưng nó vẫn phải để lại một dòng — luật 3.
+fn doc_so<T: serde::de::DeserializeOwned + Default>(db: &Db, key: &str) -> T {
+    let Some(v) = db.cursor_or_log(key) else {
+        return T::default();
+    };
+    match serde_json::from_str(&v) {
+        Ok(m) => m,
+        Err(e) => {
+            logging::warn(
+                "auto_handover_book_unreadable",
+                json!({ "so": key, "err": e.to_string(), "bytes": v.len(),
+                        "effect": "quên sổ ⟹ mọi phiên được HỎI LẠI từ đầu (hướng an toàn)" }),
+            );
+            T::default()
+        }
+    }
+}
+
+/// Đọc **cả hai** cuốn sổ của `auto_handover`, cùng một lượt.
+///
+/// Trả về cặp vì hai cuốn chỉ đúng khi đọc CÙNG NHAU: `already_handed_over` hỏi
+/// cả hai, và [`ghi_so_ban_giao`] cắt cuốn thứ hai theo cuốn thứ nhất. Hai lượt
+/// đọc rời nhau là chỗ để chúng lệch — đúng bài học 2026-08-24 ghi ở dưới.
+///
+/// `pub` để bài kiểm chạy được **đường tròn**: ghi bằng người ghi thật, đọc bằng
+/// người đọc thật. Tầng đối chứng ngược 2026-09-16 đã bắt đúng lỗ ấy — mutant
+/// "sổ `done` thôi nhận phiên mới" đi lọt qua 7 bài kiểm, vì cả 7 đều nắn sổ
+/// bằng tay và chưa bài nào đi qua người GHI.
+pub fn doc_so_ban_giao(db: &Db) -> (Vec<String>, std::collections::BTreeMap<String, MocBanGiao>) {
+    (doc_so(db, AUTO_DONE_KEY), doc_so(db, AUTO_PCT_KEY))
+}
+
+/// Ghi hai cuốn sổ của một lượt bàn giao — **sau khi biết nó đi tới đâu**.
+///
+/// 🔴 GỌI Ở ĐÂU: sau khi `start_fresh_after_handover` đã trả lời, không phải
+/// ngay sau `sessions::handover`. Đây là cả bản vá.
+///
+/// Gốc, đo 2026-09-16 trên `logs/huba.log` (641.496 dòng). Bản cũ ghi
+/// `AUTO_DONE_KEY` ngay khi `handover` trả `Ok` — tức lúc mới có **bản bàn giao**,
+/// chưa có cửa sổ nào. Nhưng `keys::open_window` có thể hỏng **SAU KHI** đã dựng
+/// xong cửa sổ (kịch bản chạy `do script` trước, `return tty of w` sau, và
+/// `osascript` hết hạn 20 giây), nên lượt bàn giao vừa **không có id phiên mới**,
+/// vừa đã bị đóng dấu "xong". `already_handed_over` khoá 10 điểm; ca đo được mất
+/// 5 giờ 19 phút, với một cửa sổ mồ côi chạy song song suốt quãng ấy.
+///
+/// `PLAN.md` §"Còn nợ" gọi tên đúng việc phải làm: *"đừng ghi `AUTO_DONE_KEY` ở
+/// bước MỞ"*. Đây là nó.
+///
+/// ⚠ Lượt hụt vẫn VÀO SỔ, chỉ vào với mốc hỏi-lại ngắn hơn — cố ý. Không ghi gì
+/// cả thì vòng sau (~30 giây) bắn lại ngay: mỗi lượt là một `fork_call` (lượt đo
+/// được ước tính **8,30 USD** hạn mức) và **có thể thêm một cửa sổ mồ côi nữa**.
+/// Cửa "hỏi lại" phải hẹp hơn 10 điểm, không phải biến mất.
+pub fn ghi_so_ban_giao(db: &Db, sid: &str, pct: u8, mo_duoc: bool, done: &[String]) {
+    let mut next = done.to_vec();
+    next.push(sid.to_string());
+    if next.len() > AUTO_DONE_KEEP {
+        let cut = next.len() - AUTO_DONE_KEEP;
+        next.drain(..cut);
+    }
+    match serde_json::to_string(&next) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(AUTO_DONE_KEY, &v) {
+                logging::error(
+                    "auto_handover_done_book_write_failed",
+                    json!({ "session": sid, "err": e.to_string(),
+                            "effect": "lượt bàn giao này không vào sổ ⟹ vòng sau có thể bắn lại" }),
+                );
+            }
+        }
+        Err(e) => logging::error(
+            "auto_handover_done_book_encode_failed",
+            json!({ "session": sid, "err": e.to_string() }),
+        ),
+    }
+
+    let mut at: std::collections::BTreeMap<String, MocBanGiao> = doc_so(db, AUTO_PCT_KEY);
+    at.insert(sid.to_string(), MocBanGiao { pct, mo_duoc });
+    // 🔴 CẮT THEO SỔ `done`, KHÔNG CẮT THEO THỨ TỰ KHOÁ.
+    //
+    // Hà 2026-08-24: *"Trong danh sách phiên tôi thấy có 1 phiên 64% rồi tại sao
+    // chưa tự chuyển, tôi thấy vấn đề này chạy không được ổn định"*. Anh mô tả
+    // đúng cả triệu chứng lẫn tính chất: nó KHÔNG ổn định, và cái quyết định
+    // phiên nào hỏng là **thứ tự chữ cái của uuid**.
+    //
+    // Bản cũ cắt bằng `at.keys().next()` — khoá NHỎ NHẤT của `BTreeMap`, tức
+    // uuid xếp trước theo bảng chữ cái, chẳng liên quan gì tới tuổi. Chú thích
+    // ngay trên nó viết "nhớ 50 phiên gần nhất"; mã thì nhớ 50 phiên có uuid
+    // LỚN NHẤT.
+    //
+    // Đo được trên DB thật lúc phát hiện: `auto_handover:pct` mở đầu bằng khoá
+    // `5a7f2f4a` — **mọi khoá bắt đầu bằng 0–4 đã bị xoá sạch**, trong khi
+    // `auto_handover:done` (một `Vec`, cắt từ đầu nên đúng là cũ-trước) vẫn giữ
+    // chúng. Phiên `1ad3e613` rơi đúng khe ấy: có trong `done`, mất trong `pct`
+    // ⟹ `AlreadyDone` với mốc sai, đứng im ở 63% suốt nhiều giờ.
+    //
+    // Gốc sâu hơn một tầng: **hai cuốn sổ cho một sự thật, cắt bằng hai luật
+    // khác nhau** thì sớm muộn cũng lệch. Nay cuốn `pct` bám hẳn vào `done` —
+    // cùng danh sách, nên không còn hai luật để mà lệch.
+    at.retain(|k, _| next.contains(k));
+    match serde_json::to_string(&at) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(AUTO_PCT_KEY, &v) {
+                logging::error(
+                    "auto_handover_pct_book_write_failed",
+                    json!({ "session": sid, "err": e.to_string(),
+                            "effect": "mất mốc ⟹ phiên này được HỎI LẠI từ đầu (hướng an toàn)" }),
+                );
+            }
+        }
+        Err(e) => logging::error(
+            "auto_handover_pct_book_encode_failed",
+            json!({ "session": sid, "err": e.to_string() }),
+        ),
+    }
+
+    logging::info(
+        "auto_handover_booked",
+        json!({ "session": sid, "pct": pct, "mo_duoc": mo_duoc,
+                "buoc_hoi_lai": MocBanGiao { pct, mo_duoc }.buoc_hoi_lai(),
+                "nho": next.len() }),
+    );
 }
 
 /// Câu nói về SỐ PHẬN CỦA CỬA SỔ CŨ sau một lượt bàn giao — rỗng khi nó đã đóng.
@@ -3317,6 +3487,28 @@ pub const AUTO_PCT_KEY: &str = "auto_handover:pct";
 /// phiên đã bàn giao hụt không kịp bò từ 67% lên 80% trong im lặng — đúng quãng
 /// đã xảy ra thật ngày 2026-08-14.
 const AUTO_RETRY_STEP: u8 = 10;
+
+/// Mốc hỏi-lại cho một lượt bàn giao **mở HỤT** — xem [`MocBanGiao`].
+///
+/// Hai điểm, và cả hai đầu của khoảng đều đo được, không phải chọn cho đẹp:
+/// · **0 điểm là quá rẻ** — vòng nền tick ~30 giây, nên "thử lại ngay" nghĩa là
+///   một `fork_call` mỗi nửa phút (lượt đo được: `estimate_usd` **8,30**) và
+///   khả năng đẻ thêm một cửa sổ mồ côi mỗi lượt, vì cửa sổ hụt vẫn có thể đã
+///   được dựng xong.
+/// · **10 điểm là quá đắt** — đúng con số đã bắt lượt `1aac8d22` nằm im
+///   **5 giờ 19 phút** (80 % lúc 18:45:33 → 93 % lúc 00:03:43) với hai cửa sổ
+///   cùng sống.
+/// Hai điểm ở giữa: trên chính lượt ấy, 80 → 81 % mất **3 phút 49 giây**, nên
+/// hai điểm ≈ **8 phút** — đủ lâu để không thành vòng lặp đốt hạn mức, đủ nhanh
+/// để chủ máy không mất một buổi chiều.
+///
+/// ⚠ Đây là con số tôi CHỌN, không phải con số chủ máy chốt. `PLAN.md` ghi nó
+/// vào mục cần chủ máy xem lại.
+const AUTO_RETRY_STEP_HUT: u8 = 2;
+
+/// Nhớ chừng này lượt bàn giao trong `AUTO_DONE_KEY`. Cắt từ ĐẦU (`Vec`), tức
+/// cũ-trước — và `AUTO_PCT_KEY` bám theo đúng danh sách ấy.
+const AUTO_DONE_KEEP: usize = 50;
 
 /// Chuyện gì THẬT SỰ xảy ra khi huba thay cửa sổ — ba kết cục, không gộp.
 ///

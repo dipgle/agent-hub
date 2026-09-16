@@ -107,6 +107,28 @@ chỉ chọn ra *ai đáng hỏi lại*. Tab không chấm được (màn `None`
 trắng) vẫn thành ứng viên, có trần `TRUST_FRESH_MAX = 6`, và phần bị trần cắt
 thì **nói ra** (`trust_tick_khong_cham_duoc`).
 
+**Đã cài lúc 01:39:20Z** (`install_update.sh`, pid 1594, chữ ký `cert`,
+`--verify` KHỚP). Đo **21 vòng** sau khi cài, so với **161 vòng** hai giờ trước
+đó (cùng máy, cùng 40 cửa sổ, cùng tải nặng vì có phiên khác đang dịch mã):
+
+| | trước (161 vòng) | sau (21 vòng) |
+|---|---|---|
+| `trust_dialog_screen_blind` | 5,93/vòng | **0,00** |
+| `keys_screen_read_failed` | 6,65/vòng | **0,00** |
+| `window_of_from_cache` | 6,82/vòng | **0,00** |
+| `trust_tick_probe_failed` · `orphan_tick_probe_failed` | 0,22 · 0,13 | **0,00** · **0,00** |
+| `probe_budget_spent` | **89%** số vòng | **14%** |
+| `cycle_done` p50 · p90 · max | 10.958 · 20.552 · 106.053 ms | **4.962** · 13.162 · 21.127 ms |
+
+🔴 Hàng cuối là **hệ quả bậc hai đáng ghi**: `ms_terminal_probe` của phép dò LÕI
+tụt **p50 5.147 → 1.496ms · p90 26.600 → 2.860ms · max 98.277 → 12.219ms**
+(n=39 lượt sau khi cài) dù không ai sửa một dòng nào trong nó.
+Terminal.app trả lời AppleScript **TUẦN TỰ** (xem `keys::PROBE_YIELD_MS`), nên
+80 lời gọi của cái tick nằm **xếp hàng ngay trước** chính phép dò lõi. Gỡ chúng
+đi thì phép dò lõi nhanh hơn — và ngược lại, bất kỳ ai thêm một vòng lặp
+hỏi-Terminal-theo-phiên vào vòng chạy sẽ làm chậm **cả danh sách phiên**, không
+chỉ phần của mình.
+
 **Mỗi hàng `/accounts` nói được GIỜ SẮP RESET (2026-09-16).** Hà, ảnh chụp
 Telegram 07:46: *"Danh sách acc thiếu giờ sắp reset"* — trong năm hàng chỉ acc2
 (đã kịch trần) mang `mở lại 17:59 16/09`, bốn hàng còn lại trắng giờ, tức đúng
@@ -124,7 +146,17 @@ sổ THẬT, vòng đầu sau khi cài (`quota_read`, 01:39:23Z):
 | acc4 | đã dùng 46% | `reset 5 tiếng 09:50 16/09 (còn 70 phút)` ← 5 tiếng 46% > tuần 16% |
 | acc5 | đã dùng 18% | `reset tuần 16:00 21/09 (còn 5 ngày)` |
 
-7 bài kiểm thuần + 1 bài DÒ trên sổ thật. Đối chứng ngược lôi ra một điểm mù
+7 bài kiểm thuần + 1 bài DÒ trên sổ thật (`gio_reset_tren_so_that_live`,
+`--ignored`) — bài dò in nguyên năm dòng sẽ đi ra Telegram và khai **MẪU SỐ
+5/5 hàng mang được giờ**, chạy 02:09:20Z:
+
+```text
+acc1  tuần 62% · 5 tiếng 19% · hạng: đã dùng 62% · reset tuần 15:00 20/09 (còn 4 ngày)  · đo 11 phút trước
+acc2  tuần 100% · 5 tiếng 0% · hạng: ĐÃ KỊCH TRẦN · mở lại 17:59 16/09                  · đo 11 phút trước
+acc4  tuần 16% · 5 tiếng 46% · hạng: đã dùng 46% · reset 5 tiếng 09:50 16/09 (còn 40 phút) · đo 10 phút trước
+```
+
+Đối chứng ngược lôi ra một điểm mù
 trong chính cổng ấy: mutant *"bỏ cửa `..=0 => return None`"* ra **XANH** ⟹ không
 bài nào chạm tới dòng đó, và đọc lại thì dòng đó còn sai hướng — `cua_so` đã loại
 mốc quá khứ, nên `phut == 0` nghĩa là *"còn dưới một phút"*, mà bản cũ lại làm

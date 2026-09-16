@@ -26,6 +26,44 @@ OUT="$HERE/.tmp"
 SAN="$OUT/binrun"
 cd "$RUST" || exit 2
 moc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# ── ⓪ MỘT LƯỢT MỘT LÚC ────────────────────────────────────────────────────────
+#
+# 🔴 Vì sao có khoá, và nó đã trả giá BA lần trong hai ngày. Cả lượt chạy đều ghi
+# chung `$OUT/cong-sach-{bin,dachep,ket}.txt`; mỗi lượt mở đầu bằng `: >` (cắt
+# tệp) rồi nối tiếp vào. Hai lượt chồng nhau ⟹ mẫu số của lượt này cộng vào kết
+# quả của lượt kia: đo 2026-09-16 sáng ra `MAU_SO=152` mà `DA_CHEP=277` ·
+# `DA_CHAY=553`. Cổng xử ĐÚNG (fail-closed vì `DA_CHAY != MAU_SO`); cái sai là
+# cách chạy nó. Lần thứ ba, cùng ngày 18:0x: một `gate.sh` MỒ CÔI (`ppid 1`, cha
+# đã chết theo phiên) chạy từ 15:54:52 song song với một lượt mới — không ai
+# thấy, vì bản bàn giao khai là nó "đã mất dấu".
+#
+# `mkdir` là thao tác NGUYÊN TỬ trên POSIX: hai tiến trình cùng gọi thì đúng một
+# cái thành công. Đó là cả cơ chế — không cần `flock` (macOS không có sẵn) và
+# không cần đọc-rồi-ghi (chỗ đua nằm đúng giữa hai bước ấy).
+#
+# Khoá MỒ CÔI phải cướp được, nếu không một lượt bị `kill -9` sẽ khoá cổng vĩnh
+# viễn — và một cổng không bao giờ chạy được cũng vô dụng y như một cổng không
+# bao giờ đỏ. Nên khoá mang PID: chủ còn sống ⟹ TỪ CHỐI; chủ đã chết ⟹ cướp và
+# NÓI RA (im lặng cướp khoá là đúng thứ khoá này sinh ra để chặn).
+KHOA="$OUT/gate.lock.d"
+mkdir -p "$OUT"
+if ! mkdir "$KHOA" 2>/dev/null; then
+  CHU=$(cat "$KHOA/pid" 2>/dev/null || echo "")
+  if [ -n "$CHU" ] && kill -0 "$CHU" 2>/dev/null; then
+    echo "TEST_EXIT=2  # KHÔNG ĐO ĐƯỢC: đã có lượt gate.sh đang chạy (pid $CHU) — hai lượt chung tệp đếm thì mẫu số hỏng"
+    echo "GATE_DONE=$(moc)"
+    exit 2
+  fi
+  echo "KHOA_MO_COI: pid ${CHU:-?} không còn sống — cướp khoá"
+  rm -f "$KHOA/pid" 2>/dev/null
+fi
+echo "$$" > "$KHOA/pid"
+# Nhả khoá ở MỌI đường ra, kể cả `exit 2` ở các cửa "không đo được" bên dưới.
+# `trap` chỉ chạy cho tiến trình này; `kill -9` thì mục "cướp khoá" ở trên lo.
+nha_khoa() { rm -f "$KHOA/pid" 2>/dev/null; rmdir "$KHOA" 2>/dev/null; }
+trap nha_khoa EXIT
+
 echo "STARTED=$(moc)"
 mkdir -p "$SAN"
 

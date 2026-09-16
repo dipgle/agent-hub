@@ -452,10 +452,38 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
   (`DA_CHAY` phải bằng `MAU_SO`). Cổng xử đúng; cái sai là cách chạy nó. Lần thứ
   hai còn có một bài học riêng: `pkill -f <tên-vỏ>` **không giết tiến trình
   con** — cái vỏ chết, `quality-gate.sh` bên trong vẫn sống và vẫn ghi.
-  ⇒ Vá đúng: một `flock`/tệp khoá ở đầu `gate.sh`, từ chối chạy khi đã có lượt
-  khác. Chưa làm, vì nó là cái cổng chấm mọi thứ khác nên không sửa vội cuối
-  một mạch việc dài. Cho tới lúc ấy: **kiểm `pgrep -f 'gate\.sh|quality-gate'`
-  trước khi chạy** (`.tmp/cong-mot-luot.sh` làm sẵn việc đó).
+  ✅ **VÁ 2026-09-16 tối** — và lần thứ BA mới là lần đẩy nó lên đầu hàng: lúc
+  tiếp quản phiên, bản bàn giao khai cổng *"đã mất dấu sau khi phiên đóng"*,
+  nhưng `ps` ra một `gate.sh` **MỒ CÔI** (pid 46974, `ppid 1`) chạy từ 15:54:52,
+  song song với một lượt mới — đúng hai lượt chồng nhau, lần này **không ai
+  thấy** vì tờ giấy nói nó đã chết. ⇒ *Trước khi tin "việc nền đã chết",
+  `ps` một lượt.*
+
+  Khoá đặt ở **đầu `gate.sh`**, không ở vỏ: `mkdir` (nguyên tử trên POSIX, và
+  macOS không có sẵn `flock`) dựng `.tmp/gate.lock.d` mang PID. Chủ còn sống ⟹
+  **`exit 2`** — ô KHÔNG-ĐO-ĐƯỢC, không phải "cây hỏng". Chủ đã chết ⟹ **cướp
+  khoá và NÓI RA** (`KHOA_MO_COI`): im lặng cướp là đúng thứ khoá này sinh ra để
+  chặn, mà từ chối mãi thì một lượt `kill -9` khoá cổng vĩnh viễn — *một cổng
+  không bao giờ chạy được cũng vô dụng y như một cổng không bao giờ đỏ*.
+  `trap … EXIT` nhả khoá ở mọi đường ra, kể cả các cửa `exit 2` bên dưới.
+
+  **Hai tầng đối chứng, cả hai đều đạt** (`.tmp/doi-chung-khoa-gate.sh` ·
+  `.tmp/mutant-khoa-gate.sh`): tầng một `MAU_SO=7 · DAT=7 · SAI=0` — chủ sống ⟹
+  exit 2 **và mtime tệp đếm không đổi** (đo đúng thứ cần giữ, không chỉ đo mã
+  thoát) · khoá mồ côi ⟹ cướp + nói · ca lành ⟹ chạy được, khoá mang đúng pid,
+  nhả sạch khi thoát. Tầng hai cấy hỏng vào chính cái khoá: `MAU_SO=4 ·
+  DUNG_KY_VONG=4 · XANH_MU=0` (bỏ cửa khoá · từ chối cả khoá mồ côi · bỏ `trap`
+  · ghi sai pid — cả bốn ĐỎ).
+
+  📌 Bài học phụ, trả giá ngay trong lúc viết phép thử: bản đầu dừng `gate.sh`
+  bằng `kill "$GPID"` ⟹ để lại `cargo`/`rustc` chạy tiếp với `ppid 1`. **Phép
+  thử tự đẻ ra đúng con mồ côi mà nó đang đi chặn.** Nay `giet_cay()` đi từ lá
+  lên gốc, và dùng TERM (không KILL) vì `trap … EXIT` của bash chỉ chạy cho TERM
+  — mà chính lượt nhả khoá ấy là thứ ca C đang đo.
+
+  `.tmp/cong-mot-luot.sh` giữ nguyên phép `pgrep` của nó: hai hàng rào cho hai
+  chỗ khác nhau (vỏ từ chối sớm, khoá chặn mọi đường gọi khác — kể cả
+  `quality-gate.sh` gọi thẳng `bash ./gate.sh`).
 
 - 🔴 **`quota::mo_lai_luc` lấy mốc SỚM NHẤT — sai khi CẢ HAI cửa sổ cùng chặn**
   (đo 2026-09-16, chưa sửa, đã báo chủ máy). Lời giải thích viết kèm là *"đó mới

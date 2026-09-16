@@ -213,6 +213,44 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
+- 🔴 **Bàn giao mở phiên mới mà KHÔNG đóng được phiên cũ — 14 lượt, đo
+  2026-09-16.** `handover_old_window_not_closed`, cùng con số ở cả `hubd.err`
+  lẫn `logs/huba.log`. Hậu quả phiên `dwork/main` đo được: **hai bản sao cùng
+  sống 5h19′, cả hai cùng nhận việc thật** (1.731 lượt nói ↔ 90 lượt), có lúc
+  BA phiên `main` cùng sống, và chủ máy phải tự gõ *"Có phiên main khác rồi thì
+  đóng"*. Đây mới là thứ Hà gọi là *"nhảy sang phiên khác"* — không phải con trỏ
+  nhảy, mà hai bản sao cùng làm.
+  Lý do ghi trong log, 8 lượt gần nhất: *"không hỏi được tab còn bận không"* ×4 ·
+  *"vòng nền đã tiêu hết ngân sách hỏi Terminal (10,3s · 11,9s /10,0s)"* ×2 ·
+  *"nhường Terminal cho một lượt hỏi đang có người chờ"*.
+  ⚠ **Hai lượt mang chữ "hết ngân sách" là nạn nhân của thủ phạm đã vá 16/09**
+  (`trust_dialog_tick`, xem mục "Đã xong"): Terminal trả lời AppleScript TUẦN
+  TỰ, nên 81 lời gọi mỗi 30 giây nằm xếp hàng ngay trước cả phép hỏi *"tab còn
+  bận không"* của đường bàn giao. ⇒ **DỰ ĐOÁN ĐO ĐƯỢC, chưa phải kết luận:** nếu
+  ngân sách là nguyên nhân chính thì dòng ấy phải thưa hẳn kể từ **16/09
+  01:39Z**. Nhật ký mấy ngày tới trả lời; đừng đóng mục này trước khi có số.
+  ⇒ Phần CHẮC CHẮN còn lại: **đóng phiên cũ là BẤT BIẾN của bàn giao**, không
+  phải việc phụ — hụt thì phải vào sổ và thử lại (`close_pending_tick` đã đúng
+  hướng, nhánh này không đi tới đó), chứ không phải ghi một dòng log rồi thôi.
+  *(Số đo do phiên `dwork/main` mang sang 16/09; đã đo lại bằng nguồn của huba.)*
+
+- **Con trỏ nằm lại phiên ĐÃ CHẾT, đôi khi ở DỰ ÁN KHÁC** — 3 lượt nhật ký ghi
+  `"ended" == "focus"`, và 2 lượt con trỏ đang ở project khác lúc bàn giao dwork
+  (`94e7bd84` = mailler, `975277d1` = huba). Hại thật đo được: last-prompt của
+  phiên nhãn `dwork/main` là một câu trả lời về **mailler** — chủ máy gõ việc
+  dwork vào cửa sổ mailler. `focus_kept_on_auto_handover` (`pipeline.rs:2046`)
+  cố ý không dời con trỏ và luật ấy ĐÚNG (chỉ chủ máy chọn phiên) — thiếu là
+  **một tiếng nói**: bàn giao xong mà con trỏ trỏ vào phiên vừa đóng, hoặc vào
+  phiên thuộc project khác, thì đẩy một tin có nút nhảy. Nay `pipeline.rs:13078`
+  chỉ trả *"đã đóng sổ"* khi chủ máy GÕ vào id cũ — tức phải mất một lượt mới biết.
+
+- **`/exit` tự bấm giết việc nền mà không ai ghi lại.** Đo: `2026-09-14T07:31:55Z`
+  cửa sổ 517 (`dwork/dev @ main`) `pressed: 1` ⟹ `stopped: ["monitor · tiến độ 4
+  vai dwork…"]`, thêm 2 ca 13/09 (2 monitor dwork + 1 shell `.tmp/scout`). Đây
+  đúng là cách một vòng monitor biến mất lặng lẽ, trong khi `CLAUDE.md` của
+  workspace §"BẢY LUẬT" ⑤ bắt monitor phải KÊU. ⇒ Trước khi tự bấm, **ghi danh
+  sách việc nền sắp bị giết vào bản bàn giao của phiên mới**, kèm lệnh chạy lại.
+
 - ⚠ **`gate.sh` KHÔNG có khoá: hai lượt chạy chồng thì mẫu số hỏng** — đo hai
   lần trong sáng 2026-09-16. Cả hai lượt ghi chung `.tmp/cong-sach-{bin,dachep,
   ket}.txt`, mỗi lượt `: >` cắt tệp của lượt kia giữa chừng rồi cùng nối tiếp

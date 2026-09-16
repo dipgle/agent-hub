@@ -439,6 +439,43 @@ pub struct SessionsSnapshot {
     /// động lại SAU lúc đếm phiên, và cái loa sẽ gán một cái cớ vào nhầm vòng.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal_pid: Option<u32>,
+    /// Mọi tab Terminal của ĐÚNG khoảnh khắc này, kèm chữ trên màn từng tab.
+    /// `None` = **chưa đo được** (lượt dò hỏng), KHÔNG phải "máy không có tab".
+    ///
+    /// 🔴 Vì sao nó nằm lại đây thay vì để mỗi cỗ máy tự đi hỏi lấy. Đo
+    /// 2026-09-16 trên máy này, **40 cửa sổ Terminal** đang mở (ttys000-039):
+    ///
+    /// | lượt dò | giá đo được (3 lượt liền) |
+    /// |---|---|
+    /// | `keys::terminal_tabs()` — không xin chữ | 4,26s · 4,17s · 4,32s |
+    /// | `keys::terminal_screens()` — có chữ | 5,34s · 4,83s · **17,19s** |
+    ///
+    /// Ngân sách hỏi Terminal cho MỘT vòng là [`crate::keys::PROBE_BUDGET_MS`]
+    /// = 10 giây, nên **hai** lượt dò gộp lại đã tiêu gần hết ngân sách trước
+    /// khi cỗ máy nào kịp hỏi câu của riêng nó. Hậu quả đo được trên
+    /// `~/Library/Logs/hubd.err`, 31 giờ (15/09 17:35 → 16/09 00:46):
+    ///
+    /// - `probe_budget_spent` **432 / 1352 vòng** (32%) — vòng nặng nhất bỏ
+    ///   **50** phép dò, và mỗi dòng ấy tự khai *"vòng này KHÔNG đo hết"*;
+    /// - `trust_dialog_screen_blind` **2111 lượt**, trong đó **2046** mang đúng
+    ///   câu *"vòng nền đã tiêu hết ngân sách hỏi Terminal"* — tức phép bấm hộ
+    ///   tin-thư-mục đã MÙ suốt cả đêm, đúng đêm 8 vai cùng mở cửa sổ;
+    /// - chuỗi lặp `window_of_from_cache → keys_screen_read_failed →
+    ///   trust_dialog_screen_blind` chiếm **1946 / 2394** lượt đọc màn hỏng.
+    ///
+    /// Giữ bảng tab lại đây thì [`crate::pipeline::trust_dialog_tick`] và
+    /// [`crate::pipeline::orphan_windows_tick`] đọc CHUNG ảnh chụp của vòng —
+    /// đúng luật đã viết sẵn trong `run_once` (*"MỘT ảnh chụp cho cả vòng…
+    /// dựng hai lần là hai câu trả lời lệch nhau"*), và đúng cái lý lẽ đã trả
+    /// giá một lần ở `terminal_screens` (*"hỏi từng phiên là con đường đã kéo
+    /// một vòng từ ~18 giây lên 90 giây"*).
+    ///
+    /// `#[serde(skip)]`: [`crate::keys::Tab`] không đi qua JSON và không nên —
+    /// đây là dữ liệu THÔ của một vòng, không phải hình dạng dữ liệu của màn
+    /// hình. Trường mất khi đi qua JSON ⟹ về `None` ⟹ *chưa đo được*, tức phía
+    /// an toàn: cỗ máy đọc nó phải từ chối kết luận, không được im.
+    #[serde(skip)]
+    pub tabs: Option<Vec<crate::keys::Tab>>,
 }
 
 /// Phiên khác đang chiếm đúng cửa sổ (tty) của phiên vừa tắt — nếu có.
@@ -4552,10 +4589,10 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
     // đường cho một lượt hỏi gấp — xem `keys::LOI_COI`. Nhường ở đây là trả về
     // một danh sách SAI, đúng ba hậu quả kể trong nhánh `Err` ngay dưới.
     let _loi = crate::keys::core_probe();
-    let tabs = match crate::keys::terminal_screens() {
+    let probed = match crate::keys::terminal_screens() {
         Ok(t) => {
             note_probe_ok();
-            t
+            Some(t)
         }
         Err(e) => {
             // Không đoán bù, và nói ĐỦ ba hậu quả: một lượt dò hỏng nay kéo
@@ -4579,9 +4616,16 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                         "terminal_alive": terminal_process_alive(),
                         "effect": "cửa sổ rảnh không lên danh sách · mọi phiên tạm coi là không gõ vào được · không đọc được dòng đang-làm-gì" }),
             );
-            Vec::new()
+            None
         }
     };
+    // Bảng tab của vòng này đi theo ảnh chụp, để hai cỗ máy chạy sau
+    // (`trust_dialog_tick`, `orphan_windows_tick`) khỏi hỏi Terminal thêm lượt
+    // nào — xem `SessionsSnapshot::tabs` cho số đo. `None` giữ nguyên là `None`:
+    // "chưa đo được" là một trạng thái RIÊNG, không được rơi thành danh sách
+    // rỗng, vì một danh sách rỗng đọc y hệt *"không cửa sổ nào kẹt cả"*.
+    out.tabs = probed.clone();
+    let tabs = probed.unwrap_or_default();
     let ms_probe = probe_started.elapsed().as_millis();
 
     // Ba tài khoản, hỏi NỐI ĐUÔI.

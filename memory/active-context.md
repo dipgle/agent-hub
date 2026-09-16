@@ -5513,3 +5513,60 @@ initialized", không còn tính là lỗi).
   owner của repo.
 - Hook `bash-guardrail` của workspace chặn lệnh nào trông như "dò sandbox" (tôi
   bị chặn 1 lần khi tạo file thử tên `SECRET_MARKER`). Đừng đặt tên kiểu đó.
+
+---
+
+## 2026-09-16 — phiên `[huba]` · hai bản vá, cả hai đã CÀI và đang chạy
+
+*(Sổ này đứng im từ 27/08 tới hôm nay. Ghi lại là việc của phiên — không cỗ máy
+nào ghi hộ; xem luật ở `~/projects/CLAUDE.md`.)*
+
+**Vào phiên bằng một chữ "huba", tự quét việc.** Quét: `PLAN.md` §"Còn nợ" ·
+`git log` · `hubd.err`. Thứ nổi lên không nằm trong sổ nợ mà nằm trong **nhật ký
+đang chạy**, nên ghi lại cách tìm: đếm tên sự kiện trong 31 giờ log, rồi xem 3
+dòng ĐỨNG TRƯỚC mỗi dòng hỏng — chuỗi lặp hiện ra ngay
+(`window_of_from_cache → keys_screen_read_failed → trust_dialog_screen_blind`,
+**1946/2394**), và mốc giờ của cùng một vòng cách nhau **0,00s** cho ttys000-039
+chỉ thẳng vào một vòng lặp quét cả máy.
+
+### ① `trust_dialog_tick` thôi tự mở lượt dò — đọc ảnh chụp của vòng
+
+- **Trước:** `terminal_tabs()` + `answer_trust_dialog` cho **từng** tab `claude`
+  (= `window_of` + `screen_text`) ⇒ **81 lời gọi `osascript`** mỗi nhịp 30 giây
+  trên 40 cửa sổ, ngân sách vòng chỉ **10s**.
+- **Số trước bản vá** (2 giờ, 161 vòng): `probe_budget_spent` **144 = 89%** số
+  vòng · vòng nặng nhất bỏ **56** phép dò · `trust_dialog_screen_blind`
+  **5,93/vòng** · `keys_screen_read_failed` **6,65/vòng** ·
+  `cycle_done` p50 **10.958ms**, p90 **20.552ms**, max **106.053ms**.
+- **Giá lượt dò gộp, đo tay 16/09 trên 40 cửa sổ:** `terminal_tabs`
+  4,26/4,17/4,32s · `terminal_screens` 5,34/4,83/**17,19**s.
+- **Vá:** `SessionsSnapshot.tabs: Option<Vec<keys::Tab>>` (`#[serde(skip)]`,
+  `None` = chưa đo được) — `trust_dialog_tick` + `orphan_windows_tick` dùng chung.
+  Bấm vẫn chỉ bấm sau **bản đọc tươi**.
+
+### ② `/accounts` in giờ sắp reset cho MỌI hàng (Hà hỏi lúc 07:46)
+
+`quota::sap_reset` lấy mốc của **cửa sổ chật nhất** (đúng cửa sổ `rank` chấm
+hạng). Số thật vòng đầu sau khi cài: acc1 *còn 4 ngày* · acc3 *6 ngày* · acc4
+***reset 5 tiếng, còn 70 phút*** (5 tiếng 46% > tuần 16%) · acc5 *5 ngày*; acc2
+kịch trần giữ nguyên chữ *"mở lại"*.
+
+### Bài học của lượt này (ghi để khỏi trả giá lần hai)
+
+- **Đối chứng ngược bắt được lỗi trong cổng của CHÍNH tôi**, đúng như luật 16/09
+  đã cảnh báo: mutant *"bỏ cửa `..=0 => return None`"* ra **XANH** ⇒ dòng ấy
+  không bài nào chạm tới, và đọc lại thì nó còn **sai hướng** (làm tài khoản sắp
+  mở lại biến mất khỏi màn đúng phút đáng nói nhất).
+- **Cổng soi mã nguồn phải cắt thân hàm tới mục KẾ TIẾP GẦN NHẤT**, không tới
+  `pub fn` gần nhất: lượt chạy đầu đỏ oan vì thân `orphan_windows_tick` nuốt trọn
+  khối tài liệu của `trust_dialog_tick` rồi "bắt" được một chuỗi nằm trong câu kể
+  chuyện.
+- **Ba phép đo của chính tôi tự khớp chính nó trong một buổi**: `pgrep -lx hubad`
+  (tiến trình cài tên `hubd`) suýt cho kết luận *"daemon đã chết"*;
+  `ps | grep hubad` khớp đúng tiến trình `grep` của mình; `ps -p $$ -o command=`
+  đọc ra `--disallowedTools` từ **chính chuỗi lệnh mình vừa gõ**. Cả ba đều hỏng
+  về phía **tự tin sai**.
+- **Ngân sách vòng vẫn chật** và đó là **nợ mở, đã ghi vào `PLAN.md`**: riêng
+  phép dò LÕI của ảnh chụp là p50 **5.147ms** / p90 **26.600ms** trên ngân sách
+  10.000ms (445 lượt). Bản vá này **gỡ hai cỗ máy ra khỏi ngân sách**, nó không
+  làm ngân sách rộng ra.

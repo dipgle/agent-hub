@@ -252,6 +252,17 @@ impl Quota {
             if let Some(m) = mo_lai_luc(self, now_ms) {
                 p.push(format!("mở lại {m}"));
             }
+        } else if let Some(r) = sap_reset(self, now_ms) {
+            // 🔴 Hà 2026-09-16, ảnh chụp `/accounts` lúc 07:46: *"Danh sách acc
+            // thiếu giờ sắp reset"*. Đúng, và chỗ thiếu nằm ngay tại đây: mốc
+            // mở lại chỉ được in khi tài khoản ĐÃ kịch trần, tức đúng lúc nó
+            // không còn giúp gì cho việc chọn nữa. Câu chủ máy hỏi khi nhìn
+            // danh sách là *"mở phiên bằng acc nào"*, và một tài khoản 61% tuần
+            // đáng chọn hay không phụ thuộc hẳn vào việc nó reset sau 4 ngày
+            // hay sau 4 tiếng — dữ kiện ấy huba ĐÃ CÓ trong tay (`week_resets_at`
+            // của cả năm tài khoản đều nằm trong `quota_read` mỗi vòng), chỉ là
+            // chưa bao giờ đi ra tới màn.
+            p.push(r);
         }
         // Điều kiện kiểm tra THỨ HAI, đứng cạnh tỉ lệ chứ không thay nó.
         if let Some(canh) = kich_tran_can_xac_nhan(self, now_ms) {
@@ -555,6 +566,56 @@ pub fn mo_lai_luc(q: &Quota, now_ms: i64) -> Option<String> {
     })
 }
 
+/// Cửa sổ ĐANG CHẬT NHẤT của một tài khoản **chưa** kịch trần mở lại lúc nào.
+///
+/// 🔴 Hà 2026-09-16: *"Danh sách acc thiếu giờ sắp reset"*. [`mo_lai_luc`] chỉ
+/// trả lời cho tài khoản đã kịch trần — tức đúng lúc câu trả lời không còn dùng
+/// để chọn được nữa. Hàm này trả lời cho phần còn lại, và đó mới là chỗ chủ máy
+/// đứng khi đọc `/accounts`: *acc này 61% tuần, mở phiên vào có sao không?*
+///
+/// **Chọn ĐÚNG cửa sổ mà [`rank`] đã dùng để chấm hạng** — cái CHẬT NHẤT, vì nó
+/// là cái sẽ chặn trước. Một dòng in "hạng: đã dùng 45%" (lấy từ cửa sổ 5 tiếng)
+/// mà kèm mốc reset của cửa sổ TUẦN là hai phép đo nói về hai thứ khác nhau
+/// đứng cạnh nhau như một — đúng hình dạng lỗi mà `/accounts` đã tách nhãn "(dò
+/// /usage: …)" ra để tránh.
+///
+/// `None` khi chưa đọc được đủ hai cửa sổ: giữ nguyên luật [`cua_so`] — mốc đã
+/// qua hay đọc không ra thì fail-closed, thà im còn hơn in một cái hẹn đã hết
+/// hạn ra màn.
+pub fn sap_reset(q: &Quota, now_ms: i64) -> Option<String> {
+    let w = cua_so(q.week_pct, q.week_resets_at.as_deref(), now_ms);
+    let h = cua_so(q.hour5_pct, q.hour5_resets_at.as_deref(), now_ms);
+    // Hoà thì lấy TUẦN: nó là cửa sổ đắt hơn (5 tiếng tự mở lại trong ngày),
+    // nên khi hai con số bằng nhau thì mốc tuần là mốc đáng biết hơn.
+    let (ten, moc) = match (w, h) {
+        (Some(a), Some(b)) if b > a => ("5 tiếng", q.hour5_resets_at.as_deref()?),
+        (Some(_), Some(_)) => ("tuần", q.week_resets_at.as_deref()?),
+        _ => return None,
+    };
+    let khi = chrono::DateTime::parse_from_rfc3339(moc).ok()?;
+    let phut = (khi.timestamp_millis() - now_ms) / 60_000;
+    // 🔴 `phut == 0` là *"còn DƯỚI một phút"*, không phải *"đã qua"* — [`cua_so`]
+    // ở trên đã loại mọi mốc quá khứ (fail-closed), nên tới được đây là mốc còn
+    // ở phía trước, chỉ là gần tới mức phép chia phút làm tròn về 0.
+    //
+    // Bản đầu viết `..=0 => return None` và **tầng đối chứng ngược bắt được nó**:
+    // mutant "bỏ cửa ấy" ra XANH, nghĩa là không bài kiểm nào chạm tới dòng đó —
+    // bài kiểm mang tên *"mốc đã qua thì không in gì"* thật ra đang chứng minh
+    // cái cửa `cua_so`, không phải cửa này. Và khi đọc lại thì dòng ấy còn SAI
+    // hướng: nó làm tài khoản sắp mở lại **biến mất khỏi màn** đúng phút đáng
+    // nói nhất.
+    let con = match phut {
+        ..=0 => "còn dưới 1 phút".to_string(),
+        1..=90 => format!("còn {phut} phút"),
+        91..=1439 => format!("còn {} tiếng", phut / 60),
+        _ => format!("còn {} ngày", phut / 1440),
+    };
+    Some(format!(
+        "reset {ten} {} ({con})",
+        khi.with_timezone(&chrono::Local).format("%H:%M %d/%m")
+    ))
+}
+
 pub fn rank(q: &Quota, now_ms: i64) -> Rank {
     // Đứng TRƯỚC mọi phép tính phần trăm: còn chưa mở được cửa sổ thì con số
     // hạn mức nói về một cánh cửa chưa ai bước qua.
@@ -597,6 +658,10 @@ pub fn rank_all(cfg: &crate::config::Config, now_ms: i64) -> Vec<Ranked> {
                         "week_resets_at": q.week_resets_at, "hour5_pct": q.hour5_pct,
                         "fetched_at_ms": q.fetched_at_ms, "why_unknown": q.why_unknown,
                         "rank": r.say(),
+                        // Cùng luật với `can_xac_nhan` ngay dưới: thứ chỉ hiện
+                        // trên điện thoại là thứ người đọc log không thấy, và
+                        // log mới là bề mặt pháp y của kho này.
+                        "sap_reset": sap_reset(&q, now_ms),
                         "can_xac_nhan": kich_tran_can_xac_nhan(&q, now_ms),
                         "mo_lai_luc": mo_lai_luc(&q, now_ms) }),
             );

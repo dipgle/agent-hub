@@ -5534,12 +5534,20 @@ pub fn orphan_windows_tick(
     }
     LAST.store(now, std::sync::atomic::Ordering::Relaxed);
 
-    let tabs = match crate::keys::terminal_screens() {
-        Ok(t) => t,
+    // Bảng tab đi theo ảnh chụp của vòng (`SessionsSnapshot::tabs`) — cùng một
+    // lượt dò với danh sách phiên ngay trên, nên hai vế của phép so ("cửa sổ
+    // nào còn" ↔ "phiên nào còn sống") được chấm trên CÙNG một khoảnh khắc.
+    // Trước 2026-09-16 chỗ này tự gọi `terminal_screens()` thêm một lượt: 4,8
+    // đến 17,2 giây trên máy 40 cửa sổ, trên một ngân sách vòng 10 giây.
+    let tabs = match live.tabs.as_deref() {
+        Some(t) => t,
         // Không dò được thì KHÔNG kết luận "không có cửa sổ rác nào" — đó là
         // "chưa đo được", một trạng thái riêng (luật 13②).
-        Err(e) => {
-            logging::warn("orphan_tick_probe_failed", json!({ "err": e.to_string() }));
+        None => {
+            logging::warn(
+                "orphan_tick_probe_failed",
+                json!({ "err": "ảnh chụp của vòng này không mang bảng tab — lượt dò Terminal đã hỏng" }),
+            );
             return;
         }
     };
@@ -5650,33 +5658,159 @@ fn luu_so_mo_coi(db: &Db, book: &BTreeMap<String, i64>) {
 /// khoản × thư mục, và câu trả lời luôn là "có" — chủ máy uỷ quyền 2026-08-13.
 /// Ba mươi giây một lượt, cùng nhịp với `close_pending_tick`, vì nó cũng là
 /// một câu hỏi về màn hình chứ không phải một sự kiện.
-pub fn trust_dialog_tick(now: i64) {
+///
+/// 🔴 **Quét trên ẢNH CHỤP CỦA VÒNG, không mở lượt dò riêng nào — sửa
+/// 2026-09-16.** Bản trước gọi `keys::terminal_tabs()` (một lượt `osascript`)
+/// rồi `answer_trust_dialog` cho **từng** tab `claude`, mà hàm ấy lại là
+/// `window_of` + `screen_text` — **hai lượt `osascript` nữa mỗi tab**. Với 40
+/// cửa sổ trên máy này, một nhịp 30 giây đòi tới **81 lời gọi** trên một ngân
+/// sách 10 giây ([`crate::keys::PROBE_BUDGET_MS`]), nên nó không những không
+/// bấm được cho ai, nó còn **tiêu hết phần của những cỗ máy chạy sau**.
+///
+/// Đo trên `hubd.err` 31 giờ (15/09 17:35 → 16/09 00:46), trước bản vá:
+/// `trust_dialog_screen_blind` **2111 lượt**, **2046** trong đó vì hết ngân
+/// sách; chuỗi `window_of_from_cache → keys_screen_read_failed →
+/// trust_dialog_screen_blind` lặp **1946 / 2394** lượt đọc màn hỏng; và các
+/// dòng `trust_dialog_screen_blind` của cùng một vòng đóng dấu giờ **cách nhau
+/// 0,00 giây** cho ttys000-039 — dấu vân tay của một vòng lặp quét cả máy.
+/// Tức cỗ máy này đã MÙ suốt cả đêm 8 vai, đúng đêm cần nó nhất.
+///
+/// Điều KHÔNG đổi, và đừng gỡ: **bấm vẫn chỉ bấm sau một bản đọc TƯƠI**. Chữ
+/// trong ảnh chụp chỉ chọn ra *ai đáng hỏi lại*; bấm theo một tấm ảnh vài giây
+/// tuổi là trả lời thay chủ máy một câu có thể đã khác — xem
+/// [`quet_hop_tin_thu_muc`].
+pub fn trust_dialog_tick(live: &crate::sessions::SessionsSnapshot, now: i64) {
     static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
     let last = LAST.load(std::sync::atomic::Ordering::Relaxed);
     if now - last < CLOSE_CHECK_SEC {
         return;
     }
     LAST.store(now, std::sync::atomic::Ordering::Relaxed);
-    let tabs = match crate::keys::terminal_tabs() {
-        Ok(t) => t,
-        Err(e) => {
-            logging::warn("trust_tick_probe_failed", json!({ "err": e.to_string() }));
-            return;
-        }
-    };
-    for tab in tabs {
-        // Chỉ tab đang chạy `claude`: hộp ấy là của `claude`, và đọc màn của
-        // một tab đang chạy thứ khác là đọc thứ không liên quan.
-        if !tab.is_claude() {
-            continue;
-        }
-        if let Some(n) = crate::sessions::answer_trust_dialog(&tab.tty) {
-            logging::info(
-                "trust_dialog_unstuck",
-                json!({ "tty": tab.tty, "pressed": n,
-                        "why": "cửa sổ kẹt ở hộp tin-thư-mục, chưa có id phiên nên không route nào với tới" }),
+    // Ảnh chụp của CHÍNH vòng này — không mở thêm lượt dò nào. Xem
+    // `SessionsSnapshot::tabs` cho số đo và cho lý do.
+    match quet_hop_tin_thu_muc(live.tabs.as_deref()) {
+        TrustQuet::ChuaDoDuoc => {
+            logging::warn(
+                "trust_tick_probe_failed",
+                json!({ "err": "ảnh chụp của vòng này không mang bảng tab — lượt dò Terminal đã hỏng",
+                        "why": "CHƯA ĐO ĐƯỢC, không phải 'không cửa sổ nào kẹt hộp tin-thư-mục'" }),
             );
         }
+        TrustQuet::Quet {
+            ung_vien,
+            mu,
+            bo_qua,
+            tong_claude,
+        } => {
+            // Khai MẪU SỐ mọi lượt đo (luật 13③): số tab đã chấm được, số tab
+            // không chấm được, và số tab bị TRẦN cắt. Im ở đây là để một lượt
+            // quét thiếu đọc y hệt một lượt quét đủ.
+            if mu > 0 || bo_qua > 0 {
+                logging::warn(
+                    "trust_tick_khong_cham_duoc",
+                    json!({ "tab_claude": tong_claude, "khong_co_chu": mu, "bo_qua_vi_tran": bo_qua,
+                            "tran": TRUST_FRESH_MAX,
+                            "why": "tab không mang chữ màn về thì phải hỏi lại từng cái — trần này giữ cho \
+                                    lượt hỏi lại không phình về đúng cái giá vừa gỡ bỏ" }),
+                );
+            }
+            for tty in ung_vien {
+                // Đọc lại MÀN TƯƠI rồi mới bấm — không đổi. Chữ trong ảnh chụp
+                // chỉ chọn ra AI ĐÁNG HỎI; quyền quyết định bấm vẫn nằm ở
+                // `answer_trust_dialog`, nơi có một bản đọc của đúng giây ấy.
+                // Bấm theo một tấm ảnh vài giây tuổi là trả lời thay chủ máy
+                // một câu có thể đã khác.
+                if let Some(n) = crate::sessions::answer_trust_dialog(&tty) {
+                    logging::info(
+                        "trust_dialog_unstuck",
+                        json!({ "tty": tty, "pressed": n,
+                                "why": "cửa sổ kẹt ở hộp tin-thư-mục, chưa có id phiên nên không route nào với tới" }),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Nhiều nhất bấy nhiêu tab được hỏi lại bằng một lượt dò RIÊNG trong một vòng.
+///
+/// Chỉ những tab ảnh chụp **không chấm được** mới tiêu tới nó (màn về rỗng, hay
+/// lượt dò không xin chữ). Có trần vì đường "hỏi lại từng tab" chính là đường
+/// vừa gỡ bỏ: 40 tab × 2 lượt `osascript` là 80 lời gọi trên một ngân sách 10
+/// giây. Trần bị cắt thì **NÓI RA** (`trust_tick_khong_cham_duoc`) — một cái
+/// trần im lặng đọc y hệt "đã quét hết".
+pub const TRUST_FRESH_MAX: usize = 6;
+
+/// Kết quả một lượt quét hộp tin-thư-mục trên ảnh chụp của vòng.
+#[derive(Debug, PartialEq)]
+pub enum TrustQuet {
+    /// Vòng này không có bảng tab để mà chấm. Trạng thái RIÊNG (luật 13②) —
+    /// không được gộp vào "quét xong, không thấy hộp nào".
+    ChuaDoDuoc,
+    Quet {
+        /// tty của những tab đáng hỏi lại bằng một bản đọc tươi.
+        ung_vien: Vec<String>,
+        /// Tab `claude` mà ảnh chụp không mang chữ về ⟹ chưa chấm được.
+        mu: usize,
+        /// Trong số `mu`, bao nhiêu cái bị TRẦN cắt khỏi lượt hỏi lại.
+        bo_qua: usize,
+        /// Mẫu số: tổng số tab đang chạy `claude` trong ảnh chụp.
+        tong_claude: usize,
+    },
+}
+
+/// Ai đáng hỏi lại — chấm bằng CHỮ ĐÃ CÓ trong ảnh chụp, không hỏi Terminal.
+///
+/// Hai cửa, và phải giữ đủ cả hai:
+///
+/// - **thấy đúng hộp ấy trong chữ** ⟹ ứng viên. Phép nhận dạng dùng lại đúng
+///   hai hàm mà [`crate::sessions::answer_trust_dialog`] dùng
+///   ([`crate::keys::parse_choices`] + [`crate::sessions::trust_dialog_choice`]),
+///   nên nó không thể lệch với thứ sẽ phán ở bản đọc tươi — một phép nhận dạng
+///   thứ hai viết riêng cho chỗ lọc là hai câu trả lời cho cùng một câu hỏi.
+/// - **không chấm được thì KHÔNG kết luận là không có hộp**: màn về `None`
+///   (lượt dò không xin chữ) hay rỗng (khung trắng, xem
+///   [`crate::keys::frame_is_blank`]) đều thành ứng viên, để bản đọc tươi trả
+///   lời thay — chứ không im lặng bỏ qua một cửa sổ đang kẹt.
+///
+/// Tab không chạy `claude` thì không đụng tới: hộp ấy là hộp của `claude`, và
+/// đọc màn của một tab đang chạy thứ khác là đọc thứ không liên quan.
+pub fn quet_hop_tin_thu_muc(tabs: Option<&[crate::keys::Tab]>) -> TrustQuet {
+    let Some(tabs) = tabs else {
+        return TrustQuet::ChuaDoDuoc;
+    };
+    let mut thay_hop: Vec<String> = Vec::new();
+    let mut chua_cham: Vec<String> = Vec::new();
+    let mut tong_claude = 0usize;
+    for t in tabs {
+        if !t.is_claude() {
+            continue;
+        }
+        tong_claude += 1;
+        match t.screen.as_deref() {
+            Some(scr) if !scr.trim().is_empty() => {
+                if crate::sessions::trust_dialog_choice(&crate::keys::parse_choices(scr)).is_some()
+                {
+                    thay_hop.push(t.tty.clone());
+                }
+            }
+            // `None` = lượt dò không xin chữ · `Some("")` = xin rồi mà khung
+            // trắng. Cả hai là "chưa chấm được", nên phải hỏi lại — trong trần.
+            _ => chua_cham.push(t.tty.clone()),
+        }
+    }
+    let mu = chua_cham.len();
+    let bo_qua = mu.saturating_sub(TRUST_FRESH_MAX);
+    // Tab ĐÃ THẤY hộp thì không bao giờ bị trần cắt: trần sinh ra để chặn đường
+    // hỏi-lại-từng-tab phình trở lại, chứ không phải để bỏ rơi đúng cái cửa sổ
+    // đang kẹt — thứ duy nhất cỗ máy này tồn tại vì nó.
+    chua_cham.truncate(TRUST_FRESH_MAX);
+    thay_hop.extend(chua_cham);
+    TrustQuet::Quet {
+        ung_vien: thay_hop,
+        mu,
+        bo_qua,
+        tong_claude,
     }
 }
 
@@ -16329,8 +16463,10 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     // trong lượt lệnh: chờ tại chỗ là giữ `CMD_LOCK` (xem `CLOSING_KEY`).
     close_pending_tick(db, cfg, now_sec);
     // Cửa sổ kẹt ở hộp tin-thư-mục: chưa có id phiên nên không route nào với
-    // tới — phải có người ngó lại mỗi vòng (xem `trust_dialog_tick`).
-    trust_dialog_tick(now_sec);
+    // tới — phải có người ngó lại mỗi vòng (xem `trust_dialog_tick`). Đọc bảng
+    // tab từ chính ảnh chụp `live`, KHÔNG mở lượt dò riêng: hai lượt dò trong
+    // một vòng đã tiêu hết ngân sách 10 giây trước khi ai kịp hỏi câu của mình.
+    trust_dialog_tick(&live, now_sec);
     // Cửa sổ còn đứng đó sau khi phiên của nó đã thoát: NÓI một lần, không tự
     // đóng (Hà 2026-09-03). Dùng chung ảnh chụp `live` để "phiên nào còn sống"
     // trả lời từ đúng một nguồn — xem `orphan_windows_tick`.

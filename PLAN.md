@@ -82,6 +82,55 @@ thật. Mã cũ nằm trong git trước `cf20874`.
 | — | 🪦 **Một chốt bị GỠ vì đối chứng ngược đo được nó là mutant TƯƠNG ĐƯƠNG** | `probe_verdict` từng có thêm `gap_luc_ms > 0` kèm lời giải thích nghe rất hợp lý (*"mốc 0 nghĩa là chưa có lượt gấp nào"*). Cấy bỏ nó ⟹ **`RED_G5 = 0`**, bài kiểm KHÔNG đỏ. Lý do: mốc chưa dùng là `0`, còn `bay_gio_ms` là giờ epoch thật (~1,79e12), nên `con` luôn âm sâu và nhánh ấy chưa từng chạm tới — chốt chưa chặn một lượt nào. **Gỡ chứ không giữ**, đúng lựa chọn đã ghi cho mutant *"bỏ lượt cắt `(` trong `minutes_until_reset`"*: một dòng mã không đỏ được, kèm một câu chuyện nghe hợp lý, tệ hơn cả hai vế của nó. Bài kiểm ở lại nhưng đổi lời khai — nó nói về SỐ HỌC (`0 + 2000 − 1_789_264_800_000` âm sâu) chứ không giả vờ gác một nhánh không tồn tại, và nó sẽ đỏ thật nếu ai đổi thang đo thời gian |
 | — | ⚠ **CHƯA đo: vì sao Terminal câm** | Ba ứng viên, một cái nằm ngay trong luật của repo này (*một hộp thoại modal chặn mọi lệnh automation sau nó*), hai cái còn lại là Terminal đang bận vẽ một phiên xả chữ, và WindowServer bị giành. Cửa ③ dựng ra chính để thu số liệu trả lời câu này ở những lượt hết giờ sau — nên **đừng đọc S36 như đã tìm ra nguyên nhân**: nó chặn HẬU QUẢ (một vòng 448 giây) và đặt một cái thước cho lượt tới |
 
+**Cỗ máy bấm hộ hộp tin-thư-mục thôi hỏi Terminal 81 lần mỗi 30 giây
+(2026-09-16).** `trust_dialog_tick` gọi `keys::terminal_tabs()` rồi
+`answer_trust_dialog` cho **TỪNG** tab `claude`, mà hàm ấy là `window_of` +
+`screen_text` — hai lượt `osascript` nữa mỗi tab. Với 40 cửa sổ trên máy này,
+một nhịp 30 giây đòi **81 lời gọi** trên ngân sách 10 giây
+(`keys::PROBE_BUDGET_MS`). Nó không bấm được cho ai, **và tiêu hết phần của
+những cỗ máy chạy sau**. Đo trên `hubd.err` 31 giờ (15/09 17:35 → 16/09 00:46):
+
+| | trước bản vá |
+|---|---|
+| `trust_dialog_screen_blind` | **2111** lượt · **2046** vì *"vòng nền đã tiêu hết ngân sách"* |
+| chuỗi `window_of_from_cache → keys_screen_read_failed → trust_dialog_screen_blind` | **1946 / 2394** lượt đọc màn hỏng |
+| `probe_budget_spent` (2 giờ cuối, 161 vòng) | **144 vòng = 89%**, vòng nặng nhất bỏ **56** phép dò |
+| dấu vân tay | các dòng của CÙNG một vòng cách nhau **0,00s** cho ttys000-039 |
+
+Vá: `SessionsSnapshot` mang theo bảng tab của chính vòng ấy
+(`Option<Vec<Tab>>`, `#[serde(skip)]` — `None` là **chưa đo được**, không phải
+*"máy không có tab"*), rồi `trust_dialog_tick` **và** `orphan_windows_tick` đọc
+chung nó, không mở lượt dò nào. Đúng luật đã viết sẵn trong `run_once`:
+*"MỘT ảnh chụp cho cả vòng… dựng hai lần là hai câu trả lời lệch nhau"*.
+Cái KHÔNG đổi: **bấm vẫn chỉ bấm sau một bản đọc TƯƠI** — chữ trong ảnh chụp
+chỉ chọn ra *ai đáng hỏi lại*. Tab không chấm được (màn `None`, hay khung
+trắng) vẫn thành ứng viên, có trần `TRUST_FRESH_MAX = 6`, và phần bị trần cắt
+thì **nói ra** (`trust_tick_khong_cham_duoc`).
+
+**Mỗi hàng `/accounts` nói được GIỜ SẮP RESET (2026-09-16).** Hà, ảnh chụp
+Telegram 07:46: *"Danh sách acc thiếu giờ sắp reset"* — trong năm hàng chỉ acc2
+(đã kịch trần) mang `mở lại 17:59 16/09`, bốn hàng còn lại trắng giờ, tức đúng
+lúc con số còn dùng để CHỌN thì nó im. Dữ kiện vốn đã có (`week_resets_at` của
+cả năm tài khoản nằm trong `quota_read` mỗi vòng), chỉ chưa đi ra tới màn.
+`quota::sap_reset` lấy mốc của **cửa sổ chật nhất** — đúng cửa sổ mà `rank` dùng
+để chấm hạng, nếu không thì con số và cái hẹn nói về hai thứ khác nhau. Đo trên
+sổ THẬT, vòng đầu sau khi cài (`quota_read`, 01:39:23Z):
+
+| acc | hạng | giờ đưa ra màn |
+|---|---|---|
+| acc1 | đã dùng 62% | `reset tuần 14:59 20/09 (còn 4 ngày)` |
+| acc2 | ĐÃ KỊCH TRẦN | giữ nguyên `mở lại …` — hai câu khác nghĩa, không gộp |
+| acc3 | đã dùng 29% | `reset tuần 13:00 22/09 (còn 6 ngày)` |
+| acc4 | đã dùng 46% | `reset 5 tiếng 09:50 16/09 (còn 70 phút)` ← 5 tiếng 46% > tuần 16% |
+| acc5 | đã dùng 18% | `reset tuần 16:00 21/09 (còn 5 ngày)` |
+
+7 bài kiểm thuần + 1 bài DÒ trên sổ thật. Đối chứng ngược lôi ra một điểm mù
+trong chính cổng ấy: mutant *"bỏ cửa `..=0 => return None`"* ra **XANH** ⟹ không
+bài nào chạm tới dòng đó, và đọc lại thì dòng đó còn sai hướng — `cua_so` đã loại
+mốc quá khứ, nên `phut == 0` nghĩa là *"còn dưới một phút"*, mà bản cũ lại làm
+hàng ấy **biến mất khỏi màn đúng phút đáng nói nhất**. Nay in `còn dưới 1 phút`,
+và mutant được nhắm lại vào đúng cửa thi hành mệnh đề (`cua_so`).
+
 **UC-S11, bằng chứng chạy thật (2026-08-10, cả hai đường):**
 
 | | hỏi lúc | Hà bấm | kết cục | phiên sau đó |
@@ -95,6 +144,20 @@ gì cho tới khi bấm nút.` → `✋ Đã huỷ trên Telegram — không d�
 Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghiệm thu ở **390×844**.
 
 ## Còn nợ, có sổ
+
+- 🔴 **Phép dò GỘP của ảnh chụp một mình đã ăn hết ngân sách vòng — đo
+  2026-09-16, CHƯA vá.** `keys::PROBE_BUDGET_MS` là 10 giây cho cả một vòng,
+  còn `sessions_snapshot_ms.ms_terminal_probe` (445 lượt, 31 giờ) ra
+  **p50 5.147ms · p90 26.600ms · max 98.277ms** ⇒ riêng phép dò LÕI tiêu **51%
+  ngân sách ở p50 và 266% ở p90**. Nên mọi phép dò TUỲ CHỌN chạy sau nó bị bỏ ở
+  phần lớn các vòng, và con số `probe_budget_spent` **144/161 vòng (89%)** trong
+  hai giờ 15/09 22:46→16/09 00:46 là hệ quả trực tiếp, không phải trùng hợp.
+  Bản vá 16/09 (hai cái tick đọc chung ảnh chụp) **gỡ hai cỗ máy ra khỏi cái
+  ngân sách ấy**, nó KHÔNG làm ngân sách rộng ra — đừng đọc nhầm. Số phiên
+  trong ảnh chụp đã lên tới **44** (min 11), và giá của lượt dò gộp đo tay cùng
+  ngày trên 40 cửa sổ: `terminal_tabs` 4,26/4,17/4,32s ·
+  `terminal_screens` 5,34/4,83/**17,19**s. ⇒ Việc kế: hoặc cắt giá lượt dò gộp,
+  hoặc thôi dựng cả ảnh chụp mỗi vòng khi không có ai nhìn.
 
 - **Bản bàn giao từ nhật ký (`sessions::handover_from_journal`) mang thêm CÂY
   LÀM VIỆC THẬT — VÁ XONG 2026-09-05, ĐÃ ĐO BẰNG DÒ THẬT, CHƯA QUA MỘT LƯỢT
@@ -184,6 +247,15 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
   `hub/.mcp.json`. Đừng đọc "cargo test xanh" thành "đã chạy được trên Chrome
   thật" — đúng luật honest-reporting của sổ này.
 - 💣 **Bẫy đang nằm chờ: huba gõ vào `selected tab`, không phải tab của phiên.**
+  🔴 *Thêm 16/09 — bản vá "quét hộp tin-thư-mục trên ảnh chụp" làm lộ ra một vế
+  nữa của chính cái bẫy này.* Ảnh chụp gộp (`terminal_screens`) mang chữ đi kèm
+  ĐÚNG tab đã khai tty, còn bản đọc tươi (`answer_trust_dialog` →
+  `screen_text(window_of(tty))`) vẫn đọc `selected tab`. Nên trên một cửa sổ hai
+  tab, hai bản đọc ấy nói về HAI màn khác nhau: huba sẽ thấy hộp trong ảnh chụp
+  rồi đọc lại không thấy, và **không bấm**. Hỏng về phía im lặng (không bấm nhầm
+  ai) nên chưa nguy, nhưng nó biến một cửa sổ kẹt thành cửa sổ kẹt vĩnh viễn.
+  Đo 16/09 07:4x: cả **40** cửa sổ Terminal trên máy này đều đúng 1 tab, nên vế
+  này chưa cắn — cùng kết luận với lượt đo 4 cửa sổ ngày 12/08.
   `keys::do_script` và `keys::screen_text` đều nhắm `selected tab of window id
   W`, trong khi `window_of` chỉ tìm ra CỬA SỔ chứa tty ấy. Đo 2026-08-12: cả 4
   cửa sổ Terminal đều đúng 1 tab nên hiện chưa sai — nhưng mở tab thứ hai trong

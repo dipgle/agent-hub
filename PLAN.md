@@ -213,26 +213,69 @@ Mặt bằng: 4 tab (Phiên · Trao đổi · Sức khoẻ · Cấu hình), nghi
 
 ## Còn nợ, có sổ
 
-- 🔴 **Bàn giao mở phiên mới mà KHÔNG đóng được phiên cũ — 14 lượt, đo
-  2026-09-16.** `handover_old_window_not_closed`, cùng con số ở cả `hubd.err`
-  lẫn `logs/huba.log`. Hậu quả phiên `dwork/main` đo được: **hai bản sao cùng
-  sống 5h19′, cả hai cùng nhận việc thật** (1.731 lượt nói ↔ 90 lượt), có lúc
-  BA phiên `main` cùng sống, và chủ máy phải tự gõ *"Có phiên main khác rồi thì
-  đóng"*. Đây mới là thứ Hà gọi là *"nhảy sang phiên khác"* — không phải con trỏ
-  nhảy, mà hai bản sao cùng làm.
-  Lý do ghi trong log, 8 lượt gần nhất: *"không hỏi được tab còn bận không"* ×4 ·
-  *"vòng nền đã tiêu hết ngân sách hỏi Terminal (10,3s · 11,9s /10,0s)"* ×2 ·
-  *"nhường Terminal cho một lượt hỏi đang có người chờ"*.
-  ⚠ **Hai lượt mang chữ "hết ngân sách" là nạn nhân của thủ phạm đã vá 16/09**
-  (`trust_dialog_tick`, xem mục "Đã xong"): Terminal trả lời AppleScript TUẦN
-  TỰ, nên 81 lời gọi mỗi 30 giây nằm xếp hàng ngay trước cả phép hỏi *"tab còn
-  bận không"* của đường bàn giao. ⇒ **DỰ ĐOÁN ĐO ĐƯỢC, chưa phải kết luận:** nếu
-  ngân sách là nguyên nhân chính thì dòng ấy phải thưa hẳn kể từ **16/09
-  01:39Z**. Nhật ký mấy ngày tới trả lời; đừng đóng mục này trước khi có số.
-  ⇒ Phần CHẮC CHẮN còn lại: **đóng phiên cũ là BẤT BIẾN của bàn giao**, không
-  phải việc phụ — hụt thì phải vào sổ và thử lại (`close_pending_tick` đã đúng
-  hướng, nhánh này không đi tới đó), chứ không phải ghi một dòng log rồi thôi.
-  *(Số đo do phiên `dwork/main` mang sang 16/09; đã đo lại bằng nguồn của huba.)*
+- 🔴 **BÀN GIAO CÓ MỘT NHÁNH SINH RA CỬA SỔ MỚI MÀ KHÔNG ĐI QUA SỔ — 11/162
+  lượt bắn (6,8 %), đo 2026-09-16.**
+
+  ~~Bản đầu của mục này (viết cùng ngày, vài giờ trước) ghi: *"mở phiên mới mà
+  không đóng được phiên cũ — `handover_old_window_not_closed` 14 lượt… đây mới
+  là thứ Hà gọi là nhảy sang phiên khác"*.~~ **ĐÍNH CHÍNH — chẩn đoán ấy SAI, và
+  giữ nguyên văn ở đây vì nó là một cái bẫy đọc rất dễ vấp:** thứ tự bàn giao
+  *"mở phiên kế thừa TRƯỚC, đóng phiên cũ SAU"* là **cố ý**
+  (`sessions.rs:6895` mở, `:6943` mới hỏi `should_close_old_window`), nên một
+  quãng hai phiên cùng sống là **bình thường**, không phải lỗi. Đo chồng lấn
+  thật của từng cặp: n=144 · p50 **125 giây** · p90 205s · max 3.351s ·
+  **0 lượt quá một giờ**. Và `handover_old_window_not_closed` **không phải cụt
+  đường**: `defer_close_to_book` đóng được sau đó **30/53** lần. Cơ chế LÀNH.
+  ⇒ Bài học: một dòng log tên là *"không đóng được"* đọc như một hỏng hóc, trong
+  khi nó là **một bước trong quy trình có đường lùi**. Đếm dòng ấy rồi kết luận
+  là đếm đúng, hiểu sai.
+
+  **GỐC THẬT, hẹp hơn nhiều, và nó nằm đúng chỗ `PLAN.md` đã tự khai là
+  KHÔNG-ĐO-ĐƯỢC** (*"đường THÀNH CÔNG của nhánh này không có log"*): có một
+  nhánh sinh ra cửa sổ mới **không ghi `handover_window_opened`, không gọi
+  `remember_successor`, không đưa cửa sổ cũ vào sổ đóng** — nhưng **vẫn kịp ghi
+  `AUTO_DONE_KEY`**, nên `already_handed_over` (`pipeline.rs:3205-3210`) trả
+  `AlreadyDone` và **khoá luôn mọi lượt thử lại**. Trong khi chính
+  `pipeline.rs:2072-2075` đã viết đúng định nghĩa: *"bàn giao coi là XONG khi mở
+  được phiên mới, trong khi việc chưa xong chừng nào phiên cũ còn sống"*.
+
+  Dòng thời gian lượt `1aac8d22` (= `[dwork/main]`), rút từ `logs/huba.log`:
+
+  ```text
+  18:45:33  auto_handover_firing  pct=80 · fork_call_budget cap=16.59
+            ⟨KHÔNG handover_window_opened · KHÔNG close_done · KHÔNG lỗi⟩
+  18:48:45  phiên d1cdcd48 nhận lời nhắc "Tiếp quản phiên trước…"
+            ⟹ CỬA SỔ MỚI CÓ RA ĐỜI THẬT, kèm bản bàn giao đầy đủ
+  18:49:22  auto_handover_held  pct=81  why="AlreadyDone"   ← cửa khoá lại
+  … 5h19′ hai phiên cùng làm việc thật (1.731 lượt nói ↔ 90 lượt) …
+  00:03:43  auto_handover_firing pct=93  ← chỉ thoát nhờ AUTO_RETRY_STEP +10 điểm
+  ```
+
+  ⇒ Bản vá 15/08 (`defer_close_to_book`, `AUTO_RETRY_STEP`) **chỉ với tới nhánh
+  `Ok(w)` có `w.closed_err.is_some()`** (`pipeline.rs:2076-2077`); lượt 18:45
+  không đi qua đó. Cái hố lấp năm ngoái còn một cửa bên hông.
+
+  **MẪU SỐ, đo bằng nguồn của huba (`logs/huba.log`, 639.434 dòng JSON, 49 dòng
+  hỏng):** `auto_handover_firing` **162** · `handover_window_opened` **278** ·
+  lượt bắn **không** thấy `handover_window_opened` trong 300 giây sau:
+  **11/162 = 6,8 %**, gồm đúng lượt `1aac8d22` 18:45:33. Đây là **dân số của
+  lỗi**, không phải một ca lẻ.
+
+  **Việc phải làm, chưa làm:** ① đừng ghi `AUTO_DONE_KEY` ở bước MỞ — ghi khi
+  **đo được phiên cũ đã chết**, hoặc ghi kèm cờ *"chưa đóng xong"* để
+  `already_handed_over` trả `false`; ② nhánh sinh cửa sổ mới ngoài
+  `handover_window_opened` thì hoặc bịt, hoặc bắt nó gọi đủ ba việc kia;
+  ③ bất biến cho chính nó: **"số phiên cùng nhãn sống đồng thời ≤ 1 sau chồng
+  lấn 5 phút"**, và **đối chứng ngược có sẵn trong nhật ký lịch sử** — cấy lại
+  lượt 18:45 thì phải ĐỎ, cấy lượt chồng lấn 136 giây đóng sạch thì phải KHÔNG đỏ.
+
+  ⚠ `at_percent` **KHÔNG phải chỗ cần động**: với gốc ở đây thì ngưỡng cao hơn
+  chỉ làm lỗi **thưa hơn**, không mất đi. (Đề nghị `88` đã được chính phiên
+  `dwork/main` rút lại.)
+  *(Số đo do phiên `dwork/main` mang sang rồi tự đính chính cùng ngày; mọi con
+  số trên đã đo lại bằng nguồn của huba. Chỗ lệch duy nhất: họ khai "0 dòng hỏng
+  JSON", đo lại ra **49** — không đổi kết luận, nhưng một mẫu số khai là sạch mà
+  không sạch thì phải nói ra.)*
 
 - **Con trỏ nằm lại phiên ĐÃ CHẾT, đôi khi ở DỰ ÁN KHÁC** — 3 lượt nhật ký ghi
   `"ended" == "focus"`, và 2 lượt con trỏ đang ở project khác lúc bàn giao dwork

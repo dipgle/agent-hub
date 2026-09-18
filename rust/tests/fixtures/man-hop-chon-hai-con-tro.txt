@@ -1,0 +1,25 @@
+
+✻ Sautéed for 4m 11s
+
+❯ Tôi muốn xem workflow chi tiết                                                                                                                                                                              
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Workflow nào  ✔ Submit  →
+
+"Workflow chi tiết" — Hà muốn xem cái nào? Bốn thứ này ra bốn tài liệu khác hẳn nhau nên tôi hỏi trước thay vì đoán.
+
+❯ 1. [✔] Luồng ①②③ của tiêu chuẩn
+  Luồng dữ liệu tích hợp Worklist end-to-end: app phát việc → người dùng bấm → W&N gọi ngược app → app trả 1/6 nhánh → Worklist hỏi chi tiết nghiệp vụ. Vẽ rõ HÔM NAY chạy thế nào vs SAU chuẩn phải chạy thế 
+  nào, chỗ nào đứt. Đây là thứ cần để Hà quyết A/B/C.
+  2. [ ] Quy trình T2 phải làm
+  Kế hoạch thi công T2 chi tiết: 3 lát T2a/T2b/T2c, mỗi lát gồm những cửa nào phải viết/sửa, cổng + đối chứng ngược kèm theo, thứ tự phụ thuộc, và điều kiện xong của từng lát.
+  3. [ ] Quy trình đội / phiếu
+  Cách đội đang vận hành: vai–làn–phiên chính, phiếu đi qua DW-phieu thế nào, ai chốt cái gì, chỗ nào đang đứt (main không có địa chỉ sống, phiếu nằm trên nhánh làn, deny push của vai).
+  4. [ ] Cách tôi đã làm lượt này
+  Quy trình làm việc của chính phiên này: chia 6 câu thành 5 mũi đo song song, đo trên origin/main, tự kiểm lại từng khẳng định sắc, ba lần suýt nói sai và cách bắt được.
+  5. [ ] Type something
+     Submit
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+

@@ -268,3 +268,67 @@ fn without_the_navigate_footer_it_refuses_to_send_arrows() {
     assert!(submit_plan(screen, 0).is_none());
     assert!(checkbox_plan(screen, 2).is_none());
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MÀN THẬT CÓ **HAI** DẤU `❯` — Hà 2026-09-18: *"giờ thì bấm vào lựa chọn nào
+// cũng như bấm vào số 1"*.
+//
+// Bản chụp bằng osascript từ chính cửa sổ đang treo hộp chọn (window 1525):
+//     dòng  4:  `❯ Tôi muốn xem workflow chi tiết`   ← ô nhập / lượt trước
+//     dòng 10:  `❯ 1. [✔] Luồng ①②③ của tiêu chuẩn`  ← con trỏ THẬT
+// `nav_plan` cũ lấy dấu `❯` ĐẦU TIÊN ⇒ trúng ô nhập ⇒ trả `None` ⇒ chỗ gọi rơi
+// về gõ số trần ⇒ CR chốt ô con trỏ = ô 1, mọi lần.
+//
+// 🔴 Ca này dùng MÀN THẬT chứ không phải màn tự bịa: con bọ nằm ở chỗ TUI vẽ
+//    thêm một `❯` mà không ai nghĩ tới, và một fixture do tôi tự gõ sẽ không có
+//    nó — đúng cái làm nó sống sót qua mọi bài kiểm cũ.
+const MAN_THAT: &str = include_str!("fixtures/man-hop-chon-hai-con-tro.txt");
+
+#[test]
+fn man_that_hai_con_tro_van_di_duoc_toi_muc_3() {
+    let plan = huba::keys::checkbox_plan(MAN_THAT, 3)
+        .expect("phải dựng được kế hoạch — trả None là rơi về gõ số trần");
+    // Con trỏ ở mục 1, đích là mục 3 ⇒ ba lượt: enter · ↓↓ · enter
+    assert_eq!(
+        plan,
+        vec![
+            vec!["enter".to_string()],
+            vec!["down".to_string(), "down".to_string()],
+            vec!["enter".to_string()],
+        ],
+        "kế hoạch sai: {plan:?}"
+    );
+}
+
+#[test]
+fn man_that_muc_1_la_cho_dang_dung_nen_chi_mot_luot() {
+    let plan = huba::keys::checkbox_plan(MAN_THAT, 1).expect("phải dựng được kế hoạch");
+    assert_eq!(plan, vec![vec!["enter".to_string()]], "kế hoạch sai: {plan:?}");
+}
+
+#[test]
+fn man_that_di_len_khi_dich_o_tren() {
+    // Không có ca nào đi LÊN trên màn này (con trỏ ở mục 1), nên dựng một biến
+    // thể: dời `❯` xuống mục 4 rồi đòi mục 2 ⇒ phải ra `up` ×2.
+    let doi = MAN_THAT
+        .replace("❯ 1. [✔]", "  1. [✔]")
+        .replace("  4. [ ]", "❯ 4. [ ]");
+    let plan = huba::keys::checkbox_plan(&doi, 2).expect("phải dựng được kế hoạch");
+    assert_eq!(
+        plan,
+        vec![
+            vec!["enter".to_string()],
+            vec!["up".to_string(), "up".to_string()],
+            vec!["enter".to_string()],
+        ],
+        "kế hoạch sai: {plan:?}"
+    );
+}
+
+#[test]
+fn man_khong_phai_hop_checkbox_thi_van_tra_none() {
+    // CHIỀU NGƯỢC: cổng phải biết IM. Không có ô `[ ]` thì đây là hộp chọn MỘT,
+    // và đường gõ số trần vẫn đúng cho nó — `checkbox_plan` không được lấn sang.
+    let man = "❯ 1. Phương án A\n  2. Phương án B\nEnter to select · ↑/↓ to navigate\n";
+    assert!(huba::keys::checkbox_plan(man, 2).is_none());
+}

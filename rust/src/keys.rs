@@ -4562,9 +4562,28 @@ pub fn nav_plan(screen: &str, target_line: usize) -> Option<Vec<Vec<String>>> {
         .filter(|(_, l)| is_item_line(l))
         .map(|(i, _)| i)
         .collect();
+    // 🔴 CON TRỎ PHẢI LÀ MỘT MỤC, KHÔNG PHẢI DẤU `❯` ĐẦU TIÊN TRÊN MÀN.
+    //
+    // Hà 2026-09-18: *"giờ thì bấm vào lựa chọn nào cũng như bấm vào số 1"*.
+    // Đo trên chính màn ấy (`tests/fixtures/man-hop-chon-hai-con-tro.txt`,
+    // chụp bằng osascript lúc 08:2x): màn có **HAI** dấu `❯` —
+    //     dòng  4:  `❯ Tôi muốn xem workflow chi tiết`   ← ô nhập / lượt trước
+    //     dòng 10:  `❯ 1. [✔] Luồng ①②③ của tiêu chuẩn`  ← con trỏ THẬT
+    // `position` lấy cái ĐẦU TIÊN ⇒ trúng dòng ô nhập ⇒ dòng ấy không nằm trong
+    // `items` ⇒ `?` trả `None` ⇒ `checkbox_plan` trả `None` ⇒ chỗ gọi rơi về
+    // "gõ thẳng con số". Mà hộp chọn-nhiều KHÔNG nhận số (dòng chân của nó chỉ
+    // khai `Enter to select · ↑/↓ to navigate`), nên con số rơi vào hư không và
+    // **dấu CR mà `do script` luôn kèm** chốt ô con trỏ đang đứng — ô 1, mọi lần.
+    // Bằng chứng nó chưa từng chạy: `keys_checkbox_plan` = **0 lượt** trong 60 MB
+    // nhật ký, trong khi `keys_typed kind:"key"` vẫn đều.
+    //
+    // Hỏng ÂM THẦM về phía "không tìm thấy" — `None` ở đây đọc y hệt "màn này
+    // không phải hộp checkbox", nên đường lùi trông hợp lý trong khi nó sai.
     let cursor_line = lines
         .iter()
-        .position(|l| l.trim_start().starts_with('\u{276f}'))?;
+        .enumerate()
+        .find(|(_, l)| l.trim_start().starts_with('\u{276f}') && is_item_line(l))
+        .map(|(i, _)| i)?;
     let from = items.iter().position(|i| *i == cursor_line)?;
     let to = items.iter().position(|i| *i == target_line)?;
     let delta = to as isize - from as isize;

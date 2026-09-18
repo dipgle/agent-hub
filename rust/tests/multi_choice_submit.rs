@@ -332,3 +332,63 @@ fn man_khong_phai_hop_checkbox_thi_van_tra_none() {
     let man = "❯ 1. Phương án A\n  2. Phương án B\nEnter to select · ↑/↓ to navigate\n";
     assert!(huba::keys::checkbox_plan(man, 2).is_none());
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MỤC TỰ-DO ("Type something") — Hà 2026-09-18: *"gửi vào type something chưa
+// thấy gì"*. Đường ấy gửi một CHỮ SỐ bằng phím rời; hộp chọn-nhiều không nhận
+// số, nên nó bay vào hư không — mà chỗ gọi vẫn khai "đã chọn mục 5" chỉ vì
+// `send_bare` trả `Ok(())`. Đo trên màn thật ngay sau đó: mục 5 vẫn `[ ]`, con
+// trỏ vẫn ở mục 4.
+//
+// `bare_item_keys` là đường thay thế: k mũi tên + Enter, phím RỜI nên không kèm
+// CR. KHÔNG cần mẹo ba-lượt của `nav_plan` vì không có CR nào phải triệt tiêu.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// Màn thật, con trỏ ở mục 1 ⇒ tới mục 5 là 4 lần ↓ rồi Enter.
+#[test]
+fn bare_item_keys_di_tu_muc_1_toi_muc_5() {
+    let keys = huba::keys::bare_item_keys(MAN_THAT, 5).expect("phải dựng được dãy phím");
+    assert_eq!(
+        keys,
+        vec!["down", "down", "down", "down", "enter"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>(),
+        "dãy phím sai: {keys:?}"
+    );
+}
+
+/// Con trỏ ở mục 4 (đúng trạng thái màn lúc Hà gõ "Thử xem") ⇒ chỉ còn 1 lần ↓.
+#[test]
+fn bare_item_keys_tu_muc_4_toi_muc_5_chi_mot_mui_ten() {
+    let doi = MAN_THAT
+        .replace("❯ 1. [✔]", "  1. [✔]")
+        .replace("  4. [ ]", "❯ 4. [ ]")
+        .replace("  4. [✔]", "❯ 4. [✔]");
+    let keys = huba::keys::bare_item_keys(&doi, 5).expect("phải dựng được dãy phím");
+    assert_eq!(
+        keys,
+        vec!["down".to_string(), "enter".to_string()],
+        "dãy phím sai: {keys:?}"
+    );
+}
+
+/// KHÔNG có mẹo ba-lượt ở đây: `send_bare` không kèm CR nên dãy phải là dãy THẬT.
+/// Ca này khoá đúng khác biệt ấy giữa hai đường.
+#[test]
+fn bare_item_keys_khac_nav_plan_o_cho_khong_co_enter_dem() {
+    let bare = huba::keys::bare_item_keys(MAN_THAT, 3).expect("dãy phím");
+    let qua_do_script = huba::keys::checkbox_plan(MAN_THAT, 3).expect("kế hoạch");
+    assert_eq!(bare, vec!["down", "down", "enter"].into_iter().map(String::from).collect::<Vec<_>>());
+    // Đường `do script` phải có Enter ĐỆM ở đầu để triệt tiêu cú bật/tắt dọc đường.
+    assert_eq!(qua_do_script[0], vec!["enter".to_string()]);
+    assert_eq!(qua_do_script.len(), 3, "đường do script phải là BA lượt ghi");
+}
+
+/// CHIỀU NGƯỢC: màn không khai `↑/↓ to navigate` ⇒ KHÔNG dựng dãy, vì lúc ấy
+/// mũi tên có thể vừa di vừa chốt.
+#[test]
+fn bare_item_keys_tu_choi_khi_man_khong_khai_navigate() {
+    let man = MAN_THAT.replace("↑/↓ to navigate", "");
+    assert!(huba::keys::bare_item_keys(&man, 5).is_none());
+}

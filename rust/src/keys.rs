@@ -4651,6 +4651,55 @@ pub fn ticks_changed(before: &str, after: &str) -> Vec<usize> {
         .collect()
 }
 
+/// Dãy PHÍM RỜI đưa con trỏ tới mục `n` rồi Enter — cho đường `cgkeys`.
+///
+/// 🔴 Hà 2026-09-18: *"gửi vào type something chưa thấy gì"*. Đo trên màn thật
+/// ngay sau đó: mục 5 vẫn `[ ]`, con trỏ vẫn đứng ở mục 4, không ô nhập nào mở.
+/// Gốc: đường mục-tự-do gửi **chữ số** bằng `send_bare(w, [so])` — cùng đúng cái
+/// sai đã vá cho `checkbox_plan` sáng nay. Hộp chọn-nhiều KHÔNG nhận số (dòng
+/// chân của nó chỉ khai `↑/↓ to navigate`), nên con số bay vào hư không; rồi chỗ
+/// gọi khai "đã chọn mục 5" **chỉ vì `send_bare` trả `Ok(())`** — mà `Ok` ở đó
+/// chỉ nói PHÍM ĐÃ ĐƯỢC BẮN ĐI, không nói mục nào được chọn.
+///
+/// Khác [`nav_plan`] ở một điểm cốt lõi: đường kia đi qua `do script`, mỗi lượt
+/// ghi tự kèm một CR nên phải xếp BA lượt cho các cú bật/tắt dọc đường triệt
+/// tiêu nhau. `send_bare` đi thẳng bằng `CGEventPostToPid`, **không kèm gì**,
+/// nên ở đây chỉ cần đúng dãy phím thật: k mũi tên rồi Enter.
+pub fn bare_item_keys(screen: &str, n: usize) -> Option<Vec<String>> {
+    if !screen.contains("to navigate") {
+        return None;
+    }
+    let lines: Vec<&str> = screen.lines().collect();
+    let items: Vec<usize> = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| is_item_line(l))
+        .map(|(i, _)| i)
+        .collect();
+    // Cùng cái neo đã vá ở `nav_plan`: con trỏ phải VỪA mang `❯` VỪA là một mục
+    // — màn thật có thêm một `❯` ở dòng ô nhập phía trên.
+    let cursor_line = lines
+        .iter()
+        .enumerate()
+        .find(|(_, l)| l.trim_start().starts_with('\u{276f}') && is_item_line(l))
+        .map(|(i, _)| i)?;
+    let target = lines.iter().position(|l| {
+        let t = l.trim().trim_start_matches('\u{276f}').trim();
+        t.split_once('.')
+            .is_some_and(|(num, _)| num.trim().parse::<usize>() == Ok(n))
+    })?;
+    let from = items.iter().position(|i| *i == cursor_line)?;
+    let to = items.iter().position(|i| *i == target)?;
+    let delta = to as isize - from as isize;
+    let mut keys: Vec<String> = std::iter::repeat_n(
+        if delta > 0 { "down" } else { "up" }.to_string(),
+        delta.unsigned_abs(),
+    )
+    .collect();
+    keys.push("enter".to_string());
+    Some(keys)
+}
+
 /// Chuỗi phím để bật/tắt LỰA CHỌN số `n` trong một hộp CHỌN NHIỀU.
 ///
 /// `None` khi màn không phải hộp checkbox hoặc không thấy mục ấy — chỗ gọi giữ

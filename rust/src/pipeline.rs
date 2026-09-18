@@ -13870,24 +13870,82 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                      Cấp quyền ở System Settings → Privacy & Security → Accessibility → `hubd`."
                                                 ))
                                             } else {
-                                                match crate::keys::send_bare(
-                                                    w,
-                                                    std::slice::from_ref(&so),
-                                                ) {
+                                                // 🔴 ĐI BẰNG MŨI TÊN, KHÔNG GỬI CHỮ SỐ — Hà
+                                                // 2026-09-18: *"gửi vào type something chưa
+                                                // thấy gì"*. Bản cũ gửi `[so]` (một chữ số);
+                                                // hộp chọn-nhiều không nhận số nên nó bay vào
+                                                // hư không, mà chỗ này vẫn khai "đã chọn mục N"
+                                                // — xem `keys::bare_item_keys`.
+                                                let day = so
+                                                    .parse::<usize>()
+                                                    .ok()
+                                                    .and_then(|n| crate::keys::bare_item_keys(&body, n));
+                                                // Không dựng được đường ⟹ KHÔNG bấm liều.
+                                                // Trả một câu nói rõ vì sao, chứ không im.
+                                                match day {
+                                                // Không dựng được đường ⟹ KHÔNG bấm liều, và
+                                                // nói rõ vì sao chứ không im.
+                                                None => {
+                                                    logging::warn(
+                                                        "free_text_no_nav_plan",
+                                                        json!({ "session": s.session_id, "muc": so,
+                                                                "why": "không dựng được đường đi tới mục ấy từ màn đang đọc được" }),
+                                                    );
+                                                    Some(format!(
+                                                        "⚠ Mục {so} là ô gõ chữ tự do, nhưng tôi KHÔNG dựng được đường đi tới nó \
+                                                         từ màn đang đọc được (không thấy con trỏ, hoặc không thấy mục ấy).\n\
+                                                         Không bấm liều: số trần không chọn được gì trong hộp này, còn Enter trần \
+                                                         thì chốt nhầm ô con trỏ đang đứng. Gửi /shot để nhìn màn."
+                                                    ))
+                                                }
+                                                Some(day) => match crate::keys::send_bare(w, &day) {
                                                     Ok(()) => {
-                                                        logging::info(
-                                                            "free_text_opened_by_bare_key",
-                                                            json!({ "session": s.session_id,
-                                                                    "muc": so, "nhan": nhan,
-                                                                    "why": "phím rời không kèm CR ⟹ ô nhập mở ra và con trỏ đứng chờ" }),
+                                                        // 🔴 `Ok(())` CHỈ NÓI PHÍM ĐÃ BẮN ĐI.
+                                                        // Bản cũ khai "ô nhập đang mở và con trỏ
+                                                        // đứng chờ ngay đó" thẳng từ nhánh này —
+                                                        // và đo trên màn thật thì mục 5 vẫn `[ ]`,
+                                                        // con trỏ vẫn ở mục 4. Một câu khẳng định
+                                                        // về MÀN thì phải đọc MÀN mới được nói.
+                                                        std::thread::sleep(
+                                                            std::time::Duration::from_millis(400),
                                                         );
-                                                        Some(format!(
-                                                            "✍ Đã chọn mục {so} bằng phím RỜI (không kèm Enter), nên ô nhập \
-                                                             đang mở và con trỏ đứng chờ ngay đó.\n\
-                                                             👉 Gõ nội dung vào đây — nó đi thẳng vào ô ấy.\n\n\
-                                                             (Bấm kiểu thường sẽ kèm một Enter và trả lời câu này bằng chuỗi \
-                                                             RỖNG rồi nhảy tab — đúng cái đã xảy ra với Q2 lúc 15:58.)"
-                                                        ))
+                                                        let sau = match crate::keys::look(&s.tty, 24) {
+                                                            crate::keys::Look::Saw { body, .. } => Some(body),
+                                                            _ => None,
+                                                        };
+                                                        let con_hop = sau
+                                                            .as_deref()
+                                                            .map(crate::keys::is_checkbox_list);
+                                                        logging::info(
+                                                            "free_text_bare_key_sent",
+                                                            json!({ "session": s.session_id,
+                                                                    "muc": so, "nhan": nhan, "phim": day,
+                                                                    "con_hop_chon_sau_khi_bam": con_hop }),
+                                                        );
+                                                        Some(match con_hop {
+                                                            // Hộp biến mất ⟹ mục tự-do đã ăn, ô nhập mở ra.
+                                                            Some(false) => format!(
+                                                                "✍ Đã tới mục {so} bằng phím RỜI ({} mũi tên + Enter) và hộp chọn \
+                                                                 đã đóng — ĐỌC LẠI MÀN để xác nhận, không đoán.\n\
+                                                                 👉 Gõ nội dung vào đây, nó đi thẳng vào ô ấy.",
+                                                                day.len() - 1
+                                                            ),
+                                                            // Hộp còn nguyên ⟹ CHƯA ăn. Nói thẳng.
+                                                            Some(true) => format!(
+                                                                "⚠ Đã bắn {} mũi tên + Enter tới mục {so}, nhưng đọc lại màn thì \
+                                                                 HỘP CHỌN VẪN CÒN ⇒ ô nhập CHƯA mở.\n\
+                                                                 Đừng gõ nội dung vào lúc này: chữ sẽ bị hộp chọn nuốt, chỉ còn dấu \
+                                                                 xuống dòng đi chốt ô con trỏ đang đứng.\n\
+                                                                 Gửi /shot để nhìn màn rồi tính tiếp.",
+                                                                day.len() - 1
+                                                            ),
+                                                            None => format!(
+                                                                "✍ Đã bắn {} mũi tên + Enter tới mục {so}, nhưng KHÔNG đọc lại được \
+                                                                 màn nên tôi không khẳng định ô nhập đã mở hay chưa.\n\
+                                                                 Gửi /shot để nhìn trước khi gõ nội dung.",
+                                                                day.len() - 1
+                                                            ),
+                                                        })
                                                     }
                                                     Err(e) => {
                                                         logging::error(
@@ -13901,6 +13959,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                                              trả lời câu này bằng chuỗi rỗng."
                                                         ))
                                                     }
+                                                },
                                                 }
                                             }
                                         } else {

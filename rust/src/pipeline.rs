@@ -10243,11 +10243,37 @@ fn session_layout(text: &str, data: &SessionData, buttons: &[(String, String)]) 
     // cạnh" đã lặp nhiều lần trong tệp này. Giữ `:enter`/`:clear` (ô nhập, không
     // phải lựa chọn) và `pick:` (bảng nhiều câu — các câu sau không có neo nào
     // trong chữ để mà chèn).
-    if !data.choices.is_empty() {
-        rest_btns.retain(|(_, d)| {
-            !d.starts_with("key:") || d.ends_with(":enter") || d.ends_with(":clear")
-        });
-    }
+    //
+    // 🔴 LUẬT TRÊN ĐÃ BỊ TẮT 2026-09-18 — và nó đã ăn mất 8 ngày của chủ máy.
+    //
+    // Hà, ảnh chụp buồng chat 06:43: *"Bấm mấy cái xong chả thấy cái nào tích,
+    // cái này bị rất lâu rồi chưa sửa"*. Đo lại thì cái ☑ trong chữ **không phải
+    // một đích chạm còn sống**: nó là deep link `t.me/<bot>?start=<payload>`, và
+    // Telegram nay giao tới huba một `/start` **TRẦN, mất sạch payload**.
+    // Bằng chứng, nguyên văn trong `logs`: **10 lượt `telegram_not_a_command`
+    // với `head=[/start]`, từ 10/09 tới 18/09** — tức suốt TOÀN BỘ phần nhật ký
+    // còn giữ (từ 08/09), và **0 lượt nào có payload**. Đối chứng cho thấy đây là
+    // HỒI QUY chứ không phải chưa từng chạy: `verbs.rs:109` chép lại ca 19/08 khi
+    // payload còn nguyên (`head=[/start k_win-ttys_2]`). Hệ quả đo được ở sổ
+    // lệnh: `pick` **3 lượt, lần cuối 12/09**, trong khi `session` 992 và `shot`
+    // 883 — hai cái sau đi bằng NÚT CALLBACK, đường duy nhất còn sống.
+    //
+    // Vì sao dòng `retain` cũ biến một liên kết hỏng thành một màn hình chết:
+    // với hộp MỘT CÂU, mọi lựa chọn đi bằng `key:<id>:<n>`, nên nó quét sạch
+    // đích chạm ở đáy và để lại đúng một đường — đường đã chết. Bảng nhiều câu
+    // thoát nạn chỉ vì `pick:` không khớp `starts_with("key:")`, tình cờ chứ
+    // không do thiết kế.
+    //
+    // Nay: ☑ trong chữ ở lại làm **phần HIỂN THỊ TRẠNG THÁI** (ô nào đã tích,
+    // đọc được ngay tại dòng — đúng thứ Hà đòi 16/08), còn **nút là thứ để
+    // BẤM**. Hai vai trò khác nhau, không phải hai đường cho một việc.
+    //
+    // ⚠ Cái giá phải chịu, khai thẳng: nhãn nút bị Telegram cắt ở 52 ký tự
+    // (`☐ 1 Khô` — Hà đọc được 17/08). Xấu, nhưng một đích chạm XẤU vẫn hơn một
+    // đích chạm CHẾT. Muốn bỏ nút lần nữa thì phải chứng minh trước rằng deep
+    // link giao được payload — bằng một dòng `/start <payload>` có thật trong
+    // log, không bằng lý lẽ.
+    let _ = &data.choices;
     // …và tab đã có ↪ trong chữ thì THÔI nằm ở đáy. Cùng luật, cùng lý do: hai
     // đường cho một việc thì cái ở đáy chỉ là tiếng ồn, và nhãn của nó bị
     // Telegram cắt ở 52 ký tự.
@@ -16080,6 +16106,35 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
                 // thì huba biến lỗi chính tả thành một lượt gõ thật.
                 None => {
                     let head = crate::exec::truncate(item.text.trim(), 40);
+                    // 🔴 `/start` TRẦN = MỘT CÚ CHỌN VỪA RƠI, không phải người
+                    // gõ sai lệnh. Mọi ☑/↪/✅ chèn trong chữ là deep link
+                    // `t.me/<bot>?start=<payload>`; Telegram giao tới đây một
+                    // `/start` mất sạch payload thì cú chạm ấy bốc hơi.
+                    //
+                    // Tách hẳn nhánh này ra vì câu trả lời cũ ("Chưa hiểu lệnh
+                    // này — gõ /help") là thứ đã GIẤU con bọ suốt 8 ngày: người
+                    // bấm đọc nó thành "mình gõ nhầm gì đó", còn người đọc log
+                    // thấy `telegram_not_a_command` thì không đời nào nối nó với
+                    // việc bấm một cái ☑. Đo được 10 lượt như thế, 10/09→18/09,
+                    // và không ai lần ra. Một dòng log gọi đúng tên sự việc rẻ
+                    // hơn tám ngày.
+                    if item.text.trim() == "/start" {
+                        logging::warn(
+                            "telegram_deep_link_payload_lost",
+                            json!({ "why": "`/start` trần — Telegram giao cú chạm mà không mang payload \
+                                            ⇒ một lựa chọn/tab/Submit vừa BỐC HƠI",
+                                    "sua": "bấm NÚT ở đáy tin thay cho ☑ trong chữ" }),
+                        );
+                        if let Err(e) = inbox.send_text(
+                            "⚠ Cú chạm ấy tới nơi nhưng KHÔNG mang theo lựa chọn nào \
+                             (Telegram cắt mất phần dữ liệu của liên kết).\n\
+                             → Bấm NÚT ở đáy tin, hoặc gõ /pick <câu>.<ô> · /key <số>.\n\
+                             Dấu ☑ trong chữ chỉ để NHÌN xem ô nào đã tích.",
+                        ) {
+                            logging::error("telegram_ack_failed", json!({ "err": e }));
+                        }
+                        continue;
+                    }
                     logging::info("telegram_not_a_command", json!({ "head": head }));
                     if let Err(e) = inbox.send_text(
                         "Chưa hiểu lệnh này — gõ /help để xem danh sách.\n\
@@ -16752,4 +16807,103 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     }
     logging::info("cycle_done", serde_json::to_value(&summary)?);
     Ok(summary)
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CỔNG: LỰA CHỌN PHẢI LUÔN CÒN MỘT ĐÍCH CHẠM SỐNG
+//
+// Sinh 2026-09-18 sau khi Hà gửi ảnh buồng chat: *"Bấm mấy cái xong chả thấy cái
+// nào tích, cái này bị rất lâu rồi chưa sửa"*. Gốc: `session_layout` gỡ sạch nút
+// `key:` vì "lựa chọn đã có ☑ trong chữ" — trong khi ☑ là deep link, và Telegram
+// đã thôi giao payload của deep link (10 lượt `/start` TRẦN, 10/09→18/09, 0 lượt
+// có payload). Hộp một câu vì thế còn đúng một đường, và đường ấy đã chết.
+//
+// 🔴 Cổng này neo vào HÀNH VI (nút còn hay mất), KHÔNG neo vào câu chữ của nhãn
+//    hay vào một dòng `retain` cụ thể: vá lại bằng một cách viết khác mà vẫn gỡ
+//    nút thì nó vẫn phải ĐỎ.
+// ══════════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod cong_dich_cham_lua_chon {
+    use super::*;
+
+    fn data_hai_lua_chon(ma: [&str; 2]) -> SessionData {
+        SessionData {
+            sid: "f168de42-5cfb-44cb-a97e-1861cbe0b49c".to_string(),
+            choices: vec![
+                (ma[0].to_string(), "Khô ráo".to_string()),
+                (ma[1].to_string(), "Ướt sũng".to_string()),
+            ],
+            ..Default::default()
+        }
+    }
+    const MAN: &str = "❯ 1. [ ] Khô ráo\n  2. [ ] Ướt sũng\n";
+
+    fn dem_nut(l: &Layout, dau: &str) -> usize {
+        l.rest_btns
+            .iter()
+            .filter(|(_, d)| d.starts_with(dau))
+            .count()
+    }
+
+    /// Hộp MỘT CÂU — ca trong ảnh của Hà. Nút `key:` phải CÒN.
+    #[test]
+    fn hop_mot_cau_van_con_nut_bam() {
+        let data = data_hai_lua_chon(["1", "2"]);
+        let btns = vec![
+            ("1. Khô ráo".to_string(), "key:f168de42:1".to_string()),
+            ("2. Ướt sũng".to_string(), "key:f168de42:2".to_string()),
+        ];
+        let l = session_layout(MAN, &data, &btns);
+        assert_eq!(
+            dem_nut(&l, "key:"),
+            2,
+            "nút chọn bị gỡ ⇒ đích chạm duy nhất còn lại là ☑, mà ☑ đã chết. \
+             rest_btns = {:?}",
+            l.rest_btns
+        );
+    }
+
+    /// Bảng NHIỀU CÂU — `pick:` vốn thoát nạn, giữ nguyên để lần vá sau không
+    /// kéo tuột nó theo.
+    #[test]
+    fn bang_nhieu_cau_van_con_nut_pick() {
+        let data = data_hai_lua_chon(["1.1", "1.2"]);
+        let btns = vec![
+            ("1▸1 Khô ráo".to_string(), "pick:f168de42:1.1".to_string()),
+            ("1▸2 Ướt sũng".to_string(), "pick:f168de42:1.2".to_string()),
+        ];
+        let l = session_layout(MAN, &data, &btns);
+        assert_eq!(dem_nut(&l, "pick:"), 2, "rest_btns = {:?}", l.rest_btns);
+    }
+
+    /// CHIỀU NGƯỢC — cổng phải biết IM. Không có lựa chọn nào thì không có gì
+    /// để giữ, và khẳng định ở trên không được tự thoả bằng một danh sách rỗng.
+    #[test]
+    fn khong_co_lua_chon_thi_khong_co_nut_chon() {
+        let data = SessionData {
+            sid: "f168de42-5cfb-44cb-a97e-1861cbe0b49c".to_string(),
+            ..Default::default()
+        };
+        let l = session_layout("chỉ là chữ thường, không hộp chọn\n", &data, &[]);
+        assert_eq!(dem_nut(&l, "key:"), 0, "rest_btns = {:?}", l.rest_btns);
+    }
+
+    /// ⏎/⌫ của Ô NHẬP là chuyện khác, KHÔNG được vạ lây: chúng vốn bị gỡ khi đã
+    /// chèn được vào giữa chữ, và bản vá 18/09 không đụng tới luật ấy.
+    #[test]
+    fn nut_o_nhap_van_theo_luat_cu() {
+        let mut data = data_hai_lua_chon(["1", "2"]);
+        data.box_text = Some("đang gõ dở".to_string());
+        let btns = vec![
+            ("1. Khô ráo".to_string(), "key:f168de42:1".to_string()),
+            ("⏎ Gửi".to_string(), "key:f168de42:enter".to_string()),
+        ];
+        let l = session_layout(MAN, &data, &btns);
+        assert_eq!(
+            dem_nut(&l, "key:f168de42:1"),
+            1,
+            "rest_btns = {:?}",
+            l.rest_btns
+        );
+    }
 }

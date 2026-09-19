@@ -303,7 +303,11 @@ fn man_that_hai_con_tro_van_di_duoc_toi_muc_3() {
 #[test]
 fn man_that_muc_1_la_cho_dang_dung_nen_chi_mot_luot() {
     let plan = huba::keys::checkbox_plan(MAN_THAT, 1).expect("phải dựng được kế hoạch");
-    assert_eq!(plan, vec![vec!["enter".to_string()]], "kế hoạch sai: {plan:?}");
+    assert_eq!(
+        plan,
+        vec![vec!["enter".to_string()]],
+        "kế hoạch sai: {plan:?}"
+    );
 }
 
 #[test]
@@ -379,10 +383,20 @@ fn bare_item_keys_tu_muc_4_toi_muc_5_chi_mot_mui_ten() {
 fn bare_item_keys_khac_nav_plan_o_cho_khong_co_enter_dem() {
     let bare = huba::keys::bare_item_keys(MAN_THAT, 3).expect("dãy phím");
     let qua_do_script = huba::keys::checkbox_plan(MAN_THAT, 3).expect("kế hoạch");
-    assert_eq!(bare, vec!["down", "down", "enter"].into_iter().map(String::from).collect::<Vec<_>>());
+    assert_eq!(
+        bare,
+        vec!["down", "down", "enter"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>()
+    );
     // Đường `do script` phải có Enter ĐỆM ở đầu để triệt tiêu cú bật/tắt dọc đường.
     assert_eq!(qua_do_script[0], vec!["enter".to_string()]);
-    assert_eq!(qua_do_script.len(), 3, "đường do script phải là BA lượt ghi");
+    assert_eq!(
+        qua_do_script.len(),
+        3,
+        "đường do script phải là BA lượt ghi"
+    );
 }
 
 /// CHIỀU NGƯỢC: màn không khai `↑/↓ to navigate` ⇒ KHÔNG dựng dãy, vì lúc ấy

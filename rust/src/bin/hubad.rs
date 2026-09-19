@@ -367,6 +367,17 @@ fn real_main() -> Result<()> {
         // in the console (disable an adapter, lower daily_budget_usd, drop a
         // tier) reported success while the running loop kept its boot-time
         // copy — a kill-switch that does not switch anything off.
+        //
+        // 🔴 …VÀ NẠP LẠI CHO RIÊNG VÒNG NÀY THÌ CHƯA XONG VIỆC (vá 2026-09-20).
+        // `telegram::Inbox` giữ bản cấu hình RIÊNG, chụp lúc `Inbox::start` ở
+        // trên, và mọi lệnh gõ trên Telegram chạy qua bản ấy
+        // (`telegram::push_text` → `pipeline::run_telegram_now(&self.cfg)`), chứ
+        // không qua `cfg` cục bộ dưới đây. Nên trước lượt vá này, `cfg = fresh`
+        // chữa được đúng một nửa số người đọc cấu hình: Hà thêm `acc6` lúc 19/09
+        // 20:46:37, dòng `config_reloaded` ra lúc 20:47:17, `quota_read
+        // account=acc6` ra lúc 20:47:19 — mà `/accounts` vẫn trả "5 tài khoản"
+        // suốt 9 tiếng sau đó. Cùng một họ lỗi mà chú thích ngay trên vừa gọi
+        // tên, chỉ khác người đọc.
         let now_mtime = config_mtime(&cfg.config_file);
         if now_mtime != config_seen {
             match config::load(Some(&cfg.config_file.clone())) {
@@ -379,6 +390,7 @@ fn real_main() -> Result<()> {
                         }),
                     );
                     cfg = fresh;
+                    huba::telegram::update_cfg(&cfg);
                 }
                 // Keep running on the last good config rather than dying: a
                 // half-written file must not take the daemon down.

@@ -333,7 +333,28 @@ pub struct Inbox {
     /// `Arc` vì `Inbox` bị `clone()` cho luồng đọc và nằm trong một `OnceLock`
     /// toàn cục — chép cả `Config` mỗi lượt bấm nút là chép một cây cấu hình
     /// cho một việc chỉ cần đọc.
-    cfg: std::sync::Arc<Config>,
+    ///
+    /// 🔴 `RwLock` — THAY ĐƯỢC, và đó là cả bản vá 2026-09-20. Trước đó đây là
+    /// `Arc<Config>` trơn: một bản chụp lúc `Inbox::start()` (tức lúc `hubad`
+    /// boot) nằm trong `OnceLock` toàn cục, nên **không có đường ghi lại**. Vòng
+    /// chính thì CÓ nạp lại khi `huba.config.json` đổi mtime (`bin/hubad.rs`,
+    /// nhánh `config_reloaded`) — nhưng nó chỉ ghi vào biến `cfg` cục bộ của
+    /// chính nó. Một tiến trình, HAI bản cấu hình, và lệnh gõ trên Telegram đi
+    /// qua bản đông cứng.
+    ///
+    /// Cái giá đã trả, đo trên `~/Library/Logs/hubd.err`: Hà thêm `acc6` vào
+    /// `huba.config.json` lúc 19/09 20:46:37. Vòng nền thấy ngay —
+    /// `config_reloaded` 20:47:17, `quota_read account=acc6` 20:47:19 — nhưng
+    /// **mọi** lượt `/accounts` sau đó vẫn trả `👤 5 tài khoản claude`, lần cuối
+    /// 20/09 05:34:07, tức 9 tiếng sau khi cấu hình đã đổi. Hà hỏi *"thêm 1 acc
+    /// mới rồi mà gõ lệnh account ra danh sách bị thiếu"*.
+    ///
+    /// Và nó KHÔNG riêng `/accounts`: mọi route đi qua `run_telegram_now` đọc
+    /// bản này, nên mọi công tắc trong cấu hình (adapter, ngân sách, `projects`)
+    /// cũng câm cho tới lần restart kế tiếp — đúng thứ chú thích tại chỗ nạp lại
+    /// của vòng chính đã tự gọi tên cho một ca khác: *"a kill-switch that does
+    /// not switch anything off"*. Vá cho vòng chạy, bỏ quên đường Telegram.
+    cfg: std::sync::Arc<std::sync::RwLock<std::sync::Arc<Config>>>,
     /// Đánh thức vòng chạy khi có lệnh mới — nay ở `runtime::Waker`.
     ///
     /// 🔴 Nhà cũ của nó là `live.rs`, cái socket của phòng chat tfl5, gỡ ngày
@@ -1101,7 +1122,31 @@ pub fn inbox() -> Option<&'static Inbox> {
     INBOX.get()
 }
 
+/// Cấu hình vừa đổi trên đĩa ⇒ đường Telegram phải thấy NGAY, không chờ restart.
+///
+/// Gọi từ đúng một chỗ: nhánh nạp lại của vòng chính trong `bin/hubad.rs`. Kênh
+/// chưa dựng (thiếu bí mật, `confirm.enabled=false`) thì không có gì để cập nhật
+/// và đó không phải lỗi — `Inbox::start` sẽ tự đọc bản mới khi nào nó chạy.
+pub fn update_cfg(fresh: &Config) {
+    if let Some(i) = inbox() {
+        i.set_cfg(fresh);
+    }
+}
+
 impl Inbox {
+    /// Bản cấu hình ĐANG dùng — đọc mỗi lượt, không giữ bản chụp lúc boot.
+    ///
+    /// Trả `Arc` chứ không trả `&Config`: người gọi giữ được bản mình đọc sau khi
+    /// khoá đã nhả, nên không lượt nào cầm khoá đọc suốt thời gian chạy một lệnh.
+    fn cfg(&self) -> std::sync::Arc<Config> {
+        self.cfg.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Thay bản cấu hình cho đường Telegram. Xem chú thích của field `cfg`.
+    pub fn set_cfg(&self, fresh: &Config) {
+        *self.cfg.write().unwrap_or_else(|e| e.into_inner()) = std::sync::Arc::new(fresh.clone());
+    }
+
     /// Dựng hòm thư và chạy vòng đọc nền. `None` khi thiếu bí mật — SKIP-CÓ-LOG,
     /// không phải lỗi (luật 4 của dự án: thiếu khoá thì bỏ qua và nói ra).
     pub fn start(cfg: &Config, waker: Option<Arc<crate::runtime::Waker>>) -> Option<Inbox> {
@@ -1137,7 +1182,7 @@ impl Inbox {
             inline: Arc::new(AtomicBool::new(false)),
             token,
             chat_id,
-            cfg: std::sync::Arc::new(cfg.clone()),
+            cfg: std::sync::Arc::new(std::sync::RwLock::new(std::sync::Arc::new(cfg.clone()))),
             waker,
             ack_live: Arc::new(Mutex::new(None)),
         };
@@ -1336,7 +1381,7 @@ impl Inbox {
             },
         };
         // 3. Chỗ để: thư mục dự án của phiên đang theo, `.inbox/`.
-        let db = crate::db::Db::open(&self.cfg.db).ok();
+        let db = crate::db::Db::open(&self.cfg().db).ok();
         let focus = db
             .as_ref()
             .and_then(|db| db.cursor_or_log(crate::pipeline::FOCUS_SESSION_KEY))
@@ -1347,7 +1392,7 @@ impl Inbox {
         // thư mục dự án nữa → chuyển ra thư mục gốc để dùng chung"*. Đúng: id
         // phiên đã là duy nhất, thêm một tầng dự án chỉ làm chỗ dọn rác nằm rải
         // ra nhiều nơi — mà dọn rác là toàn bộ lý do chia theo phiên.
-        let dir = self.cfg.workspace_root.clone();
+        let dir = self.cfg().workspace_root.clone();
         // Xếp theo MÃ PHIÊN (Hà 2026-08-13: *"`.inbox` nên đưa vào theo mã phiên
         // cho dễ dọn rác"*). Tệp gửi cho một phiên chỉ có nghĩa trong đời phiên
         // ấy; đổ chung một chỗ thì sau một tuần không ai biết cái nào còn dùng.
@@ -1422,7 +1467,7 @@ impl Inbox {
         self.push_text_from(&line, msg_id);
         // 👀 = phiên đã được cho xem. Hai dấu chồng lên nhau đọc thành hai bước
         // đã xong, đúng cái "nhiều emoji cho mỗi tình trạng" Hà xin.
-        let of = crate::pipeline::project_of_focus(&self.cfg);
+        let of = crate::pipeline::project_of_focus(&self.cfg());
         mark(crate::pipeline::ack_emoji(
             of.as_deref(),
             crate::pipeline::Ack::Seen,
@@ -1614,11 +1659,11 @@ impl Inbox {
         // Hàng rào vẫn thật: `~/.ssh`, `~/Library`, `/etc` nằm ngoài workspace
         // nên vẫn bị chặn, và mọi cửa còn lại (quét rò, trần dung lượng, phải là
         // file chữ) không đổi.
-        let ws = self
-            .cfg
+        let c = self.cfg();
+        let ws = c
             .workspace_root
             .canonicalize()
-            .unwrap_or_else(|_| self.cfg.workspace_root.clone());
+            .unwrap_or_else(|_| c.workspace_root.clone());
         if !real.starts_with(&root_real) && !real.starts_with(&ws) {
             return Err(format!(
                 "nằm ngoài chỗ làm việc ({} · {}) — huba không gửi",
@@ -1735,7 +1780,7 @@ impl Inbox {
             .map_err(|e| e.to_string())?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
-            remember_sent(&self.cfg, &v);
+            remember_sent(&self.cfg(), &v);
             // Số byte ĐÃ GỬI, không phải cỡ tệp trên đĩa: với một bản cắt thì
             // hai con số khác nhau, và dòng log này là chỗ duy nhất trả lời
             // được "cái gì đã rời khỏi máy".
@@ -1793,7 +1838,7 @@ impl Inbox {
             .map_err(|e| e.to_string())?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
-            remember_sent(&self.cfg, &v);
+            remember_sent(&self.cfg(), &v);
             logging::info("telegram_photo_sent", json!({ "bytes": meta.len() }));
             Ok(())
         } else {
@@ -1910,7 +1955,7 @@ impl Inbox {
         // được một vòng đang chạy dở (đo 2026-08-12: một cú bấm nút chờ 26 giây
         // đúng vì thế). Chạy thẳng ở đây, trong một luồng riêng, xếp hàng bằng
         // `pipeline::CMD_LOCK`.
-        crate::pipeline::run_telegram_now(&self.cfg);
+        crate::pipeline::run_telegram_now(&self.cfg());
     }
 
     /// Còn lệnh nào đang chờ không — để luồng chạy-ngay vét nốt trước khi thoát.
@@ -2281,7 +2326,7 @@ impl Inbox {
             // Mã của nút, KHÔNG phải số thứ tự — xem `pipeline::quick_token`.
             // Hà 2026-08-16: *"nó lại nhận cái cuối cùng trong phiên chat"*.
             if let Some(n) = data.strip_prefix("run:") {
-                match crate::db::Db::open(&self.cfg.db)
+                match crate::db::Db::open(&self.cfg().db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
                     .map(|(sid, c)| (sid, c.line))
@@ -2368,7 +2413,7 @@ impl Inbox {
             // Mã của nút, KHÔNG phải số thứ tự — xem `pipeline::quick_token`.
             // Hà 2026-08-16: *"nó lại nhận cái cuối cùng trong phiên chat"*.
             if let Some(n) = data.strip_prefix("box:") {
-                match crate::db::Db::open(&self.cfg.db)
+                match crate::db::Db::open(&self.cfg().db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
                     .map(|(sid, c)| (sid, c.line))
@@ -2405,7 +2450,7 @@ impl Inbox {
             // Mã của nút, KHÔNG phải số thứ tự — xem `pipeline::quick_token`.
             // Hà 2026-08-16: *"nó lại nhận cái cuối cùng trong phiên chat"*.
             if let Some(n) = data.strip_prefix("say:") {
-                match crate::db::Db::open(&self.cfg.db)
+                match crate::db::Db::open(&self.cfg().db)
                     .ok()
                     .and_then(|db| crate::pipeline::quick_cmd(&db, n))
                     .map(|(sid, c)| (sid, c.line))
@@ -2436,7 +2481,7 @@ impl Inbox {
                 .strip_prefix("full:")
                 .and_then(|n| n.parse::<usize>().ok())
             {
-                let full = crate::db::Db::open(&self.cfg.db)
+                let full = crate::db::Db::open(&self.cfg().db)
                     .ok()
                     .and_then(|db| crate::pipeline::full_report(&db, n));
                 match full {
@@ -2458,7 +2503,7 @@ impl Inbox {
                         // phải được NÓI RA trong chính tin ấy — và chỉ được nói
                         // khi đã ghi xong sổ. Ghi hỏng mà vẫn in "đang theo" là
                         // đúng loại nói dối làm người ta gõ việc vào nhầm phiên.
-                        let db = crate::db::Db::open(&self.cfg.db).ok();
+                        let db = crate::db::Db::open(&self.cfg().db).ok();
                         let focus = db
                             .as_ref()
                             .and_then(|db| db.cursor_or_log(crate::pipeline::FOCUS_SESSION_KEY))
@@ -2533,7 +2578,7 @@ impl Inbox {
                         // vế sau thì bản đầy đủ đọc xong vẫn không thao tác tiếp
                         // được — đúng cảnh người không ngồi trước máy.
                         let (screen, choices) =
-                            match crate::pipeline::screen_tail(&self.cfg, &sid, 12) {
+                            match crate::pipeline::screen_tail(&self.cfg(), &sid, 12) {
                                 Some((s, c)) => (format!("\n\n📷 Màn đang hiện:\n{s}"), c),
                                 // Không đọc được thì NÓI, đừng im: thiếu khúc
                                 // này mà không biết vì sao thì người đọc tưởng
@@ -2558,7 +2603,7 @@ impl Inbox {
                         match db.as_ref() {
                             Some(db) => crate::pipeline::say_from_session_with(
                                 db,
-                                &self.cfg,
+                                &self.cfg(),
                                 self,
                                 &sid,
                                 &body,
@@ -2688,7 +2733,7 @@ impl Inbox {
     /// cũ — `send_document` và `session_root` — nên thêm lối vào thứ hai không
     /// mở thêm cửa nào.
     pub fn send_quick_file(&self, n: usize) -> Option<String> {
-        let db = crate::db::Db::open(&self.cfg.db).ok();
+        let db = crate::db::Db::open(&self.cfg().db).ok();
         let found = db
             .as_ref()
             .and_then(|db| crate::pipeline::quick_file(db, n));
@@ -2698,7 +2743,7 @@ impl Inbox {
                 // Không tra ra được thì TỪ CHỐI — xem `session_root`.
                 match db
                     .as_ref()
-                    .and_then(|db| crate::pipeline::session_root(db, &self.cfg, &sid))
+                    .and_then(|db| crate::pipeline::session_root(db, &self.cfg(), &sid))
                 {
                     Some(root) => {
                         // 🔴 GIẢI ĐƯỜNG DẪN BẰNG ĐÚNG HÀM ĐÃ DỰNG NÊN CÁI NÚT.
@@ -2711,7 +2756,8 @@ impl Inbox {
                         // Trước lượt này chỗ đây tự `shellexpand_home` rồi mở
                         // thẳng, tức hai đầu dùng hai luật khác nhau: nút mọc ra
                         // được mà bấm vào thì "không mở được".
-                        match crate::pipeline::sendable_file(&p, &root, &self.cfg.workspace_root) {
+                        match crate::pipeline::sendable_file(&p, &root, &self.cfg().workspace_root)
+                        {
                             Some(real) => match self.send_document(&real, &root) {
                                 Ok(()) => None,
                                 Err(e) => Some(format!("⚠ chưa gửi được {p} — {e}")),
@@ -2825,7 +2871,7 @@ impl Inbox {
         }
         let v = self.post_retry("sendMessage", &body)?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
-            remember_sent(&self.cfg, &v);
+            remember_sent(&self.cfg(), &v);
             let sent = Sent::read(&v);
             logging::info(
                 "telegram_html_sent",
@@ -3032,7 +3078,7 @@ impl Inbox {
             &json!({ "chat_id": self.chat_id, "text": strip_markdown(text) }),
         )?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
-            remember_sent(&self.cfg, &v);
+            remember_sent(&self.cfg(), &v);
             Ok(())
         } else {
             Err(v
@@ -3185,7 +3231,7 @@ impl Inbox {
             }),
         )?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
-            remember_sent(&self.cfg, &v);
+            remember_sent(&self.cfg(), &v);
             // Ghi SỐ NÚT đã gửi. "Gửi được tin" và "tin ấy có nút bấm" là hai
             // chuyện khác nhau, mà từ máy này không nhìn thấy màn hình điện
             // thoại — không có dòng này thì câu "đã có nút" chỉ là suy luận từ
@@ -3396,6 +3442,19 @@ mod tests {
 
     /// `Inbox` trần, không luồng nào chạy: đủ để hỏi sổ chờ trả lời thế nào.
     fn bare() -> Inbox {
+        bare_voi(Config::default())
+    }
+
+    /// Như `bare()` nhưng KHAI SẴN cấu hình, đặt thẳng vào struct.
+    ///
+    /// 🔴 Có riêng hàm này vì lượt đối chứng ngược đầu tiên (20/09) lộ ra một
+    /// khuyết tật của chính bài kiểm: ca `them_tai_khoan_thi_duong_telegram_thay_ngay`
+    /// dựng cái NỀN "5 tài khoản" bằng `set_cfg` — tức bằng đúng thứ nó đang đo.
+    /// Cấy `set_cfg` thành no-op thì ca ĐỎ ngay ở assert NỀN (`👤 1 tài khoản
+    /// claude`, bản rơi về tài khoản mặc định) và **không bao giờ chạy tới** vế
+    /// thật là *"tài khoản mới có tới được đường Telegram không"*. Đỏ đúng lý do
+    /// sai vẫn là một phép đo mù.
+    fn bare_voi(cfg: Config) -> Inbox {
         Inbox {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             offset: Arc::new(Mutex::new(0)),
@@ -3404,10 +3463,70 @@ mod tests {
             inline: Arc::new(AtomicBool::new(false)),
             token: "x".into(),
             chat_id: "1".into(),
-            cfg: Arc::new(Config::default()),
+            cfg: Arc::new(std::sync::RwLock::new(Arc::new(cfg))),
             waker: None,
             ack_live: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Mốc CỐ ĐỊNH cho `accounts_text` — cùng lý do như `tests/config.rs::MOC`:
+    /// hàm ấy nhận thời gian làm tham số để bài kiểm không đi mượn đồng hồ.
+    const MOC: i64 = 1_788_102_000_000;
+
+    /// 🔴 THÊM TÀI KHOẢN VÀO `huba.config.json` ⇒ `/accounts` PHẢI THẤY NGAY.
+    ///
+    /// Ca này neo vào đúng con chữ Hà đọc trên điện thoại — `👤 N tài khoản
+    /// claude` — chứ không neo vào "`set_cfg` có được gọi hay không". Một phép đo
+    /// chấm "đã gọi hàm" thì vẫn xanh khi hàm ấy là no-op, tức nó xanh ở đúng
+    /// trạng thái hỏng mà nó phải bắt.
+    ///
+    /// Lỗi nó khoá lại: trước 20/09, field `cfg` là `Arc<Config>` trơn chụp lúc
+    /// boot, nên `acc6` thêm lúc 19/09 20:46:37 không bao giờ tới được đường
+    /// Telegram — `/accounts` trả "5 tài khoản" suốt 9 tiếng sau đó, trong khi
+    /// vòng nền đã đọc hạn mức của `acc6` từ 20:47:19.
+    #[test]
+    fn them_tai_khoan_thi_duong_telegram_thay_ngay() {
+        fn cfg_voi(ten: &[&str]) -> Config {
+            Config {
+                claude_accounts: ten
+                    .iter()
+                    .map(|n| crate::config::ClaudeAccountCfg {
+                        name: (*n).to_string(),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            }
+        }
+        // Đúng đường mà `CommandKind::Accounts` đi: cfg lấy từ `Inbox`, không
+        // phải một `Config` truyền tay — vì chính chỗ LẤY cfg là chỗ đã hỏng.
+        fn cau(i: &Inbox) -> String {
+            crate::runtime::accounts_text(
+                &i.cfg(),
+                &crate::sessions::SessionsSnapshot::default(),
+                &json!({}),
+                &[],
+                &Default::default(),
+                MOC,
+            )
+        }
+
+        // NỀN dựng thẳng vào struct, KHÔNG qua `set_cfg` — xem `bare_voi`.
+        let i = bare_voi(cfg_voi(&["acc1", "acc2", "acc3", "acc4", "acc5"]));
+        let truoc = cau(&i);
+        assert!(
+            truoc.starts_with("👤 5 tài khoản claude"),
+            "nền phải là 5 tài khoản:\n{truoc}"
+        );
+
+        // Hà thêm acc6; vòng chính nạp lại tệp rồi gọi `telegram::update_cfg`.
+        i.set_cfg(&cfg_voi(&["acc1", "acc2", "acc3", "acc4", "acc5", "acc6"]));
+        let sau = cau(&i);
+        assert!(
+            sau.starts_with("👤 6 tài khoản claude"),
+            "tài khoản mới KHÔNG tới được đường Telegram — đúng lỗi 19/09:\n{sau}"
+        );
+        assert!(sau.contains("\nacc6"), "thiếu hẳn dòng acc6:\n{sau}");
     }
 
     #[test]

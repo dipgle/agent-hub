@@ -5744,3 +5744,63 @@ Ba phiên ≥ ngưỡng bị giữ bằng `why="NoWindow"` lúc `18:57:09Z` —
 `8a022ece` 83 % · `036b0024` 84 % · `b906489b` 79 %. `NoWindow` nghĩa là huba
 **không thấy cửa sổ terminal của chúng**, nên không bàn giao được. Có thể cùng
 gốc với cái vừa vá (phép dò Terminal hết giờ). Chưa đo.
+
+---
+
+## 2026-09-20 ~06:0x — `/accounts` bỏ sót tài khoản mới: một tiến trình, HAI bản cấu hình
+
+Hà hỏi 05:38: *"Tại sao thêm 1 acc mới rồi mà gõ lệnh account ra danh sách bị
+thiếu"*. Đã truy tới gốc, vá, và đóng cổng. Commit `c019b13` (+ `e5420cf` fmt).
+
+**Đã đo (mọi số đều có lệnh sinh ra nó):**
+
+| Việc | Mốc | Lệnh đo lại |
+|---|---|---|
+| `hubd` pid 13539 boot, 0 restart | 18/09 09:07:24 | `ps -o lstart= -p $(pgrep -x hubd)` |
+| acc6 vào `huba.config.json` | 19/09 20:46:37 | `stat -f '%Sm' huba.config.json` |
+| vòng nền thấy acc6 | 20:47:17 `config_reloaded` · 20:47:19 `quota_read account=acc6` | `grep -a 'config_reloaded' ~/Library/Logs/hubd.err \| tail -1` |
+| `/accounts` vẫn trả **5** | 20/09 05:34:07, và **mọi** lượt từ 19/09 13:21Z | `grep -ao '👤 [0-9]* tài khoản claude[^"]*"[^}]*"ts":"[^"]*"' ~/Library/Logs/hubd.err \| sed -E 's/^(👤 [0-9]+ [^\\]*).*"ts":"([^"]*)".*/\2 -> \1/' \| tail -5` |
+
+**Gốc:** `telegram::Inbox` giữ bản cấu hình riêng, chụp ở `Inbox::start` rồi nằm
+trong `OnceLock`; field là `Arc<Config>` trơn ⇒ không có đường ghi lại. Mọi lệnh
+Telegram chạy qua nó (`push_text` → `run_telegram_now(&self.cfg)`), không qua
+`cfg` của vòng chính. ⇒ **không riêng `/accounts`** — mọi công tắc cấu hình
+(adapter, ngân sách, `projects`) cũng câm tới lần restart.
+
+**Đã LOẠI TRỪ, đừng đo lại:** ① không phải bộ lọc bỏ acc thiếu trường — không có
+bộ lọc nào, `accounts_text` lặp trên `claude_accounts_or_ambient()` (`runtime.rs`);
+② không phải khai thiếu ở đâu — đối chiếu 3 nguồn (`huba.config.json` · thư mục
+`~/.claude-acc6` · `scripts/acc-mo-vai.sh`) đều **6/6**; ③ không phải danh sách
+cứng trong huba — huba đọc động; ④ không phải khe hở 40 giây lúc nạp lại: lượt
+05:34 hôm nay cách mốc nạp lại **9 tiếng**; ⑤ `Inbox` là chỗ DUY NHẤT giữ một
+`Config` chép ra sống lâu — mọi `cfg.clone()` khác là bản cho một luồng rồi chết.
+
+**Đối chứng ngược hai chiều** (lượt 1 lộ ra bài kiểm tự đo chính mình: nền cũng
+dựng qua `set_cfg` nên nó ĐỎ ở assert NỀN, không tới được vế thật ⇒ thêm
+`bare_voi(cfg)` đặt thẳng vào struct). Lượt 2: no-op ⇒ ĐỎ ở `telegram.rs:3527`,
+in đúng `👤 5 tài khoản claude`; ca lành ⇒ 72/72.
+Cổng: `bash gate.sh` ⇒ `FMT=0 CLIPPY=0 BUILD=0 MAU_SO=154 DA_CHAY=154/154
+FAILED=0 DOC=0 GATE_EXIT=0`.
+
+### 🔴 CÒN NỢ — bản vá CHƯA có hiệu lực trên máy
+
+`hubd` đang chạy là binary cài **18/09 09:06**. Phải `/upgrade` (build → ký →
+cài → restart, nút của Hà) mới nạp mã mới. **Chưa restart thì `/accounts` vẫn
+thiếu acc6** — và một lần restart trần cũng đủ để acc6 hiện, vì lúc boot nó đọc
+lại cấu hình. Bản vá là để lần thêm acc SAU không phải restart nữa.
+
+Chưa push: `git push` bị `--disallowedTools` tước ⇒ phải đi hòm thư huba.
+`huba.config.json` (4 dòng acc6 của Hà) vẫn **chưa vào git** — cố ý không commit
+hộ, vì đó là thay đổi của Hà.
+
+### Việc kề bên, CHƯA làm (ngoài cây phiên này)
+
+`scripts/acc-mo-vai.sh:54-55` liệt kê tài khoản bằng **danh sách viết cứng**
+`[("acc3"…),("acc4"…),("acc5"…),("acc6"…)]` — nguồn duy nhất sinh bảng
+`TÀI KHOẢN` + `ACC_TOT=` của banner đầu phiên. Thêm `acc7` ⇒ **rơi im lặng**,
+không đo, không in, không thể thành `ACC_TOT`. Bộ tự kiểm có ca canh riêng acc6
+(dòng 142) nhưng **không có ca nào canh tài khoản kế tiếp** ⇒ lần thiếu sau vẫn
+báo `SAI=0`. Kèm `scripts/main-khoi-dong.sh:361` in nhãn tĩnh `"(chỉ acc3/4/5/6)"`.
+Sửa đúng gốc là liệt kê động (`~/.claude-acc*`, hoặc đọc `claude_accounts` của
+`huba.config.json` — huba đã làm đúng cách này). Chưa làm vì tệp nằm ở
+`~/projects/scripts/`, ngoài cây phiên, cần Hà yêu cầu.

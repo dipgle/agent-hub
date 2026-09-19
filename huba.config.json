@@ -12,7 +12,7 @@
   },
   "auto_handover": {
     "enabled": true,
-    "at_percent": 60,
+    "at_percent": 80,
     "idle_sec": 120,
     "on_limit": true,
     "on_limit_wait_min": 30
@@ -69,6 +69,10 @@
     {
       "name": "acc5",
       "config_dir": "~/.claude-acc5"
+    },
+    {
+      "name": "acc6",
+      "config_dir": "~/.claude-acc6"
     }
   ]
 }

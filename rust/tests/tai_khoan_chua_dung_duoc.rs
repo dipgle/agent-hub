@@ -61,6 +61,7 @@ fn quota_cua(ten: &str, pct: i64, chua_dung_duoc: Option<&str>) -> Quota {
         why_unknown: None,
         chua_dung_duoc: chua_dung_duoc.map(str::to_string),
         models: Vec::new(),
+        model_use: None,
     }
 }
 

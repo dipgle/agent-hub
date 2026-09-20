@@ -122,6 +122,172 @@ pub struct Quota {
     /// model là thứ của nhà cung cấp, không phải hằng số của ta.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<ModelPct>,
+    /// MỨC DÙNG theo model (phiên gần nhất) — họ dữ liệu khác `models` ở trên.
+    /// `None` = không mục `projects.*` nào có `lastModelUsage` mang số.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_use: Option<ModelUseSnapshot>,
+}
+
+/// MỨC DÙNG theo model của phiên gần nhất — **họ dữ liệu KHÁC hẳn [`ModelPct`]**.
+///
+/// 🔴 Hai họ, đừng bao giờ trộn, và tôi đã trộn một lần ngày 20/09:
+/// · **TRẦN** — `rate_limits` · `utilization.limits[]` · `seven_day_opus/sonnet`.
+///   Trả lời *"được phép dùng bao nhiêu"*. Đây là thứ `/usage` in ra, và là thứ
+///   [`ModelPct`] mang.
+/// · **MỨC DÙNG** — `projects.<path>.lastModelUsage`. Trả lời *"đã dùng bao
+///   nhiêu, theo từng model"*. Đây là thứ CLI dùng cho `/cost` / "Favorite model".
+///
+/// Hà hỏi *"% sử dụng của cả 3 model"* — câu ấy thuộc họ THỨ HAI. Tôi đi soi họ
+/// thứ nhất, thấy `seven_day_sonnet = null`, rồi báo *"dữ liệu không có 3 model"*.
+/// `null` ở đó chỉ nói **không có TRẦN riêng cho Sonnet**; đọc mã bundle CLI
+/// 2.1.228 thì còn rõ hơn — **không hề tồn tại trường `seven_day_haiku`**, vậy mà
+/// Haiku vẫn được dùng thật. Trần vắng mặt không nói gì về mức dùng.
+///
+/// ⛔ TUYỆT ĐỐI KHÔNG đọc `costUSD` ở đây, dù nguồn có sẵn. LUẬT 9 — không có
+/// tiền trên màn (`tests/no_money_on_screen.rs`). Tỉ trọng tính bằng TOKEN.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ModelUse {
+    pub name: String,
+    pub tokens: i64,
+    /// Tỉ trọng token trong chính lượt chụp này, đã làm tròn.
+    pub pct: i64,
+}
+
+/// Một lượt chụp mức dùng, KÈM phạm vi của nó.
+///
+/// 🔴 Phạm vi phải đi cùng con số, không được để người đọc tự đoán: mỗi mục
+/// `projects.<path>` chỉ giữ số của **phiên gần nhất** trên đúng đường dẫn ấy
+/// (`lastSessionId` và `lastStartTime` đứng cùng cấp; tổng `costUSD` các model
+/// khớp `lastCost` — đo 20/09 trên cả 5 tài khoản). Nên đây **không phải** số 7
+/// ngày và **không phải** số của cả tài khoản.
+///
+/// Vì sao không lấy nhật ký JSONL (có đủ 7 ngày): `~/.claude-accN/projects` đều
+/// là **symlink về chung một kho** `~/.claude/projects`, và bản ghi trong đó
+/// không mang định danh tài khoản ⇒ không tách được theo acc, mà `/accounts` thì
+/// hỏi theo acc.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ModelUseSnapshot {
+    pub project: String,
+    pub at_ms: Option<i64>,
+    pub rows: Vec<ModelUse>,
+}
+
+impl ModelUseSnapshot {
+    pub fn say(&self, now_ms: i64) -> String {
+        let ds = self
+            .rows
+            .iter()
+            .map(|r| format!("{} {}%", r.name, r.pct))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let du_an = std::path::Path::new(&self.project)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(self.project.as_str());
+        // Số có hạn thì phải kèm đồng hồ của nó — cùng luật với dòng hạn mức.
+        let tuoi = match self.at_ms {
+            Some(t) => {
+                let phut = (now_ms - t).max(0) / 60_000;
+                match phut {
+                    0..=90 => format!(" · mở {phut} phút trước"),
+                    _ => format!(" · mở {} tiếng trước", phut / 60),
+                }
+            }
+            None => String::new(),
+        };
+        format!("model dùng (phiên gần nhất · {du_an}{tuoi}): {ds}")
+    }
+}
+
+/// `claude-opus-5[1m]` → `Opus 5 (1M)` · `claude-haiku-4-5-20251001` → `Haiku 4.5`.
+///
+/// Biến đổi theo QUY TẮC chứ không theo bảng tên: bảng tên thì model mới rơi ra
+/// dạng thô, mà rơi kiểu ấy không ai thấy — cùng lớp lỗi "danh sách viết cứng".
+fn ten_model(raw: &str) -> String {
+    let (goc, hau) = match raw.split_once('[') {
+        Some((g, r)) => (g, Some(r.trim_end_matches(']').to_uppercase())),
+        None => (raw, None),
+    };
+    let goc = goc.strip_prefix("claude-").unwrap_or(goc);
+    let mut phan: Vec<&str> = goc.split('-').collect();
+    // Đuôi ngày `-20251001` là mã bản, không phải số hiệu model.
+    if phan
+        .last()
+        .is_some_and(|p| p.len() == 8 && p.chars().all(|c| c.is_ascii_digit()))
+    {
+        phan.pop();
+    }
+    let Some(ho) = phan.first().copied() else {
+        return raw.to_string();
+    };
+    let mut out = String::new();
+    let mut ky_tu = ho.chars();
+    if let Some(c) = ky_tu.next() {
+        out.extend(c.to_uppercase());
+        out.push_str(ky_tu.as_str());
+    }
+    let so = phan[1..].join(".");
+    if !so.is_empty() {
+        out.push(' ');
+        out.push_str(&so);
+    }
+    if let Some(h) = hau {
+        out.push_str(&format!(" ({h})"));
+    }
+    out
+}
+
+/// Bóc mức dùng theo model của DỰ ÁN có phiên gần nhất. Xem [`ModelUseSnapshot`].
+fn doc_model_use(doc: &Value) -> Option<ModelUseSnapshot> {
+    let prj = doc.get("projects")?.as_object()?;
+    // Nhiều dự án ⇒ mỗi cái một lượt chụp của riêng nó, KHÔNG cộng chúng lại:
+    // cộng hai lượt chụp ở hai thời điểm khác nhau ra một con số không thuộc
+    // thời điểm nào. Lấy cái MỚI NHẤT và nói rõ nó là cái nào.
+    let (at, path) = prj
+        .iter()
+        .filter(|(_, p)| {
+            p.get("lastModelUsage")
+                .and_then(Value::as_object)
+                .is_some_and(|m| !m.is_empty())
+        })
+        .map(|(path, p)| {
+            (
+                p.get("lastStartTime").and_then(Value::as_i64).unwrap_or(0),
+                path,
+            )
+        })
+        .max_by_key(|(at, _)| *at)?;
+    let lmu = prj.get(path)?.get("lastModelUsage")?.as_object()?;
+    let mut rows: Vec<ModelUse> = lmu
+        .iter()
+        .map(|(m, u)| ModelUse {
+            name: ten_model(m),
+            // 4 loại token đều là tiêu thụ thật. KHÔNG đụng `costUSD` — luật 9.
+            tokens: [
+                "inputTokens",
+                "outputTokens",
+                "cacheReadInputTokens",
+                "cacheCreationInputTokens",
+            ]
+            .iter()
+            .filter_map(|k| u.get(*k).and_then(Value::as_i64))
+            .sum(),
+            pct: 0,
+        })
+        .collect();
+    let tong: i64 = rows.iter().map(|r| r.tokens).sum();
+    if tong <= 0 {
+        return None;
+    }
+    for r in &mut rows {
+        r.pct = (r.tokens * 100 + tong / 2) / tong;
+    }
+    rows.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.name.cmp(&b.name)));
+    Some(ModelUseSnapshot {
+        project: path.clone(),
+        at_ms: (at > 0).then_some(at),
+        rows,
+    })
 }
 
 /// Một hàng hạn mức GẮN VỚI MỘT MODEL, bóc từ `utilization.limits[]`.
@@ -422,6 +588,7 @@ pub fn read(account: &str, dir: Option<&Path>) -> Quota {
         why_unknown: Some(why),
         chua_dung_duoc: None,
         models: Vec::new(),
+        model_use: None,
     };
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -503,6 +670,7 @@ pub fn read(account: &str, dir: Option<&Path>) -> Quota {
         why_unknown: None,
         chua_dung_duoc,
         models: doc_models(buckets),
+        model_use: doc_model_use(&doc),
     }
 }
 
@@ -855,6 +1023,7 @@ mod tests {
             why_unknown: None,
             chua_dung_duoc: None,
             models: Vec::new(),
+            model_use: None,
         }
     }
 
@@ -894,6 +1063,98 @@ mod tests {
         for cho in ["Opus", "Sonnet", "Fable"] {
             assert!(!s0.contains(cho), "bịa ra {cho} từ nguồn rỗng: {s0}");
         }
+    }
+
+    /// Tên model rút gọn theo QUY TẮC, để model mới không rơi ra dạng thô.
+    #[test]
+    fn ten_model_rut_gon_theo_quy_tac_khong_theo_bang_ten() {
+        assert_eq!(ten_model("claude-opus-5"), "Opus 5");
+        assert_eq!(ten_model("claude-sonnet-5"), "Sonnet 5");
+        assert_eq!(ten_model("claude-opus-5[1m]"), "Opus 5 (1M)");
+        assert_eq!(ten_model("claude-haiku-4-5-20251001"), "Haiku 4.5");
+        // Model CHƯA TỪNG CÓ vẫn phải ra dạng người đọc được — đây là vế chứng
+        // minh nó là quy tắc chứ không phải bảng tra.
+        assert_eq!(ten_model("claude-fable-9-20300101"), "Fable 9");
+    }
+
+    /// 🔴 MỨC DÙNG THEO MODEL, và PHẠM VI phải đi cùng con số.
+    ///
+    /// Hình dạng fixture lấy đúng từ `~/.claude-acc6/.claude.json` thật (đo
+    /// 20/09), kể cả `costUSD` — để ca này chứng minh luôn rằng ta ĐỌC ĐƯỢC nó
+    /// mà CỐ Ý không mang ra màn (luật 9).
+    #[test]
+    fn muc_dung_theo_model_lay_du_an_moi_nhat_va_khong_mang_tien_ra() {
+        let doc = serde_json::json!({
+            "projects": {
+                "/Users/hanguyen/projects/cu": {
+                    "lastStartTime": 1_700_000_000_000i64,
+                    "lastModelUsage": { "claude-opus-5": {
+                        "inputTokens": 1, "outputTokens": 1,
+                        "cacheReadInputTokens": 1, "cacheCreationInputTokens": 1,
+                        "costUSD": 999.9 } }
+                },
+                "/Users/hanguyen/projects": {
+                    "lastStartTime": 1_789_912_471_927i64,
+                    "lastCost": 16.568_368_35,
+                    "lastModelUsage": {
+                        "claude-haiku-4-5-20251001": {
+                            "inputTokens": 739, "outputTokens": 26,
+                            "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0,
+                            "costUSD": 0.000_869 },
+                        "claude-opus-5": {
+                            "inputTokens": 662, "outputTokens": 83_034,
+                            "cacheReadInputTokens": 15_525_749,
+                            "cacheCreationInputTokens": 275_822,
+                            "costUSD": 12.600_254_5 },
+                        "claude-sonnet-5": {
+                            "inputTokens": 34_544, "outputTokens": 40_831,
+                            "cacheReadInputTokens": 6_127_097,
+                            "cacheCreationInputTokens": 376_805,
+                            "costUSD": 3.967_244_85 }
+                    }
+                },
+                "/khong-co-so": { "lastStartTime": 1_799_999_999_999i64 }
+            }
+        });
+        let mu = doc_model_use(&doc).expect("phải bóc ra được");
+
+        // ① Lấy dự án MỚI NHẤT trong số có số — `/khong-co-so` mới hơn nhưng
+        //    không có `lastModelUsage` nên không được kéo cả lượt chụp về rỗng.
+        assert_eq!(mu.project, "/Users/hanguyen/projects");
+        assert_eq!(mu.at_ms, Some(1_789_912_471_927));
+
+        // ② Đủ BA model, sắp giảm dần theo token.
+        assert_eq!(
+            mu.rows.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(),
+            vec!["Opus 5", "Sonnet 5", "Haiku 4.5"]
+        );
+        assert_eq!(mu.rows[0].pct, 71, "Opus"); // 15.885.267 / 22.465.309
+        assert_eq!(mu.rows[1].pct, 29, "Sonnet"); //  6.579.277 / 22.465.309
+        assert_eq!(mu.rows[2].pct, 0, "Haiku"); //        765 / 22.465.309
+
+        // ③ LUẬT 9 — nguồn CÓ tiền, dòng ra KHÔNG được có. Neo vào chính con số
+        //    tiền trong fixture, không neo vào ký tự `$`: đổi cách in tiền thì
+        //    một phép đo bắt `$` sẽ im lặng cho qua.
+        let dong = mu.say(1_789_912_471_927 + 7 * 60_000);
+        for cam in ["12.6", "3.96", "16.56", "999", "$", "USD", "usd"] {
+            assert!(!dong.contains(cam), "lọt tiền ra màn ({cam}): {dong}");
+        }
+        assert!(dong.contains("Opus 5 71%"), "{dong}");
+        assert!(dong.contains("Sonnet 5 29%"), "{dong}");
+        assert!(dong.contains("Haiku 4.5 0%"), "{dong}");
+        assert!(dong.contains("phiên gần nhất"), "thiếu PHẠM VI: {dong}");
+        assert!(dong.contains("7 phút trước"), "thiếu đồng hồ: {dong}");
+
+        // ④ CHIỀU NGƯỢC — không có gì để nói thì trả `None`, đừng dựng dòng rỗng.
+        assert!(doc_model_use(&serde_json::json!({})).is_none());
+        assert!(doc_model_use(&serde_json::json!({ "projects": {} })).is_none());
+        assert!(
+            doc_model_use(&serde_json::json!({
+                "projects": { "/x": { "lastModelUsage": { "m": { "inputTokens": 0 } } } }
+            }))
+            .is_none(),
+            "tổng token = 0 thì chia cho 0 — phải trả None, không phải một dòng 0%"
+        );
     }
 
     /// `doc_models` phải bỏ hàng KHÔNG có model và hàng thiếu `percent`, giữ

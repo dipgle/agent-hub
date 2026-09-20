@@ -35,6 +35,7 @@ fn q(week_pct: i64, week_in: i64, hour5_pct: i64, hour5_in: i64) -> Quota {
         why_unknown: None,
         chua_dung_duoc: None,
         models: Vec::new(),
+        model_use: None,
     }
 }
 

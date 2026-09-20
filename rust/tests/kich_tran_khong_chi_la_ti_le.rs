@@ -57,6 +57,7 @@ fn doc(
         why_unknown: None,
         chua_dung_duoc: None,
         models: Vec::new(),
+        model_use: None,
     }
 }
 

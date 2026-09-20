@@ -245,6 +245,17 @@ pub fn accounts_text(
         // Nó bỏ sót THỜI GIAN, mà thời gian cũng là một phép đo đi ra ngoài.
         if let Some(q) = quotas.iter().find(|q| q.account == acc.name) {
             out.push_str(&format!("    hạn mức: {}\n", q.say(now_ms)));
+            // 🔴 DÒNG RIÊNG, cố ý không nối vào dòng trên. Hai lý do, cả hai đều
+            // là lý do tệp này đã tự đặt ra cho dòng `(dò /usage: …)`:
+            // ① khác HỌ — dòng trên là TRẦN (được phép dùng bao nhiêu), dòng này
+            //   là MỨC DÙNG (đã dùng bao nhiêu, theo model);
+            // ② khác PHẠM VI — dòng trên là cửa sổ tuần/5 tiếng của tài khoản,
+            //   dòng này là phiên gần nhất của MỘT dự án.
+            // Gộp chung một dòng thì lúc hai bên lệch nhau, người đọc không có
+            // cách nào biết con số nào đang nói về cái gì.
+            if let Some(mu) = &q.model_use {
+                out.push_str(&format!("    {}\n", mu.say(now_ms)));
+            }
         }
         // 🔴 TỔ CHỨC KHOÁ — và dòng này phải đứng NGAY DƯỚI dòng hạn mức, vì
         // hai dòng ấy hay mâu thuẫn nhau và người đọc cần thấy cả hai cùng lúc:

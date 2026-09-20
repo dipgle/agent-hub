@@ -134,3 +134,65 @@ fn doc_duoc_han_muc_theo_model_tu_so_that() {
          nguồn thật sự rỗng — đã đo 20/09 là mọi tài khoản đều có hàng `weekly_scoped`"
     );
 }
+
+/// MỨC DÙNG theo model, đọc từ sổ THẬT — vế trả lời câu của Hà.
+///
+/// Hà 2026-09-20: *"Rõ ràng có dùng sonet nhưng thông tin lại không có"*. Đúng, và
+/// bài này là chốt để câu ấy không đúng lần nữa: nó đòi số Sonnet thật phải tới
+/// được dòng chữ. Ca đơn vị chạy trên fixture nên không bắt được lớp hỏng nguy
+/// nhất ở đây — **trỏ nhầm nhánh khoá**, thứ làm mọi tài khoản ra `None` một cách
+/// hoàn toàn im lặng, y như cách tôi đã kết luận nhầm "dữ liệu không có".
+#[test]
+#[ignore = "đọc sổ tài khoản thật trong $HOME — chạy tay bằng --ignored"]
+fn muc_dung_theo_model_doc_duoc_tu_so_that() {
+    let cfg_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("rust/ phải có thư mục cha")
+        .join("huba.config.json");
+    let cfg = huba::config::load(Some(&cfg_path)).expect("đọc được huba.config.json");
+
+    let all = huba::quota::read_all(&cfg);
+    let now = huba::quota::now_ms();
+    let mut co = 0usize;
+    let mut co_sonnet = 0usize;
+    for q in &all {
+        match &q.model_use {
+            Some(mu) => {
+                co += 1;
+                if mu.rows.iter().any(|r| r.name.contains("Sonnet")) {
+                    co_sonnet += 1;
+                }
+                println!("{:<8} {}", q.account, mu.say(now));
+                // Tỉ trọng phải cộng lại ra ~100 — nếu không thì mẫu số sai.
+                let tong: i64 = mu.rows.iter().map(|r| r.pct).sum();
+                assert!(
+                    (99..=101).contains(&tong),
+                    "{}: tỉ trọng cộng ra {tong}%, không phải ~100 — mẫu số sai",
+                    q.account
+                );
+                // LUẬT 9 ngay trên dữ liệu THẬT, không chỉ trên fixture.
+                //
+                // Bản đầu chỉ dò ký tự `$` — clippy bắt `single_element_loop`, và
+                // cái lint ấy chỉ đúng một nửa vấn đề: một phép đo dò MỘT hình
+                // dạng của tiền thì đổi cách in tiền là nó im lặng cho qua. Nên
+                // dò cả nhãn chữ, không chỉ ký hiệu.
+                let dong = mu.say(now);
+                for cam in ["$", "USD", "usd", "đ/", "cost"] {
+                    assert!(!dong.contains(cam), "lọt tiền ra màn ({cam}): {dong}");
+                }
+            }
+            None => println!("{:<8} (không có lastModelUsage)", q.account),
+        }
+    }
+    println!(
+        "=> {}/{} tài khoản có mức dùng theo model · {co_sonnet} tài khoản có Sonnet",
+        co,
+        all.len()
+    );
+    assert!(
+        co > 0,
+        "KHÔNG tài khoản nào đọc ra mức dùng ⟹ nhiều khả năng `doc_model_use` trỏ \
+         nhầm nhánh khoá (nó nằm ở `projects.<path>.lastModelUsage`, KHÔNG nằm \
+         trong `cachedUsageUtilization`) — đo 20/09 thì cả 5 tài khoản đều có"
+    );
+}

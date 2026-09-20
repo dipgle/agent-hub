@@ -11462,6 +11462,11 @@ pub fn screen_report(
                 .take(lines.clamp(1, SHOT_LINES_MAX))
                 .collect();
             let body: String = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
+            // 🔴 GỘP KHUNG VẼ LẶP — Hà 2026-09-21: *"Sao thông tin lại bị lặp thế
+            // này"*. Bước cắt ngay trên đếm DÒNG và mù hoàn toàn với ranh giới
+            // "khung vẽ", nên 11 khung của cùng một chân màn đi thẳng ra Telegram.
+            // Xem `keys::gop_khung_lap` để biết vì sao phải gộp theo KHỐI.
+            let body = crate::keys::gop_khung_lap(&body);
             // ⛔ KHÔNG in lại lệnh thành chữ: CÁI NÚT ĐÃ LÀ CÂU ẤY RỒI.
             //
             // 🔴 Hà 2026-08-13: *"các nút phải thay vào đúng vị trí nó làm,

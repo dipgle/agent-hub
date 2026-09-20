@@ -5151,23 +5151,127 @@ impl Activity {
     }
 }
 
+/// Chỗ bắt đầu cái ĐỒNG HỒ `(<n>m <n>s …)` — `None` nếu dòng này không phải một
+/// dòng trạng thái đang quay.
+///
+/// Tách khỏi [`activity`] ngày 2026-09-21 để [`gop_khung_lap`] hỏi được về MỘT
+/// dòng. Hai chỗ tự so chuỗi mỗi chỗ một kiểu là cách rẻ nhất để về sau chúng
+/// phán khác nhau về cùng một dòng — và ở đây thì "dòng nào là một khung vẽ"
+/// phải là CÙNG một câu trả lời với "phiên có đang chạy không".
+pub fn moc_dong_ho(line: &str) -> Option<usize> {
+    let open = line.find(" (")?;
+    let inside = &line[open + 2..];
+    // "<số>m <số>s" — cùng cái neo `is_busy` dùng.
+    let mins: String = inside.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if mins.is_empty() || !inside[mins.len()..].starts_with("m ") {
+        return None;
+    }
+    let after = &inside[mins.len() + 2..];
+    let secs: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if secs.is_empty() || !after[secs.len()..].starts_with('s') {
+        return None;
+    }
+    Some(open)
+}
+
+/// Bỏ phần ĐỔI MỖI KHUNG khỏi một dòng, để so hai khung với nhau.
+///
+/// Hai thứ đổi: ký hiệu quay ở đầu (`· ✢ ✶ ✽ ✻`) và cái đồng hồ. Bỏ cả hai thì
+/// hai khung của cùng một chân màn trở thành hai chuỗi BẰNG NHAU.
+fn chuan_khung(line: &str) -> String {
+    let l = line.trim_end();
+    let l = match moc_dong_ho(l) {
+        Some(i) => &l[..i],
+        None => l,
+    };
+    l.trim()
+        .trim_start_matches(|c: char| !c.is_alphanumeric())
+        .trim()
+        .to_string()
+}
+
+/// Gộp các KHUNG VẼ lặp lại của cùng một chân màn động.
+///
+/// 🔴 Hà 2026-09-21, nhìn một lượt `/shot`: *"Sao thông tin lại bị lặp thế này"*.
+///
+/// Đo trên chính bản tin ấy: cụm chân màn 3 dòng (`✻ Razzmatazzing…` ·
+/// `⛶ auto mode on…` · `⌐ Tip: Use /clear…`) xuất hiện **11 lần**, bản tin phình
+/// lên **10.069 ký tự**, và nội dung thật bị đẩy lún giữa chúng. Mười một bản KHÔNG
+/// giống hệt nhau — ký hiệu quay đổi và đồng hồ chạy `35m49s → 35m46s` — tức đây là
+/// ~3 khung/giây, **11 khung ≈ 4 giây hoạt hình** cùng nằm trên màn một lúc.
+///
+/// Vì sao chúng cùng nằm trên màn: `screen_text` đọc `contents of selected tab` =
+/// **khung nhìn hiện tại**, một lệnh một lần (`keys.rs`, `screen_text`). Nên đây
+/// KHÔNG phải huba gọi nhiều lần rồi dán chồng, cũng không phải nó đọc lịch sử
+/// cuộn. TUI đẩy dòng mới mỗi khung thay vì vẽ đè, và cửa sổ 61 dòng chứa vừa 11
+/// khung × 3 dòng.
+///
+/// 🔴 PHẢI GỘP THEO KHỐI, KHÔNG THEO DÒNG. Ba dòng của một khung xen kẽ nhau, nên
+/// mọi phép so "hai dòng liền kề có giống nhau không" đều trượt sạch — đúng lý do
+/// [`merge_above`] (phép so duy nhất có sẵn trong vùng này) không bắt được ca này,
+/// bên cạnh việc nó so BẰNG NHAU TUYỆT ĐỐI nên spinner đổi một ký tự là trượt.
+///
+/// Mỗi khung = từ một dòng đồng hồ tới ngay trước dòng đồng hồ kế. Hai khung là
+/// MỘT nếu khung ngắn hơn là phần đầu của khung kia: khung mới nhất hay bị vẽ dở,
+/// và vẽ dở không phải một nội dung khác. Giữ bản MỚI NHẤT của mỗi cụm vì đồng hồ
+/// của nó tươi nhất.
+///
+/// ⚠ CỐ Ý chỉ dùng trên đường HIỂN THỊ (`screen_report` của `/shot`), không dùng
+/// trong `look_from_screen`: đường ấy nuôi các phép PHÁN QUYẾT (`arrow_verdict`,
+/// `parse_choices`, đếm monitor) và ở đó đổi số dòng là đổi kết luận.
+pub fn gop_khung_lap(body: &str) -> String {
+    let ls: Vec<&str> = body.lines().collect();
+    let moc: Vec<usize> = ls
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| moc_dong_ho(l).is_some())
+        .map(|(i, _)| i)
+        .collect();
+    if moc.len() < 2 {
+        return body.to_string();
+    }
+    let khung: Vec<Vec<String>> = moc
+        .iter()
+        .enumerate()
+        .map(|(k, &i)| {
+            let het = moc.get(k + 1).copied().unwrap_or(ls.len());
+            ls[i..het].iter().map(|l| chuan_khung(l)).collect()
+        })
+        .collect();
+    let cung = |a: &Vec<String>, b: &Vec<String>| -> bool {
+        let n = a.len().min(b.len());
+        n > 0 && a[..n] == b[..n]
+    };
+    let mut out: Vec<String> = ls[..moc[0]].iter().map(|s| (*s).to_string()).collect();
+    let mut k = 0usize;
+    while k < khung.len() {
+        let mut j = k;
+        while j + 1 < khung.len() && cung(&khung[j], &khung[j + 1]) {
+            j += 1;
+        }
+        if j > k {
+            out.push(format!(
+                "⟳ … {} khung vẽ trước của cùng chân màn — đã gộp (chỉ khác ký hiệu quay và đồng hồ)",
+                j - k
+            ));
+        }
+        let het = moc.get(j + 1).copied().unwrap_or(ls.len());
+        out.extend(ls[moc[j]..het].iter().map(|s| (*s).to_string()));
+        k = j + 1;
+    }
+    out.join("\n")
+}
+
 /// Đọc dòng trạng thái đang quay, nếu có.
 pub fn activity(screen: &str) -> Option<Activity> {
     for line in screen.lines().rev() {
-        let Some(open) = line.find(" (") else {
+        let Some(open) = moc_dong_ho(line) else {
             continue;
         };
         let inside = &line[open + 2..];
-        // "<số>m <số>s" — cùng cái neo `is_busy` dùng.
         let mins: String = inside.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if mins.is_empty() || !inside[mins.len()..].starts_with("m ") {
-            continue;
-        }
         let after = &inside[mins.len() + 2..];
         let secs: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if secs.is_empty() || !after[secs.len()..].starts_with('s') {
-            continue;
-        }
         // Động từ = phần trước dấu "(", bỏ ký hiệu quay ở đầu và "…" ở cuối.
         let verb = line[..open]
             .trim()
@@ -5848,9 +5952,65 @@ mod merge_above_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        activity, arrow_verdict, as_string, ghost_verdict, landed, window_any_script,
-        window_script, Arrow, Landed, Look,
+        activity, arrow_verdict, as_string, ghost_verdict, gop_khung_lap, landed,
+        window_any_script, window_script, Arrow, Landed, Look,
     };
+
+    /// 🔴 11 KHUNG VẼ CỦA CÙNG MỘT CHÂN MÀN ⇒ GỘP CÒN MỘT (Hà 2026-09-21).
+    ///
+    /// Dữ liệu là bản chụp THẬT: đếm trên chính bản tin Hà nhận thì cụm chân màn
+    /// 3 dòng lặp 11 lần, ký hiệu quay đổi và đồng hồ chạy `35m49s → 35m46s`.
+    #[test]
+    fn muoi_mot_khung_ve_cua_mot_chan_man_gop_con_mot() {
+        let mut man = String::from("❯ Account xong chưa\n");
+        // Đồng hồ ĐI LÙI dần về cuối cho giống bản chụp thật (khung mới ở dưới).
+        let quay = ['·', '✢', '✶', '✽', '✻', '✢', '·', '✳', '✻', '✽', '✻'];
+        for (i, q) in quay.iter().enumerate() {
+            let s = 49 - i / 3;
+            man.push_str(&format!("{q} Razzmatazzing… (35m {s}s · ↓ 77.4k tokens)\n"));
+            man.push_str("  ⌐ Tip: Use /clear to start fresh when switching topics\n");
+            man.push_str("⛶⛶ auto mode on (shift+tab to cycle) · esc to interrupt\n");
+        }
+        let ra = gop_khung_lap(man.trim_end());
+
+        assert_eq!(
+            ra.matches("Razzmatazzing").count(),
+            1,
+            "phải còn ĐÚNG MỘT khung:\n{ra}"
+        );
+        assert_eq!(ra.matches("auto mode on").count(), 1, "{ra}");
+        assert!(
+            ra.contains("⟳ … 10 khung"),
+            "thiếu lời khai đã gộp mấy:\n{ra}"
+        );
+        // Giữ bản MỚI NHẤT — đồng hồ nhỏ nhất là khung cuối cùng.
+        assert!(ra.contains("(35m 46s"), "giữ nhầm khung cũ:\n{ra}");
+        // Nội dung THẬT nằm trước cụm chân màn không được đụng tới.
+        assert!(ra.starts_with("❯ Account xong chưa"), "{ra}");
+        assert!(
+            ra.lines().count() < man.lines().count() / 3,
+            "gộp mà không ngắn đi thì gộp cái gì:\n{ra}"
+        );
+    }
+
+    /// CHIỀU NGƯỢC — hai dòng đồng hồ KHÁC NỘI DUNG thì tuyệt đối không được gộp.
+    ///
+    /// Đây là vế giữ cho phép gộp khỏi ăn mất chữ thật: một màn có hai lượt việc
+    /// khác nhau vẫn phải giữ đủ hai.
+    #[test]
+    fn hai_khung_khac_noi_dung_thi_khong_gop() {
+        let man = "✳ Brewing… (1m 2s · ↓ 1.0k tokens)\n\
+                   kết quả lượt một\n\
+                   ✶ Perambulating… (2m 3s · ↓ 2.0k tokens)\n\
+                   kết quả lượt hai";
+        let ra = gop_khung_lap(man);
+        assert_eq!(ra, man, "gộp nhầm hai nội dung khác nhau:\n{ra}");
+
+        // Và một màn KHÔNG có khung nào lặp thì trả nguyên văn.
+        let mot = "✳ Brewing… (1m 2s · ↓ 1.0k tokens)\nxong";
+        assert_eq!(gop_khung_lap(mot), mot);
+        assert_eq!(gop_khung_lap(""), "");
+    }
 
     /// Đọc ĐÚNG chữ terminal đang hiện, và neo vào đồng hồ chứ không vào động từ.
     ///

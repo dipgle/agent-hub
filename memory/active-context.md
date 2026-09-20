@@ -5802,5 +5802,65 @@ không đo, không in, không thể thành `ACC_TOT`. Bộ tự kiểm có ca ca
 (dòng 142) nhưng **không có ca nào canh tài khoản kế tiếp** ⇒ lần thiếu sau vẫn
 báo `SAI=0`. Kèm `scripts/main-khoi-dong.sh:361` in nhãn tĩnh `"(chỉ acc3/4/5/6)"`.
 Sửa đúng gốc là liệt kê động (`~/.claude-acc*`, hoặc đọc `claude_accounts` của
-`huba.config.json` — huba đã làm đúng cách này). Chưa làm vì tệp nằm ở
-`~/projects/scripts/`, ngoài cây phiên, cần Hà yêu cầu.
+`huba.config.json` — huba đã làm đúng cách này).
+✅ **ĐÃ LÀM** cùng ngày sau khi Hà nói *"Tiện vá luôn liệt kê động"* — xem mục dưới.
+
+---
+
+## 2026-09-20 ~10:4x — Hai bản vá cùng một khuyết tật: DANH SÁCH VIẾT CỨNG
+
+Hà nói hai câu, và chúng hoá ra là cùng một lỗi ở hai chỗ: *"Tiện vá luôn liệt kê
+động"* và *"Thêm vào thông tin account % sử dụng của cả 3 model"*.
+
+### ① `scripts/acc-mo-vai.sh` — liệt kê động (KHÔNG commit, xem cuối mục)
+
+Quét `~/.claude-acc<N>` thật thay danh sách literal; sắp theo SỐ (acc10 không chen
+trước acc4); in dòng `MẪU SỐ: trên đĩa N · ĐO n · LOẠI n theo chính sách · BỎ QUA n`;
+`LY_DO=` thôi ghim `"nhóm 3/4/5/6"`. Chính sách loại acc1/acc2 giữ nguyên nhưng nay
+là một **tập tên đứng riêng** (`KHONG_DO`), không phải cơ chế liệt kê.
+`scripts/main-khoi-dong.sh` bỏ nhãn tĩnh `"(chỉ acc3/4/5/6)"`.
+
+Đo lại: `bash scripts/acc-mo-vai.sh --tu-kiem` ⇒ **exit 0, DAT=29 SAI=0**.
+Đối chứng ngược: cấy lại danh sách literal cũ ⇒ **exit 1, SAI=3** — đúng ca3e
+(`dựng acc7 ⇒ phải vào bảng`), ca3f (mẫu số), ca3h (sắp theo số); **26 ca cũ vẫn
+xanh**, tức bộ tự kiểm cũ KHÔNG THỂ bắt lỗi này dù có ca canh riêng acc6.
+6 ca mới chạy trên **sân bịa** (đè `$HOME`, dựng tài khoản giả) nên tất định.
+
+⛔ **KHÔNG commit hai tệp ấy**: cây `~/projects` đang có 227 dòng đổi của phiên khác
+ở `main-khoi-dong.sh`, cộng `CLAUDE.md`, `OPERATING-CHARTER.md`, `phien.sh`,
+`scripts/luat/`. Gộp vào là dựng lại sự cố *"một commit không phải của ai"* (§A4).
+
+### ② huba — % theo model (commit `a72eb7b`)
+
+🔴 **Tiền đề "3 model" SAI, và đây là phần đắt nhất đã trả — đừng đo lại.**
+`~/.claude*/.claude.json` → `cachedUsageUtilization.utilization`: hàng model nằm
+trong `limits[]` dưới dạng `kind=weekly_scoped` + `scope.model.display_name`, và
+trên **cả 6 tài khoản** chỉ có ĐÚNG MỘT hàng — `Fable`. `seven_day_opus` và
+`seven_day_sonnet` **null ở tất cả**. Lệnh đo lại:
+
+    python3 -c "import json,os;u=(json.load(open(os.path.expanduser('~/.claude-acc6/.claude.json'))).get('cachedUsageUtilization') or {}).get('utilization') or {};print([(r.get('kind'),r.get('percent'),((r.get('scope') or {}).get('model') or {}).get('display_name')) for r in u.get('limits') or []], u.get('seven_day_opus'), u.get('seven_day_sonnet'))"
+
+Vá: `quota::ModelPct` + `Quota.models` + `doc_models()` (bóc MỌI hàng có model, bỏ
+hàng thiếu `percent` chứ không hoá 0) + `say()` in từng hàng kèm đồng hồ riêng, và
+khai `model: nguồn không có hàng nào` khi rỗng.
+Vá kèm một lỗi thật cùng họ: `runtime::parse_usage` ghi vào hai khoá TĨNH
+`week_model_pct`/`week_model_name`, nên `/usage` in N dòng model thì N-1 dòng đầu
+bị dòng cuối **xoá không dấu vết**; nay là mảng `week_models`.
+
+Đối chứng ngược 3 lỗi cấy → 3 cổng riêng bắt (72 xanh/3 đỏ), ca ③ in ra đúng ảnh
+chụp lỗi cũ: `week_models: [{"name":"Sonnet","pct":7}]`, Opus 41% + Fable 50% mất.
+Cổng `bash gate.sh` ⇒ `GATE_EXIT=0`, `MAU_SO=154 DA_CHAY=154/154 FAILED=0`.
+Chạy thật: `cargo test --offline --test quota_live -- --ignored --nocapture` ⇒ rc=0,
+**6/6** tài khoản bóc ra hàng model từ sổ thật.
+
+### 🔴 CÒN NỢ (cả hai đều KHÔNG tự hết theo thời gian)
+
+1. **`/upgrade` chưa bấm** ⇒ `c019b13` (cấu hình đông cứng) và `a72eb7b` (model)
+   đều CHƯA có hiệu lực. `hubd` đang chạy binary cài 18/09 09:06.
+   Đo: `ps -o lstart= -p $(pgrep -x hubd)` so với `ls -la "$HOME/Library/Application Support/hub/bin/hubd"`.
+2. **Push KHÔNG ĐẨY ĐƯỢC — đã thử 2 lượt hòm thư, cả hai bị NHẶT mà không lên.**
+   `huba-run.taken-20260919T234007Z` và `...T235118Z`. Đo trên remote:
+   `git ls-remote origin main` ⇒ vẫn `57a5f6a`, còn **9 commit** chưa đẩy (4 cái có
+   trước phiên này: `d0f9ef2 f9e79fc b055e67 bcd0e07`). Hai lượt không trả về dòng
+   lỗi nào ⇒ chưa biết vì sao. **Đừng thử lượt thứ ba kiểu cũ** — lượt kế phải
+   CHỤP stderr vào tệp mới có cái đọc.

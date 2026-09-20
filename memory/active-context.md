@@ -5897,7 +5897,36 @@ model + vá ghi đè `parse_usage`) · `c019b13` (cấu hình đông cứng ở 
 Ở cây `~/projects`: `1cf5cfc` (liệt kê động) — commit bằng **bản vá LỌC**, chỉ 6
 dòng của tôi trong `main-khoi-dong.sh`, 221 dòng của phiên khác để nguyên.
 
-### 🔴 CÒN NỢ DUY NHẤT — và nó là một KHUYẾT TẬT CỦA CHÍNH HUBA
+### ✅ ĐÍNH CHÍNH 22:34 — MỤC DƯỚI ĐÂY ĐÃ ĐÓNG, ĐỪNG ĐI VÁ LẠI
+
+Phần *"CÒN NỢ DUY NHẤT"* viết bên dưới là **chẩn đoán SAI hướng**, giữ nguyên chữ
+vì nó ghi lại đường đã đi, nhưng đọc kèm đính chính này.
+
+**Hòm thư KHÔNG hỏng.** Truy tiếp thì ra: nó xếp hàng đúng (3/3 lượt đều có
+`runin_inbox_queued`, đúng phiên, đúng chuỗi lệnh). Chỗ nuốt lệnh nằm ở handler
+`CommandKind::RunIn` (`pipeline.rs:11931`): nó gọi `sessions::snapshot(cfg)` với
+**cfg của đường Telegram** — tức bản ĐÔNG CỨNG từ lúc boot 18/09 09:07, khi cấu
+hình chưa có acc6. Phiên này chạy bằng **acc6** ⇒ vô hình trong ảnh chụp ⇒ ack
+`⚠ không thấy phiên 'ff29260b-…' đang chạy — lệnh KHÔNG chạy.`
+(log `2026-09-20T02:30:29.505Z`; **89 lượt** ack ấy trong nhật ký, tức nó đã nuốt
+lệnh của nhiều phiên khác, im lặng, từ 18/09).
+
+⇒ **Cùng một con bug với `/accounts` báo "5 tài khoản"**, tức `c019b13`. Câu hỏi
+đầu tiên của Hà sáng nay và việc push chết suốt đêm là MỘT.
+
+**Đối chứng ngược tự xảy ra, hai chiều, cùng lệnh + cùng đường + cùng phiên:**
+
+    lượt 1-3  daemon CŨ (cfg đông cứng)  ⇒ nhặt file, "không thấy phiên", KHÔNG chạy
+    lượt 4    daemon MỚI (pid 59433)     ⇒ CHẠY, 3,6s, 11 commit lên remote
+
+Đo từ phía remote: `git ls-remote origin main` ⇒ `70c69eb`, `origin/main..HEAD` = 0.
+
+📌 Bài học giữ lại: *"hòm thư nhặt file mà không chạy"* là một TRIỆU CHỨNG có ít
+nhất hai gốc khác hẳn nhau — `runin_inbox_session_gone` (đổi tên trước, kiểm sau)
+và `RunIn` không thấy phiên vì ảnh chụp thiếu tài khoản. Lần sau đừng dừng ở tệp
+`.taken-`; đi tìm ack trong log bằng chính id phiên.
+
+### 🔴 (ĐÃ ĐÓNG — xem đính chính ngay trên) Chẩn đoán ban đầu
 
 **Hòm thư `huba-run.txt` NHẬN FILE NHƯNG KHÔNG CHẠY LỆNH.** Đo được, 3/3 lượt:
 

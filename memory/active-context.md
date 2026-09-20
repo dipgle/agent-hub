@@ -5945,3 +5945,45 @@ remote** (4 cái có trước phiên này: `d0f9ef2 f9e79fc b055e67 bcd0e07`).
 theo là ĐỌC MÃ đường đọc hòm thư trong `rust/src/` (tìm `huba-run`), không phải thử
 lại. Đây cũng là một tính năng Hà dùng hằng ngày, nên nó hỏng là hỏng rộng hơn một
 lượt push.
+
+---
+
+## 2026-09-21 06:0x — `/shot` gửi 11 khung vẽ của cùng một chân màn (`d0d84bd`)
+
+Hà, nhìn một lượt "Xem màn": *"Sao thông tin lại bị lặp thế này"*.
+
+**Đã đo** trên chính bản tin ấy: `Razzmatazzing` ×11 · `auto mode on` ×11 ·
+`Tip: Use /clear` ×11, bản tin **10.069 ký tự** cho một màn đáng lẽ ~1.000.
+11 bản KHÔNG trùng khít — ký hiệu quay đổi (`· ✢ ✶ ✽ ✻`), đồng hồ chạy
+`35m 49s → 35m 46s` ⇒ ~3 khung/giây, **11 khung ≈ 4 giây hoạt hình**.
+
+Lệnh đo lại:
+
+    grep -a 'Razzmatazzing' ~/Library/Logs/hubd.err | tail -1 \
+      | grep -aoE '[^\\]{0,3}Razzmatazzing[^\\]{0,58}' | nl
+
+**Đã LOẠI TRỪ, đừng đo lại:** ① không phải huba gửi lặp — 11 bản khác nhau;
+② không phải nó gọi AppleScript nhiều lần rồi dán chồng — `keys::screen_text` gọi
+ĐÚNG MỘT lệnh; ③ không phải nó đọc scrollback — `contents of selected tab` là
+**khung nhìn hiện tại**, `history of tab` là property KHÁC và chưa bao giờ được gọi
+trên đường `/shot`. Gốc thật: TUI đẩy dòng mới mỗi khung thay vì vẽ đè, cửa sổ 61
+dòng chứa vừa 11 khung × 3 dòng, và bước cắt của `screen_report` đếm DÒNG nên mù
+hoàn toàn với ranh giới khung.
+
+**Vá:** `keys::moc_dong_ho` (tách phép neo đồng hồ khỏi `activity` để dùng chung) +
+`keys::gop_khung_lap` (gộp theo KHỐI, giữ bản mới nhất, khai rõ đã gộp mấy khung),
+gọi từ `screen_report`. ⚠ CỐ Ý không áp vào `look_from_screen` — đường ấy nuôi
+`arrow_verdict`/`parse_choices`/đếm monitor, bớt một dòng là đổi kết luận.
+
+**Đối chứng ngược hai chiều, mỗi lỗi bị đúng ca của nó bắt** (vế này mới là vế
+chứng minh hai ca đo hai thứ khác nhau):
+
+    cấy "gộp bừa"     ⇒ ĐỎ ca chiều-ngược (ăn mất "kết quả lượt một") · thuận XANH
+    cấy "không gộp"   ⇒ ĐỎ ca chiều-thuận                            · ngược XANH
+    lành              ⇒ 79/79 · gate.sh 154/154 · GATE_EXIT=0
+
+📌 Trước lượt này repo **không có fixture nào mang nhiều khung xếp lớp** — tức lớp
+lỗi này chưa từng có ai canh, dù `/shot` là nút Hà bấm nhiều nhất.
+
+**Đã có hiệu lực:** `hubd` pid **49511** từ 21/09 06:05:40, binary 21/09 06:05,
+chuỗi `khung vẽ trước của cùng chân màn` có trong nhị phân đang chạy.

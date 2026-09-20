@@ -56,6 +56,7 @@ fn doc(
         fetched_at_ms: fetched.map(ms),
         why_unknown: None,
         chua_dung_duoc: None,
+        models: Vec::new(),
     }
 }
 

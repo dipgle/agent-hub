@@ -114,6 +114,73 @@ pub struct Quota {
     /// đứng ngay"*, và không đồng hồ nào chữa được, chỉ có người.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chua_dung_duoc: Option<String>,
+    /// % hạn mức của từng MODEL, đọc từ `utilization.limits[]` — mỗi hàng có
+    /// `scope.model.display_name`. Xem [`doc_models`].
+    ///
+    /// 🔴 RỖNG NGHĨA LÀ "NGUỒN KHÔNG CÓ HÀNG NÀO", không phải "mọi model 0%".
+    /// `Vec` chứ không phải ba trường `opus_pct`/`sonnet_pct`/`fable_pct`: số
+    /// model là thứ của nhà cung cấp, không phải hằng số của ta.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<ModelPct>,
+}
+
+/// Một hàng hạn mức GẮN VỚI MỘT MODEL, bóc từ `utilization.limits[]`.
+///
+/// Giữ luôn `resets_at` vì cùng một lý do dòng hạn mức phải mang đồng hồ của
+/// từng cửa sổ: hai con số phần trăm cạnh nhau mà chỉ có một mốc thì người đọc
+/// không có cách nào biết mốc ấy thuộc con số nào.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ModelPct {
+    pub name: String,
+    pub pct: i64,
+    pub resets_at: Option<String>,
+}
+
+/// Bóc MỌI hàng hạn mức có model từ `utilization.limits[]` — bao nhiêu cũng lấy.
+///
+/// 🔴 Vì sao đi qua `limits[]` chứ không đọc `seven_day_opus` / `seven_day_sonnet`:
+/// đo trên cả 5 thư mục tài khoản của máy này ngày 2026-09-20, hai khoá ấy là
+/// `null` ở TẤT CẢ, còn hàng model thật nằm trong `limits[]` dưới dạng
+/// `{"kind":"weekly_scoped", "percent":0, "scope":{"model":{"display_name":"Fable"}}}`.
+/// Đọc khoá `null` rồi in `0%` là biến "nguồn không có hàng này" thành "đã đo và
+/// bằng 0" — đúng lớp lỗi *"lỗi bị nuốt thành giá trị rỗng HỢP LỆ"*.
+///
+/// Và cố ý KHÔNG ghim số model (Hà xin "cả 3 model", nguồn hiện chỉ có 1): ngày
+/// nhà cung cấp bơm thêm hàng thì chúng tự hiện, không phải sửa mã. Một danh
+/// sách viết cứng thì tài khoản/model mới **rơi im lặng** — cùng khuyết tật vừa
+/// phải vá ở `scripts/acc-mo-vai.sh` hôm nay.
+fn doc_models(buckets: Option<&Value>) -> Vec<ModelPct> {
+    let Some(rows) = buckets
+        .and_then(|b| b.get("limits"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for r in rows {
+        // Không có model ⇒ đây là hàng `session` / `weekly_all`, đã có chỗ riêng
+        // trên dòng hạn mức; bỏ qua ở đây chứ không đếm thành một "model" vô danh.
+        let Some(name) = r
+            .pointer("/scope/model/display_name")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+        else {
+            continue;
+        };
+        // Thiếu `percent` là KHÔNG ĐO ĐƯỢC, không phải 0 — bỏ hàng, đừng bịa số.
+        let Some(pct) = r.get("percent").and_then(Value::as_i64) else {
+            continue;
+        };
+        out.push(ModelPct {
+            name: name.to_string(),
+            pct,
+            resets_at: r
+                .get("resets_at")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        });
+    }
+    out
 }
 
 /// Xếp hạng một tài khoản để CHỌN. Thứ tự của `derive(Ord)` chính là thứ tự ưu tiên.
@@ -263,8 +330,30 @@ impl Quota {
                 },
             );
         }
+        // 🔴 % THEO TỪNG MODEL — Hà 2026-09-20: *"Thêm vào thông tin account %
+        // sử dụng của cả 3 model"*.
+        //
+        // Yêu cầu nói "3 model", nguồn thì không có 3. Đo cả 5 tài khoản ngày
+        // 20/09: `limits[]` có ĐÚNG MỘT hàng mang model (`weekly_scoped` /
+        // `Fable`), và `seven_day_opus` · `seven_day_sonnet` đều `null`. Nên chỗ
+        // này in bao nhiêu hàng CÓ THẬT thì in, không ghim con số 3 — xem
+        // [`doc_models`] để biết vì sao in `Opus 0%` từ `null` là bịa phép đo.
+        for m in &self.models {
+            p.push(
+                match moc_cua_so(Some(m.pct), m.resets_at.as_deref(), now_ms, false) {
+                    Some(moc) => format!("{} {}% ↻ {moc}", m.name, m.pct),
+                    None => format!("{} {}%", m.name, m.pct),
+                },
+            );
+        }
         if p.is_empty() {
             p.push("sổ không có con số nào".to_string());
+        }
+        // KHAI MẪU SỐ khi không có hàng model nào. Im lặng ở đây đọc y hệt "tài
+        // khoản này không có hạn mức riêng theo model", mà nó cũng có thể là
+        // "chẳng ai đi đọc" — hai chuyện dẫn tới hai việc khác nhau.
+        if self.models.is_empty() && self.why_unknown.is_none() {
+            p.push("model: nguồn không có hàng nào".to_string());
         }
         let hang = rank(self, now_ms);
         p.push(format!("hạng: {}", hang.say()));
@@ -332,6 +421,7 @@ pub fn read(account: &str, dir: Option<&Path>) -> Quota {
         fetched_at_ms: None,
         why_unknown: Some(why),
         chua_dung_duoc: None,
+        models: Vec::new(),
     };
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
@@ -412,6 +502,7 @@ pub fn read(account: &str, dir: Option<&Path>) -> Quota {
         fetched_at_ms: u.get("fetchedAtMs").and_then(Value::as_i64),
         why_unknown: None,
         chua_dung_duoc,
+        models: doc_models(buckets),
     }
 }
 
@@ -763,7 +854,90 @@ mod tests {
             fetched_at_ms: None,
             why_unknown: None,
             chua_dung_duoc: None,
+            models: Vec::new(),
         }
+    }
+
+    fn mpct(name: &str, pct: i64) -> ModelPct {
+        ModelPct {
+            name: name.into(),
+            pct,
+            resets_at: None,
+        }
+    }
+
+    /// 🔴 BAO NHIÊU HÀNG MODEL CÓ THẬT THÌ IN ĐỦ — không ghim con số 3.
+    ///
+    /// Đối chứng hai chiều nằm ngay trong ca: ba hàng ⇒ dòng phải mang cả ba;
+    /// không hàng nào ⇒ phải nói ra là NGUỒN rỗng, chứ không im (im đọc y hệt
+    /// "model nào cũng 0%").
+    #[test]
+    fn moi_hang_model_co_that_deu_len_dong_han_muc() {
+        let mut ba = q(Some(18), None, Some(34), None);
+        ba.models = vec![mpct("Opus", 7), mpct("Sonnet", 12), mpct("Fable", 0)];
+        let s = ba.say(NOW);
+        for cho in ["Opus 7%", "Sonnet 12%", "Fable 0%"] {
+            assert!(s.contains(cho), "thiếu {cho} trong: {s}");
+        }
+        assert!(
+            !s.contains("nguồn không có hàng nào"),
+            "có hàng rồi thì đừng khai rỗng: {s}"
+        );
+
+        // CHIỀU NGƯỢC — không có hàng nào thì phải KHAI, không được im.
+        let khong = q(Some(18), None, Some(34), None);
+        let s0 = khong.say(NOW);
+        assert!(
+            s0.contains("model: nguồn không có hàng nào"),
+            "nguồn rỗng mà im lặng — không phân biệt được với 'chưa ai đọc': {s0}"
+        );
+        for cho in ["Opus", "Sonnet", "Fable"] {
+            assert!(!s0.contains(cho), "bịa ra {cho} từ nguồn rỗng: {s0}");
+        }
+    }
+
+    /// `doc_models` phải bỏ hàng KHÔNG có model và hàng thiếu `percent`, giữ
+    /// nguyên thứ tự nguồn. Hình dạng JSON lấy đúng từ `.claude.json` thật
+    /// (đo 2026-09-20 trên `~/.claude-acc6`).
+    #[test]
+    fn doc_models_chi_giu_hang_co_model_va_co_so() {
+        let u = serde_json::json!({
+            "limits": [
+                { "kind": "session",       "percent": 34, "scope": null },
+                { "kind": "weekly_all",    "percent": 18, "scope": null },
+                { "kind": "weekly_scoped", "percent": 0,
+                  "resets_at": "2026-09-21T16:00:00+00:00",
+                  "scope": { "model": { "id": null, "display_name": "Fable" } } },
+                { "kind": "weekly_scoped", "percent": 9,
+                  "scope": { "model": { "display_name": "Opus" } } },
+                // thiếu `percent` ⇒ KHÔNG ĐO ĐƯỢC, bỏ hàng chứ không hoá 0
+                { "kind": "weekly_scoped",
+                  "scope": { "model": { "display_name": "Sonnet" } } },
+                // tên rỗng ⇒ không phải một model
+                { "kind": "weekly_scoped", "percent": 5,
+                  "scope": { "model": { "display_name": "  " } } },
+            ]
+        });
+        let got = doc_models(Some(&u));
+        assert_eq!(
+            got,
+            vec![
+                ModelPct {
+                    name: "Fable".into(),
+                    pct: 0,
+                    resets_at: Some("2026-09-21T16:00:00+00:00".into())
+                },
+                ModelPct {
+                    name: "Opus".into(),
+                    pct: 9,
+                    resets_at: None
+                },
+            ],
+            "bóc sai hàng model"
+        );
+        // Nguồn không có `limits` ⇒ rỗng, KHÔNG panic, KHÔNG đoán.
+        assert!(doc_models(Some(&serde_json::json!({}))).is_empty());
+        assert!(doc_models(None).is_empty());
     }
 
     /// Mốc giả: 2026-08-30T15:00:00Z.

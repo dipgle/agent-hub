@@ -278,11 +278,21 @@ pub fn accounts_text(
                 if let Some(p) = v.get("session_pct").and_then(Value::as_u64) {
                     parts.push(format!("phiên {p}%"));
                 }
-                if let (Some(n), Some(p)) = (
-                    v.get("week_model_name").and_then(Value::as_str),
-                    v.get("week_model_pct").and_then(Value::as_u64),
-                ) {
-                    parts.push(format!("{n} {p}%"));
+                // MỌI model mà `/usage` khai, không phải một cái. Xem chú thích
+                // ở nhánh `week_model` của `parse_usage`: chỗ này từng chỉ đọc
+                // được một cặp, nên dù nguồn có sửa thì dòng ra vẫn mất model.
+                for m in v
+                    .get("week_models")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+                {
+                    if let (Some(n), Some(p)) = (
+                        m.get("name").and_then(Value::as_str),
+                        m.get("pct").and_then(Value::as_u64),
+                    ) {
+                        parts.push(format!("{n} {p}%"));
+                    }
                 }
                 if parts.is_empty() {
                     // `parse_usage` giữ nguyên câu thô khi lời của CLI đổi —
@@ -563,16 +573,47 @@ fn parse_usage(text: &str) -> Value {
             h if h.starts_with("Current week") => "week_model",
             _ => continue,
         };
+        // 🔴 MỖI MODEL MỘT PHẦN TỬ, KHÔNG GHI ĐÈ (vá 2026-09-20).
+        //
+        // Bản trước ghi vào hai khoá TĨNH `week_model_pct` / `week_model_name`
+        // cho MỌI dòng `Current week (<Model>)`. `key` là chuỗi hằng
+        // `"week_model"`, không mang tên model, nên `/usage` in N dòng thì N-1
+        // dòng đầu bị dòng cuối xoá — và cái sống sót không phải model quan
+        // trọng nhất, chỉ là model đứng CUỐI văn bản. Hà 2026-09-20 xin % của
+        // *"cả 3 model"*: với hình dạng cũ thì dù CLI có in đủ ba, dòng ra vẫn
+        // chỉ được một, và không có dấu hiệu nào cho biết hai cái kia đã mất.
+        if key == "week_model" {
+            // "Current week (Fable)" → "Fable"
+            let Some(name) = head
+                .split_once('(')
+                .and_then(|(_, n)| n.split_once(')'))
+                .map(|x| x.0.trim().to_string())
+                .filter(|s| !s.is_empty())
+            else {
+                continue;
+            };
+            let mut row = serde_json::Map::new();
+            row.insert("name".into(), json!(name));
+            row.insert("pct".into(), json!(pct));
+            if let Some(r) = resets {
+                row.insert("resets".into(), json!(r));
+            }
+            // `as_array_mut` trả `None` thì BỎ, không `expect`: một lượt dò hạn
+            // mức không được quyền làm chết cả daemon.
+            if let Some(arr) = out
+                .entry("week_models".to_string())
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+            {
+                arr.push(Value::Object(row));
+                hit = true;
+            }
+            continue;
+        }
         hit = true;
         out.insert(format!("{key}_pct"), json!(pct));
         if let Some(r) = resets {
             out.insert(format!("{key}_resets"), json!(r));
-        }
-        if key == "week_model" {
-            // "Current week (Fable)" → "Fable"
-            if let Some(name) = head.split_once('(').and_then(|(_, n)| n.split_once(')')) {
-                out.insert("week_model_name".into(), json!(name.0));
-            }
         }
     }
     if !hit {
@@ -1524,10 +1565,48 @@ mod tests {
         let v = parse_usage(USAGE_SAMPLE);
         assert_eq!(v["session_pct"], 6);
         assert_eq!(v["week_pct"], 98);
-        assert_eq!(v["week_model_pct"], 50);
-        assert_eq!(v["week_model_name"], "Fable");
+        assert_eq!(v["week_models"][0]["pct"], 50);
+        assert_eq!(v["week_models"][0]["name"], "Fable");
+        assert_eq!(v["week_models"].as_array().map(Vec::len), Some(1));
         assert!(v["week_resets"].as_str().unwrap().contains("Aug 11"));
         assert!(v.get("raw").is_none());
+        // Khoá cũ phải BIẾN MẤT, không nằm lại song song: hai khoá cùng trả lời
+        // một câu thì lúc chúng lệch nhau không ai biết tin cái nào.
+        assert!(v.get("week_model_pct").is_none(), "còn khoá cũ: {v}");
+        assert!(v.get("week_model_name").is_none(), "còn khoá cũ: {v}");
+    }
+
+    /// 🔴 `/usage` khai NHIỀU model ⇒ GIỮ ĐỦ, theo đúng thứ tự văn bản.
+    ///
+    /// Đây là ca mà hình dạng cũ KHÔNG THỂ đạt: hai khoá tĩnh
+    /// `week_model_pct`/`week_model_name` bị mỗi dòng sau ghi đè, nên nó sẽ chỉ
+    /// còn `Sonnet 7%` — model đứng cuối — và hai model kia mất KHÔNG dấu vết.
+    ///
+    /// Đối chứng ngược đi kèm ở vế cuối: một dòng model KHÔNG có ngoặc thì không
+    /// được đếm thành model vô danh.
+    #[test]
+    fn nhieu_dong_model_thi_giu_du_khong_ghi_de() {
+        let v = parse_usage(concat!(
+            "Current session: 6% used · resets Aug 10 at 1:29pm (Asia/Saigon)\n",
+            "Current week (all models): 98% used · resets Aug 11 at 12:59pm (Asia/Saigon)\n",
+            "Current week (Opus): 41% used · resets Aug 11 at 1pm (Asia/Saigon)\n",
+            "Current week (Fable): 50% used · resets Aug 11 at 1pm (Asia/Saigon)\n",
+            "Current week (Sonnet): 7% used · resets Aug 11 at 1pm (Asia/Saigon)\n",
+        ));
+        let ds = v["week_models"].as_array().expect("phải là mảng");
+        assert_eq!(
+            ds.iter()
+                .map(|m| (m["name"].as_str().unwrap(), m["pct"].as_u64().unwrap()))
+                .collect::<Vec<_>>(),
+            vec![("Opus", 41), ("Fable", 50), ("Sonnet", 7)],
+            "mất model hoặc sai thứ tự: {v}"
+        );
+        // `all models` KHÔNG được lẫn vào danh sách model — nó là hàng tổng.
+        assert_eq!(v["week_pct"], 98);
+        assert!(
+            !ds.iter().any(|m| m["name"] == "all models"),
+            "đếm hàng tổng thành một model: {v}"
+        );
     }
 
     /// Câu chữ của CLI đổi thì phải trả về NGUYÊN VĂN, tuyệt đối không trả 0%.

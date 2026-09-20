@@ -73,3 +73,64 @@ fn doc_duoc_han_muc_that_cua_tung_tai_khoan() {
         );
     }
 }
+
+/// % HẠN MỨC THEO MODEL, đọc từ sổ THẬT (Hà 2026-09-20).
+///
+/// Cùng lý do bài trên phải chạy trên máy thật: thứ dễ sai nhất không phải phép
+/// tính mà là **đường đi tới dữ liệu**. `doc_models` bóc theo con trỏ
+/// `/scope/model/display_name` trong `utilization.limits[]`; trỏ nhầm một nhịp là
+/// nó trả `Vec` rỗng ở MỌI tài khoản, mà rỗng lại là một trạng thái hợp lệ ("nguồn
+/// không có hàng nào") — nên hỏng kiểu ấy im lặng hoàn toàn. Bài này đòi ÍT NHẤT
+/// MỘT hàng model đọc ra được từ đĩa.
+///
+/// 🔴 CỐ Ý KHÔNG chấm "phải có đúng 1 hàng, tên Fable". Đó là hình dạng dữ liệu
+/// của HÔM NAY (đo 20/09: cả 5 tài khoản đúng một hàng `Fable`, và
+/// `seven_day_opus`/`seven_day_sonnet` đều `null`). Ghim nó vào bài kiểm thì ngày
+/// nhà cung cấp thêm hàng Opus/Sonnet, bài này ĐỎ OAN trong khi sản phẩm đúng —
+/// đúng lớp "phép đo neo vào nhãn tĩnh".
+#[test]
+#[ignore = "đọc sổ tài khoản thật trong $HOME — chạy tay bằng --ignored"]
+fn doc_duoc_han_muc_theo_model_tu_so_that() {
+    let cfg_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("rust/ phải có thư mục cha")
+        .join("huba.config.json");
+    let cfg = huba::config::load(Some(&cfg_path)).expect("đọc được huba.config.json");
+
+    let all = huba::quota::read_all(&cfg);
+    let mut co_hang = 0usize;
+    for q in &all {
+        let ten: Vec<String> = q
+            .models
+            .iter()
+            .map(|m| format!("{} {}%", m.name, m.pct))
+            .collect();
+        println!(
+            "{:<8} {} hàng model: {}",
+            q.account,
+            q.models.len(),
+            if ten.is_empty() {
+                "(nguồn không có hàng nào)".to_string()
+            } else {
+                ten.join(" · ")
+            }
+        );
+        // Dòng thật sẽ đi ra Telegram — in luôn để người đọc thấy bằng mắt.
+        println!("         ↳ {}", q.say(huba::quota::now_ms()));
+        if !q.models.is_empty() {
+            co_hang += 1;
+        }
+    }
+    // MẪU SỐ: khai cả tử và mẫu, vì "0/6" và "6/6" đọc rất khác nhau.
+    println!(
+        "=> {}/{} tài khoản có ít nhất một hàng model",
+        co_hang,
+        all.len()
+    );
+    assert!(
+        co_hang > 0,
+        "KHÔNG tài khoản nào bóc ra hàng model ⟹ nhiều khả năng con trỏ \
+         `/scope/model/display_name` trong `doc_models` trỏ nhầm, chứ không phải \
+         nguồn thật sự rỗng — đã đo 20/09 là mọi tài khoản đều có hàng `weekly_scoped`"
+    );
+}

@@ -5864,3 +5864,55 @@ Chạy thật: `cargo test --offline --test quota_live -- --ignored --nocapture`
    trước phiên này: `d0f9ef2 f9e79fc b055e67 bcd0e07`). Hai lượt không trả về dòng
    lỗi nào ⇒ chưa biết vì sao. **Đừng thử lượt thứ ba kiểu cũ** — lượt kế phải
    CHỤP stderr vào tệp mới có cái đọc.
+
+---
+
+## 2026-09-20 22:3x — ĐÃ CÀI VÀ KHỞI ĐỘNG LẠI: ba bản vá nay có hiệu lực thật
+
+Hà: *"Làm đi"*. Đã chạy `bash ./huba self-install` (build release → ký → cài →
+`launchctl kickstart -k gui/501/com.dipgle.hubd`).
+
+**Nghiệm thu từ TARGET, không từ mã thoát của lệnh cài:**
+
+| | trước | sau |
+|---|---|---|
+| binary đã cài | 8.808.176 B · 18/09 09:06 | **8.841.712 B · 20/09 22:29** |
+| tiến trình | pid 13539 · 18/09 09:07:24 | **pid 59433 · 20/09 22:30:04** |
+| chuỗi trong binary | — | `model dùng (phiên gần nhất`×1 · `nguồn không có hàng nào`×1 · `lastModelUsage`×2 · `week_models`×1 · `update_cfg`×1 |
+| daemon mới đọc acc | — | **acc1…acc6 đủ 6**, ts `15:30:07.086Z` |
+
+Lệnh đo lại:
+`ls -la "$HOME/Library/Application Support/hub/bin/hubd"` ·
+`ps -axo pid,lstart,command | grep hubd` ·
+`grep -a -c 'lastModelUsage' "$HOME/Library/Application Support/hub/bin/hubd"`
+
+🔴 **BẪY ĐO đã dính một lần ngay tại bước này, ghi lại cho phiên sau:** lượt đầu tôi
+dùng `strings` để tìm chuỗi mới trong binary và nó báo **KHÔNG CÓ** hai chuỗi tiếng
+Việt ⇒ suýt kết luận "cài hụt". `strings` chỉ in dãy **ASCII**, nên nó chẻ vụn chuỗi
+UTF-8 có dấu. Dùng `grep -a -c` trên chính tệp nhị phân thì ra đủ. *Phép đo mù về
+phía IM LẶNG: nó trả ÍT hơn sự thật mà không báo lỗi.*
+
+**Commit của mạch này:** `e3efefc` (mức dùng theo model) · `a72eb7b` (trần theo
+model + vá ghi đè `parse_usage`) · `c019b13` (cấu hình đông cứng ở đường Telegram).
+Ở cây `~/projects`: `1cf5cfc` (liệt kê động) — commit bằng **bản vá LỌC**, chỉ 6
+dòng của tôi trong `main-khoi-dong.sh`, 221 dòng của phiên khác để nguyên.
+
+### 🔴 CÒN NỢ DUY NHẤT — và nó là một KHUYẾT TẬT CỦA CHÍNH HUBA
+
+**Hòm thư `huba-run.txt` NHẬN FILE NHƯNG KHÔNG CHẠY LỆNH.** Đo được, 3/3 lượt:
+
+    huba-run.taken-20260919T234007Z   nhặt · remote không đổi
+    huba-run.taken-20260919T235118Z   nhặt · remote không đổi
+    huba-run.taken-20260920T034024Z   nhặt · **không tạo nổi `.tmp/push-thu3.log`**
+
+Lượt 3 là bằng chứng mạnh nhất: lệnh có dạng `cd … && git push > .tmp/push-thu3.log
+2>&1`, mà phép chuyển hướng **tạo tệp trước khi chạy `git`** — tệp không tồn tại ⇒
+thân lệnh chưa hề chạy. Không phải push hỏng; là lệnh không được thực thi.
+
+Hậu quả đang mở: `git ls-remote origin main` ⇒ vẫn `57a5f6a`, **11 commit chưa lên
+remote** (4 cái có trước phiên này: `d0f9ef2 f9e79fc b055e67 bcd0e07`).
+
+⛔ Đã dừng thử theo đúng trần 2 lượt — **đừng xếp lượt thứ tư kiểu cũ**. Việc tiếp
+theo là ĐỌC MÃ đường đọc hòm thư trong `rust/src/` (tìm `huba-run`), không phải thử
+lại. Đây cũng là một tính năng Hà dùng hằng ngày, nên nó hỏng là hỏng rộng hơn một
+lượt push.

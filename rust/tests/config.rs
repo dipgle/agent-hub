@@ -313,6 +313,67 @@ fn measured_quota_reaches_the_line() {
     assert!(said.contains("phiên 6%"), "thiếu hạn mức phiên:\n{said}");
 }
 
+/// 🔴 DÒNG DÒ `/usage` CHỈ NÓI KHI LỆCH — Hà 2026-09-21, nhìn `/accounts`:
+/// *"Sao để thông tin hiện lặp lại vậy"*.
+///
+/// Anh đếm đúng: `tuần 55%`, `1%` và `Fable 0%` nằm NGUYÊN SI ở cả dòng
+/// `hạn mức:` lẫn dòng `(dò /usage: …)`. Chú thích cũ biện minh cho hai dòng bằng
+/// lý lẽ *"hai nguồn, lúc lệch nhau người đọc phải biết"* — lý lẽ ấy chỉ biện minh
+/// cho việc NÓI LÚC LỆCH, không biện minh cho việc in lại y hệt lúc khớp. Mà khớp
+/// là trường hợp gần như luôn xảy ra.
+#[test]
+fn dong_do_usage_im_khi_khop_va_noi_khi_lech() {
+    let live = snap_with(vec![]);
+    let q = |week: i64| huba::quota::Quota {
+        account: "acc1".into(),
+        week_pct: Some(week),
+        week_resets_at: None,
+        hour5_pct: Some(6),
+        hour5_resets_at: None,
+        fetched_at_ms: Some(MOC),
+        why_unknown: None,
+        chua_dung_duoc: None,
+        models: Vec::new(),
+        model_use: None,
+    };
+    let usage = serde_json::json!({ "accounts": { "acc1": { "week_pct": 98, "session_pct": 6 } } });
+
+    // KHỚP ⇒ IM HẲN. Con số vẫn còn, nhưng chỉ một lần, ở dòng `hạn mức:`.
+    let khop = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &usage,
+        &[q(98)],
+        &Default::default(),
+        MOC,
+    );
+    assert!(
+        !khop.contains("dò /usage"),
+        "khớp hết mà vẫn in lại nguyên si:\n{khop}"
+    );
+    assert!(
+        khop.contains("tuần 98%"),
+        "im quá tay, mất luôn con số ở dòng hạn mức:\n{khop}"
+    );
+
+    // LỆCH ⇒ NÓI, và chỉ nói ĐÚNG phần lệch. Đây là vế giữ cho phép "im khi khớp"
+    // khỏi biến thành "im luôn" — hai thứ ấy nhìn từ ngoài giống hệt nhau.
+    let lech = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &usage,
+        &[q(55)],
+        &Default::default(),
+        MOC,
+    );
+    assert!(lech.contains("LỆCH"), "hai nguồn lệch nhau mà im:\n{lech}");
+    assert!(lech.contains("tuần 98%"), "không nói con số lệch:\n{lech}");
+    assert!(
+        !lech.contains("phiên 6%"),
+        "lôi cả phần KHỚP vào dòng lệch — lại lặp:\n{lech}"
+    );
+}
+
 /// Số hạn mức đọc từ SỔ của chính CLI phải tới được dòng, kèm TUỔI của nó.
 ///
 /// 🔴 Hà 2026-08-30: *"mở phiên mới ở acc khác chưa kiểm soát được acc đó có

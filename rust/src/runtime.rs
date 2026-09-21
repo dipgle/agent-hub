@@ -243,7 +243,8 @@ pub fn accounts_text(
         // Ranh giới tệp này tự đặt cho mình — *"phần dựng câu, tách khỏi phần đi
         // đo"* — vốn đã kể tên `usage` và `quotas` là hai thứ phải truyền vào.
         // Nó bỏ sót THỜI GIAN, mà thời gian cũng là một phép đo đi ra ngoài.
-        if let Some(q) = quotas.iter().find(|q| q.account == acc.name) {
+        let q_acc = quotas.iter().find(|q| q.account == acc.name);
+        if let Some(q) = q_acc {
             out.push_str(&format!("    hạn mức: {}\n", q.say(now_ms)));
             // 🔴 DÒNG RIÊNG, cố ý không nối vào dòng trên. Hai lý do, cả hai đều
             // là lý do tệp này đã tự đặt ra cho dòng `(dò /usage: …)`:
@@ -282,12 +283,38 @@ pub fn accounts_text(
                 v.get("err").and_then(Value::as_str).unwrap_or("")
             )),
             Some(v) => {
+                // 🔴 CHỈ NÓI KHI LỆCH — Hà 2026-09-21: *"Sao để thông tin hiện lặp
+                // lại vậy"*. Anh đếm đúng: với acc6 thì `tuần 55%`, `1%` và
+                // `Fable 0%` nằm NGUYÊN SI ở cả hai dòng, chỉ khác cái nhãn.
+                //
+                // Chú thích cũ ngay trên biện minh cho hai dòng bằng câu *"hai
+                // NGUỒN khác nhau … lúc chúng lệch nhau người đọc không biết tin
+                // cái nào"*. Lý lẽ ấy vẫn đúng, nhưng nó chỉ biện minh cho việc
+                // NÓI RA LÚC LỆCH — không biện minh cho việc in lại y hệt con số
+                // lúc khớp. Và khớp là trường hợp gần như luôn xảy ra, nên dòng ấy
+                // hầu hết thời gian chỉ là tiếng ồn che mất chỗ cần nhìn.
+                //
+                // Nên: so từng phần với dòng `hạn mức:`; khớp hết thì IM. Lệch thì
+                // in ĐÚNG phần lệch, kèm chữ LỆCH — lúc ấy nó mới mang tin.
+                // 🔴 KHÔNG CÓ DÒNG TRÊN thì không có gì để mà "lệch" — và bài kiểm
+                // `measured_quota_reaches_the_line` bắt đúng chỗ này ngay lượt đầu.
+                // Tài khoản chưa đọc được sổ hạn mức thì dòng dò là NGUỒN DUY NHẤT,
+                // phải in trọn và in bằng giọng bình thường; dán chữ "LỆCH" lên một
+                // con số không có gì đối chiếu là bịa ra một mâu thuẫn không tồn tại.
+                let co_doi_chieu = q_acc.is_some();
                 let mut parts: Vec<String> = Vec::new();
+                let mut doc_duoc_so = false;
                 if let Some(p) = v.get("week_pct").and_then(Value::as_u64) {
-                    parts.push(format!("tuần {p}%"));
+                    doc_duoc_so = true;
+                    if q_acc.map(|q| q.week_pct) != Some(Some(p as i64)) {
+                        parts.push(format!("tuần {p}%"));
+                    }
                 }
                 if let Some(p) = v.get("session_pct").and_then(Value::as_u64) {
-                    parts.push(format!("phiên {p}%"));
+                    doc_duoc_so = true;
+                    if q_acc.map(|q| q.hour5_pct) != Some(Some(p as i64)) {
+                        parts.push(format!("phiên {p}%"));
+                    }
                 }
                 // MỌI model mà `/usage` khai, không phải một cái. Xem chú thích
                 // ở nhánh `week_model` của `parse_usage`: chỗ này từng chỉ đọc
@@ -302,18 +329,31 @@ pub fn accounts_text(
                         m.get("name").and_then(Value::as_str),
                         m.get("pct").and_then(Value::as_u64),
                     ) {
-                        parts.push(format!("{n} {p}%"));
+                        doc_duoc_so = true;
+                        let khop = q_acc.is_some_and(|q| {
+                            q.models.iter().any(|x| x.name == n && x.pct == p as i64)
+                        });
+                        if !khop {
+                            parts.push(format!("{n} {p}%"));
+                        }
                     }
                 }
-                if parts.is_empty() {
+                if !doc_duoc_so {
                     // `parse_usage` giữ nguyên câu thô khi lời của CLI đổi —
-                    // thà một dòng thô còn hơn một con số bịa.
+                    // thà một dòng thô còn hơn một con số bịa. Đây là nhánh
+                    // KHÔNG ĐỌC RA SỐ NÀO, khác hẳn nhánh "đọc ra và khớp hết".
                     if let Some(raw) = v.get("raw").and_then(Value::as_str) {
-                        parts.push(raw.to_string());
+                        out.push_str(&format!("    (dò /usage: {raw})\n"));
                     }
-                }
-                if !parts.is_empty() {
-                    out.push_str(&format!("    (dò /usage: {})\n", parts.join(" · ")));
+                } else if !parts.is_empty() {
+                    out.push_str(&if co_doi_chieu {
+                        format!(
+                            "    ⚠ (dò /usage LỆCH với dòng trên: {})\n",
+                            parts.join(" · ")
+                        )
+                    } else {
+                        format!("    (dò /usage: {})\n", parts.join(" · "))
+                    });
                 }
             }
             // "Chưa đo xong" KHÁC "đã đo và bằng 0". Nói đúng cái đang có.

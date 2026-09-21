@@ -505,12 +505,28 @@ impl Quota {
         // này in bao nhiêu hàng CÓ THẬT thì in, không ghim con số 3 — xem
         // [`doc_models`] để biết vì sao in `Opus 0%` từ `null` là bịa phép đo.
         for m in &self.models {
-            p.push(
-                match moc_cua_so(Some(m.pct), m.resets_at.as_deref(), now_ms, false) {
-                    Some(moc) => format!("{} {}% ↻ {moc}", m.name, m.pct),
-                    None => format!("{} {}%", m.name, m.pct),
-                },
-            );
+            // 🔴 ĐỪNG IN LẠI CÙNG MỘT CÁI ĐỒNG HỒ — Hà 2026-09-21: *"Sao để thông
+            // tin hiện lặp lại vậy"*. Lỗi này do CHÍNH bản vá hôm trước gây ra: tôi
+            // cho mỗi hàng model mang đồng hồ riêng theo luật *"mỗi con số một
+            // đồng hồ"* mà không hỏi câu kế tiếp — *"cái đồng hồ ấy có trùng cái
+            // ngay bên cạnh không"*. Đo trên cả 5 tài khoản: hàng `weekly_scoped`
+            // reset ĐÚNG CÙNG LÚC với cửa sổ tuần, nên dòng nào cũng in
+            // `↻ 23:00 21/09 (còn 9 tiếng)` hai lần.
+            //
+            // Luật đầy đủ phải là: mỗi con số kéo theo đồng hồ CỦA NÓ **khi đồng
+            // hồ ấy nói thêm điều gì**. Trùng khít với cái đứng cạnh thì nó không
+            // nói thêm gì, chỉ làm dòng dài ra và làm người đọc phải so hai chuỗi
+            // để phát hiện chúng bằng nhau.
+            let trung_moc = m.resets_at.is_some() && m.resets_at == self.week_resets_at;
+            let moc = if trung_moc {
+                None
+            } else {
+                moc_cua_so(Some(m.pct), m.resets_at.as_deref(), now_ms, false)
+            };
+            p.push(match moc {
+                Some(moc) => format!("{} {}% ↻ {moc}", m.name, m.pct),
+                None => format!("{} {}%", m.name, m.pct),
+            });
         }
         if p.is_empty() {
             p.push("sổ không có con số nào".to_string());
@@ -1155,6 +1171,30 @@ mod tests {
             .is_none(),
             "tổng token = 0 thì chia cho 0 — phải trả None, không phải một dòng 0%"
         );
+    }
+
+    /// 🔴 ĐỒNG HỒ CỦA HÀNG MODEL TRÙNG CỬA SỔ TUẦN ⇒ ĐỪNG IN LẠI (Hà 2026-09-21).
+    ///
+    /// Lỗi do chính bản vá hôm trước gây ra: mỗi hàng model mang đồng hồ riêng
+    /// theo luật *"mỗi con số một đồng hồ"*, mà trên máy này hàng `weekly_scoped`
+    /// reset ĐÚNG CÙNG LÚC với cửa sổ tuần ⇒ dòng nào cũng in cùng một mốc hai lần.
+    #[test]
+    fn dong_ho_hang_model_trung_cua_so_tuan_thi_khong_in_lai() {
+        let mut q = q(Some(55), Some("2026-09-21T16:00:00+00:00"), Some(1), None);
+        q.models = vec![ModelPct {
+            name: "Fable".into(),
+            pct: 0,
+            resets_at: Some("2026-09-21T16:00:00+00:00".into()),
+        }];
+        let s = q.say(NOW);
+        assert!(s.contains("Fable 0%"), "mất luôn hàng model:\n{s}");
+        assert_eq!(s.matches('↻').count(), 1, "in lại cùng một đồng hồ:\n{s}");
+
+        // CHIỀU NGƯỢC — mốc KHÁC thì PHẢI in, vì lúc ấy nó mới nói thêm điều gì.
+        // Thiếu vế này thì "bỏ đồng hồ" và "bỏ đúng đồng hồ thừa" đọc giống nhau.
+        q.models[0].resets_at = Some("2026-09-25T16:00:00+00:00".into());
+        let s2 = q.say(NOW);
+        assert_eq!(s2.matches('↻').count(), 2, "nuốt mất một mốc KHÁC:\n{s2}");
     }
 
     /// `doc_models` phải bỏ hàng KHÔNG có model và hàng thiếu `percent`, giữ

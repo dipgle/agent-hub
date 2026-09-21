@@ -5987,3 +5987,50 @@ lỗi này chưa từng có ai canh, dù `/shot` là nút Hà bấm nhiều nh�
 
 **Đã có hiệu lực:** `hubd` pid **49511** từ 21/09 06:05:40, binary 21/09 06:05,
 chuỗi `khung vẽ trước của cùng chân màn` có trong nhị phân đang chạy.
+
+---
+
+## 2026-09-21 17:1x — `/accounts` in lại cùng một con số (`e4b7330` + `b610466`)
+
+Hà: *"Sao để thông tin hiện lặp lại vậy"*, rồi *"Xem lại /accounts"*. Hai lượt vá,
+vì lượt đầu của tôi **chỉ đúng 1/6 tài khoản**.
+
+**Hai chỗ lặp, một chỗ do chính tôi gây ra hôm trước:**
+① `↻ <mốc>` in hai lần — `a72eb7b` cho mỗi hàng model mang đồng hồ riêng theo luật
+  *"mỗi con số một đồng hồ"* mà không hỏi *"đồng hồ ấy có trùng cái bên cạnh
+  không"*. Dạng đầy đủ của luật: **kéo theo đồng hồ của nó KHI đồng hồ ấy nói thêm
+  điều gì.**
+② dòng `(dò /usage: …)` in lại con số dòng `hạn mức:` vừa nói. Không xoá nó — nó
+  sinh ra để phơi lúc hai nguồn LỆCH; nay **im khi khớp, nói khi lệch**.
+
+🔴 **Vì sao lượt vá đầu trượt — lớp lỗi này dính HAI LẦN trong một ngày:** tôi so
+`m.resets_at == week_resets_at`, tức **so chuỗi thô**. Nguồn ghi hai mốc của CÙNG
+một lần reset với độ chính xác khác nhau — `2026-09-22T05:59:59.040217+00:00` và
+`2026-09-22T06:00:00+00:00`, lệch **0,96 giây** — nên làm tròn ra `12:59` và
+`13:00`. Chỉ acc5 tình cờ trùng từng ký tự. ⇒ `cung_moc()` so **khoảng cách**,
+ngưỡng 120 giây, và chính ngưỡng ấy có ca canh (3 phút = khác) đã chứng minh đỏ được.
+**Bài học: so thứ NGƯỜI ĐỌC THẤY, đừng so giá trị thô.**
+
+### 🔴 PHÉP NGHIỆM THU cho mọi thay đổi HIỂN THỊ — dùng lại, đừng chế cái khác
+
+Ba lượt liên tiếp hôm nay tôi tuyên bố xong rồi Hà phát hiện vẫn lặp. Thiếu sót
+giống hệt nhau cả ba lần: tôi nghiệm thu ở tầng *mã đã cài* (chuỗi có trong nhị
+phân), còn Hà đọc ở tầng *chữ trên màn*. Ba con bug đều nằm đúng khoảng giữa.
+
+Lệnh đo tới tầng chữ, trên sổ THẬT của cả 6 tài khoản:
+
+    cd rust && cargo test --offline --test quota_live -- --ignored --nocapture 2>/dev/null \
+      | grep -a '↳' | while IFS= read -r l; do \
+          printf '%d ↻  %s\n' "$(printf '%s' "$l" | grep -o '↻' | wc -l | tr -d ' ')" "$l"; done
+
+Kết quả sau bản vá: **6/6 hết lặp**; số `↻` còn lại đúng bằng số cửa sổ thật sự có
+mốc riêng (2 khi cả tuần lẫn 5 tiếng đang chạy, 1 khi 5 tiếng ở 0% không có mốc).
+
+**Đã có hiệu lực:** `hubd` pid **22335** từ 21/09 17:12:32.
+
+### Còn để lại, CỐ Ý không tự làm
+
+acc1 hiện `model dùng (phiên gần nhất · hanguyen · …)` — tên dự án ra `hanguyen`
+vì đường dẫn là `/Users/hanguyen`. Đúng nhưng vô nghĩa với người đọc. Chưa sửa vì
+Hà không hỏi tới, và hôm nay tôi đã một lần tự nới phạm vi (đổi nhãn `phiên` →
+`5 tiếng`) rồi phải gỡ ra vì nó phá một bài kiểm có lý do chính đáng.

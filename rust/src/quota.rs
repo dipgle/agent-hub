@@ -517,7 +517,7 @@ impl Quota {
             // hồ ấy nói thêm điều gì**. Trùng khít với cái đứng cạnh thì nó không
             // nói thêm gì, chỉ làm dòng dài ra và làm người đọc phải so hai chuỗi
             // để phát hiện chúng bằng nhau.
-            let trung_moc = m.resets_at.is_some() && m.resets_at == self.week_resets_at;
+            let trung_moc = cung_moc(m.resets_at.as_deref(), self.week_resets_at.as_deref());
             let moc = if trung_moc {
                 None
             } else {
@@ -701,6 +701,38 @@ pub fn read(account: &str, dir: Option<&Path>) -> Quota {
 /// Và đúng chiều ngược cũng phải giữ: **`None` KHÔNG được đọc thành 0**. Hai câu
 /// *"đo được 0%"* và *"không đo được"* dẫn tới hai hành động khác nhau ở phía
 /// chủ máy, nên chúng không được nhìn giống nhau (luật 13②).
+/// Hai mốc mở lại có phải CÙNG MỘT thời điểm không — so bằng KHOẢNG CÁCH, không
+/// bằng chuỗi.
+///
+/// 🔴 So chuỗi là bản vá SAI của lượt trước, và Hà bắt được ngay trên màn thật.
+/// Nguồn ghi hai mốc của CÙNG một lần reset với độ chính xác khác nhau:
+/// `2026-09-22T05:59:59.040217+00:00` cho cửa sổ tuần và
+/// `2026-09-22T06:00:00+00:00` cho hàng model — cách nhau **chưa tới một giây**,
+/// nhưng làm tròn xuống phút thì ra `12:59` và `13:00`. Hai chuỗi khác nhau ⇒ phép
+/// so chuỗi trượt ⇒ dòng vẫn in cùng một cái đồng hồ hai lần. Đo trên bản
+/// `/accounts` thật lúc 2026-09-21 09:18:35Z: trong 6 tài khoản chỉ **acc5** trùng
+/// đúng từng ký tự nên gộp được, 5 tài khoản còn lại vẫn lặp.
+///
+/// Bài học, và nó lặp lại lần thứ hai trong ngày: **so thứ NGƯỜI ĐỌC THẤY, đừng so
+/// giá trị thô.** Người đọc thấy hai cái đồng hồ giống nhau; chuỗi bên dưới thì
+/// không.
+///
+/// Ngưỡng 120 giây: đủ rộng để nuốt mọi sai lệch làm-tròn kiểu ấy, đủ hẹp để hai
+/// cửa sổ THẬT SỰ khác nhau (tuần ↔ 5 tiếng, cách nhau hàng giờ) không bị gộp oan.
+fn cung_moc(a: Option<&str>, b: Option<&str>) -> bool {
+    let (Some(a), Some(b)) = (a, b) else {
+        return false;
+    };
+    let (Ok(x), Ok(y)) = (
+        chrono::DateTime::parse_from_rfc3339(a),
+        chrono::DateTime::parse_from_rfc3339(b),
+    ) else {
+        // Đọc không ra mốc ⇒ KHÔNG dám gộp. Gộp nhầm là giấu mất một con số.
+        return false;
+    };
+    (x.timestamp_millis() - y.timestamp_millis()).abs() <= 120_000
+}
+
 fn cua_so(pct: Option<i64>, resets_at: Option<&str>, now_ms: i64) -> Option<i64> {
     let pct = pct?;
     match resets_at {
@@ -1180,21 +1212,47 @@ mod tests {
     /// reset ĐÚNG CÙNG LÚC với cửa sổ tuần ⇒ dòng nào cũng in cùng một mốc hai lần.
     #[test]
     fn dong_ho_hang_model_trung_cua_so_tuan_thi_khong_in_lai() {
-        let mut q = q(Some(55), Some("2026-09-21T16:00:00+00:00"), Some(1), None);
+        // 🔴 HÌNH DẠNG THẬT, chép từ `.claude.json` (đo 21/09): hai mốc của CÙNG
+        // một lần reset được ghi với độ chính xác khác nhau, lệch **chưa tới một
+        // giây** — nhưng làm tròn xuống phút thì ra `12:59` và `13:00`. Bản vá đầu
+        // so CHUỖI nên trượt hết, và Hà thấy nó lặp ngay trên màn.
+        let mut q = q(
+            Some(100),
+            Some("2026-09-22T05:59:59.040217+00:00"),
+            Some(0),
+            None,
+        );
         q.models = vec![ModelPct {
             name: "Fable".into(),
             pct: 0,
-            resets_at: Some("2026-09-21T16:00:00+00:00".into()),
+            resets_at: Some("2026-09-22T06:00:00+00:00".into()),
         }];
         let s = q.say(NOW);
         assert!(s.contains("Fable 0%"), "mất luôn hàng model:\n{s}");
-        assert_eq!(s.matches('↻').count(), 1, "in lại cùng một đồng hồ:\n{s}");
+        assert_eq!(
+            s.matches('↻').count(),
+            1,
+            "lệch 0,96 giây mà vẫn in lại cùng một đồng hồ:\n{s}"
+        );
 
-        // CHIỀU NGƯỢC — mốc KHÁC thì PHẢI in, vì lúc ấy nó mới nói thêm điều gì.
-        // Thiếu vế này thì "bỏ đồng hồ" và "bỏ đúng đồng hồ thừa" đọc giống nhau.
+        // Trùng đúng từng ký tự thì đương nhiên cũng phải gộp.
+        q.models[0].resets_at = Some("2026-09-22T05:59:59.040217+00:00".into());
+        assert_eq!(q.say(NOW).matches('↻').count(), 1);
+
+        // CHIỀU NGƯỢC — mốc THẬT SỰ khác thì PHẢI in, vì lúc ấy nó mới nói thêm
+        // điều gì. Thiếu vế này thì "bỏ đồng hồ thừa" và "bỏ mọi đồng hồ" đọc
+        // giống hệt nhau. Lấy một mốc cách vài ngày, ngoài hẳn ngưỡng 120 giây.
         q.models[0].resets_at = Some("2026-09-25T16:00:00+00:00".into());
         let s2 = q.say(NOW);
         assert_eq!(s2.matches('↻').count(), 2, "nuốt mất một mốc KHÁC:\n{s2}");
+
+        // Và sát ngưỡng: 3 phút là KHÁC, phải giữ cả hai.
+        q.models[0].resets_at = Some("2026-09-22T06:02:59+00:00".into());
+        assert_eq!(
+            q.say(NOW).matches('↻').count(),
+            2,
+            "ngưỡng nuốt quá tay: 3 phút là hai thời điểm khác nhau"
+        );
     }
 
     /// `doc_models` phải bỏ hàng KHÔNG có model và hàng thiếu `percent`, giữ

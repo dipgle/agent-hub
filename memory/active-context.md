@@ -1,5 +1,52 @@
 # active context — huba
 
+## 🎯 2026-09-23 18:05 — `/clean` + `/accounts`: ĐÃ CÀI `hubd@2026-09-23T11:02:55Z`
+
+`gate.sh` (nice 19, `CARGO_BUILD_JOBS=2` — Hà báo TREO MÁY khi biên dịch chạy hết lõi):
+`GATE_EXIT=0` · fmt 0 · clippy 0 · **157/157 binary, 0 mã thoát ≠ 0** · 0 warning. `--verify` KHỚP,
+`hubd_signature cert`, Trợ năng `true`. **CHƯA** thấy Hà gõ `/clean` hay `/accounts` trên bản mới.
+
+- **`/clean`**: gốc là phép ĐỌC (bảng subagent dưới ô), không phải phép XOÁ. Live
+  `tests/clear_box_live.rs` 3 lượt đo cùng kết quả: ô 3 dòng → `clear_box Ok(true)` → ô trống ⟹ DEL
+  **có** xoá qua chỗ xuống dòng. 9 màn thật cũ↔mới: khác đúng 2/9 (hai màn có bảng subagent).
+- **`/accounts`** (Hà, ảnh acc1: *"Sao các thông số này lại mâu thuẫn thế"*): 4 chỗ — `Fable 0%` (TRẦN)
+  cạnh `Opus 5 100%` (TOKEN một phiên) · phiên 187 tiếng = NGOÀI cửa sổ tuần · `không có phiên nào`
+  cạnh `phiên gần nhất` · `còn 3 ngày` khi còn 3 ngày 22 tiếng. Mã cũ 4/4 bài mới ĐỎ, mã mới xanh.
+
+**Phát hiện bên lề, CHƯA làm:**
+- `/exit` gõ qua `do script` + Enter rời bị claude 2.1.280 nhận như **TIN NHẮN THƯỜNG** (đo 2 lượt
+  trên cửa sổ nháp; mỗi lượt tốn một lượt model). `/stop` của huba đi đúng đường ấy
+  (`keys::send_exit` → `type_and_send`). Log từ 18/09 lẫn lộn: có `close_done`, cũng có
+  `close_check_failed`/`close_still_busy` — CHƯA ĐỦ để kết luận `/stop` hỏng; cần một phép đo riêng.
+- `huba/.claude/settings.local.json` (09/08) thêm `…/Documents/projects/AI/mailler` vào workspace ⟹
+  mọi thư mục nháp dưới `huba/` bật hộp tin-thư-mục. `box_start` NHẬN hộp ấy là ô nhập (vạch + `❯`,
+  lựa chọn không đánh số nên `parse_choices` rỗng).
+- `Terminal` 37–50 % CPU · `launchservicesd` 28 % · `loginwindow` 23 % lúc máy nặng — đều là cửa nhận
+  AppleScript/`osascript`. Chưa đo phần của huba trong đó.
+
+### Nhật ký mạch (giữ lại vì các số đo trong đó)
+
+Hà: *"chỉnh lại lệnh clean để xóa toàn bộ ô nhập của phiên, hiện tại xóa mỗi dòng thì phải"*.
+
+**Gốc ĐO ĐƯỢC** (`logs/huba.log`): `/clean` ×2 vào `[dwork]` 07:54Z/07:55Z ⟹ `keys_clear_gave_up
+left_seen=194` cả hai (16 lô × 400 DEL, 24,8 s và 34,8 s chặn cả vòng). Màn chụp ngay sau: ô TRỐNG;
+194 ký tự là **bảng subagent dưới dòng chân** (`⏺ main` · `◯ general-purpose …`) mà `input_box_text`
+đọc vì nó đọc từ viền trên tới HẾT MÀN. Cùng gốc: `auto_unstick_box_firing` bấm Enter vào ô trống
+ấy (`text_len` 194/209, 07:56–07:59Z). 15 lượt `keys_clear_gave_up` từ 29/08 (left_seen 114…2211).
+
+**Lúc 15:30 — mã đã sửa, chưa commit (đã đóng 18:05, xem khối trên):** `keys.rs` — `box_close` (viền dưới = vạch cùng bề rộng viền
+trên, lùi về phép cũ) dùng chung cho `body_before_box` + `box_inner` mới; `input_box_text` đọc
+`box_inner`. `pipeline.rs` — câu trả lời `/clean` hết tự mâu thuẫn (*"đã sạch. ⚠ vẫn còn chữ"*).
+Bài kiểm `tests/o_nhap_giua_hai_vien.rs` + tệp mẫu màn thật: **ĐỎ trước sửa đã chạy (4/5 đỏ đúng
+lý do)**; lượt XANH sau sửa **BỊ DỪNG giữa lúc biên dịch** vì Hà báo treo máy (tải 15,9 → 6,0 sau khi
+dừng). ⇒ chưa có số xanh, chưa cài, chưa đo trên Telegram.
+**Lúc 15:30 còn mở (đã đo 17:0x — CÓ xoá qua):** vế "DEL có xoá qua chỗ xuống dòng không" CHƯA đo trên TUI thật (khuôn:
+`tests/clean_queue_live.rs`). Chạy lại bằng `nice -n 19 cargo test --offline -j 2 …` để không treo máy.
+
+**Hà hỏi thêm: "gửi nhiều lệnh càng nhiều càng chậm"** — số đo hôm nay: `cycle_done` n=433, trung vị
+9,0 s · p90 27,9 s · max 141 s; lệnh chạy TUẦN TỰ trong một vòng nên lệnh sau chờ lệnh trước
+(`RunIn` 111 lượt = 26 phút, `Shot` max 130 s). Việc riêng, chưa làm.
+
 ## 🎯 2026-08-27 — hai nút KHAI một việc mà không ĐO nó
 
 `fmt 0` · `clippy --all-targets 0` · **109/109 tệp test · 637 ca xanh · 0 đỏ**

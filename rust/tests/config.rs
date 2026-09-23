@@ -256,6 +256,31 @@ fn the_accounts_list_names_the_one_that_new_lands_on() {
     );
 }
 
+/// "0 phiên" nói về phiên ĐANG CHẠY — và phải nói đúng chữ ấy, vì ngay bên dưới
+/// là dòng về phiên GẦN NHẤT (có khi đã tắt cả tuần). Hà 2026-09-23 đọc
+/// *"không có phiên nào"* cạnh *"phiên gần nhất … 187 tiếng trước"* thành một
+/// cặp mâu thuẫn (`tests/accounts_khong_tu_mau_thuan.rs`).
+#[test]
+fn an_account_with_no_live_session_says_none_are_running() {
+    let live = snap_with(vec![row("acc1", "projects-7c")]);
+    let said = huba::runtime::accounts_text(
+        &acc_cfg(),
+        &live,
+        &serde_json::json!({}),
+        &[],
+        &Default::default(),
+        MOC,
+    );
+    let line = said
+        .lines()
+        .find(|l| l.starts_with("acc2"))
+        .unwrap_or_else(|| panic!("thiếu dòng acc2:\n{said}"));
+    assert!(
+        line.contains("không có phiên nào đang chạy"),
+        "acc2 không có phiên sống mà câu không nói 'đang chạy': {line}"
+    );
+}
+
 /// Tài khoản KHÔNG liệt kê được phiên thì "0 phiên" là con số của một phép đo
 /// hỏng — phải nói thẳng, đúng bài học 14:44 hôm nay.
 #[test]

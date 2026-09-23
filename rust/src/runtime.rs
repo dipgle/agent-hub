@@ -193,8 +193,12 @@ pub fn accounts_text(
             } else {
                 ""
             },
+            // "ĐANG CHẠY", không chỉ "phiên": dòng `model dùng` bên dưới nói về
+            // phiên GẦN NHẤT (có khi đã tắt cả tuần) — Hà 2026-09-23 đọc hai câu
+            // *"không có phiên nào"* và *"phiên gần nhất … 187 tiếng trước"* cạnh
+            // nhau thành mâu thuẫn.
             match mine.len() {
-                0 => "không có phiên nào".to_string(),
+                0 => "không có phiên nào đang chạy".to_string(),
                 n => format!(
                     "{n} phiên: {}",
                     mine.iter()

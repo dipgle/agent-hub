@@ -172,6 +172,9 @@ pub struct ModelUseSnapshot {
     pub rows: Vec<ModelUse>,
 }
 
+/// Bề dài cửa sổ TUẦN của hạn mức, tính bằng phút.
+const TUAN_PHUT: i64 = 7 * 1440;
+
 impl ModelUseSnapshot {
     pub fn say(&self, now_ms: i64) -> String {
         let ds = self
@@ -185,17 +188,28 @@ impl ModelUseSnapshot {
             .and_then(|s| s.to_str())
             .unwrap_or(self.project.as_str());
         // Số có hạn thì phải kèm đồng hồ của nó — cùng luật với dòng hạn mức.
+        //
+        // 🔴 Cũ hơn CỬA SỔ TUẦN thì nói ra (Hà 2026-09-23, ảnh `/accounts`: *"Sao
+        // các thông số này lại mâu thuẫn thế"* — `tuần 32%` ngay trên `mở 187
+        // tiếng trước: Opus 5 100%`). Phiên ấy mở TRƯỚC khi cửa sổ tuần hiện tại
+        // bắt đầu, nên nó không nói gì về con số tuần ở dòng trên.
         let tuoi = match self.at_ms {
             Some(t) => {
                 let phut = (now_ms - t).max(0) / 60_000;
                 match phut {
                     0..=90 => format!(" · mở {phut} phút trước"),
-                    _ => format!(" · mở {} tiếng trước", phut / 60),
+                    91..=2879 => format!(" · mở {} tiếng trước", phut / 60),
+                    2880..=TUAN_PHUT => format!(" · mở {} ngày trước", phut / 1440),
+                    _ => format!(" · mở {} ngày trước, NGOÀI cửa sổ tuần", phut / 1440),
                 }
             }
             None => String::new(),
         };
-        format!("model dùng (phiên gần nhất · {du_an}{tuoi}): {ds}")
+        // 🔴 "tỉ trọng token", không phải "model dùng" (cùng ngày, cùng ảnh): dòng
+        // hạn mức ngay trên in `Fable 0%` — % TRẦN — còn dòng này in `Opus 5
+        // 100%` — % TOKEN của một phiên. Cùng hình dạng "tên N%" mà hai họ số
+        // khác nhau (xem đầu [`ModelUse`]), nên nhãn phải tự nói nó là họ nào.
+        format!("phiên gần nhất ({du_an}{tuoi}) — tỉ trọng token: {ds}")
     }
 }
 
@@ -959,7 +973,13 @@ pub fn moc_cua_so(
         ..=0 => "còn dưới 1 phút".to_string(),
         1..=90 => format!("còn {phut} phút"),
         91..=1439 => format!("còn {} tiếng", phut / 60),
-        _ => format!("còn {} ngày", phut / 1440),
+        // Kèm phần TIẾNG lẻ: chia nguyên cắt cụt, nên 3 ngày 22 tiếng in ra
+        // `còn 3 ngày` cạnh mốc `27/09` trong khi hôm nay là 23/09 — người đọc
+        // đếm lịch ra 4 và thấy máy nói 3 (Hà 2026-09-23, ảnh `/accounts`).
+        _ => match (phut % 1440) / 60 {
+            0 => format!("còn {} ngày", phut / 1440),
+            gio => format!("còn {} ngày {gio} tiếng", phut / 1440),
+        },
     };
     let khuon = if ngan_gon { "%H:%M" } else { "%H:%M %d/%m" };
     Some(format!(

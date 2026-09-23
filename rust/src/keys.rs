@@ -4766,6 +4766,8 @@ pub fn checkbox_plan(screen: &str, n: usize) -> Option<Vec<Vec<String>>> {
 
 pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
     let mut out: Vec<(usize, String, usize)> = Vec::new();
+    // Dòng (chỉ số) của các mục dài hơn `LABEL_MAX` — xem chỗ ghi bên dưới.
+    let mut dai: Vec<usize> = Vec::new();
     for (idx, line) in screen.lines().enumerate() {
         let t = line.trim();
         // Bỏ dấu con trỏ ❯ nếu có, rồi tìm "<số>." ở đầu.
@@ -4786,8 +4788,18 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
         // mà chữ Việt có dấu tốn 2-3 byte mỗi ký tự: cùng một trần 120, tiếng
         // Anh được ~120 ký tự còn tiếng Việt chỉ ~50-60. Cái trần này vì thế
         // cắt đúng thứ tiếng mà phiên của chủ máy viết ra.
-        if label.is_empty() || label.chars().count() > 120 {
+        if label.is_empty() {
             continue;
+        }
+        // 🔴 DÒNG DÀI: GHI LẠI, CHƯA BỎ — 2026-09-23. Hà, ảnh tin hộp hỏi quyền:
+        // *"Tin có option nhưng không bấm được"*. Lựa chọn 2 của hộp ấy (`Yes,
+        // and always allow access to /Users/…/memory, /Users/…/memory for this
+        // session`) dài hơn 120 ký tự ⟹ bị bỏ ⟹ khối còn `1, 3`, đứt số ⟹ cả
+        // hộp thật về 0. Trần độ dài là hàng rào cho ca KHÔNG có dòng chân (xem
+        // khối "CÓ DÒNG CHÂN" bên dưới: có dòng chân thì neo vào cấu trúc, trần
+        // chỉ là xổ số) — nên chỉ áp nó sau khi biết có dòng chân hay không.
+        if label.chars().count() > LABEL_MAX {
+            dai.push(idx);
         }
         out.push((n, label.to_string(), idx));
     }
@@ -4842,6 +4854,11 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
     });
     let chan = chooser_footer_line(screen);
     let footer = chan.is_some();
+    // Không có dòng chân ⟹ trần độ dài đứng như cũ: một câu văn đánh số dài lê
+    // thê không phải lựa chọn.
+    if !footer {
+        out.retain(|(_, _, idx)| !dai.contains(idx));
+    }
     if out.is_empty() || (!footer && (!co_tro || out[0].0 != 1)) {
         return Vec::new();
     }
@@ -4919,8 +4936,23 @@ pub fn parse_choices(screen: &str) -> Vec<(usize, String)> {
             }
         }
     }
-    out.into_iter().map(|(n, l, _)| (n, l)).collect()
+    // Nhãn dài (chỉ còn sống tới đây khi có dòng chân) được CẮT để hiện — cái
+    // nút gửi con số, không gửi nhãn, nên cắt nhãn không đổi lựa chọn nào.
+    out.into_iter()
+        .map(|(n, l, _)| {
+            if l.chars().count() > LABEL_MAX {
+                let mut ngan: String = l.chars().take(LABEL_MAX).collect();
+                ngan.push('…');
+                (n, ngan)
+            } else {
+                (n, l)
+            }
+        })
+        .collect()
 }
+
+/// Trần độ dài một nhãn lựa chọn, tính theo KÝ TỰ — xem `parse_choices`.
+const LABEL_MAX: usize = 120;
 
 /// Màn có đang vẽ CHÂN của một hộp chọn không.
 ///
@@ -4971,7 +5003,15 @@ pub fn chooser_footer_line(screen: &str) -> Option<usize> {
         .enumerate()
         .filter(|(_, line)| {
             let l = line.to_lowercase();
-            (l.contains("to select") || l.contains("to confirm") || l.contains("để chọn"))
+            // `to amend`: hộp HỎI QUYỀN (sửa tệp ngoài thư mục làm việc) vẽ
+            // *"Esc to cancel · Tab to amend"* — không có "select"/"confirm".
+            // Đo 2026-09-23 trên cửa sổ 7949 (Hà: *"Tin có option nhưng không
+            // bấm được"*); vẫn đòi đủ HAI vế nên một câu văn nhắc "to amend"
+            // đứng một mình không thành dòng chân.
+            (l.contains("to select")
+                || l.contains("to confirm")
+                || l.contains("to amend")
+                || l.contains("để chọn"))
                 && (l.contains("to navigate") || l.contains("to cancel") || l.contains("để huỷ"))
         })
         .map(|(i, _)| i)

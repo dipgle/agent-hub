@@ -733,22 +733,69 @@ pub fn body_before_box(screen: &str) -> String {
     // Bài kiểm `file_button_beside_command` bắt được ngay: đường dẫn báo cáo
     // `.html` nằm ở dòng 29, ô nhập ở dòng 19–21.
     let rest = &screen[i..];
-    let mut at = 0usize;
-    let mut close = None;
-    for (k, line) in rest.split_inclusive('\n').enumerate() {
-        let t = line.trim();
-        let is_rule = t.chars().count() >= 8 && t.chars().all(|c| "─━—▔═".contains(c));
-        if k > 0 && (is_rule || t.starts_with('╰')) {
-            close = Some(at + line.len());
-            break;
-        }
-        at += line.len();
-    }
-    match close {
-        Some(end) => format!("{head}{}", &rest[end..]),
+    match box_close(rest) {
+        Some((_, end)) => format!("{head}{}", &rest[end..]),
         // Ô chạy tới hết màn (bị mép dưới cắt) — không còn gì phía sau để giữ.
         None => head.to_string(),
     }
+}
+
+/// Dòng kẻ ngang — viền của ô nhập ở bản không khung. Đòi dài (≥ 8) để một dòng
+/// gạch ngắn giữa văn bản không bị đọc thành viền.
+fn is_rule_line(t: &str) -> bool {
+    t.chars().count() >= 8 && t.chars().all(|c| "─━—▔═".contains(c))
+}
+
+/// VIỀN DƯỚI của ô nhập: `(đầu dòng viền, cuối dòng viền)`, tính theo byte của
+/// `rest` — chuỗi bắt đầu ở viền TRÊN, tức `&screen[box_start(screen)?..]`.
+/// `None` = ô chạy tới hết màn (mép dưới cắt mất viền).
+///
+/// Một chỗ cho câu hỏi "ô nhập dừng ở đâu", dùng chung cho [`body_before_box`]
+/// (bỏ đúng cái ô) và [`box_inner`] (đọc đúng cái ô).
+///
+/// 🔴 VIỀN DƯỚI RỘNG ĐÚNG BẰNG VIỀN TRÊN — 2026-09-23. TUI vẽ hai vạch suốt bề
+/// ngang, nên chúng dài bằng nhau từng ký tự (màn thật hôm ấy: 206 và 206). Một
+/// vạch NGẮN trong nội dung ô (đầu ra lệnh dán vào hay có) thì không. Vạch cùng
+/// bề rộng không có thì lùi về vạch ≥ 8 đầu tiên — đúng phép cũ của
+/// `body_before_box`, nên ca nào phép cũ đã tìm đúng viền thì phép này tìm ra
+/// cùng dòng ấy.
+fn box_close(rest: &str) -> Option<(usize, usize)> {
+    let mut lines = rest.split_inclusive('\n');
+    let top = lines.next()?;
+    let width = top.trim().chars().count();
+    let mut at = top.len();
+    let mut loose = None;
+    for line in lines {
+        let t = line.trim();
+        let span = (at, at + line.len());
+        if t.starts_with('╰') || (is_rule_line(t) && t.chars().count() == width) {
+            return Some(span);
+        }
+        if loose.is_none() && is_rule_line(t) {
+            loose = Some(span);
+        }
+        at += line.len();
+    }
+    loose
+}
+
+/// Phần NẰM GIỮA HAI VIỀN của ô nhập — từ dòng ngay dưới viền trên tới dòng
+/// ngay trên viền dưới. `None` khi màn không có ô nhập (cùng neo `box_start`).
+///
+/// 🔴 Hà 2026-09-23: *"chỉnh lại lệnh clean để xóa toàn bộ ô nhập của phiên,
+/// hiện tại xóa mỗi dòng thì phải"*. `input_box_text` từng đọc từ viền trên tới
+/// HẾT MÀN, tức gói luôn mọi thứ TUI vẽ dưới viền dưới — dòng chân thì có bộ lọc
+/// chữ riêng, còn **bảng subagent** (`⏺ main` · `◯ general-purpose  <việc>
+/// 14m 8s · ↓ 165.4k tokens`) thì không. Đo trên `[dwork]` cùng ngày: ô TRỐNG
+/// mà đọc ra 194 ký tự ⟹ `/clean` bắn 16 lô × 400 DEL rồi vẫn khai "còn chữ"
+/// (`keys_clear_gave_up`, 15 lượt từ 29/08), và vòng tự gỡ kẹt bấm Enter vào ô
+/// trống ấy (`auto_unstick_box_firing text_len=194`). Bảng ấy nằm ngoài ô, nên
+/// sửa ở chỗ cắt vùng — không thêm một cụm chữ nữa vào bộ lọc.
+pub fn box_inner(screen: &str) -> Option<&str> {
+    let rest = &screen[box_start(screen)?..];
+    let top_end = rest.find('\n').map_or(rest.len(), |n| n + 1);
+    let end = box_close(rest).map_or(rest.len(), |(start, _)| start);
+    Some(&rest[top_end..end.max(top_end)])
 }
 
 /// Ô nhập BẮT ĐẦU ở byte nào — một cái neo, hai chỗ dùng.
@@ -795,8 +842,7 @@ pub fn box_start(screen: &str) -> Option<usize> {
     let mut rules: Vec<usize> = Vec::new();
     let mut at = 0usize;
     for line in screen.split_inclusive('\n') {
-        let t = line.trim();
-        if t.chars().count() >= 8 && t.chars().all(|c| "─━—▔═".contains(c)) {
+        if is_rule_line(line.trim()) {
             rules.push(at);
         }
         at += line.len();
@@ -866,9 +912,11 @@ pub fn input_box_text(screen: &str) -> Option<String> {
     // Luật này `CLAUDE.md` đã ghi rồi (*"rơi âm thầm về đường lùi bốn dòng
     // cuối — đủ để mọi thứ trông vẫn chạy, và đã trả giá"* · *"Một cái neo duy
     // nhất: `keys::box_start`"*); chỗ thiếu chỉ là hàm này chưa nhận nó.
-    box_start(screen)?;
+    //
+    // 🔴 VÀ CHỈ ĐỌC GIỮA HAI VIỀN (vá 2026-09-23) — dưới viền dưới là dòng chân
+    // và bảng subagent, không phải chữ của người gõ. Xem [`box_inner`].
     let mut buf = String::new();
-    for line in box_region(screen).lines() {
+    for line in box_inner(screen)?.lines() {
         let t = line.trim();
         if t.is_empty() {
             continue;

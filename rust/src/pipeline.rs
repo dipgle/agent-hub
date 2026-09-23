@@ -13401,19 +13401,24 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // đổ đầy trở lại.
                                 let don = crate::keys::clear_queue(w);
                                 let o_sach = matches!(crate::keys::clear_box(w), Ok(true));
-                                let con_o = if o_sach {
-                                    String::new()
+                                // Câu về ô nhập nói ĐÚNG MỘT trạng thái. Bản cũ
+                                // viết cứng "ô nhập đã sạch" rồi nối thêm cảnh
+                                // báo khi chưa sạch, nên Hà nhận nguyên văn
+                                // *"ô nhập đã sạch. ⚠ ô nhập vẫn còn chữ"*
+                                // (log 2026-09-23 07:54Z, hai lượt liền).
+                                let o = if o_sach {
+                                    "ô nhập đã sạch."
                                 } else {
-                                    " ⚠ ô nhập vẫn còn chữ — gõ `/clear` lần nữa.".to_string()
+                                    "⚠ ô nhập vẫn còn chữ sau khi xoá — gõ `/clear` lần nữa, hoặc xoá tay ở máy."
                                 };
                                 match don {
                                     Ok((0, 0)) => format!(
-                                        "🧹 {} không có tin nào trong hàng chờ; ô nhập đã sạch.{con_o}",
+                                        "🧹 {} không có tin nào trong hàng chờ; {o}",
                                         crate::sessions::shown(&s)
                                     ),
                                     Ok((removed, 0)) => format!(
-                                        "🧹 Đã xoá {removed} tin khỏi hàng chờ của {} — hàng chờ trống, ô nhập đã sạch. \
-                                         Lượt đang chạy KHÔNG bị cắt (muốn cắt thì `/key esc`).{con_o}",
+                                        "🧹 Đã xoá {removed} tin khỏi hàng chờ của {} — hàng chờ trống; {o} \
+                                         Lượt đang chạy KHÔNG bị cắt (muốn cắt thì `/key esc`).",
                                         crate::sessions::shown(&s)
                                     ),
                                     Ok((removed, left)) => format!(

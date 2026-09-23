@@ -14251,6 +14251,61 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         ))
                                     }
                                 }
+                            } else if !is_key {
+                                // 🔴 CHỮ gõ vào một màn ĐANG MỞ HỘP CHỌN thì bị
+                                // hộp nuốt — 2026-09-23. Hà: *"Gửi file md vẫn
+                                // chưa vào được phiên"*. Đo trên nhật ký CỦA CHÍNH
+                                // PHIÊN ĐÍCH (`f3b764dd`): 14:50:26Z huba gõ
+                                // `Xem tệp: …/bao-cao-ngay-23.md` vào cửa sổ 7949
+                                // lúc hộp hỏi quyền đang mở, báo `✓ đã gửi` — và
+                                // câu ấy KHÔNG CÓ trong nhật ký, không lần nào.
+                                // `still_in_box` thấy chữ không nằm trong ô nhập
+                                // nên đọc thành "đã đi", trong khi ô nhập đang bị
+                                // hộp che. Cú CR `do script` kèm theo còn có thể
+                                // CHỐT hộ lựa chọn đang trỏ — lần này thì không
+                                // (không có tin `1` nào lọt vào hàng chờ sau đó),
+                                // nhưng đó là may, không phải cổng.
+                                //
+                                // Nên: nhìn màn trước như nhánh số ở trên. Có hộp
+                                // chọn ⟹ KHÔNG gõ, nói ra, và gắn nút của chính hộp
+                                // ấy để trả lời ngay. Không đọc được màn ⟹ gõ như
+                                // cũ: chữ thường là việc hằng ngày, từ chối mọi câu
+                                // mỗi khi Terminal chậm là làm hỏng đường chính.
+                                match crate::keys::look(&s.tty, 24) {
+                                    crate::keys::Look::Saw { body, .. } => {
+                                        let hop = crate::keys::parse_choices(&body);
+                                        if hop.is_empty() {
+                                            None
+                                        } else {
+                                            logging::info(
+                                                "keys_text_held_dialog",
+                                                json!({ "session": s.session_id,
+                                                        "len": typed.chars().count(),
+                                                        "so_lua_chon": hop.len(),
+                                                        "why": "màn đang mở hộp chọn — chữ sẽ bị hộp nuốt, CR có thể chốt hộ" }),
+                                            );
+                                            shot_choices = hop
+                                                .iter()
+                                                .map(|(n, l)| (n.to_string(), l.clone()))
+                                                .collect();
+                                            let mut msg = format!(
+                                                "⚠ {} đang mở một HỘP CHỌN, nên tôi CHƯA gõ gì cả: chữ gõ lúc \
+                                                 này bị hộp nuốt mất, và cú Enter đi kèm có thể chốt hộ lựa \
+                                                 chọn đang trỏ.\nTrả lời hộp trước (nút bên dưới), rồi gửi lại.",
+                                                crate::sessions::shown(&s)
+                                            );
+                                            if let Some(p) = file_path_in_typed(&typed) {
+                                                msg.push_str(&format!("\n📎 Tệp ĐÃ lưu trên máy: {p}"));
+                                            }
+                                            msg.push_str(&format!(
+                                                "\nCâu chưa gửi:\n{}",
+                                                crate::exec::truncate(typed.trim(), 400)
+                                            ));
+                                            Some(msg)
+                                        }
+                                    }
+                                    crate::keys::Look::Blind { .. } => None,
+                                }
                             } else {
                                 None
                             };

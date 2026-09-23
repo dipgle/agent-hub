@@ -22,6 +22,13 @@ Cài SỚM `hubd@2026-09-23T14:18:06Z` (Hà: *"Vẫn chưa được"* — bản 
 trong binary) trước khi cổng xong; cổng sau đó XANH 160/160 · clippy 0 · 0 warning trên cùng mã nguồn.
 CHƯA thấy Hà `/shot` lại phiên có hộp ⇒ nút trên Telegram CHƯA được nhìn thấy bằng mắt.
 
+**Gửi `.md` lần 2 (14:50Z) vẫn không vào** — lỗi KHÁC lần 08:51: phiên đích đang mở hộp hỏi quyền,
+huba gõ `Xem tệp:` vào hộp và báo `✓ đã gửi`; nhật ký phiên `f3b764dd` KHÔNG có câu ấy. Vá: nhánh gõ
+CHỮ đọc màn trước, có hộp chọn ⇒ không gõ + nút của hộp. Cài `hubd@2026-09-23T15:13:03Z`, gate
+161/161. Nút hộp chọn ĐÃ chạy thật: 14:50:40Z Hà bấm `k_f3b764dd_1`, hộp đóng.
+Còn treo, chưa làm: 4 lượt `auto_unstick_box_firing` vào phiên `c6923d05` sau 13:46Z, lượt nào cũng
+`stuck` (Enter không đẩy được chữ) — nghi câu gợi ý `Press up to edit queued messages`, CHƯA chứng minh.
+
 **Rút lại trong ngày:** các con số "chờ trung vị 75 s / 52 s" — phép ghép log `queued`↔`done` trôi lệch;
 nay có `cho_ms` nên không phải ghép nữa.
 

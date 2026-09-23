@@ -3942,6 +3942,61 @@ fn list_account(account: &ClaudeAccountCfg, cli: &str) -> Result<Vec<Value>> {
     list_account_cli(account, cli)
 }
 
+/// Một id có còn nằm trong sổ `claude agents` của tài khoản nào không.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Listed {
+    /// Có tên trong sổ của ít nhất một tài khoản — CHƯA chắc còn sống (sổ có
+    /// thể còn giữ hàng cũ), nên chỗ gọi vẫn phải đi đường ảnh chụp.
+    Yes,
+    /// Mọi tài khoản đọc được, và không sổ nào có id này.
+    No,
+    /// Có tài khoản KHÔNG đọc được sổ — "không thấy" ở đây không nói được gì.
+    Blind(Vec<String>),
+}
+
+/// Hỏi SỔ của từng tài khoản xem `want` còn trong danh sách không — **không hỏi
+/// Terminal**.
+///
+/// 🔴 Thêm 2026-09-23. Hà gửi một tệp `.md` vào phiên đang theo lúc 08:51Z,
+/// phiên ấy đã tắt từ 08:37Z; `/type` rơi khỏi sổ theo dõi (sổ xoá phiên ngay
+/// khi nó tắt) rồi dựng NGUYÊN một ảnh chụp — đọc chữ của mọi tab Terminal,
+/// hết giờ 20 giây lúc máy nặng — và **46 giây** sau mới trả *"không thấy
+/// phiên"*. Câu hỏi "phiên này còn trong danh sách không" chỉ cần phần đọc sổ
+/// (`ms_ask_accounts` 2–17 ms trong cùng log), không cần phần hỏi Terminal.
+///
+/// So id theo đúng luật [`crate::pipeline::same_session`] (nguyên id, hoặc 8 ký
+/// tự đầu) để hai phép tra không trả lời khác nhau về cùng một chuỗi.
+pub fn listed_in_books(cfg: &Config, want: &str) -> Listed {
+    let mut blind = Vec::new();
+    for account in &cfg.claude_accounts_or_ambient() {
+        match list_account(account, &cfg.claude_cli) {
+            Ok(rows) => {
+                let co = rows.iter().any(|r| {
+                    r.get("sessionId")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|id| crate::pipeline::same_session(id, want))
+                });
+                if co {
+                    return Listed::Yes;
+                }
+            }
+            Err(e) => {
+                logging::warn(
+                    "claude_agents_list_failed",
+                    json!({ "account": account.name, "err": e.to_string(),
+                            "cho_goi": "listed_in_books" }),
+                );
+                blind.push(account.name.clone());
+            }
+        }
+    }
+    if blind.is_empty() {
+        Listed::No
+    } else {
+        Listed::Blind(blind)
+    }
+}
+
 /// Ask one account's CLI what it has running.
 fn list_account_cli(account: &ClaudeAccountCfg, cli: &str) -> Result<Vec<Value>> {
     // Absent variable = default account. Setting it to ~/.claude reports "not

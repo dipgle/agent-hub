@@ -83,6 +83,13 @@ pub struct Incoming {
     /// là RUỘT của huba, không phải việc của người đọc; đúng cùng lý do đã bỏ
     /// dòng "(phải gửi thêm một Enter rời)" hôm qua.
     pub quiet: bool,
+    /// Lúc lệnh VÀO HÀNG — để tách "chờ trong hàng" khỏi "tự chạy".
+    ///
+    /// 🔴 Thêm 2026-09-23. Trước đó log chỉ có `telegram_command_queued` (không
+    /// mang mã lệnh) và `command_done.ms` (thời gian TỰ chạy), nên câu *"lệnh
+    /// của Hà chờ bao lâu"* chỉ trả lời được bằng cách ghép hai dòng theo thứ
+    /// tự — và phép ghép ấy trôi lệch hai lần trong cùng một buổi đo.
+    pub at: std::time::Instant,
 }
 
 /// Hàng update chờ thợ, kèm mốc NHẬN của từng cái (để đo thời gian nằm chờ).
@@ -1942,6 +1949,7 @@ impl Inbox {
                 text: t.to_string(),
                 quiet,
                 msg_id,
+                at: std::time::Instant::now(),
             });
         logging::info(
             "telegram_command_queued",

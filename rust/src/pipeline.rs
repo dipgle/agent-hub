@@ -1317,6 +1317,41 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
             }
             _ => c.say(&idle, tail),
         };
+        // 🔴 PHIÊN ĐANG THEO vừa tắt ⟹ nói ra đúng điều ấy (Hà 2026-09-23). Lúc
+        // 08:37Z huba báo `⚫ [dwork]·Dwork đợt 41 giao nhận đã tắt …` — một trong
+        // 5 tin "đã tắt" trong 35 phút, và KHÔNG câu nào nói đây là phiên con trỏ
+        // đang trỏ vào. 14 phút sau Hà gửi một tệp `.md`: nó về máy, rồi rơi vào
+        // một phiên đã tắt. Con trỏ vẫn KHÔNG tự chuyển (chỉ chủ máy chọn phiên
+        // — `FocusKept`); thứ đổi là tin báo nói cho anh biết phải chọn.
+        let text = if matches!(c, crate::watch::Change::Ended { .. })
+            && takeover.is_none()
+            && same_session(&id, &focused)
+        {
+            let links: Vec<(String, String)> = live
+                .iter()
+                .filter(|s| s.session_id != id && s.host != "dead")
+                .take(GONE_LINKS_MAX)
+                .map(|s| (crate::sessions::shown(s), session_link(&s.session_id)))
+                .collect();
+            let mut t = format!(
+                "{text}\n📍 Đây là phiên anh ĐANG THEO — gõ hay gửi tệp tiếp sẽ không tới đâu."
+            );
+            if links.is_empty() {
+                t.push_str("\n(Không thấy phiên nào khác đang chạy.)");
+            } else {
+                t.push_str("\nChọn phiên:");
+                for (ten, duong) in &links {
+                    t.push_str(&format!("\n👁 {ten}: {duong}"));
+                }
+            }
+            logging::info(
+                "focus_session_ended_told",
+                json!({ "session": id, "so_phien_de_chon": links.len() }),
+            );
+            t
+        } else {
+            text
+        };
         // Phiên vừa rời danh sách: giữ lại đủ dữ kiện để CÒN HỎI ĐƯỢC về nó
         // (xem `ENDED_KEY`). Ghi trước khi nói, vì sau lượt này cuốn sổ theo dõi
         // đã bỏ nó rồi — không còn chỗ nào lấy `cwd` với tài khoản nữa.
@@ -5373,6 +5408,124 @@ pub fn remember_successor(db: &Db, old_id: &str, new_id: &str, now: i64) {
     }
 }
 
+/// Đường dẫn tệp trong câu `Xem tệp: <đường dẫn>[ — <chú thích>]` — đúng câu
+/// `telegram.rs` dựng khi nhận một tệp/ảnh rồi gõ vào phiên đang theo.
+pub fn file_path_in_typed(typed: &str) -> Option<&str> {
+    let rest = typed.trim().strip_prefix("Xem tệp: ")?;
+    let path = rest.split(" — ").next()?.trim();
+    (!path.is_empty()).then_some(path)
+}
+
+/// Câu trả lời khi phiên đích KHÔNG còn — thay cho *"không thấy phiên '<uuid>'
+/// trong danh sách"*.
+///
+/// 🔴 Hà 2026-09-23: *"Tại sao gửi ảnh thì được mà file md thì không gửi vào
+/// phiên?"*. Đo: không phải do loại tệp — lúc 12:13Z cùng tệp ấy vào phiên được.
+/// Lúc 08:51Z tệp về máy rồi (`telegram_file_received`), nhưng phiên đang theo
+/// đã tắt từ 08:37Z, và câu trả lời chỉ là một uuid 36 ký tự: nó không nói tệp
+/// ĐÃ nằm trên máy, không nói phiên ấy đã TẮT, không đưa đường nào sang phiên
+/// khác — đọc lên y hệt "tệp không gửi được".
+///
+/// Thuần — `ended` = (tên, giờ tắt) nếu sổ phiên-đã-tắt còn nhớ; `links` = (tên,
+/// đường vào) của các phiên đang sống.
+pub fn gone_reply(
+    ended: Option<(&str, &str)>,
+    want: &str,
+    is_type: bool,
+    typed: &str,
+    links: &[(String, String)],
+) -> String {
+    let dau = match ended {
+        Some((ten, luc)) => format!("⚠ phiên {ten} đã tắt lúc {luc}"),
+        None => format!(
+            "⚠ phiên {} không còn trong danh sách phiên đang chạy",
+            short_id(want)
+        ),
+    };
+    let viec = if is_type {
+        "câu vừa gửi CHƯA gõ vào đâu cả"
+    } else {
+        "lệnh vừa rồi CHƯA làm gì cả"
+    };
+    let mut out = format!("{dau} — {viec}.");
+    if let Some(p) = file_path_in_typed(typed) {
+        out.push_str(&format!("\n📎 Tệp ĐÃ lưu trên máy: {p}"));
+    }
+    if is_type && !typed.trim().is_empty() {
+        out.push_str(&format!(
+            "\nGửi lại nguyên câu này sau khi chọn phiên:\n{}",
+            crate::exec::truncate(typed.trim(), 400)
+        ));
+    }
+    if links.is_empty() {
+        out.push_str("\n(Không thấy phiên nào khác đang chạy.)");
+    } else {
+        out.push_str("\nChọn phiên:");
+        for (ten, duong) in links {
+            out.push_str(&format!("\n👁 {ten}: {duong}"));
+        }
+    }
+    out
+}
+
+/// Đường vào một phiên: liên kết sâu nếu có tên bot, không thì lệnh gõ tay.
+fn session_link(id: &str) -> String {
+    crate::telegram::deep_link(&format!("s_{id}"))
+        .unwrap_or_else(|| format!("/session {}", short_id(id)))
+}
+
+/// Trần số phiên kể ra trong một câu "chọn phiên" — đủ cho số phiên thường chạy
+/// cùng lúc trên máy này, và giữ câu vừa một màn điện thoại.
+const GONE_LINKS_MAX: usize = 12;
+
+/// Gom dữ kiện cho [`gone_reply`] từ SỔ — không dựng ảnh chụp nào: sổ
+/// phiên-đã-tắt (`ENDED_KEY`) cho tên + giờ tắt, sổ theo dõi (`WATCH_KEY`) cho
+/// các phiên đang sống ở lượt quét gần nhất.
+fn focus_gone_reply(db: &Db, want: &str, is_type: bool, typed: &str) -> String {
+    let ended: Vec<(crate::sessions::LiveSession, i64)> = db
+        .cursor_or_log(ENDED_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    let da_tat = ended
+        .iter()
+        .rev()
+        .find(|(s, _)| same_session(&s.session_id, want))
+        .map(|(s, at)| {
+            let luc = chrono::DateTime::from_timestamp(*at, 0)
+                .map(|t| {
+                    t.with_timezone(&chrono::Local)
+                        .format("%H:%M %d/%m")
+                        .to_string()
+                })
+                .unwrap_or_else(|| "?".to_string());
+            (crate::sessions::shown(s), luc)
+        });
+    let book: BTreeMap<String, crate::watch::Mark> = db
+        .cursor_or_log(WATCH_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default();
+    let links: Vec<(String, String)> = book
+        .iter()
+        .filter(|(id, _)| !same_session(id, want))
+        .take(GONE_LINKS_MAX)
+        .map(|(id, m)| {
+            let ten = if m.l.is_empty() {
+                crate::watch::name_from_mark(id, m)
+            } else {
+                m.l.clone()
+            };
+            (ten, session_link(id))
+        })
+        .collect();
+    gone_reply(
+        da_tat.as_ref().map(|(t, l)| (t.as_str(), l.as_str())),
+        want,
+        is_type,
+        typed,
+        &links,
+    )
+}
+
 /// Phiên nào đã thay phiên này? `None` = không có dòng nào — và `None` ở đây
 /// nghĩa là **chưa từng ghi**, không phải "phiên ấy còn sống".
 pub fn successor_of(db: &Db, old_id: &str) -> Option<String> {
@@ -6578,36 +6731,22 @@ fn runin_inbox_tick(db: &Db, cfg: &Config) -> usize {
             );
             continue;
         }
-        let alive = crate::sessions::snapshot(cfg)
-            .sessions
-            .iter()
-            .any(|s| s.session_id == sid && s.host != "dead");
-        if !alive {
-            logging::warn(
-                "runin_inbox_session_gone",
-                json!({ "session": sid, "cmd": crate::exec::truncate(&cmd, 120),
-                        "effect": "không còn phiên nào để dán kết quả vào — bỏ" }),
-            );
-            continue;
-        }
-        match crate::telegram::inbox() {
-            Some(tg) => {
-                logging::info(
-                    "runin_inbox_queued",
-                    json!({ "session": sid, "cmd": crate::exec::truncate(&cmd, 120) }),
-                );
-                // 🔴 QUIET: phiên tự nhờ thì kết quả vào phiên là đủ. Xem
-                // tham số `quiet` của `watch_long_job` để biết vì sao — 21 lượt
-                // hòm thư trong một buổi là 21 tin Hà không hỏi mà vẫn nhận.
-                tg.push_text_quiet(&format!("/runin {sid} {cmd}"));
-                taken += 1;
-            }
-            None => logging::warn(
-                "runin_inbox_no_inbox",
-                json!({ "session": sid, "file": moved.display().to_string(),
-                        "why": "chưa có hòm thư Telegram — đổi tên tệp lại để chạy vòng sau" }),
-            ),
-        }
+        // 🔴 KHÔNG còn chụp danh sách phiên ở đây (gỡ 2026-09-23). Bản cũ gọi
+        // `sessions::snapshot` cho MỖI tệp chỉ để hỏi "phiên còn sống không" —
+        // một lượt đọc toàn bộ chữ của mọi tab Terminal (~6 giây, 37 giây lúc
+        // máy nặng), chạy trong vòng nền và giành lượt Terminal với lệnh của chủ
+        // máy. Nhánh `RunIn` tự tra phiên ngay sau đó (sổ trước, ảnh chụp chỉ
+        // khi sổ không biết) và tự ghi `runin_inbox_session_gone` khi không
+        // thấy — tra hai lần là trả tiền hai lần cho cùng một câu hỏi.
+        logging::info(
+            "runin_inbox_queued",
+            json!({ "session": sid, "cmd": crate::exec::truncate(&cmd, 120) }),
+        );
+        // Hàng THỨ HAI, không phải hàng Telegram — xem `SESSION_RUNS`. Lệnh
+        // vẫn chạy `quiet`: phiên tự nhờ thì kết quả vào phiên là đủ (21 lượt
+        // hòm thư một buổi từng là 21 tin Hà không hỏi mà vẫn nhận).
+        queue_session_run(cfg, format!("/runin {sid} {cmd}"));
+        taken += 1;
     }
     taken
 }
@@ -11965,20 +12104,51 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     }
                     continue;
                 }
-                let live = crate::sessions::snapshot(cfg);
+                // 🔴 SỔ TRƯỚC, ảnh chụp sau — cùng đường nhanh `/type`·`/key` đã
+                // dùng từ lâu (`sessions::window_target_from_book`: sổ nói cửa
+                // sổ nào, `ps` chứng thực pid còn ngồi đúng tty ấy). Bản cũ luôn
+                // chụp cả danh sách phiên, tức đọc toàn bộ chữ của mọi tab
+                // Terminal (~6 giây/lượt, 37 giây lúc máy nặng — đo 2026-09-23)
+                // chỉ để lấy `tty` + nhãn của MỘT phiên; `watch_long_job` chỉ
+                // dùng `session_id`, `label`, `tty` — sổ có đủ cả ba.
+                let booked = db
+                    .cursor_or_log(WATCH_KEY)
+                    .and_then(|v| crate::sessions::window_target_from_book(&v, &want));
+                let live = match &booked {
+                    Some(_) => None,
+                    None => Some(crate::sessions::snapshot(cfg)),
+                };
+                let found = booked.or_else(|| {
+                    live.as_ref().and_then(|l| {
+                        l.sessions
+                            .iter()
+                            .find(|s| same_session(&s.session_id, &want))
+                            .cloned()
+                    })
+                });
                 // Phiên mà câu trả lời này NÓI VỀ — cửa định dạng cần nó để gắn
                 // action vào đúng phiên (rỗng ⟹ không có phiên nào, đi đường
                 // thường).
                 let mut ack_sid = String::new();
-                let ack = match live
-                    .sessions
-                    .iter()
-                    .find(|s| same_session(&s.session_id, &want))
-                {
-                    None => format!(
-                        "⚠ không thấy phiên '{}' đang chạy — lệnh KHÔNG chạy.",
-                        crate::exec::truncate(&want, 40)
-                    ),
+                let ack = match found.as_ref() {
+                    None => {
+                        // Lệnh `quiet` (phiên tự nhờ qua hòm thư) thì câu trả lời
+                        // bị tắt tiếng ở `reply_in_channel` — nên phải NÓI RA ở
+                        // log, với đủ phiên + lệnh. Dòng này trước nằm ở
+                        // `runin_inbox_tick`, nơi đã thôi tra phiên.
+                        if cmd.quiet {
+                            logging::warn(
+                                "runin_inbox_session_gone",
+                                json!({ "session": want,
+                                        "cmd": crate::exec::truncate(&line, 120),
+                                        "effect": "không còn phiên nào để dán kết quả vào — lệnh KHÔNG chạy" }),
+                            );
+                        }
+                        format!(
+                            "⚠ không thấy phiên '{}' đang chạy — lệnh KHÔNG chạy.",
+                            crate::exec::truncate(&want, 40)
+                        )
+                    }
                     Some(s) => {
                         // 🔴 THƯ MỤC PHẢI LÀ CỦA PHIÊN ẤY. Hà 2026-08-13, chỉ
                         // vào nút `bash scripts/verify-acl-delta-0813.sh`:
@@ -13177,10 +13347,34 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let booked = db
                     .cursor_or_log(WATCH_KEY)
                     .and_then(|v| crate::sessions::window_target_from_book(&v, &want));
+                // 🔴 BÁO NGAY khi phiên đã đi — không dựng ảnh chụp để nhận lại
+                // cùng câu trả lời (2026-09-23). Sổ theo dõi XOÁ phiên ngay khi
+                // nó tắt, nên với một phiên đã tắt thì `booked` luôn `None` và
+                // bản cũ luôn trả tiền một ảnh chụp đọc chữ mọi tab Terminal:
+                // 46 giây lúc 08:51Z (lượt hỏi Terminal hết giờ 20 giây) chỉ để
+                // nói "không thấy phiên". Sổ `claude agents` của các tài khoản
+                // trả lời câu "còn trong danh sách không" trong vài mili giây.
+                //
+                // Hẹp có chủ ý: chỉ id dạng uuid (con trỏ lưu đúng dạng ấy — tên
+                // gõ tay thì sổ không so được), không phải cửa sổ `win-ttys…`
+                // (nhánh dưới cần ảnh chụp để thấy phiên vừa mọc trong đó), và
+                // chỉ khi MỌI tài khoản đọc được (`Listed::No`) — một tài khoản mù
+                // thì "không thấy" không nói gì, đi đường cũ.
+                let gone_fast = booked.is_none()
+                    && looks_like_uuid(&want)
+                    && crate::sessions::tty_of_window_id(&want).is_none()
+                    && crate::sessions::listed_in_books(cfg, &want) == crate::sessions::Listed::No;
+                if gone_fast {
+                    logging::info(
+                        "focus_target_gone_fast",
+                        json!({ "session": want,
+                                "why": "không có trong sổ theo dõi lẫn sổ claude agents — báo ngay, không chụp Terminal" }),
+                    );
+                }
                 // Chỉ trả tiền ảnh chụp khi sổ KHÔNG trả lời được.
-                let live = match &booked {
-                    Some(_) => None,
-                    None => Some(crate::sessions::snapshot(cfg)),
+                let live = match (&booked, gone_fast) {
+                    (Some(_), _) | (None, true) => None,
+                    (None, false) => Some(crate::sessions::snapshot(cfg)),
                 };
                 let target = booked
                     .or_else(|| {
@@ -13312,9 +13506,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 short_id(&new_id)
                             )
                         }
-                        None => format!(
-                            "⚠ không thấy phiên '{}' trong danh sách",
-                            crate::exec::truncate(&want, 40)
+                        // Không có kế nhiệm trong sổ bàn giao của huba (dwork
+                        // tự chuyển phiên bằng `phien.sh`, không qua `/handover`)
+                        // ⟹ nói phiên ấy đã tắt lúc nào, tệp đã nằm ở đâu, câu
+                        // nào chưa gửi, và đưa đường sang các phiên đang sống.
+                        None => focus_gone_reply(
+                            db,
+                            &want,
+                            matches!(cmd.kind, CommandKind::Type),
+                            &typed,
                         ),
                     },
                     Some(s) => match crate::keys::window_of(&s.tty) {
@@ -16085,6 +16285,127 @@ pub fn run_telegram_now(cfg: &Config) {
     }
 }
 
+/// HÀNG THỨ HAI: việc do PHIÊN nhờ chạy (hòm thư `huba-run.txt`) — riêng với
+/// hàng lệnh `/` chủ máy gõ trên Telegram.
+///
+/// 🔴 Hà 2026-09-23: *"Lệnh ở đây là lệnh "/" của hub nhận từ tele, chứ không
+/// phải để dán vào phiên, như vậy phải có 2 hàng đợi trên luồng xử lý từ tele
+/// mới đúng chứ"*. Đúng. Trước lượt này [`runin_inbox_tick`] nhét `/runin
+/// <phiên> <lệnh>` vào CHÍNH hàng Telegram (`push_text_quiet`), nên việc của
+/// phiên và lệnh của chủ máy xếp chung một hàng, một luồng `telegram-now`, dưới
+/// một [`CMD_LOCK`]. Đo hôm ấy: **179/342** lệnh trong hàng là `/runin` của
+/// phiên, mỗi cái giữ luồng ~9 giây (trung vị `command_done` của `RunIn`)
+/// trước khi lệnh kế tiếp của Hà được chạy.
+///
+/// Tách được mà không mở thêm kiểu chạy song song nào: phần NẶNG của `/runin`
+/// (chạy lệnh, dán kết quả vào phiên) vốn đã ở luồng riêng của
+/// [`watch_long_job`], ngoài `CMD_LOCK`, từ trước. Thứ hàng này đưa ra khỏi
+/// đường của chủ máy chỉ là phần tra phiên + trả lời.
+///
+/// ⚠ Luồng này chạy ở hạng NỀN (không `exec::urgent()`), cố ý: Terminal trả
+/// lời AppleScript tuần tự, và hạng nền là thứ NHƯỜNG lượt cho lệnh gấp của chủ
+/// máy (`keys::PROBE_YIELD_MS`). Hai hàng mà cùng hạng thì việc của
+/// phiên vẫn chen ngang được ở tầng Terminal.
+static SESSION_RUNS: std::sync::Mutex<std::collections::VecDeque<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+/// Đang có luồng vét [`SESSION_RUNS`] hay chưa.
+static RUNNING_SESSION_RUNS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Xếp một việc của phiên vào hàng thứ hai rồi vét hàng ấy ở luồng riêng.
+pub fn queue_session_run(cfg: &Config, text: String) {
+    use std::sync::atomic::Ordering;
+    SESSION_RUNS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push_back((text, std::time::Instant::now()));
+    if RUNNING_SESSION_RUNS.swap(true, Ordering::SeqCst) {
+        // Luồng đang chạy sẽ vét nốt trước khi thoát.
+        return;
+    }
+    let cfg = cfg.clone();
+    let spawned = std::thread::Builder::new()
+        .name("session-runs".into())
+        .spawn(move || {
+            loop {
+                match Db::open(&cfg.db) {
+                    Ok(db) => execute_session_runs(&db, &cfg),
+                    Err(e) => {
+                        logging::error("session_runs_db_failed", json!({ "err": e.to_string() }));
+                        break;
+                    }
+                }
+                if SESSION_RUNS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .is_empty()
+                {
+                    break;
+                }
+            }
+            RUNNING_SESSION_RUNS.store(false, Ordering::SeqCst);
+        });
+    if let Err(e) = spawned {
+        // Không nuốt: việc vẫn nằm trong hàng, vét ở lượt xếp kế tiếp.
+        RUNNING_SESSION_RUNS.store(false, Ordering::SeqCst);
+        logging::error("session_runs_spawn_failed", json!({ "err": e.to_string() }));
+    }
+}
+
+/// Vét [`SESSION_RUNS`] — cùng `parse_command` + `execute_commands` với lệnh
+/// của chủ máy (luật 12: một đường, một bộ handler), khác đúng ba chỗ: không
+/// `CMD_LOCK`, không hạng gấp, và CHỈ nhận `/runin`.
+fn execute_session_runs(db: &Db, cfg: &Config) {
+    let pending: Vec<(String, std::time::Instant)> = SESSION_RUNS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .drain(..)
+        .collect();
+    if pending.is_empty() {
+        return;
+    }
+    let cho_ms = pending
+        .iter()
+        .map(|(_, at)| at.elapsed().as_millis() as u64)
+        .max()
+        .unwrap_or(0);
+    let chat_id = crate::telegram::inbox()
+        .map(|i| i.chat_id().to_string())
+        .unwrap_or_default();
+    let mut cmds: Vec<ChannelCommand> = Vec::new();
+    for (text, _) in pending {
+        match verbs::parse_command(&text) {
+            Some((CommandKind::RunIn, decision_id, arg)) => cmds.push(ChannelCommand {
+                // Phiên tự nhờ ⟹ kết quả vào phiên là đủ — xem `watch_long_job`.
+                quiet: true,
+                kind: CommandKind::RunIn,
+                decision_id,
+                arg,
+                chat_id: chat_id.clone(),
+                callback_id: String::new(),
+                message_id: None,
+            }),
+            // Hàng này chỉ chở `/runin`. Thứ khác lọt vào là lỗi của chỗ xếp,
+            // và chạy nó ở đây là cho nó né khoá của hàng chủ máy — nên BỎ, và
+            // nói ra.
+            other => logging::error(
+                "session_run_not_runin",
+                json!({ "head": crate::exec::truncate(&text, 60),
+                        "kind": other.map(|(k, _, _)| format!("{k:?}")),
+                        "effect": "KHÔNG chạy — hàng của phiên chỉ nhận /runin" }),
+            ),
+        }
+    }
+    if !cmds.is_empty() {
+        logging::info(
+            "session_runs_run",
+            json!({ "count": cmds.len(), "cho_ms": cho_ms }),
+        );
+        execute_commands(db, cfg, crate::telegram::NAME, &cmds);
+    }
+}
+
 /// Chạy những mệnh lệnh vừa gõ trên TELEGRAM.
 ///
 /// Cùng `parse_command`, cùng `execute_commands`, cùng bộ handler với phòng chat
@@ -16112,6 +16433,13 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
     if pending.is_empty() {
         return;
     }
+    // Lệnh chờ lâu nhất trong lô này đã nằm trong hàng bao lâu (tính cả lượt
+    // chờ `CMD_LOCK` ngay trên) — thước đo "lệnh của chủ máy chờ bao lâu".
+    let cho_ms = pending
+        .iter()
+        .map(|i| i.at.elapsed().as_millis() as u64)
+        .max()
+        .unwrap_or(0);
     let mut cmds: Vec<ChannelCommand> = Vec::new();
     for item in pending {
         match verbs::parse_command(&item.text) {
@@ -16217,7 +16545,10 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
         }
     }
     if !cmds.is_empty() {
-        logging::info("telegram_commands_run", json!({ "count": cmds.len() }));
+        logging::info(
+            "telegram_commands_run",
+            json!({ "count": cmds.len(), "cho_ms": cho_ms }),
+        );
         execute_commands(db, cfg, crate::telegram::NAME, &cmds);
     }
 }

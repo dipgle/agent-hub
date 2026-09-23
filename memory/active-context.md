@@ -1,5 +1,30 @@
 # active context — huba
 
+## 🎯 2026-09-23 21:xx — hai hàng lệnh · phiên đang theo đã tắt · hộp hỏi quyền không nút
+
+**Đã cài `hubd@2026-09-23T13:45:59Z` + đẩy `d48f74e`** (gate 159/159 · clippy 0 · 0 warning):
+- **Hai hàng lệnh** (Hà: *"phải có 2 hàng đợi trên luồng xử lý từ tele"*). Đo trước: 179/342 lệnh trong
+  hàng Telegram là `/runin` của hòm thư phiên; huba giữ Terminal 1231–1358 s/giờ lúc 08–09Z để đọc toàn
+  màn. Nay: `SESSION_RUNS` luồng `session-runs`, hạng nền, không `CMD_LOCK`; `RunIn` tra sổ trước.
+  **Đo SAU cài, chạy thật:** hòm thư `git push` 13:48:13Z đi `session_runs_run cho_ms=1` → `runin_ran
+  code=0`, KHÔNG qua `telegram_commands_run`; lệnh Hà 13:48:06Z `cho_ms=3`. Mới 1 mẫu mỗi bên — số
+  thật dài hạn đọc `telegram_commands_run.cho_ms` trên log vài ngày tới.
+- **Phiên đang theo đã tắt** (Hà: *"gửi ảnh thì được mà file md thì không"*): không do loại tệp — 08:51Z
+  tệp `.md` về máy nhưng phiên theo đã tắt từ 08:37Z; câu trả lời là uuid trơn, sau 46 s. Nay: tin tắt
+  của phiên đang theo nói ra + đường sang phiên khác; câu trả lời nói giờ tắt + `📎 Tệp ĐÃ lưu` + câu
+  chưa gửi; báo ngay bằng `listed_in_books` (sổ `claude agents`, không hỏi Terminal). CHƯA có ca thật
+  nào đi qua đường mới sau cài.
+
+**Hộp hỏi quyền không nút** (Hà, ảnh 20:42): `parse_choices` 0 lựa chọn — nhãn dài >120 bị bỏ + dòng
+chân `Esc to cancel · Tab to amend` không được nhận. Vá `keys.rs`; 18 màn thật cũ↔mới khác đúng 3/18
+(cả ba hộp thật). `w7627` `[dwork/dsign]·Ban giao dsign 03` treo ở hộp ấy từ ít nhất 16:05.
+Cài SỚM `hubd@2026-09-23T14:18:06Z` (Hà: *"Vẫn chưa được"* — bản 13:45Z chưa có vá; 0 lần `to amend`
+trong binary) trước khi cổng xong; cổng sau đó XANH 160/160 · clippy 0 · 0 warning trên cùng mã nguồn.
+CHƯA thấy Hà `/shot` lại phiên có hộp ⇒ nút trên Telegram CHƯA được nhìn thấy bằng mắt.
+
+**Rút lại trong ngày:** các con số "chờ trung vị 75 s / 52 s" — phép ghép log `queued`↔`done` trôi lệch;
+nay có `cho_ms` nên không phải ghép nữa.
+
 ## 🎯 2026-09-23 18:05 — `/clean` + `/accounts`: ĐÃ CÀI `hubd@2026-09-23T11:02:55Z`
 
 `gate.sh` (nice 19, `CARGO_BUILD_JOBS=2` — Hà báo TREO MÁY khi biên dịch chạy hết lõi):

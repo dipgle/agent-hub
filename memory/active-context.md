@@ -72,6 +72,38 @@ CHƯA: tin tự phát thật có `text_links>0` · Hà bấm 📎 thật ra đú
 6 tài khoản mỗi ~7′, mỗi lượt một tiến trình `claude` đầy đủ (binary 217 MB). Vẫn trả số thật ("Current week … 91 %").
 `runtime.rs:36 USAGE_TTL_MS` 5′ (Hà từng chốt "5p 1 lần"); bộ đệm trong bộ nhớ ⟹ mỗi lần cài cũng chạy lại. Đụng nhịp
 Hà chốt ⟹ báo, chưa đổi.
+Đo thêm: từ 13:00Z 16 lượt, mỗi lượt 6 tài khoản NỐI ĐUÔI **49–80 s**, cách nhau 6,5–8,5′. Chọn tài khoản của huba =
+sổ `.claude.json` + đè số `/usage` sống (`quota.rs:419` `overlay_live`, Hà 07/09 "chạy luôn lệnh /usage có hơn không").
+`acc-mo-vai.sh` (main mở vai) KHÔNG dùng số sống — đọc `.claude.json` (`acc-mo-vai.sh:12`). Hà hỏi "không có số mới
+thì sao biết acc nào còn nhiều"; đã đề xuất: đo ĐÚNG LÚC CHỌN (top ứng viên, song song ~10 s) + nền thưa 30′ + lưu qua
+khởi động lại. **Hà CHỐT (~15:0xZ):** *"trước khi mở phiên mới thì đo lại các phiên có lịch sử đo cũ hơn 15 phút"* +
+*"riêng lệnh accounts thì cũ hơn 5 phút thì đo"* (rồi *"nếu phức tạp quá thì để 1 con số 15 phút"* — không phức tạp,
+giữ cả hai). ĐANG LÀM (chưa build xong): `runtime.rs` — sổ `usage:song` trong DB (mỗi hàng `at_ms`), `usage_cached`
+KHÔNG còn đo, `usage_lam_moi(cu_ms)` đo SONG SONG tài khoản có số MỚI NHẤT (max `at_ms`, `fetchedAtMs` sổ CLI) cũ hơn
+ngưỡng, `chi_so_moi_hon_tep` (không đè sổ CLI mới hơn bằng lượt dò cũ), `xep_hang_tai_khoan` = MỘT chỗ cho 4 đường chọn
+tài khoản; `auto_switch_on_limit` chỉ đo khi kết luận là `Do`/`NoAccount`; `announce_changes` chỉ khi có `Limited`;
+`--dry-run` không đo. Bài `tests/usage_do_khi_chon.rs` dùng `claude` GIẢ (shell, đếm lần gọi theo tài khoản).
+**Đo:** build 593 s, 11/11 bài liên quan xanh, 0 cảnh báo (`usage_do_khi_chon` 11/11 · `auto_limit_switch` 15/15 ·
+`config` 38/38 · `limited_points_at_a_live_account` 11/11). Cấy `can_do_lai → true` ⟹ **đúng 4/11 ĐỎ** như dự đoán,
+trả gốc băm `39e36f37…` khớp. Commit cục bộ; CHƯA cài (chờ Terminal ổn + gộp một lượt cài), CHƯA cổng đầy đủ.
+
+### Hà hỏi "có sinh tiến trình mồ côi không, càng chạy càng tốn RAM" (~15:0xZ) — ĐO:
+- hubd pid 78968: **0 tiến trình con**, RSS 11 MB sau 3 h. Terminal 120 MB. 29 mồ côi (cha=1, ngoài hệ thống), 108 MB:
+  0 cái do hubd đẻ (10 `runner.sh` + dhub + fbot + hubd — dịch vụ từ lúc bật máy 7,5 ngày).
+- Máy: RAM 16 GB, swap 4,7/6 GB, compressor ~5,3 GB, free ~58 MB ⟹ thiếu RAM thật.
+- Tích dần: **4 ngăn `dev-up.sh` của dwork** song song (84247 2 ngày `dev-uc-ttc` MỒ CÔI · 98105 5,5 h `dev-account`
+  MỒ CÔI · 72715 41′ · 28043 4′), ~22 vite + 23 esbuild ~700 MB; 41 chrome-headless-shell 1,2 GB; 14 `bang-viec.mjs`.
+- Đã SendMessage main dwork (uds 13983) kèm số; huba KHÔNG tự giết tiến trình dwork.
+- Main dwork 51 trả lời: dwork KHÔNG tích tụ tăng dần (79 lượt mở vai hôm nay, 0 mồ côi mới); gốc mồ côi = đóng vai
+  bằng `kill -9` ⟹ trap của `dev-up.sh` không chạy — đã giao làn giam-sat vá. 98105 không mồ côi thật (Playwright
+  account còn 7 kết nối :5200). **Tích tụ đơn điệu thật duy nhất: ONGHUT** — `publish-watch.mjs` pid 897 (launchd,
+  7,5 ngày) rò chromium: đo lại 9 con, cây 36 tiến trình / 283 MB; `onghut/tools/panel-session.mjs:114` launch →
+  `:124` `page.goto` ném lỗi → không close; `publish-watch.log` 136 dòng `page.goto`. 0 phiên onghut sống ⟹ báo Hà.
+
+### Cổng đầy đủ: CHƯA chạy được
+`cho-ranh-roi-cong.sh` chờ 3 h rồi thoát 2 (`CHO_HET_GIO load=78`). Tải 65–78 do làn dwork: 57 `node` (`*-gate.mjs`),
+52 `chrome-headless-shell`, 18 `esbuild`; Terminal 60 % (phiên cũ còn vẽ nhan đề). Bật lại với `CHO_TOI_DA=43200`
+(12 h) → `.tmp/thu-o-nhap/cong-37661ba.out`. 3 commit cục bộ CHƯA đẩy (`70029f5` `8325ac9` `37661ba`).
 
 Số đo khác, CHƯA truy gốc:
 - Terminal NGHẸT 09:55Z → **hồi 11:01:50Z** (40/43 vòng `terminal_probe_failed`, 31 lần `quá 20s`). Số phiên

@@ -404,9 +404,9 @@ impl Rank {
     }
 }
 
-/// Hạng từ phép dò SỐNG (`runtime::usage_cached`, `/usage` vừa chạy thật) —
-/// không cần `resets_at` như [`cua_so`]: phép đo vừa xảy ra đúng lúc này nên
-/// không có tuổi để mà cũ.
+/// Hạng từ phép dò SỐNG (`/usage` chạy thật) — không cần `resets_at` như
+/// [`cua_so`]: ở mọi chỗ CHỌN tài khoản, số này đã được đo lại nếu cũ hơn 15′
+/// (`runtime::xep_hang_tai_khoan`, Hà 24/09), nên tuổi của nó có trần.
 ///
 /// `None` = phép dò chưa có số (đang đo lần đầu, hết giờ, hoặc không đọc được
 /// câu trả lời) — gọi nơi khác lùi về tệp (`rank`).
@@ -419,8 +419,8 @@ pub fn rank_from_live(session_pct: Option<i64>, week_pct: Option<i64>) -> Option
 ///
 /// Hà 2026-09-07, sau vụ dồn 4 phiên `acc2 → acc1` rồi chính acc1 hết hạn mức
 /// một tiếng sau: *"chạy luôn lệnh /usage có hơn không"*. Đúng — huba đã có
-/// phép dò này từ 10/08 (`runtime::usage_cached`, cache 5 phút, chạy nền không
-/// chặn vòng lặp), nhưng [`crate::watch::suggest_account`] chưa từng đọc nó,
+/// phép dò này từ 10/08 (khi ấy đo nền 5′; từ 24/09 đo ngay trước khi chọn —
+/// `runtime::usage_lam_moi`), nhưng [`crate::watch::suggest_account`] chưa từng đọc nó,
 /// chỉ đọc tệp `.claude.json` qua [`rank_all`] — tệp CHỈ đổi khi chính CLI của
 /// tài khoản ấy chạm mạng, nên một tài khoản vừa bị khoá mà không phiên nào
 /// của nó gọi API tiếp thì tệp đứng yên ở con số CŨ vô thời hạn, đọc lên như
@@ -843,8 +843,8 @@ fn ban_doc_cu(fetched_at_ms: Option<i64>, resets_at: Option<&str>, now_ms: i64) 
 /// Verdict [`Rank::Full`] này có đang tựa vào một con số CŨ không — nói ra bằng số.
 ///
 /// `None` = không phải `Full`, hoặc cửa sổ làm nên verdict ấy còn tươi. `Some(câu)`
-/// = nó cũ; câu ấy đi thẳng ra `/accounts` và là tín hiệu cho chỗ gọi đi hỏi
-/// [`crate::runtime::usage_cached`].
+/// = nó cũ; câu ấy đi thẳng ra `/accounts` và là tín hiệu cho chỗ gọi đi đo lại
+/// ([`crate::runtime::usage_lam_moi`]).
 ///
 /// 🔴 **Nó KHÔNG hạ hạng, và đó là cả quyết định.** Hà chốt 15/09 giữa ba nhánh
 /// hỏng ngược chiều nhau: *dò sống TRƯỚC, **hết cách mới giữ `Full`***. Hạ xuống

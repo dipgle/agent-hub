@@ -232,16 +232,14 @@ fn cmd_handover(
         // Đè bằng phép dò SỐNG y như hai đường trong `pipeline.rs` (15/09):
         // `-a auto` là lệnh chủ máy gõ khi đang kẹt, nên nó là chỗ ÍT được phép
         // trả lời bằng một tỉ lệ đông cứng nhất. Xem `quota::kich_tran_can_xac_nhan`.
-        let now_ms = huba::quota::now_ms();
-        let usage_song = huba::runtime::usage_cached(cfg, now_ms);
-        let hang = huba::quota::apply_dead_book(
-            huba::quota::overlay_live(
-                huba::quota::rank_all(cfg, now_ms),
-                usage_song
-                    .get("accounts")
-                    .unwrap_or(&serde_json::Value::Null),
-            ),
-            &db.dead_accounts(),
+        // Sắp MỞ phiên kế nhiệm ⟹ đo lại tài khoản có số cũ hơn 15′ (Hà 24/09).
+        // Trước lượt này lệnh CLI chạy trong tiến trình MỚI nên bộ đệm trong bộ nhớ
+        // luôn rỗng — tức nó chưa từng có số sống nào; nay sổ nằm trong DB.
+        // `--dry-run` hứa "không gọi `claude`" ⟹ chỉ đọc sổ, không đo.
+        let hang = huba::runtime::xep_hang_tai_khoan(
+            cfg,
+            db,
+            (!dry_run).then_some(huba::runtime::USAGE_CU_MO_PHIEN_MS),
         );
         let chon = huba::watch::suggest_account(
             &target.account,

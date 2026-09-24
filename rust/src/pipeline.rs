@@ -1075,17 +1075,19 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
     // từ 07/09 — hai đường trả lời cùng một câu *"acc nào còn chỗ"* bằng hai
     // nguồn khác nhau, và cái đọc tệp là cái tựa vào con số CŨ.
     // Xem `quota::kich_tran_can_xac_nhan`.
-    let now_ms = crate::quota::now_ms();
-    let usage_song = crate::runtime::usage_cached(cfg, now_ms);
-    let tai_khoan = crate::quota::apply_dead_book(
-        crate::quota::overlay_live(
-            crate::quota::rank_all(cfg, now_ms),
-            usage_song
-                .get("accounts")
-                .unwrap_or(&serde_json::Value::Null),
-        ),
-        &db.dead_accounts(),
-    );
+    //
+    // 🔴 CHỈ khi có phiên VỪA bị chặn (24/09): cái nút gợi ý là huba chọn tài khoản
+    // cho một phiên mới, nên đo lại tài khoản có số cũ hơn 15′ trước khi gợi ý (Hà:
+    // *"trước khi mở phiên mới thì đo lại…"*). Bản cũ tính hạng ở MỌI vòng — và
+    // chính lời gọi ấy là thứ giữ nhịp đo nền 5′ chạy suốt ngày.
+    let tai_khoan = if changes
+        .iter()
+        .any(|c| matches!(c, crate::watch::Change::Limited { .. }))
+    {
+        crate::runtime::xep_hang_tai_khoan(cfg, db, Some(crate::runtime::USAGE_CU_MO_PHIEN_MS))
+    } else {
+        Vec::new()
+    };
     for mut c in changes {
         if let crate::watch::Change::Limited { acc, goi_y, .. } = &mut c {
             *goi_y = crate::watch::suggest_account(acc, &tai_khoan, live, now_local_min());
@@ -1998,16 +2000,11 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                 // Cùng lý do với đường gợi ý ở trên: `acc_cu_het` là một phán
                 // quyết KỊCH TRẦN, nên nó không được tựa vào tỉ lệ đông cứng
                 // trong tệp một mình. Xem `quota::kich_tran_can_xac_nhan`.
-                let now_ms = crate::quota::now_ms();
-                let usage_song = crate::runtime::usage_cached(cfg, now_ms);
-                let hang = crate::quota::apply_dead_book(
-                    crate::quota::overlay_live(
-                        crate::quota::rank_all(cfg, now_ms),
-                        usage_song
-                            .get("accounts")
-                            .unwrap_or(&serde_json::Value::Null),
-                    ),
-                    &db.dead_accounts(),
+                // Sắp MỞ phiên kế nhiệm ⟹ đo lại tài khoản có số cũ hơn 15′ (Hà 24/09).
+                let hang = crate::runtime::xep_hang_tai_khoan(
+                    cfg,
+                    db,
+                    Some(crate::runtime::USAGE_CU_MO_PHIEN_MS),
                 );
                 let acc_cu_het = hang
                     .iter()
@@ -2250,20 +2247,10 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
     // Đọc hạng hạn mức MỘT lần cho cả vòng: nó mở tệp sổ của từng tài khoản, và
     // trong một vòng thì con số ấy không đổi.
     //
-    // Đè bằng phép dò SỐNG (`/usage`, cache 5 phút, không chặn vòng) trước khi
-    // đóng dấu Dead — xem `quota::overlay_live`. Tệp chỉ còn là đường lùi cho
-    // tài khoản phép dò sống chưa có số.
-    let now_ms = crate::quota::now_ms();
-    let usage_song = crate::runtime::usage_cached(cfg, now_ms);
-    let hang = crate::quota::apply_dead_book(
-        crate::quota::overlay_live(
-            crate::quota::rank_all(cfg, now_ms),
-            usage_song
-                .get("accounts")
-                .unwrap_or(&serde_json::Value::Null),
-        ),
-        &db.dead_accounts(),
-    );
+    // Đè bằng số `/usage` đã đo (sổ, KHÔNG đo ở đây) trước khi đóng dấu Dead — xem
+    // `runtime::xep_hang_tai_khoan`.
+    let mut hang = crate::runtime::xep_hang_tai_khoan(cfg, db, None);
+    let mut da_do_lai = false;
     let now_min = now_local_min();
     for s in &live.sessions {
         if s.host == "dead" {
@@ -2272,19 +2259,37 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
         let Some(khi) = s.limited.as_deref() else {
             continue;
         };
-        let target = crate::watch::suggest_account(&s.account, &hang, &live.sessions, now_min);
+        let mut target = crate::watch::suggest_account(&s.account, &hang, &live.sessions, now_min);
         let phut = minutes_until_reset(khi, now_min);
         let age_sec =
             ((chrono::Utc::now().timestamp_millis() - s.started_at_ms).max(0) / 1000) as u64;
-        let why = auto_limit_why(
-            Some(khi),
-            done.contains(&s.session_id),
-            age_sec,
-            crate::sessions::is_real_tty(&s.tty),
-            target.as_deref(),
-            phut,
-            cfg.auto_handover.on_limit_wait_min,
-        );
+        let xet = |target: Option<&str>| {
+            auto_limit_why(
+                Some(khi),
+                done.contains(&s.session_id),
+                age_sec,
+                crate::sessions::is_real_tty(&s.tty),
+                target,
+                phut,
+                cfg.auto_handover.on_limit_wait_min,
+            )
+        };
+        let mut why = xet(target.as_deref());
+        // 🔴 Kết luận nào TỰA vào hạn mức — sắp MỞ phiên mới (`Do`), hay "không còn
+        // tài khoản nào" (`NoAccount`) — thì đo lại tài khoản có số cũ hơn 15′ rồi
+        // xét LẠI, một lần mỗi vòng (Hà 24/09: *"trước khi mở phiên mới thì đo lại
+        // các phiên có lịch sử đo cũ hơn 15 phút"*). Các lý do khác (chưa đủ tuổi,
+        // sắp tới giờ mở lại, không có cửa sổ) không phụ thuộc con số nào.
+        if matches!(why, LimitWhy::Do | LimitWhy::NoAccount) && !da_do_lai {
+            hang = crate::runtime::xep_hang_tai_khoan(
+                cfg,
+                db,
+                Some(crate::runtime::USAGE_CU_MO_PHIEN_MS),
+            );
+            da_do_lai = true;
+            target = crate::watch::suggest_account(&s.account, &hang, &live.sessions, now_min);
+            why = xet(target.as_deref());
+        }
         if why != LimitWhy::Do {
             logging::info(
                 "auto_limit_held",
@@ -13599,11 +13604,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
             CommandKind::Accounts => {
                 // Một ảnh chụp thật, không phải con số nhớ từ lượt trước: câu
                 // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì
-                // hiện tại. Hạn mức thì lấy bản đã đo sẵn (5 phút một lượt),
-                // nên lệnh này không đẻ thêm tiến trình `claude` nào.
+                // hiện tại. Hạn mức: tài khoản có số cũ hơn 5′ thì đo lại trước
+                // khi trả lời (Hà 24/09) — xem `runtime::accounts_say`.
                 let live = crate::sessions::snapshot(cfg);
                 let ack = crate::runtime::accounts_say(
                     cfg,
+                    db,
                     &live,
                     chrono::Utc::now().timestamp_millis(),
                     &db.dead_accounts(),

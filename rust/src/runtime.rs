@@ -32,15 +32,24 @@ use crate::sessions::SessionsSnapshot;
 /// login state change on the scale of days, not seconds.
 const SLOW_TTL_MS: i64 = 10 * 60 * 1000;
 
-/// Hạn mức đổi nhanh hơn "plist đã cài chưa", và Hà chỉ cần 5 phút một lần.
-const USAGE_TTL_MS: i64 = 5 * 60 * 1000;
+/// Số hạn mức của một tài khoản cũ hơn chừng này thì ĐO LẠI trước khi mở phiên mới.
+///
+/// 🔴 Hà 2026-09-24: *"trước khi mở phiên mới thì đo lại các phiên có lịch sử đo cũ
+/// hơn 15 phút"* — thay nhịp đo NỀN 5′ cho mọi tài khoản. Đo cùng ngày: nhịp nền ấy
+/// là **1.127 lượt `claude -p /usage` trong một ngày** (6 tài khoản nối đuôi, 49–80 s
+/// một lượt, cứ ~7′), 14.149 nhật ký tích lại — phần lớn không phục vụ quyết định
+/// nào, và mỗi lượt là một tiến trình `claude` đầy đủ trên một máy đang tải 60+.
+pub const USAGE_CU_MO_PHIEN_MS: i64 = 15 * 60 * 1000;
+
+/// Riêng `/accounts` — Hà cùng ngày: *"riêng lệnh accounts thì cũ hơn 5 phút thì đo"*.
+pub const USAGE_CU_ACCOUNTS_MS: i64 = 5 * 60 * 1000;
+
+/// Sổ số đo `/usage` — trong DB, không trong bộ nhớ: bản cũ mất sạch ở mỗi lần cài
+/// lại hubd, tức mỗi lần cài là một lượt đo cả 6 tài khoản.
+pub const USAGE_KEY: &str = "usage:song";
 
 static STARTED_AT: OnceLock<i64> = OnceLock::new();
 static SLOW_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
-static USAGE_CACHE: OnceLock<Mutex<Option<(i64, Value)>>> = OnceLock::new();
-/// Đang có một luồng đi hỏi hạn mức hay chưa — để vòng chạy kế tiếp không đẻ
-/// thêm ba tiến trình `claude` nữa trong lúc lượt trước còn dở.
-static USAGE_REFRESHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Called once by `hubad` at boot so "how long has it been up" is a fact rather
 /// than a guess from the first cycle.
@@ -107,7 +116,7 @@ pub fn snapshot(cfg: &Config, db: &Db, live: &SessionsSnapshot) -> Value {
         // Nhịp RIÊNG, ngắn hơn khối chậm: Hà xin 5 phút cho hạn mức, còn
         // "plist đã cài chưa" thì đổi theo ngày. Gộp chung là hoặc hỏi
         // `launchctl` nhiều gấp đôi cần thiết, hoặc để hạn mức cũ gấp đôi.
-        "usage": usage_cached(cfg, now),
+        "usage": usage_cached(cfg, db),
     })
 }
 
@@ -132,23 +141,19 @@ fn daemon_block(now: i64) -> Value {
 /// luôn luôn một tài khoản duy nhất. Cái đó phải NÓI RA trên màn, vì hậu quả
 /// của nó (tuần cạn hạn mức thì phiên mới chết giữa chừng) chỉ lộ ra về sau.
 ///
-/// Hạn mức lấy từ SỔ của chính CLI (`quota::read_all` — đọc tệp, không spawn) và
-/// từ bản dò đã đo sẵn (`usage_cached`, 5 phút một lượt). Không đẻ thêm một tiến
-/// trình `claude` nào cho một lệnh xem.
+/// Hạn mức lấy từ SỔ của chính CLI (`quota::read_all` — đọc tệp) và từ số `/usage`:
+/// tài khoản nào có số mới nhất cũ hơn [`USAGE_CU_ACCOUNTS_MS`] (5′) thì ĐO LẠI ngay
+/// trước khi trả lời — Hà 2026-09-24: *"riêng lệnh accounts thì cũ hơn 5 phút thì
+/// đo"*. Nên lệnh này có thể chờ một lượt `/usage` (~10 s, song song).
 pub fn accounts_say(
     cfg: &Config,
+    db: &Db,
     live: &SessionsSnapshot,
     now: i64,
     dead: &std::collections::BTreeMap<String, String>,
 ) -> String {
-    accounts_text(
-        cfg,
-        live,
-        &usage_cached(cfg, now),
-        &crate::quota::read_all(cfg),
-        dead,
-        now,
-    )
+    let usage = usage_lam_moi(cfg, db, USAGE_CU_ACCOUNTS_MS);
+    accounts_text(cfg, live, &usage, &crate::quota::read_all(cfg), dead, now)
 }
 
 /// Phần dựng câu, tách khỏi phần đi đo — để test được mà không spawn `claude`.
@@ -465,52 +470,186 @@ fn slow_block(cfg: &Config, now: i64) -> Value {
     v
 }
 
-/// Hạn mức, cache 5 phút — và **không bao giờ bắt vòng chạy đứng đợi**.
+/// Số `/usage` ĐÃ ĐO, đọc từ sổ — **không bao giờ đi đo**. `{"accounts": {tên: hàng}}`,
+/// mỗi hàng mang `at_ms` (lúc đo được số) và có thể `err`/`err_at_ms` (lượt đo gần
+/// nhất hỏng — số cũ, nếu có, vẫn giữ).
 ///
-/// Hết hạn thì trả BẢN CŨ ngay rồi cho một luồng riêng đi hỏi lại. Vì sao không
-/// hỏi tại chỗ: ba lần spawn `claude` kéo một vòng lên **80 giây** (đo
-/// 2026-08-10 ngay sau khi thêm), mà mỗi vòng là một nhịp huba đọc lệnh từ điện
-/// thoại — nên cái giá không phải "số liệu chậm 30 giây" mà là "lệnh của chủ máy
-/// nằm chờ hơn một phút". Đúng bài học đã ghi trong `CLAUDE.md` đêm trước về
-/// luật tự đóng sổ (90s → 3,2s), và tôi vừa tái phạm bằng một phép dò mới.
+/// 🔴 Trước 2026-09-24 hàm này tự đẻ một luồng đo lại cả 6 tài khoản mỗi 5′ (bộ đệm
+/// trong bộ nhớ). Nay đo chỉ xảy ra ở [`usage_lam_moi`], gọi đúng lúc SẮP chọn tài
+/// khoản — xem [`USAGE_CU_MO_PHIEN_MS`].
 ///
-/// Một số liệu trễ 5 phút mà màn vẫn mượt thì tốt hơn một số liệu tươi mà cả
-/// huba khựng lại.
-///
-/// 🔴 `pub` từ 15/09, không phải `pub(crate)`: `huba handover -a auto` sống trong
-/// nhị phân `main.rs` — một crate KHÁC — và nó cũng phán "acc cũ đã kịch trần
-/// chưa". Để nó ngoài tầm với nghĩa là đúng cái lệnh chủ máy gõ khi đang kẹt lại
-/// là cái duy nhất quyết định bằng tỉ lệ đông cứng trong tệp.
-pub fn usage_cached(cfg: &Config, now: i64) -> Value {
-    let cell = USAGE_CACHE.get_or_init(|| Mutex::new(None));
-    let cached = cell.lock().ok().and_then(|g| g.clone());
-    if let Some((at, v)) = &cached {
-        if now - at < USAGE_TTL_MS {
-            return v.clone();
+/// 🔴 `pub` từ 15/09: `huba handover -a auto` sống trong nhị phân `main.rs`.
+pub fn usage_cached(cfg: &Config, db: &Db) -> Value {
+    let so = doc_so_usage(db);
+    let mut accounts = serde_json::Map::new();
+    for acc in cfg.claude_accounts_or_ambient() {
+        if let Some(row) = so.get(&acc.name) {
+            accounts.insert(acc.name.clone(), row.clone());
         }
     }
+    json!({ "accounts": accounts })
+}
 
-    // Chỉ một luồng làm mới tại một thời điểm: vòng chạy tới trước khi lượt
-    // trước xong thì cứ dùng bản cũ, đừng đẻ thêm ba tiến trình `claude` nữa.
-    if !USAGE_REFRESHING.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        let cfg = cfg.clone();
-        std::thread::spawn(move || {
-            let v = json!({
-                "checked_at": chrono::Utc::now().timestamp_millis(),
-                "accounts": usage_block(&cfg),
-            });
-            if let Ok(mut guard) = USAGE_CACHE.get_or_init(|| Mutex::new(None)).lock() {
-                *guard = Some((chrono::Utc::now().timestamp_millis(), v));
+fn doc_so_usage(db: &Db) -> serde_json::Map<String, Value> {
+    match db.cursor_or_log(USAGE_KEY) {
+        None => serde_json::Map::new(),
+        Some(v) => match serde_json::from_str::<Value>(&v) {
+            Ok(Value::Object(m)) => m,
+            other => {
+                crate::logging::warn(
+                    "usage_store_unreadable",
+                    json!({ "err": other.err().map(|e| e.to_string()),
+                            "effect": "sổ /usage đọc hỏng — coi như chưa đo tài khoản nào" }),
+                );
+                serde_json::Map::new()
             }
-            USAGE_REFRESHING.store(false, std::sync::atomic::Ordering::SeqCst);
-        });
+        },
     }
+}
 
-    // Lần đầu tiên thì chưa có gì để trả. Nói "đang đo" chứ đừng trả một đối
-    // tượng rỗng trông y hệt "đã đo xong và mọi thứ bằng 0".
-    cached
-        .map(|(_, v)| v)
-        .unwrap_or_else(|| json!({ "pending": true }))
+/// Tuổi của số đo MỚI NHẤT cho một tài khoản: lần huba đo `/usage` (`usage_at_ms`)
+/// hay lần CLI tự ghi sổ `.claude.json` (`so_cli_ms`, `fetchedAtMs`), cái nào mới
+/// hơn. `None` = chưa từng có số nào. Thuần, để kiểm được.
+pub fn tuoi_so_do(usage_at_ms: Option<i64>, so_cli_ms: Option<i64>, now_ms: i64) -> Option<i64> {
+    usage_at_ms
+        .into_iter()
+        .chain(so_cli_ms)
+        .max()
+        .map(|t| (now_ms - t).max(0))
+}
+
+/// Có phải đo lại không: chưa có số nào, hoặc số mới nhất cũ hơn `cu_ms`.
+pub fn can_do_lai(tuoi: Option<i64>, cu_ms: i64) -> bool {
+    tuoi.is_none_or(|t| t > cu_ms)
+}
+
+/// Đo lại NGAY, song song, những tài khoản có số mới nhất cũ hơn `cu_ms` — ghi sổ —
+/// rồi trả [`usage_cached`].
+///
+/// CHẶN chỗ gọi tới khi đo xong (trần 60 s một lượt `/usage`), và đó là cố ý: chỉ
+/// gọi ở chỗ SẮP CHỌN tài khoản cho một phiên mới (hoặc `/accounts`), nơi một con
+/// số cũ dẫn tới mở phiên trên một tài khoản đã kịch trần — đúng vụ 07/09 dồn 4
+/// phiên sang acc1 rồi acc1 hết hạn mức. Đừng gọi nó ở mỗi vòng chạy: ba lần spawn
+/// `claude` từng kéo một vòng lên 80 s (đo 2026-08-10).
+pub fn usage_lam_moi(cfg: &Config, db: &Db, cu_ms: i64) -> Value {
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut so = doc_so_usage(db);
+    let so_cli = crate::quota::read_all(cfg);
+    let accounts = cfg.claude_accounts_or_ambient();
+    let can: Vec<&crate::config::ClaudeAccountCfg> = accounts
+        .iter()
+        .filter(|a| {
+            let at = so
+                .get(&a.name)
+                .and_then(|r| r.get("at_ms"))
+                .and_then(Value::as_i64);
+            let tep = so_cli
+                .iter()
+                .find(|q| q.account == a.name)
+                .and_then(|q| q.fetched_at_ms);
+            can_do_lai(tuoi_so_do(at, tep, now), cu_ms)
+        })
+        .collect();
+    crate::logging::info(
+        "usage_do_lai",
+        json!({ "cu_hon_ms": cu_ms, "mau_so": accounts.len(),
+                "do_lai": can.iter().map(|a| a.name.clone()).collect::<Vec<_>>() }),
+    );
+    if can.is_empty() {
+        return usage_cached(cfg, db);
+    }
+    let ket_qua: Vec<(String, Value)> = std::thread::scope(|s| {
+        let tay: Vec<_> = can
+            .iter()
+            .map(|a| s.spawn(move || (a.name.clone(), usage_one(cfg, a))))
+            .collect();
+        tay.into_iter()
+            .filter_map(|h| match h.join() {
+                Ok(r) => Some(r),
+                Err(_) => {
+                    crate::logging::error(
+                        "usage_probe_panicked",
+                        json!({ "effect": "một luồng đo /usage chết giữa chừng — tài khoản ấy giữ số cũ" }),
+                    );
+                    None
+                }
+            })
+            .collect()
+    });
+    let xong = chrono::Utc::now().timestamp_millis();
+    for (ten, mut row) in ket_qua {
+        match row.get("err").cloned() {
+            // Hỏng: GIỮ số cũ (nếu có), chỉ ghi thêm lỗi — không có `at_ms` mới, nên
+            // lần chọn sau vẫn đo lại nó.
+            Some(err) => {
+                let mut cu = so.remove(&ten).unwrap_or_else(|| json!({}));
+                if let Some(o) = cu.as_object_mut() {
+                    o.insert("err".into(), err);
+                    o.insert("err_at_ms".into(), json!(xong));
+                }
+                so.insert(ten, cu);
+            }
+            None => {
+                if let Some(o) = row.as_object_mut() {
+                    o.insert("at_ms".into(), json!(xong));
+                }
+                so.insert(ten, row);
+            }
+        }
+    }
+    match serde_json::to_string(&Value::Object(so)) {
+        Ok(v) => {
+            if let Err(e) = db.set_cursor(USAGE_KEY, &v) {
+                crate::logging::error("usage_store_not_saved", json!({ "err": e.to_string() }));
+            }
+        }
+        Err(e) => crate::logging::error("usage_store_not_saved", json!({ "err": e.to_string() })),
+    }
+    usage_cached(cfg, db)
+}
+
+/// Chỉ giữ những hàng `/usage` MỚI HƠN sổ `.claude.json` của cùng tài khoản — để
+/// [`crate::quota::overlay_live`] không đè một số CLI vừa ghi 2′ trước bằng một lượt
+/// dò đã 2 tiếng. Hàng không mang `at_ms` (chỉ có lỗi) thì giữ: nó không có số nên
+/// không đè được gì. Thuần, để kiểm được.
+pub fn chi_so_moi_hon_tep(accounts: Option<&Value>, so_cli: &[crate::quota::Quota]) -> Value {
+    let mut out = serde_json::Map::new();
+    if let Some(Value::Object(m)) = accounts {
+        for (ten, row) in m {
+            let at = row.get("at_ms").and_then(Value::as_i64);
+            let tep = so_cli
+                .iter()
+                .find(|q| &q.account == ten)
+                .and_then(|q| q.fetched_at_ms);
+            let giu = match (at, tep) {
+                (Some(a), Some(t)) => a >= t,
+                _ => true,
+            };
+            if giu {
+                out.insert(ten.clone(), row.clone());
+            }
+        }
+    }
+    Value::Object(out)
+}
+
+/// Hạng các tài khoản cho việc CHỌN tài khoản — MỘT chỗ cho mọi đường mở phiên mới.
+///
+/// `cu_ms = Some(n)` ⟹ đo lại trước những tài khoản có số cũ hơn `n` ([`usage_lam_moi`]);
+/// `None` ⟹ chỉ đọc sổ. Rồi: sổ CLI + đè bằng số `/usage` MỚI HƠN nó + sổ tài khoản chết.
+/// Bốn chỗ gọi trước đây chép tay đúng chuỗi này (`announce_changes`, `auto_handover`,
+/// `auto_switch_on_limit`, `huba handover -a auto`).
+pub fn xep_hang_tai_khoan(cfg: &Config, db: &Db, cu_ms: Option<i64>) -> Vec<crate::quota::Ranked> {
+    let usage = match cu_ms {
+        Some(c) => usage_lam_moi(cfg, db, c),
+        None => usage_cached(cfg, db),
+    };
+    let now_ms = crate::quota::now_ms();
+    let moi = chi_so_moi_hon_tep(usage.get("accounts"), &crate::quota::read_all(cfg));
+    crate::quota::apply_dead_book(
+        crate::quota::overlay_live(crate::quota::rank_all(cfg, now_ms), &moi),
+        &db.dead_accounts(),
+    )
 }
 
 /// **Còn bao nhiêu hạn mức** — hỏi `claude -p "/usage"` cho từng tài khoản.
@@ -536,68 +675,64 @@ pub fn usage_cached(cfg: &Config, now: i64) -> Value {
 /// Current week (Fable): 50% used · resets Aug 11 at 1pm
 /// ```
 ///
-/// Cache 5 phút (Hà: *"không cần thường xuyên, chỉ cần 5p 1 lần là được"*) —
-/// mỗi lượt là ba lần spawn tiến trình, nên đừng gắn nó vào mỗi vòng poll.
-fn usage_block(cfg: &Config) -> Value {
-    let mut map = serde_json::Map::new();
-    for acc in cfg.claude_accounts_or_ambient() {
-        let env = account_env(&acc);
-        let out = run(
-            &cfg.claude_cli,
-            &["-p", "/usage", "--output-format", "json"],
-            RunOpts {
-                timeout: Some(Duration::from_secs(60)),
-                env,
-                ..Default::default()
-            },
-        );
-        let row = match out {
-            Ok(r) => {
-                let text = serde_json::from_str::<Value>(r.stdout.trim())
-                    .ok()
-                    .and_then(|v| v.get("result").and_then(Value::as_str).map(str::to_string));
-                match text {
-                    Some(t) => parse_usage(&t),
-                    None => {
-                        // Một dòng "không đọc được" gộp hai chuyện khác hẳn
-                        // nhau, và tôi đã đoán nhầm vì đúng chỗ này (đo
-                        // 2026-08-12: hubad hỏng cả ba tài khoản trong khi chạy
-                        // tay thì 6 giây ra đủ số — `code: null` hoá ra là HẾT
-                        // GIỜ, không phải câu trả lời khó hiểu). `RunOut` đã
-                        // mang sẵn `timed_out` và `ms`; dòng log cũ vứt đi cả
-                        // hai. Không log nội dung stdout: nó mang email tài
-                        // khoản và số hạn mức.
-                        crate::logging::warn(
-                            "usage_probe_unparsed",
-                            json!({
-                                "account": acc.name,
-                                "code": r.code,
-                                "timed_out": r.timed_out,
-                                "ms": r.ms as u64,
-                                "stdout_bytes": r.stdout.len(),
-                                "stderr": crate::exec::truncate(r.stderr.trim(), 200),
-                            }),
-                        );
-                        let err = if r.timed_out {
-                            format!("/usage hết giờ sau {}ms", r.ms)
-                        } else {
-                            "không đọc được câu trả lời của /usage".to_string()
-                        };
-                        json!({ "err": err })
-                    }
+/// MỘT tài khoản, MỘT tiến trình — [`usage_lam_moi`] gọi song song cho những tài
+/// khoản có số cũ. (Nhịp 5′ cho mọi tài khoản — Hà 10/08 *"chỉ cần 5p 1 lần là
+/// được"* — đã thay bằng "đo khi sắp chọn" ngày 24/09; xem [`USAGE_CU_MO_PHIEN_MS`].)
+fn usage_one(cfg: &Config, acc: &crate::config::ClaudeAccountCfg) -> Value {
+    let env = account_env(acc);
+    let out = run(
+        &cfg.claude_cli,
+        &["-p", "/usage", "--output-format", "json"],
+        RunOpts {
+            timeout: Some(Duration::from_secs(60)),
+            env,
+            ..Default::default()
+        },
+    );
+    match out {
+        Ok(r) => {
+            let text = serde_json::from_str::<Value>(r.stdout.trim())
+                .ok()
+                .and_then(|v| v.get("result").and_then(Value::as_str).map(str::to_string));
+            match text {
+                Some(t) => parse_usage(&t),
+                None => {
+                    // Một dòng "không đọc được" gộp hai chuyện khác hẳn
+                    // nhau, và tôi đã đoán nhầm vì đúng chỗ này (đo
+                    // 2026-08-12: hubad hỏng cả ba tài khoản trong khi chạy
+                    // tay thì 6 giây ra đủ số — `code: null` hoá ra là HẾT
+                    // GIỜ, không phải câu trả lời khó hiểu). `RunOut` đã
+                    // mang sẵn `timed_out` và `ms`; dòng log cũ vứt đi cả
+                    // hai. Không log nội dung stdout: nó mang email tài
+                    // khoản và số hạn mức.
+                    crate::logging::warn(
+                        "usage_probe_unparsed",
+                        json!({
+                            "account": acc.name,
+                            "code": r.code,
+                            "timed_out": r.timed_out,
+                            "ms": r.ms as u64,
+                            "stdout_bytes": r.stdout.len(),
+                            "stderr": crate::exec::truncate(r.stderr.trim(), 200),
+                        }),
+                    );
+                    let err = if r.timed_out {
+                        format!("/usage hết giờ sau {}ms", r.ms)
+                    } else {
+                        "không đọc được câu trả lời của /usage".to_string()
+                    };
+                    json!({ "err": err })
                 }
             }
-            Err(e) => {
-                crate::logging::warn(
-                    "usage_probe_failed",
-                    json!({ "account": acc.name, "err": e.to_string() }),
-                );
-                json!({ "err": e.to_string() })
-            }
-        };
-        map.insert(acc.name.clone(), row);
+        }
+        Err(e) => {
+            crate::logging::warn(
+                "usage_probe_failed",
+                json!({ "account": acc.name, "err": e.to_string() }),
+            );
+            json!({ "err": e.to_string() })
+        }
     }
-    Value::Object(map)
 }
 
 /// Bóc ba dòng phần trăm ra khỏi câu trả lời của `/usage`.

@@ -1,0 +1,42 @@
+📷 acc3 [dwork]·42090c12:
+
+  ⎿  Added 2 lines, removed 2 lines
+      81    <line class="mui" x1="320" y1="225" x2="262" y2="225" marker-end="url(#m)"/>
+      82    <!-- ① chờ quyết định -->
+      83    <path class="mui-do" d="M760,188 L760,112" marker-end="url(#md)"/>
+      84 -  <text class="dut" x="772" y="140">① CHỜ NGOÀI: 25/116 việc mở (13:38) · lâu nhất 24 giờ</text>                                                                                             
+      85 -  <text class="dut" x="772" y="156">DW-phieu ⏳ 105 phiếu — nghẽn thật nằm ở chờ quyết định</text>                                                                                           
+      84 +  <text class="dut" x="748" y="140" text-anchor="end">① CHỜ NGOÀI: 25/116 việc mở (13:38) · lâu nhất 24 giờ</text>                                                                           
+      85 +  <text class="dut" x="748" y="156" text-anchor="end">DW-phieu ⏳ 105 phiếu — nghẽn thật nằm ở chờ quyết định</text>                                                                         
+      86  
+      87    <!-- hàng 2: vai làm → báo → đẩy (trái → phải) -->
+      88    <rect class="vai"   x="30"  y="350" width="230" height="70" rx="10"/><text class="t" x="145" y="378" text-anchor="middle">vai nghe &lt;làn&gt; + làm</text><text class="s" x="145" y="398" 
+          text-anchor="middle">6 bước: BA → API thật → code → test</text>
+  ⎿  Allowed by auto mode classifier
+  Read 1 file, ran 2 shell commands 
+⏺ [dwork] Sơ đồ đã vẽ lại xong, gửi anh/chị (bấm 📎 để tải về điện thoại):
+  /Users/hanguyen/projects/dwork/dev/.tmp/so-do-quy-trinh-doi-2026-09-24.html
+  Sơ đồ có 3 phần: 
+  1. Vòng việc hằng ngày qua bảng việc Redis, đánh dấu 7 điểm đứt màu đỏ kèm số đo. Ví dụ: 25/116 việc mở đang chờ quyết định; các vai chưa nhắn trực tiếp cho nhau lần nào; đội trống main 10:28→13:40.
+  2. Chuyển phiên: 8 bước cho vai, và 5 bước cho main theo luật mới.
+  3. Bảng các điểm đứt: cách sửa, ai làm, trạng thái hiện tại.
+  Tôi đã tự chụp lại để kiểm, sơ đồ hiện đúng và không có lỗi. Bản chính docs/so-do-quy-trinh-doi.html nằm trong cây của main, nên tôi đã nhờ main 49 thay qua bảng việc.
+  Các việc anh/chị giao trong lúc tôi vẽ:
+  - Main: đã mở main 49 (pid 5012) lúc 13:40, rồi main 49 đóng main 48. Tôi mở bằng acc-mo-vai.sh, không dùng phien.sh vai dev, vì lệnh đó sẽ giết cả đội (GS-15).
+    - Vì sao mất main: luật cũ chỉ nói main chuyển phiên ở 60%, không nói ai mở main kế nhiệm. Main 48 dừng lúc 10:28 rồi hỏi bằng lời, chờ anh/chị gõ /new. Không có gì báo động khi đội trống main.
+  - Luật: đã ghi vào luat-doi.md và đã lên remote (2d4e065).
+    - Main chạm 60% thì phải tự mở main kế nhiệm ngay trong lượt đó.
+    - Phiên nào thấy đội trống main cũng tự mở main theo bàn giao mới nhất, không dừng lại hỏi. Có bộ đo F6 kêu khi đội trống main quá 15 phút.
+    - Cùng commit, ~/projects/CLAUDE.md thêm luật: lập báo cáo xong thì gửi đường dẫn để anh/chị bấm 📎, không mở trình duyệt.
+  - AOF: đã bật và ghi vào redis.conf, nên giữ được qua lần khởi động lại. Nhờ vậy phần bỏ TSV (R1c) giờ thu hoạch được.
+  - Tiến trình node: giảm từ 60 xuống 30, RAM của nhóm này từ khoảng 1,67 GB xuống 0,74 GB.
+    - Đã tắt 26 tiến trình, là các ngăn xếp dev mồ côi của những phiên vai trước, chạy từ 9 giờ tới 2,5 ngày. Lúc tắt, cái nào cũng 0% CPU và không có kết nối.
+    - Còn giữ: ngăn xếp web của uc-ttc (đang có kết nối), bản xem trước của account (vừa mở), các dịch vụ fbot/onghut, MCP và bộ nghe của các phiên đang sống.
+    - Đã báo 5 làn qua bảng việc Redis rằng các cổng này đã tắt, cần thì dựng lại theo bàn giao, và đừng đọc lỗi "không kết nối được" thành lỗi sản phẩm.
+  Còn một gốc chưa sửa: bàn giao của vai cố ý để ngăn xếp dev chạy suốt qua các phiên, nên chúng sẽ lại tích lên. Tôi đề xuất thêm luật: "vai đóng phiên thì tắt ngăn xếp của mình, chỉ ghi lệnh dựng lại vào
+  bàn giao". Anh/chị đồng ý thì tôi ghi vào luật đội.
+✻ Cooked for 15m 11s · done 1:51 PM
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents

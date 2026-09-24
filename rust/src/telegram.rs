@@ -2579,7 +2579,7 @@ impl Inbox {
                         // dòng lệnh từ sáng).
                         //
                         // Nay đi CHUNG máy móc với tin tự phát:
-                        // `say_with_command_icons` — cắt ngay sau dòng lệnh,
+                        // `say_from_session_with` — cắt ngay sau dòng lệnh,
                         // dán icon vào cuối chính dòng ấy, chia nhỏ cho vừa trần
                         // Telegram. Không còn "📄 (i/n)": mẩu nay cắt theo Ý
                         // (kết bằng một dòng lệnh) chứ không theo số ký tự, nên
@@ -2806,7 +2806,11 @@ impl Inbox {
                     )),
                 }
             }
-            None => Some("⚠ đường dẫn ấy đã cũ (màn đã đổi). Gõ /shot rồi bấm lại.".into()),
+            None => Some(format!(
+                "⚠ liên kết 📎 ấy đã cũ — huba chỉ giữ {} tệp gần nhất, và liên kết từ trước 24/09 \
+                 không còn tra được. Gõ /shot rồi bấm lại.",
+                crate::pipeline::FILE_GIU
+            )),
         }
     }
 

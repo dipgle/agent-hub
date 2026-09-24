@@ -1482,14 +1482,31 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // có cái nút. Tin BÁO TỬ thì thôi, cùng lý do với nút lệnh: phiên đã
         // tắt, nhưng ở đây lý do khác — file thì vẫn còn, chỉ là một tin báo tử
         // không phải chỗ để đọc tài liệu.
-        if !matches!(c, crate::watch::Change::Ended { .. }) {
-            quick.extend(remember_files(
-                db,
-                cfg,
-                &id,
-                &crate::keys::paths_on_screen(scan, 4),
-            ));
-        }
+        //
+        // 🔴 VÀ 📎 NGAY TẠI TÊN TỆP TRONG CHỮ, như `/shot` và câu trả lời của
+        // route — Hà 2026-09-24, ảnh tin `💤 [dwork/blocked]` có dòng
+        // `📎 /Users/…/HOP-QUYET-DINH.html` in chữ đơn cách, không bấm được:
+        // *"Vấn đề tải file trong nội dung tin vẫn lúc được lúc không"*. Đường này
+        // chỉ dựng nút ở đáy, còn `SessionData.files` để trống — nên cả ba tin
+        // `[dwork/blocked]` hôm ấy ra `text_links: 0`, và đường dẫn rơi vào
+        // `tame_auto_links` thành `<code>`. Cùng một đường dẫn, bấm được hay không
+        // tuỳ tin ra bằng cửa nào: đúng hình dạng "lúc được lúc không".
+        //
+        // Nguồn vẫn là `scan` (lời của phiên trong nhật ký), KHÔNG qua
+        // `body_before_box`: đây là văn xuôi, không có ô nhập, và phép tìm ô cắt
+        // theo vạch `─` dài — thứ một bảng kẻ trong văn xuôi cũng có.
+        let files: Vec<(String, usize)> = if matches!(c, crate::watch::Change::Ended { .. }) {
+            Vec::new()
+        } else {
+            let seen = paths_not_in_commands(
+                scan,
+                &crate::keys::paths_on_screen(scan, PATHS_SCAN_MAX),
+                &cmds,
+            );
+            let tep = ghi_so_tep(db, cfg, &id, &seen);
+            quick.extend(tep.iter().map(TepDaNho::nut));
+            tep.iter().map(TepDaNho::neo_so).collect()
+        };
         // "… (còn N dòng)" phải có đường đi tiếp — xem `remember_full`.
         if text.contains("… (còn ") {
             let shown_name = row
@@ -1565,6 +1582,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                             (code, l.clone())
                         })
                         .collect(),
+                    files,
                     ..Default::default()
                 };
                 say_session_data(tg, &text, &btns, "session_change_telegram_failed", &data);
@@ -1583,12 +1601,16 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 let mut b: Vec<(String, String)> = Vec::new();
                 b.extend(enter);
                 b.extend(quick.clone());
-                say_with_command_icons(
+                say_session_data(
                     tg,
                     &text,
-                    &crate::sessions::lines_of(&cmds),
                     &b,
                     "session_change_telegram_failed",
+                    &SessionData {
+                        cmds: crate::sessions::lines_of(&cmds),
+                        files,
+                        ..Default::default()
+                    },
                 );
             }
             _ => {
@@ -8102,8 +8124,69 @@ pub fn full_report(db: &Db, n: usize) -> Option<(String, String, String)> {
         .map(|it| (it.s.clone(), it.n.clone(), it.t.clone()))
 }
 
-/// Đường dẫn file huba vừa nhắc tới trên màn — để nút `file:<n>` tìm lại được.
-pub const FILES_KEY: &str = "quick:files";
+/// Sổ tệp huba đã dựng 📎 — để nút `file:<n>` và liên kết `f_<n>` tìm lại được.
+///
+/// 🔴 Đổi tên khoá 2026-09-24 (từ `quick:files`) vì đổi HÌNH DẠNG, và đổi hình
+/// dạng vì sổ cũ chỉ có MỘT ô: tin nào có tệp cũng ghi đè danh sách, còn nút chỉ
+/// mang chỉ số (`file:0`). Hà: *"Vấn đề tải file trong nội dung tin vẫn lúc được
+/// lúc không"* — đo log 21/09→24/09: 4 lần nhận được tệp, và lần 08:11:26Z bấm
+/// liên kết số 0 nhận về `CLAUDE.md` của MỘT TIN KHÁC, 26 s sau bấm lại mới ra
+/// tệp `.html`. Với ~13 phiên cùng tự phát, danh sách bị ghi đè trước khi người
+/// ta kịp bấm là ca THƯỜNG, không phải ca hiếm. Nay số tăng dần, giữ
+/// [`FILE_GIU`] mục gần nhất (cùng khuôn với [`FULL_KEY`]); số của sổ cũ (0–3)
+/// nằm dưới [`FILE_SO_DAU`] nên đọc ra "đã cũ" chứ không trúng tệp khác.
+pub const FILES_KEY: &str = "quick:files:so";
+
+/// Số đầu tiên của sổ tệp. Lớn hơn mọi số sổ một ô từng phát ra (0–3).
+pub const FILE_SO_DAU: usize = 1000;
+
+/// Sổ tệp giữ bao nhiêu mục. Một mục ~100 byte; một tin tối đa 4 tệp, và cùng
+/// (phiên, tệp) dùng lại số cũ, nên 500 mục là vài trăm tin có tệp khác nhau.
+pub const FILE_GIU: usize = 500;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct FileItem {
+    /// id phiên đã nhắc tới tệp — cây của phiên ấy là hàng rào lúc gửi.
+    s: String,
+    /// Đường dẫn đúng như nó hiện trong chữ.
+    p: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct FilesStore {
+    base: usize,
+    items: Vec<FileItem>,
+}
+
+impl Default for FilesStore {
+    fn default() -> Self {
+        FilesStore {
+            base: FILE_SO_DAU,
+            items: Vec::new(),
+        }
+    }
+}
+
+/// Một tệp đã vào sổ: nút ở đáy tin và 📎 giữa chữ dùng CHUNG số `so`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TepDaNho {
+    /// Đường dẫn đúng như nó hiện trong chữ — neo của 📎.
+    pub neo: String,
+    /// Số trong sổ tệp: `file:<so>` · `f_<so>`.
+    pub so: usize,
+    /// Nhãn nút `📎 <tên>`.
+    pub nhan: String,
+}
+
+impl TepDaNho {
+    pub fn nut(&self) -> (String, String) {
+        (self.nhan.clone(), format!("file:{}", self.so))
+    }
+
+    pub fn neo_so(&self) -> (String, usize) {
+        (self.neo.clone(), self.so)
+    }
+}
 
 /// Tin đang mang BẢNG lựa chọn của mỗi phiên — để cú bấm sau sửa đúng nó.
 pub const PANEL_KEY: &str = "panel:msg";
@@ -8159,22 +8242,18 @@ pub const MENU_WINDOW: i64 = 200;
 // hàm mũ nào. Cái được thêm là đọc ra được — "trong 200 lượt vừa rồi anh gõ
 // `/shot` 41 lần" là một câu kiểm lại được bằng mắt, còn "điểm 887.0" thì không.
 
-/// Nhớ các đường dẫn rồi dựng nút `📎 <tên file>`.
+/// Quét tối đa bao nhiêu đường dẫn trên chữ TRƯỚC khi lọc tệp gửi được. Trần 4
+/// nút vẫn áp như cũ — nhưng SAU bước lọc (`file_anchors`, `remember_files`).
 ///
-/// Cùng khuôn với [`remember_quick`] và cố ý thế: một cuốn sổ, một dạng
-/// `callback_data`, một chỗ hết hạn. Nút mang CHỈ SỐ chứ không mang đường dẫn,
-/// vì `callback_data` của Telegram chỉ có 64 byte — một đường dẫn tuyệt đối
-/// vượt trần ấy là chuyện thường, và khi vượt thì nút im lặng không hiện.
-///
-/// Sổ nhớ luôn **phiên nào đã nhắc tới đường dẫn ấy**, và đó là cả điểm:
-/// 🔴 Hà 2026-08-13: *"giới hạn phiên nào chỉ nhận được file nằm trong đúng thư
-/// mục của phiên đó thôi"*. Bản đầu gác ở GỐC WORKSPACE, tức một phiên dwork
-/// nhắc tới đường dẫn của tfl5 là kéo được file tfl5 về điện thoại. Gác theo
-/// phiên thì mỗi cái nút chỉ với tới đúng cây thư mục mà phiên ấy đang làm.
-///
-/// Buộc theo phiên ĐÃ SINH RA nút, không phải phiên đang theo lúc bấm: con trỏ
-/// đổi được giữa hai thời điểm ấy (bấm "Xem đầy đủ" là đổi), và lúc đó cái nút
-/// sẽ lặng lẽ đo bằng một cái thước khác.
+/// 🔴 Hà 2026-09-24, ảnh tin `[dwork]`: *"Ảo thật, bảo bấm tải nhưng ko có link"*.
+/// Phiên viết *"(bấm 📎 để tải về điện thoại):"* rồi đường dẫn tuyệt đối tới tệp
+/// `.html` CÓ THẬT — mà tin không có 📎. Chạy lại đúng chuỗi hàm của `/shot`
+/// 07:27:20Z trên chữ thật: quét dừng ở **4 đường dẫn ĐẦU** (`phien.sh` ·
+/// `luat-doi.md` · `~/projects/CLAUDE.md` · `redis.conf`), ba cái là tên trơn
+/// không gửi được ⟹ 📎 rơi vào `CLAUDE.md` (chỉ được nhắc qua), còn tệp phiên
+/// MỜI tải thì chưa từng được xét. Cắt trước lọc sau là để rác ăn hết suất.
+pub const PATHS_SCAN_MAX: usize = 12;
+
 /// Những đường dẫn CÒN LẠI sau cửa "phải là tệp thật, nằm trong cây của phiên".
 ///
 /// Tách ra vì hai chỗ cần ĐÚNG danh sách này theo ĐÚNG thứ tự ấy: cái nút ở đáy
@@ -8238,12 +8317,40 @@ fn kept_paths(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<
     }
 }
 
+/// Nhớ các đường dẫn rồi dựng nút `📎 <tên file>`.
+///
+/// Cùng khuôn với [`remember_quick`] và cố ý thế: một cuốn sổ, một dạng
+/// `callback_data`, một chỗ hết hạn. Nút mang CHỈ SỐ chứ không mang đường dẫn,
+/// vì `callback_data` của Telegram chỉ có 64 byte — một đường dẫn tuyệt đối
+/// vượt trần ấy là chuyện thường, và khi vượt thì nút im lặng không hiện.
+///
+/// Sổ nhớ luôn **phiên nào đã nhắc tới đường dẫn ấy**, và đó là cả điểm:
+/// 🔴 Hà 2026-08-13: *"giới hạn phiên nào chỉ nhận được file nằm trong đúng thư
+/// mục của phiên đó thôi"*. Bản đầu gác ở GỐC WORKSPACE, tức một phiên dwork
+/// nhắc tới đường dẫn của tfl5 là kéo được file tfl5 về điện thoại. Gác theo
+/// phiên thì mỗi cái nút chỉ với tới đúng cây thư mục mà phiên ấy đang làm.
+///
+/// Buộc theo phiên ĐÃ SINH RA nút, không phải phiên đang theo lúc bấm: con trỏ
+/// đổi được giữa hai thời điểm ấy (bấm "Xem đầy đủ" là đổi), và lúc đó cái nút
+/// sẽ lặng lẽ đo bằng một cái thước khác.
 pub fn remember_files(
     db: &Db,
     cfg: &Config,
     session_id: &str,
     paths: &[String],
 ) -> Vec<(String, String)> {
+    ghi_so_tep(db, cfg, session_id, paths)
+        .iter()
+        .map(TepDaNho::nut)
+        .collect()
+}
+
+/// Ghi sổ tệp MỘT lần, trả cả nút đáy tin lẫn neo 📎 giữa chữ — cùng số.
+///
+/// Mọi chỗ dựng 📎 (`/shot`, câu trả lời của route, tin tự phát) đi qua đây: số
+/// của liên kết giữa chữ và số của nút ở đáy sinh ra từ CÙNG một lượt ghi, nên
+/// không có khe nào để một lượt ghi khác chen vào giữa hai lần hỏi.
+pub fn ghi_so_tep(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<TepDaNho> {
     // 🔴 MỘT CÁI TÊN KHÔNG PHẢI MỘT TỆP. Hà 2026-08-14, ảnh chụp một tin có nút
     // 📎 `com.dipgle.hubd.plist`: *"Com.dipgle.hubd.plist đâu phải là file"*.
     // Đúng — đó là một cái tên nhắc giữa câu văn của chính huba, và tệp thật thì
@@ -8257,12 +8364,55 @@ pub fn remember_files(
     //
     // Không tra được thư mục phiên ⟹ giữ nguyên như cũ (dựng nút): thà một nút
     // có thể hỏng còn hơn im lặng nuốt mọi nút vì một cuốn sổ chưa kịp ghi.
-    let paths = kept_paths(db, cfg, session_id, paths);
+    let paths: Vec<String> = kept_paths(db, cfg, session_id, paths)
+        .into_iter()
+        .take(4)
+        .collect();
     let paths = &paths[..];
     if paths.is_empty() {
         return Vec::new();
     }
-    match serde_json::to_string(&json!({ "s": session_id, "p": paths })) {
+    let mut st: FilesStore = match db.cursor_or_log(FILES_KEY) {
+        None => FilesStore::default(),
+        Some(v) => serde_json::from_str(&v).unwrap_or_else(|e| {
+            // Đọc hỏng thì dựng sổ mới — và NÓI ra: số cũ trong các tin đã gửi
+            // từ nay đọc thành "đã cũ".
+            logging::warn(
+                "quick_files_store_reset",
+                json!({ "err": e.to_string(), "effect": "sổ tệp đọc hỏng — dựng sổ mới, liên kết 📎 cũ thành 'đã cũ'" }),
+            );
+            FilesStore::default()
+        }),
+    };
+    // Chừa chỗ TRƯỚC khi cấp số: bỏ mục cũ nhất sau khi cấp là có thể bỏ đúng
+    // mục vừa được dùng lại, tức phát ra một số chết ngay trong tin này.
+    let du = (st.items.len() + paths.len()).saturating_sub(FILE_GIU);
+    if du > 0 {
+        st.items.drain(..du.min(st.items.len()));
+        st.base += du;
+    }
+    // Cùng (phiên, tệp) ⟹ dùng lại số cũ: một phiên nhắc lại một tệp ở mỗi tin
+    // tự phát là chuyện thường, và mọi liên kết cũ tới tệp ấy vẫn đúng.
+    let so: Vec<usize> = paths
+        .iter()
+        .map(|p| {
+            match st
+                .items
+                .iter()
+                .position(|it| it.s == session_id && it.p == *p)
+            {
+                Some(i) => st.base + i,
+                None => {
+                    st.items.push(FileItem {
+                        s: session_id.to_string(),
+                        p: p.clone(),
+                    });
+                    st.base + st.items.len() - 1
+                }
+            }
+        })
+        .collect();
+    match serde_json::to_string(&st) {
         Ok(v) => {
             if let Err(e) = db.set_cursor(FILES_KEY, &v) {
                 logging::error("quick_files_not_saved", json!({ "err": e.to_string() }));
@@ -8303,54 +8453,46 @@ pub fn remember_files(
             }
         })
         .collect();
-    shown
-        .into_iter()
-        .enumerate()
-        .map(|(i, name)| {
-            (
-                format!("📎 {}", crate::exec::truncate(&name, 40)),
-                format!("file:{i}"),
-            )
+    paths
+        .iter()
+        .zip(so)
+        .zip(shown)
+        .map(|((p, so), name)| TepDaNho {
+            neo: p.clone(),
+            so,
+            nhan: format!("📎 {}", crate::exec::truncate(&name, 40)),
         })
         .collect()
 }
 
-/// Neo 📎 cho chữ: `(đường dẫn ĐÚNG NHƯ NÓ HIỆN trong chữ, chỉ số trong sổ)`.
+/// Những đường dẫn SẼ được neo 📎 — đúng thứ tự, đúng phép lọc của
+/// [`ghi_so_tep`], nhưng KHÔNG ghi sổ và KHÔNG mang số.
 ///
-/// Cùng thứ tự, cùng phép lọc với [`remember_files`] — hai danh sách phải sinh
-/// ra từ MỘT lần gọi, nếu không chỉ số lệch và cái liên kết 📎 sẽ mở một tệp
-/// khác. Đó là lý do hàm này nhận lại `paths` đã lọc thay vì tự lọc lần nữa.
-pub fn file_anchors(
-    db: &Db,
-    cfg: &Config,
-    session_id: &str,
-    paths: &[String],
-) -> Vec<(String, usize)> {
+/// Không mang số là cố ý: số chỉ có nghĩa khi đã ghi sổ, và một số tự đếm từ 0 ở
+/// đây chính là con bug sổ-một-ô vừa gỡ. Dựng liên kết thì dùng
+/// [`ghi_so_tep`].
+pub fn file_anchors(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<String> {
     kept_paths(db, cfg, session_id, paths)
         .into_iter()
         .take(4)
-        .enumerate()
-        .map(|(i, p)| (p, i))
         .collect()
 }
 
-/// Đường dẫn số `n` trong sổ, kèm PHIÊN đã nhắc tới nó.
+/// Đường dẫn số `n` trong sổ, kèm PHIÊN đã nhắc tới nó. `None` = số ấy đã rơi
+/// khỏi sổ (quá [`FILE_GIU`] mục), hoặc là số của sổ một ô trước 2026-09-24.
 pub fn quick_file(db: &Db, n: usize) -> Option<(String, String)> {
-    let v = db.cursor_or_log(FILES_KEY)?;
-    let st: serde_json::Value = serde_json::from_str(&v).ok()?;
-    let sid = st
-        .get("s")
-        .and_then(|s| s.as_str())
-        .unwrap_or_default()
-        .to_string();
-    let path = st
-        .get("p")
-        .and_then(|p| p.as_array())
-        .and_then(|a| a.get(n))
-        .and_then(|p| p.as_str())?
-        .to_string();
-    Some((sid, path))
+    let st: FilesStore = db
+        .cursor_or_log(FILES_KEY)
+        .and_then(|v| serde_json::from_str(&v).ok())?;
+    n.checked_sub(st.base)
+        .and_then(|i| st.items.get(i))
+        .map(|it| (it.s.clone(), it.p.clone()))
 }
+
+// 🪦 Sổ MỘT Ô (`quick:files`, tới 2026-09-24): `{ "s": phiên, "p": [đường dẫn] }`
+// ghi đè ở mỗi tin có tệp, và `file:<n>` là chỉ số trong danh sách của tin CUỐI
+// CÙNG có tệp — không phải của tin mang cái nút. Đừng dựng lại nó dưới tên khác:
+// `tests/so_tep_danh_so.rs` sẽ đỏ.
 
 /// Cây thư mục MỘT PHIÊN được phép với tới — gốc workspace + thư mục dự án của nó.
 ///
@@ -10674,16 +10816,14 @@ pub fn say_from_session_with(
     // ⏎/⌫, không phải 📎 (xem `keys::body_before_box`).
     let seen_paths = paths_not_in_commands(
         text,
-        &crate::keys::paths_on_screen(&crate::keys::body_before_box(text), 4),
+        &crate::keys::paths_on_screen(&crate::keys::body_before_box(text), PATHS_SCAN_MAX),
         &cmds,
     );
-    let files = file_anchors(db, cfg, sid, &seen_paths);
-    if !files.is_empty() {
-        // Sổ tệp phải được ghi thì cú bấm sau mới tra ra đường dẫn; nút ở đáy
-        // là tác dụng phụ đáng giữ (một liên kết không dựng được thì vẫn còn
-        // đường bấm).
-        buttons.extend(remember_files(db, cfg, sid, &seen_paths));
-    }
+    // Sổ tệp phải được ghi thì cú bấm sau mới tra ra đường dẫn; nút ở đáy là tác
+    // dụng phụ đáng giữ (một liên kết không dựng được thì vẫn còn đường bấm).
+    let tep = ghi_so_tep(db, cfg, sid, &seen_paths);
+    buttons.extend(tep.iter().map(TepDaNho::nut));
+    let files: Vec<(String, usize)> = tep.iter().map(TepDaNho::neo_so).collect();
     buttons.extend(extra.iter().cloned());
     let data = SessionData {
         sid: sid.to_string(),
@@ -11013,25 +11153,6 @@ fn reply_from_session(
         }
     }
     reply_in_channel(db, cfg, adapter, cmd, text);
-}
-
-pub fn say_with_command_icons(
-    tg: &crate::telegram::Inbox,
-    text: &str,
-    cmds: &[String],
-    buttons: &[(String, String)],
-    log_key: &str,
-) {
-    say_session_data(
-        tg,
-        text,
-        buttons,
-        log_key,
-        &SessionData {
-            cmds: cmds.to_vec(),
-            ..Default::default()
-        },
-    )
 }
 
 /// Dựng HTML từ bảng dữ liệu — phần thuần của [`say_session_data`], kiểm được.
@@ -16281,9 +16402,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                 let mut quick = Vec::new();
                 // Giữ riêng ĐÚNG các dòng lệnh (không kèm "làm đi"), vì icon
                 // trong chữ phải bám đúng dòng sinh ra nó — xem
-                // `say_with_command_icons`.
+                // `say_session_data`.
                 let mut cmd_lines: Vec<String> = Vec::new();
-                // Tệp thấy trong chữ → neo cho liên kết 📎 (xem `file_anchors`).
+                // Tệp thấy trong chữ → neo cho liên kết 📎 (xem `ghi_so_tep`).
                 let mut shot_files: Vec<(String, usize)> = Vec::new();
                 // `/refresh` đứng chung hàng với `/shot` ở đây, không phải vì
                 // tiện: `ack` của nó CŨNG là một màn của phiên, và luật "MỘT
@@ -16375,15 +16496,19 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // ▶️/🖥 của nó (xem `paths_not_in_commands`).
                     let seen_paths = paths_not_in_commands(
                         &ack,
-                        &crate::keys::paths_on_screen(&crate::keys::body_before_box(&ack), 4),
+                        &crate::keys::paths_on_screen(
+                            &crate::keys::body_before_box(&ack),
+                            PATHS_SCAN_MAX,
+                        ),
                         &cmds_of_text(cfg, &want, &ack),
                     );
-                    quick.extend(remember_files(db, cfg, &want, &seen_paths));
                     // …và ĐÍCH CHẠM NẰM NGAY TẠI TÊN TỆP trong chữ, không chỉ ở
                     // đáy tin (Hà 2026-08-16: *"chưa chèn link tải file xuất
-                    // hiện trong nội dung phiên gửi lên tele"*). Cùng một lần
-                    // lọc với cái nút ở trên, nên chỉ số không lệch được.
-                    shot_files = file_anchors(db, cfg, &want, &seen_paths);
+                    // hiện trong nội dung phiên gửi lên tele"*). Cùng MỘT lượt
+                    // ghi sổ với cái nút, nên số không lệch được.
+                    let tep = ghi_so_tep(db, cfg, &want, &seen_paths);
+                    quick.extend(tep.iter().map(TepDaNho::nut));
+                    shot_files = tep.iter().map(TepDaNho::neo_so).collect();
                 }
                 // Ô nhập đang có sẵn chữ ⟹ một nút GỬI (Hà 2026-08-13: *"có gợi
                 // ý nội dung chat cần có cách bấm nhanh để gửi nó"*). Đi đúng

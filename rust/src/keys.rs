@@ -1522,6 +1522,69 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
     } else {
         format!("/dev/{tty}")
     };
+    // 🔴 BỘ ĐỆM TRƯỚC, kiểm bằng MỘT Apple Event — rồi mới quét (2026-09-24).
+    //
+    // Hà: *"Tại sao mỗi lần phiên chạy thì kênh tele treo vậy"*. Đo lượt gõ chữ
+    // 08:54:50Z mất 71,5 s: **45 s** là `window_script` (đi qua TỪNG tab, hàng
+    // chục Apple Event) hết giờ lúc Terminal bận vẽ cho các phiên đang chạy — rồi
+    // mới rơi về đúng id cửa sổ đã nhớ (8754), thứ đã đúng ngay từ đầu. Bản cũ chỉ
+    // dùng bộ nhớ SAU khi phép quét hỏng, tức trả trọn 45 s mỗi lần Terminal bận.
+    //
+    // Phép kiểm là CÂU HỎI mà `do_script` cần đúng: tab ĐANG CHỌN của cửa sổ ấy có
+    // mang tty này không (chữ luôn được gõ vào `selected tab of window id W`).
+    // Khớp ⟹ dùng; lệch (cửa sổ đổi tab, tty bị dùng lại) ⟹ quên và quét như cũ;
+    // hỏi hỏng (Terminal câm) ⟹ quét như cũ, và đường lùi bộ nhớ bên dưới vẫn còn.
+    if let Some(w) = recall_window(&dev) {
+        match selected_tab_tty(w) {
+            Ok(t) if t.trim().trim_start_matches("/dev/") == dev.trim_start_matches("/dev/") => {
+                return Ok(Some(w));
+            }
+            Ok(t) => {
+                forget_window(&dev);
+                logging::info(
+                    "window_cache_stale",
+                    json!({ "tty": dev, "window": w, "tab_tty": t.trim(),
+                            "effect": "tab đang chọn không còn mang tty này — quên id ấy, quét lại" }),
+                )
+            }
+            // Cửa sổ đã đóng ⟹ id đã nhớ là xác — quét lại.
+            Err(e) if e.to_string().contains("Can't get") => {
+                forget_window(&dev);
+                logging::info(
+                    "window_cache_stale",
+                    json!({ "tty": dev, "window": w, "err": e.to_string(),
+                            "effect": "cửa sổ đã nhớ không còn — quên id ấy, quét lại" }),
+                )
+            }
+            // Terminal BẬN (hết giờ · ngân sách · nhường): phép quét hàng chục Apple
+            // Event sẽ hết giờ lâu hơn rồi rơi về đúng id này (đường lùi bên dưới) —
+            // trả luôn, và nói ra. Chỗ gõ vẫn qua `paste_target_ok`/đọc lại màn.
+            Err(e) => {
+                logging::warn(
+                    "window_of_from_cache",
+                    json!({ "tty": dev, "window": w, "err": e.to_string(),
+                            "why": "Terminal bận — dùng id cửa sổ đã nhớ, KHÔNG quét từng tab" }),
+                );
+                return Ok(Some(w));
+            }
+        }
+    }
+    // 🔴 MỘT LƯỢT QUÉT MỘT LÚC, và NGHỈ sau khi hỏng (2026-09-24, báo của main
+    // dwork 17:3x giờ máy): Terminal không nhận Apple Event (-1712) từ ~09:55Z,
+    // `sample` luồng chính Terminal: ~80 % trong callback trạng thái ứng dụng của
+    // LaunchServices, 0 khung hộp thoại; hubd sinh `window_script` liên tục — mỗi
+    // lượt treo tới trần rồi chồng lên lượt sau (2 lượt treo cùng lúc lúc đo), còn
+    // dwork mở vai hỏng 6 lượt. Quét khi Terminal đang câm không đọc được gì, chỉ
+    // xếp thêm Apple Event vào đúng cái hàng đang nghẹt.
+    let _mot_luot = match QuetCuaSo::xin() {
+        Ok(g) => g,
+        Err(why) => {
+            return match recall_window(&dev) {
+                Some(w) => Ok(Some(w)),
+                None => Err(anyhow!(why)),
+            }
+        }
+    };
     let script = window_script(&dev);
     // Không tìm thấy thì script chạy hết mà không `return` gì — `osascript` in
     // ra chuỗi rỗng, `parse` hỏng, và ta được `None`. Đó là câu trả lời đúng.
@@ -1532,6 +1595,7 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
     // *"Expected string but found end of script. (-2741)"*. Một dòng thừa viết
     // cho dễ hiểu lại làm hỏng cả tính năng — và nó chỉ lộ khi CHẠY THẬT, vì
     // test của tệp này chỉ kiểm phần thoát chuỗi.
+    let bat_dau = std::time::Instant::now();
     match osascript(&script) {
         Ok(out) => {
             let id = out.trim().parse::<i64>().ok();
@@ -1550,7 +1614,10 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
         // câu trả lời cũ và dùng khi phép hỏi hết giờ: sai lầm tệ nhất của bản
         // nhớ (cửa sổ đã đóng) chỉ dẫn tới một `do script` hỏng có thông báo,
         // còn hỏng như hiện nay là mất hẳn đường gõ.
-        Err(e) => match recall_window(&dev) {
+        Err(e) => match {
+            QuetCuaSo::hong(bat_dau.elapsed(), &e.to_string());
+            recall_window(&dev)
+        } {
             Some(w) => {
                 logging::warn(
                     "window_of_from_cache",
@@ -1593,10 +1660,13 @@ pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
     } else {
         format!("/dev/{tty}")
     };
-    Ok(osascript(&window_any_script(&dev))?
-        .trim()
-        .parse::<i64>()
-        .ok())
+    // Cùng cửa MỘT LƯỢT + nghỉ sau hỏng với `window_of` — hai bản quét, một hàng
+    // Apple Event của Terminal (xem `QuetCuaSo`).
+    let _mot_luot = QuetCuaSo::xin().map_err(|why| anyhow!(why))?;
+    let bat_dau = std::time::Instant::now();
+    let out = osascript(&window_any_script(&dev))
+        .inspect_err(|e| QuetCuaSo::hong(bat_dau.elapsed(), &e.to_string()))?;
+    Ok(out.trim().parse::<i64>().ok())
 }
 
 /// Tách ra để KIỂM ĐƯỢC — cùng lý do với [`window_script`]: ba lỗi AppleScript
@@ -1647,6 +1717,162 @@ end tell"#
     Ok(out.trim().parse::<usize>().unwrap_or(0))
 }
 
+/// Cửa MỘT LƯỢT cho những phép hỏi Terminal đi qua TỪNG tab (`window_script`,
+/// `window_any_script`, `tabs_script`): giữ `co` tới khi rời tầm — kể cả khi rời
+/// bằng panic, nên một lượt hỏng không khoá cửa mãi.
+///
+/// Báo của main dwork 24/09: Terminal không nhận Apple Event, các lượt quét của
+/// hubd chồng lên nhau — mỗi lượt treo tới trần rồi xếp thêm vào đúng cái hàng
+/// đang nghẹt.
+pub struct MotLuot(&'static std::sync::atomic::AtomicBool);
+
+/// Nhịp hỏi lại khi đang CHỜ một lượt khác trả về.
+const MOT_LUOT_NHIP: Duration = Duration::from_millis(100);
+
+impl MotLuot {
+    /// Xin lượt. Đang có lượt khác thì chờ nó trả về, tối đa `cho`
+    /// (`Duration::ZERO` = không chờ). `None` = hết giờ chờ mà lượt kia vẫn chưa trả.
+    pub fn xin(co: &'static std::sync::atomic::AtomicBool, cho: Duration) -> Option<MotLuot> {
+        let het = std::time::Instant::now() + cho;
+        loop {
+            if !co.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return Some(MotLuot(co));
+            }
+            if std::time::Instant::now() >= het {
+                return None;
+            }
+            std::thread::sleep(MOT_LUOT_NHIP);
+        }
+    }
+}
+
+impl Drop for MotLuot {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Chờ lượt đang chạy bao lâu, theo HẠNG của việc đang xin.
+///
+/// 🔴 Đo 2026-09-24: `/shot` của Hà lúc 10:47:56Z và 10:49:59Z nhận ngay *"đang có
+/// một lượt quét cửa sổ khác chưa trả về"* — lượt kia là của vòng NỀN. Bản đầu của
+/// cửa một lượt từ chối mọi người tới sau, tức một ngón tay thua một vòng quét
+/// định kỳ. Có người đang chờ ⟹ CHỜ, tối đa trần hỏi Terminal của chính lượt ấy
+/// (cùng lý do với [`osa_budget`]: thà chờ thêm còn hơn trả về một câu mà chính
+/// người ấy không làm gì được với nó). Vòng nền ⟹ không chờ: nó đọc `Err` thành
+/// *"chưa đo được"*, và vòng sau hỏi lại.
+pub fn cho_luot(lane: crate::exec::Lane, tran: Duration) -> Duration {
+    match lane {
+        crate::exec::Lane::Urgent => tran,
+        crate::exec::Lane::Background => Duration::ZERO,
+    }
+}
+
+/// Nghỉ bao lâu sau một lượt quét BỊ TERMINAL BẮT CHỜ rồi hỏng. Hỏi lại ngay là
+/// xếp thêm vào đúng hàng đang nghẹt; 60 s đủ cho một cơn nghẹt ngắn qua mà vẫn
+/// không để một phiên mới mở phải chờ quá lâu mới có cửa sổ.
+pub const QUET_NGHI_MS: i64 = 60_000;
+
+/// Còn phải nghỉ bao nhiêu ms nữa (`0` = được quét). `hong_luc_ms` là mốc lượt
+/// quét hỏng gần nhất (`0` = chưa hỏng lần nào). Thuần, để kiểm được mà không cần
+/// đồng hồ thật.
+pub fn quet_con_nghi_ms(hong_luc_ms: i64, bay_gio_ms: i64) -> i64 {
+    (hong_luc_ms + QUET_NGHI_MS - bay_gio_ms).max(0)
+}
+
+/// Lượt quét phải chờ Terminal ít nhất chừng này rồi mới hỏng thì mới tính là
+/// Terminal CÂM. Bằng nửa trần hỏi Terminal nhỏ nhất (20 s, vòng nền — xem
+/// [`osa_budget`]).
+pub const QUET_CAM_TU: Duration = Duration::from_secs(10);
+
+/// Lượt quét hỏng này có phải vì TERMINAL không trả lời không — tức có đáng NGHỈ.
+///
+/// 🔴 Đo 2026-09-24 10:42→11:09Z: **11/15** lần `window_scan_paused` là lỗi do
+/// CHÍNH huba sinh ra mà không hề hỏi Terminal — hết ngân sách vòng nền ×10,
+/// nhường lượt gấp ×1 (xem [`probe_verdict`]), trả về trong ~0 ms. Nghỉ theo chúng
+/// là hoãn 60 s mọi lượt quét, kể cả của Hà, vì một câu hỏi chưa từng được đặt ra.
+///
+/// Phân biệt bằng THỜI GIAN ĐÃ CHỜ, không bằng chữ trong câu lỗi: câu lỗi là văn
+/// của người viết và đổi được mà không ai báo, còn "Terminal đã bắt ta chờ bao
+/// lâu" chính là thứ phép nghỉ sinh ra để tránh.
+pub fn quet_hong_la_terminal_cam(da_cho: Duration) -> bool {
+    da_cho >= QUET_CAM_TU
+}
+
+/// Lượt mình vừa XẾP HÀNG chờ có kết thúc bằng Terminal câm không — có thì đừng
+/// hỏi chồng thêm một lượt nữa. `cam_luc_ms` = mốc lượt dò gần nhất hỏng vì Terminal
+/// câm (`0` = chưa lần nào); `bat_dau_cho_ms` = lúc mình bắt đầu xin lượt.
+///
+/// Vì sao: lượt có người chờ nay XẾP HÀNG sau vòng nền ([`cho_luot`]). Không có cửa
+/// này thì lúc Terminal câm, người chờ trả trọn trần của vòng nền (20 s) rồi trả
+/// thêm trần của chính mình (45 s) cho một câu trả lời đã biết trước — tệ hơn cả
+/// lúc hai lượt còn chạy chồng nhau.
+pub fn luot_truoc_da_cam(cam_luc_ms: i64, bat_dau_cho_ms: i64) -> bool {
+    cam_luc_ms > 0 && cam_luc_ms >= bat_dau_cho_ms
+}
+
+/// Cửa một lượt + thời gian nghỉ của phép quét cửa sổ — xem [`MotLuot`],
+/// [`cho_luot`], [`quet_hong_la_terminal_cam`].
+#[cfg(target_os = "macos")]
+struct QuetCuaSo;
+
+#[cfg(target_os = "macos")]
+static QUET_DANG_CHAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Mốc (ms epoch) lượt quét hỏng gần nhất vì Terminal câm.
+#[cfg(target_os = "macos")]
+static QUET_HONG_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+#[cfg(target_os = "macos")]
+impl QuetCuaSo {
+    /// Xin lượt quét. `Err(lý do)` = đang nghỉ, hoặc lượt khác chưa trả về trong
+    /// thời gian được chờ.
+    fn xin() -> std::result::Result<MotLuot, String> {
+        let dang_nghi = || {
+            let con = quet_con_nghi_ms(
+                QUET_HONG_MS.load(std::sync::atomic::Ordering::SeqCst),
+                crate::quota::now_ms(),
+            );
+            (con > 0).then(|| {
+                format!(
+                    "Terminal vừa không trả lời lượt quét cửa sổ — tạm KHÔNG quét lại (còn {} s)",
+                    con / 1000
+                )
+            })
+        };
+        // Hỏi nghỉ TRƯỚC khi chờ (đang nghỉ thì trả lời ngay, khỏi chờ ai), và hỏi
+        // lại SAU khi được lượt — lượt vừa trả có thể chính là lượt vừa hỏng.
+        if let Some(why) = dang_nghi() {
+            return Err(why);
+        }
+        let cho = cho_luot(crate::exec::lane(), osa_timeout());
+        let Some(luot) = MotLuot::xin(&QUET_DANG_CHAY, cho) else {
+            return Err(format!(
+                "đang có một lượt quét cửa sổ khác chưa trả về (đã chờ {} s) — KHÔNG chồng thêm",
+                cho.as_secs()
+            ));
+        };
+        match dang_nghi() {
+            Some(why) => Err(why),
+            None => Ok(luot),
+        }
+    }
+
+    /// Lượt quét hỏng: Terminal bắt chờ ≥ [`QUET_CAM_TU`] thì ghi mốc NGHỈ — và nói
+    /// ra, vì từ lúc này các lượt quét bị hoãn. Hỏng nhanh (huba tự không hỏi, hoặc
+    /// Terminal trả lỗi ngay) thì không nghỉ: chỗ gọi đã tự ghi lỗi ấy.
+    fn hong(da_cho: Duration, err: &str) {
+        if !quet_hong_la_terminal_cam(da_cho) {
+            return;
+        }
+        QUET_HONG_MS.store(crate::quota::now_ms(), std::sync::atomic::Ordering::SeqCst);
+        logging::warn(
+            "window_scan_paused",
+            json!({ "err": err, "da_cho_ms": da_cho.as_millis() as u64, "nghi_ms": QUET_NGHI_MS,
+                    "effect": "Terminal không trả lời lượt quét cửa sổ — hoãn mọi lượt quét trong thời gian nghỉ, dùng id đã nhớ nếu có" }),
+        );
+    }
+}
+
 /// Sổ nhớ `tty → id cửa sổ`. Bé, và cố ý không có hạn dùng: id chỉ đổi khi cửa
 /// sổ đóng, và lúc ấy `do script` hỏng ra lỗi rõ ràng chứ không im.
 #[cfg(target_os = "macos")]
@@ -1666,6 +1892,16 @@ fn recall_window(dev: &str) -> Option<i64> {
     let m = WINDOW_CACHE.get_or_init(Default::default);
     let g = m.lock().ok()?;
     g.get(dev).copied()
+}
+
+/// Bỏ một id đã ĐO RA là sai (tab đang chọn mang tty khác · cửa sổ đã đóng) — để
+/// các đường lùi "dùng id đã nhớ" của [`window_of`] không rơi về đúng cái xác ấy.
+#[cfg(target_os = "macos")]
+fn forget_window(dev: &str) {
+    let m = WINDOW_CACHE.get_or_init(Default::default);
+    if let Ok(mut g) = m.lock() {
+        g.remove(dev);
+    }
 }
 
 /// MỌI tty mà Terminal.app đang giữ — một lời gọi cho cả danh sách.
@@ -1813,8 +2049,43 @@ pub fn terminal_screens() -> Result<Vec<Tab>> {
     probe_tabs(true)
 }
 
+/// Đang có một lượt `probe_tabs` chạy chưa — lượt thứ hai KHÔNG chồng lên.
+///
+/// 🔴 Đo 2026-09-24 10:40Z (sau báo của main dwork, Terminal không nhận Apple
+/// Event): hai lượt `tabs_script` của hubd treo CÙNG LÚC — một của vòng chạy, một
+/// của một lệnh. Lượt thứ hai không đọc thêm được gì mà vòng chạy chưa đọc; nó chỉ
+/// xếp thêm một chuỗi Apple Event đọc chữ mọi tab vào đúng cái hàng đang nghẹt.
+/// Lệnh có người chờ thì XẾP HÀNG sau lượt kia ([`cho_luot`]); vòng nền nhận `Err`
+/// ngay — chỗ gọi đã đọc `Err` của phép dò thành *"CHƯA ĐO ĐƯỢC"*
+/// (`terminal_probe_failed`), không thành "không có cửa sổ nào".
+static DO_TAB_DANG_CHAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Mốc (ms epoch) lượt `probe_tabs` gần nhất hỏng vì Terminal câm — xem
+/// [`luot_truoc_da_cam`].
+static DO_TAB_CAM_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 fn probe_tabs(with_screens: bool) -> Result<Vec<Tab>> {
-    let out = osascript(&tabs_script(with_screens))?;
+    let cho = cho_luot(crate::exec::lane(), osa_timeout());
+    let bat_dau_cho = crate::quota::now_ms();
+    let Some(_mot_luot) = MotLuot::xin(&DO_TAB_DANG_CHAY, cho) else {
+        return Err(anyhow!(
+            "đang có một lượt dò tab Terminal khác chưa trả về (đã chờ {} s) — KHÔNG chồng thêm",
+            cho.as_secs()
+        ));
+    };
+    if luot_truoc_da_cam(
+        DO_TAB_CAM_MS.load(std::sync::atomic::Ordering::SeqCst),
+        bat_dau_cho,
+    ) {
+        return Err(anyhow!(
+            "lượt dò tab ngay trước (đã xếp hàng chờ nó) không được Terminal trả lời — KHÔNG hỏi chồng thêm"
+        ));
+    }
+    let bat_dau = std::time::Instant::now();
+    let out = osascript(&tabs_script(with_screens)).inspect_err(|_| {
+        if quet_hong_la_terminal_cam(bat_dau.elapsed()) {
+            DO_TAB_CAM_MS.store(crate::quota::now_ms(), std::sync::atomic::Ordering::SeqCst);
+        }
+    })?;
     let (tabs, skipped) = parse_tabs(&out, with_screens);
     // Bỏ qua một cửa sổ là chuyện thường (bảng cài đặt của Terminal cũng nằm
     // trong `every window`). Bỏ qua mà KHÔNG đọc được cái nào thì không —

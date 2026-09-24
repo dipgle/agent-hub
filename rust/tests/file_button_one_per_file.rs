@@ -18,7 +18,7 @@
 
 mod common;
 
-use huba::pipeline::{file_anchors, remember_files, WATCH_KEY};
+use huba::pipeline::{file_anchors, ghi_so_tep, remember_files, WATCH_KEY};
 
 const SID: &str = "0f3c2a11-1111-4111-8111-111111111111";
 
@@ -64,21 +64,25 @@ fn mot_tep_nhac_hai_lan_van_chi_mot_nut() {
     let neo = file_anchors(&db, &cfg, SID, &paths);
     assert_eq!(
         neo,
-        vec![
-            ("docs/du-toan.md".to_string(), 0),
-            ("docs/phu-luc.md".to_string(), 1)
-        ],
+        vec!["docs/du-toan.md".to_string(), "docs/phu-luc.md".to_string()],
         "ba lần nhắc, hai tệp ⟹ hai neo — và giữ lần nhắc ĐẦU nên thứ tự nút \
          vẫn là thứ tự đọc"
     );
 
-    // Hai chỗ dùng chung phải ra CÙNG một danh sách. Chỉ số của neo 📎 giữa chữ
-    // chính là chỉ số của nút ở đáy tin (`file:<i>`), nên lệch một bậc nghĩa là
-    // bấm 📎 trên tên tệp này lại tải về tệp khác.
-    let nut = remember_files(&db, &cfg, SID, &paths);
-    assert_eq!(nut.len(), neo.len(), "{nut:?}");
-    assert_eq!(nut[0].1, "file:0", "{nut:?}");
-    assert_eq!(nut[1].1, "file:1", "{nut:?}");
+    // Hai chỗ dùng chung phải ra CÙNG một danh sách VÀ cùng số. Số của neo 📎
+    // giữa chữ chính là số của nút ở đáy tin (`file:<n>`), nên lệch một bậc
+    // nghĩa là bấm 📎 trên tên tệp này lại tải về tệp khác. Số do SỔ cấp
+    // (`ghi_so_tep`, 2026-09-24), không còn đếm từ 0 — xem `tests/so_tep_danh_so.rs`.
+    let tep = ghi_so_tep(&db, &cfg, SID, &paths);
+    assert_eq!(
+        tep.iter().map(|t| t.neo.clone()).collect::<Vec<_>>(),
+        neo,
+        "{tep:?}"
+    );
+    let nut: Vec<_> = tep.iter().map(|t| t.nut()).collect();
+    assert_eq!(nut[0].1, format!("file:{}", tep[0].so), "{nut:?}");
+    assert_eq!(nut[1].1, format!("file:{}", tep[1].so), "{nut:?}");
+    assert_ne!(tep[0].so, tep[1].so, "{tep:?}");
     assert!(nut[0].0.contains("du-toan.md"), "{nut:?}");
     assert!(nut[1].0.contains("phu-luc.md"), "{nut:?}");
 }
@@ -94,10 +98,7 @@ fn hai_tep_khac_nhau_trung_ten_thi_van_hai_nut() {
     let neo = file_anchors(&db, &cfg, SID, &paths);
     assert_eq!(
         neo,
-        vec![
-            ("docs/README.md".to_string(), 0),
-            ("tools/README.md".to_string(), 1)
-        ],
+        vec!["docs/README.md".to_string(), "tools/README.md".to_string()],
         "hai tệp thật, hai neo — trùng TÊN không phải trùng TỆP"
     );
 

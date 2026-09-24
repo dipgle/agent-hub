@@ -91,6 +91,13 @@ trả gốc băm `39e36f37…` khớp. Commit `623623c`.
 2/2 hòm thư dán về phiên (`so_viec_da_tra` 2). CHƯA thấy thật: `/accounts` đo lại (chờ Hà gõ) · chọn tài khoản khi
 phiên bị chặn (chờ sự kiện `Limited`). CHƯA cổng đầy đủ ⟹ 4 commit CHƯA đẩy.
 
+### ✅ 2026-09-25 (19:4xZ 24/09) — `/session` cắt ở 12 phiên ⟹ nay tới 20 (`017a903`), ĐÃ CÀI 19:40:50Z (pid 58270)
+Hà, ảnh danh sách kết "…còn 2 phiên nữa chưa liệt kê": *"Sao không liệt kê hết phiên thế?"*. Trần `MAX_SESSION_BUTTONS`
+(12) là của BẢNG PHÍM; mỗi hàng nay là liên kết trong chữ (`session_taps_sent`, 0 nút). Tin 12 hàng đo được tới 1.967 ký
+tự ⟹ `MAX_SESSION_ROWS` = 20 (~3.300 < 4.096). Nút chỉ còn cho đường lùi, và đường ấy NÓI phiên nào không có nút.
+Bài `session_tap::muoi_bon_phien_thi_liet_ke_du_muoi_bon`; cấy trần 12 ⟹ đúng bài ấy ĐỎ, trả gốc khớp băm. 5 bài
+liên quan xanh (build 1.095 s). Sau cài: 48 dòng log, 0 `error`. CHƯA thấy Hà gõ `/session` trên bản mới.
+
 ### Hà hỏi "có sinh tiến trình mồ côi không, càng chạy càng tốn RAM" (~15:0xZ) — ĐO:
 - hubd pid 78968: **0 tiến trình con**, RSS 11 MB sau 3 h. Terminal 120 MB. 29 mồ côi (cha=1, ngoài hệ thống), 108 MB:
   0 cái do hubd đẻ (10 `runner.sh` + dhub + fbot + hubd — dịch vụ từ lúc bật máy 7,5 ngày).

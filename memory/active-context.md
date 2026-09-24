@@ -91,6 +91,14 @@ trả gốc băm `39e36f37…` khớp. Commit `623623c`.
 2/2 hòm thư dán về phiên (`so_viec_da_tra` 2). CHƯA thấy thật: `/accounts` đo lại (chờ Hà gõ) · chọn tài khoản khi
 phiên bị chặn (chờ sự kiện `Limited`). CHƯA cổng đầy đủ ⟹ 4 commit CHƯA đẩy.
 
+### ✅ 2026-09-24 22:0xZ (05:0x giờ máy 25/09) — cửa sổ đã đóng đọc nhầm thành "Terminal bận" (`937cd28`), ĐÃ CÀI 22:08:47Z (pid 8328)
+Log 24/09 19:15→19:58Z: 25× `window_of_from_cache` err `Terminal got an error: Can’t get window id 10807. (-1728)` —
+nháy CONG U+2019; mã so `"Can't get"` nháy thẳng ⟹ id chết dùng lại mãi ⟹ 61× `so_viec_cho_tra_lai` + 8 việc hòm thư
+`so_viec_bo_cuoc` (~1.000 s). `keys::cua_so_da_mat` nhận `(-1728)` + hai kiểu nháy; `tests/cua_so_da_dong.rs` 5/5 dùng
+NGUYÊN VĂN câu log, đối chứng: phép so cũ trượt đúng câu ấy. Kèm vá clippy `blocks_in_conditions` (cổng 21:05Z đỏ ở
+clippy, `keys.rs` `match { khối }`). Cổng lần 3 (21:34Z) bị HUỶ đúng thiết kế lúc Hà bấm "📋 Phiên" 22:04:20Z — lượt
+ấy là `/session` đầu tiên trên bản 20 hàng: **16 hàng / 16 liên kết**, 2.021 ký tự. Cổng lần 4 đang chờ máy rảnh.
+
 ### ✅ 2026-09-25 (19:4xZ 24/09) — `/session` cắt ở 12 phiên ⟹ nay tới 20 (`017a903`), ĐÃ CÀI 19:40:50Z (pid 58270)
 Hà, ảnh danh sách kết "…còn 2 phiên nữa chưa liệt kê": *"Sao không liệt kê hết phiên thế?"*. Trần `MAX_SESSION_BUTTONS`
 (12) là của BẢNG PHÍM; mỗi hàng nay là liên kết trong chữ (`session_taps_sent`, 0 nút). Tin 12 hàng đo được tới 1.967 ký

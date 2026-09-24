@@ -1,5 +1,36 @@
 # active context — huba
 
+## ✅ 2026-09-24 07:25Z — cổng 166/166 XANH (06:25→07:22Z, clippy 0 · fmt 0 · doctest 0); commit + đẩy lượt này
+
+Đang chạy `hubd` pid 82614 (cài 06:23:10Z) = mọi thứ dưới đây + **một client Telegram dùng chung** (`Inbox::client`
+giữ trong `static`, keep-alive). Gốc: Hà *"từ lúc gửi đến lúc nhận phản hồi mất 20s là quá chậm"*; đo mạng tới
+`api.telegram.org` 5 lượt: kết nối 0,22–2,43 s · TLS 0,45–3,73 s · tổng 1,1–4,9 s, 1 lượt HỎNG 7,7 s; bản cũ dựng
+client MỚI cho 9 chỗ gọi (mỗi lượt gửi/sửa/thả dấu = 1 lần bắt tay). Lỗi Telegram theo giờ: 24/09 03Z **78**.
+Bài `tests/telegram_mot_client.rs` 2/2 (đỏ trên `telegram.rs` của HEAD). Sau cài (mẫu còn ÍT): lệnh Hà n=7 trung
+vị 3,73 s p90 5,13 s (trước: n=427 · 5,52 s · p90 46,39 s); 0 lỗi Telegram. ĐO LẠI khi đủ mẫu.
+Còn treo: 42 s không log trong `/session` 05:11Z (cần đo từng bước) · Terminal chậm theo tải (p90 `/session` 46 s
+chủ yếu là dò Terminal) · 2 việc chờ Hà quyết (chặn tiến trình rò ở đường ĐÓNG vai; chrome rò của fbot pid 897).
+
+## 🟡 2026-09-24 05:05Z — "ĐÃ DÁN" NAY PHẢI QUA NHẬT KÝ PHIÊN; ĐÃ CÀI (hubd pid 53170), CHƯA QUA CỔNG, CHƯA COMMIT
+
+Sổ việc đã commit + đẩy: `3e0cbfd` (`origin/main` khớp, cổng 164/164 xanh 02:33Z). Sau đó đo ra "đã dán" GIẢ:
+trên 98 lượt `so_viec_da_tra`, **21 lượt khối vào hội thoại sau > 60 s** (366 · 856 · 1766 · 4914 s…) — nằm
+trong ô nhập chưa gửi; ca rõ nhất: kết quả `git push` 3e0cbfd dán 02:35:56Z, vào hội thoại 04:34:33Z dính
+liền câu Hà gõ (công cụ đo: `.tmp/thu-o-nhap/do_da_tra_that.py`). Hai nguồn trong `type_and_send`: đọc
+màn lần đầu 400 ms (TUI chưa kịp vẽ ⟹ ô trông rỗng ⟹ `Gone`), và Enter đi đường BYTE (`press`) — chú
+thích `press_enter` ghi đường ấy hụt 30/31 lượt.
+Sửa (chưa commit): `dan_vao_phien` đặt mốc nhật ký TRƯỚC khi gõ; `Gone` ⟹ `xac_nhan_da_gui` chờ nhật ký
+(`khoi_da_vao_nhat_ky`: lượt `user` hoặc `queue-operation enqueue` mang `[huba chạy hộ` + `$ <lệnh>`) tối
+đa 8 s; chưa thấy ⟹ khối của huba còn trong ô + không hộp chọn ⟹ một `press_enter` RỜI rồi đo lại; ô mang
+chữ khác ⟹ KHÔNG bấm, khai `NamTrongO`. Bài `tests/da_gui_that.rs` 4/4 (có ca âm: lệnh khác · lời
+assistant · tool_result · `remove`). Nghiệm thu 05:04Z, phiên RẢNH, khối nhiều dòng: gõ 37,5 s → nhật ký
+nhận 41,9 s → `so_viec_da_tra` 45,0 s; KHÔNG phải cứu. Đường cứu bằng Enter rời CHƯA gặp ca thật.
+**Tiến trình rác (Hà hỏi 04:4xZ):** 62 `node` sống, ~33 là rác của vai đã tắt (32 `vite` trong ngăn
+`dev-up.sh` mồ côi / `ppid=1` + 1 script); fbot `publish-watch` rò 6 chrome gốc (~1,86 GB, 7 ngày). Đã
+chuyển main dwork 48 — họ dọn 5 vite ở cây không còn vai, phần còn lại bàn giao main 49 hỏi từng làn.
+Chặn cả lớp (đường ĐÓNG vai giết nhóm tiến trình) = hạ tầng chung ⟹ chờ Hà quyết. fbot: không có phiên sống.
+**VIỆC KẾ:** cổng đầy đủ (đang chờ máy rảnh: `cho-ranh-roi-cong.sh`) ⟹ commit + đẩy qua hòm thư.
+
 ## 🟡 2026-09-24 00:00Z — SỔ VIỆC (Redis Streams) ĐÃ NỐI + ĐÃ CÀI; CHƯA QUA CỔNG ĐẦY ĐỦ, CHƯA COMMIT
 
 Phiên `775adc45` (kế nhiệm `c6923d05`). Đang chạy `hubd` pid 15083 (cài 23:56:40Z, `--no-build`

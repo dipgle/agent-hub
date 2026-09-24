@@ -7042,10 +7042,142 @@ enum DanVao {
     ChuaDan(Option<String>),
 }
 
+/// Khối `[huba chạy hộ]` của lệnh `lenh` đã vào HỘI THOẠI (lượt `user`) hay HÀNG
+/// CHỜ (`queue-operation enqueue`) của phiên chưa — soi trên PHẦN MỚI của nhật ký
+/// `.jsonl`. THUẦN, để kiểm được không cần phiên thật.
+///
+/// 🔴 Vì sao phải hỏi nhật ký (2026-09-24): `type_and_send` phán "đã gửi" chỉ
+/// bằng MÀN, và đo trên 98 lượt huba khai `so_viec_da_tra` thì **21 lượt khối chỉ
+/// vào hội thoại sau hơn 60 s** (366 s · 856 s · 1766 s · 4914 s…) — nó nằm trong ô
+/// nhập tới khi có ai gõ tiếp. Chính kết quả `git push` của phiên huba 02:35:56Z
+/// nằm ~2 giờ, rồi dính liền với câu Hà gõ lúc 04:34Z. Nhật ký là thứ `claude`
+/// tự ghi khi NHẬN một lượt — không đọc sai được vì màn vẽ chậm hay khối dán bị
+/// rút gọn thành nhãn.
+pub fn khoi_da_vao_nhat_ky(phan_moi: &str, lenh: &str) -> bool {
+    let neo = format!("$ {}", lenh.chars().take(60).collect::<String>());
+    phan_moi.lines().any(|l| {
+        // Lọc rẻ bằng phần ASCII của nhãn — không đòi chữ có dấu nằm nguyên văn.
+        if !l.contains("huba ch") {
+            return false;
+        }
+        let Ok(j) = serde_json::from_str::<serde_json::Value>(l) else {
+            return false;
+        };
+        let chu = match j.get("type").and_then(|t| t.as_str()) {
+            Some("user") => match j.pointer("/message/content") {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Array(a)) => a
+                    .iter()
+                    .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => String::new(),
+            },
+            Some("queue-operation")
+                if j.get("operation").and_then(|o| o.as_str()) == Some("enqueue") =>
+            {
+                j.get("content")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or_default()
+                    .to_string()
+            }
+            _ => String::new(),
+        };
+        chu.contains("[huba chạy hộ") && chu.contains(&neo)
+    })
+}
+
+/// Chờ nhật ký nhận khối, tối đa bao lâu. Nhận một lượt thì `claude` ghi ngay
+/// (dưới 1 s ở máy lành) — 8 s là chỗ cho máy nặng, không phải cho may rủi.
+const XAC_NHAN_NHAT_KY_SEC: u64 = 8;
+
+/// Đọc phần nhật ký ghi thêm từ byte `tu` — `None` khi không đọc được.
+fn phan_moi_nhat_ky(path: &std::path::Path, tu: u64) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    f.seek(SeekFrom::Start(tu)).ok()?;
+    let mut b = Vec::new();
+    f.take(8_000_000).read_to_end(&mut b).ok()?;
+    Some(String::from_utf8_lossy(&b).into_owned())
+}
+
+fn cho_nhat_ky_nhan(path: &std::path::Path, tu: u64, lenh: &str) -> bool {
+    let het = std::time::Instant::now() + std::time::Duration::from_secs(XAC_NHAN_NHAT_KY_SEC);
+    loop {
+        if phan_moi_nhat_ky(path, tu).is_some_and(|m| khoi_da_vao_nhat_ky(&m, lenh)) {
+            return true;
+        }
+        if std::time::Instant::now() >= het {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// Màn khai "đã gửi" — ĐỐI CHIẾU với nhật ký phiên. Nhật ký chưa nhận thì nhìn lại
+/// ô nhập: khối của huba (hay nhãn `[Pasted text` của nó) còn đó và không có hộp
+/// chọn ⟹ một Enter RỜI (`press_enter` — đường byte hụt 30/31 lượt, xem chú thích
+/// ở đó), rồi đo lại. Ô mang chữ KHÁC (bản nháp của người đang gõ) ⟹ KHÔNG bấm:
+/// gửi hộ bản nháp của người khác tệ hơn để khối nằm chờ.
+fn xac_nhan_da_gui(
+    nhat_ky: Option<(&std::path::Path, u64)>,
+    w: i64,
+    s: &crate::sessions::LiveSession,
+    block: &str,
+    line: &str,
+) -> DanVao {
+    let Some((p, tu)) = nhat_ky else {
+        logging::warn(
+            "runin_paste_khong_do_duoc_nhat_ky",
+            json!({ "session": s.session_id,
+                    "effect": "không tìm/đọc được nhật ký phiên — tin MÀN, coi là đã gửi (KHÔNG kiểm chéo được)" }),
+        );
+        return DanVao::DaGui;
+    };
+    if cho_nhat_ky_nhan(p, tu, line) {
+        return DanVao::DaGui;
+    }
+    let man = crate::keys::screen_text(w);
+    let bam = match &man {
+        Ok(m) => {
+            let khoi_con = crate::keys::still_in_box(m, block)
+                || (block.contains('\n')
+                    && crate::keys::input_box_text(m).is_some_and(|t| t.contains("[Pasted text")));
+            khoi_con && crate::keys::parse_choices(m).is_empty()
+        }
+        Err(_) => false,
+    };
+    logging::warn(
+        "runin_paste_chua_vao_nhat_ky",
+        json!({ "session": s.session_id, "window": w, "bam_enter": bam,
+                "man": man.as_ref().map(|_| "đọc được").unwrap_or("KHÔNG đọc được"),
+                "why": format!("màn khai đã gửi nhưng nhật ký phiên chưa nhận sau {XAC_NHAN_NHAT_KY_SEC} s") }),
+    );
+    if bam {
+        let how = crate::keys::press_enter(w);
+        if cho_nhat_ky_nhan(p, tu, line) {
+            logging::info(
+                "runin_paste_cuu_bang_enter",
+                json!({ "session": s.session_id, "how": format!("{how:?}") }),
+            );
+            return DanVao::DaGui;
+        }
+        return DanVao::NamTrongO(format!("nhật ký chưa nhận cả sau một Enter rời ({how:?})"));
+    }
+    DanVao::NamTrongO(format!(
+        "màn khai đã gửi, nhật ký phiên chưa nhận sau {XAC_NHAN_NHAT_KY_SEC} s — KHÔNG bấm Enter (ô không thấy khối của huba, hoặc có hộp chọn)"
+    ))
+}
+
 /// MỘT cửa dán kết quả `/runin` vào phiên — dùng chung cho đường cũ trong
 /// [`watch_long_job`] và bên trả của sổ việc, để hàng rào `paste_target_ok`
 /// chỉ phải đứng ở một chỗ.
-fn dan_vao_phien(s: &crate::sessions::LiveSession, block: &str) -> DanVao {
+fn dan_vao_phien(
+    cfg: &Config,
+    s: &crate::sessions::LiveSession,
+    block: &str,
+    line: &str,
+) -> DanVao {
     // 🔴 HẠNG GẤP cho CẢ cú dán, đặt ở cửa (2026-09-24). Một phiên đang đứng chờ
     // khối này — không phải việc quét nền. Gọi từ vòng chạy (hạng nền) thì cú dán
     // chết theo hai cách, cả hai đều đo được: ① câu hỏi tty hạng gấp của
@@ -7054,12 +7186,23 @@ fn dan_vao_phien(s: &crate::sessions::LiveSession, block: &str) -> DanVao {
     // 23:56:49Z · 23:58:54Z); ② ngân sách hỏi Terminal của vòng đã tiêu hết từ ảnh
     // chụp. Đường gõ lại cũ dính đúng hai thứ ấy: từ 21:29Z nhận 2, dán được 0.
     let _lane = crate::exec::urgent();
+    // Mốc nhật ký ĐẶT TRƯỚC khi gõ: mọi thứ ghi thêm sau mốc này mới là bằng chứng
+    // cho lượt dán NÀY, không phải một lượt cũ cùng lệnh.
+    let nhat_ky = crate::sessions::find_transcript(&cfg.claude_transcript_root(), &s.session_id)
+        .and_then(|p| std::fs::metadata(&p).ok().map(|m| (p, m.len())));
     match crate::keys::window_of(&s.tty) {
         // Cú Enter rời nằm ở MỘT chỗ (`keys::type_and_send`) — bản chép tay cũ
         // nuốt lỗi bằng `let _ = press(…)`, đúng hình dạng luật 3 cấm.
         Ok(Some(w)) if paste_target_ok(w, &s.tty, &s.session_id) => {
             match crate::keys::type_and_send(w, block) {
-                Ok(crate::keys::Delivered::Gone) => DanVao::DaGui,
+                // Màn nói "đã đi" — CHƯA đủ; hỏi nhật ký phiên (xem `xac_nhan_da_gui`).
+                Ok(crate::keys::Delivered::Gone) => xac_nhan_da_gui(
+                    nhat_ky.as_ref().map(|(p, n)| (p.as_path(), *n)),
+                    w,
+                    s,
+                    block,
+                    line,
+                ),
                 Ok(other) => DanVao::NamTrongO(format!("{other:?}")),
                 Err(e) => DanVao::ChuaDan(Some(e.to_string())),
             }
@@ -7218,7 +7361,7 @@ fn tra_viec_mot(
             return Tra::ChoLai(e.to_string());
         }
     };
-    match dan_vao_phien(&s, &khoi) {
+    match dan_vao_phien(cfg, &s, &khoi, &v.noi_dung) {
         DanVao::DaGui => {
             if let Err(e) = so.danh_dau(&mut r, id, Buoc::DaGui, None) {
                 logging::error(
@@ -7238,7 +7381,7 @@ fn tra_viec_mot(
                 &mut r,
                 id,
                 Buoc::DaGui,
-                Some("nằm trong ô nhập của phiên, CHƯA gửi"),
+                Some(&format!("CHƯA chắc đã gửi — {landed}")),
             ) {
                 logging::error(
                     "so_viec_danh_dau_hong",
@@ -10070,7 +10213,7 @@ fn watch_long_job(job: LongJob) {
                             &line,
                             &report,
                         ),
-                        None => match dan_vao_phien(&s, &block) {
+                        None => match dan_vao_phien(&cfg, &s, &block, &line) {
                                 DanVao::DaGui => {
                                     format!(
                                         "✅ Đã chạy trên máy rồi dán kết quả vào {}:\n$ {}\n{}",

@@ -1981,12 +1981,36 @@ impl Inbox {
         q.drain(..).collect()
     }
 
+    /// MỘT client dùng chung cho mọi lượt gọi Telegram — giữ kết nối (keep-alive).
+    ///
+    /// 🔴 Đo 2026-09-24 (Hà: *"từ lúc gửi đến lúc nhận phản hồi mất 20s là quá
+    /// chậm"*): bản cũ dựng một client MỚI cho mỗi lượt gửi / sửa / thả dấu, tức
+    /// mỗi lượt là một lần mở TCP + bắt tay TLS. Đường mạng tới `api.telegram.org`
+    /// ở máy này, đo 5 lượt cùng phút: kết nối 0,22–2,43 s · TLS 0,45–3,73 s · tổng
+    /// 1,1–4,9 s, một lượt HỎNG sau 7,7 s. Một phản hồi `/shot` gồm 2–3 lượt gọi ⟹
+    /// trả phí bắt tay ấy 2–3 lần. `reqwest::blocking::Client` là `Arc` bên trong,
+    /// nhân bản rẻ và dùng chung giữa các luồng được — bể kết nối của nó giữ lại
+    /// kết nối đã mở cho lượt sau.
+    ///
+    /// Dựng hỏng thì KHÔNG nhớ cái hỏng — lượt sau dựng lại, và nói ra mỗi lần.
     fn client(&self) -> Option<reqwest::blocking::Client> {
-        reqwest::blocking::Client::builder()
+        static CHUNG: std::sync::Mutex<Option<reqwest::blocking::Client>> =
+            std::sync::Mutex::new(None);
+        let mut g = CHUNG.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(c) = g.as_ref() {
+            return Some(c.clone());
+        }
+        let c = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(40))
+            // Giữ kết nối sống qua quãng im giữa hai lệnh; mạng chập chờn thì
+            // kết nối chết được phát hiện thay vì treo tới hết `timeout`.
+            .tcp_keepalive(Duration::from_secs(30))
+            .pool_idle_timeout(Duration::from_secs(90))
             .build()
             .map_err(|e| logging::error("telegram_client_failed", json!({ "err": e.to_string() })))
-            .ok()
+            .ok()?;
+        *g = Some(c.clone());
+        Some(c)
     }
 
     fn read_forever(&self) {

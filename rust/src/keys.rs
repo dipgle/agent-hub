@@ -1548,7 +1548,7 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
                 )
             }
             // Cửa sổ đã đóng ⟹ id đã nhớ là xác — quét lại.
-            Err(e) if e.to_string().contains("Can't get") => {
+            Err(e) if cua_so_da_mat(&e.to_string()) => {
                 forget_window(&dev);
                 logging::info(
                     "window_cache_stale",
@@ -1614,20 +1614,20 @@ pub fn window_of(tty: &str) -> Result<Option<i64>> {
         // câu trả lời cũ và dùng khi phép hỏi hết giờ: sai lầm tệ nhất của bản
         // nhớ (cửa sổ đã đóng) chỉ dẫn tới một `do script` hỏng có thông báo,
         // còn hỏng như hiện nay là mất hẳn đường gõ.
-        Err(e) => match {
+        Err(e) => {
             QuetCuaSo::hong(bat_dau.elapsed(), &e.to_string());
-            recall_window(&dev)
-        } {
-            Some(w) => {
-                logging::warn(
-                    "window_of_from_cache",
-                    json!({ "tty": dev, "window": w, "err": e.to_string(),
+            match recall_window(&dev) {
+                Some(w) => {
+                    logging::warn(
+                        "window_of_from_cache",
+                        json!({ "tty": dev, "window": w, "err": e.to_string(),
                             "why": "hỏi Terminal hết giờ — dùng id cửa sổ đã nhớ" }),
-                );
-                Ok(Some(w))
+                    );
+                    Ok(Some(w))
+                }
+                None => Err(e),
             }
-            None => Err(e),
-        },
+        }
     }
 }
 
@@ -1892,6 +1892,19 @@ fn recall_window(dev: &str) -> Option<i64> {
     let m = WINDOW_CACHE.get_or_init(Default::default);
     let g = m.lock().ok()?;
     g.get(dev).copied()
+}
+
+/// Lỗi AppleScript này có nghĩa là CỬA SỔ ẤY KHÔNG CÒN (không phải Terminal bận).
+///
+/// 🔴 Đo 2026-09-24 19:15→19:58Z: 25 lần `window_of_from_cache` mang đúng câu
+/// `Terminal got an error: Can’t get window id 10807. (-1728)` — dấu nháy CONG
+/// (U+2019), trong khi mã so `"Can't get"` bằng dấu nháy THẲNG. Không khớp ⟹ một
+/// cửa sổ ĐÃ ĐÓNG bị đọc thành "Terminal bận" ⟹ dùng lại id chết mãi ⟹ 61 lượt
+/// `so_viec_cho_tra_lai` "chưa tìm ra cửa sổ" rồi 8 việc hòm thư bỏ cuộc sau ~1.000 s.
+/// Nhận theo MÃ LỖI `-1728` (errAENoSuchObject — không đổi theo ngôn ngữ hay kiểu
+/// nháy), và cả hai kiểu nháy cho chắc.
+pub fn cua_so_da_mat(err: &str) -> bool {
+    err.contains("(-1728)") || err.contains("Can't get") || err.contains("Can’t get")
 }
 
 /// Bỏ một id đã ĐO RA là sai (tab đang chọn mang tty khác · cửa sổ đã đóng) — để

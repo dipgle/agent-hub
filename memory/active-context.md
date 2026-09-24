@@ -85,7 +85,11 @@ tài khoản; `auto_switch_on_limit` chỉ đo khi kết luận là `Do`/`NoAcco
 `--dry-run` không đo. Bài `tests/usage_do_khi_chon.rs` dùng `claude` GIẢ (shell, đếm lần gọi theo tài khoản).
 **Đo:** build 593 s, 11/11 bài liên quan xanh, 0 cảnh báo (`usage_do_khi_chon` 11/11 · `auto_limit_switch` 15/15 ·
 `config` 38/38 · `limited_points_at_a_live_account` 11/11). Cấy `can_do_lai → true` ⟹ **đúng 4/11 ĐỎ** như dự đoán,
-trả gốc băm `39e36f37…` khớp. Commit cục bộ; CHƯA cài (chờ Terminal ổn + gộp một lượt cài), CHƯA cổng đầy đủ.
+trả gốc băm `39e36f37…` khớp. Commit `623623c`.
+**ĐÃ CÀI 15:28:13Z** (hubd pid 50932) sau khi đo: `count windows` 0,22–0,31 s ×3 + `dang-chay.py` 0 việc/0 hòm thư
+60 s (đo lại ngay trong lệnh cài). 8′ sau cài: **0 lượt dò `/usage`** (bản cũ: 1 lượt lúc khởi động + mỗi ~7′), 0 `error`,
+2/2 hòm thư dán về phiên (`so_viec_da_tra` 2). CHƯA thấy thật: `/accounts` đo lại (chờ Hà gõ) · chọn tài khoản khi
+phiên bị chặn (chờ sự kiện `Limited`). CHƯA cổng đầy đủ ⟹ 4 commit CHƯA đẩy.
 
 ### Hà hỏi "có sinh tiến trình mồ côi không, càng chạy càng tốn RAM" (~15:0xZ) — ĐO:
 - hubd pid 78968: **0 tiến trình con**, RSS 11 MB sau 3 h. Terminal 120 MB. 29 mồ côi (cha=1, ngoài hệ thống), 108 MB:

@@ -1,5 +1,106 @@
 # active context — huba
 
+## 🟡 2026-09-24 11:3xZ — phiên 0b9859f3 tiếp quản: đo bản cài 10:42Z ra 2 lỗi của CHÍNH nó, đã sửa (CHƯA cài, CHƯA cổng)
+
+Đo log 10:42:17→11:09Z (1948 dòng, 43 vòng, 27 lệnh Tele), bản đang chạy pid 81199:
+① **11/15 `window_scan_paused` là lỗi huba TỰ sinh, Terminal chưa hề được hỏi** — hết ngân sách vòng nền ×10,
+nhường lượt gấp ×1; chỉ 4/15 là `osascript quá 45s` thật. Nay `QuetCuaSo::hong(da_cho, …)` chỉ nghỉ khi đã chờ
+Terminal ≥ `QUET_CAM_TU` (10 s = nửa trần nhỏ nhất) — phân biệt bằng THỜI GIAN chờ, không bằng chữ lỗi.
+② **`/shot` của Hà 10:47:56Z + 10:49:59Z bị từ chối ngay** ("đang có một lượt quét cửa sổ khác") vì vòng NỀN
+đang quét. Nay `keys::MotLuot` dùng chung cho cả `QuetCuaSo` lẫn `probe_tabs`; `cho_luot(Urgent)` = CHỜ tối đa
+`osa_timeout()`, `Background` = không chờ (đọc `Err` thành "chưa đo được" như cũ).
+③ Chú thích `window_of` nói "lệch ⟹ quên" mà mã không quên ⟹ đường lùi rơi về đúng id đã đo ra sai. Thêm
+`forget_window`. ④ Doc của `PATHS_SCAN_MAX` đã nuốt doc của `kept_paths` (và `remember_files` mất doc từ trước)
+— tách lại.
+Bài `tests/mot_luot_quet_terminal.rs` (hành vi `MotLuot`: không chờ / chờ / hết giờ / panic nhả / 16 luồng ×20
+lượt tối đa 1 người giữ; hàm thuần; đọc mã nối 3 phép dò + đối chứng ngược trên đúng hình dạng bản 10:42Z).
+Thêm ⑤ `luot_truoc_da_cam`: người XẾP HÀNG mà lượt mình chờ vừa hết giờ vì Terminal câm thì trả lời ngay (không
+thì lúc câm lượt gấp trả 20 s chờ vòng nền + 45 s của mình — tệ hơn cả hai lượt chồng nhau).
+**Đo:** build lẻ (bản trước ⑤) 513 s, 4/4 bài xanh (mẫu số 4). **Cấy lỗi thật vào `keys.rs`** (Drop không nhả ·
+`xin` không chờ; `.tmp/thu-o-nhap/cay-loi-mot-luot.sh`): **5/16 ĐỎ đúng 5 bài hành vi**, 11 bài thuần + đọc mã
+xanh; trả tệp gốc, băm `da27b710…` khớp, 0 dấu cấy sót.
+
+### 📎 "tải file trong nội dung tin vẫn lúc được lúc không" (Hà, ảnh tin `💤 [dwork/blocked]` ~11:3xZ)
+
+HAI gốc, đo được:
+① **Tin tự phát không neo 📎 giữa chữ.** `announce_changes` dựng nút đáy (`remember_files`) nhưng `SessionData.files`
+TRỐNG ⟹ cả 3 tin `[dwork/blocked]` (11:01:46Z · 11:12:37Z · 11:28:58Z) `telegram_html_sent text_links:0`; đường dẫn
+rơi vào `tame_auto_links` ⟹ `<code>` đơn cách (đúng ảnh). `/shot` + ack route có `files` ⟹ "lúc được lúc không".
+② **Sổ tệp MỘT Ô** (`quick:files` = `{s,p:[…]}`), tin nào có tệp cũng GHI ĐÈ, nút chỉ mang chỉ số (`file:0`/`f_0`).
+Log 21/09→24/09: Hà nhận tệp đúng 4 lần; 08:11:26Z bấm `f_0` nhận `CLAUDE.md` (tin khác), 26 s sau mới ra `.html`.
+Sửa: `pipeline::ghi_so_tep` — sổ `quick:files:so` đánh số tăng dần từ `FILE_SO_DAU`=1000, giữ `FILE_GIU`=500, cùng
+(phiên, tệp) dùng lại số, chừa chỗ TRƯỚC khi cấp số; trả `TepDaNho` (nút + neo CÙNG số) cho cả 3 cửa. `file_anchors`
+nay chỉ trả đường dẫn (không số). Gỡ `say_with_command_icons` (0 chỗ gọi). Số cũ 0–3 ⟹ "liên kết 📎 ấy đã cũ".
+Bài `tests/so_tep_danh_so.rs` (bài chính chỉ dùng API có từ HEAD: `remember_files` + `quick_file`).
+**Đo:** chạy lẻ 11 bài liên quan (build 867 s): 11/11 xanh, 0 cảnh báo (`so_tep_danh_so` 9/9 · `telegram` 101/101 ·
+`mot_luot_quet_terminal` 16/16). Cấy "sổ một ô" vào `ghi_so_tep` (`.tmp/thu-o-nhap/cay-loi-so-tep.sh`): **4/9 ĐỎ đúng
+4 bài dự đoán**, trả tệp gốc băm `abdda72f…` khớp.
+**Commit cục bộ `70029f5`** (chưa đẩy). **ĐÃ CÀI 11:58:58Z** (`install_update.sh --no-build` sau khi `dang-chay.py` báo
+0 việc + 0 hòm thư trong 60 s; chờ 2 việc push n=24/25 xong trước), hubd **pid 78968** `hubd_started` 11:59:34Z,
+`--verify` KHỚP `080a9cb5…`, bản cài chứa `quick:files:so`. 40 dòng log đầu sau khởi động: 0 `error`.
+CHƯA: tin tự phát thật có `text_links>0` · Hà bấm 📎 thật ra đúng tệp · cổng đầy đủ · đẩy.
+
+### 🔴 Terminal câm LẦN HAI từ ~11:40Z (TRƯỚC lúc cài) — và lượt cài làm nặng thêm
+- Dò tab theo 10′: 11:3x ok 2/hỏng 2 · 11:4x 1/5 · 11:5x 0/4 (cài 11:58:58Z) · 12:0x 0/4 · 12:1x 0/4 · 12:2x 1/6.
+  `count windows` 12:31:58Z **11,6 s**, rồi 2 lần hết 15 s. 21 cửa sổ. Load **49** (43 node · 37 chrome-headless ·
+  13 esbuild · 16 mdworker · `syspolicyd` 41 % trạng thái U). Build của tôi 11:13–11:57Z trùng quãng — CHƯA loại trừ.
+- Cài xoá bộ đệm tty→cửa sổ ⟹ **12 việc hòm thư `so_viec_bo_cuoc`** 12:00→12:25Z ("chưa tìm ra cửa sổ", chờ ~1000 s),
+  kể cả push n=24 `37dd1244` đã chạy xong 11:57:59Z code 0. Đúng ca [[feedback_cai_hubd_giet_viec_runin]] cảnh báo —
+  lẽ ra phải đo Terminal còn trả lời TRƯỚC khi cài, không chỉ đo 0 việc đang chạy.
+- **`sample 606 3` 12:3xZ: 2016/2167 mẫu luồng chính (93 %) trong `NSKeyValueDidChange`; 1174/2167 (54 %) trong
+  `-[NSWindow _dosetTitle:andDefeatWrap:]` → `setTitle` → CoreText.** Luồng chính bận VẼ TIÊU ĐỀ ⟹ giả thuyết tiêu đề
+  nay có số đo. Tệp mẫu: scratchpad phiên 0b9859f3 `terminal-sample.txt`.
+- Nhãn "đang làm gì" có sẵn trong nhật ký: `{"type":"ai-title","aiTitle":"…"}` (4/4 nhật ký soi, trùng chữ tiêu đề tab).
+  huba đang đọc TIÊU ĐỀ (`sessions.rs` `mark_doing` → `Tab::doing()`). CHƯA đo: `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` có
+  tắt luôn `ai-title` không.
+- Monitor 30′ đầu của tôi MÙ: ống `grep --line-buffered | cut` — `cut` không xả dòng ⟹ 12 dòng `error` không tới.
+
+Số đo khác, CHƯA truy gốc:
+- Terminal NGHẸT 09:55Z → **hồi 11:01:50Z** (40/43 vòng `terminal_probe_failed`, 31 lần `quá 20s`). Số phiên
+  KHÔNG giảm lúc hồi (13 → 14) ⟹ giả thuyết "tiêu đề cửa sổ của ~13 phiên" chưa được số đo này ủng hộ.
+- Sau khi hồi, `command_done` (18 lệnh): p50 **1,5 s**; nhưng `/session` 11:10:09Z **46,5 s** và 11:11:31Z
+  **34,1 s** — `ms_terminal_probe` 45,2 s/33,4 s trong khi Terminal 13 % CPU, load 8, lượt đọc trót lọt trước đó
+  0,2 s, và lượt dò nền NGAY SAU chỉ **53 ms**. Một lượt `tabs_script` treo mà Terminal không bận ⟹ chưa biết chờ gì.
+- `PROBE_SPENT_MS` cộng cả lượt GẤP vào ngân sách vòng nền ("45.1s/10.0s" ngay sau lượt `/session`) ⟹ vòng nền
+  kế tiếp bỏ dò. Chưa xét có cố ý không.
+- `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`: có trong 2.1.280 (`p1r()`). ⚠ huba ĐỌC `custom title` của tab
+  (`keys.rs` `tabs_script` → `Tab::doing()`) làm nhãn "đang làm gì" trong `/session` (`[huba]·Sổ việc Redis…`) ⟹
+  bật biến là MẤT nhãn ấy. Bàn giao trước không nhắc cái giá này — phải nói khi hỏi Hà.
+- Build test lẻ: `rustc` ngủ 4–5 phút với 4,3 s CPU, `syspolicyd` 35 % — nghi cùng họ "treo trong `deps/`"
+  (dylib proc-macro nằm trong `deps/`), CHƯA đo.
+
+## 🟡 2026-09-24 10:45Z — Terminal NGHẸT; hubd nay không chồng lượt (pid 81199, cài 10:42:17Z); CHƯA cổng/commit
+
+Main dwork báo (17:3x giờ máy): Terminal -1712 từ ~09:55Z, hubd sinh `window_script` chồng nhau. Sửa + cài:
+`keys::QuetCuaSo` — MỘT lượt quét cửa sổ một lúc (`window_of` + `window_of_any`), quét hỏng ⟹ NGHỈ 60 s
+(`window_scan_paused`) dùng id đã nhớ; `probe_tabs` (ảnh chụp đọc chữ mọi tab) cũng một lượt một lúc. Đo 30 s/lần
+10:39→10:45Z: `osascript` của hubd 0–2 (không chồng), tổng 2–5, load 54→12,5; NHƯNG Terminal KHÔNG trả lời
+`count windows` trong 10 s ở MỌI mẫu, kể cả lúc hubd 0 `osascript` ⟹ hubd không còn là nguồn nghẹt.
+`sample 606 3` 10:45Z: luồng chính ~100 % cập nhật giao diện — `NSKeyValueDidChange` 3511 · `NSTextFieldCell`/
+`_NSGetTextCellBoundingRect` ~1310 · vẽ chuỗi 1258 / 2004 mẫu (không còn LaunchServices như dwork đo). Giả thuyết
+CHƯA chứng minh: ~13 cửa sổ `claude` đổi tiêu đề liên tục (spinner ✳◐◑). Nguồn tải khác lúc đo: Spotlight (`mds`
+37 %, 24 `mdworker_shared`), Time Machine, 40 chrome headless, vitest dwork; `claude -p /usage` của CHÍNH hubd
+chạy lại mỗi lần khởi động + mỗi 5′ (`runtime.rs:36 USAGE_TTL_MS`, bộ đệm trong bộ nhớ) — 70–100 % CPU/lượt ⟹
+việc kế cho huba: nhớ `/usage` qua khởi động lại. 5 lần cài hôm nay = 5 lần chạy lại `/usage` + mất bộ đệm cửa sổ.
+
+## 🟡 2026-09-24 09:55Z — 2 sửa ĐÃ CÀI (hubd pid 13407, 09:50:16Z), CHƯA QUA CỔNG, CHƯA COMMIT (trên `3f33175`)
+
+① **📎 mất link** (Hà: *"bảo bấm tải nhưng ko có link"*): `paths_on_screen(…, 4)` cắt TRƯỚC khi lọc ⟹ 4 suất
+bị 3 tên trơn + `CLAUDE.md` ăn hết, tệp `.html` phiên MỜI tải chưa từng được xét. Nay `PATHS_SCAN_MAX = 12`
+ở cả 3 chỗ gọi, trần 4 nút áp SAU lọc. Chạy lại đúng chuỗi hàm `/shot` 07:27:20Z trên chữ thật: trước
+`[(CLAUDE.md,0)]` → sau `[(…so-do-quy-trinh-doi-2026-09-24.html,0),(CLAUDE.md,1)]`. Bài
+`tests/neo_tep_trong_shot.rs` 5/5 (+2 thăm dò `#[ignore]`), fixture NGUYÊN VĂN
+`tests/fixtures/shot-dwork-tep-moi-tai-2026-09-24.txt`, đối chứng ngược trên chữ thật (trần 4 bỏ sót).
+Hà đã mở được sơ đồ qua 📎 (ảnh 09:2xZ).
+② **Kênh Tele "treo" khi phiên chạy**: lượt gõ chữ 08:54:50Z 71,5 s = 45 s `window_script` (quét từng tab)
+hết giờ lúc Terminal bận (75 % CPU) rồi mới dùng id đã nhớ (đúng từ đầu) + 18 s gõ + 7 s Enter. Nay
+`keys::window_of` hỏi bộ đệm TRƯỚC, kiểm 1 Apple Event (`selected_tab_tty`); lệch/"Can't get" ⟹ quét;
+Terminal bận ⟹ dùng luôn id đã nhớ. Bài `tests/window_of_dem_truoc.rs` 2/2, đỏ trên `keys.rs` của HEAD.
+CHƯA đo sau cài (chờ lệnh Hà). Kèm: tắt cổng nền của tôi chạy 1 h 05′ đúng lúc Hà dùng máy (lỗi của tôi —
+`cho-ranh-roi-cong.sh` nay HUỶ cổng khi có lệnh Telegram mới, thoát 3; nhánh huỷ CHƯA chạy thật lần nào).
+Điểm ③ sơ đồ dwork ("hòm thư là TỆP, không qua Redis") là số CŨ: từ 23:49:30Z 199 việc qua Redis
+(183 dán · 16 khép · 0 treo), 24 việc không qua đều trước 23:49Z — main dwork chưa có địa chỉ để báo.
+
 ## ✅ 2026-09-24 07:25Z — cổng 166/166 XANH (06:25→07:22Z, clippy 0 · fmt 0 · doctest 0); commit + đẩy lượt này
 
 Đang chạy `hubd` pid 82614 (cài 06:23:10Z) = mọi thứ dưới đây + **một client Telegram dùng chung** (`Inbox::client`

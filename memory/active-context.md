@@ -1,5 +1,80 @@
 # active context — huba
 
+## 🟡 2026-09-24 00:00Z — SỔ VIỆC (Redis Streams) ĐÃ NỐI + ĐÃ CÀI; CHƯA QUA CỔNG ĐẦY ĐỦ, CHƯA COMMIT
+
+Phiên `775adc45` (kế nhiệm `c6923d05`). Đang chạy `hubd` pid 15083 (cài 23:56:40Z, `--no-build`
+từ release dựng 06:48 giờ máy), mã = `fdfcee4` + 3 sửa của khối 22:00Z bên dưới + sổ việc:
+- `src/redis_mini.rs` · `src/so_viec.rs` (thêm `ket_noi` dựng lại nhóm mỗi lần mở, `tra_gi`,
+  `giay_tu`, `khoa_hom_thu`, trường `xong_luc`/`gui_luc`) · `adapters::ChannelCommand.viec`.
+- `pipeline.rs`: hòm thư GHI SỔ trước rồi mới đổi tên (khoá = đường dẫn@mtime_ns:cỡ) · hàng của phiên
+  đọc việc mới thẳng từ Redis (`so_viec_doc_moi`, đánh dấu `doc`) · `watch_long_job(viec)` đánh dấu
+  `chay` TRƯỚC `exec::run`, `pid`, kết quả vào sổ TRƯỚC khi dán · cửa dán chung `dan_vao_phien` ·
+  bên trả `tra_viec` (gọi ngay + `so_viec_tra_tick` mỗi vòng, `XAUTOCLAIM` ≥ 30 s, bỏ cuộc 900 s) ·
+  `so_viec_khoi_dong` mỗi tiến trình một lần; cửa nhận/bên thực thi CHỈ dùng sổ sau khi khôi phục xong
+  (chặn ca chạy lặp khi Redis chập chờn). Redis không với tới ⟹ đường cũ trong bộ nhớ + log.
+**Đã đo trên máy thật (23:49–23:58Z):** việc 3 (`echo SO-VIEC-THU-1`) nhận→chạy→dán vào phiên này,
+`runin_paste_to khop=true`. KHỞI ĐỘNG LẠI giữa chừng (23:56:40Z) với 2 việc treo: `so_viec_khoi_phuc
+tong=2 chay_lai=1 bao_co_the_da_chay=1 hong=0`; việc ở bước `doc` (cấy bằng `.tmp/thu-o-nhap/
+cay_viec_doc.sh`, khe thật vài ms) CHẠY LẠI đúng 1 lần và dán về; việc đang `sleep 200` KHÔNG chạy lại,
+sổ ghi câu "có thể đã chạy". Hai `git push` thật của dwork tới đúng lúc cài được sổ nhận + chạy (mã 0).
+**Bài:** `so_viec` 8/8 + 2/2 Redis thật (có đối chứng `NOGROUP`) · `so_viec_thu_tu` 5/5 (mới; đối chứng
+ngược: bản HEAD đỏ 4/4, 4 bản cấy đổi chỗ mỗi bản đỏ đúng 1 bài) · `dan_dung_phien` 5/5 (thêm hình
+dạng cửa chung) · `hai_hang_lenh` 4/4 · `go_chu_vao_hop_chon` 2/2 · `quiet_khong_phai_mat_dau` 13/13 ·
+`cargo check --lib --tests` 0 cảnh báo.
+**CHƯA:** `./gate.sh` đầy đủ (fmt · clippy · 147 binary) — máy tải 15–24 · commit + push.
+**Phát hiện kèm:** ① `dang-chay.py` MÙ sau khởi động lại (`n` đếm lại từ 1 ⟹ `runin_ran n=4` cũ khép
+nhầm job n=4 mới; 23:56:23Z in `{}` khi `sleep 200` đang chạy) — ĐÃ SỬA, cắt theo `hubd_started`, có
+`--doi-chung`. ② Hòm thư chờ tới ~2,5 phút (`poll_interval_sec 120`, trung vị 136 s/65 vòng): 23:50:56Z
+dwork đóng 8 vai theo lô ⟹ lệnh đẩy `lan/pin-iphone`+`DW-phieu` của `ed951ab6` KHÔNG chạy (luật cũ "phiên
+tắt ⟹ không chạy") — đã báo main dwork 47, họ đẩy lại (`56bfd7410..496d2d214`, `532a677..17ba23c`).
+③ Tin "▶ đang chạy" vẫn ra Telegram cho việc hòm thư `quiet` — CÓ TỪ TRƯỚC (23:47:44Z), chưa sửa.
+
+### 00:30Z — nghiệm thu lộ 2 lỗi của chính bản này, ĐÃ SỬA + CÀI (`hubd` pid 46831, 00:11:36Z, `--verify` KHỚP)
+④ **Trả lại từ vòng chạy luôn hỏng**: `paste_target_ok` hỏi tty hạng GẤP ⟹ mở cửa nhường `PROBE_YIELD_MS`
+⟹ `type_and_send` hạng NỀN ngay sau bị nhường (việc 5: 2/2 lượt "nhường Terminal…"). Đường gõ lại CŨ
+`runin_pending_tick` dính cùng lỗi từ bản 21:29Z: nhận 2, dán 0. Sửa: `dan_vao_phien` + nhánh gõ lại chạy
+`exec::urgent()` cả cú dán; bài `dan_dung_phien::cu_dan_chay_hang_gap_o_ca_hai_cua` (+ đối chứng) 7/7.
+⑤ **Trả lại trong vòng chạy làm vòng dài 201 s** (Terminal treo, mỗi lượt ~45 s) ⟹ hòm thư nằm yên. Sửa:
+`so_viec_tra_nen` = luồng riêng, một lượt một lúc; vòng về 22–29 s. Bài `so_viec_thu_tu::vong_chay_khong_
+dung_cho_terminal_de_tra_lai` — CHƯA dựng/chạy (dừng bản dựng vì tải 116).
+⑥ **Terminal không trả lời AppleScript** từ ~00:04Z: `window_script` (từng tab) > 60 s, cả `id of every
+window` hết giờ 120 s (-1712); load 116 do vitest dwork (83 node · 45 esbuild · 14 chrome). Bộ đệm
+tty→cửa sổ nằm trong BỘ NHỚ ⟹ mỗi lần cài là mất ⟹ phiên mới/phiên sau cài không dán được: việc 5·8·9·10
+bỏ cuộc 900 s (kết quả ra Telegram), 11–14 đang gõ lại. Đã báo main dwork 48 (mọi lệnh đẩy mã 0).
+Đường tra HÀNG LOẠT (3 Apple Event, nạp đệm cho cả máy) viết xong + bài thuần, nhưng CHƯA có lượt chạy
+trót lọt nào ⟹ RÚT khỏi cây, cất ở `.tmp/thu-o-nhap/cho-cai/` (chạy thử lại khi Terminal lành rồi mới cài).
+⚠ Giả thuyết "màn khoá ⟹ Terminal bị hãm" SAI (khoá từ 15:34Z, 23:51–23:58Z vẫn nhanh) — đã rút.
+**VIỆC KẾ:** khi tải xuống: dựng + chạy 6 bài liên quan → `./gate.sh` → commit + push. Không cài lại hubd
+khi không cần (mỗi lần cài = mất bộ đệm cửa sổ).
+
+### 01:35Z — đã đo thêm (6 bài liên quan 6/6 xanh lúc 00:47Z; clippy `-D warnings` XANH 01:30Z sau khi sửa 2 lỗi
+của chính bản này: `Tra::DangTra` → `DangGiu`, `watch_long_job` 8 tham số → struct `LongJob` theo nếp `NewSession`)
+- Sổ 24 việc lúc 00:58Z: 16 đã dán (việc 12·13·14 dán ở lượt trả lại 6/4/3 sau khi Terminal lành — đường trả lại
+  chạy thật) · 5 bỏ cuộc (quãng Terminal câm) · 2 phiên tắt thật · 1 không chạy (phiên tắt trước khi nhận).
+- Hà hỏi 01:2xZ *"sao giờ mọi tin phản hồi chậm thế"*. Đo: lệnh Hà chậm = câu hỏi Terminal của chính lệnh chạm
+  trần 45 s (`/session` 01:22Z: 48,7 s, trong đó `ms_terminal_probe` 47,6 s); 01:26Z đã về 1,5–2,2 s. Lượt dò
+  nền chạm trần 20 s theo giờ: 22/09 **0%** → 23/09 02Z bắt đầu → 16Z–00Z **50–75%** — đà có TRƯỚC lượt cài đầu
+  (23:49Z). Bên trả của tôi trùng 3/14 lệnh chậm (00:25–00:28Z), sau 00:30Z 0. Chưa rõ gốc đà tăng.
+- Cổng đầy đủ `./gate.sh` XANH lúc máy rảnh 01:37→02:33Z: FMT 0 · CLIPPY 0 · 164/164 binary chạy, FAILED=0 ·
+  doctest 0 · `GATE_EXIT=0` (`.tmp/thu-o-nhap/gate-ranh.log`). Commit cùng lượt này (sổ việc + 3 sửa khối 22:00Z).
+
+## 🟡 2026-09-23 22:00Z — ĐANG CÀI mà CHƯA QUA CỔNG, CHƯA COMMIT (cây bẩn có chủ ý)
+
+Đang chạy `hubd@2026-09-23T21:55:55Z`, gồm 3 thay đổi chưa commit trên `fdfcee4`:
+1. **Hàng rào ở cửa dán `/runin`** (`paste_target_ok` + `keys::selected_tab_tty`) — báo của main dwork 44:
+   kết quả `lan/dorg` 17:40Z vào hàng chờ phiên dci (đo trên nhật ký 2 phiên). Gốc CHƯA tìm ra; 5 mắt
+   xích đã loại. Chạy thật 18:16→21:15Z: 74 lượt `runin_paste_to` khớp, 0 lệch.
+2. **Câu hỏi tty chạy HẠNG GẤP** — bản 1 để nó ở hạng nền ⟹ 23 lượt `unverified` bị ngân sách chặn,
+   `c9177b08` chờ 613 s, `4381a5c2` bỏ cuộc sau 1072 s.
+3. **Hàng rào gõ chữ đọc thẳng `screen_text(w)`** thay `look(&s.tty)` — bớt 1 lượt hỏi Terminal/câu.
+Kiểm đã chạy: `dan_dung_phien` 5/5 (bản không hạng gấp ĐỎ đúng bài); cổng đầy đủ bản 1 xanh 162/162.
+**Chưa chạy:** cổng đầy đủ cho (2)+(3) — Hà báo máy chậm (tải 17–22; Terminal p50 17–20 s ở các giờ
+cổng chạy) ⇒ để cổng lúc máy rảnh. Trước mỗi lần cài: `python3 .tmp/thu-o-nhap/dang-chay.py` (0 việc).
+**Ca 18:15:45Z mất 2 việc hòm thư** do lượt cài của phiên này khởi động lại hubd giữa chừng ⇒ đang
+thiết kế SỔ VIỆC (Hà: "cơ chế 1 cửa … đánh dấu từng bước") — bản nháp `.tmp/thu-o-nhap/so_viec.rs`
+(8 bước nhan→doc→chay→xong→gui→da_gui + loi/bo; `khoi_phuc` thuần); chờ Hà chọn SQLite hay Redis
+Streams (Redis máy này `appendonly no`).
+
 ## 🎯 2026-09-23 21:xx — hai hàng lệnh · phiên đang theo đã tắt · hộp hỏi quyền không nút
 
 **Đã cài `hubd@2026-09-23T13:45:59Z` + đẩy `d48f74e`** (gate 159/159 · clippy 0 · 0 warning):

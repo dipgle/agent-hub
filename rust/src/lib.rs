@@ -58,9 +58,13 @@ pub mod quota;
 /// product that needed a full outbound leak gate is gone; the gate that stops a
 /// password from leaving this Mac is not optional.
 pub mod redaction;
+/// Bộ nói RESP2 tối giản, đồng bộ — nền của [`so_viec`].
+pub mod redis_mini;
 pub mod runtime;
 pub mod sessions;
 pub mod setup;
+/// Sổ việc một cửa trên Redis Streams: nhận → thực thi → trả, mỗi vai đánh dấu bước.
+pub mod so_viec;
 /// Telegram làm kênh RA LỆNH hai chiều, không chỉ cái loa.
 pub mod telegram;
 pub mod verbs;

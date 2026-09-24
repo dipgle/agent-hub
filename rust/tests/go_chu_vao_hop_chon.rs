@@ -26,7 +26,7 @@ fn nhanh_chu(src: &str) -> Option<&str> {
 
 /// Nhánh ấy có đọc màn, hỏi hộp chọn, và gắn nút của hộp không.
 fn chan_hop_chon(than: &str) -> bool {
-    than.contains("keys::look(")
+    (than.contains("keys::look(") || than.contains("keys::screen_text("))
         && than.contains("parse_choices(")
         && than.contains("shot_choices =")
         && than.contains("Some(msg)")

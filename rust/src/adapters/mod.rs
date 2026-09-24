@@ -324,6 +324,9 @@ pub struct ChannelCommand {
     pub callback_id: String,
     /// The message carrying the buttons, so it can be edited after the action.
     pub message_id: Option<i64>,
+    /// Việc trong sổ việc (`so_viec`) mà lệnh này thực thi. `None` cho mọi lệnh
+    /// không đi qua sổ: lệnh chủ máy gõ, hoặc hòm thư lúc Redis không với tới.
+    pub viec: Option<i64>,
 }
 
 // 🔴 `Skip` đã bỏ 2026-08-14. Nó là "thiếu khoá thì bỏ qua CÓ GHI SỔ, không

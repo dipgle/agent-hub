@@ -77,6 +77,14 @@ pub fn screen_scrollback(window: i64, steps: usize, du: impl Fn(&str) -> bool) -
 pub fn window_of(tty: &str) -> Result<Option<i64>> {
     crate::keys_win::window_of(tty)
 }
+/// Windows chưa có "tab đang chọn" theo tty — trả lỗi để chỗ gọi dừng ở phía an
+/// toàn (không gõ) thay vì đoán.
+#[cfg(windows)]
+pub fn selected_tab_tty(_window: i64) -> Result<String> {
+    Err(anyhow::anyhow!(
+        "selected_tab_tty chưa có trên Windows — không kiểm được tab đích"
+    ))
+}
 #[cfg(windows)]
 pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
     crate::keys_win::window_of_any(tty)
@@ -1488,6 +1496,21 @@ pub fn screen_scrollback(window: i64, steps: usize, du: impl Fn(&str) -> bool) -
 /// `Terminal` công bố `tty` của từng tab qua AppleScript (đo 2026-08-09:
 /// `/dev/ttys005, /dev/ttys000, …`), và huba đã biết `tty` của từng phiên từ
 /// `ps -o tty=`. Ghép hai đầu ấy lại là ra đúng cửa sổ của phiên.
+/// `tty` của TAB ĐANG CHỌN trong cửa sổ `window` — đúng cái tab mà
+/// [`do_script`] (`… in selected tab of window id W`) sẽ gõ chữ vào.
+///
+/// 🔴 Thêm 2026-09-23 (báo của main dwork 44): kết quả `/runin` của phiên dorg
+/// (`ttys000`, cửa sổ 8411) lúc 17:40Z lại vào hàng chờ của phiên dci (`ttys001`,
+/// cửa sổ 8410) — đo trên nhật ký của chính hai phiên. Mọi mắt xích đọc lại được
+/// đều đúng, nên thứ còn lại phải được HỎI ngay tại cửa gõ: tab sắp nhận chữ có
+/// đúng là tty của phiên đích không.
+#[cfg(target_os = "macos")]
+pub fn selected_tab_tty(window: i64) -> Result<String> {
+    osascript(&format!(
+        "tell application \"Terminal\" to return tty of selected tab of window id {window}"
+    ))
+}
+
 #[cfg(target_os = "macos")]
 pub fn window_of(tty: &str) -> Result<Option<i64>> {
     if tty.is_empty() || tty == "??" || tty == "-" {

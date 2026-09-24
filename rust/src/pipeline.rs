@@ -6715,12 +6715,44 @@ const SCRATCH_ROOT: &str = "/private/tmp";
 /// với một lệnh không idempotent thì không lùi được). Cùng lý lẽ đã chọn cho
 /// `auto_run` hôm qua, chọn ngược phía vì ở đó "mất" là im còn ở đây "mất" là
 /// một tệp nhìn thấy được.
+///
+/// 🔴 CÓ SỔ VIỆC thì thứ tự ĐẢO LẠI: ghi sổ TRƯỚC, đổi tên SAU (2026-09-24).
+/// Cái lý ở trên chọn giữa "mất" và "chạy lặp" vì hồi ấy không có chỗ nào giữ
+/// việc qua một cú chết — và cái giá của nó đã trả thật: 23/09 18:15:45Z hai hòm
+/// thư bị đổi tên `.taken` rồi daemon khởi động lại, một việc chạy mà kết quả
+/// không về, một việc chưa hề chạy. Nay sổ nhận việc bằng một KHOÁ riêng cho đúng
+/// lần ghi tệp ấy ([`crate::so_viec::khoa_hom_thu`]): chết giữa hai bước thì
+/// vòng sau đọc lại tệp, sổ trả "đã nhận rồi", và chỉ còn bước đổi tên — không
+/// mất, không chạy lặp. Redis không với tới ⟹ về lại đúng đường cũ ở dưới.
 fn runin_inbox_tick(db: &Db, cfg: &Config) -> usize {
     let _ = db;
     let mut taken = 0usize;
+    let mut vao_so = 0usize;
     for (sid, cmd, path) in scan_session_inboxes(std::path::Path::new(SCRATCH_ROOT)) {
         let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let moved = path.with_extension(format!("taken-{stamp}"));
+        if let Some(nhan) = so_viec_nhan_hom_thu(&sid, &cmd, &path) {
+            if let Err(e) = std::fs::rename(&path, &moved) {
+                // Việc ĐÃ vào sổ, và khoá giữ nó khỏi bị nhận lần hai ⟹ vòng sau
+                // đọc lại tệp chỉ để thử đổi tên tiếp, không chạy lại.
+                logging::error(
+                    "runin_inbox_not_renamed",
+                    json!({ "session": sid, "file": path.display().to_string(),
+                            "viec": nhan, "err": e.to_string(),
+                            "effect": "việc ĐÃ vào sổ — tệp còn nằm đó, khoá chống nhận trùng giữ nó khỏi chạy lại" }),
+                );
+            }
+            if let Some(id) = nhan {
+                logging::info(
+                    "runin_inbox_queued",
+                    json!({ "session": sid, "viec": id,
+                            "cmd": crate::exec::truncate(&cmd, 120) }),
+                );
+                vao_so += 1;
+                taken += 1;
+            }
+            continue;
+        }
         if let Err(e) = std::fs::rename(&path, &moved) {
             // Không đổi tên được thì KHÔNG chạy: chạy mà không cầm được tệp là
             // hẹn giờ chạy lại nó ở mọi vòng sau.
@@ -6748,7 +6780,676 @@ fn runin_inbox_tick(db: &Db, cfg: &Config) -> usize {
         queue_session_run(cfg, format!("/runin {sid} {cmd}"));
         taken += 1;
     }
+    if vao_so > 0 {
+        wake_session_runs(cfg);
+    }
     taken
+}
+
+// ───────────── SỔ VIỆC: dây nối giữa `so_viec` và các vai trong tệp này ─────────────
+//
+// Bốn vai, mỗi vai chỉ ĐÁNH DẤU bước của mình (Hà 2026-09-24, xem `so_viec`):
+// cửa nhận = [`runin_inbox_tick`] · bên thực thi = hàng của phiên
+// ([`execute_session_runs`] → route `RunIn` → [`watch_long_job`]) · bên trả =
+// [`tra_viec`] (gọi ngay từ luồng vừa có kết quả, và mỗi vòng từ
+// [`so_viec_tra_tick`] cho lượt trả lại) · khôi phục = [`so_viec_khoi_dong`].
+
+/// Một lượt đọc sổ lấy tối đa bao nhiêu việc.
+const SO_VIEC_MOI_LUOT: usize = 20;
+
+/// Redis đang hỏng (theo lần hỏi gần nhất) — để lỗi được NÓI một lần mỗi lần
+/// nó đổi trạng thái, không phải mỗi vòng 10 giây.
+static SO_VIEC_REDIS_HONG: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Sổ việc không với tới được. Lần đầu (sau một quãng lành) là `error` — mất sổ
+/// là mất đúng thứ giữ việc qua khởi động lại; các lần kế tiếp trong cùng cơn
+/// hỏng là `warn` để log còn đọc được.
+fn so_viec_hong(cho: &str, e: &anyhow::Error) {
+    let fields = json!({ "cho": cho, "err": e.to_string(),
+                         "effect": "đi đường cũ trong bộ nhớ — việc KHÔNG sống qua khởi động lại" });
+    if SO_VIEC_REDIS_HONG.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        logging::warn("so_viec_redis_hong", fields);
+    } else {
+        logging::error("so_viec_redis_hong", fields);
+    }
+}
+
+fn so_viec_lanh() {
+    if SO_VIEC_REDIS_HONG.swap(false, std::sync::atomic::Ordering::SeqCst) {
+        logging::info("so_viec_redis_lanh", json!({}));
+    }
+}
+
+/// Mở sổ; hỏng thì nói ra (một lần mỗi cơn) và trả `None`.
+fn so_viec_mo(cho: &str) -> Option<(crate::so_viec::So, crate::redis_mini::Redis)> {
+    let so = crate::so_viec::So::huba();
+    match so.ket_noi() {
+        Ok(r) => {
+            so_viec_lanh();
+            Some((so, r))
+        }
+        Err(e) => {
+            so_viec_hong(cho, &e);
+            None
+        }
+    }
+}
+
+/// CỬA NHẬN của hòm thư. `None` = sổ không nhận được ⟹ chỗ gọi đi đường cũ.
+/// `Some(None)` = tệp này đã được nhận ở một vòng trước (chết giữa ghi sổ và đổi
+/// tên) — chỉ còn việc đổi tên.
+fn so_viec_nhan_hom_thu(sid: &str, cmd: &str, path: &std::path::Path) -> Option<Option<i64>> {
+    if !so_viec_da_khoi_phuc() {
+        return None;
+    }
+    // Không đọc được mốc sửa thì không dựng được khoá chống nhận trùng ⟹ không
+    // dám đổi thứ tự — đi đường cũ (đổi tên trước).
+    let meta = match std::fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) => {
+            logging::warn(
+                "so_viec_khong_dung_duoc_khoa",
+                json!({ "file": path.display().to_string(), "err": e.to_string() }),
+            );
+            return None;
+        }
+    };
+    let sua_ns = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())?;
+    let khoa = crate::so_viec::khoa_hom_thu(&path.display().to_string(), sua_ns, meta.len());
+    let (so, mut r) = so_viec_mo("nhan")?;
+    match so.nhan(&mut r, "hom_thu", Some(&khoa), sid, cmd, true) {
+        Ok(Some(id)) => Some(Some(id)),
+        Ok(None) => {
+            logging::info(
+                "so_viec_da_nhan_truoc",
+                json!({ "session": sid, "file": path.display().to_string(),
+                        "why": "tệp này đã vào sổ ở vòng trước — chỉ đổi tên, KHÔNG nhận lần hai" }),
+            );
+            Some(None)
+        }
+        Err(e) => {
+            so_viec_hong("nhan", &e);
+            None
+        }
+    }
+}
+
+/// BÊN THỰC THI: việc MỚI trong sổ ⟹ các dòng `/runin` cho hàng của phiên.
+/// Mỗi việc đọc ra được đánh dấu `doc` ngay tại đây.
+fn so_viec_doc_moi() -> Vec<SessionRun> {
+    use crate::so_viec::Buoc;
+    if !so_viec_da_khoi_phuc() {
+        return Vec::new();
+    }
+    let Some((so, mut r)) = so_viec_mo("doc_viec_moi") else {
+        return Vec::new();
+    };
+    let moi = match so.doc_viec_moi(&mut r, SO_VIEC_MOI_LUOT) {
+        Ok(v) => v,
+        Err(e) => {
+            so_viec_hong("doc_viec_moi", &e);
+            return Vec::new();
+        }
+    };
+    let mut out = Vec::new();
+    for (muc, id) in moi {
+        let v = match so.lay(&mut r, id) {
+            Ok(v) => v,
+            Err(e) => {
+                // Mục đã nằm trong tay người đọc (đã `XREADGROUP`) ⟹ nó TREO,
+                // không mất: lượt khởi động sau sẽ thấy nó ở `viec_con_treo`.
+                logging::error(
+                    "so_viec_doc_hong",
+                    json!({ "viec": id, "muc": muc, "err": e.to_string(),
+                            "effect": "việc treo trong sổ tới lần khởi động lại sau" }),
+                );
+                continue;
+            }
+        };
+        let Some(v) = v else {
+            logging::error(
+                "so_viec_mat_viec",
+                json!({ "viec": id, "muc": muc,
+                        "effect": "mục trong hàng mà không còn hash việc — KHÔNG chạy, khép mục" }),
+            );
+            if let Err(e) = so.xong_muc_viec(&mut r, &muc) {
+                logging::error(
+                    "so_viec_xack_hong",
+                    json!({ "muc": muc, "err": e.to_string() }),
+                );
+            }
+            continue;
+        };
+        if v.buoc != Buoc::Nhan {
+            // Một mục MỚI (`>`) phải đang ở bước `nhan`. Khác đi là có ai đã làm
+            // nó rồi — chạy lại là chạy lặp.
+            logging::error(
+                "so_viec_buoc_la",
+                json!({ "viec": id, "buoc": v.buoc.as_str(),
+                        "effect": "mục mới mà việc không ở bước nhan — KHÔNG chạy, khép mục" }),
+            );
+            if let Err(e) = so.xong_muc_viec(&mut r, &muc) {
+                logging::error(
+                    "so_viec_xack_hong",
+                    json!({ "muc": muc, "err": e.to_string() }),
+                );
+            }
+            continue;
+        }
+        let ghi = so
+            .ghi_vao(&mut r, id, &muc)
+            .and_then(|_| so.danh_dau(&mut r, id, Buoc::Doc, None));
+        if let Err(e) = ghi {
+            // Không đánh dấu được `doc` mà vẫn chạy thì lúc khởi động lại, sổ
+            // nói "chưa đọc" về một việc đã chạy ⟹ chạy lặp. Để nó treo.
+            logging::error(
+                "so_viec_danh_dau_hong",
+                json!({ "viec": id, "buoc": "doc", "err": e.to_string(),
+                        "effect": "KHÔNG chạy lượt này — việc treo trong sổ" }),
+            );
+            continue;
+        }
+        out.push((
+            format!("/runin {} {}", v.phien, v.noi_dung),
+            std::time::Instant::now(),
+            Some(id),
+        ));
+    }
+    out
+}
+
+/// Đánh dấu một bước; hỏng thì NÓI RA (không có đường lui nào tốt hơn một dòng log).
+fn so_viec_danh_dau(id: i64, buoc: crate::so_viec::Buoc) {
+    let Some((so, mut r)) = so_viec_mo("danh_dau") else {
+        return;
+    };
+    if let Err(e) = so.danh_dau(&mut r, id, buoc, None) {
+        logging::error(
+            "so_viec_danh_dau_hong",
+            json!({ "viec": id, "buoc": buoc.as_str(), "err": e.to_string() }),
+        );
+    }
+}
+
+fn so_viec_ghi_pid(id: i64, pid: u32) {
+    let Some((so, mut r)) = so_viec_mo("ghi_pid") else {
+        return;
+    };
+    if let Err(e) = so.ghi_pid(&mut r, id, pid as i64) {
+        logging::error(
+            "so_viec_ghi_pid_hong",
+            json!({ "viec": id, "pid": pid, "err": e.to_string() }),
+        );
+    }
+}
+
+/// KHÉP một việc không đi tới kết quả (phiên đã tắt, không biết thư mục…): đánh
+/// dấu + `XACK` mục của nó bên `hang_viec`.
+fn so_viec_khep(id: i64, buoc: crate::so_viec::Buoc, ghi_chu: &str) {
+    let Some((so, mut r)) = so_viec_mo("khep") else {
+        return;
+    };
+    let ket = so.danh_dau(&mut r, id, buoc, Some(ghi_chu)).and_then(|_| {
+        match so.lay(&mut r, id)?.and_then(|v| v.vao) {
+            Some(muc) => so.xong_muc_viec(&mut r, &muc),
+            None => Ok(()),
+        }
+    });
+    match ket {
+        Ok(()) => logging::info(
+            "so_viec_khep",
+            json!({ "viec": id, "buoc": buoc.as_str(), "ghi_chu": ghi_chu }),
+        ),
+        Err(e) => logging::error(
+            "so_viec_khep_hong",
+            json!({ "viec": id, "buoc": buoc.as_str(), "err": e.to_string() }),
+        ),
+    }
+}
+
+/// BÊN THỰC THI ghi kết quả vào sổ. `false` ⟹ sổ KHÔNG giữ được kết quả, chỗ
+/// gọi phải tự dán (đường cũ) — không có đường nào khác đưa nó tới phiên.
+fn so_viec_ghi_ket_qua(id: i64, ma_thoat: Option<i32>, khoi: &str) -> bool {
+    let Some((so, mut r)) = so_viec_mo("ghi_ket_qua") else {
+        return false;
+    };
+    match so.ghi_ket_qua(&mut r, id, ma_thoat.map(i64::from), khoi) {
+        Ok(()) => true,
+        Err(e) => {
+            logging::error(
+                "so_viec_ghi_ket_qua_hong",
+                json!({ "viec": id, "err": e.to_string(),
+                        "effect": "kết quả KHÔNG vào sổ — dán theo đường cũ" }),
+            );
+            false
+        }
+    }
+}
+
+/// Kết cục một cú dán khối kết quả vào ô nhập của phiên.
+enum DanVao {
+    /// Chữ đã rời ô nhập — đo bằng chính màn.
+    DaGui,
+    /// Chữ còn NẰM TRONG ô nhập, chưa gửi (`Delivered` khác `Gone`).
+    NamTrongO(String),
+    /// Chưa gõ: không cửa sổ, tab sắp nhận chữ không phải của phiên
+    /// ([`paste_target_ok`]), hoặc Terminal trả lỗi (`Some(lỗi)`).
+    ChuaDan(Option<String>),
+}
+
+/// MỘT cửa dán kết quả `/runin` vào phiên — dùng chung cho đường cũ trong
+/// [`watch_long_job`] và bên trả của sổ việc, để hàng rào `paste_target_ok`
+/// chỉ phải đứng ở một chỗ.
+fn dan_vao_phien(s: &crate::sessions::LiveSession, block: &str) -> DanVao {
+    // 🔴 HẠNG GẤP cho CẢ cú dán, đặt ở cửa (2026-09-24). Một phiên đang đứng chờ
+    // khối này — không phải việc quét nền. Gọi từ vòng chạy (hạng nền) thì cú dán
+    // chết theo hai cách, cả hai đều đo được: ① câu hỏi tty hạng gấp của
+    // `paste_target_ok` mở cửa nhường `PROBE_YIELD_MS` ⟹ `type_and_send` ngay sau
+    // nó bị nhường ("nhường Terminal cho một lượt hỏi…" — việc 5, 2/2 lượt trả lại
+    // 23:56:49Z · 23:58:54Z); ② ngân sách hỏi Terminal của vòng đã tiêu hết từ ảnh
+    // chụp. Đường gõ lại cũ dính đúng hai thứ ấy: từ 21:29Z nhận 2, dán được 0.
+    let _lane = crate::exec::urgent();
+    match crate::keys::window_of(&s.tty) {
+        // Cú Enter rời nằm ở MỘT chỗ (`keys::type_and_send`) — bản chép tay cũ
+        // nuốt lỗi bằng `let _ = press(…)`, đúng hình dạng luật 3 cấm.
+        Ok(Some(w)) if paste_target_ok(w, &s.tty, &s.session_id) => {
+            match crate::keys::type_and_send(w, block) {
+                Ok(crate::keys::Delivered::Gone) => DanVao::DaGui,
+                Ok(other) => DanVao::NamTrongO(format!("{other:?}")),
+                Err(e) => DanVao::ChuaDan(Some(e.to_string())),
+            }
+        }
+        _ => DanVao::ChuaDan(None),
+    }
+}
+
+/// Bên trả làm xong lượt của nó ra sao.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Tra {
+    /// Đã dán tới nơi — `XACK` được mục `ket_qua`.
+    DaDan,
+    /// Việc đã khép mà không dán lượt này (trả từ trước, hoặc bỏ có lý do) —
+    /// `XACK` được mục `ket_qua`.
+    Khep(String),
+    /// Chưa trả được — để mục treo, lượt sau (`XAUTOCLAIM`) thử lại.
+    ChoLai(String),
+    /// Một luồng khác đang trả đúng việc này.
+    DangGiu,
+}
+
+/// Câu xác nhận của luồng chạy lệnh khi kết quả đi qua sổ việc.
+fn ack_tra_viec(tra: Tra, s: &crate::sessions::LiveSession, line: &str, report: &str) -> String {
+    let duoi = format!("$ {line}\n{}", crate::exec::truncate(report, 400));
+    match tra {
+        Tra::DaDan => format!(
+            "✅ Đã chạy trên máy rồi dán kết quả vào {}:\n{duoi}",
+            crate::sessions::shown(s)
+        ),
+        Tra::Khep(why) => format!("⚠ Đã chạy xong — {why}.\n\n{duoi}"),
+        Tra::ChoLai(why) => format!(
+            "⏳ Đã chạy xong. Chưa dán được vào {} ({}) — kết quả nằm trong sổ việc, huba sẽ gõ lại.\n\n{duoi}",
+            crate::sessions::shown(s),
+            crate::exec::truncate(&why, 160)
+        ),
+        Tra::DangGiu => format!("⏳ Đã chạy xong — kết quả đang được trả vào phiên.\n\n{duoi}"),
+    }
+}
+
+/// Việc đang được trả — để luồng vừa có kết quả và vòng chạy không cùng dán
+/// một khối hai lần.
+static SO_VIEC_DANG_TRA: std::sync::Mutex<Vec<i64>> = std::sync::Mutex::new(Vec::new());
+
+/// BÊN TRẢ: đưa kết quả của việc `id` vào phiên đã nhờ.
+///
+/// `phien`: phiên đích nếu chỗ gọi đã cầm sẵn (luồng vừa chạy xong lệnh). `live`:
+/// danh sách phiên của vòng này, để tra khi chưa cầm sẵn. `ngay`: gọi từ chính
+/// luồng vừa có kết quả — không chờ nhịp [`RUNIN_RETRY_SEC`].
+fn tra_viec(
+    cfg: &Config,
+    id: i64,
+    phien: Option<&crate::sessions::LiveSession>,
+    live: &[crate::sessions::LiveSession],
+    now: i64,
+    ngay: bool,
+) -> Tra {
+    {
+        let mut dang = SO_VIEC_DANG_TRA.lock().unwrap_or_else(|e| e.into_inner());
+        if dang.contains(&id) {
+            return Tra::DangGiu;
+        }
+        dang.push(id);
+    }
+    let ket = tra_viec_mot(cfg, id, phien, live, now, ngay);
+    SO_VIEC_DANG_TRA
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .retain(|x| *x != id);
+    ket
+}
+
+fn tra_viec_mot(
+    cfg: &Config,
+    id: i64,
+    phien: Option<&crate::sessions::LiveSession>,
+    live: &[crate::sessions::LiveSession],
+    now: i64,
+    ngay: bool,
+) -> Tra {
+    use crate::so_viec::{giay_tu, tra_gi, Buoc, TraGi};
+    let Some((so, mut r)) = so_viec_mo("tra") else {
+        return Tra::ChoLai("sổ việc không với tới".to_string());
+    };
+    let v = match so.lay(&mut r, id) {
+        Ok(Some(v)) => v,
+        // Hash đã hết hạn giữ (việc khép từ lâu) — không còn gì để trả.
+        Ok(None) => return Tra::Khep("việc không còn trong sổ".to_string()),
+        Err(e) => {
+            logging::error(
+                "so_viec_doc_hong",
+                json!({ "viec": id, "err": e.to_string() }),
+            );
+            return Tra::ChoLai(e.to_string());
+        }
+    };
+    let tuoi_gui = v.gui_luc.as_deref().and_then(|m| giay_tu(m, now));
+    match tra_gi(v.buoc, tuoi_gui, ngay, RUNIN_RETRY_SEC) {
+        TraGi::Khep => return Tra::Khep(format!("đã khép ở bước {}", v.buoc.as_str())),
+        TraGi::ChoLai => return Tra::ChoLai("vừa thử trả chưa lâu".to_string()),
+        TraGi::SaiBuoc => {
+            logging::error(
+                "so_viec_tra_sai_buoc",
+                json!({ "viec": id, "buoc": v.buoc.as_str(),
+                        "effect": "mục kết quả mà việc chưa có kết quả — khép, KHÔNG dán" }),
+            );
+            return Tra::Khep(format!("sai bước {}", v.buoc.as_str()));
+        }
+        TraGi::Tra => {}
+    }
+    let khoi = v.ket_qua.clone().unwrap_or_default();
+    // Lấy mốc tuổi từ lúc CÓ kết quả: đó là lúc phiên bắt đầu phải chờ.
+    let tuoi = v
+        .xong_luc
+        .as_deref()
+        .and_then(|m| giay_tu(m, now))
+        .unwrap_or(0);
+    let bo = |so: &crate::so_viec::So, r: &mut crate::redis_mini::Redis, why: &str| {
+        if let Err(e) = so.danh_dau(r, id, Buoc::Bo, Some(why)) {
+            logging::error(
+                "so_viec_danh_dau_hong",
+                json!({ "viec": id, "buoc": "bo", "err": e.to_string() }),
+            );
+        }
+    };
+    let tim = phien.cloned().or_else(|| {
+        live.iter()
+            .find(|s| s.session_id == v.phien && s.host != "dead")
+            .cloned()
+    });
+    let Some(s) = tim else {
+        logging::warn(
+            "so_viec_phien_da_tat",
+            json!({ "viec": id, "session": v.phien,
+                    "cmd": crate::exec::truncate(&v.noi_dung, 120) }),
+        );
+        bo(&so, &mut r, "phiên nhận đã tắt");
+        say_closed(
+            cfg,
+            &format!(
+                "⚠ Phiên nhận kết quả đã tắt trước khi dán được. Kết quả của lệnh:\n\n{}",
+                crate::exec::truncate(&khoi, 1200)
+            ),
+        );
+        return Tra::Khep("phiên đã tắt".to_string());
+    };
+    let lan = match so.bat_dau_gui(&mut r, id) {
+        Ok(n) => n,
+        Err(e) => {
+            // Không ghi được "đang trả" thì đừng dán: một lượt khởi động lại
+            // giữa chừng sẽ không biết đã có một bản trong ô nhập.
+            logging::error(
+                "so_viec_danh_dau_hong",
+                json!({ "viec": id, "buoc": "gui", "err": e.to_string() }),
+            );
+            return Tra::ChoLai(e.to_string());
+        }
+    };
+    match dan_vao_phien(&s, &khoi) {
+        DanVao::DaGui => {
+            if let Err(e) = so.danh_dau(&mut r, id, Buoc::DaGui, None) {
+                logging::error(
+                    "so_viec_danh_dau_hong",
+                    json!({ "viec": id, "buoc": "da_gui", "err": e.to_string() }),
+                );
+            }
+            logging::info(
+                "so_viec_da_tra",
+                json!({ "viec": id, "session": s.session_id, "lan": lan, "cho_sec": tuoi }),
+            );
+            Tra::DaDan
+        }
+        DanVao::NamTrongO(landed) => {
+            // Chữ ĐÃ vào ô nhập — dán lại là hai bản. Khép, và nói chỗ nó nằm.
+            if let Err(e) = so.danh_dau(
+                &mut r,
+                id,
+                Buoc::DaGui,
+                Some("nằm trong ô nhập của phiên, CHƯA gửi"),
+            ) {
+                logging::error(
+                    "so_viec_danh_dau_hong",
+                    json!({ "viec": id, "buoc": "da_gui", "err": e.to_string() }),
+                );
+            }
+            logging::warn(
+                "runin_block_left_in_box",
+                json!({ "session": s.session_id, "viec": id, "landed": landed,
+                        "effect": "kết quả nằm trong ô nhập của phiên, CHƯA gửi" }),
+            );
+            Tra::Khep(format!(
+                "kết quả còn NẰM TRONG Ô NHẬP của {} — chưa gửi",
+                crate::sessions::shown(&s)
+            ))
+        }
+        DanVao::ChuaDan(loi) => {
+            let why = loi
+                .clone()
+                .unwrap_or_else(|| "chưa tìm ra cửa sổ của phiên".to_string());
+            if tuoi >= RUNIN_GIVE_UP_SEC {
+                logging::error(
+                    "so_viec_bo_cuoc",
+                    json!({ "viec": id, "session": s.session_id, "cho_sec": tuoi,
+                            "lan": lan, "err": why }),
+                );
+                bo(&so, &mut r, &why);
+                // Bỏ cuộc thì kết quả đi ra NGUYÊN VẸN HƠN: lần cuối nó được nhìn thấy.
+                say_closed(
+                    cfg,
+                    &format!(
+                        "⚠ Thử dán vào phiên suốt {} phút không được ({why}). Kết quả:\n\n{}",
+                        tuoi / 60,
+                        crate::exec::truncate(&khoi, 1200)
+                    ),
+                );
+                return Tra::Khep(format!("bỏ cuộc: {why}"));
+            }
+            logging::warn(
+                "so_viec_cho_tra_lai",
+                json!({ "viec": id, "session": s.session_id, "lan": lan, "err": why,
+                        "why": "chưa dán được — mục kết quả treo, lượt sau thử lại" }),
+            );
+            Tra::ChoLai(why)
+        }
+    }
+}
+
+/// Mỗi vòng: trả những kết quả chưa ai trả (mới) và những kết quả treo đủ lâu
+/// (`XAUTOCLAIM` — lượt trả lại, và cũng là đường nhặt lại sau khởi động lại).
+fn so_viec_tra_tick(cfg: &Config, live: &[crate::sessions::LiveSession], now: i64) {
+    let Some((so, mut r)) = so_viec_mo("tra_tick") else {
+        return;
+    };
+    let mut muc = match so.doc_ket_qua_moi(&mut r, SO_VIEC_MOI_LUOT) {
+        Ok(v) => v,
+        Err(e) => {
+            so_viec_hong("doc_ket_qua_moi", &e);
+            return;
+        }
+    };
+    match so.ket_qua_treo(&mut r, (RUNIN_RETRY_SEC as u64) * 1000, SO_VIEC_MOI_LUOT) {
+        Ok(v) => muc.extend(v),
+        Err(e) => so_viec_hong("ket_qua_treo", &e),
+    }
+    for (m, id) in muc {
+        if let Tra::DaDan | Tra::Khep(_) = tra_viec(cfg, id, None, live, now, false) {
+            if let Err(e) = so.da_tra(&mut r, &m) {
+                logging::error(
+                    "so_viec_xack_hong",
+                    json!({ "muc": m, "viec": id, "err": e.to_string() }),
+                );
+            }
+        }
+    }
+}
+
+/// Đang có luồng trả lại chạy hay chưa — xem [`so_viec_tra_nen`].
+static SO_VIEC_TRA_NEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Chạy [`so_viec_tra_tick`] ở LUỒNG RIÊNG, mỗi lúc một lượt.
+///
+/// 🔴 Đo 2026-09-24 00:03→00:06Z, bản đầu gọi thẳng trong vòng chạy: Terminal treo
+/// (`osascript quá 20s`) ⟹ mỗi lượt trả lại tốn ~45 s (`window_of` hết giờ) ⟹ 4
+/// việc treo = một vòng **201 s** (`cycle_done ms=201339`), suốt quãng ấy hòm thư
+/// của mọi phiên nằm yên. Vòng chạy không được đứng chờ Terminal thay cho một
+/// việc đã có chỗ nằm an toàn trong sổ. Lượt trước chưa xong thì vòng này bỏ qua —
+/// mục vẫn treo trong `ket_qua`, không mất.
+fn so_viec_tra_nen(cfg: &Config, live: &[crate::sessions::LiveSession], now: i64) {
+    use std::sync::atomic::Ordering;
+    if SO_VIEC_TRA_NEN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let (cfg, live) = (cfg.clone(), live.to_vec());
+    let spawned = std::thread::Builder::new()
+        .name("so-viec-tra".into())
+        .spawn(move || {
+            so_viec_tra_tick(&cfg, &live, now);
+            SO_VIEC_TRA_NEN.store(false, Ordering::SeqCst);
+        });
+    if let Err(e) = spawned {
+        SO_VIEC_TRA_NEN.store(false, Ordering::SeqCst);
+        logging::error(
+            "so_viec_tra_spawn_failed",
+            json!({ "err": e.to_string(), "effect": "vòng này không trả lại — mục vẫn treo trong sổ" }),
+        );
+    }
+}
+
+/// Khôi phục sau khởi động lại đã chạy xong chưa (mỗi tiến trình một lần).
+static SO_VIEC_DA_KHOI_PHUC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// 🔴 Cửa nhận và bên thực thi CHỈ dùng sổ sau khi khôi phục xong. Khôi phục đọc
+/// mọi mục "đã đọc, chưa xong" của người đọc `hubd` và chạy lại những việc ở
+/// bước `doc` — nên một việc tiến trình NÀY đã kịp đọc trước lượt khôi phục
+/// (Redis hỏng lúc khôi phục, lành lại ngay trong cùng vòng) sẽ bị nhận là việc
+/// của tiến trình cũ và CHẠY HAI LẦN. Trước lúc ấy: đường cũ trong bộ nhớ.
+fn so_viec_da_khoi_phuc() -> bool {
+    SO_VIEC_DA_KHOI_PHUC.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// KHÔI PHỤC: lần đầu với tới sổ trong tiến trình này, nhặt lại việc bên thực
+/// thi đã đọc mà chưa xong, theo đúng [`crate::so_viec::khoi_phuc`]. Redis
+/// chưa với tới thì vòng sau hỏi lại.
+fn so_viec_khoi_dong(cfg: &Config) {
+    use crate::so_viec::{bao_co_the_da_chay, khoi_phuc, KhoiPhuc};
+    use std::sync::atomic::Ordering;
+    if SO_VIEC_DA_KHOI_PHUC.load(Ordering::SeqCst) {
+        return;
+    }
+    let Some((so, mut r)) = so_viec_mo("khoi_phuc") else {
+        return;
+    };
+    let treo = match so.viec_con_treo(&mut r, 500) {
+        Ok(v) => v,
+        Err(e) => {
+            so_viec_hong("viec_con_treo", &e);
+            return;
+        }
+    };
+    let (mut chay_lai, mut bao, mut khep, mut hong) = (0usize, 0usize, 0usize, 0usize);
+    for (muc, id) in &treo {
+        let v = match so.lay(&mut r, *id) {
+            Ok(v) => v,
+            Err(e) => {
+                logging::error(
+                    "so_viec_khoi_phuc_hong",
+                    json!({ "viec": id, "muc": muc, "err": e.to_string() }),
+                );
+                hong += 1;
+                continue;
+            }
+        };
+        let buoc = v.as_ref().map(|v| khoi_phuc(v.buoc));
+        let ket: anyhow::Result<()> = match (v, buoc) {
+            // Chưa bắt đầu chạy ⟹ đưa lại bên thực thi, giữ nguyên mục.
+            (Some(v), Some(KhoiPhuc::ChayLai)) => {
+                chay_lai += 1;
+                so.ghi_vao(&mut r, *id, muc).map(|_| {
+                    SESSION_RUNS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push_back((
+                            format!("/runin {} {}", v.phien, v.noi_dung),
+                            std::time::Instant::now(),
+                            Some(*id),
+                        ));
+                })
+            }
+            // Đang chạy khi tiến trình chết ⟹ KHÔNG chạy lại; kết quả là một câu
+            // nói đúng như vậy, đi qua bên trả như mọi kết quả khác.
+            (Some(v), Some(KhoiPhuc::BaoCoTheDaChay)) => {
+                bao += 1;
+                logging::warn(
+                    "so_viec_co_the_da_chay",
+                    json!({ "viec": id, "session": v.phien, "pid": v.pid,
+                            "cmd": crate::exec::truncate(&v.noi_dung, 120) }),
+                );
+                so.ghi_ket_qua(
+                    &mut r,
+                    *id,
+                    None,
+                    &bao_co_the_da_chay(&v.noi_dung, v.chay_luc.as_deref()),
+                )
+                .and_then(|_| so.xong_muc_viec(&mut r, muc))
+            }
+            // Có kết quả rồi / đã khép / mất hash ⟹ bên thực thi chỉ khép mục.
+            _ => {
+                khep += 1;
+                so.xong_muc_viec(&mut r, muc)
+            }
+        };
+        if let Err(e) = ket {
+            hong += 1;
+            logging::error(
+                "so_viec_khoi_phuc_hong",
+                json!({ "viec": id, "muc": muc, "err": e.to_string() }),
+            );
+        }
+    }
+    // MẪU SỐ đi kèm: "0 việc chạy lại" chỉ có nghĩa khi biết đã xét bao nhiêu.
+    logging::info(
+        "so_viec_khoi_phuc",
+        json!({ "tong": treo.len(), "chay_lai": chay_lai, "bao_co_the_da_chay": bao,
+                "khep": khep, "hong": hong }),
+    );
+    SO_VIEC_DA_KHOI_PHUC.store(true, Ordering::SeqCst);
+    // Đánh thức cả khi không có gì treo: việc MỚI nằm trong sổ từ lúc tiến trình
+    // cũ chết (đã nhận, chưa ai đọc) chỉ có luồng vét đọc ra.
+    wake_session_runs(cfg);
 }
 
 /// Kết quả `/runin` đã chạy xong mà CHƯA dán được vào phiên.
@@ -7059,11 +7760,20 @@ pub fn runin_pending_tick(db: &Db, cfg: &Config, now: i64) {
             .find(|s| s.session_id == p.s && s.host != "dead")
             .map(|s| s.tty.clone());
         let typed = match tty {
-            Some(t) if !t.is_empty() => match crate::keys::window_of(&t) {
-                Ok(Some(w)) => crate::keys::type_and_send(w, &p.b).map(|d| Some(format!("{d:?}"))),
-                Ok(None) => Ok(None),
-                Err(e) => Err(e),
-            },
+            Some(t) if !t.is_empty() => {
+                // HẠNG GẤP cả cú gõ lại — cùng lý do với `dan_vao_phien`: ở hạng
+                // nền, từ 21:29Z đường này nhận 2 việc và dán được 0.
+                let _lane = crate::exec::urgent();
+                match crate::keys::window_of(&t) {
+                    Ok(Some(w)) if paste_target_ok(w, &t, &p.s) => {
+                        crate::keys::type_and_send(w, &p.b).map(|d| Some(format!("{d:?}")))
+                    }
+                    // Không có cửa sổ, HOẶC tab sắp nhận chữ không phải của phiên
+                    // này (hàng rào `paste_target_ok`) ⟹ chưa gõ, giữ lại lượt sau.
+                    Ok(_) => Ok(None),
+                    Err(e) => Err(e),
+                }
+            }
             // Phiên đã chết trong lúc chờ: không còn ai để dán vào, và giữ tiếp
             // là giữ rác. Nói ra rồi bỏ.
             _ => {
@@ -8982,6 +9692,97 @@ fn la_sudo(t: &str) -> Option<&str> {
     }
 }
 
+/// Hai chuỗi tty có chỉ CÙNG một thiết bị không — `ps` in `ttys000`, AppleScript
+/// trả `/dev/ttys000`. Chuỗi rỗng không khớp với gì, kể cả chuỗi rỗng.
+pub fn same_tty(a: &str, b: &str) -> bool {
+    let n = |s: &str| s.trim().trim_start_matches("/dev/").to_string();
+    let (a, b) = (n(a), n(b));
+    !a.is_empty() && a == b
+}
+
+/// HÀNG RÀO Ở CỬA GÕ cho kết quả `/runin`: tab sắp nhận chữ có đúng là tty của
+/// phiên đích không. `false` ⟹ KHÔNG gõ lượt này (chỗ gọi giữ lại để gõ lại).
+///
+/// 🔴 2026-09-23, main dwork 44 báo, đo trên nhật ký của chính hai phiên: kết
+/// quả đẩy `lan/dorg` lúc 17:40Z vào hàng chờ của phiên **dci** (`2151a7af…jsonl`
+/// dòng 1568, `queue-operation enqueue 17:40:17.400`), phiên dorg không nhận —
+/// trong khi huba KHAI *"dán kết quả vào [dwork/dorg]"*. Các mắt xích đo lại được
+/// (tab chung cửa sổ · bảng nhớ tty→cửa sổ · sổ `claude` · sổ theo dõi · phép
+/// tách id) đều đúng, và log không ghi cú dán đã gõ vào cửa sổ nào — nên gốc
+/// CHƯA tìm ra. Hàng rào đứng ở chỗ duy nhất mọi đường dán đều đi qua: hỏi thẳng
+/// Terminal tab đang chọn của cửa sổ ấy mang tty nào, ngay trước khi gõ.
+///
+/// Không đọc được tab ⟹ `false`, cố ý: dán nhầm vào phiên khác là đưa kết quả
+/// lệnh của một làn cho một làn khác đọc và làm theo — đắt hơn nhiều một lượt
+/// chờ `RUNIN_RETRY_SEC`.
+fn paste_target_ok(window: i64, want_tty: &str, session: &str) -> bool {
+    // 🔴 HẠNG GẤP cho đúng MỘT câu hỏi này (sửa cùng ngày, sau khi đo bản đầu
+    // chạy thật 18:16→21:15Z): 74 lượt `runin_paste_to` đều khớp, nhưng 23 lượt
+    // `runin_paste_target_unverified` — phần lớn là *"vòng nền đã tiêu hết ngân
+    // sách hỏi Terminal — KHÔNG hỏi"*. Luồng dán chạy hạng NỀN (hàng của phiên),
+    // nên câu hỏi tty bị ngân sách chặn ⟹ hàng rào dừng ở phía an toàn ⟹ kết
+    // quả bị dời sang gõ lại: `c9177b08` chờ 613 giây, `4381a5c2` bỏ cuộc sau
+    // 1072 giây. Một câu hỏi đứng giữa cú dán mà một phiên đang chờ không phải
+    // việc quét nền; guard chỉ sống trong hàm này nên phần còn lại vẫn là nền.
+    let _lane = crate::exec::urgent();
+    match crate::keys::selected_tab_tty(window) {
+        Ok(tab) => {
+            let khop = same_tty(&tab, want_tty);
+            logging::info(
+                "runin_paste_to",
+                json!({ "session": session, "window": window,
+                        "tty": want_tty, "tab_tty": tab, "khop": khop }),
+            );
+            if !khop {
+                logging::error(
+                    "runin_paste_target_mismatch",
+                    json!({ "session": session, "window": window,
+                            "tty": want_tty, "tab_tty": tab,
+                            "effect": "KHÔNG gõ — tab sẽ nhận chữ không phải của phiên đích; giữ lại để gõ lại" }),
+                );
+            }
+            khop
+        }
+        Err(e) => {
+            logging::warn(
+                "runin_paste_target_unverified",
+                json!({ "session": session, "window": window, "tty": want_tty,
+                        "err": e.to_string(),
+                        "effect": "không đọc được tab sắp nhận chữ ⟹ KHÔNG gõ lượt này, giữ lại để gõ lại" }),
+            );
+            false
+        }
+    }
+}
+
+/// Đề bài của MỘT lệnh chạy nền — gom lại thay vì tám tham số rời, cùng lý lẽ
+/// với [`NewSession`]: bốn trường `String`/`bool` đứng cạnh nhau qua lời gọi là
+/// đổi chỗ được mà trình dịch vẫn nhận.
+struct LongJob {
+    cfg: Config,
+    s: crate::sessions::LiveSession,
+    root: std::path::PathBuf,
+    line: String,
+    adapter: String,
+    chat_id: String,
+    /// Lượt này do PHIÊN tự nhờ (hòm thư) chứ không do chủ máy bấm ⟹ kết quả
+    /// vào phiên là đủ, đừng dội thêm một tin ra Telegram.
+    ///
+    /// 🔴 Hà 2026-08-25: *"Sao cứ có tin nhắn này ✅ Đã chạy trên máy rồi dán
+    /// kết quả vào [dwork/A-DDOC]…"*. Đo cùng lúc: **21 lượt hòm thư trong một
+    /// buổi**, mỗi lượt một tin. Phiên A-DDOC đang DÙNG tính năng ấy đúng như
+    /// thiết kế — nó nhờ chạy, nó đọc kết quả — nhưng Hà thì không hỏi gì mà
+    /// vẫn nhận đủ 21 tin.
+    ///
+    /// Cửa `quiet` đã có sẵn cho việc này (`push_text_quiet` → `Incoming.quiet`
+    /// → `reply_in_channel` im), nhưng đường `/runin` trả lời bằng `say_back`,
+    /// và `say_back` KHÔNG hỏi `quiet` — nên cờ ấy chưa từng với tới đây.
+    quiet: bool,
+    /// Việc trong sổ việc (hòm thư). `Some` ⟹ đánh dấu `chay` trước khi chạy,
+    /// ghi kết quả vào sổ TRƯỚC khi dán, và dán qua bên trả ([`tra_viec`]).
+    viec: Option<i64>,
+}
+
 /// Chạy một lệnh ở luồng riêng, theo dõi nó, rồi báo lại — thay cho việc ngồi
 /// chờ tới một cái trần.
 ///
@@ -8997,27 +9798,17 @@ fn la_sudo(t: &str) -> Option<&str> {
 ///    Không có bước này thì "bỏ trần" chỉ đổi một cái chết ồn ào thành một sự
 ///    im lặng dài — mà im lặng dài thì người ta bấm lại lần nữa, và lần thứ hai
 ///    là một lệnh triển khai chạy hai lần.
-fn watch_long_job(
-    cfg: Config,
-    s: crate::sessions::LiveSession,
-    root: std::path::PathBuf,
-    line: String,
-    adapter: String,
-    chat_id: String,
-    // Lượt này do PHIÊN tự nhờ (hòm thư) chứ không do chủ máy bấm ⟹ kết quả
-    // vào phiên là đủ, đừng dội thêm một tin ra Telegram.
-    //
-    // 🔴 Hà 2026-08-25: *"Sao cứ có tin nhắn này ✅ Đã chạy trên máy rồi dán
-    // kết quả vào [dwork/A-DDOC]…"*. Đo cùng lúc: **21 lượt hòm thư trong một
-    // buổi**, mỗi lượt một tin. Phiên A-DDOC đang DÙNG tính năng ấy đúng như
-    // thiết kế — nó nhờ chạy, nó đọc kết quả — nhưng Hà thì không hỏi gì mà
-    // vẫn nhận đủ 21 tin.
-    //
-    // Cửa `quiet` đã có sẵn cho việc này (`push_text_quiet` → `Incoming.quiet`
-    // → `reply_in_channel` im), nhưng đường `/runin` trả lời bằng `say_back`,
-    // và `say_back` KHÔNG hỏi `quiet` — nên cờ ấy chưa từng với tới đây.
-    quiet: bool,
-) {
+fn watch_long_job(job: LongJob) {
+    let LongJob {
+        cfg,
+        s,
+        root,
+        line,
+        adapter,
+        chat_id,
+        quiet,
+        viec,
+    } = job;
     let n = JOB_SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     // Bản sao cho nhánh "không dựng được luồng": luồng nuốt bản gốc, mà đúng ca
     // ấy mới cần nói ra là lệnh KHÔNG chạy.
@@ -9137,6 +9928,9 @@ fn watch_long_job(
                     .name(format!("long-job-pid-{n}"))
                     .spawn(move || {
                         if let Ok(pid) = rx.recv() {
+                            if let Some(id) = viec {
+                                so_viec_ghi_pid(id, pid);
+                            }
                             let mut jobs = JOBS.lock().unwrap_or_else(|e| e.into_inner());
                             // Ghi AI nhờ, ngay lúc mở sổ. Trước bản này dòng
                             // `long_job_started` chỉ có `n` + `pid`, nên khi
@@ -9200,6 +9994,11 @@ fn watch_long_job(
                 (Some((_, viet_lai)), Some(_)) => viet_lai.clone(),
                 _ => line.clone(),
             };
+            // `chay` vào sổ TRƯỚC khi tiến trình con ra đời: chết sau dòng này
+            // thì lượt khôi phục nói "có thể đã chạy", KHÔNG chạy lại.
+            if let Some(id) = viec {
+                so_viec_danh_dau(id, crate::so_viec::Buoc::Chay);
+            }
             let out = crate::exec::run(
                 "/bin/zsh",
                 &["-lc", &chay],
@@ -9261,15 +10060,18 @@ fn watch_long_job(
                     // việc ấy, và bỏ dở im lặng ngay lúc lệnh vừa in ra thứ
                     // đáng đọc nhất. Ghi dấu hiệu vào log, chữ đi tiếp.
                     crate::sessions::note_preview_risk("runin_block", &block);
-                    {
-                        match crate::keys::window_of(&s.tty) {
-                            // Cú Enter rời nay nằm ở MỘT chỗ (`keys::type_and_send`).
-                            // Bản cũ chép tay vòng lặp ấy vào đây và nuốt lỗi
-                            // bằng `let _ = press(…)` — tức nếu Enter không gửi
-                            // được thì huba vẫn in "✅ đã chạy", không một dòng
-                            // log nào. Đúng hình dạng luật 3 cấm.
-                            Ok(Some(w)) => match crate::keys::type_and_send(w, &block) {
-                                Ok(crate::keys::Delivered::Gone) => {
+                    // CÓ SỔ ⟹ kết quả vào sổ TRƯỚC khi dán: chết giữa hai bước
+                    // thì bên trả nhặt lại được, thay vì kết quả chỉ sống trong
+                    // bộ nhớ của luồng này (ca 23/09 18:15:45Z).
+                    match viec.filter(|id| so_viec_ghi_ket_qua(*id, r.code, &block)) {
+                        Some(id) => ack_tra_viec(
+                            tra_viec(&cfg, id, Some(&s), &[], chrono::Utc::now().timestamp(), true),
+                            &s,
+                            &line,
+                            &report,
+                        ),
+                        None => match dan_vao_phien(&s, &block) {
+                                DanVao::DaGui => {
                                     format!(
                                         "✅ Đã chạy trên máy rồi dán kết quả vào {}:\n$ {}\n{}",
                                         crate::sessions::shown(&s),
@@ -9285,11 +10087,11 @@ fn watch_long_job(
                                 // cả ba đường ra của `type_and_send` cùng trả
                                 // `Ok(())`. Nay ba đường ba câu, và câu này nói
                                 // rõ chữ đang Ở ĐÂU cùng cách gỡ.
-                                Ok(other) => {
+                                DanVao::NamTrongO(landed) => {
                                     logging::warn(
                                         "runin_block_left_in_box",
                                         json!({ "session": s.session_id, "n": n,
-                                                "landed": format!("{other:?}"),
+                                                "landed": landed,
                                                 "effect": "kết quả nằm trong ô nhập của phiên, CHƯA gửi" }),
                                     );
                                     // Cùng bẫy với nhánh `Bảng ĐÃ ĐỦ` (xem chú
@@ -9317,7 +10119,7 @@ fn watch_long_job(
                                 // hỏi Terminal — 386 lượt trong một ngày. Một
                                 // lần hỏi trượt không phải một sự thật vĩnh
                                 // viễn, nên giữ kết quả lại và gõ lại vòng sau.
-                                Err(e) => {
+                                DanVao::ChuaDan(Some(e)) => {
                                     remember_runin_pending_for(
                                         &cfg,
                                         &s.session_id,
@@ -9328,13 +10130,14 @@ fn watch_long_job(
                                     format!(
                                         "⏳ Đã chạy xong. Terminal chưa nhận được ({}) — huba sẽ gõ lại, \
                                          báo anh khi vào được phiên.\n\n$ {}\n{}",
-                                        crate::exec::truncate(&e.to_string(), 160),
+                                        crate::exec::truncate(&e, 160),
                                         line,
                                         crate::exec::truncate(&report, 600)
                                     )
                                 }
-                            },
-                            _ => {
+                            // Không có cửa sổ, hoặc tab sắp nhận chữ không phải
+                            // của phiên này (`paste_target_ok`) ⟹ giữ, gõ lại sau.
+                            DanVao::ChuaDan(None) => {
                                 remember_runin_pending_for(
                                     &cfg,
                                     &s.session_id,
@@ -9350,19 +10153,32 @@ fn watch_long_job(
                                     crate::exec::truncate(&report, 600)
                                 )
                             }
-                        }
+                        },
                     }
                 }
                 Err(e) => {
                     logging::error(
                         "runin_failed",
-                        json!({ "err": e.to_string(), "n": n,
+                        json!({ "err": e.to_string(), "n": n, "viec": viec,
                                 "cmd": crate::exec::truncate(&line, 120) }),
                     );
-                    format!(
+                    // Có sổ ⟹ phiên đã nhờ cũng phải được biết lệnh KHÔNG chạy
+                    // được — nó là bên đang đứng chờ kết quả. Đường cũ chỉ nói
+                    // câu này ra Telegram, mà hòm thư thì `quiet`.
+                    let report = format!(
                         "⚠ không chạy được: {}",
                         crate::exec::truncate(&e.to_string(), 200)
-                    )
+                    );
+                    let block = runin_block(&line, &report, true);
+                    match viec.filter(|id| so_viec_ghi_ket_qua(*id, None, &block)) {
+                        Some(id) => ack_tra_viec(
+                            tra_viec(&cfg, id, Some(&s), &[], chrono::Utc::now().timestamp(), true),
+                            &s,
+                            &line,
+                            &report,
+                        ),
+                        None => report,
+                    }
                 }
             };
             if quiet {
@@ -12092,6 +12908,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         ),
                     };
                     let ok = ack.starts_with("🔧");
+                    // Khép việc trong sổ TRƯỚC cú khởi động lại — không thì lượt
+                    // khôi phục sau đó thấy nó ở bước `doc` và dựng lại lần nữa.
+                    if let Some(id) = cmd.viec {
+                        so_viec_khep(
+                            id,
+                            crate::so_viec::Buoc::Bo,
+                            "lệnh dựng lại huba — đi đường /upgrade",
+                        );
+                    }
                     // NÓI TRƯỚC, chết sau. Thứ tự này là cả bản vá.
                     reply_in_channel(db, cfg, adapter, cmd, &ack);
                     if ok {
@@ -12144,6 +12969,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         "effect": "không còn phiên nào để dán kết quả vào — lệnh KHÔNG chạy" }),
                             );
                         }
+                        if let Some(id) = cmd.viec {
+                            so_viec_khep(
+                                id,
+                                crate::so_viec::Buoc::Bo,
+                                "không thấy phiên đích — lệnh KHÔNG chạy",
+                            );
+                        }
                         format!(
                             "⚠ không thấy phiên '{}' đang chạy — lệnh KHÔNG chạy.",
                             crate::exec::truncate(&want, 40)
@@ -12177,6 +13009,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     json!({ "session": s.session_id,
                                             "why": "sổ chưa biết dự án của phiên — không đoán gốc workspace" }),
                                 );
+                                if let Some(id) = cmd.viec {
+                                    so_viec_khep(
+                                        id,
+                                        crate::so_viec::Buoc::Bo,
+                                        "chưa biết thư mục của phiên — lệnh KHÔNG chạy",
+                                    );
+                                }
                                 let msg = format!(
                                     "⚠ chưa biết {} làm ở thư mục nào nên KHÔNG chạy. Một lệnh tương đối chạy nhầm thư mục thì vẫn ra một mã thoát, mà kết quả nói về thứ khác. Dùng đường dẫn tuyệt đối, hoặc chờ huba nhận ra dự án của phiên.",
                                     crate::sessions::shown(s)
@@ -12201,15 +13040,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         // giữa "chặn kênh chat" và "giết lệnh", mà cả hai đều
                         // sai. Nay lệnh chạy ở luồng riêng, huba trả lời NGAY,
                         // rồi theo dõi và báo lại — xem `watch_long_job`.
-                        watch_long_job(
-                            cfg.clone(),
-                            s.clone(),
-                            root.clone(),
-                            line.clone(),
-                            adapter.to_string(),
-                            cmd.chat_id.clone(),
-                            cmd.quiet,
-                        );
+                        watch_long_job(LongJob {
+                            cfg: cfg.clone(),
+                            s: s.clone(),
+                            root: root.clone(),
+                            line: line.clone(),
+                            adapter: adapter.to_string(),
+                            chat_id: cmd.chat_id.clone(),
+                            quiet: cmd.quiet,
+                            viec: cmd.viec,
+                        });
                         ack_sid = s.session_id.clone();
                         // 🔴 Câu này KHÔNG kể ruột huba — Hà 2026-08-16: *"Tại
                         // sao để báo trần 120s làm gì"*. Bản cũ khoe *"không
@@ -14271,8 +15111,15 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // ấy để trả lời ngay. Không đọc được màn ⟹ gõ như
                                 // cũ: chữ thường là việc hằng ngày, từ chối mọi câu
                                 // mỗi khi Terminal chậm là làm hỏng đường chính.
-                                match crate::keys::look(&s.tty, 24) {
-                                    crate::keys::Look::Saw { body, .. } => {
+                                //
+                                // ⚡ Đọc thẳng màn của `w` (cửa sổ đã tìm ra ở trên),
+                                // KHÔNG `look(&s.tty)`: `look` tìm lại cửa sổ rồi mới
+                                // đọc ⟹ hai lượt hỏi Terminal. Đo 23/09 21:5xZ, sau khi
+                                // dừng lượt biên dịch: mỗi lượt hỏi ~6 giây, một lệnh
+                                // gõ chữ 41,5 giây — mỗi lượt hỏi thừa là thêm giây
+                                // chờ cho mọi câu Hà gõ.
+                                match crate::keys::screen_text(w) {
+                                    Ok(body) => {
                                         let hop = crate::keys::parse_choices(&body);
                                         if hop.is_empty() {
                                             None
@@ -14304,7 +15151,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                             Some(msg)
                                         }
                                     }
-                                    crate::keys::Look::Blind { .. } => None,
+                                    Err(_) => None,
                                 }
                             } else {
                                 None
@@ -16361,22 +17208,45 @@ pub fn run_telegram_now(cfg: &Config) {
 /// lời AppleScript tuần tự, và hạng nền là thứ NHƯỜNG lượt cho lệnh gấp của chủ
 /// máy (`keys::PROBE_YIELD_MS`). Hai hàng mà cùng hạng thì việc của
 /// phiên vẫn chen ngang được ở tầng Terminal.
-static SESSION_RUNS: std::sync::Mutex<std::collections::VecDeque<(String, std::time::Instant)>> =
+///
+/// Phần tử thứ ba là id trong SỔ VIỆC ([`crate::so_viec`]) — `Some` chỉ cho
+/// việc sổ đưa lại lúc khởi động lại; việc MỚI của sổ không đi qua hàng này mà
+/// được đọc thẳng từ Redis (`so_viec_doc_moi`), còn `None` là đường cũ khi
+/// Redis không với tới.
+type SessionRun = (String, std::time::Instant, Option<i64>);
+
+static SESSION_RUNS: std::sync::Mutex<std::collections::VecDeque<SessionRun>> =
     std::sync::Mutex::new(std::collections::VecDeque::new());
 
 /// Đang có luồng vét [`SESSION_RUNS`] hay chưa.
 static RUNNING_SESSION_RUNS: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Có ai vừa đánh thức hàng từ lúc luồng vét bắt đầu lượt của nó chưa.
+///
+/// Cần riêng một cờ vì việc mới của sổ nằm trong REDIS, không trong
+/// [`SESSION_RUNS`]: luồng vét vừa `XREADGROUP` ra rỗng và sắp thoát thì một
+/// `XADD` chen giữa hai bước ấy sẽ nằm yên trong Redis — "hàng rỗng" không thấy
+/// nó. Cờ này là thứ luồng hỏi lại trước khi thoát.
+static SESSION_RUNS_WOKEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 /// Xếp một việc của phiên vào hàng thứ hai rồi vét hàng ấy ở luồng riêng.
 pub fn queue_session_run(cfg: &Config, text: String) {
-    use std::sync::atomic::Ordering;
     SESSION_RUNS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .push_back((text, std::time::Instant::now()));
+        .push_back((text, std::time::Instant::now(), None));
+    wake_session_runs(cfg);
+}
+
+/// Đánh thức luồng vét hàng của phiên (dựng luồng nếu chưa có) — nó vét cả
+/// [`SESSION_RUNS`] lẫn việc mới trong sổ việc.
+pub fn wake_session_runs(cfg: &Config) {
+    use std::sync::atomic::Ordering;
+    SESSION_RUNS_WOKEN.store(true, Ordering::SeqCst);
     if RUNNING_SESSION_RUNS.swap(true, Ordering::SeqCst) {
-        // Luồng đang chạy sẽ vét nốt trước khi thoát.
+        // Luồng đang chạy sẽ thấy cờ và vét thêm một lượt trước khi thoát.
         return;
     }
     let cfg = cfg.clone();
@@ -16384,22 +17254,32 @@ pub fn queue_session_run(cfg: &Config, text: String) {
         .name("session-runs".into())
         .spawn(move || {
             loop {
-                match Db::open(&cfg.db) {
+                SESSION_RUNS_WOKEN.store(false, Ordering::SeqCst);
+                let tu_so = match Db::open(&cfg.db) {
                     Ok(db) => execute_session_runs(&db, &cfg),
                     Err(e) => {
                         logging::error("session_runs_db_failed", json!({ "err": e.to_string() }));
                         break;
                     }
-                }
-                if SESSION_RUNS
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .is_empty()
-                {
+                };
+                // Còn việc nếu: hàng bộ nhớ chưa rỗng · lượt vừa rồi có đọc từ
+                // sổ (có thể còn quá `COUNT`) · có người đánh thức giữa lượt.
+                let con = tu_so
+                    || SESSION_RUNS_WOKEN.load(Ordering::SeqCst)
+                    || !SESSION_RUNS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .is_empty();
+                if !con {
                     break;
                 }
             }
             RUNNING_SESSION_RUNS.store(false, Ordering::SeqCst);
+            // Một lượt đánh thức rơi đúng khe giữa lần hỏi cuối và dòng trên
+            // thì chính nó đã thấy cờ "đang chạy" và bỏ về — hỏi lại một lần.
+            if SESSION_RUNS_WOKEN.load(Ordering::SeqCst) {
+                wake_session_runs(&cfg);
+            }
         });
     if let Err(e) = spawned {
         // Không nuốt: việc vẫn nằm trong hàng, vét ở lượt xếp kế tiếp.
@@ -16411,25 +17291,31 @@ pub fn queue_session_run(cfg: &Config, text: String) {
 /// Vét [`SESSION_RUNS`] — cùng `parse_command` + `execute_commands` với lệnh
 /// của chủ máy (luật 12: một đường, một bộ handler), khác đúng ba chỗ: không
 /// `CMD_LOCK`, không hạng gấp, và CHỈ nhận `/runin`.
-fn execute_session_runs(db: &Db, cfg: &Config) {
-    let pending: Vec<(String, std::time::Instant)> = SESSION_RUNS
+///
+/// Trả `true` khi lượt này có đọc được việc mới từ sổ — luồng vét hỏi lại sổ
+/// thêm một lượt, vì một lượt đọc có trần ([`SO_VIEC_MOI_LUOT`]).
+fn execute_session_runs(db: &Db, cfg: &Config) -> bool {
+    let mut pending: Vec<SessionRun> = SESSION_RUNS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .drain(..)
         .collect();
+    let tu_so = so_viec_doc_moi();
+    let co_tu_so = !tu_so.is_empty();
+    pending.extend(tu_so);
     if pending.is_empty() {
-        return;
+        return false;
     }
     let cho_ms = pending
         .iter()
-        .map(|(_, at)| at.elapsed().as_millis() as u64)
+        .map(|(_, at, _)| at.elapsed().as_millis() as u64)
         .max()
         .unwrap_or(0);
     let chat_id = crate::telegram::inbox()
         .map(|i| i.chat_id().to_string())
         .unwrap_or_default();
     let mut cmds: Vec<ChannelCommand> = Vec::new();
-    for (text, _) in pending {
+    for (text, _, viec) in pending {
         match verbs::parse_command(&text) {
             Some((CommandKind::RunIn, decision_id, arg)) => cmds.push(ChannelCommand {
                 // Phiên tự nhờ ⟹ kết quả vào phiên là đủ — xem `watch_long_job`.
@@ -16440,16 +17326,27 @@ fn execute_session_runs(db: &Db, cfg: &Config) {
                 chat_id: chat_id.clone(),
                 callback_id: String::new(),
                 message_id: None,
+                viec,
             }),
             // Hàng này chỉ chở `/runin`. Thứ khác lọt vào là lỗi của chỗ xếp,
             // và chạy nó ở đây là cho nó né khoá của hàng chủ máy — nên BỎ, và
             // nói ra.
-            other => logging::error(
-                "session_run_not_runin",
-                json!({ "head": crate::exec::truncate(&text, 60),
-                        "kind": other.map(|(k, _, _)| format!("{k:?}")),
-                        "effect": "KHÔNG chạy — hàng của phiên chỉ nhận /runin" }),
-            ),
+            other => {
+                logging::error(
+                    "session_run_not_runin",
+                    json!({ "head": crate::exec::truncate(&text, 60),
+                            "kind": other.map(|(k, _, _)| format!("{k:?}")),
+                            "viec": viec,
+                            "effect": "KHÔNG chạy — hàng của phiên chỉ nhận /runin" }),
+                );
+                if let Some(id) = viec {
+                    so_viec_khep(
+                        id,
+                        crate::so_viec::Buoc::Loi,
+                        "không phải /runin — không chạy",
+                    );
+                }
+            }
         }
     }
     if !cmds.is_empty() {
@@ -16459,6 +17356,7 @@ fn execute_session_runs(db: &Db, cfg: &Config) {
         );
         execute_commands(db, cfg, crate::telegram::NAME, &cmds);
     }
+    co_tu_so
 }
 
 /// Chạy những mệnh lệnh vừa gõ trên TELEGRAM.
@@ -16507,6 +17405,7 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
                 callback_id: String::new(),
                 // Tin đã sinh ra lệnh — chỗ trả lời sẽ thả emoji lên chính nó.
                 message_id: item.msg_id,
+                viec: None,
             }),
             // Không phải lệnh — hai đường rất khác nhau, xem `text_for_session`.
             None => match text_for_session(&item.text) {
@@ -16550,6 +17449,7 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
                             chat_id: inbox.chat_id().to_string(),
                             callback_id: String::new(),
                             message_id: item.msg_id,
+                            viec: None,
                         });
                     }
                 }
@@ -17177,6 +18077,12 @@ pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {
     // cạnh hai cái tick trên vì cùng một hình dạng việc — thứ hỏng vì Terminal
     // bận một lúc, không hỏng vì sai.
     runin_pending_tick(db, cfg, now_sec);
+    // Sổ việc: lần đầu với tới Redis trong tiến trình này thì nhặt lại việc treo
+    // từ tiến trình trước, rồi mỗi vòng trả những kết quả chưa ai trả / trả hỏng.
+    // Dùng chung ảnh chụp `live` để tra phiên đích — không chụp thêm lượt nào.
+    // Trả lại chạy ở luồng riêng: vòng chạy không đứng chờ Terminal.
+    so_viec_khoi_dong(cfg);
+    so_viec_tra_nen(cfg, &live.sessions, now_sec);
     // …và nhận thư của chính các phiên: chúng tự xếp lệnh vào scratchpad của
     // mình, huba đọc id từ đường dẫn nên không phiên nào phải khai id.
     // 🔴 RÚT LỆNH LẦN NỮA, ngay sau phép chụp — Hà 2026-08-25: *"sau khi gửi

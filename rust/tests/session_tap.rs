@@ -133,3 +133,34 @@ fn a_link_that_cannot_be_built_never_becomes_a_dead_tap() {
     assert_eq!(wrapped, 0, "{html}");
     assert!(!html.contains("<a href="), "{html}");
 }
+
+/// 🔴 Hà 2026-09-25, ảnh `/session` kết bằng *"…còn 2 phiên nữa chưa liệt kê"*: *"Sao
+/// không liệt kê hết phiên thế?"*. Máy lúc ấy chạy 14 phiên, danh sách cắt ở 12 —
+/// trần của BẢNG PHÍM, trong khi mỗi hàng đã là liên kết trong chữ. Đúng 14 phiên
+/// ⟹ đủ 14 hàng, 14 đích chạm, không câu "còn … phiên nữa".
+#[test]
+fn muoi_bon_phien_thi_liet_ke_du_muoi_bon() {
+    bot();
+    let rows: Vec<LiveSession> = (0..14)
+        .map(|i| {
+            sess(
+                &format!("{i:08x}-1111-2222-3333-444444444444"),
+                &format!("[dwork/lan{i}]"),
+            )
+        })
+        .collect();
+    let text = session_list_text(&rows, "", NOW);
+    assert!(
+        !text.contains("phiên nữa chưa liệt kê"),
+        "14 phiên mà vẫn cắt:\n{text}"
+    );
+    let (html, wrapped) = session_list_html(&text, &rows);
+    assert_eq!(wrapped, 14, "phải đủ 14 đích chạm:\n{html}");
+    for r in &rows {
+        assert!(
+            html.contains(&format!("start=s_{}", r.session_id)),
+            "thiếu {}:\n{html}",
+            r.session_id
+        );
+    }
+}

@@ -4302,12 +4302,24 @@ pub fn recent_errors_line(db: &Db) -> String {
 // một dòng cho mỗi vòng, để `huba status` và khối "lỗi gần đây" của `/doctor` còn
 // có chỗ đọc, thay vì luôn luôn rỗng.
 
-/// Nhiều nhất bấy nhiêu nút phiên trong một tin.
+/// Nhiều nhất bấy nhiêu nút phiên trong một tin — chỉ còn cho ĐƯỜNG LÙI bằng nút
+/// (chưa biết tên bot ⟹ không dựng được liên kết trong chữ).
 ///
 /// Không phải giới hạn của Telegram (nó chịu được nhiều hơn) mà của **ngón tay
 /// trên điện thoại**: quá số này thì bảng phím dài hơn màn hình và cái nút cuối
-/// nằm ngoài tầm nhìn. Cắt thì phải NÓI RA — xem `session_list_text`.
+/// nằm ngoài tầm nhìn. Cắt thì phải NÓI RA.
 pub const MAX_SESSION_BUTTONS: usize = 12;
+
+/// Nhiều nhất bấy nhiêu HÀNG phiên trong danh sách `/session` — mỗi hàng mang liên
+/// kết của chính nó ngay trong chữ, không chiếm bàn phím.
+///
+/// 🔴 Hà 2026-09-25, ảnh danh sách kết bằng *"…còn 2 phiên nữa chưa liệt kê"*: *"Sao
+/// không liệt kê hết phiên thế?"*. Danh sách vẫn cắt ở [`MAX_SESSION_BUTTONS`] (12)
+/// — lý do của con số ấy là BẢNG PHÍM dài quá màn hình, mà từ khi mỗi hàng thành
+/// liên kết trong chữ thì không còn bảng phím nào (`session_taps_sent`, 0 nút).
+/// Trần thật bây giờ là 4.096 ký tự một tin của Telegram: đo 24/09, tin 12 hàng dài
+/// tới **1.967** ký tự (~164/hàng) ⟹ 20 hàng ~3.300, còn dư chỗ cho tiêu đề.
+pub const MAX_SESSION_ROWS: usize = 20;
 
 /// Danh sách phiên, viết cho một cái điện thoại.
 ///
@@ -4559,7 +4571,7 @@ fn only_tool_marks(s: &str) -> bool {
 pub fn session_list_html(text: &str, sessions: &[crate::sessions::LiveSession]) -> (String, usize) {
     let taps: Vec<(String, String)> = sessions
         .iter()
-        .take(MAX_SESSION_BUTTONS)
+        .take(MAX_SESSION_ROWS)
         .filter_map(|s| {
             let href = crate::telegram::deep_link(&format!("s_{}", s.session_id))?;
             Some((short_id(&s.session_id).to_string(), href))
@@ -5070,7 +5082,7 @@ pub fn session_list_text(
     // nhau. Hàng không khai gì (cửa sổ Terminal trần) vẫn không in gì — nó
     // không có chế độ, chứ không phải thiếu dữ liệu.
     let shown_rows: Vec<&crate::sessions::LiveSession> =
-        sessions.iter().take(MAX_SESSION_BUTTONS).collect();
+        sessions.iter().take(MAX_SESSION_ROWS).collect();
     let modes: std::collections::BTreeSet<&str> = shown_rows
         .iter()
         .map(|s| permission_label(s))
@@ -5296,11 +5308,11 @@ pub fn session_list_text(
             }
         }
     }
-    if sessions.len() > MAX_SESSION_BUTTONS {
+    if sessions.len() > MAX_SESSION_ROWS {
         // Cắt bớt mà im lặng thì danh sách này nói dối về số phiên đang chạy.
         out.push_str(&format!(
             "…còn {} phiên nữa chưa liệt kê — dùng /session <id>\n",
-            sessions.len() - MAX_SESSION_BUTTONS
+            sessions.len() - MAX_SESSION_ROWS
         ));
     }
     if focus.is_empty() {
@@ -17036,7 +17048,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     let mut sent = false;
                     if adapter == crate::telegram::NAME {
                         if let Some(tg) = crate::telegram::inbox() {
-                            let rows = live.sessions.len().min(MAX_SESSION_BUTTONS);
+                            let rows = live.sessions.len().min(MAX_SESSION_ROWS);
                             let (html, linked) = session_list_html(
                                 &crate::telegram::strip_markdown(&ack),
                                 &live.sessions,
@@ -17072,7 +17084,19 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                         (session_button_label(s), format!("sess:{}", s.session_id))
                                     })
                                     .collect();
-                                match tg.send_buttons(&ack, &buttons) {
+                                // Chữ liệt kê tới `MAX_SESSION_ROWS` hàng, nút chỉ
+                                // `MAX_SESSION_BUTTONS` — hàng nào không có nút thì NÓI.
+                                let ack_nut = if live.sessions.len().min(MAX_SESSION_ROWS)
+                                    > MAX_SESSION_BUTTONS
+                                {
+                                    format!(
+                                        "{ack}\n(nút chỉ có cho {MAX_SESSION_BUTTONS} phiên đầu — \
+                                         phiên còn lại: /session <id>)"
+                                    )
+                                } else {
+                                    ack.clone()
+                                };
+                                match tg.send_buttons(&ack_nut, &buttons) {
                                     Ok(()) => sent = true,
                                     // Hỏng thì rơi về đường chữ thường bên dưới,
                                     // đừng nuốt: thà một tin không nút còn hơn im.

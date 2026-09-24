@@ -5,9 +5,7 @@
 //! cú bấm rơi vào hư không, còn một dòng danh sách thiếu id thì người đọc không
 //! gõ tiếp được lệnh nào.
 
-use huba::pipeline::{
-    session_button_label, session_list_text, text_for_session, MAX_SESSION_BUTTONS,
-};
+use huba::pipeline::{session_button_label, session_list_text, text_for_session, MAX_SESSION_ROWS};
 use huba::sessions::LiveSession;
 use huba::telegram::callback_to_command;
 
@@ -286,7 +284,7 @@ fn a_truncated_list_says_how_many_it_hid() {
     // (`0 gõ được · 15 chỉ đọc`, thêm 2026-09-06). Bài kiểm này nói về việc CẮT
     // danh sách, không nói về gõ được hay không, nên fixture phải mang đúng hình
     // dạng nó định tả — sửa fixture, không nới câu assert.
-    let live: Vec<LiveSession> = (0..MAX_SESSION_BUTTONS + 3)
+    let live: Vec<LiveSession> = (0..MAX_SESSION_ROWS + 3)
         .map(|i| {
             let mut s = sess(
                 &format!("{i:08}-0000-0000-0000-000000000000"),
@@ -301,7 +299,7 @@ fn a_truncated_list_says_how_many_it_hid() {
         .collect();
     let text = session_list_text(&live, "", NOW);
     assert!(
-        text.contains(&format!("{} phiên đang sống", MAX_SESSION_BUTTONS + 3)),
+        text.contains(&format!("{} phiên đang sống", MAX_SESSION_ROWS + 3)),
         "tổng số phải đúng: {text}"
     );
     assert!(text.contains("còn 3 phiên nữa"), "cắt mà im: {text}");

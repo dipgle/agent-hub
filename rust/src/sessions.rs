@@ -277,13 +277,23 @@ pub struct LiveSession {
     /// mọi phiên đang chạy nên phân biệt được đúng số không. Trường này là CHỦ
     /// ĐỀ, nó đứng yên suốt một mạch việc.
     ///
-    /// Nguồn: **nhan đề tab Terminal**, thứ chính `claude` đặt và chính chủ máy
-    /// đang nhìn trên thanh tab (`keys::Tab::doing`). Nên đây không phải huba
-    /// đoán từ nhật ký — cùng hạng bằng chứng với `status` của `claude agents`,
-    /// và cùng một chữ trên hai màn hình. Đúng phép thử cầu nối.
+    /// Nguồn: **bản ghi `ai-title` trong nhật ký phiên** — chính nhan đề `claude`
+    /// tự đặt, cùng chữ nó đẩy lên thanh tab Terminal. Nhan đề tab
+    /// (`keys::Tab::doing`) nay chỉ là đường lùi cho phiên chưa có `ai-title`.
     ///
-    /// Rỗng = phiên không có tab (nền, editor), hoặc lượt dò Terminal hỏng, hoặc
-    /// tab chưa đặt nhan đề. Không đoán bù: chỗ gọi rơi về mã id ngắn.
+    /// 🔴 Đổi nguồn 2026-09-24. `sample` Terminal lúc nó câm: **54 %** mẫu luồng
+    /// chính nằm trong `-[NSWindow _dosetTitle:]` — ~13 phiên `claude` đổi nhan đề
+    /// liên tục, và Apple Event của huba xếp hàng sau đó. Nhật ký đọc được CẢ lúc
+    /// lượt dò Terminal hỏng — đúng lúc cần nhất.
+    ///
+    /// ⚠ Hà duyệt `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` cùng ngày, và đo ra biến ấy
+    /// tắt LUÔN `ai-title`: phiên mở sau khi bật (pid 90626, 14:40Z) — tab chỉ còn
+    /// `Terminal`, và 0 bản ghi `ai-title` sau 8 lượt, trong khi 4/4 phiên mở trước
+    /// đó có ngay sau lượt ĐẦU. Nên phiên mở với biến ấy KHÔNG có trường này — cả
+    /// hai nguồn cùng tắt; nhãn còn lại là tên phiên tự khai (`[dự án/làn]`).
+    ///
+    /// Rỗng = không có `ai-title` trong 256 KB cuối và không có tab mang nhan đề.
+    /// Không đoán bù: chỗ gọi rơi về mã id ngắn.
     #[serde(default)]
     pub doing: String,
     /// The permission mode the session is running under ("auto", "dontAsk",
@@ -1570,6 +1580,9 @@ pub struct TranscriptTail {
     /// `tool_use_id` never got a `tool_result` is the difference between "đang
     /// chạy" and "đứng im", and it is the one thing a phone cannot guess.
     pub pending_subagents: usize,
+    /// Nhan đề `claude` tự đặt cho phiên — bản ghi `ai-title` MỚI NHẤT trong
+    /// khung đọc. Cùng chữ với nhan đề tab Terminal; xem `LiveSession::doing`.
+    pub ai_title: Option<String>,
 }
 
 /// Dự án phiên đang làm — đoán từ ĐƯỜNG DẪN nó đụng vào, không phải từ `cwd`.
@@ -3577,8 +3590,19 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
         ..Default::default()
     };
     for line in tail.lines().rev() {
+        // Đủ cả ba (lượt mới nhất · chế độ · nhan đề) ⟹ dừng.
+        if out.last_text.is_some() && out.permission_mode.is_some() && out.ai_title.is_some() {
+            break;
+        }
         let line = line.trim();
         if line.is_empty() {
+            continue;
+        }
+        // Đã có lượt mới nhất lẫn chế độ ⟹ chỉ còn tìm nhan đề: dòng nào không
+        // mang chữ ấy thì bỏ qua KHÔNG parse, để một nhật ký không có `ai-title`
+        // không bắt vòng chạy parse trọn 256 KB mỗi lượt.
+        let chi_tim_nhan_de = out.last_text.is_some() && out.permission_mode.is_some();
+        if chi_tim_nhan_de && !line.contains("\"ai-title\"") {
             continue;
         }
         let Ok(record) = serde_json::from_str::<Value>(line) else {
@@ -3586,6 +3610,14 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
             continue;
         };
         let kind = record.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if kind == "ai-title" && out.ai_title.is_none() {
+            out.ai_title = record
+                .get("aiTitle")
+                .and_then(|t| t.as_str())
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_string);
+        }
         if kind == "permission-mode" && out.permission_mode.is_none() {
             out.permission_mode = record
                 .get("permissionMode")
@@ -3611,10 +3643,6 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
             .get("timestamp")
             .and_then(|t| t.as_str())
             .map(str::to_string);
-        // Stop once BOTH are known: the newest turn and the mode it runs under.
-        if out.last_text.is_some() && out.permission_mode.is_some() {
-            break;
-        }
     }
     out
 }
@@ -4633,18 +4661,19 @@ pub fn drive_summary(rows: &[LiveSession]) -> String {
     }
 }
 
-/// Chép VIỆC ĐANG LÀM từ nhan đề tab sang từng hàng — xem `LiveSession::doing`.
+/// Chép VIỆC ĐANG LÀM từ nhan đề tab sang những hàng CHƯA có nó từ nhật ký
+/// (`ai-title`) — xem `LiveSession::doing`.
 ///
 /// Cùng khuôn với `mark_can_type`, và cùng một lý do: dùng lại đúng cái danh
 /// sách tab mà ảnh chụp đã phải trả tiền một lần (`keys::terminal_screens`), nên
 /// giá cận biên của cả tính năng này bằng KHÔNG — không thêm một lời gọi
 /// `osascript` nào, không thêm một mili giây nào vào vòng chạy.
 ///
-/// Không có tab thì để RỖNG, không đoán bù bằng nhật ký: một câu bịa đứng trên
-/// nút còn tệ hơn một mã hex, vì mã hex thì ai cũng biết là mình không hiểu.
+/// Không có tab lẫn `ai-title` thì để RỖNG, không đoán bù: một câu bịa đứng
+/// trên nút còn tệ hơn một mã hex, vì mã hex thì ai cũng biết là mình không hiểu.
 fn mark_doing(rows: &mut [LiveSession], tabs: &[crate::keys::Tab]) {
     for r in rows.iter_mut() {
-        if r.tty.is_empty() {
+        if r.tty.is_empty() || !r.doing.is_empty() {
             continue;
         }
         r.doing = crate::keys::alive_tab(tabs, &r.tty)
@@ -5082,6 +5111,9 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                         row.last_activity = Some(ts);
                     }
                     row.permission_mode = parsed.permission_mode.clone();
+                    // Chủ đề phiên từ NHẬT KÝ trước, nhan đề tab chỉ là đường lùi
+                    // (`mark_doing`) — xem `LiveSession::doing`.
+                    row.doing = parsed.ai_title.clone().unwrap_or_default();
                     // Phiên đã chết thì KHÔNG có subagent nào đang chạy — dù
                     // nhật ký còn dở dang. Đo thật 2026-08-10, ngay sau khi biết
                     // đọc agent nền: phiên "Tự chạy lại khi gặp lỗi" khai **3

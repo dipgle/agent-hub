@@ -55,6 +55,24 @@ CHƯA: tin tự phát thật có `text_links>0` · Hà bấm 📎 thật ra đú
   tắt luôn `ai-title` không.
 - Monitor 30′ đầu của tôi MÙ: ống `grep --line-buffered | cut` — `cut` không xả dòng ⟹ 12 dòng `error` không tới.
 
+### ✅ Hà DUYỆT (~13:0xZ) `CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1` — đã ghi vào `~/projects/.claude/settings.json` `env`
+- Tệp ấy nằm trong git của workspace (`~/projects`), để `M`, KHÔNG commit (ngoài cây huba). JSON hợp lệ.
+- **Đo tác dụng** (14:4xZ, Terminal đã trả lời lại, `count windows` 16): phiên mở SAU khi bật (pid 90626, `5718cb91`,
+  14:40Z) — `custom title` tab = `Terminal` (không còn nhan đề); phiên cũ vẫn `✳ …`. ⚠ **Biến tắt LUÔN `ai-title`**:
+  0 bản ghi sau 8 lượt, trong khi 4/4 phiên cũ có ngay sau lượt đầu (dòng 24–25). n=1 phiên mới.
+  ⟹ phiên mới mất phần "·đang làm gì" trong `/session`; nhãn `[dự án/làn]` tự khai vẫn còn.
+- ⚠ `ps -E` KHÔNG đo được biến này: pid 51784 (chính phiên này) "khớp" vì argv chứa chữ bàn giao — tự khớp.
+- huba: `LiveSession::doing` nay lấy `ai-title` từ nhật ký trước, nhan đề tab là đường lùi (`sessions.rs`
+  `parse_tail` + `mark_doing`). Có ích cho phiên cũ lúc dò tab hỏng; KHÔNG cứu được phiên mới. Bài
+  `tests/nhan_de_tu_nhat_ky.rs` 5/5; cấy "dừng sớm cũ" ⟹ đúng 1 ĐỎ (`nhan_de_nam_xa_van_tim_thay`), trả gốc khớp băm.
+  CHƯA cài (cài lại xoá bộ đệm cửa sổ — không đáng cho thay đổi này).
+
+### Việc kế đo được: `claude -p /usage` của CHÍNH hubd
+`~/.claude/projects/-Users-hanguyen-Library-Application-Support-hub/`: **14.149 nhật ký, 63 MB, 1.127 lượt hôm nay** —
+6 tài khoản mỗi ~7′, mỗi lượt một tiến trình `claude` đầy đủ (binary 217 MB). Vẫn trả số thật ("Current week … 91 %").
+`runtime.rs:36 USAGE_TTL_MS` 5′ (Hà từng chốt "5p 1 lần"); bộ đệm trong bộ nhớ ⟹ mỗi lần cài cũng chạy lại. Đụng nhịp
+Hà chốt ⟹ báo, chưa đổi.
+
 Số đo khác, CHƯA truy gốc:
 - Terminal NGHẸT 09:55Z → **hồi 11:01:50Z** (40/43 vòng `terminal_probe_failed`, 31 lần `quá 20s`). Số phiên
   KHÔNG giảm lúc hồi (13 → 14) ⟹ giả thuyết "tiêu đề cửa sổ của ~13 phiên" chưa được số đo này ủng hộ.

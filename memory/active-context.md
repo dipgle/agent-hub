@@ -91,6 +91,16 @@ trả gốc băm `39e36f37…` khớp. Commit `623623c`.
 2/2 hòm thư dán về phiên (`so_viec_da_tra` 2). CHƯA thấy thật: `/accounts` đo lại (chờ Hà gõ) · chọn tài khoản khi
 phiên bị chặn (chờ sự kiện `Limited`). CHƯA cổng đầy đủ ⟹ 4 commit CHƯA đẩy.
 
+### ✅ 2026-09-25 01:1xZ — CỔNG XANH, ĐÃ ĐẨY `3f33175..3b92367` (11 commit của phiên 0b9859f3)
+- `gate.sh` (cổng lần 6, 00:40→01:04Z): fmt 0 · clippy 0 · build 0 (1.359 s) · **173/173** binary · 0 hỏng · doctest 0.
+  Lần 2 đỏ clippy (`blocks_in_conditions`, đã vá); lần 3/4/5 bị HUỶ đúng thiết kế khi Hà gửi lệnh (clippy tốn ~30′).
+- `quality-gate.sh huba` `QG_BASE=3f33175`: **thoát 0**, mọi mục cơ học xanh — sau khi bỏ `todo!()` trong chuỗi mã giả
+  của `tests/window_of_dem_truoc.rs` (cổng chấm là hardcode giả). Lần chạy không `QG_BASE` ra 2 (diff rỗng) — đúng.
+- Đẩy qua hòm thư huba: `3f33175..b91445a` 01:06Z · `b91445a..3b92367` 01:10Z; `merge-base --is-ancestor` xác nhận cả hai.
+- 📎 trên máy thật từ 11:59Z: 357 tin tự phát, 45 có đường dẫn, **41 gửi kèm liên kết** (trước: 0). Hà CHƯA bấm 📎
+  lần nào ⟹ sổ đánh số chưa được cú bấm thật kiểm. `/session` 22:04Z: 16 hàng/16 liên kết.
+- Hubd đang chạy: pid 8328 (cài 22:08:47Z) = HEAD trừ commit sổ + bài đối chứng (không đổi mã chạy).
+
 ### ✅ 2026-09-24 22:0xZ (05:0x giờ máy 25/09) — cửa sổ đã đóng đọc nhầm thành "Terminal bận" (`937cd28`), ĐÃ CÀI 22:08:47Z (pid 8328)
 Log 24/09 19:15→19:58Z: 25× `window_of_from_cache` err `Terminal got an error: Can’t get window id 10807. (-1728)` —
 nháy CONG U+2019; mã so `"Can't get"` nháy thẳng ⟹ id chết dùng lại mãi ⟹ 61× `so_viec_cho_tra_lai` + 8 việc hòm thư

@@ -47,7 +47,7 @@ fn window_of_hoi_bo_dem_truoc_khi_quet() {
 /// ĐỐI CHỨNG NGƯỢC: hình dạng CŨ (quét trước, bộ đệm chỉ là đường lùi khi hỏng).
 #[test]
 fn doi_chung_nguoc_quet_truoc() {
-    let cu = "pub fn window_of(tty: &str) -> Result<Option<i64>> {\n    let script = window_script(&dev);\n    match osascript(&script) {\n        Err(e) => match recall_window(&dev) { _ => todo!() },\n    }\n}\n";
+    let cu = "pub fn window_of(tty: &str) -> Result<Option<i64>> {\n    let script = window_script(&dev);\n    match osascript(&script) {\n        Err(e) => match recall_window(&dev) { w => Ok(w) },\n    }\n}\n";
     assert_eq!(dem_truoc(than_window_of_mac(cu).unwrap()), Some(false));
     let khong_dem = "pub fn window_of(tty: &str) -> Result<Option<i64>> {\n    let script = window_script(&dev);\n}\n";
     assert_eq!(dem_truoc(than_window_of_mac(khong_dem).unwrap()), None);

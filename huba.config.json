@@ -73,6 +73,10 @@
     {
       "name": "acc6",
       "config_dir": "~/.claude-acc6"
+    },
+    {
+      "name": "acc7",
+      "config_dir": "~/.claude-acc7"
     }
   ]
 }

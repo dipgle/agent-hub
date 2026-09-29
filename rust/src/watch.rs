@@ -1001,10 +1001,14 @@ pub fn suggest_account(
         // TRƯỚC `Full` ⟹ được chọn đúng lúc acc2 kịch trần ⟹ cửa sổ `ttys007`
         // mở ra rồi đứng ở hộp chọn giao diện lần đầu, còn phiên cũ thì đã bị
         // bỏ lại. Xem `quota::account_not_ready`.
+        // `Locked` (Hà 29/09) — chủ máy khoá thì huba không đưa vào sử dụng.
         .filter(|a| {
             !matches!(
                 a.rank,
-                crate::quota::Rank::Full | crate::quota::Rank::NotReady | crate::quota::Rank::Dead
+                crate::quota::Rank::Full
+                    | crate::quota::Rank::NotReady
+                    | crate::quota::Rank::Dead
+                    | crate::quota::Rank::Locked
             )
         })
         .min_by_key(|a| a.rank)

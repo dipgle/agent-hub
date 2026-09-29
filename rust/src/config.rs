@@ -644,9 +644,39 @@ pub struct ClaudeAccountCfg {
     /// một lệnh sắp chạy trên máy người khác là đúng thứ tệp này cấm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub launch: Option<String>,
+    /// 🔒 Chủ máy KHOÁ tài khoản này ⟹ huba không đưa nó vào sử dụng: không tự
+    /// chọn (`quota::Rank::Locked`), không mở phiên trên nó kể cả khi gõ `-a`
+    /// (`sessions::ensure_account_usable`), không dò `/usage` bằng nó. Phiên ĐANG
+    /// chạy trên nó vẫn được liệt kê — nhìn không phải là dùng.
+    ///
+    /// Hà 2026-09-29: *"thêm thuộc tính khóa vào danh sách tài khoản, nếu đang
+    /// khóa thì không đưa vào sử dụng"*. Đổi từ điện thoại: `/accounts khoa <tên>`
+    /// · `/accounts mo <tên>`. Mặc định `false`, và `false` không ghi ra tệp —
+    /// cấu hình cũ đọc vào y nguyên.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 
 impl Config {
+    /// Tài khoản `name` có đang bị chủ máy khoá không. Tên lạ ⟹ `false`: cửa
+    /// "tên lạ" là một cửa riêng, mỗi route đã tự gác và tự nói.
+    pub fn account_locked(&self, name: &str) -> bool {
+        self.claude_accounts
+            .iter()
+            .any(|a| a.name == name && a.locked)
+    }
+
+    /// Tên tài khoản MẶC ĐỊNH — hàng không có `config_dir`, đúng định nghĩa mà
+    /// `sessions::account_launch` dùng khi được gọi với `None`. Cần tên này để
+    /// hỏi *"mặc định có đang khoá không"*: `/new` không gõ `-a` mà không còn tài
+    /// khoản nào còn cửa thì rơi về đúng hàng ấy.
+    pub fn default_account_name(&self) -> Option<String> {
+        self.claude_accounts
+            .iter()
+            .find(|a| a.config_dir.as_deref().unwrap_or("").is_empty())
+            .map(|a| a.name.clone())
+    }
+
     /// Accounts to enumerate, with the ambient account as the fallback so a
     /// machine that never configured this still sees its own sessions.
     pub fn claude_accounts_or_ambient(&self) -> Vec<ClaudeAccountCfg> {
@@ -655,6 +685,7 @@ impl Config {
                 name: "mặc định".into(),
                 config_dir: None,
                 launch: None,
+                locked: false,
             }]
         } else {
             self.claude_accounts.clone()

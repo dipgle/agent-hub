@@ -382,6 +382,9 @@ fn doc_models(buckets: Option<&Value>) -> Vec<ModelPct> {
 ///   rồi mà lượt chạy đầu chưa xong (`claude` còn hỏi giao diện). Đứng cạnh
 ///   `Dead` chứ không cạnh `Unknown`, và đó là cả bản vá 12/09 — xem
 ///   [`account_not_ready`].
+/// * [`Rank::Locked`] — **chủ máy khoá** (`locked: true` trong cấu hình). Không
+///   phải một phép đo mà một QUYẾT ĐỊNH, nên nó đè mọi con số: phép dò `/usage`
+///   đọc ra 0% cũng không mở lại được nó ([`overlay_live`]). Chỉ chủ máy mở.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Rank {
     Free(i64),
@@ -389,6 +392,7 @@ pub enum Rank {
     Full,
     NotReady,
     Dead,
+    Locked,
 }
 
 impl Rank {
@@ -400,6 +404,7 @@ impl Rank {
             Rank::Full => "ĐÃ KỊCH TRẦN".to_string(),
             Rank::NotReady => "CHƯA DÙNG ĐƯỢC".to_string(),
             Rank::Dead => "TỔ CHỨC ĐÃ KHOÁ".to_string(),
+            Rank::Locked => "ĐANG KHOÁ".to_string(),
         }
     }
 }
@@ -432,6 +437,11 @@ pub fn overlay_live(ranked: Vec<Ranked>, usage_accounts: &Value) -> Vec<Ranked> 
     ranked
         .into_iter()
         .map(|mut r| {
+            // Khoá là quyết định của chủ máy, không phải một con số — số dò sống
+            // đẹp tới đâu cũng không được mở lại nó.
+            if r.rank == Rank::Locked {
+                return r;
+            }
             let row = usage_accounts.get(&r.name);
             let pct = |k: &str| row.and_then(|v| v.get(k)).and_then(Value::as_i64);
             if let Some(live) = rank_from_live(pct("session_pct"), pct("week_pct")) {
@@ -1016,7 +1026,15 @@ pub fn rank_all(cfg: &crate::config::Config, now_ms: i64) -> Vec<Ranked> {
     read_all(cfg)
         .into_iter()
         .map(|q| {
-            let r = rank(&q, now_ms);
+            // 🔒 Khoá đứng Ở ĐÂY vì mọi đường CHỌN tài khoản đều bắt đầu từ hàm
+            // này (`/new` không `-a`, gợi ý khi bị chặn, tự chuyển khi kịch trần,
+            // bàn giao tự động, `huba handover -a auto`) — một chỗ đóng dấu thì
+            // năm đường cùng thấy, và dòng log dưới cũng nói ra.
+            let r = if cfg.account_locked(&q.account) {
+                Rank::Locked
+            } else {
+                rank(&q, now_ms)
+            };
             // 🔴 Điều kiện thứ hai phải có mặt Ở ĐÂY, không chỉ ở `/accounts`.
             // Log là bề mặt pháp y của repo này — mọi mục PLAN.md đều dựng từ
             // nó — nên một cảnh báo chỉ hiện trên điện thoại là cảnh báo mới làm

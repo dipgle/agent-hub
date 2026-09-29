@@ -279,6 +279,11 @@ fn cmd_handover(
                 biet.join(" · ")
             );
         }
+        // 🔒 Dừng TRƯỚC lượt đóng sổ (tốn hạn mức) — cửa sổ kế nhiệm trên một tài
+        // khoản khoá sẽ bị `sessions::ensure_account_usable` chặn đằng nào cũng vậy.
+        if cfg.account_locked(acc) {
+            anyhow::bail!(huba::sessions::account_locked_text(cfg, acc));
+        }
         println!("→ chuyển {} ({}) sang {acc}", target.name, target.account);
         Some(acc.to_string())
     };

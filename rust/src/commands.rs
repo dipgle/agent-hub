@@ -384,9 +384,12 @@ pub const ROUTES: &[Route] = &[
         aliases: &["acc", "taikhoan"],
         legacy: &[],
         kind: CommandKind::Accounts,
-        arg: Arg::None,
-        usage: "",
-        help: "Các tài khoản Claude trên máy",
+        // `Rest`: gõ trơn = XEM như cũ; `khoa <tên>` / `mo <tên>` = khoá / mở
+        // một tài khoản (Hà 29/09) — ngồi ở máy thì sửa tệp cấu hình, từ điện
+        // thoại thì phải có đường này, không thì là một "gap" của cầu nối.
+        arg: Arg::Rest,
+        usage: "[khoa|mo <tài khoản>]",
+        help: "Các tài khoản Claude trên máy · khoa/mo <tên> = khoá/mở",
         listed: true,
     },
     Route {

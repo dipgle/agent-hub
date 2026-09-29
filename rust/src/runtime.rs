@@ -180,7 +180,14 @@ pub fn accounts_text(
     let per_acc = usage.get("accounts");
     let accounts = cfg.claude_accounts_or_ambient();
 
-    let mut out = format!("👤 {} tài khoản claude\n", accounts.len());
+    let so_khoa = accounts.iter().filter(|a| a.locked).count();
+    let mut out = match so_khoa {
+        0 => format!("👤 {} tài khoản claude\n", accounts.len()),
+        k => format!(
+            "👤 {} tài khoản claude · 🔒 {k} đang khoá\n",
+            accounts.len()
+        ),
+    };
     for acc in &accounts {
         let mine: Vec<_> = live
             .sessions
@@ -213,6 +220,14 @@ pub fn accounts_text(
                 ),
             }
         ));
+        // 🔒 Ngay dưới tên, trước mọi con số: tài khoản khoá thì hạn mức bên dưới
+        // chỉ còn là thông tin, không còn là lý do để chọn nó.
+        if acc.locked {
+            out.push_str(&format!(
+                "    🔒 ĐANG KHOÁ — huba không chọn, không mở phiên, không dò /usage · mở: /accounts mo {}\n",
+                acc.name
+            ));
+        }
         // Tài khoản KHÔNG liệt kê được phiên ở lượt này: nói thẳng, vì con số
         // "0 phiên" ở trên là con số của một phép đo hỏng — xem `watch::Mark::a`.
         if live.blind.contains(&acc.name) {
@@ -536,8 +551,16 @@ pub fn usage_lam_moi(cfg: &Config, db: &Db, cu_ms: i64) -> Value {
     let mut so = doc_so_usage(db);
     let so_cli = crate::quota::read_all(cfg);
     let accounts = cfg.claude_accounts_or_ambient();
+    // 🔒 Tài khoản khoá thì KHÔNG dò: mỗi lượt dò là một `claude -p` chạy bằng
+    // chính tài khoản ấy, tức là đưa nó vào sử dụng (Hà 29/09).
+    let khoa: Vec<String> = accounts
+        .iter()
+        .filter(|a| a.locked)
+        .map(|a| a.name.clone())
+        .collect();
     let can: Vec<&crate::config::ClaudeAccountCfg> = accounts
         .iter()
+        .filter(|a| !a.locked)
         .filter(|a| {
             let at = so
                 .get(&a.name)
@@ -553,6 +576,7 @@ pub fn usage_lam_moi(cfg: &Config, db: &Db, cu_ms: i64) -> Value {
     crate::logging::info(
         "usage_do_lai",
         json!({ "cu_hon_ms": cu_ms, "mau_so": accounts.len(),
+                "bo_qua_khoa": khoa,
                 "do_lai": can.iter().map(|a| a.name.clone()).collect::<Vec<_>>() }),
     );
     if can.is_empty() {

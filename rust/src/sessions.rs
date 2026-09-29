@@ -7132,6 +7132,7 @@ pub fn start_fresh_after_handover(
     // Tên tài khoản lạ KHÔNG rơi về mặc định — `account_launch` đã gác chỗ ấy,
     // và mở nhầm tài khoản là mở nhầm cả kho phiên.
     let dung_acc = acc.unwrap_or(session.account.as_str());
+    ensure_account_usable(cfg, Some(dung_acc))?;
     let cmd = terminal_command(&account_launch(cfg, Some(dung_acc)), cwd, Some(&task));
     let opened_at = std::time::SystemTime::now();
     let (_window, tty) = crate::keys::open_window(&cmd)?;
@@ -7293,6 +7294,53 @@ pub fn open_bare_terminal() -> Result<(i64, String)> {
     Ok((window, tty_short))
 }
 
+/// 🔒 CỬA CHẶN TÀI KHOẢN KHOÁ — đứng ở CHỖ THẮT, không ở từng route.
+///
+/// Mọi lượt mở phiên trên một tài khoản đều đi qua đúng hai hàm:
+/// [`start_background`] (`/new`, mở lại `/new <id>`) và
+/// [`start_fresh_after_handover`] (`/handover`, bàn giao tự động, `huba
+/// handover`). Gác ở đây thì một đường mở phiên viết sau này cũng không lọt;
+/// các route vẫn tự hỏi trước để trả lời NGAY bằng một câu rõ, nhưng thiếu
+/// một route thì cửa này vẫn đứng.
+///
+/// `account = None` là tài khoản MẶC ĐỊNH ([`Config::default_account_name`]) —
+/// `/new` không gõ `-a` mà không còn tài khoản nào còn cửa thì rơi về đó, và
+/// nó cũng có thể đang khoá.
+pub fn ensure_account_usable(cfg: &Config, account: Option<&str>) -> Result<()> {
+    let name = match account {
+        Some(a) => Some(a.to_string()),
+        None => cfg.default_account_name(),
+    };
+    match name {
+        Some(n) if cfg.account_locked(&n) => {
+            logging::warn(
+                "account_locked_refused",
+                json!({ "account": n, "why": "chủ máy khoá — không mở phiên trên nó" }),
+            );
+            anyhow::bail!(account_locked_text(cfg, &n))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Câu từ chối cho một tài khoản đang khoá — MỘT chỗ dựng, để `/new`,
+/// `/handover`, `huba handover` và cửa [`ensure_account_usable`] nói cùng một
+/// câu, kèm cách mở khoá và những tài khoản còn dùng được.
+pub fn account_locked_text(cfg: &Config, name: &str) -> String {
+    let mo: Vec<&str> = cfg
+        .claude_accounts
+        .iter()
+        .filter(|a| !a.locked)
+        .map(|a| a.name.as_str())
+        .collect();
+    let con = if mo.is_empty() {
+        " Không còn tài khoản nào đang mở.".to_string()
+    } else {
+        format!(" Đang mở: {}.", mo.join(" · "))
+    };
+    format!("🔒 {name} đang KHOÁ — huba không mở phiên trên nó. Mở khoá: /accounts mo {name}.{con}")
+}
+
 /// TỪ để gõ ở terminal cho ra đúng tài khoản ấy.
 ///
 /// Ưu tiên thứ chủ máy khai (`launch`: `claude` · `claude2` · `claude3`); không
@@ -7442,6 +7490,7 @@ pub fn start_background(
     account: Option<&str>,
     resume: Option<&str>,
 ) -> Result<Started> {
+    ensure_account_usable(cfg, account)?;
     let task = task.trim();
     // Đề bài RỖNG được phép — nhưng chỉ trên đường mở cửa sổ thật.
     //

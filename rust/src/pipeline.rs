@@ -2006,10 +2006,16 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                     db,
                     Some(crate::runtime::USAGE_CU_MO_PHIEN_MS),
                 );
-                let acc_cu_het = hang
-                    .iter()
-                    .find(|a| a.name == s.account)
-                    .is_some_and(|a| a.rank == crate::quota::Rank::Full);
+                // 🔒 Tài khoản cũ đang KHOÁ cũng phải chuyển (Hà 29/09): giữ nguyên
+                // thì phiên kế nhiệm mở trên đúng tài khoản chủ máy vừa cấm dùng,
+                // và `sessions::ensure_account_usable` sẽ chặn nó sau khi lượt
+                // đóng sổ đã tốn hạn mức.
+                let acc_cu_het = hang.iter().find(|a| a.name == s.account).is_some_and(|a| {
+                    matches!(
+                        a.rank,
+                        crate::quota::Rank::Full | crate::quota::Rank::Locked
+                    )
+                });
                 let acc_moi = if acc_cu_het {
                     let m = crate::watch::suggest_account(
                         &s.account,
@@ -2020,7 +2026,7 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                     logging::info(
                         "auto_handover_account_switch",
                         json!({ "session": s.session_id, "acc_cu": s.account, "acc_moi": m,
-                                "vi_sao": "tài khoản cũ đo được là đã kịch trần",
+                                "vi_sao": "tài khoản cũ đã kịch trần hoặc đang khoá",
                                 "hang": hang.iter()
                                     .map(|a| format!("{}={}", a.name, a.rank.say()))
                                     .collect::<Vec<_>>() }),
@@ -13613,6 +13619,26 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     Some(ack)
                 }
             }
+            CommandKind::Accounts if !cmd.arg.trim().is_empty() => {
+                let ack = match account_lock_order(&cmd.arg) {
+                    Some((ten, khoa)) => match set_account_locked(cfg, &ten, khoa) {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            logging::error(
+                                "account_lock_set_failed",
+                                json!({ "account": ten, "locked": khoa,
+                                        "err": logging::err_chain(&e) }),
+                            );
+                            format!("⚠ không đổi được khoá của {ten}: {e}")
+                        }
+                    },
+                    None => "⚠ Gõ: /accounts khoa <tài khoản> · /accounts mo <tài khoản> \
+                             (trống = xem danh sách)"
+                        .to_string(),
+                };
+                reply_in_channel(db, cfg, adapter, cmd, &ack);
+                Some(ack)
+            }
             CommandKind::Accounts => {
                 // Một ảnh chụp thật, không phải con số nhớ từ lượt trước: câu
                 // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì
@@ -13843,6 +13869,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // bàn giao tốn hạn mức thật, và nó sẽ tốn cho một cái đích
                     // không tồn tại.
                     _ if acc_bad.is_some() => acc_bad.clone().unwrap_or_default(),
+                    // 🔒 Tài khoản ĐÍCH đang khoá — cũng dừng TRƯỚC khi gọi
+                    // `claude`: đóng sổ tốn hạn mức, rồi cửa sổ kế nhiệm lại bị
+                    // `sessions::ensure_account_usable` chặn thì là tốn không.
+                    // Không gõ `-a` thì đích là tài khoản của chính phiên ấy.
+                    Some(s) if cfg.account_locked(acc_moi.as_deref().unwrap_or(&s.account)) => {
+                        crate::sessions::account_locked_text(
+                            cfg,
+                            acc_moi.as_deref().unwrap_or(&s.account),
+                        )
+                    }
                     None => format!(
                         "⚠ không thấy phiên '{}' đang chạy, và nó cũng không nằm trong sổ phiên \
                          vừa tắt (giữ 24 giờ)",
@@ -14096,6 +14132,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 let accs = cfg
                                     .claude_accounts_or_ambient()
                                     .iter()
+                                    .filter(|a| !a.locked)
                                     .map(|a| a.name.clone())
                                     .collect::<Vec<_>>()
                                     .join(" · ");
@@ -14123,6 +14160,25 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         crate::exec::truncate(&a, 24),
                         known_accounts.join(", ")
                     )
+                } else if let Some(a) = resume
+                    .as_ref()
+                    .map(|(_, acc, _)| acc.clone())
+                    .or_else(|| account.clone())
+                    .or_else(|| cfg.default_account_name())
+                    .filter(|a| cfg.account_locked(a))
+                {
+                    // 🔒 Tài khoản sẽ chạy phiên này đang khoá — nói NGAY, đừng để
+                    // luồng mở cửa sổ đi một vòng rồi mới báo hỏng. Tài khoản ấy
+                    // là của phiên cũ khi mở lại (`/new <id>`), là cái gõ `-a` khi
+                    // có gõ, và là tài khoản mặc định khi không còn cái nào còn cửa.
+                    let vi_sao = if resume.is_some() {
+                        "\n(phiên mở lại chạy bằng đúng tài khoản cũ của nó)"
+                    } else if account.is_none() {
+                        "\n(không tài khoản nào còn cửa ⟹ rơi về tài khoản mặc định)"
+                    } else {
+                        ""
+                    };
+                    format!("{}{vi_sao}", crate::sessions::account_locked_text(cfg, &a))
                 } else {
                     // Không nêu `-s` ⟹ mở ở GỐC workspace, đúng chỗ mọi phiên
                     // trên máy này vẫn mở (và là thư mục duy nhất cả ba tài
@@ -18216,11 +18272,7 @@ pub fn owner_budget_state(db: &Db) -> OwnerBudget {
 /// `/set auto_handover.enabled false` cannot turn a bool into the string
 /// "false" and silently disable the check that reads it.
 pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String> {
-    let path = cfg.config_file.clone();
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
-    let mut root: Value = serde_json::from_str(&text)
-        .map_err(|e| anyhow::anyhow!("config file is not valid JSON: {e}"))?;
+    let mut root = read_config_value(cfg)?;
 
     let parts: Vec<&str> = dotted.split('.').filter(|p| !p.is_empty()).collect();
     if parts.is_empty() {
@@ -18269,7 +18321,27 @@ pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String>
     };
 
     node[leaf] = next.clone();
+    save_edited_config(cfg, root)?;
 
+    logging::info(
+        "config_field_set",
+        json!({ "key": dotted, "value": next, "via": "chat" }),
+    );
+    Ok(format!("⚙ đã đặt {dotted} = {next}"))
+}
+
+/// Đọc tệp cấu hình ĐANG nằm trên đĩa thành `Value` — bản trên đĩa, không phải
+/// bản `cfg` trong bộ nhớ, để một lượt sửa không đè mất thứ ai đó vừa ghi tay.
+fn read_config_value(cfg: &Config) -> Result<Value> {
+    let path = &cfg.config_file;
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("cannot read {}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| anyhow::anyhow!("config file is not valid JSON: {e}"))
+}
+
+/// Ghi lại một bản cấu hình đã sửa — MỘT đường cho mọi lượt sửa từ buồng chat
+/// (`/set`, `/accounts khoa|mo`).
+fn save_edited_config(cfg: &Config, root: Value) -> Result<()> {
     // The real gate: unknown keys are dropped, types enforced, and
     // `config::save` validates + backs up + temp-renames.
     let incoming: Config = serde_json::from_value(root)
@@ -18281,13 +18353,69 @@ pub fn set_config_field(cfg: &Config, dotted: &str, raw: &str) -> Result<String>
     incoming.db = cfg.db.clone();
     incoming.log_file = cfg.log_file.clone();
     incoming.notify.file = cfg.notify.file.clone();
-    crate::config::save(&incoming)?;
+    crate::config::save(&incoming)
+}
 
+/// Đọc `khoa <tên>` / `mo <tên>` sau `/accounts` ⟹ `(tên, có khoá không)`.
+/// Không khớp dạng nào ⟹ `None`, để route in cách gõ thay vì đoán ý.
+pub fn account_lock_order(arg: &str) -> Option<(String, bool)> {
+    let mut it = arg.split_whitespace();
+    let dong_tu = it.next()?.to_lowercase();
+    let ten = it.next()?.to_string();
+    if it.next().is_some() {
+        return None;
+    }
+    match dong_tu.as_str() {
+        "khoa" | "khoá" | "khóa" | "lock" => Some((ten, true)),
+        "mo" | "mở" | "unlock" => Some((ten, false)),
+        _ => None,
+    }
+}
+
+/// Khoá / mở MỘT tài khoản trong `claude_accounts` — `/accounts khoa|mo <tên>`.
+///
+/// `/set` không làm được việc này: nó đi theo đường chấm qua KHOÁ của object,
+/// còn `claude_accounts` là một MẢNG, và `locked: false` cố ý không ghi ra tệp
+/// nên trường ấy thường không có mặt để mà đặt. Tên lạ ⟹ từ chối kèm danh sách,
+/// đừng lặng lẽ thêm một hàng mới.
+pub fn set_account_locked(cfg: &Config, name: &str, locked: bool) -> Result<String> {
+    let mut root = read_config_value(cfg)?;
+    let rows = root
+        .get_mut("claude_accounts")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| anyhow::anyhow!("cấu hình không khai claude_accounts"))?;
+    let biet: Vec<String> = rows
+        .iter()
+        .filter_map(|r| r.get("name").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    let row = rows
+        .iter_mut()
+        .find(|r| r.get("name").and_then(Value::as_str) == Some(name))
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "không có tài khoản '{}'. Máy này khai: {}",
+                crate::exec::truncate(name, 24),
+                biet.join(" · ")
+            )
+        })?;
+    let truoc = row.get("locked").and_then(Value::as_bool).unwrap_or(false);
+    row.insert("locked".into(), Value::Bool(locked));
+    save_edited_config(cfg, root)?;
     logging::info(
-        "config_field_set",
-        json!({ "key": dotted, "value": next, "via": "chat" }),
+        "account_lock_set",
+        json!({ "account": name, "locked": locked, "truoc": truoc, "via": "chat" }),
     );
-    Ok(format!("⚙ đã đặt {dotted} = {next}"))
+    let viec = match (truoc, locked) {
+        (true, true) => "vẫn đang KHOÁ (không đổi)",
+        (false, false) => "vẫn đang mở (không đổi)",
+        (false, true) => "đã KHOÁ — huba không chọn, không mở phiên, không dò /usage trên nó",
+        (true, false) => "đã MỞ khoá — huba dùng lại được",
+    };
+    let dau = if locked { "🔒" } else { "🔓" };
+    Ok(format!(
+        "{dau} {name} {viec}\n(daemon nạp lại theo mtime, có hiệu lực từ vòng kế)"
+    ))
 }
 
 pub fn run_once(db: &Db, cfg: &Config) -> Result<CycleSummary> {

@@ -191,16 +191,19 @@ fn acc_cfg() -> huba::config::Config {
             name: "acc1".into(),
             config_dir: None,
             launch: Some("claude".into()),
+            locked: false,
         },
         huba::config::ClaudeAccountCfg {
             name: "acc2".into(),
             config_dir: Some("~/.claude-acc2".into()),
             launch: Some("claude2".into()),
+            locked: false,
         },
         huba::config::ClaudeAccountCfg {
             name: "acc3".into(),
             config_dir: Some("~/.claude-acc3".into()),
             launch: Some("claude3".into()),
+            locked: false,
         },
     ];
     c
@@ -605,6 +608,7 @@ fn an_account_without_a_declared_launch_word_falls_back_not_guesses() {
         name: "accX".into(),
         config_dir: Some("~/.claude-accX".into()),
         launch: None,
+        locked: false,
     }];
     let got = huba::sessions::account_launch(&cfg, Some("accX"));
     assert!(got.starts_with("CLAUDE_CONFIG_DIR="), "{got}");

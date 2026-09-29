@@ -578,10 +578,21 @@ pub fn save(cfg: &Config) -> Result<()> {
     }
 
     let text = serde_json::to_string_pretty(&out).context("serialize config")? + "\n";
-    let target = &cfg.config_file;
-    if target.as_os_str().is_empty() {
+    if cfg.config_file.as_os_str().is_empty() {
         bail!("config has no file path to save to");
     }
+    // 🔴 GHI VÀO TỆP THẬT, không vào liên kết mềm (vá 2026-09-29). hubd nạp
+    // `~/projects/hub/hub.config.json` — hai lớp liên kết (`hub → huba`,
+    // `hub.config.json → huba.config.json`, cả hai dựng 20/08) — trong khi
+    // `huba` CLI, `them-tai-khoan.sh` và `acc-mo-vai.sh` đọc `huba.config.json`.
+    // `rename` đè lên một liên kết thì THAY CHÍNH LIÊN KẾT bằng một tệp thường:
+    // lượt `/set` (hay `/accounts khoa`) đầu tiên sẽ tách hai tệp làm đôi, hubd
+    // thấy khoá còn CLI thì không, và không dòng lỗi nào nói ra. Chưa nổ chỉ vì
+    // `/set` chạy lần cuối ngày 10/08, trước khi có liên kết.
+    // Tệp chưa tồn tại (lần ghi đầu) thì `canonicalize` hỏng ⟹ ghi đúng đường
+    // đã khai, như trước.
+    let real = std::fs::canonicalize(&cfg.config_file).ok();
+    let target = real.as_ref().unwrap_or(&cfg.config_file);
     if target.is_file() {
         std::fs::copy(target, target.with_extension("json.bak"))
             .with_context(|| format!("backup {}", target.display()))?;

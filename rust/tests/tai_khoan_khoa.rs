@@ -305,6 +305,34 @@ fn khoa_roi_mo_ghi_dung_mot_hang_trong_tep() {
     assert!(e.contains("acc1 · acc2 · acc3"), "{e}");
 }
 
+/// hubd nạp cấu hình qua LIÊN KẾT MỀM (`hub.config.json → huba.config.json`,
+/// đo trên máy 29/09), CLI đọc tệp thật. Ghi qua liên kết mà thay mất liên kết
+/// thì hai bên tách đôi im lặng: hubd thấy khoá, CLI thì không.
+#[cfg(unix)]
+#[test]
+fn khoa_qua_lien_ket_mem_ghi_vao_tep_that_va_giu_lien_ket() {
+    let dir = tempfile::tempdir().unwrap();
+    let that = tep_cau_hinh(dir.path()).config_file;
+    let lien_ket = dir.path().join("hub.config.json");
+    std::os::unix::fs::symlink(&that, &lien_ket).unwrap();
+    let mut c = huba::config::load(Some(&lien_ket)).unwrap();
+    c.config_file = lien_ket.clone();
+
+    huba::pipeline::set_account_locked(&c, "acc2", true).unwrap();
+    assert!(
+        std::fs::symlink_metadata(&lien_ket)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "liên kết mềm đã bị thay bằng tệp thường — hai tệp cấu hình tách đôi"
+    );
+    assert_eq!(
+        doc_hang(&that, "acc2")["locked"],
+        true,
+        "tệp THẬT không nhận khoá"
+    );
+}
+
 // ── /accounts nói ra ────────────────────────────────────────────────────────
 
 #[test]

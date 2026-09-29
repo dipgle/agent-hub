@@ -145,6 +145,7 @@ route — nên nó không biết và không cần biết lệnh tới từ kênh
 | Lệnh | Việc |
 |---|---|
 | `/accounts` | các tài khoản: phiên nào của ai, còn bao nhiêu hạn mức, `/new` mặc định vào tài khoản nào, cái nào 🔒 đang khoá |
+| `/accounts detail <tên>` (hoặc `/accounts acc3`) | chi tiết MỘT tài khoản: email · tên · tổ chức · vai trò · gói · thư mục · hạn mức · phiên đang chạy · khoá — đọc sổ `.claude.json`, không chạy `claude` |
 | `/accounts khoa <tên>` · `/accounts mo <tên>` | khoá / mở một tài khoản (`"locked": true` trong `claude_accounts`) — đang khoá thì huba không tự chọn, không mở phiên kể cả khi gõ `-a`, không dò `/usage` bằng nó |
 | `/terminal <dòng lệnh>` | mở cửa sổ Terminal thật (có tty) rồi chạy lệnh — cho `sudo`, `ssh -t`, `passwd`; cửa sổ ở lại để gõ mật khẩu |
 | `/upgrade` | huba tự dựng lại chính nó từ mã hiện tại rồi khởi động lại |

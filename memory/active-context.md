@@ -1,5 +1,11 @@
 # active context — huba
 
+## 🟢 2026-09-29 04:4xZ — phiên c4049483: `/accounts detail <tên>` (PLAN S38) + acc2 ĐANG KHOÁ
+
+- `/accounts detail acc3` (hoặc `/accounts acc3`) in email + danh tính + hạn mức + phiên đang chạy + khoá.
+  `ebe640e`, cổng 175/175, đã cài pid 15529. Chưa gõ thật trên Telegram.
+- **acc2 đang KHOÁ** theo lệnh Hà (`f42aa6d`, hubd nạp lại 03:33:52Z). acc7 đã vào git (`7e621ed`) — mục ② bên dưới đã đóng.
+
 ## 🟢 2026-09-29 02:2xZ — phiên c4049483: tài khoản có thuộc tính KHOÁ (PLAN S37) — đã cổng, đã cài, đã đo thật
 
 Hà: *"thêm thuộc tính khóa vào danh sách tài khoản, nếu đang khóa thì không đưa vào sử dụng"*.

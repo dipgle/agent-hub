@@ -388,8 +388,8 @@ pub const ROUTES: &[Route] = &[
         // một tài khoản (Hà 29/09) — ngồi ở máy thì sửa tệp cấu hình, từ điện
         // thoại thì phải có đường này, không thì là một "gap" của cầu nối.
         arg: Arg::Rest,
-        usage: "[khoa|mo <tài khoản>]",
-        help: "Các tài khoản Claude trên máy · khoa/mo <tên> = khoá/mở",
+        usage: "[detail|khoa|mo <tài khoản>]",
+        help: "Các tài khoản Claude trên máy · detail <tên> = chi tiết + email · khoa/mo <tên> = khoá/mở",
         listed: true,
     },
     Route {

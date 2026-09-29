@@ -156,6 +156,132 @@ pub fn accounts_say(
     accounts_text(cfg, live, &usage, &crate::quota::read_all(cfg), dead, now)
 }
 
+/// `/accounts detail <tên>` — MỘT tài khoản, kể cả email (Hà 29/09).
+///
+/// Chỉ ĐỌC TỆP (sổ `.claude.json` qua [`crate::quota::identity`] và
+/// [`crate::quota::read`]), không spawn `claude`: không tiêu hạn mức, nên xem
+/// được cả tài khoản đang khoá mà không "đưa nó vào sử dụng".
+pub fn account_detail_say(
+    cfg: &Config,
+    live: &SessionsSnapshot,
+    name: &str,
+    dead: &std::collections::BTreeMap<String, String>,
+    now_ms: i64,
+) -> String {
+    let Some(acc) = cfg
+        .claude_accounts_or_ambient()
+        .into_iter()
+        .find(|a| a.name == name)
+    else {
+        return account_detail_text(cfg, live, name, None, Err(String::new()), dead, now_ms);
+    };
+    let dir = acc
+        .config_dir
+        .as_deref()
+        .filter(|d| !d.is_empty())
+        .map(|d| crate::config::expand_home(Path::new(d)));
+    let q = crate::quota::read(&acc.name, dir.as_deref());
+    let id = crate::quota::identity(dir.as_deref());
+    account_detail_text(cfg, live, name, Some(&q), id, dead, now_ms)
+}
+
+/// Phần dựng câu của [`account_detail_say`] — thuần, để bài kiểm khỏi đọc `$HOME`.
+pub fn account_detail_text(
+    cfg: &Config,
+    live: &SessionsSnapshot,
+    name: &str,
+    quota: Option<&crate::quota::Quota>,
+    id: Result<crate::quota::Identity, String>,
+    dead: &std::collections::BTreeMap<String, String>,
+    now_ms: i64,
+) -> String {
+    let accounts = cfg.claude_accounts_or_ambient();
+    let Some(acc) = accounts.iter().find(|a| a.name == name) else {
+        return format!(
+            "⚠ Không có tài khoản '{}'. Máy này khai: {}",
+            crate::exec::truncate(name, 24),
+            accounts
+                .iter()
+                .map(|a| a.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" · ")
+        );
+    };
+    let is_default = acc.config_dir.as_deref().unwrap_or("").is_empty();
+    let mut out = format!(
+        "👤 {}{}{}\n",
+        acc.name,
+        if acc.locked {
+            " · 🔒 ĐANG KHOÁ"
+        } else {
+            ""
+        },
+        if is_default {
+            " · ⭐ mặc định"
+        } else {
+            ""
+        }
+    );
+    match id {
+        Ok(i) => {
+            out.push_str(&format!(
+                "email: {}\n",
+                i.email.as_deref().unwrap_or("(sổ không ghi)")
+            ));
+            let mut ai: Vec<String> = Vec::new();
+            if let Some(v) = i.display_name {
+                ai.push(format!("tên {v}"));
+            }
+            if let Some(v) = i.org {
+                ai.push(format!("tổ chức {v}"));
+            }
+            if let Some(v) = i.role {
+                ai.push(format!("vai trò {v}"));
+            }
+            if let Some(v) = i.billing {
+                ai.push(format!("gói {v}"));
+            }
+            if !ai.is_empty() {
+                out.push_str(&format!("{}\n", ai.join(" · ")));
+            }
+        }
+        // Không đọc được danh tính thì NÓI vì sao, đừng in một dòng email trống.
+        Err(why) => out.push_str(&format!("email: chưa đọc được — {why}\n")),
+    }
+    out.push_str(&format!(
+        "thư mục: {} · gõ ở terminal: {}\n",
+        acc.config_dir
+            .as_deref()
+            .filter(|d| !d.is_empty())
+            .unwrap_or("~ (không đặt CLAUDE_CONFIG_DIR)"),
+        acc.launch.as_deref().unwrap_or("(không khai launch)")
+    ));
+    if let Some(q) = quota {
+        out.push_str(&format!("hạn mức: {}\n", q.say(now_ms)));
+    }
+    if let Some(why) = dead.get(&acc.name) {
+        out.push_str(&format!(
+            "⛔ TỔ CHỨC ĐÃ KHOÁ — không được chọn nữa: {why}\n"
+        ));
+    }
+    let mine: Vec<&str> = live
+        .sessions
+        .iter()
+        .filter(|s| s.account == acc.name && s.host != "dead")
+        .map(|s| s.name.as_str())
+        .collect();
+    out.push_str(&match mine.len() {
+        0 => "phiên đang chạy: không có\n".to_string(),
+        n => format!("phiên đang chạy ({n}): {}\n", mine.join(", ")),
+    });
+    out.push_str(&if acc.locked {
+        format!("🔓 mở khoá: /accounts mo {}", acc.name)
+    } else {
+        format!("🔒 khoá: /accounts khoa {}", acc.name)
+    });
+    out
+}
+
 /// Phần dựng câu, tách khỏi phần đi đo — để test được mà không spawn `claude`.
 ///
 /// Một hàm vừa gọi tiến trình vừa dựng chữ thì test của nó hoặc phải chạy thật

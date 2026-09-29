@@ -615,6 +615,59 @@ pub fn book_path(dir: Option<&Path>) -> PathBuf {
     }
 }
 
+/// Tài khoản này LÀ AI — đọc từ `oauthAccount` trong sổ `.claude.json`.
+///
+/// Hà 2026-09-29: *"Lệnh nào để xem chi tiết thông tin một acc? Bao gồm cả
+/// email?"* — chưa có: chỗ duy nhất từng đọc email (`runtime::auth_block`, qua
+/// `claude auth status`) nằm trong ảnh chụp của trang tfl5 đã gỡ 14/08, không
+/// còn ai gọi. Đọc TỆP chứ không spawn `claude`: không tiêu hạn mức, và dùng
+/// được cả cho tài khoản đang khoá.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Identity {
+    pub email: Option<String>,
+    pub display_name: Option<String>,
+    pub org: Option<String>,
+    pub role: Option<String>,
+    pub billing: Option<String>,
+}
+
+/// `Err(lý do)` khi sổ không có, không đọc được, hỏng JSON, hoặc chưa có
+/// `oauthAccount` (chưa đăng nhập) — bốn câu khác nhau, không gộp thành "trống".
+pub fn identity(dir: Option<&Path>) -> Result<Identity, String> {
+    let path = book_path(dir);
+    let text = std::fs::read_to_string(&path).map_err(|e| {
+        let why = if e.kind() == std::io::ErrorKind::NotFound {
+            format!("chưa có {} (chưa đăng nhập)", path.display())
+        } else {
+            format!("không đọc được {}: {e}", path.display())
+        };
+        logging::warn(
+            "identity_unreadable",
+            json!({ "path": path.display().to_string(), "err": e.to_string() }),
+        );
+        why
+    })?;
+    let doc: Value = serde_json::from_str(&text).map_err(|e| {
+        logging::warn(
+            "identity_unparsed",
+            json!({ "path": path.display().to_string(), "err": e.to_string() }),
+        );
+        format!("sổ {} hỏng JSON", path.display())
+    })?;
+    let o = doc
+        .get("oauthAccount")
+        .filter(|o| o.is_object())
+        .ok_or_else(|| "chưa đăng nhập (sổ không có oauthAccount)".to_string())?;
+    let s = |k: &str| o.get(k).and_then(Value::as_str).map(str::to_string);
+    Ok(Identity {
+        email: s("emailAddress"),
+        display_name: s("displayName"),
+        org: s("organizationName"),
+        role: s("organizationRole"),
+        billing: s("billingType"),
+    })
+}
+
 /// Đọc hạn mức của một tài khoản. Hỏng ở bất kỳ bậc nào cũng KÊU, không im.
 pub fn read(account: &str, dir: Option<&Path>) -> Quota {
     let path = book_path(dir);

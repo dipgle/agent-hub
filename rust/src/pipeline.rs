@@ -13632,9 +13632,28 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             format!("⚠ không đổi được khoá của {ten}: {e}")
                         }
                     },
-                    None => "⚠ Gõ: /accounts khoa <tài khoản> · /accounts mo <tài khoản> \
-                             (trống = xem danh sách)"
-                        .to_string(),
+                    None => {
+                        let biet: Vec<String> = cfg
+                            .claude_accounts_or_ambient()
+                            .into_iter()
+                            .map(|a| a.name)
+                            .collect();
+                        match account_detail_order(&cmd.arg, &biet) {
+                            // Ảnh chụp thật cho dòng "phiên đang chạy" — cùng lý do
+                            // với `/accounts` trơn ngay dưới.
+                            Some(ten) => crate::runtime::account_detail_say(
+                                cfg,
+                                &crate::sessions::snapshot(cfg),
+                                &ten,
+                                &db.dead_accounts(),
+                                chrono::Utc::now().timestamp_millis(),
+                            ),
+                            None => "⚠ Gõ: /accounts detail <tài khoản> · /accounts khoa \
+                                     <tài khoản> · /accounts mo <tài khoản> (trống = xem \
+                                     danh sách)"
+                                .to_string(),
+                        }
+                    }
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
@@ -18368,6 +18387,28 @@ pub fn account_lock_order(arg: &str) -> Option<(String, bool)> {
     match dong_tu.as_str() {
         "khoa" | "khoá" | "khóa" | "lock" => Some((ten, true)),
         "mo" | "mở" | "unlock" => Some((ten, false)),
+        _ => None,
+    }
+}
+
+/// Đọc `detail <tên>` sau `/accounts` ⟹ tên tài khoản cần xem chi tiết.
+///
+/// Gõ TRẦN một tên (`/accounts acc3`) cũng nhận — nhưng chỉ khi tên ấy có
+/// trong `biet`: khớp chính xác cả chuỗi là một phép ĐO, không phải đoán (cùng
+/// lối nghĩ với `lift_bare_account` của `/new`). Động từ `detail` thì nhận mọi
+/// tên, để tên gõ sai được trả lời bằng danh sách thay vì bằng câu hướng dẫn.
+pub fn account_detail_order(arg: &str, biet: &[String]) -> Option<String> {
+    let t: Vec<&str> = arg.split_whitespace().collect();
+    match t.as_slice() {
+        [dt, ten]
+            if matches!(
+                dt.to_lowercase().as_str(),
+                "detail" | "chitiet" | "chi-tiet" | "ct" | "xem"
+            ) =>
+        {
+            Some((*ten).to_string())
+        }
+        [ten] if biet.iter().any(|b| b == ten) => Some((*ten).to_string()),
         _ => None,
     }
 }

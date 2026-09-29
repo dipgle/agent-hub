@@ -1,5 +1,19 @@
 # active context — huba
 
+## 🟢 2026-09-29 02:2xZ — phiên c4049483: tài khoản có thuộc tính KHOÁ (PLAN S37) — đã cổng, đã cài, đã đo thật
+
+Hà: *"thêm thuộc tính khóa vào danh sách tài khoản, nếu đang khóa thì không đưa vào sử dụng"*.
+`e2cc5c3` (tính năng) + `b25ed0b` (`config::save` ghi qua liên kết mềm). Chi tiết + số đo: PLAN.md S37.
+- **Đã cài**: hubd pid 58874, `install_update.sh --verify` KHỚP `2ea0c61f…`; `./gate.sh` GATE_EXIT=0 (174/174).
+- **Đo thật 02:21Z** (`zsh .tmp/tb/do-that-khoa.sh` — khoá tạm acc6 trong tệp thật, đo, trả tệp, md5 khớp):
+  `-a auto` ⟹ acc5 khi khoá / acc6 khi mở; `-a acc6` ⟹ từ chối exit 1 khi khoá / qua khi mở.
+- **Đối chứng ngược**: `.tmp/tb/dot-bien.sh` + `dot-bien-2.sh` + cấy tay 2 cái ⟹ 9/9 đỏ đúng bài.
+- **CÒN MỞ**: ① `/accounts khoa|mo` chưa được gõ thật trên Telegram (cần tay Hà). ② `huba.config.json` còn
+  dòng khai acc7 CHƯA commit (có sẵn từ 26/09 16:43, sao lưu `.bak-them-acc7` do `scripts/them-tai-khoan.sh`
+  đẻ ra) — không rõ ai chạy nên chưa commit. ③ `~/projects/scripts/acc-mo-vai.sh` (chọn tài khoản cho
+  phiên vai, dòng `KHONG_DO = {"acc1", "acc2"}`) KHÔNG đọc trường `locked` ⟹ tài khoản khoá trong huba vẫn
+  có thể được nó chọn; tệp ấy là hạ tầng chung, ngoài cây huba.
+
 ## 🟡 2026-09-24 11:3xZ — phiên 0b9859f3 tiếp quản: đo bản cài 10:42Z ra 2 lỗi của CHÍNH nó, đã sửa (CHƯA cài, CHƯA cổng)
 
 Đo log 10:42:17→11:09Z (1948 dòng, 43 vòng, 27 lệnh Tele), bản đang chạy pid 81199:

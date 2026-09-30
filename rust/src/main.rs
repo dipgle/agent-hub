@@ -305,7 +305,7 @@ fn cmd_handover(
 
     println!(
         "{}",
-        huba::pipeline::handover_now(db, cfg, target, acc_moi.as_deref())
+        huba::pipeline::handover_now(db, cfg, target, acc_moi.as_deref(), false)
     );
     Ok(())
 }

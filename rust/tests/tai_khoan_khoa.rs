@@ -246,16 +246,19 @@ fn mo_tai_khoan_khoa_chi_khi_chu_may_bam() {
 
     // Bấm đồng ý ⟹ được mở (None), và câu hỏi nói rõ tài khoản + "chỉ lượt này".
     let mut cau_hoi = String::new();
-    let ra = hoi(&c, "acc2", "", |what| {
+    let ra = hoi(&c, "acc2", "mở phiên bằng acc2", |what| {
         cau_hoi = what.to_string();
         None
     });
     assert_eq!(ra, None);
     assert!(cau_hoi.contains("acc2 đang KHOÁ"), "{cau_hoi}");
+    assert!(cau_hoi.contains("Vẫn mở phiên bằng acc2?"), "{cau_hoi}");
     assert!(cau_hoi.contains("Chỉ lượt này"), "{cau_hoi}");
 
     // Vế ngược: huỷ / hết giờ ⟹ KHÔNG mở, câu trả lời chỉ đường mở khoá.
-    let ra = hoi(&c, "acc2", "", |_| Some("✋ Đã huỷ trên Telegram".into()));
+    let ra = hoi(&c, "acc2", "mở phiên bằng acc2", |_| {
+        Some("✋ Đã huỷ trên Telegram".into())
+    });
     let ra = ra.expect("huỷ mà vẫn mở");
     assert!(
         ra.contains("Đã huỷ") && ra.contains("/accounts mo acc2"),
@@ -265,10 +268,37 @@ fn mo_tai_khoan_khoa_chi_khi_chu_may_bam() {
     // Tắt xác nhận ⟹ KHÔNG mở, và KHÔNG được gọi tới lượt hỏi (không ai bấm).
     let mut tat = cfg_ba(&["acc2"]);
     tat.confirm.enabled = false;
-    let ra = hoi(&tat, "acc2", "", |_| panic!("tắt xác nhận mà vẫn đi hỏi"));
+    let ra = hoi(&tat, "acc2", "mở phiên bằng acc2", |_| {
+        panic!("tắt xác nhận mà vẫn đi hỏi")
+    });
     assert!(ra
         .expect("tắt xác nhận mà vẫn mở")
         .contains("xác nhận Telegram đang tắt"));
+}
+
+/// Cửa của đường BÀN GIAO (`/handover`, bàn giao tự động) — chỉ chấm chiều CHẶN:
+/// chiều cho qua sẽ đi tiếp tới `keys::open_window`, tức mở một cửa sổ Terminal
+/// thật, nên không đặt vào bộ kiểm. Chiều cho qua dùng đúng khuôn của
+/// `start_background` (bài ở trên chấm đủ hai chiều).
+#[test]
+fn ban_giao_sang_tai_khoan_khoa_bi_chan_khi_chua_xac_nhan() {
+    let c = cfg_ba(&["acc2"]);
+    let phien = huba::sessions::LiveSession {
+        account: "acc3".into(),
+        cwd: "/khong/co".into(),
+        ..Default::default()
+    };
+    let e = match huba::sessions::start_fresh_after_handover(
+        &c,
+        &phien,
+        "bàn giao",
+        Some("acc2"),
+        false,
+    ) {
+        Ok(_) => panic!("chuyển sang acc2 đang khoá mà không bị chặn"),
+        Err(e) => e.to_string(),
+    };
+    assert!(e.contains("acc2 đang KHOÁ"), "{e}");
 }
 
 #[test]

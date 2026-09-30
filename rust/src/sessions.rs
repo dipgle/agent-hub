@@ -7122,6 +7122,13 @@ pub fn start_fresh_after_handover(
     // 5–14 lượt mỗi ngày (110 lượt từ 21/08); không dọn thì một tuần đọng ~50
     // cửa sổ Terminal. Điều 30/08 làm rõ là lý do ấy không phụ thuộc vào việc ai
     // gõ — xem [`should_close_old_window`].
+    //
+    // 🔓 `allow_locked` — KHÁC hằng số `auto` ở trên ở chỗ nó không phải một
+    // tính chất chỗ gọi tự khai về chính mình, mà là DẤU của một sự kiện: chủ máy
+    // vừa bấm xác nhận dùng tài khoản khoá cho lượt này
+    // (`pipeline::hoi_mo_tai_khoan_khoa`, bài kiểm chấm được cả ba nhánh). Mọi
+    // đường tự động truyền `false`.
+    allow_locked: bool,
 ) -> Result<FreshWindow> {
     let task = format!(
         "Tiếp quản phiên trước (phiên cũ đã đầy ngữ cảnh nên huba đóng sổ và mở phiên này). \
@@ -7132,7 +7139,14 @@ pub fn start_fresh_after_handover(
     // Tên tài khoản lạ KHÔNG rơi về mặc định — `account_launch` đã gác chỗ ấy,
     // và mở nhầm tài khoản là mở nhầm cả kho phiên.
     let dung_acc = acc.unwrap_or(session.account.as_str());
-    ensure_account_usable(cfg, Some(dung_acc))?;
+    if allow_locked {
+        logging::info(
+            "account_locked_open_allowed",
+            json!({ "account": dung_acc, "why": "chủ máy xác nhận cho lượt bàn giao này" }),
+        );
+    } else {
+        ensure_account_usable(cfg, Some(dung_acc))?;
+    }
     let cmd = terminal_command(&account_launch(cfg, Some(dung_acc)), cwd, Some(&task));
     let opened_at = std::time::SystemTime::now();
     let (_window, tty) = crate::keys::open_window(&cmd)?;

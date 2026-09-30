@@ -2046,6 +2046,7 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
                         s,
                         &h.checkpoint,
                         acc_moi.as_deref(),
+                        false,
                     )
                 };
                 // 🔴 CON TRỎ GIỮ NGUYÊN — Hà 2026-09-03: *"việc chọn phiên làm
@@ -2328,7 +2329,7 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
                         .collect::<Vec<_>>() }),
         );
         let moved =
-            crate::sessions::start_fresh_after_handover(cfg, s, &checkpoint, Some(&acc_moi));
+            crate::sessions::start_fresh_after_handover(cfg, s, &checkpoint, Some(&acc_moi), false);
         let ngan: String = s.session_id.chars().take(8).collect();
         let go_tay = format!("/handover -a {acc_moi} {ngan}");
         // Đọc con trỏ TRƯỚC khi làm gì, và không đổi nó — xem [`FocusKept`].
@@ -2709,11 +2710,16 @@ pub fn now_local_min() -> u64 {
 /// Cái KHÔNG nằm trong đây, cố ý: câu hỏi xác nhận. Trên Telegram một cú chạm
 /// nhầm trong danh sách là một lượt `claude` bị tiêu, nên `ask_owner` đứng
 /// TRƯỚC lời gọi này; ở CLI thì chính việc gõ ra dòng lệnh đã là câu xác nhận.
+///
+/// `allow_locked` = chủ máy vừa BẤM xác nhận dùng tài khoản đang khoá cho lượt
+/// này (`hoi_mo_tai_khoan_khoa`); chuyền thẳng xuống cửa của
+/// `sessions::start_fresh_after_handover`. Mọi đường khác truyền `false`.
 pub fn handover_now(
     db: &Db,
     cfg: &Config,
     s: &crate::sessions::LiveSession,
     acc_moi: Option<&str>,
+    allow_locked: bool,
 ) -> String {
     match crate::sessions::handover(cfg, s) {
         Ok(h) => {
@@ -2754,6 +2760,7 @@ pub fn handover_now(
                     s,
                     &h.checkpoint,
                     Some(acc),
+                    allow_locked,
                 ) {
                     Ok(w) => {
                         if let Some(id) = w.new_id.as_deref() {
@@ -2840,7 +2847,13 @@ pub fn handover_now(
                     // ký. Việc đã sang phiên mới, nên cửa sổ cũ
                     // vẫn đóng (Hà 2026-08-30).
                     Some(acc) => {
-                        match crate::sessions::start_fresh_after_handover(cfg, s, &cp, Some(acc)) {
+                        match crate::sessions::start_fresh_after_handover(
+                            cfg,
+                            s,
+                            &cp,
+                            Some(acc),
+                            allow_locked,
+                        ) {
                             Ok(w) => {
                                 if let Some(id) = w.new_id.as_deref() {
                                     if let Err(e) = db.set_cursor(FOCUS_SESSION_KEY, id) {
@@ -13893,15 +13906,30 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // bàn giao tốn hạn mức thật, và nó sẽ tốn cho một cái đích
                     // không tồn tại.
                     _ if acc_bad.is_some() => acc_bad.clone().unwrap_or_default(),
-                    // 🔒 Tài khoản ĐÍCH đang khoá — cũng dừng TRƯỚC khi gọi
-                    // `claude`: đóng sổ tốn hạn mức, rồi cửa sổ kế nhiệm lại bị
-                    // `sessions::ensure_account_usable` chặn thì là tốn không.
-                    // Không gõ `-a` thì đích là tài khoản của chính phiên ấy.
+                    // 🔒 Tài khoản ĐÍCH đang khoá (không gõ `-a` thì đích là tài
+                    // khoản của chính phiên — đóng sổ gọi `claude` bằng nó) ⟹ MỘT
+                    // câu hỏi nói đủ cả việc lẫn khoá, thay cho câu "Đóng sổ…?" bên
+                    // dưới; bấm thì dùng nó cho ĐÚNG lượt này (Hà 30/09 «Làm nốt»,
+                    // cùng cơ chế với `/new`). Hỏi TRƯỚC khi gọi `claude`: đóng sổ
+                    // tốn hạn mức, rồi cửa sổ kế nhiệm bị cửa chặn thì là tốn không.
                     Some(s) if cfg.account_locked(acc_moi.as_deref().unwrap_or(&s.account)) => {
-                        crate::sessions::account_locked_text(
-                            cfg,
-                            acc_moi.as_deref().unwrap_or(&s.account),
-                        )
+                        let dich = acc_moi.as_deref().unwrap_or(&s.account);
+                        let viec = match acc_moi.as_deref() {
+                            Some(a) => format!(
+                                "đóng sổ phiên {} rồi mở phiên kế nhiệm bằng {a} (gọi claude, tốn hạn mức)",
+                                s.name
+                            ),
+                            None => format!(
+                                "đóng sổ phiên {} bằng chính {dich} của nó (gọi claude, tốn hạn mức)",
+                                s.name
+                            ),
+                        };
+                        match hoi_mo_tai_khoan_khoa(cfg, dich, &viec, |what| {
+                            ask_owner(db, cfg, adapter, cmd, what, "đóng sổ phiên nào")
+                        }) {
+                            Some(tu_choi) => tu_choi,
+                            None => handover_now(db, cfg, s, acc_moi.as_deref(), true),
+                        }
                     }
                     None => format!(
                         "⚠ không thấy phiên '{}' đang chạy, và nó cũng không nằm trong sổ phiên \
@@ -13927,7 +13955,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         "đóng sổ phiên nào",
                     ) {
                         Some(refusal) => refusal,
-                        None => handover_now(db, cfg, s, acc_moi.as_deref()),
+                        None => handover_now(db, cfg, s, acc_moi.as_deref(), false),
                     },
                 };
                 // Bản bàn giao là CHỮ CỦA PHIÊN — đi qua cửa định dạng, nên
@@ -14236,9 +14264,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 ""
                             };
                             let tu_choi = khoa.as_deref().and_then(|a| {
-                                hoi_mo_tai_khoan_khoa(cfg, a, vi_sao, |what| {
-                                    ask_owner(db, cfg, adapter, cmd, what, "mở phiên nào")
-                                })
+                                hoi_mo_tai_khoan_khoa(
+                                    cfg,
+                                    a,
+                                    &format!("mở phiên bằng {a}{vi_sao}"),
+                                    |what| ask_owner(db, cfg, adapter, cmd, what, "mở phiên nào"),
+                                )
                             });
                             if let Some(t) = tu_choi {
                                 t
@@ -18437,10 +18468,15 @@ pub fn tai_khoan_khoa_se_chay(
 /// ⚠ `confirm.enabled = false` ⟹ KHÔNG mở. `confirm::ask` khi tắt trả
 /// `Confirmed` không hỏi ai (đúng cho `/close`: chủ máy tự tắt chốt ấy), nhưng
 /// ở đây nó biến khoá thành không-khoá mà không một ngón tay nào bấm.
+///
+/// `viec` là việc sắp làm bằng tài khoản ấy, viết như một vế câu —
+/// `"mở phiên bằng acc2"` (`/new`), `"đóng sổ phiên X rồi mở phiên kế nhiệm bằng
+/// acc2"` (`/handover`) — để MỘT câu hỏi nói đủ cả việc lẫn khoá, không bắt bấm
+/// hai hộp liền nhau.
 pub fn hoi_mo_tai_khoan_khoa(
     cfg: &Config,
     acc: &str,
-    vi_sao: &str,
+    viec: &str,
     hoi: impl FnOnce(&str) -> Option<String>,
 ) -> Option<String> {
     let chan = crate::sessions::account_locked_text(cfg, acc);
@@ -18453,9 +18489,7 @@ pub fn hoi_mo_tai_khoan_khoa(
             "{chan}\n(xác nhận Telegram đang tắt — không hỏi được để mở thay)"
         ));
     }
-    let what = format!(
-        "🔒 {acc} đang KHOÁ{vi_sao}. Vẫn mở phiên bằng {acc}? Chỉ lượt này — khoá giữ nguyên."
-    );
+    let what = format!("🔒 {acc} đang KHOÁ. Vẫn {viec}? Chỉ lượt này — khoá giữ nguyên.");
     match hoi(&what) {
         Some(tu_choi) => Some(format!("{tu_choi}\n{chan}")),
         None => {

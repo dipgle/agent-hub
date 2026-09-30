@@ -18,19 +18,17 @@
     "on_limit_wait_min": 30
   },
   "auto_run": {
-    "enabled": true,
-    "allow": [
-      "bash ~/projects/huba/install_update.sh --verify"
-    ]
+    "enabled": true
+  },
+  "auto_unstick": {
+    "enabled": true
   },
   "confirm": {
     "enabled": true,
     "bot_token_env": "HUB_TELEGRAM_BOT_TOKEN",
     "chat_id_env": "HUB_TELEGRAM_CHAT_ID",
-    "timeout_sec": 90
-  },
-  "sudo_password_env": {
-    "vps-a": "HUB_VPS_A_SUDO_PASSWORD"
+    "timeout_sec": 90,
+    "delete_after_hours": 36
   },
   "projects": {
     "ai1": {},
@@ -50,7 +48,8 @@
   "claude_accounts": [
     {
       "name": "acc1",
-      "launch": "claude"
+      "launch": "claude",
+      "locked": true
     },
     {
       "name": "acc2",
@@ -79,5 +78,10 @@
       "name": "acc7",
       "config_dir": "~/.claude-acc7"
     }
-  ]
+  ],
+  "new_in_terminal": true,
+  "sudo_password_env": {
+    "vps-a": "HUB_VPS_A_SUDO_PASSWORD"
+  },
+  "pin_following": true
 }

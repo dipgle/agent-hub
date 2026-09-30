@@ -138,7 +138,7 @@ pub fn type_into(window: i64, text: &str) -> Result<()> {
     crate::keys_win::type_into(window, text)
 }
 #[cfg(windows)]
-pub fn clear_box(window: i64) -> Result<bool> {
+pub fn clear_box(window: i64) -> Result<Cleared> {
     crate::keys_win::clear_box(window)
 }
 #[cfg(windows)]
@@ -3141,10 +3141,10 @@ pub fn type_into(window: i64, text: &str) -> Result<()> {
 /// Không có nó thì mọi lượt xoá kết thúc bằng một cú Enter — tức nút "xoá" hoá
 /// thành nút "gửi", đúng thứ không lùi lại được.
 ///
-/// Trả `Ok(true)` khi ô đã sạch, `Ok(false)` khi còn chữ — KHÔNG tự khen: chỗ
-/// gọi phải nói đúng thứ đã xảy ra.
+/// Trả [`Cleared`] — ba kết cục, KHÔNG tự khen: chỗ gọi phải nói đúng thứ đã
+/// xảy ra.
 #[cfg(target_os = "macos")]
-pub fn clear_box(window: i64) -> Result<bool> {
+pub fn clear_box(window: i64) -> Result<Cleared> {
     // 🔴 NHIỀU VÒNG, vì phép đếm chỉ thấy phần HIỆN RA — Hà 2026-08-19, bấm ⊠
     // hai lần liền trên `[dwork]` và cả hai lần `keys_clear_incomplete`.
     //
@@ -3167,11 +3167,11 @@ pub fn clear_box(window: i64) -> Result<bool> {
     const ROUNDS: usize = 16;
     const BATCH: usize = 400;
     for _ in 0..ROUNDS {
-        let text = input_box_text(&screen_text(window)?).unwrap_or_default();
-        let n = text.chars().count();
-        if n == 0 {
-            return Ok(true);
-        }
+        let n = match box_state(&screen_text(window)?) {
+            BoxState::Empty => return Ok(Cleared::Clean),
+            BoxState::NoBox => return Ok(Cleared::NoBox),
+            BoxState::Text(n) => n,
+        };
         // Thừa vài phím: con trỏ có thể không ở cuối, và một ô nhiều dòng đếm ra
         // ngắn hơn thực tế. DEL thừa vào ô trống thì không làm gì.
         let dels: String = std::iter::repeat_n('\u{7f}', (n + 8).max(BATCH)).collect();
@@ -3181,16 +3181,59 @@ pub fn clear_box(window: i64) -> Result<bool> {
         ))?;
         std::thread::sleep(std::time::Duration::from_millis(600));
     }
-    let left = input_box_text(&screen_text(window)?).unwrap_or_default();
-    if !left.trim().is_empty() {
-        logging::warn(
-            "keys_clear_gave_up",
-            json!({ "window": window, "rounds": ROUNDS, "batch": BATCH,
-                    "left_seen": left.chars().count(),
-                    "effect": "xoá hết ngần ấy lô mà ô nhập vẫn còn chữ — chỗ gọi phải nói là CHƯA sạch" }),
-        );
+    match box_state(&screen_text(window)?) {
+        BoxState::Empty => Ok(Cleared::Clean),
+        BoxState::NoBox => Ok(Cleared::NoBox),
+        BoxState::Text(left) => {
+            logging::warn(
+                "keys_clear_gave_up",
+                json!({ "window": window, "rounds": ROUNDS, "batch": BATCH,
+                        "left_seen": left,
+                        "effect": "xoá hết ngần ấy lô mà ô nhập vẫn còn chữ — chỗ gọi phải nói là CHƯA sạch" }),
+            );
+            Ok(Cleared::TextLeft)
+        }
     }
-    Ok(left.trim().is_empty())
+}
+
+/// Ô nhập trên MỘT màn chụp — ba ca, không gộp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoxState {
+    /// Màn không có ô nhập nào: hộp chọn/hộp quyền đang che, hoặc phiên đã
+    /// thoát về shell.
+    NoBox,
+    /// Có ô, trống.
+    Empty,
+    /// Có ô, đang giữ chừng ấy ký tự (phần NHÌN THẤY).
+    Text(usize),
+}
+
+/// Đọc [`BoxState`] của một màn. THUẦN.
+///
+/// 🔴 [`input_box_text`] trả `None` cho CẢ "ô trống" LẪN "không có ô" — hỏi
+/// [`box_start`] trước thì hai ca ấy mới tách ra được. Gộp chúng là đúng lỗi đo
+/// được 2026-10-01 ở vòng tự gỡ kẹt (`pipeline::o_sau_cu_bam`): phiên đã thoát
+/// về shell được đọc thành "ô trống ⟹ đã gửi". Ở [`clear_box`] cùng lỗi ấy trả
+/// `Ok(true)` ⟹ `/clear` báo *"🧽 Đã xoá ô nhập"* cho một lượt KHÔNG bấm phím nào.
+pub fn box_state(screen: &str) -> BoxState {
+    if box_start(screen).is_none() {
+        return BoxState::NoBox;
+    }
+    match input_box_text(screen) {
+        Some(t) => BoxState::Text(t.chars().count()),
+        None => BoxState::Empty,
+    }
+}
+
+/// Kết cục một lượt [`clear_box`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cleared {
+    /// Đọc lại: ô trống.
+    Clean,
+    /// Đọc lại: ô vẫn còn chữ.
+    TextLeft,
+    /// Màn không có ô nhập — không có gì để xoá, và KHÔNG được khai là đã xoá.
+    NoBox,
 }
 
 /// Trần số vòng của [`clear_queue`] — hàng chờ dài hơn thế thì nói ra, đừng quay mãi.

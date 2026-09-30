@@ -487,16 +487,25 @@ pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
 /// Bịt ô nhập bằng cách bấm lùi (Backspace) đủ số ký tự đang hiện — không có
 /// khái niệm "byte ESC chặn CR" của macOS ở đây vì Windows không tự kèm CR
 /// vào lượt gõ.
-pub fn clear_box(window: i64) -> Result<bool> {
-    let screen = screen_text(window)?;
-    let Some(box_text) = crate::keys::input_box_text(&screen) else {
-        return Ok(false);
+///
+/// Cùng hợp đồng [`crate::keys::Cleared`] với bản macOS: không có ô thì nói
+/// `NoBox` (không phải "còn chữ"), và phán "sạch" bằng lượt ĐỌC LẠI sau khi bấm,
+/// không bằng việc đã gửi đủ phím.
+pub fn clear_box(window: i64) -> Result<crate::keys::Cleared> {
+    use crate::keys::{box_state, BoxState, Cleared};
+    let n = match box_state(&screen_text(window)?) {
+        BoxState::NoBox => return Ok(Cleared::NoBox),
+        BoxState::Empty => return Ok(Cleared::Clean),
+        BoxState::Text(n) => n,
     };
     bring_to_front(window)?;
-    let n = box_text.chars().count();
     let backs: Vec<INPUT> = (0..n).flat_map(|_| vk_pair(VK_BACK)).collect();
     send_raw(&backs)?;
-    Ok(true)
+    Ok(match box_state(&screen_text(window)?) {
+        BoxState::Empty => Cleared::Clean,
+        BoxState::NoBox => Cleared::NoBox,
+        BoxState::Text(_) => Cleared::TextLeft,
+    })
 }
 
 /// Hàng chờ tin nhắn xếp trong ô nhập — Windows chưa có phép đo tương đương

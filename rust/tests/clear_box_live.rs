@@ -171,7 +171,7 @@ end tell"
         "ô không hiện nhiều dòng ({lines_before}) — KHÔNG ĐO ĐƯỢC vế xuống dòng:\n{before}"
     );
     assert!(
-        matches!(cleared, Some(Ok(true))),
+        matches!(cleared, Some(Ok(huba::keys::Cleared::Clean))),
         "clear_box phải khai đã sạch: {cleared:?}"
     );
     assert_eq!(

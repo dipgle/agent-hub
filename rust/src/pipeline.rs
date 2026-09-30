@@ -3025,6 +3025,30 @@ pub fn unstick_done(o: OSau, nhat_ky: Option<bool>) -> UnstickDone {
     }
 }
 
+/// Vế "ô nhập" trong câu trả lời `/clean` — MỘT trạng thái cho mỗi kết cục của
+/// `keys::clear_box`. THUẦN.
+///
+/// Bản cũ gộp hai thứ: `clear_box` trả `Ok(true)` cho màn KHÔNG có ô nhập (không
+/// bấm phím nào) ⟹ *"ô nhập đã sạch."*; còn lỗi đọc màn thì thành *"vẫn còn chữ
+/// sau khi xoá"* — một câu về chữ cho một lượt không đọc được chữ nào.
+pub fn cau_o_nhap_sau_xoa(r: &anyhow::Result<crate::keys::Cleared>) -> String {
+    match r {
+        Ok(crate::keys::Cleared::Clean) => "ô nhập đã sạch.".into(),
+        Ok(crate::keys::Cleared::TextLeft) => {
+            "⚠ ô nhập vẫn còn chữ sau khi xoá — gõ `/clear` lần nữa, hoặc xoá tay ở máy.".into()
+        }
+        Ok(crate::keys::Cleared::NoBox) => {
+            "⚠ màn không thấy ô nhập (hộp chọn/hộp quyền đang che, hoặc phiên đã thoát) — \
+             KHÔNG xoá ô nhập."
+                .into()
+        }
+        Err(e) => format!(
+            "⚠ không đọc được màn để xoá ô nhập: {}",
+            crate::exec::truncate(&e.to_string(), 160)
+        ),
+    }
+}
+
 /// Tự bấm Enter khi CHỮ đứng ỔN ĐỊNH trong ô nhập của MỘT phiên bất kỳ — bù
 /// cho những nguồn không đi qua `do script`/`cgkeys` của huba nên chưa từng
 /// chạm safety-net cũ.
@@ -15015,17 +15039,12 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // vẫn còn. Xoá ô trước là xoá một cái ô sắp được
                                 // đổ đầy trở lại.
                                 let don = crate::keys::clear_queue(w);
-                                let o_sach = matches!(crate::keys::clear_box(w), Ok(true));
                                 // Câu về ô nhập nói ĐÚNG MỘT trạng thái. Bản cũ
                                 // viết cứng "ô nhập đã sạch" rồi nối thêm cảnh
                                 // báo khi chưa sạch, nên Hà nhận nguyên văn
                                 // *"ô nhập đã sạch. ⚠ ô nhập vẫn còn chữ"*
                                 // (log 2026-09-23 07:54Z, hai lượt liền).
-                                let o = if o_sach {
-                                    "ô nhập đã sạch."
-                                } else {
-                                    "⚠ ô nhập vẫn còn chữ sau khi xoá — gõ `/clear` lần nữa, hoặc xoá tay ở máy."
-                                };
+                                let o = cau_o_nhap_sau_xoa(&crate::keys::clear_box(w));
                                 match don {
                                     Ok((0, 0)) => format!(
                                         "🧹 {} không có tin nào trong hàng chờ; {o}",
@@ -15061,11 +15080,23 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // cả tin đã xếp hàng chờ chạy — thứ không lấy
                                 // lại được.
                                 match crate::keys::clear_box(w) {
-                                    Ok(true) => format!(
+                                    Ok(crate::keys::Cleared::Clean) => format!(
                                         "🧽 Đã xoá ô nhập của {}. Hàng chờ giữ nguyên (muốn dọn cả thì `/clean`).",
                                         crate::sessions::shown(&s)
                                     ),
-                                    Ok(false) => {
+                                    Ok(crate::keys::Cleared::NoBox) => {
+                                        logging::warn(
+                                            "keys_clear_no_box",
+                                            json!({ "session": s.session_id,
+                                                    "effect": "màn không có ô nhập — không bấm phím nào, không khai là đã xoá" }),
+                                        );
+                                        format!(
+                                            "⚠ màn của {} không thấy ô nhập (hộp chọn/hộp quyền đang che, hoặc phiên \
+                                             đã thoát) — KHÔNG xoá gì. `/shot` để xem màn.",
+                                            crate::sessions::shown(&s)
+                                        )
+                                    }
+                                    Ok(crate::keys::Cleared::TextLeft) => {
                                         logging::warn(
                                             "keys_clear_incomplete",
                                             json!({ "session": s.session_id,
@@ -15763,14 +15794,18 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                 // bấy nhiêu ký tự đang có", nên nó phải đọc màn
                                 // trước. Xem `keys::clear_box`.
                                 if typed.trim() == "clear" {
-                                    crate::keys::clear_box(w).map(|sạch| {
-                                        if !sạch {
-                                            logging::warn(
-                                                "keys_clear_incomplete",
-                                                json!({ "session": s.session_id,
-                                                        "effect": "ô nhập vẫn còn chữ sau khi xoá — không khai là đã sạch" }),
-                                            );
-                                        }
+                                    crate::keys::clear_box(w).map(|kq| match kq {
+                                        crate::keys::Cleared::Clean => {}
+                                        crate::keys::Cleared::TextLeft => logging::warn(
+                                            "keys_clear_incomplete",
+                                            json!({ "session": s.session_id,
+                                                    "effect": "ô nhập vẫn còn chữ sau khi xoá — không khai là đã sạch" }),
+                                        ),
+                                        crate::keys::Cleared::NoBox => logging::warn(
+                                            "keys_clear_no_box",
+                                            json!({ "session": s.session_id,
+                                                    "effect": "màn không có ô nhập — không bấm phím nào, không khai là đã xoá" }),
+                                        ),
                                     })
                                 } else if typed.trim() == "enter" {
                                     // 🔴 ENTER TRẦN KHÔNG GỬI ĐƯỢC HỘP CHỌN

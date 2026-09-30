@@ -7489,8 +7489,18 @@ pub fn start_background(
     task: &str,
     account: Option<&str>,
     resume: Option<&str>,
+    // 🔓 `true` CHỈ khi chủ máy vừa bấm xác nhận mở trên tài khoản khoá
+    // (`pipeline::hoi_mo_tai_khoan_khoa`). Cửa vẫn đứng cho mọi lượt khác.
+    allow_locked: bool,
 ) -> Result<Started> {
-    ensure_account_usable(cfg, account)?;
+    if allow_locked {
+        logging::info(
+            "account_locked_open_allowed",
+            json!({ "account": account, "why": "chủ máy xác nhận cho lượt này" }),
+        );
+    } else {
+        ensure_account_usable(cfg, account)?;
+    }
     let task = task.trim();
     // Đề bài RỖNG được phép — nhưng chỉ trên đường mở cửa sổ thật.
     //

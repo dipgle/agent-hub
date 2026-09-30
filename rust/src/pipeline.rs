@@ -10539,6 +10539,9 @@ pub struct NewSession {
     pub resume: Option<String>,
     pub adapter: String,
     pub chat_id: String,
+    /// 🔓 Chủ máy đã BẤM XÁC NHẬN mở phiên trên tài khoản đang khoá — chỉ lượt
+    /// này (Hà 30/09, xem [`hoi_mo_tai_khoan_khoa`]). `false` ở mọi đường khác.
+    pub allow_locked: bool,
 }
 
 fn watch_new_session(job: NewSession) {
@@ -10551,6 +10554,7 @@ fn watch_new_session(job: NewSession) {
         resume,
         adapter,
         chat_id,
+        allow_locked,
     } = job;
     let (fb_cfg, fb_adapter, fb_chat) = (cfg.clone(), adapter.clone(), chat_id.clone());
     let spawned = std::thread::Builder::new()
@@ -10565,6 +10569,7 @@ fn watch_new_session(job: NewSession) {
                     &task,
                     account.as_deref(),
                     resume.as_deref(),
+                    allow_locked,
                 );
             let ack = match started {
                 Ok(s) => {
@@ -14179,25 +14184,6 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                         crate::exec::truncate(&a, 24),
                         known_accounts.join(", ")
                     )
-                } else if let Some(a) = resume
-                    .as_ref()
-                    .map(|(_, acc, _)| acc.clone())
-                    .or_else(|| account.clone())
-                    .or_else(|| cfg.default_account_name())
-                    .filter(|a| cfg.account_locked(a))
-                {
-                    // 🔒 Tài khoản sẽ chạy phiên này đang khoá — nói NGAY, đừng để
-                    // luồng mở cửa sổ đi một vòng rồi mới báo hỏng. Tài khoản ấy
-                    // là của phiên cũ khi mở lại (`/new <id>`), là cái gõ `-a` khi
-                    // có gõ, và là tài khoản mặc định khi không còn cái nào còn cửa.
-                    let vi_sao = if resume.is_some() {
-                        "\n(phiên mở lại chạy bằng đúng tài khoản cũ của nó)"
-                    } else if account.is_none() {
-                        "\n(không tài khoản nào còn cửa ⟹ rơi về tài khoản mặc định)"
-                    } else {
-                        ""
-                    };
-                    format!("{}{vi_sao}", crate::sessions::account_locked_text(cfg, &a))
                 } else {
                     // Không nêu `-s` ⟹ mở ở GỐC workspace, đúng chỗ mọi phiên
                     // trên máy này vẫn mở (và là thư mục duy nhất cả ba tài
@@ -14231,7 +14217,32 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // ở LƯỢT SAU chứ không phải bây giờ — nên tin đầu phải
                             // nói thẳng điều đó, không thì chữ gõ ngay sau khi bấm
                             // sẽ rơi vào phiên cũ mà không ai biết vì sao.
-                            {
+                            //
+                            // 🔒 Tài khoản SẼ chạy phiên này đang khoá ⟹ HỎI chủ máy
+                            // (Hà 30/09: *"Cần cơ chế để tôi mở được phiên ở tài khoản
+                            // đang khóa"*). Hỏi ở ĐÂY, sau mọi phép kiểm khác (tên tài
+                            // khoản, dự án), để không bắt bấm xác nhận cho một lệnh
+                            // đằng nào cũng không chạy.
+                            let khoa = tai_khoan_khoa_se_chay(
+                                cfg,
+                                resume.as_ref().map(|(_, a, _)| a.as_str()),
+                                account.as_deref(),
+                            );
+                            let vi_sao = if resume.is_some() {
+                                " (phiên mở lại chạy bằng đúng tài khoản cũ của nó)"
+                            } else if account.is_none() {
+                                " (không tài khoản nào còn cửa ⟹ rơi về tài khoản mặc định)"
+                            } else {
+                                ""
+                            };
+                            let tu_choi = khoa.as_deref().and_then(|a| {
+                                hoi_mo_tai_khoan_khoa(cfg, a, vi_sao, |what| {
+                                    ask_owner(db, cfg, adapter, cmd, what, "mở phiên nào")
+                                })
+                            });
+                            if let Some(t) = tu_choi {
+                                t
+                            } else {
                                 // `/new <id>` ⟹ nối tiếp phiên ấy, và tài khoản
                                 // do CHÍNH PHIÊN quyết, không phải cờ `-a`.
                                 let (resume_id, acc, task) = match resume.clone() {
@@ -14247,6 +14258,9 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                                     resume: resume_id.clone(),
                                     adapter: adapter.to_string(),
                                     chat_id: cmd.chat_id.clone(),
+                                    // Tới được đây mà `khoa` có giá trị ⟹ chủ máy
+                                    // vừa bấm xác nhận cho đúng lượt này.
+                                    allow_locked: khoa.is_some(),
                                 });
                                 match resume_id {
                                     Some(id) => format!(
@@ -18388,6 +18402,69 @@ pub fn account_lock_order(arg: &str) -> Option<(String, bool)> {
         "khoa" | "khoá" | "khóa" | "lock" => Some((ten, true)),
         "mo" | "mở" | "unlock" => Some((ten, false)),
         _ => None,
+    }
+}
+
+/// Tài khoản SẼ chạy một lượt `/new`, nếu nó đang khoá.
+///
+/// Ba nguồn theo đúng thứ tự `/new` dùng: phiên cũ khi MỞ LẠI (`--resume` phải
+/// chạy bằng tài khoản của nó), cái gõ `-a`, rồi tài khoản MẶC ĐỊNH khi không gõ
+/// và không cái nào còn cửa (`account = None` ⟹ `sessions::account_launch` rơi
+/// về hàng không có `config_dir`).
+pub fn tai_khoan_khoa_se_chay(
+    cfg: &Config,
+    resume_acc: Option<&str>,
+    account: Option<&str>,
+) -> Option<String> {
+    resume_acc
+        .map(str::to_string)
+        .or_else(|| account.map(str::to_string))
+        .or_else(|| cfg.default_account_name())
+        .filter(|a| cfg.account_locked(a))
+}
+
+/// 🔓 Mở phiên trên tài khoản ĐANG KHOÁ — chỉ khi chủ máy BẤM xác nhận.
+///
+/// Hà 2026-09-30: *"Cần cơ chế để tôi mở được phiên ở tài khoản đang khóa"*.
+/// Ngồi ở máy thì anh gõ `claude2` là xong — không gì chặn; từ điện thoại thì
+/// khoá lại chặn cứng, tức một "gap" của cầu nối. Nhưng khoá sinh ra để huba
+/// không TỰ dùng tài khoản ấy, nên đường vòng phải là một cú bấm của NGƯỜI, cho
+/// ĐÚNG lượt này: khoá giữ nguyên, các đường tự chọn vẫn không bao giờ đụng tới.
+///
+/// `hoi` là lượt hỏi Telegram (`ask_owner` ở chỗ gọi) — tiêm vào để bài kiểm chấm
+/// được cả ba nhánh mà không chạm mạng. `None` = được mở; `Some(câu)` = không mở.
+///
+/// ⚠ `confirm.enabled = false` ⟹ KHÔNG mở. `confirm::ask` khi tắt trả
+/// `Confirmed` không hỏi ai (đúng cho `/close`: chủ máy tự tắt chốt ấy), nhưng
+/// ở đây nó biến khoá thành không-khoá mà không một ngón tay nào bấm.
+pub fn hoi_mo_tai_khoan_khoa(
+    cfg: &Config,
+    acc: &str,
+    vi_sao: &str,
+    hoi: impl FnOnce(&str) -> Option<String>,
+) -> Option<String> {
+    let chan = crate::sessions::account_locked_text(cfg, acc);
+    if !cfg.confirm.enabled {
+        logging::warn(
+            "account_locked_open_refused",
+            json!({ "account": acc, "why": "confirm.enabled = false — không có ai để bấm xác nhận" }),
+        );
+        return Some(format!(
+            "{chan}\n(xác nhận Telegram đang tắt — không hỏi được để mở thay)"
+        ));
+    }
+    let what = format!(
+        "🔒 {acc} đang KHOÁ{vi_sao}. Vẫn mở phiên bằng {acc}? Chỉ lượt này — khoá giữ nguyên."
+    );
+    match hoi(&what) {
+        Some(tu_choi) => Some(format!("{tu_choi}\n{chan}")),
+        None => {
+            logging::info(
+                "account_locked_open_confirmed",
+                json!({ "account": acc, "via": "chủ máy bấm xác nhận" }),
+            );
+            None
+        }
     }
 }
 

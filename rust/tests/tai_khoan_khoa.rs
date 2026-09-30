@@ -195,22 +195,80 @@ fn cua_mo_phien_chan_tai_khoan_khoa_ke_ca_mac_dinh() {
 fn start_background_chan_tai_khoan_khoa_truoc_moi_viec() {
     let c = cfg_ba(&["acc2"]);
     let khong_co = Path::new("/khong/co/thu/muc/nay");
-    let loi = |acc: &str| match huba::sessions::start_background(
+    let loi = |acc: &str, cho: bool| match huba::sessions::start_background(
         &c,
         "x",
         khong_co,
         "việc",
         Some(acc),
         None,
+        cho,
     ) {
         Ok(_) => panic!("{acc}: start_background không từ chối"),
         Err(e) => e.to_string(),
     };
-    let e = loi("acc2");
+    let e = loi("acc2", false);
     assert!(e.contains("acc2 đang KHOÁ"), "{e}");
     // Vế ngược: tài khoản mở ⟹ qua cửa, rơi xuống phép kiểm thư mục.
-    let e = loi("acc3");
+    let e = loi("acc3", false);
     assert!(e.contains("không thấy thư mục dự án"), "{e}");
+    // 🔓 Chủ máy đã bấm xác nhận (Hà 30/09) ⟹ tài khoản khoá QUA cửa cho lượt ấy.
+    let e = loi("acc2", true);
+    assert!(
+        e.contains("không thấy thư mục dự án"),
+        "đã xác nhận mà cửa vẫn chặn: {e}"
+    );
+}
+
+// ── Mở phiên trên tài khoản khoá: chỉ khi chủ máy BẤM (Hà 30/09) ────────────
+
+#[test]
+fn tai_khoan_se_chay_la_resume_roi_a_roi_mac_dinh() {
+    use huba::pipeline::tai_khoan_khoa_se_chay as se_chay;
+    let c = cfg_ba(&["acc1", "acc2"]);
+    assert_eq!(se_chay(&c, None, Some("acc2")).as_deref(), Some("acc2"));
+    assert_eq!(se_chay(&c, None, Some("acc3")), None, "acc3 đang mở");
+    // Không gõ -a ⟹ tài khoản mặc định (acc1) — đang khoá.
+    assert_eq!(se_chay(&c, None, None).as_deref(), Some("acc1"));
+    // Mở lại phiên: tài khoản CỦA PHIÊN thắng cờ -a.
+    assert_eq!(se_chay(&c, Some("acc3"), Some("acc2")), None);
+    assert_eq!(
+        se_chay(&c, Some("acc2"), Some("acc3")).as_deref(),
+        Some("acc2")
+    );
+}
+
+#[test]
+fn mo_tai_khoan_khoa_chi_khi_chu_may_bam() {
+    use huba::pipeline::hoi_mo_tai_khoan_khoa as hoi;
+    let c = cfg_ba(&["acc2"]);
+    assert!(c.confirm.enabled, "cấu hình mặc định phải bật xác nhận");
+
+    // Bấm đồng ý ⟹ được mở (None), và câu hỏi nói rõ tài khoản + "chỉ lượt này".
+    let mut cau_hoi = String::new();
+    let ra = hoi(&c, "acc2", "", |what| {
+        cau_hoi = what.to_string();
+        None
+    });
+    assert_eq!(ra, None);
+    assert!(cau_hoi.contains("acc2 đang KHOÁ"), "{cau_hoi}");
+    assert!(cau_hoi.contains("Chỉ lượt này"), "{cau_hoi}");
+
+    // Vế ngược: huỷ / hết giờ ⟹ KHÔNG mở, câu trả lời chỉ đường mở khoá.
+    let ra = hoi(&c, "acc2", "", |_| Some("✋ Đã huỷ trên Telegram".into()));
+    let ra = ra.expect("huỷ mà vẫn mở");
+    assert!(
+        ra.contains("Đã huỷ") && ra.contains("/accounts mo acc2"),
+        "{ra}"
+    );
+
+    // Tắt xác nhận ⟹ KHÔNG mở, và KHÔNG được gọi tới lượt hỏi (không ai bấm).
+    let mut tat = cfg_ba(&["acc2"]);
+    tat.confirm.enabled = false;
+    let ra = hoi(&tat, "acc2", "", |_| panic!("tắt xác nhận mà vẫn đi hỏi"));
+    assert!(ra
+        .expect("tắt xác nhận mà vẫn mở")
+        .contains("xác nhận Telegram đang tắt"));
 }
 
 #[test]

@@ -106,6 +106,22 @@ if [ "$CLIPPY_EXIT" -ne 0 ]; then
   exit "$CLIPPY_EXIT"
 fi
 
+# ── ②b WINDOWS: dựng-kiểm chéo (lib + bin + mọi bài kiểm), clippy -D warnings ──
+# Vì sao có bước này (30/09): bản Windows (`keys_win.rs`, 08/09) đã HỎNG BIÊN DỊCH
+# lặng lẽ — `std::os::unix::fs::symlink` trần ở `runtime.rs`, hai khối kiểm mac-only
+# không gắn cờ — mà không cổng nào thấy, vì không cổng nào dựng cho Windows. Thiếu
+# đích dựng ⟹ WIN_EXIT=2 (KHÔNG ĐO ĐƯỢC), cổng KHÔNG xanh; không được lẳng lặng bỏ qua.
+t0=$(date +%s)
+WIN_TARGET=x86_64-pc-windows-gnu
+if rustup target list --installed 2>/dev/null | grep -qx "$WIN_TARGET"; then
+  cargo clippy --offline --target "$WIN_TARGET" --all-targets -- -D warnings
+  WIN_EXIT=$?
+else
+  echo "⚠ chưa cài đích $WIN_TARGET (rustup target add $WIN_TARGET) — KHÔNG ĐO ĐƯỢC bản Windows"
+  WIN_EXIT=2
+fi
+echo "WIN_EXIT=$WIN_EXIT  # $(($(date +%s) - t0))s"
+
 # ── ③ dựng, lấy đường dẫn từ JSON (KHÔNG glob: deps/ có 1,37 triệu mục) ──────
 t0=$(date +%s)
 cargo test --offline --no-run --message-format=json > "$OUT/cong-sach-build.json" 2>"$OUT/cong-sach-build.err"
@@ -177,8 +193,8 @@ cargo test --offline --doc
 DOC_EXIT=$?
 echo "DOC_EXIT=$DOC_EXIT  # $(($(date +%s) - t0))s"
 
-echo "FAILED=$FAILED · CHEP_HONG=$CHEP_HONG · MAU_SO=$MAU_SO"
-if [ "$FAILED" -eq 0 ] && [ "$FMT_EXIT" -eq 0 ] && [ "$DOC_EXIT" -eq 0 ] && [ "$CHEP_HONG" -eq 0 ] && [ "$DA_CHAY" -eq "$MAU_SO" ]; then
+echo "FAILED=$FAILED · CHEP_HONG=$CHEP_HONG · MAU_SO=$MAU_SO · WIN_EXIT=$WIN_EXIT"
+if [ "$FAILED" -eq 0 ] && [ "$FMT_EXIT" -eq 0 ] && [ "$DOC_EXIT" -eq 0 ] && [ "$CHEP_HONG" -eq 0 ] && [ "$DA_CHAY" -eq "$MAU_SO" ] && [ "$WIN_EXIT" -eq 0 ]; then
   GATE_EXIT=0
 else
   GATE_EXIT=1

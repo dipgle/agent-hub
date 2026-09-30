@@ -18,6 +18,10 @@
 //!   cargo test --offline --test cgkeys_live -- --ignored --nocapture arrow
 //! ```
 
+// Đo trên cửa sổ Terminal.app THẬT qua `cgkeys` (CGEventPostToPid) — chỉ có trên
+// macOS; dựng cho Windows thì là lỗi biên dịch (đo 30/09, E0433).
+#![cfg(target_os = "macos")]
+
 /// Trạng thái quyền — câu đầu tiên phải hỏi, vì thiếu quyền thì phím không tới
 /// nơi và hệ thống KHÔNG báo lỗi.
 #[test]

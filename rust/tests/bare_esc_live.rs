@@ -24,6 +24,10 @@
 //! `#[ignore]` vì nó gõ vào cửa sổ thật của chủ máy — không được chạy trong lượt
 //! `cargo test` thường.
 
+// Đo trên cửa sổ Terminal.app THẬT qua `cgkeys` (CGEventPostToPid) — chỉ có trên
+// macOS; dựng cho Windows thì là lỗi biên dịch (đo 30/09, E0433).
+#![cfg(target_os = "macos")]
+
 /// Dấu chỉ màn `/usage` đang mở. Neo vào chữ CLI in ra, không vào một con số.
 const DAU_USAGE: &str = "Esc to cancel";
 

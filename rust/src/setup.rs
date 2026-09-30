@@ -523,8 +523,12 @@ mod tests {
             "khoá lạ do chủ máy tự thêm phải còn nguyên"
         );
 
-        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "file mật phải là 600, đo được {mode:o}");
+        // Quyền 600 là khái niệm Unix; nhánh Windows (`icacls`) chưa có phép đo ở đây.
+        #[cfg(unix)]
+        {
+            let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "file mật phải là 600, đo được {mode:o}");
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 

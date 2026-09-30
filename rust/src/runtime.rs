@@ -1530,7 +1530,17 @@ fn link_cli_onto_path(rust_dir: &Path) -> String {
         }
         Err(_) => {}
     }
-    match std::os::unix::fs::symlink(&bin, &link) {
+    // 🔴 `std::os::unix` KHÔNG tồn tại khi dựng cho Windows — dòng này đứng trần
+    // từ trước lượt đóng gói Windows 08/09 và làm hỏng cả thư viện ở đích ấy
+    // (đo 30/09: `cargo check --target x86_64-pc-windows-gnu` ⟹ E0433). Trên
+    // Windows, `install_update.ps1` tự đưa thư mục bin vào PATH người dùng.
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(&bin, &link);
+    #[cfg(not(unix))]
+    let made: std::io::Result<()> = Err(std::io::Error::other(
+        "không có liên kết mềm kiểu Unix — trên Windows chạy install_update.ps1",
+    ));
+    match made {
         Ok(()) => format!(
             "`huba` gõ được ở mọi cửa sổ: {} → {}",
             link.display(),

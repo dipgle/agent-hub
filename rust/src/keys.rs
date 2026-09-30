@@ -6290,7 +6290,9 @@ mod numbered_prose_tests {
     }
 }
 
-#[cfg(test)]
+// `merge_above`/`window_script` chỉ có trên macOS ⟹ hai khối kiểm này cũng chỉ dựng ở
+// đó; dựng cho Windows thì chúng là lỗi biên dịch (đo 30/09, E0432).
+#[cfg(all(test, target_os = "macos"))]
 mod merge_above_tests {
     use super::merge_above;
 
@@ -6344,7 +6346,7 @@ mod merge_above_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::{
         activity, arrow_verdict, as_string, ghost_verdict, gop_khung_lap, landed,

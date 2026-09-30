@@ -1,5 +1,14 @@
 # active context — huba
 
+## 🟡 2026-09-30 17:0xZ — phiên c4049483 CHUYỂN PHIÊN (ngữ cảnh 57 %)
+
+Bàn giao: `python3 ~/projects/scripts/ban-giao.py doc /Users/hanguyen/projects/huba` (`.tmp/ban-giao.tsv`,
+6 mục mở, cổng `kiem` XANH) · brief `.tmp/brief-huba-ke-nhiem-2026-09-30.md`.
+Đã làm trong phiên (đo được, xem PLAN S37–S41): khoá tài khoản + `/accounts khoa|mo|detail` (nghiệm thu
+thật trên Telegram phần khoa/mo) · nút ❌ Đóng · mở `/new`+`/handover` trên tài khoản khoá bằng xác nhận ·
+Windows: biên dịch sạch + `gate.sh` ②b + cài bằng Task Scheduler + gói `.tmp/huba-windows-692ee33.zip`.
+Chặn: phần nối phiên↔cửa sổ trên Windows chờ số đo máy thật (`scripts/do-windows.ps1`).
+
 ## 🟢 2026-09-29 04:4xZ — phiên c4049483: `/accounts detail <tên>` (PLAN S38) + acc2 ĐANG KHOÁ
 
 - `/accounts detail acc3` (hoặc `/accounts acc3`) in email + danh tính + hạn mức + phiên đang chạy + khoá.

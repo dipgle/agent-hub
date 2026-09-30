@@ -1,5 +1,28 @@
 # active context — huba
 
+## 🟢 2026-09-30 22:2xZ→23:xxZ — phiên fb6a2579 (kế nhiệm c4049483): "đã gửi" phải do NHẬT KÝ nói (PLAN S42)
+
+- **Phiên cũ c4049483 đã đóng sạch** 22:25Z: lượt cuối xong 22:23:33Z, cây 0 bẩn · 0/0 origin, không job nền,
+  hòm thư không có `huba-run.txt` ⟹ `kill 83217` + đóng cửa sổ 1471 (`ttys006` biến mất).
+- **Phát hiện (QA chủ động trên log, không có trong sổ nợ):** `auto_unstick_box_sent` nói dối. Đối chiếu 92 lượt
+  với nhật ký `.jsonl` đúng phiên (`.tmp/do-unstick-sent.py`): 45 thật trong 90 s; từ 25/09 **3/19**. Họ ① phiên
+  đang/đã tắt (màn không còn ô, `input_box_text`=`None` ⟹ "ô trống ⟹ đã đi"); họ ② phiên đang chạy, TUI vẽ lại
+  (`.tmp/do-unstick-sent-sau.py`). Chiều ngược sạch: 730/740 `stuck` nhật ký KHÔNG nhận gì trong 10 s.
+- `bd562e9` (vá) + `76135a5` (cùng lớp ở `/clear`/`/clean`). RED trên mã cũ đã chạy; đối chứng ngược trên bản sao
+  (bỏ `box_start`) ⟹ đúng 2 bài mới đỏ. `gate.sh`: `bd562e9` GATE_EXIT=0 176/176 · `76135a5` GATE_EXIT=0 176/176.
+- **Đang chạy `76135a5`**: `hubd@2026-09-30T23:24:40Z` pid 77730, `--verify` KHỚP (trước đó `bd562e9` = pid 16372
+  từ 22:44:17Z). `/clear` vào màn KHÔNG có ô: CHƯA gõ thật trên Telegram. Đo thật trên `bd562e9`: 6 `firing` → 6
+  `stuck` (nhánh "còn chữ ấy") → 5 `ghost`; độ trễ firing→stuck 1,50 s (trước 1,25–1,36 s). **Nhánh MỚI
+  (`sent`/`not_in_journal`) CHƯA xảy ra trên máy thật** — cần chờ (trước đây ~5 lượt `sent`/ngày).
+  Đo lại: `grep -cE '"msg":"auto_unstick_box_(sent|not_in_journal)"' logs/huba.log` sau mốc 22:44:57Z.
+- ⚠ Tự gây: lúc chạy thử, vòng lặp chạy nhầm binary `hubad` dựng từ `target/` ⟹ nó TỪ CHỐI (khoá pid 81437, exit 3)
+  nhưng để lại **1 dòng `error hubd_already_running` 22:39:45Z** trong log thật (sẽ hiện ở `/doctor`).
+- **Không đổi**: vòng tự gỡ kẹt vẫn bắn 90–230 Enter/ngày, ~95 % vào gợi ý mờ — thiết kế cố ý (Enter là phép đo,
+  Hà 16/08). Muốn giảm thì cần Hà quyết (vd chỉ bấm khi có dấu hiệu chữ THẬT).
+- **Banner khởi động sai về huba** (hạ tầng chung, KHÔNG sửa): `main-khoi-dong.sh:168` chỉ tìm
+  `brief-main-ke-nhiem*` ⟹ khai "0 bản bàn giao"; `phien-moi-nap-boi-canh.sh:86` gõ cứng `dwork/CLAUDE.md +
+  dev/CLAUDE.md`; `main-khoi-dong.sh:1439` in `huba/dev/CLAUDE.md` (không tồn tại).
+
 ## 🟡 2026-09-30 17:0xZ — phiên c4049483 CHUYỂN PHIÊN (ngữ cảnh 57 %)
 
 Bàn giao: `python3 ~/projects/scripts/ban-giao.py doc /Users/hanguyen/projects/huba` (`.tmp/ban-giao.tsv`,

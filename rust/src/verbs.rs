@@ -39,7 +39,16 @@ use crate::adapters::CommandKind;
 // phiên chát đi, trường hợp này ít xảy ra"*. Bàn phím thường trực chiếm chỗ ở
 // MỌI tin, nên chỗ trên nó đắt hơn chỗ trong menu ☰; việc hiếm thì để ở menu.
 // Route vẫn sống dưới cái tên `/ctrlc` (alias `refresh`, `lamtuoi`).
-pub const KEYBOARD: &[(&str, &str)] = &[("📷 Xem màn", "/shot"), ("📋 Phiên", "/session")];
+//
+// `❌ Đóng` — nút thứ ba, Hà chốt 2026-09-30 (ảnh bàn phím: *"Thêm nút lệnh close
+// vào bên phải"*). Một chạm vẫn an toàn: `/close` trơn nhắm phiên ĐANG THEO và
+// HỎI LẠI trước khi đóng (`sessions::closing_needs_confirm`), trừ cửa sổ trần
+// đang ở dấu nhắc trống — chỗ ấy không có việc dở nào để mất.
+pub const KEYBOARD: &[(&str, &str)] = &[
+    ("📷 Xem màn", "/shot"),
+    ("📋 Phiên", "/session"),
+    ("❌ Đóng", "/close"),
+];
 
 /// `ttys014` — tên một tty như Terminal khai, đã bỏ `/dev/`.
 ///

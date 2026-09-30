@@ -76,13 +76,21 @@ fn the_old_names_still_land_on_the_same_key() {
 /// 🪦 Nút `🔄 Làm tươi` đã rời bàn phím thường trực theo lệnh Hà. Bài kiểm này
 /// giữ cho nó không lặng lẽ quay lại: bàn phím ấy hiện ở MỌI tin, nên mỗi nút
 /// trên đó đắt hơn hẳn một dòng trong menu ☰.
+///
+/// Nút thứ ba `❌ Đóng` (`/close`) là quyết định có người chốt — Hà 2026-09-30,
+/// ảnh bàn phím: *"Thêm nút lệnh close vào bên phải"*.
 #[test]
-fn the_persistent_keyboard_stays_at_two_buttons() {
+fn the_persistent_keyboard_stays_at_three_buttons() {
     assert_eq!(
         KEYBOARD.len(),
-        2,
-        "bàn phím thường trực nay là 📷 Xem màn + 📋 Phiên. Thêm nút thứ ba thì \
-         phải là một quyết định có người chốt, không phải một lượt sửa tiện tay"
+        3,
+        "bàn phím thường trực nay là 📷 Xem màn + 📋 Phiên + ❌ Đóng. Thêm nút thứ tư \
+         thì phải là một quyết định có người chốt, không phải một lượt sửa tiện tay"
+    );
+    assert_eq!(
+        KEYBOARD.last().map(|(_, lenh)| *lenh),
+        Some("/close"),
+        "Hà chốt nút close nằm BÊN PHẢI — tức cuối hàng"
     );
     assert!(
         !KEYBOARD.iter().any(|(_, lenh)| lenh.contains("refresh")),

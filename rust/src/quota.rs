@@ -608,8 +608,8 @@ pub struct Ranked {
 pub fn book_path(dir: Option<&Path>) -> PathBuf {
     match dir {
         Some(d) => d.join(".claude.json"),
-        None => match std::env::var_os("HOME") {
-            Some(h) => PathBuf::from(h).join(".claude.json"),
+        None => match crate::config::home_dir() {
+            Some(h) => h.join(".claude.json"),
             None => PathBuf::from(".claude.json"),
         },
     }

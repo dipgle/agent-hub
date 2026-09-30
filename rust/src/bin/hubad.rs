@@ -13,6 +13,11 @@
 //! reclaims it. That is deliberately simpler than installing signal handlers —
 //! no unsafe code anywhere in this crate.
 
+// Windows: chạy KHÔNG console — Task Scheduler không bật một cửa sổ đen nằm mãi
+// trên màn chủ máy. Nhật ký vẫn ghi ra tệp (`logs/huba.log`); tiến trình con thì
+// `exec::run` gắn `CREATE_NO_WINDOW` để không nháy cửa sổ nào.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::fs;
 use std::path::PathBuf;
 use std::thread;
@@ -94,14 +99,30 @@ fn notify(cfg: &huba::config::Config, subject: Option<&str>, body: &str) -> Resu
 /// report "alive" so a second daemon refuses to start. Guessing "dead" would
 /// let two loops run, and two loops means paying twice and replying twice.
 fn pid_alive(pid: &str) -> bool {
-    match run(
+    // 🔴 Windows không có `kill`: lượt spawn hỏng ⟹ nhánh fail-closed dưới đây
+    // đọc ra "còn sống" ⟹ sau lần hubd chết ĐẦU TIÊN, tệp khoá còn pid cũ và
+    // Task Scheduler bật lại bao nhiêu lần hubd cũng tự từ chối chạy — mãi mãi.
+    // `tasklist /FO CSV` in pid trong ngoặc kép (`"1234"`) bất kể ngôn ngữ máy;
+    // câu "No tasks are running" thì dịch theo ngôn ngữ nên KHÔNG đọc nó.
+    #[cfg(windows)]
+    let probe = run(
+        "tasklist",
+        &["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"],
+        RunOpts {
+            timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        },
+    );
+    #[cfg(not(windows))]
+    let probe = run(
         "kill",
         &["-0", pid],
         RunOpts {
             timeout: Some(Duration::from_secs(5)),
             ..Default::default()
         },
-    ) {
+    );
+    match probe {
         Ok(r) if r.timed_out => {
             logging::warn(
                 "pid_check_timed_out",
@@ -109,6 +130,8 @@ fn pid_alive(pid: &str) -> bool {
             );
             true
         }
+        #[cfg(windows)]
+        Ok(r) if r.code == Some(0) => huba::exec::tasklist_has_pid(&r.stdout, pid),
         Ok(r) => r.code == Some(0),
         Err(e) => {
             logging::warn(
@@ -185,6 +208,12 @@ fn config_mtime(path: &std::path::Path) -> Option<(i64, u32)> {
 /// Chạy trong luồng riêng có hạn giờ: phép đo này KHÔNG được phép trở thành một
 /// chỗ treo mới ngay ở chỗ vừa dựng ra để chẩn đoán treo.
 fn signature_kind() -> &'static str {
+    // Windows: không có `codesign`, và không có TCC để mà giữ quyền theo chữ
+    // ký (xem `keys_win.rs` mục 3) — khai thẳng là "không áp dụng" thay vì để
+    // một lượt spawn hỏng đọc ra `unreadable`, câu mang nghĩa "TCC đang chặn".
+    if cfg!(windows) {
+        return "windows";
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let out = std::env::current_exe().ok().and_then(|exe| {

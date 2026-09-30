@@ -143,6 +143,24 @@ pub fn serve(hub_home: &Path) -> Result<()> {
 /// trình duyệt nào trong danh sách thì rơi về `open` thường; và `open` hỏng nốt
 /// thì cũng KHÔNG làm hỏng cả lệnh, vì đường dẫn đã in ra màn hình rồi.
 fn open_window(url: &str) {
+    // Windows không có `open`: `start` (lệnh trong `cmd`) mở bằng trình duyệt
+    // mặc định. Chuỗi rỗng `""` là tiêu đề cửa sổ — thiếu nó thì `start` đọc
+    // chính URL (trong ngoặc kép) làm tiêu đề và không mở gì.
+    if cfg!(windows) {
+        match std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .status()
+        {
+            Ok(s) if s.success() => {
+                logging::info("setup_window_opened", json!({ "as": "windows-start" }))
+            }
+            other => logging::warn(
+                "setup_open_failed",
+                json!({ "detail": format!("{other:?}"), "url_printed": true }),
+            ),
+        }
+        return;
+    }
     const APP_BROWSERS: &[&str] = &[
         "Google Chrome",
         "Microsoft Edge",

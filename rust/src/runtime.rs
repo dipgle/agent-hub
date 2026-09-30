@@ -1132,8 +1132,8 @@ fn autostart_state(cfg: &Config) -> Value {
 /// đúng cho MỌI lệnh sau này), và hàm này tự tìm (đường đúng cho một bản cài đã
 /// nằm sẵn trên máy người khác, nơi không ai sửa plist hộ).
 fn cargo_bin() -> String {
-    if let Some(home) = std::env::var_os("HOME") {
-        let p = std::path::PathBuf::from(home).join(".cargo/bin/cargo");
+    if let Some(home) = crate::config::home_dir() {
+        let p = home.join(".cargo/bin/cargo");
         if p.exists() {
             return p.display().to_string();
         }
@@ -1337,6 +1337,16 @@ fn text_id(bin: &Path) -> anyhow::Result<String> {
 }
 
 pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
+    // Windows: không codesign, không launchd — cài bằng `install_update.ps1`
+    // (Task Scheduler `huba-hubd`). Tự nâng cấp từ điện thoại CHƯA làm: nó phải
+    // dừng chính tác vụ đang chạy mình rồi chép đè `hubd.exe` đang bị khoá, và
+    // chưa có máy Windows nào để đo đường ấy. Nói ra, đừng chạy nửa chừng.
+    if cfg!(windows) {
+        anyhow::bail!(
+            "trên Windows chưa tự nâng cấp được — tại máy chạy: powershell -ExecutionPolicy Bypass -File {}",
+            cfg.hub_home.join("install_update.ps1").display()
+        );
+    }
     let rust_dir = source_tree(cfg);
     if !rust_dir.is_dir() {
         anyhow::bail!("không thấy cây mã ở {}", rust_dir.display());
@@ -1552,6 +1562,9 @@ fn link_cli_onto_path(rust_dir: &Path) -> String {
 
 /// Bảo launchd nạp lại hubad. Gọi SAU khi đã trả lời, vì nó giết chính mình.
 pub fn restart_daemon() -> anyhow::Result<String> {
+    if cfg!(windows) {
+        anyhow::bail!("trên Windows khởi động lại bằng: schtasks /End /TN huba-hubd && schtasks /Run /TN huba-hubd");
+    }
     let uid = run(
         "id",
         &["-u"],

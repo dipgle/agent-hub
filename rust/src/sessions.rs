@@ -3717,8 +3717,8 @@ fn account_book_dir(account: &ClaudeAccountCfg) -> PathBuf {
     if let Some(d) = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return PathBuf::from(d);
     }
-    match std::env::var_os("HOME") {
-        Some(home) => PathBuf::from(home).join(".claude"),
+    match crate::config::home_dir() {
+        Some(home) => home.join(".claude"),
         None => PathBuf::from(".claude"),
     }
 }

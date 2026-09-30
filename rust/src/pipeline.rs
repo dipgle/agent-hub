@@ -8559,9 +8559,9 @@ pub fn sendable_file(
     workspace: &std::path::Path,
 ) -> Option<std::path::PathBuf> {
     let expanded = match p.strip_prefix("~/") {
-        Some(rest) => std::env::var("HOME")
-            .map(|h| std::path::PathBuf::from(h).join(rest))
-            .unwrap_or_else(|_| std::path::PathBuf::from(p)),
+        Some(rest) => crate::config::home_dir()
+            .map(|h| h.join(rest))
+            .unwrap_or_else(|| std::path::PathBuf::from(p)),
         None => std::path::PathBuf::from(p),
     };
     let full = if expanded.is_absolute() {

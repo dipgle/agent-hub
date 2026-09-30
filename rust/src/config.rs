@@ -398,11 +398,33 @@ impl Default for Config {
     }
 }
 
+/// Thư mục nhà của chủ máy — `HOME`, rồi `USERPROFILE`.
+///
+/// 🔴 Windows KHÔNG đặt `HOME` (chỉ Git Bash/MSYS tự đặt); thư mục nhà ở đó là
+/// `USERPROFILE`. Trước 30/09 huba đọc thẳng `HOME` ở sáu chỗ — trên Windows cả
+/// sáu rơi về đường TƯƠNG ĐỐI (`.claude`, `.claude.json`): danh sách phiên rỗng,
+/// sổ hạn mức "chưa đăng nhập", mà không một dòng lỗi nào. MỘT chỗ hỏi, để chỗ
+/// thứ bảy không quên.
+pub fn home_dir() -> Option<PathBuf> {
+    home_from(env::var_os("HOME"), env::var_os("USERPROFILE"))
+}
+
+/// Phần thuần của [`home_dir`] — bài kiểm khỏi phải sửa biến môi trường của
+/// cả tiến trình (các bài chạy song song thì sửa biến chung là tự bắn nhau).
+pub fn home_from(
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    home.filter(|h| !h.is_empty())
+        .or(userprofile.filter(|h| !h.is_empty()))
+        .map(PathBuf::from)
+}
+
 pub fn expand_home(p: &Path) -> PathBuf {
     let s = p.to_string_lossy();
     if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(home) = env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
+        if let Some(home) = home_dir() {
+            return home.join(rest);
         }
     }
     p.to_path_buf()
@@ -707,8 +729,8 @@ impl Config {
         if !self.claude_transcript_root.is_empty() {
             return expand_home(Path::new(&self.claude_transcript_root));
         }
-        match env::var_os("HOME") {
-            Some(home) => PathBuf::from(home).join(".claude"),
+        match home_dir() {
+            Some(home) => home.join(".claude"),
             None => PathBuf::from(".claude"),
         }
     }

@@ -113,6 +113,32 @@ khoẻ** có một hàng nói thẳng điều đó.
 vòng chạy được đếm và backoff luỹ thừa (tối đa 10 phút), sau 5 lần liên tiếp thì
 ghi `logs/notify.log` + hiện thông báo macOS.
 
+## Chạy trên Windows (30/09 — ⚠ CHƯA chạy thử trên máy Windows thật)
+
+Bản Windows lái **Windows Terminal** (`wt.exe`) thay cho Terminal.app: gõ phím bằng
+`SendInput`, đọc màn bằng UI Automation (`rust/src/keys_win.rs`). Nó được dựng-kiểm
+chéo ở MỌI lượt `./gate.sh` (bước ②b, `x86_64-pc-windows-gnu`, clippy `-D warnings`),
+nhưng chưa từng chạy trên một máy Windows nào.
+
+1. **Đo trước** (chỉ đọc, ~10 giây): `powershell -ExecutionPolicy Bypass -File scripts\do-windows.ps1`
+   ⟹ tệp `%TEMP%\huba-do-windows-*.txt`. Gửi tệp ấy về: nó trả lời những câu mà phần
+   nối-phiên-với-cửa-sổ còn thiếu (`claude agents --json` trên Windows in gì, `claude`
+   chạy dưới tiến trình nào, lớp cửa sổ Windows Terminal).
+2. **Cấu hình**: `huba.config.json` (các `claude_accounts` của MÁY ĐÓ) + `huba.env` —
+   `huba setup` mở trang để điền. ⚠ Dùng **bot Telegram riêng** cho máy Windows: hai
+   hubd cùng một bot thì giành `getUpdates` (409 Conflict).
+3. **Cài**: PowerShell THƯỜNG (không Run as Administrator — UIPI chặn gõ phím giữa hai
+   mức quyền): `powershell -ExecutionPolicy Bypass -File install_update.ps1`
+   (cần Rust), hoặc `… install_update.ps1 -BinDir <thư mục có hubad.exe + huba.exe>` với
+   bản dựng sẵn. Nó cài vào `%LOCALAPPDATA%\hub\bin`, thêm vào PATH, đặt `HUB_CONFIG`, và
+   đăng ký tác vụ `huba-hubd` (Task Scheduler, lúc đăng nhập, chết thì chạy lại).
+   Kiểm: `install_update.ps1 -Verify`.
+
+**Đã biết là CHƯA chạy trên Windows**: nối phiên đang chạy với cửa sổ của nó (chờ số đo
+bước 1) · `/upgrade` (báo lệnh cài lại thay vì tự làm) · `/anh` chụp ảnh cửa sổ ·
+phát hiện màn khoá · `/web` lái Chrome (AppleScript) · thông báo hệ thống khi vòng chạy
+hỏng liên tiếp (chỉ ghi `logs/notify.log`).
+
 ## Lệnh
 
 Chỉ chủ máy ra lệnh được: Telegram gác bằng `chat_id` (`telegram::update_sender`

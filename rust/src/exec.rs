@@ -60,6 +60,23 @@ pub struct RunOpts<'a> {
 }
 
 const POLL: Duration = Duration::from_millis(50);
+/// Cờ `CreateProcess` của Windows: tiến trình con console KHÔNG mở cửa sổ riêng.
+#[cfg(windows)]
+pub const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// `tasklist /FI "PID eq <pid>" /FO CSV /NH` có một hàng mang ĐÚNG pid ấy không.
+///
+/// So theo CỘT thứ hai của CSV (`"hubd.exe","5432","Console","1","12,345 K"`),
+/// không theo "chuỗi có chứa": `"12,345 K"` chứa `345`. Và không đọc câu báo
+/// rỗng (`INFO: No tasks are running…`) — câu ấy dịch theo ngôn ngữ của máy.
+/// Thuần, ở thư viện chứ không ở `hubad`, để bài kiểm chạy được trên macOS.
+pub fn tasklist_has_pid(csv: &str, pid: &str) -> bool {
+    csv.lines().any(|l| {
+        l.split("\",\"")
+            .nth(1)
+            .is_some_and(|f| f.trim_matches('"') == pid)
+    })
+}
 const MAX_BYTES: usize = 8 * 1024 * 1024;
 
 /// Đọc HẾT ống, giữ lại nhiều nhất `cap` byte, đếm phần đã vứt.
@@ -376,6 +393,16 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
     {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
+    }
+    // Windows: `hubd` chạy KHÔNG console (`windows_subsystem` ở `bin/hubad.rs`, để
+    // Task Scheduler không bật một cửa sổ đen nằm mãi trên màn). Tiến trình cha
+    // không console thì mỗi con console (`claude agents`, `powershell`…) tự MỞ
+    // một cửa sổ riêng — một cái nháy mỗi vài giây. `CREATE_NO_WINDOW`
+    // (0x08000000) bảo Windows đừng mở; stdout/stderr vẫn đi qua ống như cũ.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
     }
     if let Some(dir) = opts.cwd {
         command.current_dir(dir);

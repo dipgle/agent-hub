@@ -960,6 +960,23 @@ pub fn input_box_text(screen: &str) -> Option<String> {
     (out.chars().count() >= 2).then_some(out)
 }
 
+/// Bóp một đoạn chữ về dạng SO ĐƯỢC giữa màn và nguồn: bỏ khoảng trắng (ô nhập
+/// ngắt dòng theo bề ngang cửa sổ) và các ký tự khung/dấu nhắc.
+///
+/// `$` nằm trong bộ bỏ đi cùng `❯`, và đó là một cặp: khối dán mở đầu dòng lệnh
+/// bằng `$ `, còn TUI vẽ lại chính dòng ấy dưới dấu nhắc `❯ ` của nó. Không bỏ
+/// thì hai chuỗi chỉ khác nhau đúng một ký tự ở đầu — và khác một ký tự là trượt
+/// hẳn (đo 2026-08-19, `[dwork]`).
+///
+/// MỘT hàm cho mọi phép so "chữ trên màn ↔ chữ gốc" ([`still_in_box`], và
+/// `pipeline::cau_da_vao_nhat_ky` so ô nhập với nhật ký) — hai bộ lọc chép tay
+/// lệch nhau một ký tự là hai phép đo cho hai câu trả lời khác nhau.
+pub fn squash_box(s: &str) -> String {
+    s.chars()
+        .filter(|c| !c.is_whitespace() && !"│┃|>❯$".contains(*c))
+        .collect()
+}
+
 /// Chữ vừa gõ CÒN NẰM trong ô nhập, hay đã đi?
 ///
 /// 🔴 Hà đo 2026-08-12: *"nhận được text nhưng không tự gửi"*. Chú thích của
@@ -975,15 +992,7 @@ pub fn input_box_text(screen: &str) -> Option<String> {
 /// đủ đặc trưng để không trùng ngẫu nhiên với chữ khác trên màn, mà vẫn ngắn hơn
 /// một dòng của ô nhập.
 pub fn still_in_box(screen: &str, typed: &str) -> bool {
-    // `$` nằm trong bộ bỏ đi cùng `❯`, và đó là một cặp: khối dán mở đầu dòng
-    // lệnh bằng `$ `, còn TUI vẽ lại chính dòng ấy dưới dấu nhắc `❯ ` của nó.
-    // Không bỏ thì hai chuỗi chỉ khác nhau đúng một ký tự ở đầu — và khác một
-    // ký tự là trượt hẳn (đo 2026-08-19, `[dwork]`).
-    let squash = |s: &str| -> String {
-        s.chars()
-            .filter(|c| !c.is_whitespace() && !"│┃|>❯$".contains(*c))
-            .collect()
-    };
+    let squash = squash_box;
     // ⚠ CHỈ soi trong Ô NHẬP, không soi cả màn.
     //
     // Đây là chỗ phép đo suýt trỏ sai: gửi đi RỒI thì `claude` in lại chính câu

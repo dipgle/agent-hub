@@ -11,7 +11,8 @@
 //! phải KHÔNG nổ, và phải nói ĐÚNG vì sao.
 
 use huba::pipeline::{
-    limit_still_biting, stuck_next, unstick_done, unstick_why, StuckNext, UnstickDone, UnstickWhy,
+    cau_da_vao_nhat_ky, limit_still_biting, o_sau_cu_bam, stuck_next, unstick_done, unstick_why,
+    OSau, StuckNext, UnstickDone, UnstickWhy,
 };
 
 /// Ngưỡng ổn định thật của mã (`STUCK_BOX_STABLE_SEC` = 18s, riêng tư trong
@@ -218,43 +219,169 @@ fn an_empty_box_never_fires() {
 // không biết TUI có nhận byte ấy như một phím hay không. Một tín hiệu không bao
 // giờ ở trạng thái ngược lại thì không phải phép đo (`CLAUDE.md` §13).
 
+// 🔴 Và "chữ rời ô" KHÔNG phải "đã gửi" — đo 2026-10-01: 92 lượt
+// `auto_unstick_box_sent` đối chiếu với nhật ký `.jsonl` của đúng phiên ấy, chỉ
+// 45 lượt nhật ký nhận một câu trong 90 s; từ 25/09 là 3/19. Ca đầu tiên soi:
+// `projects-7d` 2026-09-30T20:10:08Z — phiên THOÁT đúng phút ấy, màn không còn ô
+// nhập, `input_box_text` trả `None`, và `None` được đọc thành "ô trống ⟹ đã đi".
+// Nên màn chỉ còn nói được "chữ còn đó" hay "chữ đã rời màn"; "đã gửi" là việc
+// của nhật ký.
+
+/// Màn thật: ô nhập TRỐNG, bảng subagent bên dưới (`o_nhap_giua_hai_vien.rs`).
+const MAN_O_TRONG: &str = include_str!("fixtures/man-bang-subagent-duoi-o-nhap-2026-09-23.txt");
+/// Dấu nhắc trống của ô trong màn ấy (sau `❯` là NBSP) — thay khúc này là đổ chữ
+/// vào ĐÚNG ô ấy.
+const DAU_NHAC_TRONG: &str = "❯\u{a0}\n\n";
+/// Màn DỰNG (không chụp): cửa sổ đã thoát `claude` về shell — không có ô nhập.
+/// Không có cửa sổ nào ở trạng thái ấy lúc viết bài này để chụp.
+const MAN_SHELL: &str = "Last login: Wed Sep 30 20:10:02 on ttys001\nhanguyen@Mac projects % \n";
+
+fn o_co_chu(chu: &str) -> String {
+    MAN_O_TRONG.replacen(DAU_NHAC_TRONG, &format!("❯\u{a0}{chu}\n\n"), 1)
+}
+
+#[test]
+fn the_screen_after_the_press_tells_four_cases_apart() {
+    assert!(
+        MAN_O_TRONG.contains(DAU_NHAC_TRONG),
+        "tệp mẫu phải còn dấu nhắc trống — không thì bài kiểm đang đo nhầm thứ"
+    );
+    let chu = "tiếp tục quét việc";
+    assert_eq!(o_sau_cu_bam(chu, &o_co_chu(chu)), OSau::VanChuAy);
+    assert_eq!(
+        o_sau_cu_bam(chu, &o_co_chu(&format!("  {chu}  "))),
+        OSau::VanChuAy,
+        "khoảng trắng hai đầu không phải một thay đổi"
+    );
+    assert_eq!(o_sau_cu_bam(chu, MAN_O_TRONG), OSau::Trong);
+    assert_eq!(
+        o_sau_cu_bam(chu, &o_co_chu("câu chủ máy vừa gõ")),
+        OSau::ChuKhac
+    );
+    assert_eq!(
+        o_sau_cu_bam(chu, MAN_SHELL),
+        OSau::KhongCoO,
+        "màn không có ô nhập mà đọc thành 'ô trống' — đúng ca projects-7d"
+    );
+}
+
 /// Cấy ca HỎNG: đọc lại thấy đúng chữ ấy còn nguyên ⇒ phải là `StillThere`.
 /// Đây là ca đã xảy ra thật, nên nó là đối chứng ngược của cả tính năng.
 #[test]
 fn text_still_sitting_in_the_box_is_not_sent() {
     assert_eq!(
-        unstick_done("tiếp tục quét việc", Some("tiếp tục quét việc")),
+        unstick_done(OSau::VanChuAy, Some(false)),
         UnstickDone::StillThere,
         "chữ còn nguyên trong ô mà đọc thành đã gửi — đúng lỗi 2026-09-08"
     );
-    // TUI vẽ lại đổi phần đệm hai bên; một dấu cách không được biến "còn kẹt"
-    // thành "đã đi".
     assert_eq!(
-        unstick_done("tiếp tục quét việc", Some("  tiếp tục quét việc  ")),
+        unstick_done(OSau::VanChuAy, None),
         UnstickDone::StillThere,
-        "khoảng trắng hai đầu không phải một thay đổi"
+        "không đọc được nhật ký không xoá được điều màn đã thấy"
     );
 }
 
-/// Cấy ca LÀNH: ô trống sau cú bấm ⇒ phải là `Sent`, cổng KHÔNG được đỏ.
+/// 🔴 ĐẢO CHIỀU 2026-10-01 (bài cũ: `an_empty_box_after_the_press_means_sent`).
+/// Chữ rời màn — ô trống, chữ khác, hay không còn ô — mà nhật ký KHÔNG nhận câu
+/// nào ⟹ KHÔNG phải `Sent`. Mã cũ trả `Sent` cho cả hai ca đầu (RED đã chạy).
 #[test]
-fn an_empty_box_after_the_press_means_sent() {
-    assert_eq!(
-        unstick_done("tiếp tục quét việc", None),
-        UnstickDone::Sent,
-        "ô đã trống thì cú Enter ấy đi được — không được báo hụt"
-    );
+fn leaving_the_screen_without_the_journal_is_not_sent() {
+    for o in [OSau::Trong, OSau::ChuKhac, OSau::KhongCoO] {
+        assert_eq!(
+            unstick_done(o, Some(false)),
+            UnstickDone::NotInJournal,
+            "{o:?}: nhật ký không nhận câu nào mà vẫn khai đã gửi"
+        );
+        assert_eq!(
+            unstick_done(o, None),
+            UnstickDone::Unverified,
+            "{o:?}: không hỏi được nhật ký là KHÔNG ĐO ĐƯỢC, không phải gửi hay hụt"
+        );
+    }
 }
 
-/// Ô mang chữ KHÁC ⇒ chữ cũ đã đi. Thứ nằm đó bây giờ là quan sát mới, và vòng
-/// quét sau tự tính lại `stable_sec` từ đầu cho nó.
+/// Cấy ca LÀNH: nhật ký nhận câu ⇒ `Sent`, dù màn thấy gì — kể cả ca hiếm màn
+/// còn vẽ câu vừa gửi (2/740 lượt `stuck` từ 25/09 là câu ĐÃ vào nhật ký).
 #[test]
-fn different_text_in_the_box_means_the_old_one_left() {
-    assert_eq!(
-        unstick_done("tiếp tục quét việc", Some("câu chủ máy vừa gõ")),
-        UnstickDone::Sent,
-        "chữ cũ không còn ở đó nữa — đừng đếm nó là một lượt bấm hụt"
-    );
+fn the_journal_taking_the_line_is_sent() {
+    for o in [OSau::Trong, OSau::ChuKhac, OSau::KhongCoO, OSau::VanChuAy] {
+        assert_eq!(unstick_done(o, Some(true)), UnstickDone::Sent, "{o:?}");
+    }
+}
+
+// ─────────── nhật ký có nhận ĐÚNG câu đang thấy trong ô không ───────────────
+
+fn user_chuoi(chu: &str) -> String {
+    serde_json::json!({"type": "user", "message": {"role": "user", "content": chu}}).to_string()
+}
+
+fn xep_hang(chu: &str) -> String {
+    serde_json::json!({"type": "queue-operation", "operation": "enqueue", "content": chu})
+        .to_string()
+}
+
+#[test]
+fn the_journal_line_matching_the_box_counts() {
+    // Lượt `user` chữ trần, lượt `user` dạng mảng, và câu vào HÀNG CHỜ.
+    assert!(cau_da_vao_nhat_ky(
+        &user_chuoi("Xong EMAIL-08 thì làm tiếp WEB-13 đi"),
+        "Xong EMAIL-08 thì làm tiếp WEB-13 đi"
+    ));
+    let mang = serde_json::json!({"type": "user", "message": {"role": "user",
+        "content": [{"type": "text", "text": "Còn bao nhiêu mục chưa xong"}]}})
+    .to_string();
+    assert!(cau_da_vao_nhat_ky(&mang, "Còn bao nhiêu mục chưa xong"));
+    assert!(cau_da_vao_nhat_ky(&xep_hang("Làm đi"), "Làm đi"));
+    // Màn ngắt dòng + dấu nhắc; nhật ký giữ nguyên văn.
+    let dai = "tiếp tục quét việc và làm tiếp phần còn lại của sổ nợ";
+    assert!(cau_da_vao_nhat_ky(
+        &user_chuoi(dai),
+        "tiếp tục quét việc và làm │ tiếp phần còn lại của sổ nợ"
+    ));
+}
+
+/// Đối chứng ngược: phần mới của nhật ký có lượt nhập, nhưng KHÔNG phải câu ấy.
+#[test]
+fn other_journal_lines_do_not_count() {
+    let chu = "tiếp tục quét việc và làm tiếp";
+    let thong_bao = xep_hang("<task-notification>\n<task-id>b82axm4p3</task-id>");
+    let ket_qua_cong_cu = serde_json::json!({"type": "user", "message": {"role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": "t", "content": chu}]}})
+    .to_string();
+    let tra_loi = serde_json::json!({"type": "assistant", "message": {"content": chu}}).to_string();
+    for phan_moi in [
+        String::new(),
+        thong_bao,
+        ket_qua_cong_cu,
+        tra_loi,
+        user_chuoi("một câu khác hẳn"),
+    ] {
+        assert!(!cau_da_vao_nhat_ky(&phan_moi, chu), "{phan_moi}");
+    }
+    // Câu ngắn phải khớp TRỌN: "ok" nằm sẵn trong đủ thứ lượt khác.
+    assert!(!cau_da_vao_nhat_ky(&user_chuoi("ok, làm tiếp đi"), "ok"));
+    assert!(cau_da_vao_nhat_ky(&user_chuoi("ok"), "ok"));
+    // Ô rỗng thì không có gì để tìm.
+    assert!(!cau_da_vao_nhat_ky(&user_chuoi("bất kỳ"), "   "));
+}
+
+/// Ô nhập mang nhãn dán: màn không còn chữ gốc ⟹ nhận lượt nhập mới của NGƯỜI,
+/// không nhận thông báo của máy.
+#[test]
+fn a_paste_label_accepts_a_human_line_only() {
+    let nhan = "[Pasted text #1 +12 lines]";
+    assert!(cau_da_vao_nhat_ky(
+        &user_chuoi("[huba chạy hộ]\n$ git status"),
+        nhan
+    ));
+    assert!(!cau_da_vao_nhat_ky(
+        &xep_hang("<agent-message from=\"a1\">xong</agent-message>"),
+        nhan
+    ));
+    assert!(!cau_da_vao_nhat_ky(
+        &user_chuoi("Stop hook feedback:\n[nhắc]"),
+        nhan
+    ));
 }
 
 // ────────── sau cú Enter mà chữ y nguyên: chẩn đoán, không phải bắn tiếp ─────

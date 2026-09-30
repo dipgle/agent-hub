@@ -2945,26 +2945,83 @@ pub fn unstick_why(
 /// mã trả về ấy thành "xong" là đọc mã thoát của thứ mới chỉ KHỞI CHẠY.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnstickDone {
-    /// Chữ đã rời ô nhập — đo bằng chính ô nhập.
+    /// NHẬT KÝ phiên đã nhận câu ấy (lượt `user` hoặc `queue-operation enqueue`).
     Sent,
     /// Chữ VẪN nằm nguyên đó. Cú bấm không ăn.
     StillThere,
-    /// Không đọc lại được màn ⟹ **KHÔNG** được đọc thành "xong".
+    /// Không đọc lại được màn, hoặc không đọc được nhật ký ⟹ **KHÔNG** được đọc
+    /// thành "xong".
     Unverified,
+    /// Chữ đã rời MÀN mà nhật ký phiên KHÔNG nhận câu nào — phiên vừa tắt, TUI
+    /// vẽ lại, hay gợi ý mờ đổi câu. Không phải gửi.
+    NotInJournal,
+}
+
+/// Ô nhập trông ra sao khi đọc lại màn sau cú bấm — bốn trường hợp, không gộp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OSau {
+    /// Vẫn đúng chữ ấy.
+    VanChuAy,
+    /// Ô còn đó, trống.
+    Trong,
+    /// Ô còn đó, mang chữ KHÁC.
+    ChuKhac,
+    /// Màn KHÔNG có ô nhập nào (phiên đã thoát về shell, hộp khác che…).
+    KhongCoO,
+}
+
+impl OSau {
+    fn ten(self) -> &'static str {
+        match self {
+            OSau::VanChuAy => "van_chu_ay",
+            OSau::Trong => "trong",
+            OSau::ChuKhac => "chu_khac",
+            OSau::KhongCoO => "khong_co_o",
+        }
+    }
+}
+
+/// Đọc ô nhập trên màn chụp SAU cú bấm. So sau khi cắt hai đầu, vì TUI vẽ lại có
+/// thể đổi phần đệm bên phải.
+///
+/// 🔴 `keys::input_box_text` trả `None` cho CẢ "ô trống" LẪN "màn không có ô
+/// nào" — hỏi `keys::box_start` trước thì hai ca ấy mới tách ra được.
+pub fn o_sau_cu_bam(sent_text: &str, screen: &str) -> OSau {
+    if crate::keys::box_start(screen).is_none() {
+        return OSau::KhongCoO;
+    }
+    match crate::keys::input_box_text(screen) {
+        Some(t) if t.trim() == sent_text.trim() => OSau::VanChuAy,
+        Some(_) => OSau::ChuKhac,
+        None => OSau::Trong,
+    }
 }
 
 /// Phần THUẦN của phép kiểm sau cú bấm — tách ra để bài kiểm với tới được mà
 /// không cần cửa sổ thật nào.
 ///
-/// `box_after` là ô nhập ĐỌC LẠI sau cú bấm: `None` = ô trống, `Some(t)` = còn
-/// chữ. So sau khi cắt hai đầu, vì TUI vẽ lại có thể đổi phần đệm bên phải.
+/// `nhat_ky`: `Some(true)` = nhật ký phiên nhận câu ấy sau mốc đặt TRƯỚC cú bấm;
+/// `Some(false)` = đọc được mà không có; `None` = không đọc được / không có nhật ký.
 ///
-/// Ô đổi sang chữ KHÁC cũng tính là `Sent`: chữ cũ đã đi, thứ nằm đó bây giờ là
-/// một quan sát mới và vòng quét sau sẽ tự tính lại từ đầu cho nó.
-pub fn unstick_done(sent_text: &str, box_after: Option<&str>) -> UnstickDone {
-    match box_after {
-        Some(t) if t.trim() == sent_text.trim() => UnstickDone::StillThere,
-        _ => UnstickDone::Sent,
+/// 🔴 Vì sao "chữ rời ô" KHÔNG còn là `Sent` (đo 2026-10-01 trên `logs/huba.log`,
+/// đối chiếu từng lượt với nhật ký `.jsonl` của đúng phiên ấy): **92** lượt
+/// `auto_unstick_box_sent` từ khi có tính năng, chỉ **45** lượt nhật ký nhận một
+/// câu trong 90 s; từ 25/09 là **3/19**. Hai họ giả: ① phiên đang/đã TẮT — nhật
+/// ký dừng ghi trước cú bấm, màn không còn ô nhập, `input_box_text` trả `None`
+/// và `None` được đọc thành "ô trống" (ca `projects-7d` 2026-09-30T20:10:08Z:
+/// phiên thoát đúng phút ấy); ② phiên ĐANG CHẠY — chữ biến khỏi màn vì TUI vẽ
+/// lại, không vào hàng chờ, vài phút sau huba bắn Enter lại vào chính chữ ấy.
+/// Mà `Sent` còn gỡ luôn cái phanh 3 lượt (xoá dấu vết khỏi sổ), nên một lời
+/// khai sai ở đây là thêm cú Enter ở vòng sau.
+///
+/// Nhật ký là thứ `claude` tự ghi khi NHẬN một lượt — cùng lý do
+/// [`khoi_da_vao_nhat_ky`] đã dùng cho đường dán `/runin` từ 24/09.
+pub fn unstick_done(o: OSau, nhat_ky: Option<bool>) -> UnstickDone {
+    match (o, nhat_ky) {
+        (_, Some(true)) => UnstickDone::Sent,
+        (OSau::VanChuAy, _) => UnstickDone::StillThere,
+        (_, Some(false)) => UnstickDone::NotInJournal,
+        (_, None) => UnstickDone::Unverified,
     }
 }
 
@@ -3097,6 +3154,11 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                     "why": "chữ đứng im trong ô nhập, không phải huba gõ (SendMessage giữa \
                             phiên, hay nguồn khác) — bấm Enter bù" }),
         );
+        // Mốc nhật ký ĐẶT TRƯỚC cú bấm: chỉ phần ghi thêm sau mốc này mới là bằng
+        // chứng cho cú Enter NÀY (cùng khuôn `dan_vao_phien`).
+        let moc_nhat_ky =
+            crate::sessions::find_transcript(&cfg.claude_transcript_root(), &s.session_id)
+                .and_then(|p| std::fs::metadata(&p).ok().map(|m| (p, m.len())));
         // Phím RỜI trước, byte chỉ là đường lùi — `keys::press_enter` giữ cả
         // luật ấy lẫn số đo 30/31 lượt hụt của đường byte.
         let how = crate::keys::press_enter(window);
@@ -3111,17 +3173,43 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
             continue;
         }
         let duong = format!("{how:?}");
-        // Cú bấm mới chỉ ĐẨY BYTE tới tab. Đọc lại ô nhập rồi mới nói.
+        // Cú bấm mới chỉ ĐẨY BYTE tới tab. Đọc lại ô nhập, rồi hỏi NHẬT KÝ.
         std::thread::sleep(std::time::Duration::from_millis(STUCK_BOX_SETTLE_MS));
-        let done = match crate::keys::screen_text(window) {
-            Ok(scr) => unstick_done(text, crate::keys::input_box_text(&scr).as_deref()),
+        let o = match crate::keys::screen_text(window) {
+            Ok(scr) => Some(o_sau_cu_bam(text, &scr)),
             Err(e) => {
                 logging::warn(
                     "auto_unstick_box_unverified",
                     json!({ "session": s.session_id, "err": e.to_string(),
                             "effect": "không đọc lại được ô nhập ⟹ KHÔNG kết luận đã gửi" }),
                 );
-                UnstickDone::Unverified
+                None
+            }
+        };
+        let done = match o {
+            None => UnstickDone::Unverified,
+            Some(o) => {
+                // Màn nói "còn đó" thì chỉ đọc nhật ký MỘT lần, không chờ — lượt
+                // này chiếm ~95 % số cú bấm và nhật ký gần như luôn trống (730/740
+                // lượt `stuck` từ 25/09). Chữ rời màn thì chờ như đường dán `/runin`.
+                let cho = if o == OSau::VanChuAy {
+                    std::time::Duration::ZERO
+                } else {
+                    std::time::Duration::from_secs(XAC_NHAN_NHAT_KY_SEC)
+                };
+                let nk = moc_nhat_ky
+                    .as_ref()
+                    .and_then(|(p, tu)| cho_nhat_ky(p, *tu, cho, |m| cau_da_vao_nhat_ky(m, text)));
+                let d = unstick_done(o, nk);
+                if d == UnstickDone::Unverified {
+                    logging::warn(
+                        "auto_unstick_box_unverified",
+                        json!({ "session": s.session_id, "o_sau": o.ten(),
+                                "nhat_ky": if moc_nhat_ky.is_some() { "không đọc được" } else { "không tìm thấy" },
+                                "effect": "chữ rời màn nhưng không hỏi được nhật ký ⟹ KHÔNG kết luận đã gửi" }),
+                    );
+                }
+                d
             }
         };
         match done {
@@ -3129,12 +3217,27 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                 logging::info(
                     "auto_unstick_box_sent",
                     json!({ "session": s.session_id, "name": s.name,
-                            "duong": duong,
+                            "duong": duong, "o_sau": o.map(OSau::ten),
                             "text_len": text.chars().count() }),
                 );
                 if let Ok(mut g) = seen.lock() {
                     g.remove(&s.session_id);
                 }
+            }
+            // Chữ rời MÀN mà nhật ký không nhận: không phải gửi, cũng không phải
+            // "còn kẹt" — đếm như một lượt hụt để cái trần còn cắn, và KHÔNG xoá
+            // dấu vết (xoá là gỡ phanh cho chính chữ ấy ở vòng sau).
+            UnstickDone::NotInJournal => {
+                let tries = bump_stuck_try(seen, &s.session_id);
+                logging::warn(
+                    "auto_unstick_box_not_in_journal",
+                    json!({ "session": s.session_id, "name": s.name,
+                            "tries": tries, "max": STUCK_BOX_MAX_TRIES, "duong": duong,
+                            "o_sau": o.map(OSau::ten), "cho_s": XAC_NHAN_NHAT_KY_SEC,
+                            "text_len": text.chars().count(),
+                            "effect": "chữ đã rời màn nhưng nhật ký phiên KHÔNG nhận câu nào — \
+                                       không phải gửi (phiên tắt, TUI vẽ lại, hay gợi ý mờ đổi câu)" }),
+                );
             }
             // Mù cũng đếm như hụt: một lượt không đo được không được phép vừa
             // giữ chỗ vừa khỏi trả giá — nếu không, màn đọc hỏng kéo dài là một
@@ -3147,7 +3250,11 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
                             "tries": tries, "max": STUCK_BOX_MAX_TRIES,
                             "verified": done == UnstickDone::StillThere, "duong": duong,
                             "text_len": text.chars().count(),
-                            "effect": "bấm Enter xong chữ VẪN nằm trong ô nhập — cú bấm không ăn" }),
+                            "effect": if done == UnstickDone::StillThere {
+                                "bấm Enter xong chữ VẪN nằm trong ô nhập — cú bấm không ăn"
+                            } else {
+                                "không đo được cú bấm có ăn không — đếm như một lượt hụt"
+                            } }),
                 );
                 // Cú Enter vừa rồi là một PHÉP ĐO, không chỉ một lượt hụt: màn
                 // KHÔNG đổi mà phiên không bị chặn hạn mức, cũng không đang
@@ -7118,36 +7225,105 @@ pub fn khoi_da_vao_nhat_ky(phan_moi: &str, lenh: &str) -> bool {
         if !l.contains("huba ch") {
             return false;
         }
-        let Ok(j) = serde_json::from_str::<serde_json::Value>(l) else {
-            return false;
-        };
-        let chu = match j.get("type").and_then(|t| t.as_str()) {
-            Some("user") => match j.pointer("/message/content") {
-                Some(serde_json::Value::String(s)) => s.clone(),
-                Some(serde_json::Value::Array(a)) => a
+        chu_nhap_cua_dong(l).is_some_and(|chu| chu.contains("[huba chạy hộ") && chu.contains(&neo))
+    })
+}
+
+/// Chữ mà MỘT dòng nhật ký `.jsonl` ghi là phiên vừa NHẬN làm lượt nhập — lượt
+/// `user` (chữ, hoặc các mảnh `text`) hay `queue-operation enqueue`. `None` cho mọi
+/// thứ khác (`tool_result`, `assistant`, dòng hỏng…).
+fn chu_nhap_cua_dong(l: &str) -> Option<String> {
+    let j = serde_json::from_str::<serde_json::Value>(l).ok()?;
+    match j.get("type").and_then(|t| t.as_str()) {
+        Some("user") => match j.pointer("/message/content") {
+            Some(serde_json::Value::String(s)) => Some(s.clone()),
+            Some(serde_json::Value::Array(a)) => {
+                let chu = a
                     .iter()
                     .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
                     .collect::<Vec<_>>()
-                    .join("\n"),
-                _ => String::new(),
-            },
-            Some("queue-operation")
-                if j.get("operation").and_then(|o| o.as_str()) == Some("enqueue") =>
-            {
-                j.get("content")
-                    .and_then(|c| c.as_str())
-                    .unwrap_or_default()
-                    .to_string()
+                    .join("\n");
+                (!chu.is_empty()).then_some(chu)
             }
-            _ => String::new(),
-        };
-        chu.contains("[huba chạy hộ") && chu.contains(&neo)
+            _ => None,
+        },
+        Some("queue-operation")
+            if j.get("operation").and_then(|o| o.as_str()) == Some("enqueue") =>
+        {
+            j.get("content")
+                .and_then(|c| c.as_str())
+                .map(str::to_string)
+        }
+        _ => None,
+    }
+}
+
+/// Câu đang thấy trong ô nhập (`o_nhap`, đọc từ MÀN) đã vào nhật ký phiên chưa —
+/// soi trên PHẦN MỚI của nhật ký. THUẦN.
+///
+/// So qua [`crate::keys::squash_box`] ở cả hai phía: màn ngắt dòng theo bề ngang
+/// cửa sổ và vẽ dấu nhắc, nhật ký giữ nguyên văn. Câu dài lấy HAI ĐẦU 16 ký tự làm
+/// dấu vân tay (cùng lý do `still_in_box`); câu ngắn thì đòi KHỚP TRỌN — "ok" nằm
+/// sẵn trong đủ thứ lượt khác.
+///
+/// Ô nhập mang nhãn `[Pasted text …]` thì màn không còn chữ gốc để so: nhận bất
+/// kỳ lượt nhập mới nào KHÔNG phải của máy (thông báo subagent/liên phiên, phản
+/// hồi hook đều mở bằng `<` hoặc câu mẫu cố định).
+pub fn cau_da_vao_nhat_ky(phan_moi: &str, o_nhap: &str) -> bool {
+    let sq = crate::keys::squash_box;
+    let o = sq(o_nhap);
+    if o.is_empty() {
+        return false;
+    }
+    let nhan_dan = o_nhap.contains("[Pasted text");
+    let n = o.chars().count();
+    let dau: String = o.chars().take(16).collect();
+    let duoi: String = o.chars().skip(n.saturating_sub(16)).collect();
+    phan_moi.lines().filter_map(chu_nhap_cua_dong).any(|chu| {
+        if nhan_dan {
+            let t = chu.trim_start();
+            return !(t.starts_with('<')
+                || t.starts_with("Stop hook feedback")
+                || t.starts_with("Another Claude session"));
+        }
+        let c = sq(&chu);
+        if n < 16 {
+            c == o
+        } else {
+            c.contains(&dau) && c.contains(&duoi)
+        }
     })
 }
 
 /// Chờ nhật ký nhận khối, tối đa bao lâu. Nhận một lượt thì `claude` ghi ngay
 /// (dưới 1 s ở máy lành) — 8 s là chỗ cho máy nặng, không phải cho may rủi.
 const XAC_NHAN_NHAT_KY_SEC: u64 = 8;
+
+/// Chờ tới khi phần nhật ký ghi thêm từ byte `tu` thoả `thay`, tối đa `cho`
+/// (`Duration::ZERO` = đọc đúng một lần). Ba kết cục, không gộp:
+/// `Some(true)` thấy · `Some(false)` đọc được mà không thấy · `None` chưa lần
+/// nào đọc được — "không đọc được" không phải "không có".
+fn cho_nhat_ky(
+    path: &std::path::Path,
+    tu: u64,
+    cho: std::time::Duration,
+    thay: impl Fn(&str) -> bool,
+) -> Option<bool> {
+    let het = std::time::Instant::now() + cho;
+    let mut doc_duoc = false;
+    loop {
+        if let Some(m) = phan_moi_nhat_ky(path, tu) {
+            doc_duoc = true;
+            if thay(&m) {
+                return Some(true);
+            }
+        }
+        if std::time::Instant::now() >= het {
+            return doc_duoc.then_some(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
 
 /// Đọc phần nhật ký ghi thêm từ byte `tu` — `None` khi không đọc được.
 fn phan_moi_nhat_ky(path: &std::path::Path, tu: u64) -> Option<String> {
@@ -7160,16 +7336,13 @@ fn phan_moi_nhat_ky(path: &std::path::Path, tu: u64) -> Option<String> {
 }
 
 fn cho_nhat_ky_nhan(path: &std::path::Path, tu: u64, lenh: &str) -> bool {
-    let het = std::time::Instant::now() + std::time::Duration::from_secs(XAC_NHAN_NHAT_KY_SEC);
-    loop {
-        if phan_moi_nhat_ky(path, tu).is_some_and(|m| khoi_da_vao_nhat_ky(&m, lenh)) {
-            return true;
-        }
-        if std::time::Instant::now() >= het {
-            return false;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-    }
+    cho_nhat_ky(
+        path,
+        tu,
+        std::time::Duration::from_secs(XAC_NHAN_NHAT_KY_SEC),
+        |m| khoi_da_vao_nhat_ky(m, lenh),
+    )
+    .unwrap_or(false)
 }
 
 /// Màn khai "đã gửi" — ĐỐI CHIẾU với nhật ký phiên. Nhật ký chưa nhận thì nhìn lại

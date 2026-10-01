@@ -9,15 +9,21 @@
   Gốc: `was_working` = lượt nhìn cuối (10:30:13Z, `interval_sec:120`), không phải lúc chết. Đo: 592 tin; trừ
   `167252e2` + tin không nối được nhật ký còn 55 ⟹ **51 sai (93 %)**. Vá `87ef406` + `8fe103f` (hỏi nhật ký lúc báo
   tử; Esc-ngắt và `isMeta` cũng là khép lượt — xem PLAN S43). Logic cuối trên 55 tin: 52 hạ cờ, 3 giữ.
-  gate 178/178; **ĐÃ CÀI** `hubd@2026-10-01T13:35:39Z` pid 28302 `--verify` KHỚP; đã đẩy.
-  ⏳ chưa có ca thật — đo: `grep -E '"msg":"session_end_(was_idle|turn_unknown)"' logs/huba.log`.
+  ⚠ **`8fe103f` tự gây lỗi, đã vá `84018c3`:** bỏ qua MỌI `isMeta` ⟹ ca thật `310db81b` 14:16:57Z (báo cáo subagent
+  trả về = `isMeta`+`peer`+`handback`, MỞ lượt) bị hạ cờ sai. Nay chỉ bỏ qua đầu ra lệnh tại chỗ (`isMeta` không
+  `origin`, mở đầu `<local-command-caveat>` / `## Context Usage` — 0/11 409 lần mở lượt). 4 ca thật: logic mới khớp
+  nhật ký 4/4. gate 178/178; **ĐÃ CÀI** `hubd@2026-10-01T15:07:29Z` pid 82738 `--verify` KHỚP; đã đẩy.
+  ⏳ chưa có ca thật trên `84018c3` — đo: `grep -E '"msg":"session_end_(was_idle|turn_unknown)"' logs/huba.log`.
 - ⚠ **Sơ suất của chính tôi, đã sửa:** bộ đo đầu nối id từ danh sách «👁 Chọn phiên» (id phiên KHÁC) ⟹ in "57 /
   89 %" vào commit `87ef406` (không sửa được commit đã đẩy; số đúng nằm ở `8fe103f` + S43). Và một lượt dựng HỎNG
   mà vẫn chạy binary CŨ còn sót ⟹ "9/9 xanh" giả; từ đó chỉ chạy khi `BUILD_EXIT=0`, xoá binary chép trước khi dựng.
 - `quality-gate.sh` chung: lần 1 trên `87ef406` **KHÔNG ĐO ĐƯỢC** (`QG_EXIT=2`, khoá do cổng `dwork/dev-tochuc`
   pid 47924 giữ quá 900 s). Chạy lại với `QG_LOCK_WAIT` dài hơn, KHÔNG `QG_LOCK=0` — kết quả ở `.tmp/ban-giao.tsv`.
 - Bộ đo giữ lại: `.tmp/do-chay-do.py` (đối chiếu tin "đã tắt" với bản ghi hội thoại cuối) · `.tmp/do-chieu-nguoc.py`
-  (3 bản ghi cuối trước mốc tin) · `.tmp/dot-bien-1162/chay.sh` (5 ca cấy lỗi, tự trả lại + so md5).
+  (3 bản ghi cuối trước mốc tin) · `.tmp/do-is-meta.py` (bản ghi `isMeta` nào mở lượt, theo `origin`) ·
+  `.tmp/dot-bien-1162/chay.sh` (7 ca cấy lỗi, tự trả lại + so md5).
+- 📌 Bài học của mạch này: "đúng trên 55 tin lịch sử" KHÔNG đủ — luật `isMeta` của `8fe103f` xanh trên cả bộ ấy vì
+  bộ ấy không chứa ca báo cáo subagent; ca thật ĐẦU TIÊN đã bắt được. Ca THẬT sau cài là phép đo không thay được.
 
 ## 🟡 2026-10-01 09:5xZ→11:xxZ — phiên fb6a2579: `/ask` để lại `/btw` trong ô (ĐÃ CÀI vá) · banner (đang chốt)
 

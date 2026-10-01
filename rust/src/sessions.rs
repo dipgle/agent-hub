@@ -5971,6 +5971,21 @@ pub struct Aside {
     #[serde(default, skip_serializing)]
     pub cost_usd: f64,
     pub ts: String,
+    /// Lượt hỏi thẳng bằng `/btw` ĐÃ GÕ vào phiên mà không ra câu trả lời ⟹ câu
+    /// này kể phiên còn lại gì sau khi huba dọn. `None` = huba không gõ gì vào
+    /// phiên, hoặc chính `/btw` là đường trả lời.
+    #[serde(default)]
+    pub btw_hong: Option<String>,
+}
+
+/// Kết cục đường hỏi thẳng `/btw` — ba ca, vì "rơi về fork" có hai nghĩa khác
+/// hẳn nhau với phiên gốc: chưa gõ gì vào nó, hay ĐÃ gõ rồi hỏng.
+enum BtwKq {
+    TraLoi(String),
+    /// Không gõ gì vào phiên (không cửa sổ, màn không đọc được…).
+    KhongGo,
+    /// Đã gõ `/btw …` vào phiên mà không ra câu trả lời — kèm trạng thái sau dọn.
+    DaGoHong(String),
 }
 
 /// Ask a live session a question without touching it (UC-S05b, level 2).
@@ -6007,7 +6022,7 @@ pub struct Aside {
 /// đo trên chạy đúng một ca — phiên trắng. Đừng suy rộng lần nữa.
 ///
 /// Phiên không gõ vào được (nền, trong editor, không cửa sổ) thì vẫn fork như cũ.
-fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
+fn ask_via_btw(session: &LiveSession, question: &str) -> BtwKq {
     // MỖI đường lui đều phải nói ra vì sao. Bản đầu trả `None` cho cả ba lý do
     // — không có cửa sổ · không hỏi được Terminal · màn không đọc được — và
     // đường lui ấy là một lời gọi `claude --fork-session` TỐN THẬT.
@@ -6030,14 +6045,14 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
                     "fallback": "fork",
                 }),
             );
-            return None;
+            return BtwKq::KhongGo;
         }
         Err(e) => {
             logging::warn(
                 "btw_window_probe_failed",
                 json!({ "session": session.session_id, "tty": session.tty, "err": e.to_string(), "fallback": "fork" }),
             );
-            return None;
+            return BtwKq::KhongGo;
         }
     };
     // DỌN BẢNG CŨ trước đã.
@@ -6075,21 +6090,40 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
                     "fallback": "fork",
                 }),
             );
-            return None;
+            return BtwKq::KhongGo;
         }
     };
-    // ⚠ CHỈ GÕ, không có cú Enter rời — và đây là hiện trạng, không phải một
-    // quyết định. Đường này viết 2026-08-11, trước khi luật 13 ("`do script`
-    // đẩy chữ + xuống dòng trong CÙNG một lượt ghi ⟹ TUI đọc thành cú DÁN và
-    // nuốt dấu xuống dòng") được đo ra ngày 12-08. Nó CÓ THỂ đang hỏng câm y
-    // như `/type` từng hỏng. Chưa sửa vì chưa chạy thật được lượt nào để biết —
-    // ghi ra đây thay vì lặng lẽ đổi một route không kiểm được.
-    if let Err(e) = crate::keys::type_into(window, &format!("/btw {question}")) {
-        logging::warn(
-            "btw_type_failed",
-            json!({ "session": session.session_id, "err": e.to_string() }),
-        );
-        return None;
+    // 🔴 GÕ VÀ GỬI qua cửa chung `keys::type_and_send` — vá 2026-10-01.
+    //
+    // Bản trước CHỈ GÕ (`type_into`), không có cú Enter rời, và chú thích ở đây
+    // tự khai *"nó CÓ THỂ đang hỏng câm… chưa chạy thật được lượt nào để biết"*.
+    // Đo trên `logs/huba.log` 01/10: 47 lượt `/ask` đi đường này, **13 lượt
+    // `btw_no_answer_yet`** — câu `/btw …` nằm trong ô (luật 13: chữ + xuống dòng
+    // trong một lượt ghi là một cú DÁN), hết 60 giây rơi về fork, và KHÔNG ai dọn.
+    // 11/13 lượt ấy được vòng tự gỡ kẹt bấm Enter hộ vài phút SAU (6 lần `sent` —
+    // câu hỏi vào phiên muộn, sau khi Hà đã nhận câu trả lời từ bản sao). Vòng ấy
+    // tắt 01/10 07:50Z thì lộ ra: Hà, 09:55Z: *"Tại sao lệnh ask lại bị dán vào ô
+    // chat và nằm ở đó"* · *"Tôi phải dùng lệnh clean"*.
+    let typed = format!("/btw {question}");
+    match crate::keys::type_and_send(window, &typed) {
+        Ok(crate::keys::Delivered::Gone) => {}
+        Ok(khac) => {
+            let con = don_btw_bo_do(&session.session_id, window, &typed);
+            logging::warn(
+                "btw_not_sent",
+                json!({ "session": session.session_id, "delivered": format!("{khac:?}"),
+                        "sau_don": con, "fallback": "fork" }),
+            );
+            return BtwKq::DaGoHong(con);
+        }
+        Err(e) => {
+            let con = don_btw_bo_do(&session.session_id, window, &typed);
+            logging::warn(
+                "btw_type_failed",
+                json!({ "session": session.session_id, "err": e.to_string(), "sau_don": con }),
+            );
+            return BtwKq::DaGoHong(con);
+        }
     }
     // Chờ BẢNG TRẢ LỜI ĐÓNG LẠI, không phải chờ "màn đổi và phiên thôi bận".
     //
@@ -6121,7 +6155,7 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
                 json!({ "session": session.session_id, "err": e.to_string() }),
             );
         }
-        return Some(answer);
+        return BtwKq::TraLoi(answer);
     }
     // Hết trần chờ: nói ra ĐÃ NHÌN THẤY GÌ, không chỉ "chưa thấy". Dòng cuối của
     // màn là thứ phân biệt "nó vẫn đang viết" với "câu hỏi rơi vào hư không" —
@@ -6136,11 +6170,89 @@ fn ask_via_btw(session: &LiveSession, question: &str) -> Option<String> {
             .unwrap_or_default(),
         _ => "(không đọc lại được màn)".to_string(),
     };
+    // huba gõ vào phiên của người ta thì huba phải dọn — trước khi rơi về fork.
+    let con = don_btw_bo_do(&session.session_id, window, &typed);
     logging::info(
         "btw_no_answer_yet",
-        json!({ "session": session.session_id, "last_line": seen, "fallback": "fork" }),
+        json!({ "session": session.session_id, "last_line": seen, "sau_don": con, "fallback": "fork" }),
     );
-    None
+    BtwKq::DaGoHong(con)
+}
+
+/// Phiên còn lại gì sau một lượt `/btw` hỏng — đọc từ MÀN. THUẦN.
+///
+/// `(bảng_mở, câu_còn_trong_ô)`. Câu chỉ tính là "còn" khi nằm TRONG Ô NHẬP
+/// (`keys::still_in_box`): gửi đi rồi thì `claude` vẽ lại chính câu ấy phía trên,
+/// và dọn nhầm chỗ ấy là xoá chữ của chủ máy.
+pub fn btw_bo_do(screen: &str, typed: &str) -> (bool, bool) {
+    (
+        screen.contains(BTW_PANEL_DONE),
+        crate::keys::still_in_box(screen, typed),
+    )
+}
+
+/// Dọn thứ một lượt `/btw` hỏng để lại, rồi trả CÂU kể phiên còn lại gì — câu
+/// ấy đi thẳng vào câu trả lời trên Telegram, nên nó phải đúng cả khi dọn hỏng.
+///
+/// Hai bước, mỗi bước chỉ chạy khi MÀN chứng minh nó cần:
+/// - **Esc CHỈ khi thấy chân bảng `/btw`.** Esc lúc không có bảng là NGẮT lượt
+///   đang chạy của phiên — thứ không lùi lại được.
+/// - **Xoá ô CHỈ khi câu `/btw` còn nằm trong ô** (`keys::clear_box`, ba kết cục).
+fn don_btw_bo_do(sid: &str, window: i64, typed: &str) -> String {
+    let doc = |w| crate::keys::screen_text(w);
+    let mut man = match doc(window) {
+        Ok(m) => m,
+        Err(e) => {
+            let c = format!(
+                "⚠ không đọc lại được màn để dọn ({}) — câu `/btw` có thể còn nằm trong ô, `/clean` để dọn",
+                truncate(&e.to_string(), 80)
+            );
+            logging::warn("btw_cleanup", json!({ "session": sid, "ket_qua": c }));
+            return c;
+        }
+    };
+    let mut da_lam: Vec<&str> = Vec::new();
+    if btw_bo_do(&man, typed).0 {
+        match crate::keys::press(window, "esc") {
+            Ok(()) => {
+                da_lam.push("đóng bảng /btw");
+                std::thread::sleep(Duration::from_millis(700));
+                man = doc(window).unwrap_or_default();
+            }
+            Err(e) => {
+                let c = format!(
+                    "⚠ không đóng được bảng `/btw` đang mở ({})",
+                    truncate(&e.to_string(), 80)
+                );
+                logging::warn("btw_cleanup", json!({ "session": sid, "ket_qua": c }));
+                return c;
+            }
+        }
+    }
+    let c = if btw_bo_do(&man, typed).1 {
+        match crate::keys::clear_box(window) {
+            Ok(crate::keys::Cleared::Clean) => {
+                da_lam.push("xoá câu khỏi ô");
+                format!("đã {} — ô nhập sạch", da_lam.join(" + "))
+            }
+            Ok(crate::keys::Cleared::TextLeft) => {
+                "⚠ câu `/btw` VẪN nằm trong ô sau khi xoá — `/clean` để dọn".into()
+            }
+            Ok(crate::keys::Cleared::NoBox) => {
+                "⚠ màn không thấy ô nhập — câu `/btw` có thể còn nằm khuất, `/shot` để xem".into()
+            }
+            Err(e) => format!(
+                "⚠ không xoá được câu `/btw` khỏi ô ({}) — `/clean` để dọn",
+                truncate(&e.to_string(), 80)
+            ),
+        }
+    } else if da_lam.is_empty() {
+        "ô nhập không còn câu `/btw`".into()
+    } else {
+        format!("đã {} — ô nhập không còn câu `/btw`", da_lam.join(" + "))
+    };
+    logging::info("btw_cleanup", json!({ "session": sid, "ket_qua": c }));
+    c
 }
 
 /// Chân bảng `/btw`. Có nó nghĩa là BẢNG ĐANG MỞ — **không** nghĩa là đã viết xong.
@@ -6226,21 +6338,28 @@ pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<
     }
 
     // Đường THẲNG trước: hỏi chính phiên đang sống, y như ngồi trước máy.
-    if let Some(screen) = ask_via_btw(session, question) {
-        return Ok(Aside {
-            source_id: session.session_id.clone(),
-            source_name: session.name.clone(),
-            // Không có fork nào cả — câu trả lời nằm trong CHÍNH phiên ấy.
-            new_session_id: session.session_id.clone(),
-            question: question.to_string(),
-            answer: {
-                note_preview_risk("aside_screen", &screen);
-                screen.clone()
-            },
-            cost_usd: 0.0,
-            ts: crate::logging::now_iso(),
-        });
-    }
+    // `/btw` hỏng SAU KHI đã gõ vào phiên ⟹ mang trạng thái phiên sau khi dọn
+    // xuống đường fork, để câu trả lời không khai "phiên gốc không bị đụng".
+    let btw_hong = match ask_via_btw(session, question) {
+        BtwKq::TraLoi(screen) => {
+            return Ok(Aside {
+                source_id: session.session_id.clone(),
+                source_name: session.name.clone(),
+                // Không có fork nào cả — câu trả lời nằm trong CHÍNH phiên ấy.
+                new_session_id: session.session_id.clone(),
+                question: question.to_string(),
+                answer: {
+                    note_preview_risk("aside_screen", &screen);
+                    screen.clone()
+                },
+                cost_usd: 0.0,
+                ts: crate::logging::now_iso(),
+                btw_hong: None,
+            });
+        }
+        BtwKq::KhongGo => None,
+        BtwKq::DaGoHong(con) => Some(con),
+    };
     // Fork cần một CUỘC HỘI THOẠI để `--resume`. Phiên vừa mở, chưa nói lượt
     // nào, thì không có gì để nạp — và `claude` trả đúng câu ấy: *"No
     // conversation found with session ID: …"*, exit 1, sau khi đã tính tiền
@@ -6258,7 +6377,11 @@ pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<
         );
         anyhow::bail!(
             "phiên này chưa nói lượt nào nên không có bản sao để hỏi. Mở cửa sổ của nó rồi \
-             hỏi thẳng, hoặc giao cho nó một việc trước đã."
+             hỏi thẳng, hoặc giao cho nó một việc trước đã.{}",
+            btw_hong
+                .as_deref()
+                .map(|c| format!(" (Hỏi thẳng bằng /btw cũng không ra câu trả lời — {c}.)"))
+                .unwrap_or_default()
         );
     }
 
@@ -6286,6 +6409,7 @@ pub fn ask_aside(cfg: &Config, session: &LiveSession, question: &str) -> Result<
         },
         cost_usd: reply.cost_usd,
         ts: crate::logging::now_iso(),
+        btw_hong,
     })
 }
 

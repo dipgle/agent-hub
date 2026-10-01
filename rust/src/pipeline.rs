@@ -3025,6 +3025,23 @@ pub fn unstick_done(o: OSau, nhat_ky: Option<bool>) -> UnstickDone {
     }
 }
 
+/// Câu `/ask` nói ĐI ĐƯỜNG NÀO — và phiên gốc bị đụng tới đâu. THUẦN.
+///
+/// 🔴 Vế thứ ba thêm 2026-10-01: đường fork từng luôn khai *"phiên gốc không bị
+/// đụng"*, kể cả khi huba ĐÃ gõ `/btw …` vào phiên, chờ 60 giây không ra câu trả
+/// lời, rồi mới rơi về fork — để câu hỏi nằm lại trong ô (Hà 01/10: *"Tại sao
+/// lệnh ask lại bị dán vào ô chat và nằm ở đó"*).
+pub fn cach_hoi_ben_le(a: &crate::sessions::Aside) -> String {
+    if a.new_session_id == a.source_id {
+        "hỏi thẳng vào phiên bằng /btw — nhật ký không dài thêm, nhưng câu hỏi ăn vào ngữ cảnh đang chạy"
+            .into()
+    } else if let Some(con) = &a.btw_hong {
+        format!("hỏi trên bản sao — hỏi thẳng bằng /btw không ra câu trả lời; {con}")
+    } else {
+        "hỏi trên bản sao — phiên gốc không bị đụng".into()
+    }
+}
+
 /// Vế "ô nhập" trong câu trả lời `/clean` — MỘT trạng thái cho mỗi kết cục của
 /// `keys::clear_box`. THUẦN.
 ///
@@ -17251,11 +17268,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // trong TUI và KHÔNG ghi byte nào vào nhật ký.
                             // Cái nó thật sự ăn là NGỮ CẢNH đang chạy của
                             // phiên, thứ không nhìn thấy trên đĩa.
-                            let how = if a.new_session_id == a.source_id {
-                                "hỏi thẳng vào phiên bằng /btw — nhật ký không dài thêm, nhưng câu hỏi ăn vào ngữ cảnh đang chạy"
-                            } else {
-                                "hỏi trên bản sao — phiên gốc không bị đụng"
-                            };
+                            let how = cach_hoi_ben_le(&a);
                             // Nói rõ phiên ấy ĐÃ TẮT: người đọc phải biết câu
                             // trả lời dựng từ nhật ký chứ không phải từ một
                             // phiên đang chạy — hai thứ đó khác nhau ở chỗ

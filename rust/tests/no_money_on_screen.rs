@@ -85,6 +85,7 @@ fn the_three_structs_that_know_a_price_never_publish_it() {
         answer: "ở cái cổng không từ chối được".into(),
         cost_usd: PRICE,
         ts: "2026-08-14T15:48:17Z".into(),
+        btw_hong: None,
     };
     assert_eq!(a.cost_usd, PRICE);
     let json = serde_json::to_string(&a).expect("aside serialises");

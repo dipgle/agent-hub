@@ -1189,8 +1189,10 @@ pub fn window_taken_over<'a>(
     if !is_real_tty(tty) {
         return None;
     }
+    // A `shell` row is the window itself with no claude in it — after a session
+    // exits, that is the shell it leaves behind at the prompt, not a newcomer.
     live.iter()
-        .find(|s| s.session_id != id && s.tty == tty && s.host != "dead")
+        .find(|s| s.session_id != id && s.tty == tty && s.host != "dead" && s.host != "shell")
 }
 
 /// `~/projects` → `-Users-hanguyen-projects`.
@@ -6164,7 +6166,14 @@ pub fn handover_from_journal(cfg: &Config, session: &LiveSession) -> Option<Stri
         dong.len() - giu,
         dong[giu..].join("\n\n")
     );
-    Some(match working_tree_summary(cfg, session) {
+    let hint: String = st
+        .events
+        .iter()
+        .filter(|e| e.kind == "tool")
+        .map(|e| e.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(match working_tree_summary(cfg, session, &hint) {
         Some(cay) => format!("{loi_ke}\n\n---\n\n{cay}"),
         None => loi_ke,
     })
@@ -6194,14 +6203,25 @@ pub fn handover_from_journal(cfg: &Config, session: &LiveSession) -> Option<Stri
 /// không còn tồn tại — rơi về `None` một cách im lặng CÓ CHỦ Ý: đây là phần
 /// CỘNG THÊM cho bản bàn giao, không phải điều kiện để có bản bàn giao. Một
 /// bước phụ hỏng không được kéo cả lượt đóng sổ chết theo.
-fn working_tree_summary(cfg: &Config, session: &LiveSession) -> Option<String> {
+fn working_tree_summary(cfg: &Config, session: &LiveSession, hint: &str) -> Option<String> {
     let root = crate::config::project_dir(cfg, &session.folder)
         .unwrap_or_else(|| crate::config::expand_home(Path::new(&session.cwd)));
-    if !root.is_dir() {
-        return None;
-    }
+    working_tree_summary_at(&root, hint)
+}
+
+/// [`working_tree_summary`] once the project folder is known. `hint` is text
+/// the session itself produced (its tool calls) — the only witness of which
+/// nested tree it worked in when the project folder is not a tree of its own.
+///
+/// 🔴 Đo 2026-10-01: 16/29 bản bàn giao có mục cây in cây của repo WORKSPACE
+/// (`M ../.claude/settings.json`) — cả 16 là phiên dwork. `dwork` không phải
+/// một cây riêng, mỗi làn bên trong nó mới là cây, nên `git status` đứng ở
+/// `~/projects/dwork` leo ngược lên tận gốc. Luật: KHÔNG BAO GIỜ đọc một cây
+/// nằm trên `root` — xem [`tree_of_project`].
+pub fn working_tree_summary_at(root: &Path, hint: &str) -> Option<String> {
+    let tree = tree_of_project(root, hint)?;
     let opts = |timeout_sec: u64| RunOpts {
-        cwd: Some(root.as_path()),
+        cwd: Some(tree.as_path()),
         timeout: Some(Duration::from_secs(timeout_sec)),
         ..Default::default()
     };
@@ -6221,8 +6241,9 @@ fn working_tree_summary(cfg: &Config, session: &LiveSession) -> Option<String> {
         .map(|o| o.stdout)
         .unwrap_or_default();
     let mut out = format!(
-        "**Cây làm việc THẬT lúc bàn giao** (đọc bằng `git`, không phải lời kể — \
+        "**Cây làm việc THẬT lúc bàn giao** — `{}` (đọc bằng `git`, không phải lời kể — \
          lời kể có thể lạc sau lượt sửa cuối):\n\n`git status --short`:\n```\n{}\n```",
+        tree.display(),
         truncate(status.stdout.trim(), 1800)
     );
     if !diffstat.trim().is_empty() {
@@ -6232,6 +6253,76 @@ fn working_tree_summary(cfg: &Config, session: &LiveSession) -> Option<String> {
         ));
     }
     Some(out)
+}
+
+/// The git tree that belongs to `root`: `root` itself when it is the top of a
+/// tree; otherwise the nested tree the session's own tool calls named most
+/// often. Never a tree ABOVE `root` — that is somebody else's work.
+fn tree_of_project(root: &Path, hint: &str) -> Option<PathBuf> {
+    let real = root.canonicalize().ok()?;
+    if git_toplevel(root).as_deref() == Some(real.as_path()) {
+        return Some(root.to_path_buf());
+    }
+    for child in nested_dirs_named(hint, root) {
+        let dir = root.join(&child);
+        let Ok(dir_real) = dir.canonicalize() else {
+            continue;
+        };
+        if git_toplevel(&dir).as_deref() == Some(dir_real.as_path()) {
+            return Some(dir);
+        }
+    }
+    None
+}
+
+/// `git rev-parse --show-toplevel`, canonicalised so it compares with
+/// `canonicalize()` (git answers with the real path, e.g. `/private/var/…`).
+fn git_toplevel(dir: &Path) -> Option<PathBuf> {
+    let o = run(
+        "git",
+        &["rev-parse", "--show-toplevel"],
+        RunOpts {
+            cwd: Some(dir),
+            timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    if !o.ok() {
+        return None;
+    }
+    PathBuf::from(o.stdout.trim()).canonicalize().ok()
+}
+
+/// Directories directly under `root` that `hint` names, most-named first.
+/// Matches both the absolute form and the `~/…` form of `root`.
+fn nested_dirs_named(hint: &str, root: &Path) -> Vec<String> {
+    let full = root.display().to_string();
+    let mut prefixes = vec![format!("{}/", full.trim_end_matches('/'))];
+    if let Some(home) = std::env::var_os("HOME") {
+        if let Ok(rest) = root.strip_prefix(PathBuf::from(home)) {
+            prefixes.push(format!("~/{}/", rest.display()));
+        }
+    }
+    let mut count: HashMap<String, usize> = HashMap::new();
+    for p in &prefixes {
+        for (i, _) in hint.match_indices(p.as_str()) {
+            let seg = hint[i + p.len()..]
+                .split([
+                    '/', '"', '\\', ' ', ',', ')', '\n', '\t', '`', '\'', ';', '&', '|',
+                ])
+                .next()
+                .unwrap_or("");
+            // A file sitting directly in the project (`CLAUDE.md`) is no tree.
+            if seg.is_empty() || seg.contains('.') {
+                continue;
+            }
+            *count.entry(seg.to_string()).or_default() += 1;
+        }
+    }
+    let mut named: Vec<(String, usize)> = count.into_iter().collect();
+    named.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    named.into_iter().map(|(n, _)| n).collect()
 }
 
 /// A question asked ALONGSIDE a running session, and its answer.

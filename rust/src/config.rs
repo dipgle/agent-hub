@@ -479,15 +479,37 @@ pub fn validate(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Load config: explicit path → `HUB_CONFIG` → nearest huba.config.json walking
-/// up from the current directory. Missing file = defaults.
+/// Where `huba.config.json` lives when nobody named it: walking up from `cwd`
+/// first (unchanged), then from the running binary.
+///
+/// 🔴 The second leg exists because `huba` is called from OTHER trees —
+/// `~/.local/bin/huba` is a symlink into this repo's `target/release/`, and
+/// sessions run it from wherever they work. Walking up from `cwd` alone found
+/// nothing there, fell back to `Config::default` without a word, and left an
+/// empty `data/huba.sqlite` + a stray `logs/huba.log` in six dwork trees
+/// (measured 2026-10-01).
+pub fn find_config(cwd: &Path, exe: Option<&Path>) -> Option<PathBuf> {
+    let up = |start: &Path| {
+        start
+            .ancestors()
+            .map(|d| d.join("huba.config.json"))
+            .find(|f| f.is_file())
+    };
+    up(cwd).or_else(|| exe.and_then(Path::parent).and_then(up))
+}
+
+/// Load config: explicit path → `HUB_CONFIG` → [`find_config`]. Missing file =
+/// defaults.
 pub fn load(explicit: Option<&Path>) -> Result<Config> {
     let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let file = match explicit {
         Some(p) => expand_home(p),
         None => match env::var_os("HUB_CONFIG") {
             Some(v) => expand_home(Path::new(&v)),
-            None => find_hub_home(&cwd).join("huba.config.json"),
+            None => {
+                let exe = env::current_exe().ok().and_then(|e| e.canonicalize().ok());
+                find_config(&cwd, exe.as_deref()).unwrap_or_else(|| cwd.join("huba.config.json"))
+            }
         },
     };
 
@@ -497,6 +519,10 @@ pub fn load(explicit: Option<&Path>) -> Result<Config> {
         serde_json::from_str(&text)
             .with_context(|| format!("cannot parse config {}", file.display()))?
     } else {
+        crate::logging::warn(
+            "config_missing_using_defaults",
+            serde_json::json!({ "file": file.display().to_string() }),
+        );
         Config::default()
     };
 

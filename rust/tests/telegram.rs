@@ -948,6 +948,67 @@ fn a_message_past_telegrams_own_window_is_dropped_not_retried() {
     assert_eq!(gone, vec![9], "phải bỏ khỏi sổ, đừng giữ lại thử mãi");
 }
 
+/// Lần xoá hỏng phải NÓI lý do, và lỗi vĩnh viễn không được lẫn với lỗi tạm.
+///
+/// 🔴 Đo 2026-10-01 trên `logs/huba.log`: từ 16/08 **0 tin xoá được** qua
+/// 10 064 vòng (27 339 lượt hỏng), mà không dòng nào nói vì sao — nhánh
+/// `Err(_) => failed += 1` nuốt lý do, còn `failed` gộp "Telegram từ chối, bỏ
+/// khỏi sổ" với "mạng hỏng, giữ lại thử tiếp" thành một con số.
+#[test]
+fn a_failed_delete_says_why_and_keeps_refused_apart_from_retry() {
+    let outcomes: Vec<(i64, Result<(), String>)> = vec![
+        (1, Ok(())),
+        (
+            2,
+            Err("Bad Request: message can't be deleted for everyone".into()),
+        ),
+        (3, Err("Bad Request: message to delete not found".into())),
+        (4, Err("Bad Request: message to delete not found".into())),
+        (
+            5,
+            Err("error sending request for url (…): operation timed out".into()),
+        ),
+    ];
+    let t = huba::telegram::tally_deletes(&outcomes);
+    assert_eq!(t.deleted, 1);
+    assert_eq!(t.refused, 3, "Telegram từ chối vĩnh viễn ⟹ bỏ khỏi sổ");
+    assert_eq!(t.retry, 1, "lỗi mạng ⟹ giữ lại thử vòng sau");
+    assert_eq!(
+        t.drop_ids,
+        vec![1, 2, 3, 4],
+        "tin hỏng vì mạng không được rơi khỏi sổ"
+    );
+    assert_eq!(
+        t.reasons.get("Bad Request: message to delete not found"),
+        Some(&2),
+        "lý do phải vào sổ, kèm số lần: {:?}",
+        t.reasons
+    );
+    assert_eq!(t.reasons.len(), 3, "{:?}", t.reasons);
+    // Không hỏng gì thì không bịa lý do.
+    let ok = huba::telegram::tally_deletes(&[(9, Ok(()))]);
+    assert!(ok.reasons.is_empty() && ok.refused == 0 && ok.retry == 0);
+}
+
+/// Ảnh quá trần 10 MB của `sendPhoto` vẫn phải tới tay chủ máy — qua cửa tệp.
+///
+/// 🔴 Đo 2026-10-01: `/web anh` (11/09 08:03:28) chụp được rồi trả *"ảnh 11.1 MB
+/// — quá trần 10 MB của Telegram"*. Trần THẬT của tệp là 50 MB.
+#[test]
+fn a_photo_over_the_photo_limit_goes_as_a_file_not_nowhere() {
+    use huba::telegram::{photo_route, PhotoRoute, TELEGRAM_FILE_MAX, TELEGRAM_PHOTO_MAX};
+    let mb = 1024 * 1024;
+    assert_eq!(photo_route(3 * mb), PhotoRoute::Photo);
+    assert_eq!(photo_route(TELEGRAM_PHOTO_MAX), PhotoRoute::Photo);
+    assert_eq!(
+        photo_route(11 * mb + mb / 10),
+        PhotoRoute::Document,
+        "ảnh 11.1 MB bị bỏ trong khi Telegram nhận được nó qua sendDocument"
+    );
+    assert_eq!(photo_route(TELEGRAM_FILE_MAX), PhotoRoute::Document);
+    assert_eq!(photo_route(TELEGRAM_FILE_MAX + 1), PhotoRoute::TooBig);
+}
+
 /// `0` = tắt hẳn, và tắt phải là tắt: không đụng tin nào.
 #[test]
 fn zero_hours_turns_the_whole_thing_off() {

@@ -1337,6 +1337,37 @@ fn a_process_without_a_terminal_has_no_window_to_be_taken_over() {
     );
 }
 
+/// Cái VỎ shell còn lại của chính cửa sổ ấy không phải "phiên chiếm cửa sổ".
+///
+/// 🔴 Đo 2026-10-01 trên `logs/huba.log`: từ 17/08, **187/234** tin "cửa sổ ấy
+/// nay đang chạy phiên …" nói về chính hàng `shell` mà huba dựng cho cửa sổ
+/// vừa trống — `… đã tắt — cửa sổ ấy nay đang chạy phiên cửa sổ ttys001`. Phiên
+/// thoát CLI, shell đứng lại ở dấu nhắc, và huba đọc cái shell ấy thành một
+/// người đến sau.
+#[test]
+fn the_shell_left_behind_in_the_window_is_not_a_session_taking_it_over() {
+    let shell = huba::sessions::LiveSession {
+        session_id: format!("{}ttys001", huba::sessions::SHELL_ID_PREFIX),
+        name: "cửa sổ ttys001".to_string(),
+        tty: "ttys001".to_string(),
+        host: "shell".to_string(),
+        kind: "shell".to_string(),
+        ..Default::default()
+    };
+    let live = vec![shell.clone()];
+    assert!(
+        huba::sessions::window_taken_over("dead", "ttys001", &live).is_none(),
+        "đọc cái vỏ shell của chính cửa sổ ấy thành phiên chiếm cửa sổ"
+    );
+    // Một phiên THẬT ngồi vào cửa sổ ấy thì vẫn phải nhận ra, kể cả khi hàng
+    // shell đứng trước nó trong danh sách.
+    let live = vec![shell, row_at("heir", "projects-7c", "ttys001")];
+    assert_eq!(
+        huba::sessions::window_taken_over("dead", "ttys001", &live).map(|s| s.name.as_str()),
+        Some("projects-7c")
+    );
+}
+
 /// Ngăn kéo phải MỞ RA được, và luật ấy phải là phép ĐO chứ không phải một cái
 /// tên gõ sẵn.
 ///

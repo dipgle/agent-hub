@@ -991,3 +991,36 @@ fn a_recycled_tty_must_resolve_to_the_live_tab_not_a_corpse() {
     let (dead, _) = huba::keys::parse_tabs("/dev/ttys005\tfalse\t\t0\n#skipped\t0\n", true);
     assert!(huba::keys::alive_tab(&dead, "ttys005").is_none());
 }
+
+/// `huba` gọi từ một cây KHÁC phải tìm thấy cấu hình của chính nó.
+///
+/// 🔴 Đo 2026-10-01: lệnh `huba` (symlink `~/.local/bin/huba` → binary trong cây
+/// huba) gọi từ các cây dwork rơi về `Config::default` mà không một lời —
+/// `huba: không có tài khoản 'acc7'. Máy này khai: mặc định.` — và đẻ ra 6 tệp
+/// `data/huba.sqlite` rỗng + 7 tệp `logs/huba.log` lạc chỗ ở những cây ấy. Chỉ
+/// đi ngược lên từ thư mục hiện hành thì mọi cây không nằm dưới huba đều mù.
+#[test]
+fn a_cli_called_from_another_tree_finds_its_own_config_by_its_binary() {
+    let t = tempfile::tempdir().unwrap();
+    let app = t.path().join("huba");
+    std::fs::create_dir_all(app.join("rust/target/release")).unwrap();
+    std::fs::write(app.join("huba.config.json"), "{}").unwrap();
+    let exe = app.join("rust/target/release/huba");
+    std::fs::write(&exe, "").unwrap();
+    let lane = t.path().join("dwork/dev-worklist");
+    std::fs::create_dir_all(&lane).unwrap();
+
+    assert_eq!(
+        config::find_config(&lane, Some(&exe)),
+        Some(app.join("huba.config.json")),
+        "gọi từ cây khác thì phải tìm theo binary đang chạy"
+    );
+    // Không có binary để lần theo, cũng không có tệp trên đường đi ⟹ KHÔNG bịa.
+    assert_eq!(config::find_config(&lane, None), None);
+    // Cấu hình trên đường đi từ thư mục hiện hành vẫn THẮNG — hành vi cũ giữ nguyên.
+    std::fs::write(t.path().join("dwork/huba.config.json"), "{}").unwrap();
+    assert_eq!(
+        config::find_config(&lane, Some(&exe)),
+        Some(t.path().join("dwork/huba.config.json"))
+    );
+}

@@ -508,6 +508,75 @@ pub fn due_for_delete(list: &[SentMsg], now: i64, after_hours: u64) -> (Vec<i64>
     (due, gone)
 }
 
+/// Trần của `sendPhoto` — luật của Telegram.
+pub const TELEGRAM_PHOTO_MAX: u64 = 10 * 1024 * 1024;
+/// Trần của `sendDocument` — luật của Telegram.
+pub const TELEGRAM_FILE_MAX: u64 = 50 * 1024 * 1024;
+
+/// Cửa nào cho một tấm ảnh `len` byte.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PhotoRoute {
+    Photo,
+    /// Quá trần ảnh nhưng còn trong trần tệp — vẫn tới được tay chủ máy.
+    Document,
+    TooBig,
+}
+
+/// Hàm THUẦN — phần quyết định của `Inbox::send_photo`, kiểm được không cần mạng.
+pub fn photo_route(len: u64) -> PhotoRoute {
+    if len <= TELEGRAM_PHOTO_MAX {
+        PhotoRoute::Photo
+    } else if len <= TELEGRAM_FILE_MAX {
+        PhotoRoute::Document
+    } else {
+        PhotoRoute::TooBig
+    }
+}
+
+/// Kết quả một lượt xoá, đã chia nhóm — xem [`tally_deletes`].
+#[derive(Debug, Default)]
+pub struct PruneTally {
+    pub deleted: usize,
+    /// Telegram từ chối VĨNH VIỄN — bỏ khỏi sổ.
+    pub refused: usize,
+    /// Hỏng vì đường truyền — giữ lại, vòng sau thử tiếp.
+    pub retry: usize,
+    /// Những id phải bỏ khỏi sổ: đã xoá + bị từ chối vĩnh viễn.
+    pub drop_ids: Vec<i64>,
+    /// Lý do hỏng → số lần. Không có nó thì "hỏng" không chữa được.
+    pub reasons: std::collections::BTreeMap<String, usize>,
+}
+
+/// Chia kết quả `deleteMessage` thành ba nhóm — hàm THUẦN, kiểm được không cần mạng.
+///
+/// 🔴 Đo 2026-10-01: từ 16/08 **0 tin xoá được** qua 10 064 vòng, mà không dòng
+/// log nào nói vì sao — nhánh lỗi đếm rồi vứt lý do, và một con số `failed` gộp
+/// hai chuyện dẫn tới hai việc khác hẳn nhau.
+pub fn tally_deletes(outcomes: &[(i64, Result<(), String>)]) -> PruneTally {
+    let mut t = PruneTally::default();
+    for (id, r) in outcomes {
+        match r {
+            Ok(()) => {
+                t.deleted += 1;
+                t.drop_ids.push(*id);
+            }
+            Err(e) => {
+                let why: String = e.chars().take(160).collect();
+                *t.reasons.entry(why).or_default() += 1;
+                // Telegram từ chối vĩnh viễn (đã xoá tay, hết cửa 48h…) thì bỏ
+                // khỏi sổ luôn; lỗi mạng thì GIỮ lại để vòng sau thử tiếp.
+                if e.contains("can't be deleted") || e.contains("not found") {
+                    t.refused += 1;
+                    t.drop_ids.push(*id);
+                } else {
+                    t.retry += 1;
+                }
+            }
+        }
+    }
+    t
+}
+
 /// Xoá những tin huba gửi đã quá hạn — chạy mỗi vòng, rẻ khi không có gì để xoá.
 ///
 /// Hai điều phải nói thẳng vì chúng là giới hạn thật, không phải thiếu sót:
@@ -534,24 +603,14 @@ pub fn prune_sent(cfg: &Config, db: &crate::db::Db) {
     if due.is_empty() && gone.is_empty() {
         return;
     }
-    let (mut deleted, mut failed) = (0usize, 0usize);
     let too_old = gone.len();
+    let outcomes: Vec<(i64, Result<(), String>)> = due
+        .into_iter()
+        .map(|id| (id, inbox.delete_message(id)))
+        .collect();
+    let t = tally_deletes(&outcomes);
     let mut drop_ids: Vec<i64> = gone;
-    for id in due {
-        match inbox.delete_message(id) {
-            Ok(()) => {
-                deleted += 1;
-                drop_ids.push(id);
-            }
-            // Telegram từ chối vĩnh viễn (đã xoá tay, hết cửa 48h…) thì bỏ khỏi
-            // sổ luôn; lỗi mạng thì GIỮ lại để vòng sau thử tiếp.
-            Err(e) if e.contains("can't be deleted") || e.contains("not found") => {
-                drop_ids.push(id);
-                failed += 1;
-            }
-            Err(_) => failed += 1,
-        }
-    }
+    drop_ids.extend(&t.drop_ids);
     list.retain(|(id, _)| !drop_ids.contains(id));
     match serde_json::to_string(&list) {
         Ok(v) => {
@@ -564,10 +623,13 @@ pub fn prune_sent(cfg: &Config, db: &crate::db::Db) {
             json!({ "err": e.to_string() }),
         ),
     }
+    // `failed` = refused + retry, kept so counts read before 2026-10-01 still
+    // compare with counts read after.
     logging::info(
         "telegram_pruned",
-        json!({ "deleted": deleted, "too_old_to_delete": too_old, "failed": failed,
-                "left": list.len(), "after_hours": hours }),
+        json!({ "deleted": t.deleted, "too_old_to_delete": too_old,
+                "failed": t.refused + t.retry, "refused": t.refused, "retry": t.retry,
+                "reasons": t.reasons, "left": list.len(), "after_hours": hours }),
     );
 }
 
@@ -1817,19 +1879,67 @@ impl Inbox {
     /// Ảnh KHÔNG qua cổng quét rò được — không có chữ để quét. Nên luật ở đây là
     /// luật của luật 5 (huba không giấu chữ với chủ máy) đọc tới cùng: ảnh chỉ đi
     /// về ĐÚNG buồng chat của chủ máy, và chỉ khi anh gõ lệnh xin nó.
+    ///
+    /// 🔴 Ảnh quá 10 MB đi bằng `sendDocument` (trần 50 MB), không bị bỏ. Đo
+    /// 2026-10-01: `/web anh` chụp được rồi trả *"ảnh 11.1 MB — quá trần 10 MB
+    /// của Telegram"* — huba từ chối thay cho Telegram một tấm ảnh mà Telegram
+    /// vẫn nhận được, chỉ là qua cửa khác. Và `sendPhoto` còn từ chối cả ảnh nhỏ
+    /// mà quá dài/rộng, nên bị từ chối thì cũng thử lại bằng cửa tệp.
     pub fn send_photo(&self, path: &std::path::Path, caption: &str) -> Result<(), String> {
-        const MAX_BYTES: u64 = 10 * 1024 * 1024;
         let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
-        if meta.len() > MAX_BYTES {
+        let route = photo_route(meta.len());
+        if route == PhotoRoute::TooBig {
             return Err(format!(
-                "ảnh {:.1} MB — quá trần {} MB của Telegram",
+                "ảnh {:.1} MB — quá cả trần {} MB của tệp gửi qua Telegram",
                 meta.len() as f64 / 1_048_576.0,
-                MAX_BYTES / 1_048_576
+                TELEGRAM_FILE_MAX / 1_048_576
             ));
         }
         let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-        let client = self.client().ok_or("không dựng được HTTP client")?;
         self.forget_ack_live();
+        let ok = |v: &Value| v.get("ok").and_then(Value::as_bool) == Some(true);
+        let why = |v: &Value| {
+            v.get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("không rõ")
+                .to_string()
+        };
+        let mut sent_as = "photo";
+        let mut v = json!({});
+        if route == PhotoRoute::Photo {
+            v = self.post_image(bytes.clone(), "sendPhoto", "photo", caption)?;
+            if !ok(&v) {
+                logging::warn(
+                    "telegram_photo_refused_retry_as_file",
+                    json!({ "bytes": meta.len(), "why": why(&v) }),
+                );
+            }
+        }
+        if !ok(&v) {
+            sent_as = "document";
+            v = self.post_image(bytes, "sendDocument", "document", caption)?;
+        }
+        if ok(&v) {
+            remember_sent(&self.cfg(), &v);
+            logging::info(
+                "telegram_photo_sent",
+                json!({ "bytes": meta.len(), "as": sent_as }),
+            );
+            Ok(())
+        } else {
+            Err(format!("telegram từ chối: {}", why(&v)))
+        }
+    }
+
+    /// One multipart upload of a PNG; returns Telegram's JSON answer as is.
+    fn post_image(
+        &self,
+        bytes: Vec<u8>,
+        method: &str,
+        field: &str,
+        caption: &str,
+    ) -> Result<Value, String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
         let part = reqwest::blocking::multipart::Part::bytes(bytes)
             .file_name("man-hinh.png")
             .mime_str("image/png")
@@ -1837,25 +1947,13 @@ impl Inbox {
         let form = reqwest::blocking::multipart::Form::new()
             .text("chat_id", self.chat_id.clone())
             .text("caption", caption.to_string())
-            .part("photo", part);
+            .part(field.to_string(), part);
         let r = client
-            .post(self.api("sendPhoto"))
+            .post(self.api(method))
             .multipart(form)
             .send()
             .map_err(|e| e.to_string())?;
-        let v: Value = r.json().unwrap_or_else(|_| json!({}));
-        if v.get("ok").and_then(Value::as_bool) == Some(true) {
-            remember_sent(&self.cfg(), &v);
-            logging::info("telegram_photo_sent", json!({ "bytes": meta.len() }));
-            Ok(())
-        } else {
-            Err(format!(
-                "telegram từ chối: {}",
-                v.get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("không rõ")
-            ))
-        }
+        Ok(r.json().unwrap_or_else(|_| json!({})))
     }
 
     /// Đăng ký chờ cú bấm của MỘT câu hỏi xác nhận.

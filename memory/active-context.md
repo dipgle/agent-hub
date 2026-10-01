@@ -1,5 +1,25 @@
 # active context — huba
 
+## 🟡 2026-10-01 09:5xZ→11:xxZ — phiên fb6a2579: `/ask` để lại `/btw` trong ô (ĐÃ CÀI vá) · banner (đang chốt)
+
+- **`/ask` (Hà 09:5xZ *"Tại sao lệnh ask lại bị dán vào ô chat và nằm ở đó"* · *"Tôi phải dùng lệnh clean"*).**
+  Gốc `sessions.rs ask_via_btw`: CHỈ GÕ `/btw …` (`type_into`, không Enter rời). Log: 47 lượt từ 15/09, 13
+  `btw_no_answer_yet` ⟹ fork, câu bỏ lại trong ô; 11/13 được vòng tự gỡ kẹt bấm hộ vài phút SAU (6 `sent`) —
+  tắt vòng ấy 07:50Z làm lộ ra. Vá `0491c04`: `type_and_send` + `don_btw_bo_do` ở 3 nhánh hỏng + `Aside.btw_hong`
+  + `cach_hoi_ben_le` thôi khai "phiên gốc không bị đụng". gate 177/177; **ĐÃ CÀI** `hubd@2026-10-01T10:16:35Z`
+  pid 50294 `--verify` KHỚP; đã đẩy. ⏳ CHƯA có `/ask` thật nào trên bản mới — đo: `grep -E
+  '"msg":"(btw_not_sent|btw_cleanup|btw_no_answer_yet|aside_done)"' logs/huba.log` sau 10:17:15Z.
+- ⚠ **Sơ suất lúc cài 0491c04:** `dang-chay.py` báo 1 việc đang chạy (việc 32, git push của [dwork/dci]) mà chuỗi
+  `&&` vẫn cài — `dang-chay.py` THOÁT 0 kể cả khi có việc. Thoát nạn vì việc xong 10:16:04Z trước khi hubd khởi
+  động lại (10:17:15Z). Lần sau: ĐỌC dòng `việc đang chạy: {}` rồi mới cài, đừng nối `&&`.
+- **Banner khởi động (hạ tầng chung, Hà «Sửa luôn banner khởi động đi»):** `phien-moi-nap-boi-canh.sh` (quy trình
+  6 bước chỉ báo KĐĐ cho dwork · dòng BẮT BUỘC theo thứ dự án CÓ · quality-gate `~/projects/<cây>`) và
+  `main-khoi-dong.sh` (khối ⑦ kiểu `chung`: sổ ban-giao.py + brief theo mtime · `@cw-open` chỉ khi dự án khai +
+  ĐỌC mã thoát · dòng CLAUDE.md chỉ kể tệp có thật · HANDOFF chỉ khi có). Tự kiểm: pmn 11/11 (6 mới, đối chứng
+  cấy lỗi cũ ⟹ 3 đỏ); mkd 61 đạt · 0 sai · 18 KĐĐ (nền 52/0/18); cổng quy trình 6 bước dwork 3/3.
+  ⚠ Hai lượt cấy lỗi đầu chạy TRÊN TỆP THẬT vài giây (pmn ~15 s; mkd bị cửa chặn dồn nuốt ngay) — đã trả, md5
+  khớp; lượt sau làm trên bản chép `.tmp/dot-bien-banner/scripts-chep`.
+
 ## ⏹ 2026-10-01 07:50Z — phiên fb6a2579: TẮT HẲN vòng tự gỡ kẹt (Hà *"Tắt hẳn đi"*)
 
 `huba.config.json` `auto_unstick.enabled=false` (tệp thật; `~/projects/hub/hub.config.json` là symlink tới nó, md5

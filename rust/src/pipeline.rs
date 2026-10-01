@@ -1272,7 +1272,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                         logging::info(
                             "session_end_was_idle",
                             json!({ "session": id,
-                                    "why": "sổ nhìn cuối thấy đang chạy, nhưng nhật ký khép lượt bằng end_turn và 0 subagent treo" }),
+                                    "why": "sổ nhìn cuối thấy đang chạy, nhưng nhật ký đã khép lượt (end_turn hoặc chủ máy ngắt) và 0 subagent treo" }),
                         );
                     }
                     Some(true) => {}

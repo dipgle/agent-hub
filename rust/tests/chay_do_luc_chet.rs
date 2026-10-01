@@ -5,18 +5,18 @@
 //! dở, nên xem lại.` Nhật ký của phiên ấy khép lượt cuối bằng `end_turn` lúc
 //! 10:30:39Z; phiên kế nhiệm đóng nó ~10:31. Cờ "chạy dở" đến từ lượt nhìn
 //! 10:30:13Z — lúc ấy nó chạy thật — vì hai lượt nhìn cách nhau ~2 phút.
-//! Đo trên `logs/huba.log` cùng ngày: 592 tin "nên xem lại"; nối được 376 về nhật
-//! ký (216 tin không mang id phiên). Bỏ `167252e2` (phiên nền nhấp nháy 04–05/09,
-//! 319 tin, lỗi đã vá bằng `BG_MISS_DEBOUNCE_SEC`) còn 57: **51 (89 %)** về một
-//! phiên mà bản ghi hội thoại cuối là `end_turn`; `turn_open_at_death` trả
-//! `Some(false)` cho cả 51.
+//! Đo trên `logs/huba.log` cùng ngày (`.tmp/do-chay-do.py`): 592 tin "nên xem
+//! lại"; nối được 374 về nhật ký (211 không mang id phiên, 7 mất nhật ký). Bỏ
+//! `167252e2` (phiên nền nhấp nháy 04–05/09, 319 tin, đã vá bằng
+//! `BG_MISS_DEBOUNCE_SEC`) còn 55: **51 (93 %)** về một phiên mà bản ghi hội
+//! thoại cuối là `end_turn`; `turn_open_at_death` trả `Some(false)` cho cả 51.
 //!
 //! Khung bản ghi dưới đây rút từ đuôi nhật ký thật `fb6a2579` (chữ cắt ngắn,
 //! thứ tự và kiểu bản ghi giữ nguyên).
 
 use std::collections::HashSet;
 
-use huba::sessions::parse_tail;
+use huba::sessions::{parse_tail, NewestTurn};
 
 fn khong_nen() -> HashSet<String> {
     HashSet::new()
@@ -54,7 +54,47 @@ fn ca_that_fb6a2579_luot_da_khep() {
     let t = parse_tail(&duoi_that().join("\n"), &khong_nen());
     assert_eq!(
         t.newest_turn,
-        Some(("assistant".to_string(), Some("end_turn".to_string())))
+        Some(NewestTurn {
+            role: "assistant".to_string(),
+            stop_reason: Some("end_turn".to_string()),
+            interrupted: false,
+        })
+    );
+    assert_eq!(t.turn_open(), Some(false));
+}
+
+/// Ca `2aebe8dd` (30/09): chủ máy bấm Esc NGẮT lượt rồi đóng phiên. Bản ghi cuối
+/// là `user` — nhưng là dấu ngắt, phiên đã về dấu nhắc. Bản trơn mang
+/// `interruptedMessageId`; bản "for tool use" của CLI `2.1.280` thường KHÔNG.
+#[test]
+fn ngat_luot_bang_esc_la_khep() {
+    let ngat = r#"{"type":"user","interruptedMessageId":"msg_x","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#;
+    let ngat_cong_cu = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}"#;
+    for cuoi in [ngat, ngat_cong_cu] {
+        let mut v = vec![GOI_BASH, KQ_BASH, cuoi];
+        v.extend(SO_SACH_SAU);
+        let t = parse_tail(&v.join("\n"), &khong_nen());
+        assert!(
+            t.newest_turn.as_ref().is_some_and(|n| n.interrupted),
+            "{cuoi}"
+        );
+        assert_eq!(t.turn_open(), Some(false), "{cuoi}");
+    }
+}
+
+/// Ca `594a4cd8` (21/09): `/context` gõ tại chỗ sau lượt đã khép — CLI ghi đầu ra
+/// thành một bản ghi `user` có `isMeta: true`. Đó không phải một lượt. Sổ sách
+/// (`permission-mode`) đứng SAU nó để chạm đúng cửa "ngừng parse sớm".
+#[test]
+fn ban_ghi_is_meta_khong_phai_luot() {
+    let meta = r###"{"type":"user","isMeta":true,"message":{"role":"user","content":"## Context Usage\n\n**Tokens:** 416k / 1m (42%)"}}"###;
+    let mut v = duoi_that();
+    v.push(meta);
+    v.extend(SO_SACH_SAU);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(
+        t.newest_turn.as_ref().map(|n| n.role.as_str()),
+        Some("assistant")
     );
     assert_eq!(t.turn_open(), Some(false));
 }
@@ -97,6 +137,31 @@ fn cau_moi_sau_luot_khep_la_mo() {
     let moi = r#"{"type":"user","message":{"role":"user","content":"làm tiếp"}}"#;
     let mut v = duoi_that();
     v.push(moi);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(t.turn_open(), Some(true));
+}
+
+/// Câu chủ máy GÕ có nhắc tới dấu ngắt (khớp chuỗi con) KHÔNG phải dấu ngắt —
+/// đối chứng ngược của `ngat_luot_bang_esc_la_khep`.
+#[test]
+fn cau_go_nhac_toi_dau_ngat_van_la_mo() {
+    let go = r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"sao lại có [Request interrupted by user] ở đây?"}]}}"#;
+    let mut v = duoi_that();
+    v.push(go);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert!(t.newest_turn.as_ref().is_some_and(|n| !n.interrupted));
+    assert_eq!(t.turn_open(), Some(true));
+}
+
+/// Bản ghi `user` KHÔNG có `isMeta` sau lượt khép là lượt mới — đối chứng ngược
+/// của `ban_ghi_is_meta_khong_phai_luot`.
+#[test]
+fn cung_chu_ay_khong_is_meta_la_mo() {
+    let khong_meta =
+        r###"{"type":"user","message":{"role":"user","content":"## Context Usage"}}"###;
+    let mut v = duoi_that();
+    v.push(khong_meta);
+    v.extend(SO_SACH_SAU);
     let t = parse_tail(&v.join("\n"), &khong_nen());
     assert_eq!(t.turn_open(), Some(true));
 }

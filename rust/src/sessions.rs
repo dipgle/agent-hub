@@ -1583,13 +1583,51 @@ pub struct TranscriptTail {
     /// Nhan đề `claude` tự đặt cho phiên — bản ghi `ai-title` MỚI NHẤT trong
     /// khung đọc. Cùng chữ với nhan đề tab Terminal; xem `LiveSession::doing`.
     pub ai_title: Option<String>,
-    /// Bản ghi hội thoại MỚI NHẤT, có chữ hay không: `(role, stop_reason)`.
+    /// Bản ghi hội thoại MỚI NHẤT, có chữ hay không — xem [`NewestTurn`].
     ///
     /// KHÁC `last_role`: trường ấy đi lùi tới bản ghi CÓ CHỮ mới nhất, nên một
     /// lượt đang dừng ở `tool_use` trần (không chữ) vẫn đọc ra vai của câu nói
     /// trước đó. Muốn biết lượt cuối đã KHÉP chưa thì phải hỏi đúng bản ghi
     /// cuối — xem [`TranscriptTail::turn_open`].
-    pub newest_turn: Option<(String, Option<String>)>,
+    pub newest_turn: Option<NewestTurn>,
+}
+
+/// Bản ghi hội thoại mới nhất của nhật ký — đủ để biết lượt đã khép chưa.
+#[derive(Debug, Default, PartialEq)]
+pub struct NewestTurn {
+    pub role: String,
+    pub stop_reason: Option<String>,
+    /// Chủ máy bấm Esc NGẮT lượt — CLI chèn một bản ghi `user` rồi về dấu nhắc.
+    pub interrupted: bool,
+}
+
+/// Hai câu CLI tự chèn khi chủ máy ngắt lượt. Khớp NGUYÊN khối chữ, không khớp
+/// chuỗi con — lời văn của người lẫn của trợ lý hay nhắc tới đúng câu này.
+const INTERRUPT_MARKS: [&str; 2] = [
+    "[Request interrupted by user]",
+    "[Request interrupted by user for tool use]",
+];
+
+/// Bản ghi `user` này có phải dấu NGẮT LƯỢT không.
+///
+/// Trường `interruptedMessageId` là dấu cấu trúc, nhưng KHÔNG đủ: đo 01/10 trên
+/// 16 560 nhật ký, CLI `2.1.280` bỏ trường ấy ở 16/36 bản ghi ngắt lượt từ 25/09
+/// (gần hết là biến thể "for tool use"). Nên nhận thêm hai câu cố định ở trên.
+fn is_interrupt_record(record: &Value) -> bool {
+    if record.get("interruptedMessageId").is_some() {
+        return true;
+    }
+    let Some(blocks) = record
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return false;
+    };
+    blocks
+        .iter()
+        .filter_map(|b| b.get("text").and_then(Value::as_str))
+        .any(|t| INTERRUPT_MARKS.contains(&t.trim()))
 }
 
 impl TranscriptTail {
@@ -1600,17 +1638,21 @@ impl TranscriptTail {
     /// đóng ~10:31. `was_working` lấy từ lượt NHÌN cuối (10:30:13Z, lúc ấy nó
     /// chạy thật) — mà hai lượt nhìn cách nhau ~2 phút. Đo trên `logs/huba.log`:
     /// 592 tin "nên xem lại"; trừ phiên nhấp nháy `167252e2` (04–05/09, đã vá)
-    /// và tin không mang id thì còn 57, trong đó **51 (89 %)** về một phiên mà
+    /// và tin không mang id thì còn 55, trong đó **51 (93 %)** về một phiên mà
     /// bản ghi hội thoại cuối là `end_turn`.
     ///
-    /// `Some(false)` chỉ khi CẢ HAI vế đo được: bản ghi hội thoại cuối là
-    /// `assistant` + `end_turn`, VÀ không còn subagent treo — một phiên rảnh ở
-    /// dấu nhắc mà còn agent nền chạy thì chết đi vẫn là mất việc.
+    /// Lượt KHÉP khi bản ghi hội thoại cuối là `assistant` + `end_turn`, HOẶC là
+    /// dấu ngắt lượt của chủ máy (ca `2aebe8dd` 30/09: Esc rồi đóng phiên). Bản
+    /// ghi `isMeta` (đầu ra `/context` gõ tại chỗ — ca `594a4cd8` 21/09) không
+    /// phải một lượt, nên không bao giờ thành `newest_turn`.
+    /// `Some(false)` chỉ khi lượt khép VÀ không còn subagent treo — một phiên
+    /// rảnh ở dấu nhắc mà còn agent nền chạy thì chết đi vẫn là mất việc.
     /// `None` = khung đọc không có bản ghi hội thoại nào: KHÔNG đo được, khác
     /// với "đang mở".
     pub fn turn_open(&self) -> Option<bool> {
-        let (role, stop) = self.newest_turn.as_ref()?;
-        let closed = role == "assistant" && stop.as_deref() == Some("end_turn");
+        let t = self.newest_turn.as_ref()?;
+        let closed = t.interrupted
+            || (t.role == "assistant" && t.stop_reason.as_deref() == Some("end_turn"));
         Some(!closed || self.pending_subagents > 0)
     }
 }
@@ -3640,8 +3682,11 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
         ..Default::default()
     };
     for line in tail.lines().rev() {
+        // `newest_turn` cũng phải có mới được ngừng: bản ghi `isMeta` có chữ nên
+        // làm đầy `last_text` TRƯỚC khi gặp lượt thật nằm ngay sau nó.
+        let du_luot = out.last_text.is_some() && out.newest_turn.is_some();
         // Đủ cả ba (lượt mới nhất · chế độ · nhan đề) ⟹ dừng.
-        if out.last_text.is_some() && out.permission_mode.is_some() && out.ai_title.is_some() {
+        if du_luot && out.permission_mode.is_some() && out.ai_title.is_some() {
             break;
         }
         let line = line.trim();
@@ -3651,7 +3696,7 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
         // Đã có lượt mới nhất lẫn chế độ ⟹ chỉ còn tìm nhan đề: dòng nào không
         // mang chữ ấy thì bỏ qua KHÔNG parse, để một nhật ký không có `ai-title`
         // không bắt vòng chạy parse trọn 256 KB mỗi lượt.
-        let chi_tim_nhan_de = out.last_text.is_some() && out.permission_mode.is_some();
+        let chi_tim_nhan_de = du_luot && out.permission_mode.is_some();
         if chi_tim_nhan_de && !line.contains("\"ai-title\"") {
             continue;
         }
@@ -3678,18 +3723,22 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
             continue;
         }
         // Bản ghi hội thoại ĐẦU TIÊN gặp khi đi lùi — kể cả khi nó không có chữ
-        // (xem `TranscriptTail::newest_turn`).
-        if out.newest_turn.is_none() {
+        // (xem `TranscriptTail::newest_turn`). `isMeta` không phải một lượt.
+        let is_meta = record.get("isMeta").and_then(Value::as_bool) == Some(true);
+        if out.newest_turn.is_none() && !is_meta {
             let msg = record.get("message");
-            out.newest_turn = Some((
-                msg.and_then(|m| m.get("role"))
+            out.newest_turn = Some(NewestTurn {
+                role: msg
+                    .and_then(|m| m.get("role"))
                     .and_then(Value::as_str)
                     .unwrap_or(kind)
                     .to_string(),
-                msg.and_then(|m| m.get("stop_reason"))
+                stop_reason: msg
+                    .and_then(|m| m.get("stop_reason"))
                     .and_then(Value::as_str)
                     .map(str::to_string),
-            ));
+                interrupted: kind == "user" && is_interrupt_record(&record),
+            });
         }
         // Newest wins: keep scanning backwards only for what is still missing,
         // never overwrite a turn already found with an older one.

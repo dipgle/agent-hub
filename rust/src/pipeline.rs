@@ -1256,6 +1256,35 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // chớp nhoáng vẫn không phải tin. Nhánh KẸT HỎI thì không đi qua cửa ấy
         // — hỏi là hỏi, dài ngắn không đổi.
 
+        // "ĐANG CHẠY DỞ" phải là trạng thái LÚC CHẾT, không phải lúc nhìn cuối.
+        //
+        // `was_working` của sổ là lượt nhìn cuối, mà hai lượt nhìn cách nhau
+        // ~2 phút — đúng khoảng một phiên kế nhiệm đọc xong bàn giao rồi đóng
+        // phiên cũ vừa xong lượt chót. Nhật ký của phiên đã chết là bản cuối
+        // cùng, nên hỏi nó ở đây ra đúng lúc chết. Chỉ HẠ cờ khi nhật ký chứng
+        // minh lượt đã khép (`Some(false)`); không đọc được thì giữ câu cũ và
+        // nói ra — xem `sessions::TranscriptTail::turn_open`.
+        if let crate::watch::Change::Ended { was_working, .. } = &mut c {
+            if *was_working {
+                match crate::sessions::turn_open_at_death(cfg, &id) {
+                    Some(false) => {
+                        *was_working = false;
+                        logging::info(
+                            "session_end_was_idle",
+                            json!({ "session": id,
+                                    "why": "sổ nhìn cuối thấy đang chạy, nhưng nhật ký khép lượt bằng end_turn và 0 subagent treo" }),
+                        );
+                    }
+                    Some(true) => {}
+                    None => logging::info(
+                        "session_end_turn_unknown",
+                        json!({ "session": id,
+                                "why": "không đọc được nhật ký — giữ cờ chạy dở của lượt nhìn cuối" }),
+                    ),
+                }
+            }
+        }
+
         // IM khi một phiên CON kết thúc bình thường.
         //
         // Hà 2026-08-11: *"phiên con được gọi từ phiên cha mà tắt cũng đang gửi
@@ -1362,7 +1391,10 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
                 remember_ended(db, &id, m, chrono::Utc::now().timestamp());
             }
         }
-        logging::info("session_change", json!({ "text": text }));
+        // `session` đi kèm chữ: nhãn trong chữ (`[dwork/dci]`) không nối ngược
+        // được về nhật ký. Đo 01/10 — 209/592 tin "nên xem lại" không kiểm lại
+        // được chính vì thiếu trường này.
+        logging::info("session_change", json!({ "session": id, "text": text }));
         // (Nhánh gửi vào phòng chat tfl5 đã bỏ 2026-08-14 — xem `verbs.rs`.
         // Telegram nay là cái mồm duy nhất, và nó nằm ngay dưới đây.)
         // Phiên đang DỪNG LẠI HỎI thì tin nhắn phải BẤM ĐƯỢC.

@@ -1583,6 +1583,56 @@ pub struct TranscriptTail {
     /// Nhan đề `claude` tự đặt cho phiên — bản ghi `ai-title` MỚI NHẤT trong
     /// khung đọc. Cùng chữ với nhan đề tab Terminal; xem `LiveSession::doing`.
     pub ai_title: Option<String>,
+    /// Bản ghi hội thoại MỚI NHẤT, có chữ hay không: `(role, stop_reason)`.
+    ///
+    /// KHÁC `last_role`: trường ấy đi lùi tới bản ghi CÓ CHỮ mới nhất, nên một
+    /// lượt đang dừng ở `tool_use` trần (không chữ) vẫn đọc ra vai của câu nói
+    /// trước đó. Muốn biết lượt cuối đã KHÉP chưa thì phải hỏi đúng bản ghi
+    /// cuối — xem [`TranscriptTail::turn_open`].
+    pub newest_turn: Option<(String, Option<String>)>,
+}
+
+impl TranscriptTail {
+    /// Lượt cuối của phiên còn MỞ không — đọc từ nhật ký, không từ sổ `watch`.
+    ///
+    /// 🔴 Sinh ra 2026-10-01: huba báo `⚫ [huba]·fb6a2579 đã tắt hẳn — nó đang
+    /// chạy dở, nên xem lại` về một phiên đã xong lượt cuối từ 10:30:39Z, bị
+    /// đóng ~10:31. `was_working` lấy từ lượt NHÌN cuối (10:30:13Z, lúc ấy nó
+    /// chạy thật) — mà hai lượt nhìn cách nhau ~2 phút. Đo trên `logs/huba.log`:
+    /// 592 tin "nên xem lại"; trừ phiên nhấp nháy `167252e2` (04–05/09, đã vá)
+    /// và tin không mang id thì còn 57, trong đó **51 (89 %)** về một phiên mà
+    /// bản ghi hội thoại cuối là `end_turn`.
+    ///
+    /// `Some(false)` chỉ khi CẢ HAI vế đo được: bản ghi hội thoại cuối là
+    /// `assistant` + `end_turn`, VÀ không còn subagent treo — một phiên rảnh ở
+    /// dấu nhắc mà còn agent nền chạy thì chết đi vẫn là mất việc.
+    /// `None` = khung đọc không có bản ghi hội thoại nào: KHÔNG đo được, khác
+    /// với "đang mở".
+    pub fn turn_open(&self) -> Option<bool> {
+        let (role, stop) = self.newest_turn.as_ref()?;
+        let closed = role == "assistant" && stop.as_deref() == Some("end_turn");
+        Some(!closed || self.pending_subagents > 0)
+    }
+}
+
+/// Phiên vừa CHẾT có đang giữa lượt không — hỏi NHẬT KÝ của nó.
+///
+/// Nhật ký của một phiên đã chết là bản CUỐI CÙNG, nên đọc lúc nào cũng ra
+/// đúng trạng thái lúc nó chết — thứ sổ `watch` (chụp mỗi ~2 phút) không có.
+/// `None` khi không tìm thấy / không đọc được nhật ký; chỗ gọi giữ câu cũ.
+pub fn turn_open_at_death(cfg: &Config, session_id: &str) -> Option<bool> {
+    let path = find_transcript(&cfg.claude_transcript_root(), session_id)?;
+    let tail = match read_tail(&path) {
+        Ok(t) => t,
+        Err(e) => {
+            logging::warn(
+                "turn_open_at_death_unreadable",
+                json!({ "session": session_id, "err": e.to_string() }),
+            );
+            return None;
+        }
+    };
+    parse_tail(&tail, &background_agent_calls(&path)).turn_open()
 }
 
 /// Dự án phiên đang làm — đoán từ ĐƯỜNG DẪN nó đụng vào, không phải từ `cwd`.
@@ -3626,6 +3676,20 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
         }
         if !is_conversation(kind) {
             continue;
+        }
+        // Bản ghi hội thoại ĐẦU TIÊN gặp khi đi lùi — kể cả khi nó không có chữ
+        // (xem `TranscriptTail::newest_turn`).
+        if out.newest_turn.is_none() {
+            let msg = record.get("message");
+            out.newest_turn = Some((
+                msg.and_then(|m| m.get("role"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(kind)
+                    .to_string(),
+                msg.and_then(|m| m.get("stop_reason"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            ));
         }
         // Newest wins: keep scanning backwards only for what is still missing,
         // never overwrite a turn already found with an older one.

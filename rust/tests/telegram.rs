@@ -1009,6 +1009,32 @@ fn a_photo_over_the_photo_limit_goes_as_a_file_not_nowhere() {
     assert_eq!(photo_route(TELEGRAM_FILE_MAX + 1), PhotoRoute::TooBig);
 }
 
+/// Buồng chat tự xoá SỚM hơn huba thì huba không gọi xoá vào chỗ trống.
+///
+/// 🔴 Đo 2026-10-01: lý do đầu tiên đọc được sau khi vá ghi lý do là
+/// `Bad Request: message to delete not found` (3/3), và `getChat` của buồng chat
+/// riêng trả `message_auto_delete_time: 86400` — Telegram tự xoá mọi tin sau 24
+/// giờ, huba gọi xoá ở giờ thứ 36. Từ 16/08 đó là ~2 000 lượt gọi vô ích mỗi
+/// ngày, đọc ra như "cơ chế xoá hỏng".
+#[test]
+fn a_chat_that_deletes_first_is_left_to_do_it() {
+    use huba::telegram::chat_deletes_first;
+    assert!(
+        chat_deletes_first(Some(86_400), 36),
+        "24h < 36h: Telegram xoá trước"
+    );
+    assert!(
+        chat_deletes_first(Some(36 * 3600), 36),
+        "bằng nhau: vẫn là Telegram"
+    );
+    assert!(
+        !chat_deletes_first(Some(7 * 86_400), 36),
+        "tự xoá sau 7 ngày: huba vẫn phải xoá"
+    );
+    assert!(!chat_deletes_first(None, 36), "buồng chat không tự xoá");
+    assert!(!chat_deletes_first(Some(0), 36), "0 = tắt hẹn giờ");
+}
+
 /// `0` = tắt hẳn, và tắt phải là tắt: không đụng tin nào.
 #[test]
 fn zero_hours_turns_the_whole_thing_off() {

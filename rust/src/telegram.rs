@@ -533,6 +533,44 @@ pub fn photo_route(len: u64) -> PhotoRoute {
     }
 }
 
+/// Buồng chat tự xoá tin (`message_auto_delete_time`) SỚM hơn hoặc bằng mốc
+/// `after_hours` của huba ⟹ để Telegram làm, huba không gọi `deleteMessage`.
+pub fn chat_deletes_first(auto_delete_sec: Option<i64>, after_hours: u64) -> bool {
+    matches!(auto_delete_sec, Some(t) if t > 0 && t <= (after_hours as i64) * 3600)
+}
+
+/// How often the chat's auto-delete timer is asked again — the owner can
+/// switch it in the Telegram app at any time.
+const CHAT_TIMER_RECHECK_SEC: i64 = 6 * 3600;
+
+/// `(checked_at, message_auto_delete_time)` from the last `getChat` that answered.
+static CHAT_TIMER: Mutex<Option<(i64, Option<i64>)>> = Mutex::new(None);
+
+/// The chat's auto-delete timer, asked at most every [`CHAT_TIMER_RECHECK_SEC`].
+/// A failed ask is logged and reads as "no timer" — huba then deletes as before.
+fn chat_auto_delete_sec(inbox: &Inbox, now: i64) -> Option<i64> {
+    let mut slot = CHAT_TIMER.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, sec)) = *slot {
+        if now - at < CHAT_TIMER_RECHECK_SEC {
+            return sec;
+        }
+    }
+    match inbox.chat_auto_delete_time() {
+        Ok(sec) => {
+            logging::info(
+                "telegram_chat_timer_read",
+                json!({ "auto_delete_sec": sec }),
+            );
+            *slot = Some((now, sec));
+            sec
+        }
+        Err(e) => {
+            logging::warn("telegram_chat_timer_unreadable", json!({ "err": e }));
+            None
+        }
+    }
+}
+
 /// Kết quả một lượt xoá, đã chia nhóm — xem [`tally_deletes`].
 #[derive(Debug, Default)]
 pub struct PruneTally {
@@ -604,12 +642,29 @@ pub fn prune_sent(cfg: &Config, db: &crate::db::Db) {
         return;
     }
     let too_old = gone.len();
-    let outcomes: Vec<(i64, Result<(), String>)> = due
-        .into_iter()
-        .map(|id| (id, inbox.delete_message(id)))
-        .collect();
-    let t = tally_deletes(&outcomes);
+    // The chat's own timer removes them before huba's limit — calling
+    // `deleteMessage` then only ever answers "not found" (measured 2026-10-01:
+    // timer 86400s against 36h, every call since 16/08).
+    let chat_sec = if due.is_empty() {
+        None
+    } else {
+        chat_auto_delete_sec(inbox, now)
+    };
+    let left_to_chat = if chat_deletes_first(chat_sec, hours) {
+        due.len()
+    } else {
+        0
+    };
     let mut drop_ids: Vec<i64> = gone;
+    let outcomes: Vec<(i64, Result<(), String>)> = if left_to_chat > 0 {
+        drop_ids.extend(&due);
+        Vec::new()
+    } else {
+        due.into_iter()
+            .map(|id| (id, inbox.delete_message(id)))
+            .collect()
+    };
+    let t = tally_deletes(&outcomes);
     drop_ids.extend(&t.drop_ids);
     list.retain(|(id, _)| !drop_ids.contains(id));
     match serde_json::to_string(&list) {
@@ -629,7 +684,8 @@ pub fn prune_sent(cfg: &Config, db: &crate::db::Db) {
         "telegram_pruned",
         json!({ "deleted": t.deleted, "too_old_to_delete": too_old,
                 "failed": t.refused + t.retry, "refused": t.refused, "retry": t.retry,
-                "reasons": t.reasons, "left": list.len(), "after_hours": hours }),
+                "reasons": t.reasons, "left_to_chat": left_to_chat,
+                "chat_auto_delete_sec": chat_sec, "left": list.len(), "after_hours": hours }),
     );
 }
 
@@ -2915,6 +2971,29 @@ impl Inbox {
     /// Xoá MỘT tin của chính bot. `Err` mang nguyên câu Telegram trả lời, vì
     /// chỗ gọi phải phân biệt "hỏng mạng, thử lại sau" với "không bao giờ xoá
     /// được nữa".
+    /// `message_auto_delete_time` of the owner's chat (`getChat`) — `None` when
+    /// the chat has no auto-delete timer.
+    pub fn chat_auto_delete_time(&self) -> Result<Option<i64>, String> {
+        let client = self.client().ok_or("không dựng được HTTP client")?;
+        let v: Value = client
+            .post(self.api("getChat"))
+            .json(&json!({ "chat_id": self.chat_id }))
+            .send()
+            .map_err(|e| e.to_string())?
+            .json()
+            .map_err(|e| e.to_string())?;
+        if v.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(v
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("Telegram từ chối getChat")
+                .to_string());
+        }
+        Ok(v.get("result")
+            .and_then(|r| r.get("message_auto_delete_time"))
+            .and_then(Value::as_i64))
+    }
+
     pub fn delete_message(&self, message_id: i64) -> Result<(), String> {
         // Xoá đúng cái tin đang giữ sổ ⟹ bỏ sổ. Không bỏ thì lượt sau sửa một
         // tin không còn, và câu xác nhận rơi về dòng mới qua đường lỗi thay vì

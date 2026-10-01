@@ -1,5 +1,21 @@
 # active context — huba
 
+## 🟢 2026-10-01 16:0xZ→17:xxZ — phiên 26d92e09 (kế nhiệm 1162cb52): đo lại 11 nợ "chưa chạy thật", vá 5 lỗi (PLAN S45)
+
+- **Đóng phiên cũ 1162cb52:** lượt cuối `end_turn` 16:03:15Z, cây 0/0, không hòm thư/hàng đợi ⟹ `kill 57253` + đóng
+  cửa sổ 4822; ttys001 biến mất. Cổng QG chung của nó (pid 96542) đang CHỜ KHOÁ, chưa đo gì ⟹ tôi dừng để chạy lại
+  MỘT lượt phủ `f3c5f90..HEAD` sau các bản vá (không dựng cây đang sửa dở).
+- **Nghiệm thu thật:** ASK-BTW 2/2 `/ask` của Hà qua `/btw` (11:20Z, 15:18Z), 0 hỏng, câu hỏi không lọt nhật ký ⟹ XONG.
+  CHAY-DO-LUC-CHET: 1 ca thật trên `84018c3` đúng (349b7cd6 [dwork/dorg], `end_turn` 15:23:33Z, tắt 15:25:52Z, không
+  cảnh báo); chiều "nên xem lại" vẫn 0 ca.
+- **5 lỗi đã chạy thật mà sai → `601196a`** (đã cài `hubd@16:53:59Z` pid 9097, KHỚP): vỏ shell bị coi là "phiên chiếm
+  cửa sổ" · xoá tin nuốt lý do · cây bàn giao lạc lên workspace (dwork) · CLI lạc cấu hình · ảnh >10 MB bị bỏ. Chi
+  tiết + số: PLAN S45.
+- **Gốc của "0 tin xoá được từ 16/08":** buồng chat có hẹn giờ tự xoá 24h (`getChat` → `message_auto_delete_time:
+  86400`); huba gọi xoá ở 36h ⟹ "not found". Vá `chat_deletes_first` (bản vá thứ hai, xem S45).
+- ⚠ Bẫy đã gặp: `huba.env` có dòng mật khẩu chứa `&` ⟹ `. ./huba.env` trong zsh hỏng âm thầm (token rỗng ⟹ `Not
+  Found` đọc như câu trả lời). Khoá Telegram nằm ở `.env`, không ở `huba.env`. Đọc bằng Python, chỉ in tên khoá.
+
 ## 🟢 2026-10-01 13:2xZ→16:0xZ — phiên 1162cb52: Windows chạy qua CONSOLE (PLAN S44) — CHƯA chạy trên Windows thật
 
 - Hà *«Viết bản chạy cho window đi»*. `061e4cb`: gõ/đọc bằng `AttachConsole` + `WriteConsoleInputW` /

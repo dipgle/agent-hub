@@ -1,5 +1,15 @@
 # active context — huba
 
+## 🟢 2026-10-01 13:2xZ→16:0xZ — phiên 1162cb52: Windows chạy qua CONSOLE (PLAN S44) — CHƯA chạy trên Windows thật
+
+- Hà *«Viết bản chạy cho window đi»*. `061e4cb`: gõ/đọc bằng `AttachConsole` + `WriteConsoleInputW` /
+  `ReadConsoleOutputCharacterW` (không tiêu điểm, đúng tab); "tty" Windows = `con<pid shell gốc>`; `/new` = PowerShell
+  `-EncodedCommand` qua `wt.exe`; `huba windows-tu-kiem` là PHÉP ĐO trên máy thật. Chi tiết + số: PLAN S44.
+- Gói: `.tmp/huba-windows-061e4cb.zip` sha256 `0658c3da9505d940…` (`bash scripts/dong-goi-windows.sh` dựng lại).
+- Đổi chung cho cả macOS (đã cài `hubd@2026-10-01T15:59:56Z` pid 93139, 12 phiên `blind:0` sau cài):
+  `transcript_slug` theo luật thật của CLI; `is_claude_process` hiểu `\`; `/usage` chạy trong `hubd_runtime_dir`.
+- ⏳ Việc kế: Hà chạy `huba.exe windows-tu-kiem` trên máy Windows, gửi tệp kết quả ⟹ sửa theo số đo.
+
 ## 🟢 2026-10-01 10:3xZ→13:xxZ — phiên 1162cb52 (kế nhiệm fb6a2579): báo tử "đang chạy dở" sai 93 % (PLAN S43)
 
 - **Đóng phiên cũ fb6a2579:** lượt cuối khép 10:30:39Z (`stop_hook_summary`), cây 0/0, hàng đợi daemon rỗng ⟹

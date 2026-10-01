@@ -99,6 +99,53 @@ fn ban_ghi_is_meta_khong_phai_luot() {
     assert_eq!(t.turn_open(), Some(false));
 }
 
+/// Dấu kia của lệnh gõ tại chỗ — `<local-command-caveat>` (0/11 388 lần mở lượt).
+#[test]
+fn caveat_lenh_tai_cho_khong_phai_luot() {
+    let caveat = r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"<local-command-caveat>Caveat: x</local-command-caveat>"}}"#;
+    let mut v = duoi_that();
+    v.push(caveat);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(t.turn_open(), Some(false));
+}
+
+/// Ca THẬT `310db81b` 01/10 14:16:57Z — bản `8fe103f` hạ cờ SAI ở đây: báo cáo
+/// subagent trả về là `isMeta` + `origin.kind: "peer"` + `handback`, và nó MỞ
+/// lượt mới (đo: 882/886 lần có `assistant` theo sau). Phiên bị đóng giữa lượt.
+#[test]
+fn bao_cao_subagent_tra_ve_mo_luot() {
+    let tra_ve = r#"{"type":"user","isMeta":true,"origin":{"kind":"peer","from":"aeefb107648498c51","handback":true,"body":"[Subagent hand-back] …"},"message":{"role":"user","content":"[Subagent hand-back] …"},"timestamp":"2026-10-01T14:16:57.656Z"}"#;
+    let mut v = duoi_that();
+    v.push(tra_ve);
+    v.push(r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-01T14:17:03.629Z"}"#);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(t.turn_open(), Some(true));
+}
+
+/// Phiên KHÁC chuyển sang đúng một đoạn đầu ra `/context` — chữ trùng dấu lệnh
+/// tại chỗ, nhưng có `origin` (`peer`) nên VẪN là một lượt. Canh điều kiện
+/// `origin` của `is_local_command_output`: thiếu bài này thì gỡ điều kiện ấy
+/// không bài nào đỏ (đo bằng `.tmp/dot-bien-1162/chay.sh`, ca G).
+#[test]
+fn tin_lien_phien_trung_dau_lenh_tai_cho_van_mo_luot() {
+    let chuyen = r###"{"type":"user","isMeta":true,"origin":{"kind":"peer","from":"x"},"message":{"role":"user","content":"## Context Usage\n\n**Tokens:** 1k"}}"###;
+    let mut v = duoi_that();
+    v.push(chuyen);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(t.turn_open(), Some(true));
+}
+
+/// `isMeta` KHÔNG `origin`, nội dung lạ, ngay sau `end_turn` — 346 lần đo được
+/// là tự nó mở lượt. Dấu lạ ⟹ coi là lượt (nghiêng về phía GIỮ cảnh báo).
+#[test]
+fn is_meta_khong_origin_noi_dung_la_mo_luot() {
+    let la = r#"{"type":"user","isMeta":true,"message":{"role":"user","content":"việc định kỳ tới giờ chạy"}}"#;
+    let mut v = duoi_that();
+    v.push(la);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(t.turn_open(), Some(true));
+}
+
 /// Agent NỀN đã về (thông báo mang đúng `tool-use-id`) rồi lượt mới khép ⟹ rảnh.
 #[test]
 fn agent_nen_da_ve_roi_khep_luot_la_khep() {

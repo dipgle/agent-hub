@@ -1608,11 +1608,43 @@ const INTERRUPT_MARKS: [&str; 2] = [
     "[Request interrupted by user for tool use]",
 ];
 
+/// Hai cách mở đầu của bản ghi `isMeta` mà CLI ghi khi chủ máy gõ lệnh TẠI CHỖ.
+const LOCAL_COMMAND_MARKS: [&str; 2] = ["<local-command-caveat>", "## Context Usage"];
+
+/// Bản ghi này là đầu ra một lệnh gõ tại chỗ (`/context`…), KHÔNG mở lượt nào.
+///
+/// 🔴 KHÔNG phải "mọi `isMeta`" — bản `8fe103f` bỏ qua mọi `isMeta` và hạ cờ SAI
+/// ngay ca thật đầu tiên: `310db81b` 01/10 14:16:57Z, báo cáo subagent trả về
+/// (`isMeta` + `origin.kind: "peer"`, `handback`) mở lượt mới, phiên bị đóng giữa
+/// lượt ấy, huba im. Đo 01/10 trên 14 857 bản ghi `isMeta` từ 15/09, bản ghi hội
+/// thoại KẾ TIẾP là `assistant` ở: `peer` 1 840 · `peer+handback` 882 · không
+/// `origin` loại khác 668 (346 trong đó đứng ngay sau `end_turn` — tự nó mở lượt);
+/// còn `<local-command-caveat>` 0/11 388 và `## Context Usage` 0/21. Chỉ hai dấu
+/// ấy được bỏ qua; dấu lạ ⟹ coi là lượt, tức nghiêng về phía GIỮ cảnh báo.
+fn is_local_command_output(record: &Value) -> bool {
+    if record.get("isMeta").and_then(Value::as_bool) != Some(true) || record.get("origin").is_some()
+    {
+        return false;
+    }
+    let content = record.get("message").and_then(|m| m.get("content"));
+    let first = match content {
+        Some(Value::String(s)) => Some(s.as_str()),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .find_map(|b| b.get("text").and_then(Value::as_str)),
+        _ => None,
+    };
+    first.is_some_and(|t| {
+        let t = t.trim_start();
+        LOCAL_COMMAND_MARKS.iter().any(|m| t.starts_with(m))
+    })
+}
+
 /// Bản ghi `user` này có phải dấu NGẮT LƯỢT không.
 ///
 /// Trường `interruptedMessageId` là dấu cấu trúc, nhưng KHÔNG đủ: đo 01/10 trên
 /// 16 560 nhật ký, CLI `2.1.280` bỏ trường ấy ở 16/36 bản ghi ngắt lượt từ 25/09
-/// (gần hết là biến thể "for tool use"). Nên nhận thêm hai câu cố định ở trên.
+/// (gần hết là biến thể "for tool use"). Nên nhận thêm hai câu `INTERRUPT_MARKS`.
 fn is_interrupt_record(record: &Value) -> bool {
     if record.get("interruptedMessageId").is_some() {
         return true;
@@ -1642,9 +1674,10 @@ impl TranscriptTail {
     /// bản ghi hội thoại cuối là `end_turn`.
     ///
     /// Lượt KHÉP khi bản ghi hội thoại cuối là `assistant` + `end_turn`, HOẶC là
-    /// dấu ngắt lượt của chủ máy (ca `2aebe8dd` 30/09: Esc rồi đóng phiên). Bản
-    /// ghi `isMeta` (đầu ra `/context` gõ tại chỗ — ca `594a4cd8` 21/09) không
-    /// phải một lượt, nên không bao giờ thành `newest_turn`.
+    /// dấu ngắt lượt của chủ máy (ca `2aebe8dd` 30/09: Esc rồi đóng phiên). Đầu
+    /// ra lệnh gõ tại chỗ (`/context` — ca `594a4cd8` 21/09) không phải một lượt
+    /// nên không bao giờ thành `newest_turn`; mọi `isMeta` KHÁC thì có — xem
+    /// `is_local_command_output`.
     /// `Some(false)` chỉ khi lượt khép VÀ không còn subagent treo — một phiên
     /// rảnh ở dấu nhắc mà còn agent nền chạy thì chết đi vẫn là mất việc.
     /// `None` = khung đọc không có bản ghi hội thoại nào: KHÔNG đo được, khác
@@ -3682,8 +3715,8 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
         ..Default::default()
     };
     for line in tail.lines().rev() {
-        // `newest_turn` cũng phải có mới được ngừng: bản ghi `isMeta` có chữ nên
-        // làm đầy `last_text` TRƯỚC khi gặp lượt thật nằm ngay sau nó.
+        // `newest_turn` cũng phải có mới được ngừng: đầu ra lệnh gõ tại chỗ có chữ
+        // nên làm đầy `last_text` TRƯỚC khi gặp lượt thật nằm ngay sau nó.
         let du_luot = out.last_text.is_some() && out.newest_turn.is_some();
         // Đủ cả ba (lượt mới nhất · chế độ · nhan đề) ⟹ dừng.
         if du_luot && out.permission_mode.is_some() && out.ai_title.is_some() {
@@ -3723,9 +3756,8 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
             continue;
         }
         // Bản ghi hội thoại ĐẦU TIÊN gặp khi đi lùi — kể cả khi nó không có chữ
-        // (xem `TranscriptTail::newest_turn`). `isMeta` không phải một lượt.
-        let is_meta = record.get("isMeta").and_then(Value::as_bool) == Some(true);
-        if out.newest_turn.is_none() && !is_meta {
+        // (xem `TranscriptTail::newest_turn`). Đầu ra lệnh gõ tại chỗ không phải lượt.
+        if out.newest_turn.is_none() && !is_local_command_output(&record) {
             let msg = record.get("message");
             out.newest_turn = Some(NewestTurn {
                 role: msg

@@ -13,6 +13,11 @@
   tiết + số: PLAN S45.
 - **Gốc của "0 tin xoá được từ 16/08":** buồng chat có hẹn giờ tự xoá 24h (`getChat` → `message_auto_delete_time:
   86400`); huba gọi xoá ở 36h ⟹ "not found". Vá `chat_deletes_first` (bản vá thứ hai, xem S45).
+- `398025b` cài `hubd@17:02:48Z` pid 36626 KHỚP; ca thật 17:08:14Z `left_to_chat 1 · deleted 0 · failed 0`.
+- Cổng chung `f3c5f90..`: lần 1 ĐỎ (15 `let _ =` trong `keys_win.rs` của `061e4cb`) ⟹ `34d2a2d`; lần 2 **QG_EXIT=0**.
+  Gói Windows mới `.tmp/huba-windows-34d2a2d.zip` (sha256 `ac581638…e1ab`) — gói `061e4cb` thôi dùng.
+- ⏳ Việc kế: chờ ca thật cho 3 bản vá chưa có ca (mục `S45-CHUA-CA` trong sổ) · `CHAY-DO-LUC-CHET` chiều "nên
+  xem lại" · Hà chạy `windows-tu-kiem` bằng gói `34d2a2d`.
 - ⚠ Bẫy đã gặp: `huba.env` có dòng mật khẩu chứa `&` ⟹ `. ./huba.env` trong zsh hỏng âm thầm (token rỗng ⟹ `Not
   Found` đọc như câu trả lời). Khoá Telegram nằm ở `.env`, không ở `huba.env`. Đọc bằng Python, chỉ in tên khoá.
 

@@ -69,6 +69,17 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use crate::keys::{Closed, Tab, TabState};
 use crate::win_procs::{self, Row};
 
+/// A Win32 clean-up call whose failure changes nothing for the caller — but a
+/// leaked handle or a console left attached must still be SAID (rule 3).
+fn ghi_neu_hong(buoc: &str, r: windows::core::Result<()>) {
+    if let Err(e) = r {
+        crate::logging::warn(
+            "win_cleanup_failed",
+            serde_json::json!({ "step": buoc, "err": e.to_string() }),
+        );
+    }
+}
+
 // ── Bảng tiến trình ────────────────────────────────────────────────────────
 
 /// Mọi tiến trình trên máy, đọc MỘT LẦN (ToolHelp32). Dòng lệnh chỉ đọc cho
@@ -106,7 +117,7 @@ pub fn process_table() -> Result<Vec<Row>> {
             });
             ok = Process32NextW(snap, &mut entry).is_ok();
         }
-        let _ = CloseHandle(snap);
+        ghi_neu_hong("CloseHandle(snapshot)", CloseHandle(snap));
     }
     if out.is_empty() {
         return Err(anyhow!(
@@ -123,7 +134,9 @@ fn command_line(pid: u32) -> Option<String> {
     unsafe {
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut need = 0u32;
-        let _ = NtQueryInformationProcess(
+        // Size probe: EXPECTED to fail (buffer too small) — the answer is
+        // `need`, the status only explains a `need` that came back unusable.
+        let do_co = NtQueryInformationProcess(
             h,
             ProcessCommandLineInformation,
             std::ptr::null_mut(),
@@ -131,7 +144,11 @@ fn command_line(pid: u32) -> Option<String> {
             &mut need,
         );
         if need == 0 || need > 1 << 20 {
-            let _ = CloseHandle(h);
+            crate::logging::debug(
+                "win_cmdline_unreadable",
+                serde_json::json!({ "pid": pid, "status": do_co.0, "need": need }),
+            );
+            ghi_neu_hong("CloseHandle(process)", CloseHandle(h));
             return None;
         }
         // `u64` để bộ đệm căn 8 byte — `UNICODE_STRING` mang con trỏ.
@@ -143,7 +160,7 @@ fn command_line(pid: u32) -> Option<String> {
             need,
             &mut need,
         );
-        let _ = CloseHandle(h);
+        ghi_neu_hong("CloseHandle(process)", CloseHandle(h));
         if st.is_err() {
             return None;
         }
@@ -168,7 +185,7 @@ pub fn process_alive(pid: i64) -> bool {
         };
         let mut code = 0u32;
         let ok = GetExitCodeProcess(h, &mut code).is_ok();
-        let _ = CloseHandle(h);
+        ghi_neu_hong("CloseHandle(process)", CloseHandle(h));
         ok && code == STILL_ACTIVE.0 as u32
     }
 }
@@ -191,9 +208,9 @@ struct Gan {
 impl Drop for Gan {
     fn drop(&mut self) {
         unsafe {
-            let _ = CloseHandle(self.conin);
-            let _ = CloseHandle(self.conout);
-            let _ = FreeConsole();
+            ghi_neu_hong("CloseHandle(CONIN$)", CloseHandle(self.conin));
+            ghi_neu_hong("CloseHandle(CONOUT$)", CloseHandle(self.conout));
+            ghi_neu_hong("FreeConsole", FreeConsole());
         }
     }
 }
@@ -214,7 +231,11 @@ fn with_console<T>(pid: i64, f: impl FnOnce(&Gan) -> Result<T>) -> Result<T> {
             )
         })?;
         // Đăng ký MỖI lượt là đúng: danh sách bộ xử lý gắn với console đang gắn.
-        let _ = SetConsoleCtrlHandler(Some(bo_qua_tin_hieu), true);
+        // Failing here leaves hubd killable by a Ctrl+C typed into that console.
+        ghi_neu_hong(
+            "SetConsoleCtrlHandler",
+            SetConsoleCtrlHandler(Some(bo_qua_tin_hieu), true),
+        );
         let mo = |ten| {
             CreateFileW(
                 ten,
@@ -229,15 +250,15 @@ fn with_console<T>(pid: i64, f: impl FnOnce(&Gan) -> Result<T>) -> Result<T> {
         let conin = match mo(w!("CONIN$")) {
             Ok(h) => h,
             Err(e) => {
-                let _ = FreeConsole();
+                ghi_neu_hong("FreeConsole", FreeConsole());
                 return Err(anyhow!("gắn được nhưng không mở được CONIN$: {e}"));
             }
         };
         let conout = match mo(w!("CONOUT$")) {
             Ok(h) => h,
             Err(e) => {
-                let _ = CloseHandle(conin);
-                let _ = FreeConsole();
+                ghi_neu_hong("CloseHandle(CONIN$)", CloseHandle(conin));
+                ghi_neu_hong("FreeConsole", FreeConsole());
                 return Err(anyhow!("gắn được nhưng không mở được CONOUT$: {e}"));
             }
         };
@@ -832,6 +853,15 @@ impl NewConsole for std::process::Command {
     }
 }
 
+/// Đóng cửa sổ thử trên một nhánh HỎNG — và nói ra nếu đóng cũng hỏng: một cửa
+/// sổ thử nằm lại trên màn là thứ người chạy tự kiểm phải biết.
+fn dong_thu(pid: i64) -> String {
+    match close_window(pid) {
+        Ok(_) => String::new(),
+        Err(e) => format!(" · đóng cửa sổ thử cũng HỎNG: {e}"),
+    }
+}
+
 /// Mở một console bằng `mo`, rồi đo đủ bốn việc huba làm với console của một
 /// phiên: có cửa sổ · đọc được màn · gõ `echo <mốc>` + Enter rồi thấy mốc
 /// đứng RIÊNG một dòng (dòng kết quả, khác dòng lệnh vừa gõ) · đóng được.
@@ -853,10 +883,10 @@ fn thu_console(mo: impl FnOnce() -> Result<i64>) -> Ket {
         }
     }
     if man.is_empty() {
-        let _ = close_window(pid);
+        let co_cua_so = has_console_window(pid);
+        let dong = dong_thu(pid);
         return Ket::Hong(format!(
-            "console pid {pid}: không đọc được dấu nhắc PowerShell sau 10 giây (có cửa sổ: {})",
-            has_console_window(pid)
+            "console pid {pid}: không đọc được dấu nhắc PowerShell sau 10 giây (có cửa sổ: {co_cua_so}){dong}"
         ));
     }
     ghi.push(format!("cửa sổ={}", has_console_window(pid)));
@@ -867,8 +897,8 @@ fn thu_console(mo: impl FnOnce() -> Result<i64>) -> Ket {
     let go = type_into(pid, &format!("echo {moc}"))
         .and_then(|_| press_writes(pid, &[vec!["enter".to_string()]]));
     if let Err(e) = go {
-        let _ = close_window(pid);
-        return Ket::Hong(format!("gõ hỏng: {e}"));
+        let dong = dong_thu(pid);
+        return Ket::Hong(format!("gõ hỏng: {e}{dong}"));
     }
     let mut thay = false;
     for _ in 0..20 {
@@ -881,9 +911,9 @@ fn thu_console(mo: impl FnOnce() -> Result<i64>) -> Ket {
         }
     }
     if !thay {
-        let _ = close_window(pid);
+        let dong = dong_thu(pid);
         return Ket::Hong(format!(
-            "gõ xong nhưng KHÔNG thấy dòng kết quả `{moc}` trên màn ({})",
+            "gõ xong nhưng KHÔNG thấy dòng kết quả `{moc}` trên màn ({}){dong}",
             ghi.join(", ")
         ));
     }

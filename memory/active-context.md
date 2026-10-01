@@ -1,5 +1,19 @@
 # active context — huba
 
+## 🟢 2026-10-01 10:3xZ→13:xxZ — phiên 1162cb52 (kế nhiệm fb6a2579): báo tử "đang chạy dở" sai 89 % (PLAN S43)
+
+- **Đóng phiên cũ fb6a2579:** lượt cuối khép 10:30:39Z (`stop_hook_summary`), cây 0/0, hàng đợi daemon rỗng ⟹
+  `kill 35432` (thoát ~2 s) + đóng cửa sổ 3983; ttys005 biến mất (`window id 3983` còn trong danh sách Terminal
+  với `tabs=0 visible=false` — xác rỗng, không phải cửa sổ sống).
+- **Phát hiện ngay lúc đóng:** huba báo `⚫ [huba]·fb6a2579 đã tắt hẳn — nó đang chạy dở, nên xem lại` (10:32:16Z).
+  Gốc: `was_working` = lượt nhìn cuối (10:30:13Z, `interval_sec:120`), không phải lúc chết. Đo: 592 tin; trừ
+  `167252e2` + tin không mang id còn 57 ⟹ **51 sai (89 %)**. Vá `87ef406` (hỏi nhật ký lúc báo tử — xem PLAN S43).
+  gate 178/178; **ĐÃ CÀI** `hubd@2026-10-01T13:01:46Z` pid 25361 `--verify` KHỚP; đã đẩy.
+  ⏳ chưa có ca thật — đo: `grep -E '"msg":"session_end_(was_idle|turn_unknown)"' logs/huba.log`.
+- `quality-gate.sh` chung trên `87ef406`: **KHÔNG ĐO ĐƯỢC** (`QG_EXIT=2`) — khoá do cổng `dwork/dev-tochuc` (pid
+  47924) giữ quá 900 s. Chạy lại với `QG_LOCK_WAIT` dài hơn, KHÔNG `QG_LOCK=0`.
+- Bộ đo giữ lại: `.tmp/do-chay-do.py` (đối chiếu tin "đã tắt" với bản ghi hội thoại cuối của nhật ký).
+
 ## 🟡 2026-10-01 09:5xZ→11:xxZ — phiên fb6a2579: `/ask` để lại `/btw` trong ô (ĐÃ CÀI vá) · banner (đang chốt)
 
 - **`/ask` (Hà 09:5xZ *"Tại sao lệnh ask lại bị dán vào ô chat và nằm ở đó"* · *"Tôi phải dùng lệnh clean"*).**

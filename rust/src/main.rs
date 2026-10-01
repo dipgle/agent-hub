@@ -112,6 +112,15 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Windows: ĐO trên máy thật trước khi tin bản Windows — bảng tiến trình,
+    /// gõ + đọc console (cổ điển VÀ Windows Terminal), `claude --version`, tên
+    /// thư mục nhật ký. Không cần cấu hình. Thoát 0 đạt hết · 1 có mục hỏng ·
+    /// 2 có mục KHÔNG ĐO ĐƯỢC.
+    WindowsTuKiem {
+        /// (nội bộ) lượt đo chạy tách rời, không console — ghi kết quả vào tệp này
+        #[arg(long, hide = true)]
+        chay: Option<std::path::PathBuf>,
+    },
 }
 
 fn main() {
@@ -123,6 +132,12 @@ fn main() {
 
 fn real_main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Trước `config::load`: phép đo Windows phải chạy được ngay sau khi giải nén,
+    // lúc chưa có `huba.config.json` nào.
+    if let Command::WindowsTuKiem { chay } = &cli.command {
+        std::process::exit(cmd_windows_tu_kiem(chay.as_deref()));
+    }
 
     let cfg = config::load(cli.config.as_deref())?;
     logging::set_log_file(&cfg.log_file);
@@ -166,7 +181,95 @@ fn real_main() -> Result<()> {
             no_switch,
             dry_run,
         } => cmd_handover(&db, &cfg, session.as_deref(), &acc, no_switch, dry_run),
+        // Đã xử lý TRƯỚC `config::load` (đầu `real_main`) — tới được đây là lỗi luồng.
+        Command::WindowsTuKiem { .. } => Err(anyhow::anyhow!(
+            "windows-tu-kiem phải được xử lý trước khi nạp cấu hình"
+        )),
     }
+}
+
+/// `huba windows-tu-kiem` — xem doc-comment của `Command::WindowsTuKiem`.
+///
+/// `huba.exe` là chương trình console nên ĐÃ có console riêng, mà một tiến trình
+/// có console thì không gắn sang console khác được (`keys_win::with_console`).
+/// Nên lượt chính tự chạy lại CHÍNH NÓ ở chế độ tách rời (`DETACHED_PROCESS`,
+/// không console) để đo, chờ, rồi in tệp kết quả. Trả mã thoát: 0 đạt hết · 1
+/// có mục hỏng · 2 có mục không đo được (luật 13②).
+#[cfg(windows)]
+fn cmd_windows_tu_kiem(chay: Option<&std::path::Path>) -> i32 {
+    use huba::keys_win::Ket;
+    use std::os::windows::process::CommandExt;
+    if let Some(out) = chay {
+        let mut text = format!("huba {} — windows-tu-kiem\n", env!("CARGO_PKG_VERSION"));
+        for (ten, ket) in huba::keys_win::tu_kiem() {
+            let (dau, chu) = match ket {
+                Ket::Dat(s) => ("✅", s),
+                Ket::Hong(s) => ("❌", s),
+                Ket::Kdd(s) => ("⏭ KHÔNG ĐO ĐƯỢC", s),
+            };
+            text.push_str(&format!("{dau} {ten} — {chu}\n"));
+        }
+        return match std::fs::write(out, text) {
+            Ok(()) => 0,
+            Err(_) => 1,
+        };
+    }
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    let moc = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let out = std::env::temp_dir().join(format!("huba-windows-tu-kiem-{moc}.txt"));
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("KHÔNG ĐO ĐƯỢC: không biết đường dẫn của chính huba.exe: {e}");
+            return 2;
+        }
+    };
+    println!("Đang đo (mở 2 cửa sổ console rồi tự đóng — đừng bấm vào chúng)…");
+    let status = std::process::Command::new(&exe)
+        .arg("windows-tu-kiem")
+        .arg("--chay")
+        .arg(&out)
+        .creation_flags(DETACHED_PROCESS)
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(s) => {
+            eprintln!("KHÔNG ĐO ĐƯỢC: lượt đo tách rời thoát {:?}", s.code());
+            return 2;
+        }
+        Err(e) => {
+            eprintln!("KHÔNG ĐO ĐƯỢC: không chạy được lượt đo tách rời: {e}");
+            return 2;
+        }
+    }
+    let text = match std::fs::read_to_string(&out) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!(
+                "KHÔNG ĐO ĐƯỢC: lượt đo không để lại tệp {}: {e}",
+                out.display()
+            );
+            return 2;
+        }
+    };
+    print!("{text}");
+    println!("\nTệp kết quả (gửi tệp này về): {}", out.display());
+    if text.contains("❌") {
+        1
+    } else if text.contains("KHÔNG ĐO ĐƯỢC") {
+        2
+    } else {
+        0
+    }
+}
+
+#[cfg(not(windows))]
+fn cmd_windows_tu_kiem(_chay: Option<&std::path::Path>) -> i32 {
+    eprintln!("windows-tu-kiem chỉ chạy trên Windows");
+    2
 }
 
 /// `huba handover [id] [-a acc] [--no-switch]` — xem doc-comment của

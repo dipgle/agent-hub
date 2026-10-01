@@ -830,12 +830,17 @@ pub fn xep_hang_tai_khoan(cfg: &Config, db: &Db, cu_ms: Option<i64>) -> Vec<crat
 /// được"* — đã thay bằng "đo khi sắp chọn" ngày 24/09; xem [`USAGE_CU_MO_PHIEN_MS`].)
 fn usage_one(cfg: &Config, acc: &crate::config::ClaudeAccountCfg) -> Value {
     let env = account_env(acc);
+    // Chạy TRONG thư mục mà `sessions::is_hub_own_probe` nhận ra — trên macOS đó
+    // cũng là thư mục launchd đặt hubad nên không đổi gì; trên Windows hubd đứng
+    // ở thư mục gói, nên phải chỉ tay. Thư mục chưa có ⟹ để nguyên chỗ thừa hưởng.
+    let noi_do = crate::sessions::hubd_runtime_dir();
     let out = run(
         &cfg.claude_cli,
         &["-p", "/usage", "--output-format", "json"],
         RunOpts {
             timeout: Some(Duration::from_secs(60)),
             env,
+            cwd: noi_do.is_dir().then_some(noi_do.as_path()),
             ..Default::default()
         },
     );

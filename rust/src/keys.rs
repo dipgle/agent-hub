@@ -77,13 +77,10 @@ pub fn screen_scrollback(window: i64, steps: usize, du: impl Fn(&str) -> bool) -
 pub fn window_of(tty: &str) -> Result<Option<i64>> {
     crate::keys_win::window_of(tty)
 }
-/// Windows chưa có "tab đang chọn" theo tty — trả lỗi để chỗ gọi dừng ở phía an
-/// toàn (không gõ) thay vì đoán.
+/// Trên Windows mỗi console là một "tab" — tab đang chọn của nó là chính nó.
 #[cfg(windows)]
-pub fn selected_tab_tty(_window: i64) -> Result<String> {
-    Err(anyhow::anyhow!(
-        "selected_tab_tty chưa có trên Windows — không kiểm được tab đích"
-    ))
+pub fn selected_tab_tty(window: i64) -> Result<String> {
+    crate::keys_win::selected_tab_tty(window)
 }
 #[cfg(windows)]
 pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
@@ -298,6 +295,7 @@ static PROBE_SKIPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 static PROBE_SKIPPED_YIELD: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static PROBE_TIMEOUTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// Mốc (ms epoch) một lượt hỏi Terminal GẤP vừa chạy xong.
+#[cfg_attr(windows, allow(dead_code))]
 static URGENT_TERMINAL_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 thread_local! {
@@ -484,6 +482,7 @@ fn may_dang_the_nao() -> (f64, f64, f64) {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[cfg_attr(windows, allow(dead_code))]
 fn may_dang_the_nao() -> (f64, f64, f64) {
     (-1.0, -1.0, -1.0)
 }
@@ -516,6 +515,7 @@ pub fn timeout_context(
     )
 }
 
+#[cfg_attr(windows, allow(dead_code))]
 fn osascript(script: &str) -> Result<String> {
     use std::sync::atomic::Ordering::Relaxed;
     let lane = crate::exec::lane();
@@ -1981,10 +1981,25 @@ impl Tab {
     /// Shell thì bỏ qua: `login`, `-zsh`, `zsh`, `bash`, `-bash`, `sh`. Còn lại
     /// gì thì đó là thứ đang chạy.
     pub fn cli(&self) -> Option<&str> {
+        // `powershell`/`pwsh`/`cmd`: shell của console Windows (`win_procs`).
         self.procs
             .iter()
             .map(|p| p.trim_start_matches('-'))
-            .find(|p| !matches!(*p, "login" | "zsh" | "bash" | "sh" | "tcsh" | "fish" | ""))
+            .find(|p| {
+                !matches!(
+                    *p,
+                    "login"
+                        | "zsh"
+                        | "bash"
+                        | "sh"
+                        | "tcsh"
+                        | "fish"
+                        | "powershell"
+                        | "pwsh"
+                        | "cmd"
+                        | ""
+                )
+            })
             .map(|p| p.trim())
     }
 
@@ -2049,8 +2064,14 @@ impl Tab {
 ///
 /// Trả cả tab lẫn tiến trình trong MỘT lượt `osascript`: hỏi hai lần là hai ảnh
 /// chụp lệch nhau, và giữa hai lần ấy một cửa sổ đóng được.
+#[cfg(not(windows))]
 pub fn terminal_tabs() -> Result<Vec<Tab>> {
     probe_tabs(false)
+}
+/// Windows: mỗi console có cửa sổ là một "tab" — xem `keys_win::terminal_tabs`.
+#[cfg(windows)]
+pub fn terminal_tabs() -> Result<Vec<Tab>> {
+    crate::keys_win::terminal_tabs(false)
 }
 
 /// Như `terminal_tabs`, và kèm CHỮ đang hiện trên màn từng tab — vẫn MỘT lượt dò.
@@ -2067,8 +2088,13 @@ pub fn terminal_tabs() -> Result<Vec<Tab>> {
 /// tab of window id N"* — tức tab ĐANG ĐƯỢC CHỌN của cửa sổ ấy, không phải tab
 /// mang tty mình hỏi. Cửa sổ hai tab thì nó đọc nhầm màn, im lặng. Ở đây chữ đi
 /// kèm chính cái tab đã khai tty, nên không còn chỗ cho nhầm lẫn ấy.
+#[cfg(not(windows))]
 pub fn terminal_screens() -> Result<Vec<Tab>> {
     probe_tabs(true)
+}
+#[cfg(windows)]
+pub fn terminal_screens() -> Result<Vec<Tab>> {
+    crate::keys_win::terminal_tabs(true)
 }
 
 /// Đang có một lượt `probe_tabs` chạy chưa — lượt thứ hai KHÔNG chồng lên.
@@ -2080,11 +2106,14 @@ pub fn terminal_screens() -> Result<Vec<Tab>> {
 /// Lệnh có người chờ thì XẾP HÀNG sau lượt kia ([`cho_luot`]); vòng nền nhận `Err`
 /// ngay — chỗ gọi đã đọc `Err` của phép dò thành *"CHƯA ĐO ĐƯỢC"*
 /// (`terminal_probe_failed`), không thành "không có cửa sổ nào".
+#[cfg_attr(windows, allow(dead_code))]
 static DO_TAB_DANG_CHAY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Mốc (ms epoch) lượt `probe_tabs` gần nhất hỏng vì Terminal câm — xem
 /// [`luot_truoc_da_cam`].
+#[cfg_attr(windows, allow(dead_code))]
 static DO_TAB_CAM_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
+#[cfg_attr(windows, allow(dead_code))]
 fn probe_tabs(with_screens: bool) -> Result<Vec<Tab>> {
     let cho = cho_luot(crate::exec::lane(), osa_timeout());
     let bat_dau_cho = crate::quota::now_ms();
@@ -2133,6 +2162,7 @@ fn probe_tabs(with_screens: bool) -> Result<Vec<Tab>> {
 /// Đoạn AppleScript hỏi mọi tab — kèm chữ trên màn khi `with_screens`.
 ///
 /// Tách thuần để KIỂM ĐƯỢC, cùng lý do với `window_script`.
+#[cfg_attr(windows, allow(dead_code))]
 fn tabs_script(with_screens: bool) -> String {
     // 🔴 BA LỖI TRONG BỐN DÒNG APPLESCRIPT, và cả ba đều CÂM.
     // 08-15. Hà: *"lệnh terminal chưa đúng … đang có 2 cửa sổ không chạy gì"*.

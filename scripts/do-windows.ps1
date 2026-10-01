@@ -50,6 +50,20 @@ if (Test-Path $book) {
     } catch { Ghi ("  KHONG DOC DUOC JSON: " + $_.Exception.Message) }
 }
 
+Muc 'SO PHIEN CUA CLI (~\.claude\sessions) — huba lay danh sach phien tu day'
+$sessDir = Join-Path $claudeDir 'sessions'
+$sess = @(Get-ChildItem -Path $sessDir -Filter *.json -ErrorAction SilentlyContinue)
+Ghi ("so tep: " + $sess.Count)
+if ($sess.Count -gt 0) {
+    try {
+        $j = Get-Content $sess[0].FullName -Raw | ConvertFrom-Json
+        # CHI ten khoa, khong in gia tri (cwd/ten phien co the mang thong tin rieng).
+        Ghi ("khoa cua tep dau: " + (($j.PSObject.Properties | ForEach-Object { $_.Name }) -join ', '))
+    } catch { Ghi ("  KHONG DOC DUOC JSON: " + $_.Exception.Message) }
+}
+$projDir = Join-Path $claudeDir 'projects'
+Ghi ("so thu muc nhat ky (~\.claude\projects): " + @(Get-ChildItem -Path $projDir -Directory -ErrorAction SilentlyContinue).Count)
+
 Muc 'CLAUDE CLI'
 $cl = Get-Command claude -ErrorAction SilentlyContinue
 Ghi ("claude: " + $cl.Source + "  (" + $cl.CommandType + ")")

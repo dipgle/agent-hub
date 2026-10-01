@@ -1,519 +1,561 @@
-//! Windows — cùng vai trò với `keys.rs` trên macOS: gõ vào cửa sổ terminal
-//! của một phiên, và đọc lại nó. **CHƯA CHẠY THỬ TRÊN WINDOWS THẬT** — phiên
-//! viết tệp này chạy trên macOS, không có máy Windows nào để đo. Đọc kỹ mục
-//! "Chưa đo được" ở cuối trước khi tin bất kỳ dòng nào dưới đây.
+//! Windows — cùng vai trò với `keys.rs` trên macOS: gõ vào console của một
+//! phiên, và đọc lại nó. **CHƯA CHẠY TRÊN WINDOWS THẬT** — phiên viết tệp này
+//! chạy trên macOS, không có máy Windows nào để đo. Phép đo đã dựng sẵn:
+//! `huba windows-tu-kiem` (xem [`tu_kiem`]) mở console riêng, gõ một mốc, đọc
+//! lại — chạy nó trên máy thật TRƯỚC khi tin bất kỳ dòng nào dưới đây.
 //!
-//! # Vì sao KHÔNG phải một bản dịch 1:1 của `keys.rs`
+//! # Mô hình: CONSOLE, không phải cửa sổ (viết lại 01/10)
 //!
-//! Hà 2026-09-08: *"Một số hạn chế ở macos có thể chạy được trên win cũng làm
-//! hết đi"*. Ba hạn chế của macOS KHÔNG tồn tại trên Windows, nên bản này
-//! không mang chúng theo:
+//! Bản 08/09 đi đường cửa sổ: `SetForegroundWindow` + `SendInput` để gõ, UI
+//! Automation để đọc. Ba chỗ hỏng đã đọc ra được từ mã (chưa từng chạy):
+//! * **Tiến trình nền không được giành tiêu điểm.** hubd chạy từ Task Scheduler,
+//!   không có cửa sổ; luật khoá-tiền-cảnh của Windows thường từ chối nó — và khi
+//!   bị từ chối, `SendInput` gửi phím vào **cửa sổ đang ở trước**, tức gõ nhầm.
+//! * **Windows Terminal dùng MỘT tiến trình cho MỌI cửa sổ**, nên cửa sổ không
+//!   nối được với phiên nào bằng cây tiến trình; và một cửa sổ nhiều tab thì
+//!   `SendInput` rơi vào tab đang chọn, không phải tab của phiên.
+//! * UIA hỏi `TextPattern` trên cửa sổ gốc, không có đường lùi như chú thích hứa.
 //!
-//! 1. **`do script` của Terminal.app luôn kèm một CR không tắt được**
-//!    (`keys.rs::press_writes`) — buộc macOS phải đếm "một lượt ghi = một cú
-//!    Enter", dựng cả một luật xếp lượt (`nav_plan`/`checkbox_plan`) chỉ để
-//!    né hậu quả. `SendInput` của Windows gửi ĐÚNG phím được yêu cầu, không
-//!    kèm gì — nên [`press_writes`] ở đây gửi phẳng từng phím, không nhóm.
-//! 2. **`osascript`/System Events từ chối gửi phím rời** (*"is not allowed to
-//!    send keystrokes"*), buộc macOS phải xin quyền Accessibility + tự ký
-//!    chứng chỉ cố định (`cgkeys.rs`, `CLAUDE.md` mục 13) rồi tách riêng một
-//!    con đường `unsafe` chỉ để gửi MỘT phím không kèm dấu xuống dòng.
-//!    `SendInput` không đòi quyền hệ điều hành nào cho một tiến trình
-//!    KHÔNG NÂNG QUYỀN gửi phím tới một cửa sổ khác không nâng quyền — nên
-//!    không có `unsafe`-chỉ-một-tệp nào ở đây, và không có "gõ chữ thường thì
-//!    được, gõ một phím rời thì không" — MỘT hàm ([`send_keys`]) làm cả hai.
-//!    ⚠ Vẫn còn một hàng rào khác thay vào chỗ đó — xem UIPI ở mục cuối.
-//! 3. **Gatekeeper quét lần đầu mỗi binary vừa build lại, ~95 giây/lần**
-//!    (`project_huba_test_binaries_gatekeeper_stall`) — không có gì tương
-//!    đương bắt buộc trên Windows cho một `.exe` chạy từ Task Scheduler của
-//!    chính người dùng (SmartScreen chỉ chặn tệp TẢI VỀ TỪ MẠNG, có cờ
-//!    Zone.Identifier; một `.exe` tự build tại máy không mang cờ đó).
+//! Đường console tránh cả ba: `AttachConsole(pid)` gắn huba vào ĐÚNG console của
+//! phiên (mỗi tab Windows Terminal là một console riêng), rồi
+//! `WriteConsoleInputW` đặt phím thẳng vào hàng nhập của console ấy và
+//! `ReadConsoleOutputCharacterW` đọc chữ đang hiện — không cần tiêu điểm, không
+//! cần cửa sổ ở trước, và UIPI không chen vào vì không có thông điệp cửa sổ nào.
+//! "Cửa sổ" của huba trên Windows vì thế là **pid shell gốc của console**
+//! (`con<pid>` trong sổ — xem `win_procs.rs`).
 //!
-//! # Mô hình cửa sổ: MỖI PHIÊN MỘT CỬA SỔ, không dùng tab
+//! # Chưa đo được — `huba windows-tu-kiem` đo phần lớn
 //!
-//! Terminal.app cho AppleScript hỏi thẳng `tty of tab`, nên nhiều tab trong
-//! một cửa sổ vẫn phân biệt được. Windows Terminal (`wt.exe`) không có API
-//! tương đương để hỏi "tab này đang chạy gì" từ NGOÀI tiến trình — việc đọc
-//! nội dung đã phải đi qua UI Automation (xem [`screen_text`]), và UIA đọc
-//! được CỬA SỔ đang hiện, không phân biệt tab ẩn. Nên `open_window` LUÔN xin
-//! `-w new` (cửa sổ mới, không phải tab mới trong cửa sổ có sẵn) — đổi lại,
-//! "tty" của huba trên Windows là **chuỗi thập phân của HWND**, không phải
-//! một tty thật. Cùng đúng cảnh báo macOS đã ghi cho tty: **HWND cũng là một
-//! con số ĐƯỢC DÙNG LẠI** sau khi cửa sổ đóng — `window_of` phải tự xác nhận
-//! `IsWindow` còn đúng trước khi tin số cũ trong sổ.
-//!
-//! # Chưa đo được — đọc trước khi tin
-//!
-//! * **Tên lớp cửa sổ** `CASCADIA_HOSTING_WINDOW_CLASS` là tài liệu công khai
-//!   của Windows Terminal (dùng bởi nhiều script AutoHotkey/PowerToys), NHƯNG
-//!   chưa được xác nhận lại trên máy thật ở đây.
-//! * **UI Automation có đọc được buffer đầy đủ hay chỉ khung nhìn** — Windows
-//!   Terminal có hỗ trợ UIA cho trình đọc màn hình từ ~2021, nhưng độ đầy đủ
-//!   của `TextPattern` (đọc được cả phần đã cuộn khỏi khung hay chỉ khung
-//!   nhìn) CHƯA đo được ở đây, khác hẳn `screen_scrollback` — chỗ này để
-//!   nguyên là NGÕ CỤT tạm thời (trả lại `screen_text`, không cuộn thêm).
-//! * **UIPI (User Interface Privilege Isolation)** — nếu `claude`/`wt.exe`
-//!   chạy NÂNG QUYỀN (Run as Administrator) mà huba thì không, Windows CHẶN
-//!   `SendInput`/UIA đọc-ghi giữa hai mức quyền khác nhau — đúng vai trò TCC
-//!   đóng trên macOS, nhưng huba CHƯA có cách phát hiện ca này để nói ra thay
-//!   vì im lặng thất bại. Cần đo trên máy thật rồi thêm phép dò.
-//! * **`SendInput` gửi input tới cửa sổ ĐANG Ở TRƯỚC**, y hệt CGEvent trên
-//!   macOS — `SetForegroundWindow` trước khi gửi vẫn là bước KHÔNG PHẢI thủ
-//!   tục, và gõ từ điện thoại vẫn giật tiêu điểm trên máy, cùng cái giá
-//!   `keys.rs` đã ghi ở đầu tệp.
-//! * **Đóng cửa sổ còn tiến trình sống** — chưa biết Windows Terminal có bật
-//!   hộp thoại xác nhận kiểu *"Close all tabs?"* hay không (có, theo tài liệu
-//!   công khai, tắt được qua setting `confirmCloseAllTabs`) — `close_window`
-//!   ở đây gõ `exit`+Enter trước, cùng chiến lược `exit_and_close_shell` của
-//!   macOS, để né đúng hộp thoại ấy thay vì tắt setting hộ người dùng.
+//! * Gõ + đọc qua console trên console cổ điển (conhost) VÀ trên ConPTY (tab
+//!   Windows Terminal) — tự kiểm ③ ④.
+//! * `claude` (Node, đọc phím bằng `ReadConsoleInputW`) nhận phím mũi tên và
+//!   khối dán `ESC[200~…ESC[201~` từ `WriteConsoleInputW` — tự kiểm KHÔNG đo
+//!   được (cần một phiên `claude` thật); lượt `/new` thật đầu tiên là phép đo.
+//! * `AttachConsole` khiến hubd nhận tín hiệu của console ấy trong lúc đang gắn
+//!   (vài mili giây). Ctrl+C bị bỏ qua ([`bo_qua_tin_hieu`]); đóng hẳn console
+//!   đúng khoảnh khắc ấy thì Windows có thể kết thúc hubd — Task Scheduler
+//!   khởi động lại (`install_update.ps1`, `RestartCount`).
 
+use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
-use windows::core::{Interface, BOOL};
-use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
-use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
+use windows::core::{w, BOOL};
+use windows::Wdk::System::Threading::{NtQueryInformationProcess, ProcessCommandLineInformation};
+use windows::Win32::Foundation::{
+    CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, HWND, STILL_ACTIVE, UNICODE_STRING,
 };
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    KEYEVENTF_UNICODE, VIRTUAL_KEY, VK_BACK, VK_DOWN, VK_ESCAPE, VK_LEFT, VK_RETURN, VK_RIGHT,
-    VK_SPACE, VK_TAB, VK_UP,
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
+use windows::Win32::System::Console::{
+    AttachConsole, FreeConsole, GetConsoleScreenBufferInfo, GetConsoleTitleW, GetConsoleWindow,
+    ReadConsoleOutputCharacterW, SetConsoleCtrlHandler, WriteConsoleInputW,
+    CONSOLE_SCREEN_BUFFER_INFO, COORD, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD,
+    KEY_EVENT_RECORD_0, LEFT_CTRL_PRESSED,
+};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+use windows::Win32::System::Threading::{
+    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::VkKeyScanW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetWindowRect, IsWindow, IsWindowVisible, PostMessageW,
-    SetForegroundWindow, ShowWindow, SW_HIDE, WM_CLOSE,
+    GetAncestor, GetForegroundWindow, SetForegroundWindow, GA_ROOTOWNER,
 };
 
-use crate::keys::{Closed, TabState};
+use crate::keys::{Closed, Tab, TabState};
+use crate::win_procs::{self, Row};
 
-use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
-};
+// ── Bảng tiến trình ────────────────────────────────────────────────────────
 
-/// Lớp cửa sổ thật của Windows Terminal — CHƯA xác nhận lại trên máy thật, chỉ
-/// dựa trên tài liệu công khai. Xem mục "Chưa đo được" ở đầu tệp.
-const TERMINAL_WINDOW_CLASS: &str = "CASCADIA_HOSTING_WINDOW_CLASS";
-
-fn hwnd_of(window: i64) -> HWND {
-    HWND(window as *mut std::ffi::c_void)
+/// Mọi tiến trình trên máy, đọc MỘT LẦN (ToolHelp32). Dòng lệnh chỉ đọc cho
+/// tiến trình console ([`win_procs::CONSOLE_CLIENTS`]) — đó là tập duy nhất
+/// huba cần soi chữ (`claude`, `node …cli.js`, `bash … shell-snapshots`), và mở
+/// mọi tiến trình trên máy mỗi ảnh chụp là trả giá cho ~300 lời gọi vô ích.
+pub fn process_table() -> Result<Vec<Row>> {
+    let mut out = Vec::new();
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+            .map_err(|e| anyhow!("CreateToolhelp32Snapshot thất bại: {e}"))?;
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut ok = Process32FirstW(snap, &mut entry).is_ok();
+        while ok {
+            let n = entry
+                .szExeFile
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            let exe = String::from_utf16_lossy(&entry.szExeFile[..n]);
+            let pid = entry.th32ProcessID;
+            let cmd = if win_procs::is_console_client(&exe) {
+                command_line(pid).unwrap_or_default()
+            } else {
+                String::new()
+            };
+            out.push(Row {
+                pid: pid as i64,
+                ppid: entry.th32ParentProcessID as i64,
+                exe,
+                cmd,
+            });
+            ok = Process32NextW(snap, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+    if out.is_empty() {
+        return Err(anyhow!(
+            "ToolHelp trả về 0 tiến trình — không phải một máy trống"
+        ));
+    }
+    Ok(out)
 }
 
-/// Mở một cửa sổ Windows Terminal MỚI (không phải tab) chạy `cmd`.
-///
-/// Trả `(hwnd, "hwnd thập phân")` — xem mục "Mô hình cửa sổ" ở đầu tệp cho lý
-/// do chuỗi thứ hai không phải một tty thật.
-pub fn open_window(cmd: &str) -> Result<(i64, String)> {
-    let before = list_terminal_windows();
-    std::process::Command::new("wt.exe")
-        .args([
-            "-w",
-            "new",
-            "powershell",
-            "-NoLogo",
-            "-NoExit",
-            "-Command",
-            cmd,
-        ])
-        .spawn()
-        .map_err(|e| anyhow!("không chạy được wt.exe: {e}"))?;
-    // wt.exe bàn giao cho tiến trình chủ (monarch) rồi tự thoát ngay — PID của
-    // nó KHÔNG phải PID của cửa sổ thật, nên phải dò bằng SO SÁNH danh sách
-    // cửa sổ trước/sau, giống hệt lý do `open_window` của macOS bỏ cách đọc
-    // "window 1" (cửa sổ đang ở trước) để chuyển sang hỏi tty của chính tab
-    // vừa tạo.
-    let deadline = std::time::Instant::now() + Duration::from_secs(8);
-    while std::time::Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(200));
-        let now = list_terminal_windows();
-        if let Some(&hwnd) = now.iter().find(|h| !before.contains(h)) {
-            return Ok((hwnd, hwnd.to_string()));
+/// Dòng lệnh của tiến trình khác — `NtQueryInformationProcess`
+/// (`ProcessCommandLineInformation`, Windows 8.1+). `None` khi không mở được
+/// (tiến trình của người dùng khác / được bảo vệ) — chỗ gọi rơi về tên tệp.
+fn command_line(pid: u32) -> Option<String> {
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut need = 0u32;
+        let _ = NtQueryInformationProcess(
+            h,
+            ProcessCommandLineInformation,
+            std::ptr::null_mut(),
+            0,
+            &mut need,
+        );
+        if need == 0 || need > 1 << 20 {
+            let _ = CloseHandle(h);
+            return None;
+        }
+        // `u64` để bộ đệm căn 8 byte — `UNICODE_STRING` mang con trỏ.
+        let mut buf = vec![0u64; (need as usize).div_ceil(8)];
+        let st = NtQueryInformationProcess(
+            h,
+            ProcessCommandLineInformation,
+            buf.as_mut_ptr().cast(),
+            need,
+            &mut need,
+        );
+        let _ = CloseHandle(h);
+        if st.is_err() {
+            return None;
+        }
+        let us = &*(buf.as_ptr() as *const UNICODE_STRING);
+        if us.Buffer.is_null() || us.Length == 0 {
+            return None;
+        }
+        let units = std::slice::from_raw_parts(us.Buffer.0, us.Length as usize / 2);
+        Some(String::from_utf16_lossy(units))
+    }
+}
+
+/// Tiến trình còn chạy không. pid ĐƯỢC DÙNG LẠI trên Windows như trên macOS —
+/// chỗ gọi nào cần chắc "vẫn là nó" thì so thêm bảng tiến trình.
+pub fn process_alive(pid: i64) -> bool {
+    if pid <= 0 {
+        return false;
+    }
+    unsafe {
+        let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid as u32) else {
+            return false;
+        };
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(h, &mut code).is_ok();
+        let _ = CloseHandle(h);
+        ok && code == STILL_ACTIVE.0 as u32
+    }
+}
+
+// ── Gắn vào console của một tiến trình ─────────────────────────────────────
+
+/// `AttachConsole` là trạng thái của CẢ tiến trình: hai luồng gắn cùng lúc thì
+/// một luồng đọc nhầm console của luồng kia. Mọi lượt gắn đi qua khoá này.
+static CONSOLE: Mutex<()> = Mutex::new(());
+
+unsafe extern "system" fn bo_qua_tin_hieu(_kind: u32) -> BOOL {
+    BOOL(1)
+}
+
+struct Gan {
+    conin: HANDLE,
+    conout: HANDLE,
+}
+
+impl Drop for Gan {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.conin);
+            let _ = CloseHandle(self.conout);
+            let _ = FreeConsole();
         }
     }
-    Err(anyhow!(
-        "wt.exe chạy nhưng không thấy cửa sổ Windows Terminal mới nào sau 8 giây"
-    ))
 }
 
-/// Mọi cửa sổ đang mang lớp [`TERMINAL_WINDOW_CLASS`], theo thứ tự `EnumWindows`.
-fn list_terminal_windows() -> Vec<i64> {
-    unsafe extern "system" fn cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let out = &mut *(lparam.0 as *mut Vec<i64>);
-        let mut cls = [0u16; 256];
-        let n = unsafe { windows::Win32::UI::WindowsAndMessaging::GetClassNameW(hwnd, &mut cls) };
-        if n > 0 {
-            let name = String::from_utf16_lossy(&cls[..n as usize]);
-            if name == TERMINAL_WINDOW_CLASS {
-                out.push(hwnd.0 as i64);
+/// Chạy `f` trong lúc đang gắn vào console của `pid`, rồi THẢ ra ngay.
+///
+/// Thất bại khi chính tiến trình này đã có console riêng (`huba.exe` chạy từ
+/// một terminal) — khi ấy KHÔNG thả console của mình ra để gắn sang (mất chỗ
+/// in kết quả), mà báo rõ: việc này là của hubd (không console) hoặc của lượt
+/// tự kiểm chạy tách rời (`tu_kiem`).
+fn with_console<T>(pid: i64, f: impl FnOnce(&Gan) -> Result<T>) -> Result<T> {
+    let _khoa = CONSOLE.lock().unwrap_or_else(|p| p.into_inner());
+    unsafe {
+        AttachConsole(pid as u32).map_err(|e| {
+            anyhow!(
+                "không gắn được vào console của pid {pid}: {e} — tiến trình đã thoát, \
+                 hoặc chính huba đang có console riêng (chạy từ terminal thì việc này là của hubd)"
+            )
+        })?;
+        // Đăng ký MỖI lượt là đúng: danh sách bộ xử lý gắn với console đang gắn.
+        let _ = SetConsoleCtrlHandler(Some(bo_qua_tin_hieu), true);
+        let mo = |ten| {
+            CreateFileW(
+                ten,
+                GENERIC_READ.0 | GENERIC_WRITE.0,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                None,
+                OPEN_EXISTING,
+                FILE_FLAGS_AND_ATTRIBUTES(0),
+                None,
+            )
+        };
+        let conin = match mo(w!("CONIN$")) {
+            Ok(h) => h,
+            Err(e) => {
+                let _ = FreeConsole();
+                return Err(anyhow!("gắn được nhưng không mở được CONIN$: {e}"));
             }
+        };
+        let conout = match mo(w!("CONOUT$")) {
+            Ok(h) => h,
+            Err(e) => {
+                let _ = CloseHandle(conin);
+                let _ = FreeConsole();
+                return Err(anyhow!("gắn được nhưng không mở được CONOUT$: {e}"));
+            }
+        };
+        let gan = Gan { conin, conout };
+        f(&gan)
+    }
+}
+
+/// Console của `pid` có CỬA SỔ không (cửa sổ console cổ điển, hoặc cửa sổ giả
+/// của ConPTY). Một `claude -p` chạy với `CREATE_NO_WINDOW` — phép dò hạn mức
+/// của chính huba — có console mà không có cửa sổ: KHÔNG phải một phiên trên màn.
+pub fn has_console_window(pid: i64) -> bool {
+    with_console(pid, |_| Ok(!unsafe { GetConsoleWindow() }.0.is_null())).unwrap_or(false)
+}
+
+fn read_screen(g: &Gan) -> Result<String> {
+    let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
+    unsafe { GetConsoleScreenBufferInfo(g.conout, &mut info) }
+        .map_err(|e| anyhow!("GetConsoleScreenBufferInfo thất bại: {e}"))?;
+    let win = info.srWindow;
+    let width = (win.Right - win.Left + 1).max(0) as usize;
+    let mut lines: Vec<String> = Vec::new();
+    for y in win.Top..=win.Bottom {
+        let mut buf = vec![0u16; width];
+        let mut read = 0u32;
+        unsafe {
+            ReadConsoleOutputCharacterW(g.conout, &mut buf, COORD { X: win.Left, Y: y }, &mut read)
         }
-        BOOL(1)
+        .map_err(|e| anyhow!("ReadConsoleOutputCharacterW thất bại ở dòng {y}: {e}"))?;
+        let n = (read as usize).min(buf.len());
+        lines.push(String::from_utf16_lossy(&buf[..n]).trim_end().to_string());
     }
-    let mut out: Vec<i64> = Vec::new();
-    unsafe {
-        let _ = EnumWindows(Some(cb), LPARAM(&mut out as *mut _ as isize));
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
     }
-    out
+    Ok(lines.join("\n"))
 }
 
-/// Cửa sổ này còn tồn tại không — HWND là số ĐƯỢC DÙNG LẠI, nên `window_of`
-/// phải luôn đi qua đây trước khi tin một số cũ trong sổ.
-pub fn window_gone(window: i64) -> Result<bool> {
-    let alive = unsafe { IsWindow(Some(hwnd_of(window))) };
-    Ok(!alive.as_bool())
+fn console_title() -> String {
+    let mut buf = vec![0u16; 1024];
+    let n = unsafe { GetConsoleTitleW(&mut buf) } as usize;
+    String::from_utf16_lossy(&buf[..n.min(buf.len())])
 }
 
-/// Tìm lại cửa sổ ứng với "tty" (chuỗi HWND) đã ghi trong sổ phiên.
-pub fn window_of(tty: &str) -> Result<Option<i64>> {
-    let Ok(id) = tty.trim().parse::<i64>() else {
-        return Ok(None);
-    };
-    match window_gone(id) {
-        Ok(true) => Ok(None),
-        Ok(false) => Ok(Some(id)),
-        Err(e) => Err(e),
-    }
-}
+// ── Sự kiện phím ───────────────────────────────────────────────────────────
 
-/// Như [`window_of`] — trên Windows không có khái niệm "cửa sổ KHÔNG PHẢI của
-/// huba mở nhưng cùng tty" (mỗi phiên một cửa sổ do chính huba mở), nên hai
-/// hàm này trùng nhau. Giữ tên riêng để chỗ gọi trong `sessions.rs` không cần
-/// biết sự khác biệt đã biến mất trên nền này.
-pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
-    window_of(tty)
-}
+const ENHANCED_KEY: u32 = 0x0100;
+const SHIFT_PRESSED: u32 = 0x0010;
 
-pub fn bring_to_front(window: i64) -> Result<()> {
-    let ok = unsafe { SetForegroundWindow(hwnd_of(window)) };
-    if ok.as_bool() {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "SetForegroundWindow từ chối — cửa sổ có thể đã đóng"
-        ))
-    }
-}
-
-pub fn front_window() -> Result<Option<i64>> {
-    let hwnd = unsafe { GetForegroundWindow() };
-    if hwnd.0.is_null() {
-        return Ok(None);
-    }
-    Ok(Some(hwnd.0 as i64))
-}
-
-/// `Busy`/`Idle` đọc bằng MÀN, không bằng bảng tiến trình — Windows Terminal
-/// không cho hỏi "tab này bận không" từ ngoài tiến trình như Terminal.app
-/// (`busy of tab`). Xấp xỉ: dòng CUỐI không rỗng của màn có phải dấu nhắc
-/// PowerShell không (`PS ...\> `) — CHƯA đo được độ chắc của cách này trên
-/// máy thật, xem mục "Chưa đo được".
-pub fn tab_state(window: i64) -> Result<TabState> {
-    if window_gone(window)? {
-        return Ok(TabState::Gone);
-    }
-    let screen = screen_text(window)?;
-    let last = screen
-        .lines()
-        .rev()
-        .find(|l| !l.trim().is_empty())
-        .unwrap_or("");
-    let looks_idle = last.trim_end().ends_with('>');
-    Ok(if looks_idle {
-        TabState::Idle
-    } else {
-        TabState::Busy
-    })
-}
-
-/// Đọc chữ đang hiện trên cửa sổ, qua UI Automation `TextPattern` — vai trò
-/// tương đương `contents of selected tab` của AppleScript.
-///
-/// 🔴 CHƯA ĐO ĐƯỢC: Windows Terminal có hỗ trợ UIA cho trình đọc màn hình,
-/// nhưng liệu gốc `TextPattern` nằm ngay trên cửa sổ hay trên một control con
-/// (thường thấy: cần `FindFirst` xuống một phần tử tên `"Terminal"`) CHƯA
-/// được xác nhận trên máy thật. Bản dưới thử CẢ HAI — hỏi thẳng phần tử gốc
-/// trước, dò xuống con nếu gốc không có `TextPattern` — nhưng độ đúng của
-/// phỏng đoán này bằng không cho tới khi có ai chạy nó trên Windows thật.
-pub fn screen_text(window: i64) -> Result<String> {
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        let ui: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| anyhow!("không dựng được IUIAutomation: {e}"))?;
-        let el = ui
-            .ElementFromHandle(hwnd_of(window))
-            .map_err(|e| anyhow!("không lấy được automation element của cửa sổ: {e}"))?;
-        let pattern = el
-            .GetCurrentPattern(UIA_TextPatternId)
-            .map_err(|e| anyhow!("cửa sổ không có TextPattern (UIA): {e}"))?;
-        let text_pattern: IUIAutomationTextPattern = pattern
-            .cast()
-            .map_err(|e| anyhow!("TextPattern không đúng kiểu mong đợi: {e}"))?;
-        let range = text_pattern
-            .DocumentRange()
-            .map_err(|e| anyhow!("không lấy được DocumentRange: {e}"))?;
-        let text = range
-            .GetText(-1)
-            .map_err(|e| anyhow!("không đọc được chữ từ TextPattern: {e}"))?;
-        Ok(text.to_string())
-    }
-}
-
-/// Chưa có cách cuộn ngược qua UIA đã đo được — trả nguyên `screen_text`,
-/// đúng luật 13②: không đo được thì đừng bịa một kết quả trông như đã cuộn.
-pub fn screen_scrollback(window: i64, _steps: usize, _du: impl Fn(&str) -> bool) -> Result<String> {
-    screen_text(window)
-}
-
-/// Tên "phím" hiểu bằng đúng vốn từ `keys::key_payload`, cho `SendInput`.
-fn key_to_input(name: &str) -> Result<Vec<INPUT>> {
-    let vk = match name {
-        "enter" => VK_RETURN,
-        "esc" => VK_ESCAPE,
-        "up" => VK_UP,
-        "down" => VK_DOWN,
-        "right" => VK_RIGHT,
-        "left" => VK_LEFT,
-        "tab" => VK_TAB,
-        "space" => VK_SPACE,
-        // Ctrl+C: giữ Ctrl xuống, bấm C, thả cả hai — không có phím rời đơn lẻ
-        // nào phát ETX trên Windows như tty của macOS tự dịch.
-        "ctrl-c" | "ctrlc" | "^c" => {
-            return Ok(vk_pair_with_modifier(
-                windows::Win32::UI::Input::KeyboardAndMouse::VK_CONTROL,
-                VIRTUAL_KEY(0x43), // 'C'
-            ));
-        }
-        d if d.len() == 1 && d.chars().all(|c| c.is_ascii_digit()) => {
-            return Ok(unicode_input(d));
-        }
-        other => return Err(anyhow!("không biết phím '{other}'")),
-    };
-    Ok(vk_pair(vk))
-}
-
-fn key_down_up(vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
-    INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: vk,
-                wScan: 0,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
+fn key_record(down: bool, vk: u16, ch: u16, state: u32) -> INPUT_RECORD {
+    INPUT_RECORD {
+        EventType: KEY_EVENT as u16,
+        Event: INPUT_RECORD_0 {
+            KeyEvent: KEY_EVENT_RECORD {
+                bKeyDown: BOOL(down as i32),
+                wRepeatCount: 1,
+                wVirtualKeyCode: vk,
+                wVirtualScanCode: 0,
+                uChar: KEY_EVENT_RECORD_0 { UnicodeChar: ch },
+                dwControlKeyState: state,
             },
         },
     }
 }
 
-fn vk_pair(vk: VIRTUAL_KEY) -> Vec<INPUT> {
-    vec![
-        key_down_up(vk, KEYBD_EVENT_FLAGS(0)),
-        key_down_up(vk, KEYEVENTF_KEYUP),
+fn press(vk: u16, ch: u16, state: u32) -> [INPUT_RECORD; 2] {
+    [
+        key_record(true, vk, ch, state),
+        key_record(false, vk, ch, state),
     ]
 }
 
-fn vk_pair_with_modifier(modifier: VIRTUAL_KEY, vk: VIRTUAL_KEY) -> Vec<INPUT> {
-    vec![
-        key_down_up(modifier, KEYBD_EVENT_FLAGS(0)),
-        key_down_up(vk, KEYBD_EVENT_FLAGS(0)),
-        key_down_up(vk, KEYEVENTF_KEYUP),
-        key_down_up(modifier, KEYEVENTF_KEYUP),
-    ]
+/// Một đơn vị UTF-16 thành cặp phím. Ký tự có trên bố cục bàn phím đang dùng
+/// thì mang luôn mã phím ảo (`VkKeyScanW`) — vài chương trình .NET (PSReadLine)
+/// đọc mã ấy; chữ tiếng Việt không có trên bố cục thì để mã 0, chỉ mang ký tự.
+fn char_records(unit: u16) -> [INPUT_RECORD; 2] {
+    let scan = unsafe { VkKeyScanW(unit) };
+    if scan == -1 {
+        return press(0, unit, 0);
+    }
+    let vk = (scan as u16) & 0xff;
+    let shift = if (scan as u16) & 0x0100 != 0 {
+        SHIFT_PRESSED
+    } else {
+        0
+    };
+    press(vk, unit, shift)
 }
 
-/// Một chuỗi bất kỳ, từng đơn vị UTF-16, qua `KEYEVENTF_UNICODE` — path này
-/// KHÔNG cần biết layout bàn phím (khác `VkKeyScan`), nên chữ tiếng Việt của
-/// chủ máy gõ qua điện thoại đi thẳng, không cần dịch phím.
-fn unicode_input(s: &str) -> Vec<INPUT> {
-    let mut out = Vec::new();
-    for unit in s.encode_utf16() {
-        let ki = |flags: KEYBD_EVENT_FLAGS| INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VIRTUAL_KEY(0),
-                    wScan: unit,
-                    dwFlags: KEYEVENTF_UNICODE | flags,
-                    time: 0,
-                    dwExtraInfo: 0,
-                },
-            },
-        };
-        out.push(ki(KEYBD_EVENT_FLAGS(0)));
-        out.push(ki(KEYEVENTF_KEYUP));
-    }
-    out
+fn text_records(text: &str) -> Vec<INPUT_RECORD> {
+    text.encode_utf16().flat_map(char_records).collect()
 }
 
-fn send_raw(inputs: &[INPUT]) -> Result<()> {
-    if inputs.is_empty() {
-        return Ok(());
-    }
-    let sent = unsafe { SendInput(inputs, std::mem::size_of::<INPUT>() as i32) };
-    if sent as usize != inputs.len() {
-        return Err(anyhow!(
-            "SendInput chỉ nhận {sent}/{} sự kiện — Windows có thể đang chặn ca này \
-             (UIPI: đích chạy nâng quyền mà huba thì không?)",
-            inputs.len()
-        ));
+/// Tên phím, đúng vốn từ `keys::key_payload`.
+fn key_records(name: &str) -> Result<Vec<INPUT_RECORD>> {
+    let r = match name {
+        "enter" => press(0x0D, 13, 0),
+        "esc" => press(0x1B, 27, 0),
+        "up" => press(0x26, 0, ENHANCED_KEY),
+        "down" => press(0x28, 0, ENHANCED_KEY),
+        "left" => press(0x25, 0, ENHANCED_KEY),
+        "right" => press(0x27, 0, ENHANCED_KEY),
+        "tab" => press(0x09, 9, 0),
+        "space" => press(0x20, 32, 0),
+        "backspace" => press(0x08, 8, 0),
+        // Ctrl+C = ký tự ETX kèm trạng thái Ctrl giữ — ở chế độ đọc thô (Node),
+        // chương trình nhận đúng byte 3 như tty macOS.
+        "ctrl-c" | "ctrlc" | "^c" => press(0x43, 3, LEFT_CTRL_PRESSED),
+        d if d.len() == 1 && d.chars().all(|c| c.is_ascii_digit()) => {
+            return Ok(text_records(d));
+        }
+        other => return Err(anyhow!("không biết phím '{other}'")),
+    };
+    Ok(r.to_vec())
+}
+
+fn write_input(g: &Gan, records: &[INPUT_RECORD]) -> Result<()> {
+    // Từng khúc vừa phải: hàng nhập của console có trần, và một khối dán dài
+    // đẩy một lần dễ bị cắt ngang.
+    for chunk in records.chunks(256) {
+        let mut written = 0u32;
+        unsafe { WriteConsoleInputW(g.conin, chunk, &mut written) }
+            .map_err(|e| anyhow!("WriteConsoleInputW thất bại: {e}"))?;
+        if written as usize != chunk.len() {
+            return Err(anyhow!(
+                "WriteConsoleInputW chỉ nhận {written}/{} sự kiện",
+                chunk.len()
+            ));
+        }
     }
     Ok(())
 }
 
-/// Gửi một dãy phím RỜI — không kèm dấu xuống dòng nào, và KHÔNG nhóm theo
-/// "lượt ghi" như macOS (xem mục 1 ở đầu tệp): mỗi phím là một `SendInput`
-/// riêng, cách nhau một nhịp nhỏ để TUI kịp vẽ.
+// ── Mặt tiếp xúc mà `keys.rs` gọi tới ──────────────────────────────────────
+
+/// `con12345` → `12345` nếu shell gốc ấy còn sống. Số trần (HWND của bản cũ
+/// trong sổ) ⟹ `None`, không đoán.
+pub fn window_of(tty: &str) -> Result<Option<i64>> {
+    Ok(win_procs::parse_tty(tty).filter(|pid| process_alive(*pid)))
+}
+
+/// Mỗi console là một "tab" — không có tab nào khác cùng tên để mà nhầm.
+pub fn window_of_any(tty: &str) -> Result<Option<i64>> {
+    window_of(tty)
+}
+
+/// Tên "tab" đang chọn của console `window` — chính nó.
+pub fn selected_tab_tty(window: i64) -> Result<String> {
+    if process_alive(window) {
+        Ok(win_procs::tty_of_root(window))
+    } else {
+        Err(anyhow!("shell gốc {window} không còn"))
+    }
+}
+
+pub fn window_gone(window: i64) -> Result<bool> {
+    Ok(!process_alive(window))
+}
+
+/// Chữ đang hiện trên console (khung nhìn `srWindow`).
+pub fn screen_text(window: i64) -> Result<String> {
+    with_console(window, read_screen)
+}
+
+/// Console cổ điển giữ cả phần đã cuộn trong bộ đệm, nhưng ConPTY (tab Windows
+/// Terminal) chỉ giữ khung nhìn — chưa đo. Trả đúng khung nhìn, không giả vờ đã
+/// cuộn (luật 13②).
+pub fn screen_scrollback(window: i64, _steps: usize, _du: impl Fn(&str) -> bool) -> Result<String> {
+    screen_text(window)
+}
+
+/// Gõ một khối chữ — KHÔNG tự bấm Enter (hợp đồng của `keys::type_and_send`).
+/// Khối nhiều dòng đi dưới dạng DÁN (`ESC[200~ … ESC[201~`), như terminal thật
+/// làm khi dán: gửi từng dòng kèm Enter là gửi đi từng mảnh của đề bài.
+pub fn type_into(window: i64, text: &str) -> Result<()> {
+    let records = if text.contains('\n') || text.contains('\r') {
+        let body = text.replace("\r\n", "\r").replace('\n', "\r");
+        text_records(&format!("\u{1b}[200~{body}\u{1b}[201~"))
+    } else {
+        text_records(text)
+    };
+    with_console(window, |g| write_input(g, &records))
+}
+
+/// Gửi một dãy phím RỜI. Không có CR nào tự kèm như `do script` của macOS, nên
+/// không cần nhóm theo lượt ghi — nhịp nghỉ 30 ms giữa các phím để TUI kịp vẽ.
 pub fn press_writes(window: i64, writes: &[Vec<String>]) -> Result<()> {
-    bring_to_front(window)?;
     for group in writes {
         for key in group {
             if key == "clear" {
-                continue; // `clear` không phải một phím thật — xem `clear_box`.
+                continue; // không phải một phím thật — xem `clear_box`.
             }
-            send_raw(&key_to_input(key)?)?;
+            let records = key_records(key)?;
+            with_console(window, |g| write_input(g, &records))?;
             std::thread::sleep(Duration::from_millis(30));
         }
     }
     Ok(())
 }
 
-/// Gõ một khối chữ bất kỳ vào ô nhập — KHÔNG tự bấm Enter (đúng hợp đồng của
-/// `keys::type_and_send`, hàm ấy tự quyết định lúc nào cần Enter).
-pub fn type_into(window: i64, text: &str) -> Result<()> {
-    bring_to_front(window)?;
-    send_raw(&unicode_input(text))
-}
-
 pub fn send_bare(window: i64, keys: &[String]) -> Result<()> {
     press_writes(window, &[keys.to_vec()])
+}
+
+/// Bận/rảnh đọc từ CÂY TIẾN TRÌNH: shell gốc còn con nào chạy không — đúng
+/// nghĩa `busy of tab` của Terminal.app, không đoán từ dấu nhắc trên màn.
+pub fn tab_state(window: i64) -> Result<TabState> {
+    if !process_alive(window) {
+        return Ok(TabState::Gone);
+    }
+    let rows = process_table()?;
+    match win_procs::process_count(&rows, window) {
+        None => Ok(TabState::Gone),
+        Some(1) => Ok(TabState::Idle),
+        Some(_) => Ok(TabState::Busy),
+    }
+}
+
+pub fn tab_proc_count(window: i64) -> Result<usize> {
+    let rows = process_table()?;
+    win_procs::process_count(&rows, window)
+        .ok_or_else(|| anyhow!("shell gốc {window} không còn trong bảng tiến trình"))
+}
+
+/// `Ok(None)` = console đã HẾT — cùng hợp đồng với macOS (`keys.rs`).
+pub fn tab_process_count(window: i64) -> Result<Option<usize>> {
+    let rows = process_table()?;
+    Ok(win_procs::process_count(&rows, window))
+}
+
+/// Cỡ console tính bằng KÝ TỰ `(hàng, cột)` — cùng đơn vị với macOS.
+pub fn window_size(window: i64) -> Result<(i64, i64)> {
+    with_console(window, |g| {
+        let mut info = CONSOLE_SCREEN_BUFFER_INFO::default();
+        unsafe { GetConsoleScreenBufferInfo(g.conout, &mut info) }
+            .map_err(|e| anyhow!("GetConsoleScreenBufferInfo thất bại: {e}"))?;
+        let w = info.srWindow;
+        Ok(((w.Bottom - w.Top + 1) as i64, (w.Right - w.Left + 1) as i64))
+    })
+}
+
+/// Cửa sổ chứa console: cửa sổ console cổ điển chính nó; cửa sổ giả của ConPTY
+/// thì chủ của nó là cửa sổ Windows Terminal (WT gán chủ từ 1.17 — CHƯA đo).
+fn host_window(window: i64) -> Result<HWND> {
+    with_console(window, |_| {
+        let h = unsafe { GetConsoleWindow() };
+        if h.0.is_null() {
+            return Err(anyhow!("console của {window} không có cửa sổ"));
+        }
+        let owner = unsafe { GetAncestor(h, GA_ROOTOWNER) };
+        Ok(if owner.0.is_null() { h } else { owner })
+    })
+}
+
+/// Đưa cửa sổ chứa console lên trước. KHÔNG còn là bước bắt buộc trước khi gõ
+/// (gõ đi thẳng vào console) — chỉ dùng khi chủ máy xin xem cửa sổ.
+pub fn bring_to_front(window: i64) -> Result<()> {
+    let h = host_window(window)?;
+    if unsafe { SetForegroundWindow(h) }.as_bool() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "Windows từ chối đưa cửa sổ lên trước (luật khoá tiền cảnh với tiến trình nền)"
+        ))
+    }
 }
 
 pub fn focus_window(window: i64) -> Result<()> {
     bring_to_front(window)
 }
 
-pub fn window_size(window: i64) -> Result<(i64, i64)> {
-    let mut rect = RECT::default();
-    unsafe { GetWindowRect(hwnd_of(window), &mut rect) }
-        .map_err(|e| anyhow!("GetWindowRect thất bại: {e}"))?;
-    // Trả về PIXEL, không phải hàng/cột như macOS — Windows Terminal không lộ
-    // kích thước bằng KÝ TỰ qua Win32 thường (cần UIA riêng, chưa làm). Chỗ
-    // gọi hiện chỉ dùng số này để GHI SỔ chứ không tính bố cục, nên tạm chấp
-    // nhận đơn vị khác — nhưng đây là một khoảng lệch thật, ghi rõ để không
-    // ai đọc nhầm "61" là 61 CỘT.
-    Ok((
-        (rect.bottom - rect.top) as i64,
-        (rect.right - rect.left) as i64,
-    ))
+/// Console của cửa sổ đang ở trước — không đọc được từ HWND ngược về shell
+/// gốc mà không quét mọi console, nên KHÔNG đoán: `None`.
+pub fn front_window() -> Result<Option<i64>> {
+    let _ = unsafe { GetForegroundWindow() };
+    Ok(None)
 }
 
-/// Không có khái niệm "tiến trình Terminal.app" trên Windows — trả lỗi rõ
-/// ràng thay vì bịa một pid. Chỗ gọi (macOS-only trong `keys.rs`) không có
-/// nhánh Windows nào cần số này; giữ hàm để khỏi phải sửa chữ ký nơi khác.
 pub fn terminal_pid() -> Result<i32> {
     Err(anyhow!("không có khái niệm PID Terminal.app trên Windows"))
 }
 
-/// Đóng cửa sổ: gõ `exit`+Enter trước (né hộp thoại xác nhận nếu còn tiến
-/// trình sống, cùng chiến lược `exit_and_close_shell` của macOS), rồi
-/// `WM_CLOSE`, rồi xác nhận lại bằng `IsWindow`.
+/// Đóng console: gõ `exit` + Enter vào shell gốc ĐANG RẢNH, chờ nó thoát.
+/// Shell thoát thì Windows Terminal tự đóng tab (`closeOnExit` mặc định) và
+/// console cổ điển tự đóng cửa sổ. KHÔNG gửi `WM_CLOSE` tới cửa sổ Windows
+/// Terminal: một cửa sổ có thể chứa tab của phiên KHÁC.
 pub fn close_window(window: i64) -> Result<Closed> {
-    if window_gone(window)? {
+    if !process_alive(window) {
         return Ok(Closed::Gone);
     }
-    let _ = type_into(window, "exit");
-    let _ = press_writes(window, &[vec!["enter".to_string()]]);
-    std::thread::sleep(Duration::from_millis(500));
-    for _ in 0..6 {
-        if window_gone(window)? {
-            return Ok(Closed::Gone);
-        }
-        std::thread::sleep(Duration::from_millis(300));
+    if tab_state(window)? == TabState::Busy {
+        anyhow::bail!("console {window} còn chương trình đang chạy — không gõ exit đè lên");
     }
-    unsafe {
-        let _ = PostMessageW(Some(hwnd_of(window)), WM_CLOSE, WPARAM(0), LPARAM(0));
-    }
-    for _ in 0..6 {
-        std::thread::sleep(Duration::from_millis(300));
-        if window_gone(window)? {
+    type_into(window, "exit")?;
+    press_writes(window, &[vec!["enter".to_string()]])?;
+    for _ in 0..25 {
+        std::thread::sleep(Duration::from_millis(200));
+        if !process_alive(window) {
             return Ok(Closed::Gone);
         }
     }
-    // `close` không ăn — thử ẩn, cùng đường lùi macOS đã dùng khi `close`
-    // chạy êm mà cửa sổ không đóng.
-    let hidden = unsafe { ShowWindow(hwnd_of(window), SW_HIDE) };
-    if hidden.as_bool() && !unsafe { IsWindowVisible(hwnd_of(window)) }.as_bool() {
-        return Ok(Closed::Hidden);
-    }
-    anyhow::bail!("gửi WM_CLOSE rồi thử ẩn đều không ăn — cửa sổ {window} vẫn còn hiện")
+    anyhow::bail!("đã gõ exit nhưng shell {window} vẫn chạy sau 5 giây")
 }
 
-/// Chưa có phép đo tương đương `ioreg` (khoá màn hình) trên Windows ở đây.
-/// `None` = "chưa đo được", đúng luật 13②: không phải 0% cũng không phải
-/// đoán bừa.
+pub fn close_hidden_again(window: i64) -> Result<bool> {
+    let _ = window;
+    Ok(false)
+}
+
 pub fn screen_locked() -> Option<bool> {
     None
 }
 
-/// Đo số tiến trình gắn vào console của cửa sổ — cần `AttachConsole` từ tiến
-/// trình khác, việc chưa làm ở bản này. `None` là "không đo được", không phải
-/// "không còn tiến trình nào".
-pub fn tab_proc_count(window: i64) -> Result<usize> {
-    let _ = window;
-    Err(anyhow!(
-        "chưa cài: đếm tiến trình trong console trên Windows"
-    ))
-}
-
-pub fn tab_process_count(window: i64) -> Result<Option<usize>> {
-    let _ = window;
-    Ok(None)
-}
-
-pub fn close_hidden_again(window: i64) -> Result<bool> {
-    let hidden = unsafe { ShowWindow(hwnd_of(window), SW_HIDE) };
-    Ok(hidden.as_bool())
-}
-
-/// Chưa cài chụp ảnh cửa sổ thật (PrintWindow + mã hoá PNG) — trả lỗi rõ thay
-/// vì một tệp rỗng trông như đã chụp.
 pub fn photograph_window(window: i64, path: &std::path::Path) -> Result<()> {
     let _ = (window, path);
-    Err(anyhow!("chưa cài: chụp ảnh cửa sổ thật trên Windows"))
-}
-
-/// Bịt ô nhập bằng cách bấm lùi (Backspace) đủ số ký tự đang hiện — không có
-/// khái niệm "byte ESC chặn CR" của macOS ở đây vì Windows không tự kèm CR
-/// vào lượt gõ.
-///
-/// Cùng hợp đồng [`crate::keys::Cleared`] với bản macOS: không có ô thì nói
-/// `NoBox` (không phải "còn chữ"), và phán "sạch" bằng lượt ĐỌC LẠI sau khi bấm,
-/// không bằng việc đã gửi đủ phím.
-pub fn clear_box(window: i64) -> Result<crate::keys::Cleared> {
-    use crate::keys::{box_state, BoxState, Cleared};
-    let n = match box_state(&screen_text(window)?) {
-        BoxState::NoBox => return Ok(Cleared::NoBox),
-        BoxState::Empty => return Ok(Cleared::Clean),
-        BoxState::Text(n) => n,
-    };
-    bring_to_front(window)?;
-    let backs: Vec<INPUT> = (0..n).flat_map(|_| vk_pair(VK_BACK)).collect();
-    send_raw(&backs)?;
-    Ok(match box_state(&screen_text(window)?) {
-        BoxState::Empty => Cleared::Clean,
-        BoxState::NoBox => Cleared::NoBox,
-        BoxState::Text(_) => Cleared::TextLeft,
-    })
-}
-
-/// Hàng chờ tin nhắn xếp trong ô nhập — Windows chưa có phép đo tương đương
-/// `clear_queue` của macOS (đọc dấu `»`/số dòng trên màn Terminal). Trả
-/// `(0, 0)` kèm lỗi log ở chỗ gọi nếu cần phân biệt — ở đây chỉ nói KHÔNG cài.
-pub fn clear_queue(window: i64) -> Result<(usize, usize)> {
-    let _ = window;
-    Err(anyhow!("chưa cài: xoá hàng chờ trên Windows"))
+    Err(anyhow!(
+        "chưa cài: chụp ảnh cửa sổ trên Windows — dùng /shot (chữ)"
+    ))
 }
 
 pub fn frame_is_blank(path: &std::path::Path) -> Option<bool> {
@@ -521,9 +563,384 @@ pub fn frame_is_blank(path: &std::path::Path) -> Option<bool> {
     None
 }
 
-/// Xem `keys::accessibility_trusted` cho ngữ cảnh đầy đủ — trên Windows câu
-/// trả lời luôn `true` cho một tiến trình không nâng quyền, TRỪ hàng rào UIPI
-/// chưa đo được ở đây.
+/// Xoá ô nhập bằng Backspace đủ số ký tự đang hiện, rồi PHÁN bằng lượt đọc lại
+/// — cùng hợp đồng [`crate::keys::Cleared`] với macOS.
+pub fn clear_box(window: i64) -> Result<crate::keys::Cleared> {
+    use crate::keys::{box_state, BoxState, Cleared};
+    let n = match box_state(&screen_text(window)?) {
+        BoxState::NoBox => return Ok(Cleared::NoBox),
+        BoxState::Empty => return Ok(Cleared::Clean),
+        BoxState::Text(n) => n,
+    };
+    let backs: Vec<INPUT_RECORD> = (0..n).flat_map(|_| press(0x08, 8, 0)).collect();
+    with_console(window, |g| write_input(g, &backs))?;
+    std::thread::sleep(Duration::from_millis(150));
+    Ok(match box_state(&screen_text(window)?) {
+        BoxState::Empty => Cleared::Clean,
+        BoxState::NoBox => Cleared::NoBox,
+        BoxState::Text(_) => Cleared::TextLeft,
+    })
+}
+
+pub fn clear_queue(window: i64) -> Result<(usize, usize)> {
+    let _ = window;
+    Err(anyhow!("chưa cài: xoá hàng chờ trên Windows"))
+}
+
+/// Gõ phím vào console không đòi quyền hệ điều hành nào — luôn `true`.
 pub fn trusted() -> bool {
     true
+}
+
+/// Mọi console đáng liệt kê, kèm chữ trên màn khi `with_screens` — vai trò của
+/// `terminal_tabs`/`terminal_screens` trên macOS. Console KHÔNG có cửa sổ (phép
+/// dò `claude -p` của chính huba) bị loại.
+pub fn terminal_tabs(with_screens: bool) -> Result<Vec<Tab>> {
+    let rows = process_table()?;
+    let mut tabs = Vec::new();
+    for c in win_procs::consoles(&rows) {
+        let read = with_console(c.root, |g| {
+            if unsafe { GetConsoleWindow() }.0.is_null() {
+                return Ok(None);
+            }
+            let screen = if with_screens {
+                Some(read_screen(g)?)
+            } else {
+                None
+            };
+            Ok(Some((screen, console_title())))
+        });
+        let (screen, title) = match read {
+            Ok(Some(x)) => x,
+            Ok(None) => continue,
+            Err(e) => {
+                crate::logging::warn(
+                    "windows_console_unreadable",
+                    serde_json::json!({ "root": c.root, "err": e.to_string() }),
+                );
+                continue;
+            }
+        };
+        tabs.push(Tab {
+            tty: win_procs::tty_of_root(c.root),
+            busy: c.busy,
+            procs: c.procs,
+            screen,
+            title,
+        });
+    }
+    Ok(tabs)
+}
+
+// ── Mở một console mới cho `/new` ──────────────────────────────────────────
+
+/// Mở một cửa sổ MỚI chạy `script` (PowerShell) và trả `(pid shell gốc,
+/// "con<pid>")`.
+///
+/// `-EncodedCommand`: kịch bản đi dưới dạng base64, nên `;` (dấu tách lệnh của
+/// chính `wt.exe`), nháy, ngoặc trong mẫu `--disallowedTools` không còn ký tự
+/// nào để vỡ. Một dòng chú thích mang mã ngẫu nhiên làm chuỗi mã hoá DUY NHẤT —
+/// nhờ đó tìm lại đúng `powershell.exe` vừa mở trong bảng tiến trình (pid của
+/// `wt.exe` vô dụng: nó giao việc cho tiến trình chủ rồi thoát).
+///
+/// Không có `wt.exe` (Windows 10 chưa cài Windows Terminal) ⟹ mở console cổ
+/// điển bằng `cmd /c start`.
+pub fn open_window(script: &str) -> Result<(i64, String)> {
+    let nonce = format!(
+        "{:x}{:x}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let enc = win_procs::ps_encoded(&format!("{script}\n# huba {nonce}\n"));
+    // `-ExecutionPolicy Bypass` CHỈ cho tiến trình này: bản `claude` cài bằng npm
+    // là một shim `claude.ps1`, và chính sách mặc định của Windows (`Restricted`)
+    // chặn mọi `.ps1` — cửa sổ sẽ mở ra với một dòng đỏ thay vì một phiên.
+    let ps_args = [
+        "-NoLogo",
+        "-NoExit",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        enc.as_str(),
+    ];
+    let via_wt = std::process::Command::new("wt.exe")
+        .args(["-w", "new", "powershell.exe"])
+        .args(ps_args)
+        .spawn();
+    let how = match via_wt {
+        Ok(_) => "wt",
+        Err(e) => {
+            crate::logging::warn(
+                "windows_wt_unavailable",
+                serde_json::json!({ "err": e.to_string(), "fallback": "cmd /c start powershell" }),
+            );
+            std::process::Command::new("cmd.exe")
+                .args(["/d", "/c", "start", "", "powershell.exe"])
+                .args(ps_args)
+                .spawn()
+                .map_err(|e| anyhow!("không mở được cả wt.exe lẫn console cổ điển: {e}"))?;
+            "conhost"
+        }
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(250));
+        let rows = process_table()?;
+        if let Some(r) = rows
+            .iter()
+            .find(|r| r.exe.eq_ignore_ascii_case("powershell.exe") && r.cmd.contains(&enc))
+        {
+            crate::logging::info(
+                "windows_console_opened",
+                serde_json::json!({ "pid": r.pid, "via": how }),
+            );
+            return Ok((r.pid, win_procs::tty_of_root(r.pid)));
+        }
+    }
+    Err(anyhow!(
+        "đã gọi {how} nhưng không thấy powershell.exe mang đúng kịch bản sau 10 giây"
+    ))
+}
+
+// ── Tự kiểm trên máy Windows thật ──────────────────────────────────────────
+
+/// Kết quả một mục tự kiểm.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ket {
+    Dat(String),
+    Hong(String),
+    /// Không đo được — KHÔNG phải đạt (luật 13②).
+    Kdd(String),
+}
+
+/// Chạy từng mục đo; gọi từ một tiến trình KHÔNG có console (xem `main.rs`
+/// `windows-tu-kiem`: lượt chạy tách rời bằng `DETACHED_PROCESS`).
+pub fn tu_kiem() -> Vec<(String, Ket)> {
+    let mut out: Vec<(String, Ket)> = Vec::new();
+
+    // ① Bảng tiến trình đọc được, và có chính mình với dòng lệnh đúng.
+    match process_table() {
+        Ok(rows) => {
+            let me = std::process::id() as i64;
+            let mine = rows.iter().find(|r| r.pid == me);
+            out.push((
+                "① bảng tiến trình".into(),
+                match mine {
+                    Some(r) if r.cmd.contains("windows-tu-kiem") => Ket::Dat(format!(
+                        "{} tiến trình, đọc được dòng lệnh của chính mình",
+                        rows.len()
+                    )),
+                    Some(r) => Ket::Hong(format!("thấy pid mình nhưng dòng lệnh lạ: {:?}", r.cmd)),
+                    None => Ket::Hong(format!("{} tiến trình nhưng KHÔNG có pid {me}", rows.len())),
+                },
+            ));
+            let claudes: Vec<String> = rows
+                .iter()
+                .filter(|r| {
+                    win_procs::is_console_client(&r.exe)
+                        && crate::sessions::is_claude_process(if r.cmd.is_empty() {
+                            &r.exe
+                        } else {
+                            &r.cmd
+                        })
+                })
+                .map(|r| {
+                    let by: std::collections::HashMap<i64, &Row> =
+                        rows.iter().map(|x| (x.pid, x)).collect();
+                    let root = win_procs::console_root(&by, r.pid);
+                    format!(
+                        "pid {} ({}) gốc {} [{}] cửa sổ={}",
+                        r.pid,
+                        r.exe,
+                        root,
+                        by.get(&root).map(|x| x.exe.as_str()).unwrap_or("?"),
+                        has_console_window(r.pid)
+                    )
+                })
+                .collect();
+            out.push((
+                "② phiên claude đang chạy".into(),
+                if claudes.is_empty() {
+                    Ket::Kdd(
+                        "không có phiên claude nào đang chạy — mở một phiên rồi chạy lại để đo"
+                            .into(),
+                    )
+                } else {
+                    Ket::Dat(claudes.join(" · "))
+                },
+            ));
+        }
+        Err(e) => out.push(("① bảng tiến trình".into(), Ket::Hong(e.to_string()))),
+    }
+
+    // ③ Console cổ điển: mở, gõ mốc, đọc lại.
+    out.push((
+        "③ console cổ điển: gõ + đọc".into(),
+        thu_console(|| {
+            let child = std::process::Command::new("powershell.exe")
+                .args(["-NoLogo", "-NoProfile", "-NoExit"])
+                .creation_flags_new_console()
+                .spawn()
+                .map_err(|e| anyhow!("không mở được powershell: {e}"))?;
+            Ok(child.id() as i64)
+        }),
+    ));
+
+    // ④ Windows Terminal (ConPTY): đúng đường `/new` dùng.
+    out.push((
+        "④ Windows Terminal (ConPTY) qua open_window: gõ + đọc".into(),
+        thu_console(|| {
+            let (pid, _) = open_window("Write-Output 'huba-san-sang'")?;
+            Ok(pid)
+        }),
+    ));
+
+    // ⑤ claude chạy được, và tìm thấy bằng đường nào.
+    out.push((
+        "⑤ claude --version".into(),
+        match crate::exec::run(
+            "claude",
+            &["--version"],
+            crate::exec::RunOpts {
+                timeout: Some(Duration::from_secs(30)),
+                ..Default::default()
+            },
+        ) {
+            Ok(r) if r.code == Some(0) => Ket::Dat(r.stdout.trim().to_string()),
+            Ok(r) => Ket::Hong(format!("thoát {:?}: {}", r.code, r.stderr.trim())),
+            Err(e) => Ket::Hong(e.to_string()),
+        },
+    ));
+
+    // ⑥ Tên thư mục nhật ký khớp luật `transcript_slug`.
+    out.push(("⑥ thư mục nhật ký ~/.claude/projects".into(), kiem_slug()));
+    out
+}
+
+trait NewConsole {
+    fn creation_flags_new_console(&mut self) -> &mut Self;
+}
+
+impl NewConsole for std::process::Command {
+    fn creation_flags_new_console(&mut self) -> &mut Self {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        self.creation_flags(CREATE_NEW_CONSOLE)
+    }
+}
+
+/// Mở một console bằng `mo`, rồi đo đủ bốn việc huba làm với console của một
+/// phiên: có cửa sổ · đọc được màn · gõ `echo <mốc>` + Enter rồi thấy mốc
+/// đứng RIÊNG một dòng (dòng kết quả, khác dòng lệnh vừa gõ) · đóng được.
+fn thu_console(mo: impl FnOnce() -> Result<i64>) -> Ket {
+    let pid = match mo() {
+        Ok(p) => p,
+        Err(e) => return Ket::Kdd(format!("không mở được console để đo: {e}")),
+    };
+    let mut ghi = Vec::new();
+    // Chờ shell dựng xong dấu nhắc.
+    let mut man = String::new();
+    for _ in 0..40 {
+        std::thread::sleep(Duration::from_millis(250));
+        if let Ok(s) = screen_text(pid) {
+            if s.contains("PS ") {
+                man = s;
+                break;
+            }
+        }
+    }
+    if man.is_empty() {
+        let _ = close_window(pid);
+        return Ket::Hong(format!(
+            "console pid {pid}: không đọc được dấu nhắc PowerShell sau 10 giây (có cửa sổ: {})",
+            has_console_window(pid)
+        ));
+    }
+    ghi.push(format!("cửa sổ={}", has_console_window(pid)));
+    if let Ok((h, c)) = window_size(pid) {
+        ghi.push(format!("cỡ {h}×{c}"));
+    }
+    let moc = format!("HUBA{:x}", std::process::id() ^ 0x5a5a);
+    let go = type_into(pid, &format!("echo {moc}"))
+        .and_then(|_| press_writes(pid, &[vec!["enter".to_string()]]));
+    if let Err(e) = go {
+        let _ = close_window(pid);
+        return Ket::Hong(format!("gõ hỏng: {e}"));
+    }
+    let mut thay = false;
+    for _ in 0..20 {
+        std::thread::sleep(Duration::from_millis(250));
+        if let Ok(s) = screen_text(pid) {
+            if s.lines().any(|l| l.trim() == moc) {
+                thay = true;
+                break;
+            }
+        }
+    }
+    if !thay {
+        let _ = close_window(pid);
+        return Ket::Hong(format!(
+            "gõ xong nhưng KHÔNG thấy dòng kết quả `{moc}` trên màn ({})",
+            ghi.join(", ")
+        ));
+    }
+    ghi.push("gõ + Enter + đọc lại: thấy mốc".into());
+    match close_window(pid) {
+        Ok(Closed::Gone) => ghi.push("đóng: shell đã thoát".into()),
+        Ok(Closed::Hidden) => ghi.push("đóng: chỉ ẩn".into()),
+        Err(e) => return Ket::Hong(format!("{} — nhưng ĐÓNG hỏng: {e}", ghi.join(", "))),
+    }
+    Ket::Dat(ghi.join(", "))
+}
+
+/// So tên thư mục nhật ký có thật với `transcript_slug(cwd)` — nhật ký nào mang
+/// `cwd` thì đối chiếu được.
+fn kiem_slug() -> Ket {
+    let Some(home) = crate::config::home_dir() else {
+        return Ket::Kdd("không biết thư mục nhà".into());
+    };
+    let root = home.join(".claude").join("projects");
+    let Ok(dirs) = std::fs::read_dir(&root) else {
+        return Ket::Kdd(format!("không có {}", root.display()));
+    };
+    let (mut khop, mut lech, mut vi_du) = (0usize, 0usize, Vec::new());
+    for d in dirs.flatten().take(40) {
+        let Some(f) = std::fs::read_dir(d.path()).ok().and_then(|mut it| {
+            it.find_map(|e| {
+                let p = e.ok()?.path();
+                (p.extension().is_some_and(|x| x == "jsonl")).then_some(p)
+            })
+        }) else {
+            continue;
+        };
+        let Ok(text) = std::fs::read_to_string(&f) else {
+            continue;
+        };
+        let Some(cwd) = text.lines().find_map(|l| {
+            serde_json::from_str::<serde_json::Value>(l)
+                .ok()?
+                .get("cwd")?
+                .as_str()
+                .map(str::to_string)
+        }) else {
+            continue;
+        };
+        let name = d.file_name().to_string_lossy().to_string();
+        if crate::sessions::transcript_slug(&cwd) == name {
+            khop += 1;
+        } else {
+            lech += 1;
+            if vi_du.len() < 3 {
+                vi_du.push(format!("{cwd} → {name}"));
+            }
+        }
+    }
+    match (khop, lech) {
+        (0, 0) => Ket::Kdd("không có nhật ký nào mang cwd để đối chiếu".into()),
+        (_, 0) => Ket::Dat(format!("{khop}/{khop} thư mục khớp luật")),
+        _ => Ket::Hong(format!("{khop} khớp, {lech} lệch: {}", vi_du.join(" | "))),
+    }
 }

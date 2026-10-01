@@ -4,9 +4,10 @@
 #   powershell -ExecutionPolicy Bypass -File install_update.ps1 -BinDir D:\huba-win   # cài bản dựng sẵn
 #   powershell -ExecutionPolicy Bypass -File install_update.ps1 -Verify    # CHỈ ĐỌC: bản cài có phải bản vừa dựng
 #
-# Chạy bằng PowerShell THƯỜNG — KHÔNG "Run as Administrator". huba gõ phím (SendInput) và đọc
-# màn (UI Automation) vào cửa sổ Windows Terminal; Windows CHẶN hai việc ấy giữa hai mức quyền
-# khác nhau (UIPI), nên huba phải chạy CÙNG mức quyền với các cửa sổ `claude` — tức mức thường.
+# Chạy bằng PowerShell THƯỜNG — KHÔNG "Run as Administrator". huba gắn vào console của từng phiên
+# (AttachConsole) để gõ phím và đọc màn; một tiến trình thường KHÔNG gắn được vào console của tiến
+# trình chạy nâng quyền, nên huba và các cửa sổ `claude` phải cùng mức quyền thường.
+# Đo trước khi cài: `huba.exe windows-tu-kiem` (trong gói) — gõ + đọc console thật, không cần cấu hình.
 #
 # Khác macOS ở ba chỗ (Hà 30/09 «viết để chạy được window»):
 #   · không ký chứng chỉ: Windows không gắn quyền theo chữ ký như TCC (xem rust/src/keys_win.rs);

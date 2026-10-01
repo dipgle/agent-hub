@@ -361,8 +361,66 @@ fn kill_group(pid: u32) {
     }
 }
 
-#[cfg(not(unix))]
+/// Windows không có nhóm tiến trình kiểu POSIX — `taskkill /T` giết CẢ CÂY
+/// theo `ppid` (`claude` → `node` → con của nó), đúng vai trò `kill -KILL -pgid`.
+/// Bản trước là hàm rỗng: hết giờ thì chỉ đứa con trực tiếp chết, cháu rò lại —
+/// đúng ca 2026-08-10 trên macOS mà nhóm tiến trình sinh ra để chặn.
+#[cfg(windows)]
+fn kill_group(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    let out = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => crate::logging::warn(
+            "kill_group_unconfirmed",
+            serde_json::json!({ "pid": pid, "code": o.status.code(),
+                                "err": String::from_utf8_lossy(&o.stderr).trim(),
+                                "effect": "hết giờ rồi mà cây tiến trình chưa chắc đã chết" }),
+        ),
+        Err(e) => crate::logging::warn(
+            "kill_group_unconfirmed",
+            serde_json::json!({ "pid": pid, "err": e.to_string(),
+                                "effect": "không chạy được taskkill — cây tiến trình có thể còn sống" }),
+        ),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn kill_group(_pid: u32) {}
+
+/// Windows: tên trần (`claude`) ⟹ đường dẫn đầy đủ theo `PATH`, thử `.exe` rồi
+/// `.cmd`/`.bat`.
+///
+/// `Command::new("claude")` của Rust trên Windows chỉ tự thêm `.exe` — bản
+/// `claude` cài bằng npm là `claude.cmd`, nên mọi lượt gọi CLI hỏng ở bước
+/// spawn. Đưa đường dẫn `.cmd` đầy đủ cho `Command` thì Rust (≥ 1.77) tự chạy
+/// qua `cmd.exe` VÀ tự thoát đối số an toàn (bản vá BatBadBut) — không tự viết
+/// lớp bọc `cmd /c` nào ở đây. Không tìm thấy ⟹ giữ nguyên tên, để lỗi spawn
+/// nói đúng tên chủ máy đã khai.
+#[cfg(windows)]
+pub fn resolve_program(name: &str) -> String {
+    let p = std::path::Path::new(name);
+    if p.extension().is_some() || name.contains(['\\', '/']) {
+        return name.to_string();
+    }
+    let Some(path) = std::env::var_os("PATH") else {
+        return name.to_string();
+    };
+    for dir in std::env::split_paths(&path) {
+        for ext in ["exe", "cmd", "bat"] {
+            let cand = dir.join(format!("{name}.{ext}"));
+            if cand.is_file() {
+                return cand.to_string_lossy().to_string();
+            }
+        }
+    }
+    name.to_string()
+}
 
 /// Run a command, capture stdout/stderr, enforce a hard timeout.
 /// Never errors on a non-zero exit — the caller decides what failure means.
@@ -373,6 +431,8 @@ pub fn run(cmd: &str, args: &[&str], opts: RunOpts) -> Result<RunOut> {
 
     // Hạng đi kèm LỜI GỌI, không kèm tiến trình — xem `Lane`.
     let (cmd_run, args_run) = lane_wrap(cmd, args);
+    #[cfg(windows)]
+    let cmd_run = resolve_program(&cmd_run);
     let mut command = Command::new(&cmd_run);
     command
         .args(&args_run)

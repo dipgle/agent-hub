@@ -522,7 +522,32 @@ pub fn is_hub_own_probe(s: &LiveSession) -> bool {
 /// danh sách: lúc ấy không còn hàng `LiveSession` nào để hỏi, mà đó chính là
 /// lượt sinh ra tin "đã tắt".
 pub fn is_hub_runtime_cwd(cwd: &str) -> bool {
-    !cwd.is_empty() && Path::new(cwd) == crate::config::expand_home(Path::new(HUBD_RUNTIME_DIR))
+    if cwd.is_empty() {
+        return false;
+    }
+    let want = hubd_runtime_dir();
+    if cfg!(windows) {
+        // Đường dẫn Windows không phân biệt hoa thường.
+        return cwd
+            .trim_end_matches(['\\', '/'])
+            .eq_ignore_ascii_case(want.to_string_lossy().trim_end_matches(['\\', '/']));
+    }
+    Path::new(cwd) == want
+}
+
+/// Thư mục phép dò của CHÍNH huba chạy trong — xem `is_hub_own_probe`.
+///
+/// macOS: thư mục launchd đặt hubad. Windows: `%LOCALAPPDATA%\hub` — KHÔNG phải
+/// thư mục làm việc của hubd (Task Scheduler đặt nó ở thư mục gói để tìm ra
+/// `huba.config.json`), nên phép dò `/usage` được ĐẶT chạy ở đây một cách tường
+/// minh (`runtime::usage_one`), thay vì trông vào chỗ nó tình cờ thừa hưởng.
+pub fn hubd_runtime_dir() -> PathBuf {
+    if cfg!(windows) {
+        if let Some(d) = std::env::var_os("LOCALAPPDATA") {
+            return Path::new(&d).join("hub");
+        }
+    }
+    crate::config::expand_home(Path::new(HUBD_RUNTIME_DIR))
 }
 
 /// Phiên có đang ĐỨNG vì một lỗi API không — đọc từ CẤU TRÚC nhật ký.
@@ -1068,6 +1093,25 @@ pub fn is_real_tty(tty: &str) -> bool {
 fn ancestor_pids(max_bac: usize) -> Vec<i64> {
     let mut day = Vec::new();
     let mut pid = std::process::id() as i64;
+    // Windows: không có `ps` — leo trên bảng ToolHelp đọc MỘT lần.
+    #[cfg(windows)]
+    {
+        let Ok(rows) = crate::keys_win::process_table() else {
+            return day;
+        };
+        let cha_cua: HashMap<i64, i64> = rows.iter().map(|r| (r.pid, r.ppid)).collect();
+        for _ in 0..max_bac {
+            match cha_cua.get(&pid) {
+                Some(&cha) if cha > 4 && !day.contains(&cha) => {
+                    day.push(cha);
+                    pid = cha;
+                }
+                _ => break,
+            }
+        }
+        return day;
+    }
+    #[cfg_attr(windows, allow(unreachable_code))]
     for _ in 0..max_bac {
         let p = pid.to_string();
         let Ok(out) = crate::exec::run(
@@ -1151,14 +1195,33 @@ pub fn window_taken_over<'a>(
 
 /// `~/projects` → `-Users-hanguyen-projects`.
 ///
-/// The rule the CLI uses for its transcript folders: every path separator
-/// becomes a dash, including the leading one.
+/// The rule the CLI uses for its transcript folders: EVERY character outside
+/// `[A-Za-z0-9]` becomes a dash — not only the path separator.
+///
+/// 🔴 Đo 01/10 trên 32 thư mục `~/.claude/projects` (đối chiếu `cwd` trong nhật
+/// ký): luật "mọi ký tự không phải chữ/số → `-`" khớp 30, 2 lệch là thư mục đã
+/// dời từ `Documents`. Bản cũ chỉ thay `/` — sai cho `fbot/.tmp/worker-cwd-8122`
+/// (CLI: `…fbot--tmp-…`) và `Application Support` (CLI: `Application-Support`),
+/// và sai TOÀN BỘ trên Windows: `C:\Users\x` giữ nguyên `:`/`\`, rồi
+/// `PathBuf::join` với một đường tuyệt đối THAY CẢ gốc ⟹ mọi phiên "chưa có
+/// nhật ký". CLI là JavaScript nên đếm theo đơn vị UTF-16: một ký tự ngoài BMP
+/// thành HAI dấu `-`.
 pub fn transcript_slug(cwd: &str) -> String {
-    let trimmed = cwd.trim_end_matches('/');
+    let trimmed = cwd.trim_end_matches(['/', '\\']);
     if trimmed.is_empty() {
         return "-".to_string();
     }
-    trimmed.replace('/', "-")
+    let mut out = String::with_capacity(trimmed.len());
+    for c in trimmed.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c);
+        } else {
+            for _ in 0..c.len_utf16() {
+                out.push('-');
+            }
+        }
+    }
+    out
 }
 
 pub fn transcript_path(root: &Path, cwd: &str, session_id: &str) -> PathBuf {
@@ -1301,6 +1364,30 @@ struct Procs {
 }
 
 impl Procs {
+    /// Windows: không có `ps` — đọc ToolHelp32 (`keys_win::process_table`), rồi
+    /// đặt "tty" `con<gốc>` cho từng tiến trình `claude` có console mang cửa sổ
+    /// (`ps_rows_from_windows`).
+    #[cfg(windows)]
+    fn read() -> Procs {
+        match crate::keys_win::process_table() {
+            Ok(rows) => {
+                let by_pid = ps_rows_from_windows(&rows, crate::keys_win::has_console_window)
+                    .into_iter()
+                    .map(|(pid, ppid, tty, command)| (pid, Proc { ppid, tty, command }))
+                    .collect();
+                Procs { by_pid, ok: true }
+            }
+            Err(e) => {
+                logging::warn(
+                    "ps_table_failed",
+                    json!({ "err": e.to_string(), "os": "windows" }),
+                );
+                Procs::default()
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
     fn read() -> Procs {
         let out = run(
             "ps",
@@ -1443,6 +1530,46 @@ pub fn parse_ps_line(line: &str) -> Option<(i64, i64, String, String)> {
     ))
 }
 
+/// Windows: bảng tiến trình ⟹ các hàng `(pid, ppid, tty, command)` cùng hình
+/// dạng với `parse_ps_line`.
+///
+/// "tty" chỉ đặt cho tiến trình `claude` (đó là thứ duy nhất `host_of`/
+/// `session_on_tty`/`unlisted_claude_processes` hỏi tới): `con<pid shell gốc>`
+/// khi console của nó CÓ cửa sổ (`has_console`, hỏi một lần cho mỗi gốc), rỗng
+/// khi không — phép dò `claude -p` chạy `CREATE_NO_WINDOW` của chính huba thì
+/// rỗng, nên nó đọc ra `detached` như `??` của `ps` trên macOS.
+/// Thuần — `has_console` được truyền vào — nên kiểm được trên mọi nền.
+pub fn ps_rows_from_windows(
+    rows: &[crate::win_procs::Row],
+    has_console: impl Fn(i64) -> bool,
+) -> Vec<(i64, i64, String, String)> {
+    let by_pid: HashMap<i64, &crate::win_procs::Row> = rows.iter().map(|r| (r.pid, r)).collect();
+    let mut co_cua_so: HashMap<i64, bool> = HashMap::new();
+    rows.iter()
+        .map(|r| {
+            let command = if r.cmd.is_empty() {
+                r.exe.clone()
+            } else {
+                r.cmd.clone()
+            };
+            let tty = if crate::win_procs::is_console_client(&r.exe) && is_claude_process(&command)
+            {
+                let root = crate::win_procs::console_root(&by_pid, r.pid);
+                let ok = *co_cua_so.entry(root).or_insert_with(|| has_console(r.pid));
+                if ok {
+                    crate::win_procs::tty_of_root(root)
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+            (r.pid, r.ppid, tty, command)
+        })
+        .collect()
+}
+
+#[cfg_attr(windows, allow(dead_code))]
 fn parse_ps_row(line: &str) -> Option<(i64, Proc)> {
     let (pid, ppid, tty, command) = parse_ps_line(line)?;
     Some((pid, Proc { ppid, tty, command }))
@@ -1473,8 +1600,11 @@ pub fn is_claude_process(cmd: &str) -> bool {
     if cmd.contains("claude-code") {
         return true;
     }
+    // Windows: `"C:\Users\x\.local\bin\claude.exe" --resume …` — tách cả `\`, và
+    // bỏ nháy kép bọc quanh đường dẫn có khoảng trắng.
     cmd.split_whitespace().any(|tok| {
-        tok.rsplit('/')
+        tok.trim_matches('"')
+            .rsplit(['/', '\\'])
             .next()
             .is_some_and(|base| base.starts_with("claude"))
     })
@@ -1496,7 +1626,12 @@ pub fn classify_host(cmd: &str, kind: &str, tty: &str) -> &'static str {
     // The extension ships its own `claude` under the editor's extension dir, so
     // the PATH is what separates it from a terminal — the process name is
     // `claude` in both cases.
-    if cmd.contains("/.vscode") || cmd.contains("/.cursor") || cmd.contains("Cursor.app") {
+    if cmd.contains("/.vscode")
+        || cmd.contains("/.cursor")
+        || cmd.contains("Cursor.app")
+        || cmd.contains("\\.vscode")
+        || cmd.contains("\\.cursor")
+    {
         return "editor";
     }
     // "terminal" phải CÓ NGHĨA LÀ terminal.
@@ -6658,7 +6793,7 @@ fn start_in_terminal(
     resume: Option<&str>,
 ) -> Result<Started> {
     // Mở cửa sổ TRỐNG — đề bài gõ vào sau, khi ô nhập đã sẵn sàng.
-    let cmd = terminal_command_resuming(&account_launch(cfg, account), root, None, resume);
+    let cmd = window_command(cfg, account, root, None, resume);
     let (window, tty) = crate::keys::open_window(&cmd)?;
     let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
     logging::info(
@@ -7416,7 +7551,7 @@ pub fn start_fresh_after_handover(
     } else {
         ensure_account_usable(cfg, Some(dung_acc))?;
     }
-    let cmd = terminal_command(&account_launch(cfg, Some(dung_acc)), cwd, Some(&task));
+    let cmd = window_command(cfg, Some(dung_acc), cwd, Some(&task), None);
     let opened_at = std::time::SystemTime::now();
     let (_window, tty) = crate::keys::open_window(&cmd)?;
     let tty_short = tty.rsplit('/').next().unwrap_or(&tty).to_string();
@@ -7753,6 +7888,95 @@ pub fn terminal_command_resuming(
     format!(
         "cd {} && {} --permission-mode auto {}{}--disallowedTools {}",
         shell_quote(&root.to_string_lossy()),
+        launch,
+        resume,
+        prompt,
+        denied
+    )
+}
+
+/// Dòng lệnh mở một phiên trong cửa sổ MỚI, đúng cú pháp của nền đang chạy:
+/// shell POSIX trên macOS (`terminal_command_resuming`), PowerShell trên Windows
+/// (`terminal_script_ps`). Hai chỗ mở cửa sổ (`/new`, tự bàn giao) đi qua đây.
+pub fn window_command(
+    cfg: &Config,
+    account: Option<&str>,
+    root: &Path,
+    prompt: Option<&str>,
+    resume: Option<&str>,
+) -> String {
+    if cfg!(windows) {
+        terminal_script_ps(&account_launch_ps(cfg, account), root, prompt, resume)
+    } else {
+        terminal_command_resuming(&account_launch(cfg, account), root, prompt, resume)
+    }
+}
+
+/// [`account_launch`] cho PowerShell: `$env:CLAUDE_CONFIG_DIR = '…'; & 'claude'`.
+/// Từ `launch` chủ máy tự khai thì giữ nguyên chữ (như bản macOS), đứng sau `&`.
+pub fn account_launch_ps(cfg: &Config, account: Option<&str>) -> String {
+    use crate::win_procs::ps_quote;
+    let row = account.and_then(|a| {
+        let found = cfg
+            .claude_accounts_or_ambient()
+            .into_iter()
+            .find(|x| x.name == a);
+        if found.is_none() {
+            logging::warn(
+                "account_launch_unknown",
+                json!({ "account": a, "why": "rơi về tài khoản mặc định" }),
+            );
+        }
+        found
+    });
+    if let Some(l) = row.as_ref().and_then(|r| r.launch.as_ref()) {
+        let l = l.trim();
+        if !l.is_empty() {
+            return format!("& {l}");
+        }
+    }
+    match row
+        .and_then(|r| r.config_dir)
+        .map(|d| crate::config::expand_home(Path::new(&d)))
+    {
+        Some(dir) => format!(
+            "$env:CLAUDE_CONFIG_DIR = {}; & {}",
+            ps_quote(&dir.to_string_lossy()),
+            ps_quote(&cfg.claude_cli)
+        ),
+        None => format!("& {}", ps_quote(&cfg.claude_cli)),
+    }
+}
+
+/// [`terminal_command_resuming`] cho Windows PowerShell 5.1 — cùng rào, cùng thứ
+/// tự đối số (đề bài đứng TRƯỚC `--disallowedTools` vì cờ ấy variadic, luật 10).
+///
+/// Mỗi đối số đi qua `ps_arg`: nháy đơn của PowerShell bên ngoài, luật thoát
+/// `CommandLineToArgvW` bên trong — 5.1 không tự thoát `"` khi chuyển đối số cho
+/// chương trình ngoài, nên một bản bàn giao chứa `"` sẽ vỡ đôi nếu để trần.
+pub fn terminal_script_ps(
+    launch: &str,
+    root: &Path,
+    prompt: Option<&str>,
+    resume: Option<&str>,
+) -> String {
+    use crate::win_procs::{ps_arg, ps_quote};
+    let denied = DENIED_TOOLS
+        .iter()
+        .map(|t| ps_arg(t))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let resume = match resume.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(r) => format!("--resume {} ", ps_arg(r)),
+        None => String::new(),
+    };
+    let prompt = match prompt.map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => format!("{} ", ps_arg(p)),
+        None => String::new(),
+    };
+    format!(
+        "Set-Location -LiteralPath {}\n{} --permission-mode auto {}{}--disallowedTools {}",
+        ps_quote(&root.to_string_lossy()),
         launch,
         resume,
         prompt,

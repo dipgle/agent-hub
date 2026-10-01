@@ -70,3 +70,6 @@ pub mod telegram;
 pub mod verbs;
 pub mod watch;
 pub mod web;
+/// Windows: bảng tiến trình ⟹ console nào chạy phiên nào. Phần THUẦN, biên dịch
+/// và kiểm được trên mọi nền — phần gọi hệ điều hành nằm ở `keys_win.rs`.
+pub mod win_procs;

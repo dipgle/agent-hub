@@ -39,6 +39,48 @@ fn cwd_maps_to_the_folder_the_cli_writes_transcripts_into() {
     );
 }
 
+/// Luật THẬT của CLI: mọi ký tự ngoài `[A-Za-z0-9]` → `-`. Ba ca đầu là tên thư
+/// mục CÓ THẬT trên máy này (đo 01/10, đối chiếu `cwd` trong nhật ký); bản cũ chỉ
+/// thay `/` nên ra sai cả ba.
+#[test]
+fn slug_doi_moi_ky_tu_khong_phai_chu_so() {
+    assert_eq!(
+        transcript_slug("/Users/hanguyen/projects/fbot/.tmp/worker-cwd-8122"),
+        "-Users-hanguyen-projects-fbot--tmp-worker-cwd-8122"
+    );
+    assert_eq!(
+        transcript_slug("/Users/hanguyen/Library/Application Support/hub"),
+        "-Users-hanguyen-Library-Application-Support-hub"
+    );
+    assert_eq!(
+        transcript_slug("/private/var/folders/9q/x/T/tmp.FDnM6sD4E3"),
+        "-private-var-folders-9q-x-T-tmp-FDnM6sD4E3"
+    );
+    // Windows: `:` và `\` cũng là ký tự ngoài chữ/số; gạch chéo ngược cuối bị cắt.
+    assert_eq!(
+        transcript_slug(r"C:\Users\ha\projects"),
+        "C--Users-ha-projects"
+    );
+    assert_eq!(
+        transcript_slug(r"C:\Users\ha\projects\"),
+        "C--Users-ha-projects"
+    );
+    // CLI đếm theo UTF-16: chữ Việt (một đơn vị) ⟹ một `-`; ký tự ngoài BMP ⟹ hai.
+    assert_eq!(transcript_slug("/a/dự-án"), "-a-d---n");
+    assert_eq!(transcript_slug("/a/x😀"), "-a-x--");
+}
+
+/// Đường dẫn Windows phải ra một thư mục CON của `projects`, không thay cả gốc —
+/// `PathBuf::join` với `C:\…` tuyệt đối sẽ bỏ gốc nếu slug còn giữ `:`/`\`.
+#[test]
+fn duong_dan_windows_nam_duoi_projects() {
+    let p = transcript_path(Path::new("/home/x/.claude"), r"C:\Users\ha\projects", "s1");
+    assert_eq!(
+        p,
+        Path::new("/home/x/.claude/projects/C--Users-ha-projects/s1.jsonl")
+    );
+}
+
 #[test]
 fn the_last_record_is_usually_not_the_last_turn() {
     // Real transcripts end on bookkeeping as often as on conversation: of 14

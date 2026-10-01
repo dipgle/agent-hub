@@ -1,0 +1,47 @@
+huba cho Windows — đọc trước khi chạy
+=====================================
+
+Bản này dựng trên macOS, CHƯA chạy trên máy Windows thật. Bước 1 dưới đây là
+PHÉP ĐO: nó mở 2 cửa sổ console, gõ thử, đọc lại, rồi tự đóng. Gửi tệp kết quả
+về trước khi dùng thật.
+
+Mở PowerShell THƯỜNG (KHÔNG "Run as Administrator"), cd vào thư mục giải nén:
+
+  1) ĐO (khoảng 30 giây, không cần cấu hình):
+       .\huba.exe windows-tu-kiem
+     In ra từng mục ✅ / ❌ / ⏭ và đường dẫn một tệp kết quả — gửi tệp ấy về.
+     Mã thoát: 0 = đạt hết · 1 = có mục hỏng · 2 = có mục KHÔNG ĐO ĐƯỢC.
+     Mục ② cần một phiên `claude` đang chạy: mở một tab Windows Terminal, gõ
+     `claude`, rồi chạy lại lệnh đo.
+     (Đo phụ, chỉ đọc: powershell -ExecutionPolicy Bypass -File scripts\do-windows.ps1)
+
+  2) Tạo cấu hình + sổ:
+       .\huba.exe init
+     Sửa huba.config.json: "claude_accounts" của MÁY NÀY (config_dir từng tài khoản).
+
+  3) Điền bí mật Telegram (mở trang 127.0.0.1 để điền):
+       .\huba.exe setup
+     !! Dùng BOT RIÊNG cho máy Windows — hai hubd cùng một bot sẽ giành
+        getUpdates (409 Conflict).
+
+  4) Cài + chạy nền (Task Scheduler "huba-hubd", tự chạy lúc đăng nhập):
+       powershell -ExecutionPolicy Bypass -File install_update.ps1 -BinDir .
+     Kiểm:     powershell -ExecutionPolicy Bypass -File install_update.ps1 -BinDir . -Verify
+     Nhật ký:  logs\huba.log
+
+Cách bản Windows làm việc
+-------------------------
+· Mỗi phiên `claude` nằm trong một CONSOLE (một tab Windows Terminal, hay một cửa
+  sổ console). huba gắn vào đúng console ấy để gõ và đọc màn — không cần cửa sổ
+  ở trước, không giành chuột/bàn phím của người đang ngồi máy.
+· Trong sổ của huba, "tty" của một phiên trên Windows là con<pid shell gốc>,
+  ví dụ con12345.
+· /new mở một cửa sổ Windows Terminal MỚI (không có wt.exe thì mở console cổ
+  điển), chạy PowerShell, rồi gõ đề bài vào khi ô nhập sẵn sàng.
+
+Đã biết CHƯA làm trên Windows
+-----------------------------
+/anh (chụp ảnh cửa sổ) · /web · phát hiện màn khoá · /upgrade (chỉ nói lệnh) ·
+xoá hàng chờ trong ô nhập (/clean) · cuộn ngược quá khung nhìn.
+Chưa đo được, lượt /new thật đầu tiên là phép đo: claude (Node) nhận phím mũi
+tên và khối dán nhiều dòng gửi qua console.

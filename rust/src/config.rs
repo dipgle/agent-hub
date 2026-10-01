@@ -422,7 +422,8 @@ pub fn home_from(
 
 pub fn expand_home(p: &Path) -> PathBuf {
     let s = p.to_string_lossy();
-    if let Some(rest) = s.strip_prefix("~/") {
+    // `~\` cho đường dẫn chủ máy gõ trên Windows (`~\.claude-acc2`).
+    if let Some(rest) = s.strip_prefix("~/").or_else(|| s.strip_prefix("~\\")) {
         if let Some(home) = home_dir() {
             return home.join(rest);
         }

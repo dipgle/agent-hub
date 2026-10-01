@@ -10162,6 +10162,34 @@ const SSH_CO_GIA_TRI: &[&str] = &[
     "-p", "-i", "-o", "-l", "-F", "-J", "-b", "-c", "-E", "-L", "-R", "-D", "-W", "-e", "-m",
 ];
 
+/// Vỏ chạy một dòng lệnh của nút ▶️: `(chương trình, cờ "chạy chuỗi này")`.
+///
+/// macOS: `/bin/zsh -lc`, như cũ. Windows: dòng lệnh ▶️ là thứ PHIÊN gợi ý, và
+/// `claude` trên Windows chạy công cụ Bash bằng **Git Bash** — nên ưu tiên đúng
+/// vỏ ấy, tìm theo cùng thứ tự CLI tìm (`CLAUDE_CODE_GIT_BASH_PATH`, rồi chỗ cài
+/// mặc định của Git); không có thì PowerShell, và cú pháp bash sẽ hỏng ở đó —
+/// hỏng CÓ thông báo, như mọi lệnh hỏng khác của ▶️.
+fn run_shell() -> (String, &'static str) {
+    if !cfg!(windows) {
+        return ("/bin/zsh".to_string(), "-lc");
+    }
+    let mut cands: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(p) = std::env::var_os("CLAUDE_CODE_GIT_BASH_PATH") {
+        cands.push(p.into());
+    }
+    for base in ["ProgramFiles", "ProgramW6432", "LOCALAPPDATA"] {
+        if let Some(d) = std::env::var_os(base) {
+            let d = std::path::Path::new(&d);
+            cands.push(d.join("Git").join("bin").join("bash.exe"));
+            cands.push(d.join("Programs").join("Git").join("bin").join("bash.exe"));
+        }
+    }
+    match cands.into_iter().find(|p| p.is_file()) {
+        Some(b) => (b.to_string_lossy().to_string(), "-lc"),
+        None => ("powershell.exe".to_string(), "-Command"),
+    }
+}
+
 /// Kế hoạch bơm mật khẩu `sudo` qua **stdin** cho một dòng lệnh.
 ///
 /// `Some((host, dòng ĐEM CHẠY))` — `host` rỗng là máy này. `None` = dòng này
@@ -10566,9 +10594,10 @@ fn watch_long_job(job: LongJob) {
             if let Some(id) = viec {
                 so_viec_danh_dau(id, crate::so_viec::Buoc::Chay);
             }
+            let (vo, co) = run_shell();
             let out = crate::exec::run(
-                "/bin/zsh",
-                &["-lc", &chay],
+                &vo,
+                &[co, &chay],
                 crate::exec::RunOpts {
                     cwd: Some(root.as_path()),
                     timeout: Some(std::time::Duration::from_secs(LONG_JOB_MAX_SEC)),
@@ -13267,6 +13296,13 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             Ok((w, tty)) => {
                                 let full = if cwd.trim().is_empty() {
                                     line.clone()
+                                } else if cfg!(windows) {
+                                    // Cửa sổ trên Windows là PowerShell 5.1: `&&` là
+                                    // lỗi cú pháp ở đó.
+                                    format!(
+                                        "Set-Location -LiteralPath {}; {line}",
+                                        crate::win_procs::ps_quote(cwd.trim())
+                                    )
                                 } else {
                                     format!(
                                         "cd {} && {line}",

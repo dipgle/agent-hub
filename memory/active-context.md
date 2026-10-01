@@ -1,5 +1,12 @@
 # active context — huba
 
+## ⏹ 2026-10-01 07:50Z — phiên fb6a2579: TẮT HẲN vòng tự gỡ kẹt (Hà *"Tắt hẳn đi"*)
+
+`huba.config.json` `auto_unstick.enabled=false` (tệp thật; `~/projects/hub/hub.config.json` là symlink tới nó, md5
+trùng). `hubd` nạp lại nóng 07:50:08Z. Trước khi tắt: 18 `auto_unstick_box_firing` trong 07:00–07:50Z. Số đo SAU
+khi tắt: xem mục `UNSTICK-GHOST-ENTER` trong `.tmp/ban-giao.tsv`. Hệ quả: nhánh mới của S42 (`not_in_journal`)
+sẽ KHÔNG bao giờ chạy chừng nào còn tắt — mục `S42-NHAT-KY` đóng theo. Mặc định trong `config.rs` vẫn `true`.
+
 ## 🟢 2026-09-30 22:2xZ→23:xxZ — phiên fb6a2579 (kế nhiệm c4049483): "đã gửi" phải do NHẬT KÝ nói (PLAN S42)
 
 - **Phiên cũ c4049483 đã đóng sạch** 22:25Z: lượt cuối xong 22:23:33Z, cây 0 bẩn · 0/0 origin, không job nền,

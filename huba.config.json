@@ -21,7 +21,7 @@
     "enabled": true
   },
   "auto_unstick": {
-    "enabled": true
+    "enabled": false
   },
   "confirm": {
     "enabled": true,

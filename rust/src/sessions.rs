@@ -1727,6 +1727,11 @@ pub struct TranscriptTail {
     /// trước đó. Muốn biết lượt cuối đã KHÉP chưa thì phải hỏi đúng bản ghi
     /// cuối — xem [`TranscriptTail::turn_open`].
     pub newest_turn: Option<NewestTurn>,
+    /// Thông báo việc NỀN (`<task-notification>`) CLI đã xếp hàng SAU bản ghi hội
+    /// thoại mới nhất mà chưa lấy ra — chữ `<summary>` của từng cái, cũ trước.
+    /// Ở một phiên đã chết: kết quả việc nền nó không bao giờ đọc được — xem
+    /// [`TranscriptTail::turn_open`].
+    pub unread_task_notes: Vec<String>,
 }
 
 /// Bản ghi hội thoại mới nhất của nhật ký — đủ để biết lượt đã khép chưa.
@@ -1815,15 +1820,24 @@ impl TranscriptTail {
     /// ra lệnh gõ tại chỗ (`/context` — ca `594a4cd8` 21/09) không phải một lượt
     /// nên không bao giờ thành `newest_turn`; mọi `isMeta` KHÁC thì có — xem
     /// `is_local_command_output`.
-    /// `Some(false)` chỉ khi lượt khép VÀ không còn subagent treo — một phiên
-    /// rảnh ở dấu nhắc mà còn agent nền chạy thì chết đi vẫn là mất việc.
+    /// `Some(false)` chỉ khi lượt khép VÀ không còn subagent treo VÀ không còn
+    /// thông báo việc nền chưa đọc — một phiên rảnh ở dấu nhắc mà còn việc nền
+    /// chạy thì chết đi vẫn là mất việc.
+    ///
+    /// 🔴 Vế thứ ba từ 2026-10-02: `pending_subagents` chỉ đếm `Agent`/`Task`, nên
+    /// một lệnh `Bash` chạy nền (hay `Monitor`) bị giết theo phiên thì lọt. Đo
+    /// trên 51 tin báo tử mang id phiên (20/09–02/10): **12 tin im** về phiên mà
+    /// lúc thoát CLI xếp hàng `<task-notification>` (`killed` 11 · `failed` 1)
+    /// cho đúng việc nền ấy — đa số là cổng chất lượng đang chạy hay đang chờ.
+    /// Thông báo ấy là dấu CẤU TRÚC (CLI tự ghi), không phải dò chữ.
+    ///
     /// `None` = khung đọc không có bản ghi hội thoại nào: KHÔNG đo được, khác
     /// với "đang mở".
     pub fn turn_open(&self) -> Option<bool> {
         let t = self.newest_turn.as_ref()?;
         let closed = t.interrupted
             || (t.role == "assistant" && t.stop_reason.as_deref() == Some("end_turn"));
-        Some(!closed || self.pending_subagents > 0)
+        Some(!closed || self.pending_subagents > 0 || !self.unread_task_notes.is_empty())
     }
 }
 
@@ -1844,7 +1858,31 @@ pub fn turn_open_at_death(cfg: &Config, session_id: &str) -> Option<bool> {
             return None;
         }
     };
-    parse_tail(&tail, &background_agent_calls(&path)).turn_open()
+    let parsed = parse_tail(&tail, &background_agent_calls(&path));
+    if !parsed.unread_task_notes.is_empty() {
+        logging::info(
+            "death_unread_task_notes",
+            json!({ "session": session_id, "notes": parsed.unread_task_notes }),
+        );
+    }
+    parsed.turn_open()
+}
+
+/// Chữ `<summary>` của MỘT khối `<task-notification>` trọn vẹn; `None` khi chữ
+/// không chứa khối nào đủ cả thẻ mở lẫn thẻ đóng (cùng kỷ luật với
+/// `stopped_background_calls`: lời văn nhắc tới thẻ không được tính).
+fn task_note_summary(text: &str) -> Option<String> {
+    let start = text.find("<task-notification>")?;
+    let rest = &text[start..];
+    let block = &rest[..rest.find("</task-notification>")?];
+    let summary = block
+        .find("<summary>")
+        .and_then(|i| {
+            let s = &block[i + "<summary>".len()..];
+            s.find("</summary>").map(|j| s[..j].trim().to_string())
+        })
+        .unwrap_or_default();
+    Some(summary)
 }
 
 /// Dự án phiên đang làm — đoán từ ĐƯỜNG DẪN nó đụng vào, không phải từ `cwd`.
@@ -3851,6 +3889,10 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
         model,
         ..Default::default()
     };
+    // Thông báo việc nền xếp hàng SAU lượt mới nhất (mới trước, vì đi lùi) và số
+    // lần hàng đợi được lấy ra trong cùng khoảng ấy — xem `unread_task_notes`.
+    let mut queued_notes: Vec<String> = Vec::new();
+    let mut taken = 0usize;
     for line in tail.lines().rev() {
         // `newest_turn` cũng phải có mới được ngừng: đầu ra lệnh gõ tại chỗ có chữ
         // nên làm đầy `last_text` TRƯỚC khi gặp lượt thật nằm ngay sau nó.
@@ -3889,6 +3931,18 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
                 .and_then(|m| m.as_str())
                 .map(str::to_string);
         }
+        if kind == "queue-operation" && out.newest_turn.is_none() {
+            match record.get("operation").and_then(Value::as_str) {
+                Some("enqueue") => queued_notes.extend(
+                    record
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .and_then(task_note_summary),
+                ),
+                Some("dequeue" | "remove") => taken += 1,
+                _ => {}
+            }
+        }
         if !is_conversation(kind) {
             continue;
         }
@@ -3926,6 +3980,11 @@ pub fn parse_tail(tail: &str, background: &HashSet<String>) -> TranscriptTail {
             .and_then(|t| t.as_str())
             .map(str::to_string);
     }
+    // Hàng đợi lấy ra theo thứ tự xếp vào: mỗi lần lấy ăn đi cái CŨ nhất, tức cái
+    // nằm cuối danh sách đi lùi.
+    queued_notes.truncate(queued_notes.len().saturating_sub(taken));
+    queued_notes.reverse();
+    out.unread_task_notes = queued_notes;
     out
 }
 

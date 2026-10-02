@@ -1261,27 +1261,38 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         // `was_working` của sổ là lượt nhìn cuối, mà hai lượt nhìn cách nhau
         // ~2 phút — đúng khoảng một phiên kế nhiệm đọc xong bàn giao rồi đóng
         // phiên cũ vừa xong lượt chót. Nhật ký của phiên đã chết là bản cuối
-        // cùng, nên hỏi nó ở đây ra đúng lúc chết. Chỉ HẠ cờ khi nhật ký chứng
-        // minh lượt đã khép (`Some(false)`); không đọc được thì giữ câu cũ và
-        // nói ra — xem `sessions::TranscriptTail::turn_open`.
+        // cùng, nên hỏi nó ở đây ra đúng lúc chết — theo CẢ HAI chiều; không đọc
+        // được thì giữ cờ của lượt nhìn cuối và nói ra — xem
+        // `sessions::TranscriptTail::turn_open`.
+        //
+        // 🔴 Chiều NÂNG cờ có từ 2026-10-02. Một phiên rảnh ở dấu nhắc mà còn lệnh
+        // chạy nền thì lượt nhìn ghi `working = false` (`bg_shell`), nên trước
+        // đó nhật ký của nó không bao giờ được hỏi: ca `b678630c` 01/10 15:51Z
+        // chết kéo theo một lệnh nền (CLI ghi `killed`), tin báo chỉ nói "đã tắt".
         if let crate::watch::Change::Ended { was_working, .. } = &mut c {
-            if *was_working {
-                match crate::sessions::turn_open_at_death(cfg, &id) {
-                    Some(false) => {
-                        *was_working = false;
-                        logging::info(
-                            "session_end_was_idle",
-                            json!({ "session": id,
-                                    "why": "sổ nhìn cuối thấy đang chạy, nhưng nhật ký đã khép lượt (end_turn hoặc chủ máy ngắt) và 0 subagent treo" }),
-                        );
-                    }
-                    Some(true) => {}
-                    None => logging::info(
-                        "session_end_turn_unknown",
+            match (*was_working, crate::sessions::turn_open_at_death(cfg, &id)) {
+                (true, Some(false)) => {
+                    *was_working = false;
+                    logging::info(
+                        "session_end_was_idle",
                         json!({ "session": id,
-                                "why": "không đọc được nhật ký — giữ cờ chạy dở của lượt nhìn cuối" }),
-                    ),
+                                "why": "sổ nhìn cuối thấy đang chạy, nhưng nhật ký đã khép lượt (end_turn hoặc chủ máy ngắt), 0 subagent treo, 0 việc nền chưa đọc" }),
+                    );
                 }
+                (false, Some(true)) => {
+                    *was_working = true;
+                    logging::info(
+                        "session_end_was_busy",
+                        json!({ "session": id,
+                                "why": "sổ nhìn cuối thấy rảnh, nhưng nhật ký nói lượt còn mở hoặc còn việc nền chưa đọc" }),
+                    );
+                }
+                (_, Some(_)) => {}
+                (w, None) => logging::info(
+                    "session_end_turn_unknown",
+                    json!({ "session": id, "was_working": w,
+                            "why": "không đọc được nhật ký — giữ cờ của lượt nhìn cuối" }),
+                ),
             }
         }
 

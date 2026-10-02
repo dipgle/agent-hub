@@ -224,6 +224,115 @@ fn khep_luot_ma_con_agent_nen_la_mo() {
     assert_eq!(t.turn_open(), Some(true));
 }
 
+// ── Việc NỀN bị giết theo phiên (2026-10-02) ────────────────────────────────
+//
+// Đo trên 51 tin báo tử mang id phiên (20/09–02/10): 12 tin IM về phiên mà lúc
+// thoát CLI xếp hàng `<task-notification>` cho một lệnh `Bash` chạy nền (đa số
+// là cổng chất lượng). `pending_subagents` chỉ đếm `Agent`, nên lọt. Hình dạng
+// dưới đây rút từ đuôi nhật ký thật `c4ca6f8e` và `f11de2bd`.
+
+fn xep_hang(sid: &str, status: &str, summary: &str) -> String {
+    format!(
+        r#"{{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-02T04:39:20.449Z","sessionId":"c4ca6f8e","content":"<task-notification>\n<task-id>{sid}</task-id>\n<tool-use-id>toolu_{sid}</tool-use-id>\n<output-file>/private/tmp/{sid}.output</output-file>\n<status>{status}</status>\n<summary>{summary}</summary>\n</task-notification>"}}"#
+    )
+}
+const LAY_RA: &str = r#"{"type":"queue-operation","operation":"dequeue","timestamp":"2026-10-02T04:39:21.000Z","sessionId":"c4ca6f8e"}"#;
+const GO_KHOI: &str = r#"{"type":"queue-operation","operation":"remove","timestamp":"2026-10-02T04:39:21.000Z","sessionId":"c4ca6f8e"}"#;
+const GATE: &str =
+    r#"Background command \"Run quality gate for new main HEAD in background\" was stopped"#;
+
+/// Ca THẬT `c4ca6f8e` 02/10 04:40Z: lượt khép 04:38:21Z, lúc thoát CLI xếp hàng
+/// thông báo `killed` cho cổng đang chạy nền ⟹ còn việc dở.
+#[test]
+fn viec_nen_bi_giet_luc_thoat_la_mo() {
+    let giet = xep_hang("bq1", "killed", GATE);
+    let mut v = duoi_that();
+    v.push(&giet);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(t.pending_subagents, 0, "Bash nền không phải subagent");
+    assert_eq!(
+        t.unread_task_notes,
+        vec![GATE.replace("\\\"", "\"")],
+        "chữ <summary> giải escape JSON"
+    );
+    assert_eq!(t.turn_open(), Some(true));
+}
+
+/// Ca THẬT `f11de2bd`: hai lệnh nền bị giết cùng lúc — đủ cả hai, cũ trước.
+#[test]
+fn hai_viec_nen_bi_giet_giu_thu_tu() {
+    let (a, b) = (
+        xep_hang("bq1", "killed", "A"),
+        xep_hang("bq2", "killed", "B"),
+    );
+    let mut v = duoi_that();
+    v.extend([a.as_str(), b.as_str()]);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(t.unread_task_notes, vec!["A", "B"]);
+    assert_eq!(t.turn_open(), Some(true));
+}
+
+/// Hàng đợi lấy ra cái CŨ nhất trước: A xếp, B xếp, lấy một ⟹ còn B.
+#[test]
+fn lay_ra_an_cai_cu_nhat() {
+    let (a, b) = (
+        xep_hang("bq1", "completed", "A"),
+        xep_hang("bq2", "killed", "B"),
+    );
+    let mut v = duoi_that();
+    v.extend([a.as_str(), b.as_str(), LAY_RA]);
+    let t = parse_tail(&v.join("\n"), &khong_nen());
+    assert_eq!(t.unread_task_notes, vec!["B"]);
+}
+
+/// ĐỐI CHỨNG NGƯỢC: thông báo đã được lấy ra (`dequeue` hay `remove`) ⟹ không
+/// còn gì chưa đọc ⟹ lượt khép vẫn là khép.
+#[test]
+fn thong_bao_da_lay_ra_la_khep() {
+    let giet = xep_hang("bq1", "killed", GATE);
+    for lay in [LAY_RA, GO_KHOI] {
+        let mut v = duoi_that();
+        v.extend([giet.as_str(), lay]);
+        let t = parse_tail(&v.join("\n"), &khong_nen());
+        assert!(t.unread_task_notes.is_empty(), "{lay}");
+        assert_eq!(t.turn_open(), Some(false), "{lay}");
+    }
+}
+
+/// ĐỐI CHỨNG NGƯỢC: thông báo xếp hàng TRƯỚC bản ghi hội thoại mới nhất thuộc về
+/// lượt ấy (CLI đã đưa nó vào lượt) — không tính.
+///
+/// ⚠ Biến thể KHÔNG có sổ sách phía sau là biến thể canh được ranh giới: có
+/// `permission-mode` sau lượt thì vòng đi lùi bỏ qua mọi dòng trước lượt mà
+/// không parse (`chi_tim_nhan_de`), nên gỡ ranh giới vẫn xanh — đo bằng
+/// `.tmp/dot-bien-viec-nen/chay.sh` ca M4.
+#[test]
+fn thong_bao_truoc_luot_moi_nhat_khong_tinh() {
+    let giet = xep_hang("bq1", "killed", GATE);
+    for sau in [&[][..], &SO_SACH_SAU[..]] {
+        let mut v = vec![GOI_BASH, KQ_BASH, giet.as_str(), LOI_CUOI];
+        v.extend(sau);
+        let t = parse_tail(&v.join("\n"), &khong_nen());
+        assert!(t.unread_task_notes.is_empty(), "sổ sách sau: {}", sau.len());
+        assert_eq!(t.turn_open(), Some(false), "sổ sách sau: {}", sau.len());
+    }
+}
+
+/// ĐỐI CHỨNG NGƯỢC: hàng đợi mang chữ người gõ nhắc tới thẻ (không có thẻ đóng),
+/// hay không mang chữ nào — không phải thông báo việc nền.
+#[test]
+fn xep_hang_khong_phai_thong_bao_khong_tinh() {
+    let go = r#"{"type":"queue-operation","operation":"enqueue","content":"sao lại có <task-notification> ở đây?"}"#;
+    let trong = r#"{"type":"queue-operation","operation":"enqueue"}"#;
+    for x in [go, trong] {
+        let mut v = duoi_that();
+        v.push(x);
+        let t = parse_tail(&v.join("\n"), &khong_nen());
+        assert!(t.unread_task_notes.is_empty(), "{x}");
+        assert_eq!(t.turn_open(), Some(false), "{x}");
+    }
+}
+
 // ── KHÔNG ĐO ĐƯỢC ⟹ None, không lẫn vào hai trạng thái trên ─────────────────
 
 #[test]
@@ -264,4 +373,33 @@ fn doi_chung_nguoc_dung_co_so_truc_tiep() {
     assert_eq!(noi_dung(cu), None);
     let sai_cho = format!("{cu}crate::sessions::turn_open_at_death(cfg, &id);\n");
     assert_eq!(noi_dung(&sai_cho), Some(false));
+}
+
+/// Nhật ký phải được hỏi ở CẢ HAI chiều: phép hỏi không nằm sau cửa
+/// `if *was_working`, và có nhánh NÂNG cờ (`session_end_was_busy`) theo sau nó.
+/// `None` = thiếu mỏ neo ⟹ ĐỎ.
+fn hai_chieu(src: &str) -> Option<bool> {
+    let khoi = src.find("Change::Ended { was_working, .. } = &mut c {")?;
+    let hoi = khoi + src[khoi..].find("turn_open_at_death(cfg, &id)")?;
+    let nang = hoi + src[hoi..].find("*was_working = true;")?;
+    let ghi = nang + src[nang..].find("\"session_end_was_busy\"")?;
+    Some(!src[khoi..hoi].contains("if *was_working") && ghi > nang)
+}
+
+#[test]
+fn hoi_nhat_ky_ca_hai_chieu() {
+    assert_eq!(hai_chieu(&nguon()), Some(true));
+}
+
+/// ĐỐI CHỨNG NGƯỢC: hình dạng 01/10 — chỉ hỏi khi sổ thấy đang chạy — phải đỏ;
+/// thiếu nhánh nâng cờ thì không đo được (`None`).
+#[test]
+fn doi_chung_nguoc_chi_ha_co() {
+    let cu = "if let crate::watch::Change::Ended { was_working, .. } = &mut c {\n    if *was_working {\n        match crate::sessions::turn_open_at_death(cfg, &id) {\n            Some(false) => { *was_working = false; }\n            _ => {}\n        }\n    }\n}\n";
+    assert_eq!(hai_chieu(cu), None);
+    let gac_cua = cu.replace(
+        "_ => {}",
+        "Some(true) => { *was_working = true; log(\"session_end_was_busy\"); }\n            _ => {}",
+    );
+    assert_eq!(hai_chieu(&gac_cua), Some(false));
 }

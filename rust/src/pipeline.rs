@@ -9396,9 +9396,11 @@ pub fn prompt_line_text(shown: &str) -> Option<String> {
         if is_cursor_on_a_choice {
             return None;
         }
-        // Đủ dài để `line_carries` bám được, và để không khớp nhầm một dấu
-        // nhắc trống có một ký tự trang trí.
-        (rest.chars().count() >= 4).then(|| rest.to_string())
+        // Cùng MỘT ngưỡng với `keys::input_box_text` — xem
+        // `keys::BOX_TEXT_MIN_CHARS`: ngưỡng 4 riêng ở đây làm `❯ Ok` mất ⏎.
+        // Chuỗi ngắn vẫn neo đúng dòng: `html_with_links` bám LẦN KHỚP CUỐI,
+        // tức chính dòng ô nhập ở đáy màn.
+        (rest.chars().count() >= crate::keys::BOX_TEXT_MIN_CHARS).then(|| rest.to_string())
     })
 }
 

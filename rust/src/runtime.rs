@@ -1382,7 +1382,7 @@ pub fn self_install(cfg: &Config) -> anyhow::Result<String> {
     // chứng minh tệp ấy là sản phẩm của cây mã này. Ca 20/08 nằm gọn ở đây —
     // bin đổi tên `hubd`→`hubad`, bản cũ ở lại trên đĩa, và chính chỗ này chép
     // nó đi cài trong khi `cargo` vừa dựng ra một cái tên khác.
-    match (mtime(&src), newest_source_mtime(&rust_dir)) {
+    match (mtime(&src), newest_build_input_mtime(&rust_dir)) {
         (Some(built_at), Some(changed_at)) if changed_at > built_at => {
             anyhow::bail!(
                 "{} CŨ HƠN cây mã — nó không phải thứ lượt build vừa sinh ra, \
@@ -1725,7 +1725,7 @@ fn stale_against_build(cfg: &Config) -> Value {
     // so — nhưng nói ra là mình MÙ, đừng im: đây chính là hình dạng của lỗi ở
     // trên, và cái phân biệt "không có gì để so" với "tôi đang nhìn nhầm chỗ"
     // là đường dẫn đã nhìn.
-    match newest_source_mtime(&src) {
+    match newest_build_input_mtime(&src) {
         Some(changed_at) => Value::from(changed_at > installed_at),
         None => {
             crate::logging::warn(
@@ -1748,6 +1748,65 @@ fn source_tree(cfg: &Config) -> PathBuf {
 
 fn mtime(p: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(p).ok()?.modified().ok()
+}
+
+/// mtime mới nhất trong những tệp mà bản dựng `hubad` THẬT SỰ dùng — danh sách
+/// rustc ghi ở `target/release/hubad.d` — cộng `Cargo.toml`/`Cargo.lock`.
+///
+/// 🔴 Đo 2026-10-02: đếm "mọi `.rs` dưới `src/`" ([`newest_source_mtime`]) tính cả
+/// `keys_win.rs`/`win_procs.rs` — `#[cfg(windows)]`, bản dựng macOS không đọc.
+/// Sửa chúng thì `cargo` không link lại `hubad`, và `/upgrade` từ chối oan *"CŨ
+/// HƠN cây mã"* (Hà 07:30:19Z), còn bảng sức khoẻ thì báo "daemon chạy mã cũ".
+/// Không có `hubad.d` (chưa dựng lần nào) ⟹ rơi về cách đếm cũ, kèm log.
+fn newest_build_input_mtime(rust_dir: &Path) -> Option<std::time::SystemTime> {
+    let dep_file = rust_dir.join("target/release/hubad.d");
+    let inputs = match std::fs::read_to_string(&dep_file) {
+        Ok(text) => dep_info_inputs(&text),
+        Err(_) => Vec::new(),
+    };
+    if inputs.is_empty() {
+        crate::logging::info(
+            "build_inputs_unknown",
+            json!({ "dep_file": dep_file.display().to_string(),
+                    "fallback": "mọi .rs dưới src/" }),
+        );
+        return newest_source_mtime(rust_dir);
+    }
+    [rust_dir.join("Cargo.toml"), rust_dir.join("Cargo.lock")]
+        .iter()
+        .chain(inputs.iter())
+        .filter_map(|p| mtime(p))
+        .max()
+}
+
+/// Các đầu vào của rule ĐẦU TIÊN trong một tệp dep-info kiểu Makefile
+/// (`<đích>: <vào> <vào> …`), khoảng trắng thoát bằng `\ `.
+fn dep_info_inputs(text: &str) -> Vec<PathBuf> {
+    let first = text.lines().next().unwrap_or("");
+    let Some((_, rest)) = first.split_once(": ") else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut chars = rest.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.peek() == Some(&' ') => {
+                cur.push(' ');
+                chars.next();
+            }
+            ' ' => {
+                if !cur.is_empty() {
+                    out.push(PathBuf::from(std::mem::take(&mut cur)));
+                }
+            }
+            _ => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(PathBuf::from(cur));
+    }
+    out
 }
 
 /// mtime mới nhất trong cây nguồn Rust: mọi `.rs` dưới `src/`, cộng
@@ -2004,5 +2063,83 @@ mod tests {
     fn newest_source_mtime_is_unknown_when_there_is_no_tree() {
         let missing = std::env::temp_dir().join(format!("huba-rt-missing-{}", std::process::id()));
         assert_eq!(newest_source_mtime(&missing), None);
+    }
+
+    /// Một tệp mà bản dựng macOS KHÔNG đọc (`#[cfg(windows)] mod keys_win;`) thì
+    /// sửa nó không làm `hubad` cũ đi.
+    ///
+    /// 🔴 Đo 2026-10-02: sửa `keys_win.rs` (34d2a2d) ⟹ `cargo build --release` không
+    /// link lại `hubad` (rustc không nạp tệp ấy, `hubad.d` không có nó) ⟹ phép so
+    /// "mọi `.rs` dưới `src/`" thấy cây mã mới hơn binary ⟹ `/upgrade` của Hà
+    /// 07:30:19Z trả *"hubad CŨ HƠN cây mã … không cài"* — từ chối OAN.
+    #[test]
+    fn a_source_the_build_never_reads_does_not_make_the_binary_stale() {
+        let root = std::env::temp_dir().join(format!("huba-rt-dep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("target/release")).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "// a").unwrap();
+        let lib = root.join("src/lib.rs");
+        std::fs::write(
+            root.join("target/release/hubad.d"),
+            format!(
+                "{}: {}\n\n{}:\n",
+                root.join("target/release/hubad").display(),
+                lib.display(),
+                lib.display()
+            ),
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Viết SAU CÙNG, nhưng bản dựng không đọc nó.
+        std::fs::write(root.join("src/win_only.rs"), "// windows").unwrap();
+        let expected = [mtime(&lib), mtime(&root.join("Cargo.toml"))]
+            .into_iter()
+            .flatten()
+            .max();
+        assert_eq!(
+            newest_build_input_mtime(&root),
+            expected,
+            "tệp bản dựng không đọc vẫn được tính là mã mới"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Đối chứng: tệp bản dựng CÓ đọc mà mới hơn ⟹ vẫn là mốc mới nhất.
+    #[test]
+    fn a_source_the_build_reads_still_counts() {
+        let root = std::env::temp_dir().join(format!("huba-rt-dep2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("target/release")).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]").unwrap();
+        let lib = root.join("src/lib.rs");
+        std::fs::write(
+            root.join("target/release/hubad.d"),
+            format!(
+                "{}: {}\n",
+                root.join("target/release/hubad").display(),
+                lib.display()
+            ),
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(&lib, "// sửa sau cùng").unwrap();
+        assert_eq!(newest_build_input_mtime(&root), mtime(&lib));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Không có `hubad.d` (chưa dựng lần nào) ⟹ rơi về cách đếm cũ, không mù.
+    #[test]
+    fn without_dep_info_every_source_counts() {
+        let root = std::env::temp_dir().join(format!("huba-rt-dep3-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[package]").unwrap();
+        std::fs::write(root.join("src/lib.rs"), "// a").unwrap();
+        assert_eq!(newest_build_input_mtime(&root), newest_source_mtime(&root));
+        assert!(newest_build_input_mtime(&root).is_some());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

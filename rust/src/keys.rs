@@ -891,6 +891,15 @@ pub fn box_region(screen: &str) -> String {
 // xóa nút đó đi không cần nữa"*. Gỡ cả hàm chứ không để lại một phép đo không
 // ai đọc: một hàm còn đó là một lời mời dựng lại cái nút ấy ở chỗ khác.
 
+/// Ngắn nhất bao nhiêu ký tự thì chữ trong ô nhập là một câu để gửi — MỘT chỗ
+/// cho mọi hàm đọc ô nhập. Một ký tự trơ trọi là dấu trang trí, không phải câu.
+///
+/// 🔴 Hà 2026-10-02 (ảnh `❯ Ok` không có ⏎): câu "ô nhập có gì" từng có hai
+/// ngưỡng — 2 ở [`input_box_text`], 4 ở `pipeline::prompt_line_text` (thứ dựng
+/// nút ⏎) — nên mọi gợi ý dưới 4 ký tự (`Ok`, `ừ`, `có`) chưa bao giờ có nút.
+/// Bài kiểm `tests/box_send_short_suggestion.rs` đòi hai hàm trả lời giống nhau.
+pub const BOX_TEXT_MIN_CHARS: usize = 2;
+
 /// Chữ đang NẰM SẴN trong ô nhập, nếu có — thứ chỉ cần một Enter là gửi đi.
 ///
 /// 🔴 Hà 2026-08-13, gửi ảnh một màn `/shot`: *"như ảnh vừa gửi có gợi ý nội
@@ -957,7 +966,7 @@ pub fn input_box_text(screen: &str) -> Option<String> {
         buf.push_str(t);
     }
     let out = buf.trim().to_string();
-    (out.chars().count() >= 2).then_some(out)
+    (out.chars().count() >= BOX_TEXT_MIN_CHARS).then_some(out)
 }
 
 /// Bóp một đoạn chữ về dạng SO ĐƯỢC giữa màn và nguồn: bỏ khoảng trắng (ô nhập

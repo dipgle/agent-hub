@@ -1,5 +1,15 @@
 # active context — huba
 
+## 🟢 2026-10-02 07:3xZ — phiên 26d92e09: ⏎ cho gợi ý ngắn + `/upgrade` từ chối oan (PLAN S46)
+
+- `3ddc3ca`, cài `hubd@2026-10-02T07:40:02Z` pid 62305 KHỚP, đã đẩy. Hai hàm đọc ô nhập nay chung
+  `keys::BOX_TEXT_MIN_CHARS`; `/upgrade` + bảng sức khoẻ so theo `hubad.d` (đầu vào thật của bản dựng).
+- Bài học: lỗi "lại quay về" ở mảng ô nhập là do CÙNG MỘT câu hỏi có nhiều chỗ trả lời — vá một chỗ, chỗ kia lệch.
+  Gặp lại thì tìm mọi hàm trả lời câu ấy, gộp ngưỡng/luật về một nơi, và viết bài kiểm buộc chúng KHỚP NHAU.
+- ⏳ Chờ Hà: `/shot` phiên có gợi ý ngắn (phải có ⏎) · `/upgrade` (phải cài được).
+- `acc-mo-vai.sh` đọc `locked` (`9fe9e0c`, repo `~/projects`) + `bd42a81` (2 tệp Hà bảo commit); cổng chung trên
+  `~/projects` KHÔNG ĐO ĐƯỢC 2 lượt vì khoá (tfl5) — lượt 3 nền: `.tmp/qg-ws-bd42a81.log`.
+
 ## 🟢 2026-10-01 16:0xZ→17:xxZ — phiên 26d92e09 (kế nhiệm 1162cb52): đo lại 11 nợ "chưa chạy thật", vá 5 lỗi (PLAN S45)
 
 - **Đóng phiên cũ 1162cb52:** lượt cuối `end_turn` 16:03:15Z, cây 0/0, không hòm thư/hàng đợi ⟹ `kill 57253` + đóng

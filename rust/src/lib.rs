@@ -67,6 +67,8 @@ pub mod setup;
 pub mod so_viec;
 /// Telegram làm kênh RA LỆNH hai chiều, không chỉ cái loa.
 pub mod telegram;
+/// Sổ tin đến: update Telegram nằm trên ĐĨA trước khi con dấu `offset` tiến.
+pub mod tin_den;
 pub mod verbs;
 pub mod watch;
 pub mod web;

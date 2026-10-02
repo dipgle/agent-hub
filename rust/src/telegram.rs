@@ -90,7 +90,29 @@ pub struct Incoming {
     /// của Hà chờ bao lâu"* chỉ trả lời được bằng cách ghép hai dòng theo thứ
     /// tự — và phép ghép ấy trôi lệch hai lần trong cùng một buổi đo.
     pub at: std::time::Instant,
+    /// `update_id` của tin đã sinh ra lệnh này trong SỔ TIN ĐẾN
+    /// ([`crate::tin_den`]) — để lô chạy đánh dấu `chay`/`xong` đúng dòng.
+    /// `None` = lệnh huba tự xếp (không từ một update nào).
+    pub tin: Option<i64>,
 }
+
+thread_local! {
+    /// Update mà luồng này đang xử lý, và nó đã sinh ra lệnh nào chưa.
+    ///
+    /// Đặt bởi [`Inbox::xu_ly`] quanh `handle_update`; [`Inbox::push_inner`] đọc
+    /// nó để gắn `update_id` vào lệnh vừa xếp. Thread-local chứ không phải tham
+    /// số: `handle_update` có hàng chục nhánh gọi `push_text`, và một tham số
+    /// phải chuyền qua từng nhánh là một nhánh thứ mười một sẽ quên.
+    static TIN_DANG_XU_LY: std::cell::Cell<Option<(i64, bool)>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Tin CHỮ cũ hơn chừng này thì huba bỏ, có ghi log VÀ báo chủ máy: đó là câu
+/// gõ từ một lần chạy trước, không phải việc đang cần làm. Mười lăm phút rộng
+/// hơn hẳn mọi lượt cài lại (vài giây tới một phút) và hẹp hơn hẳn một buổi máy
+/// tắt — chỗ giữa ấy không có ca nào mơ hồ. Lượt chạy lại sổ tin đến lúc khởi
+/// động dùng chung ngưỡng này ([`crate::tin_den::phan_loai`]).
+pub const TOO_OLD_SEC: i64 = 900;
 
 /// Hàng update chờ thợ, kèm mốc NHẬN của từng cái (để đo thời gian nằm chờ).
 type Inflight = (Mutex<VecDeque<(Value, std::time::Instant)>>, Condvar);
@@ -2096,6 +2118,14 @@ impl Inbox {
         if t.is_empty() {
             return;
         }
+        // Lệnh sinh ra TỪ một update ⟹ mang `update_id` theo, và đánh dấu update
+        // ấy là đã sinh lệnh (để `xu_ly` khỏi khép nó `xong` khi lệnh chưa chạy).
+        let tin = TIN_DANG_XU_LY.with(|c| {
+            c.get().map(|(id, _)| {
+                c.set(Some((id, true)));
+                id
+            })
+        });
         self.queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -2104,6 +2134,7 @@ impl Inbox {
                 quiet,
                 msg_id,
                 at: std::time::Instant::now(),
+                tin,
             });
         logging::info(
             "telegram_command_queued",
@@ -2225,6 +2256,11 @@ impl Inbox {
         // theo tuổi — Telegram không nói lúc bấm (bài học sáng nay), mà một cú
         // bấm tồn đọng thì cùng lắm rơi vào sổ đã đổi và tự trả lời "lệnh ấy đã
         // cũ".
+        //
+        // Sổ tin đến: chạy lại cái lần trước bỏ dở TRƯỚC lượt `getUpdates` đầu
+        // tiên, để tin nào Telegram giao lại đã thấy mình nằm sẵn trong sổ.
+        let mut so: Option<rusqlite::Connection> = None;
+        self.khoi_phuc_tin_den(&mut so);
         loop {
             // 🔴 KHÔNG còn cửa "đứng im nhường `confirm`". Xem luật 1 ở đầu tệp:
             // cờ ấy bật được nhưng không gọi về được một long-poll đang chạy dở,
@@ -2263,25 +2299,110 @@ impl Inbox {
                 .and_then(Value::as_array)
                 .unwrap_or(&empty);
             for u in updates {
-                if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
-                    self.set_offset(id + 1);
+                if self.nhan_mot(&mut so, u) {
+                    self.hand_off(&client, u);
                 }
-                self.hand_off(&client, u);
             }
+        }
+    }
+
+    /// Sổ tin đến của luồng này — mở lần đầu cần, mở hỏng thì NÓI RA và lượt
+    /// sau thử lại (không nhớ cái hỏng).
+    fn so_tin<'a>(
+        &self,
+        so: &'a mut Option<rusqlite::Connection>,
+    ) -> Option<&'a rusqlite::Connection> {
+        if so.is_none() {
+            match crate::tin_den::mo(&self.cfg().db) {
+                Ok(c) => *so = Some(c),
+                Err(e) => {
+                    logging::error(
+                        "tin_den_open_failed",
+                        json!({ "err": e.to_string(),
+                                "effect": "tin vẫn chạy, nhưng KHÔNG có bản dự phòng trên đĩa" }),
+                    );
+                }
+            }
+        }
+        so.as_ref()
+    }
+
+    /// Một update vừa nhận: GHI ĐĨA trước, tiến con dấu `offset` sau.
+    ///
+    /// 🔴 Thứ tự là cả bản vá (02/10). Con dấu tiến ⟹ lượt `getUpdates` kế tiếp
+    /// báo Telegram "đã nhận", và Telegram không giao lại nữa. Tiến dấu khi tin
+    /// mới chỉ nằm trong bộ nhớ thì máy tắt / `hubad` chết / một lượt cài lại ở
+    /// quãng ấy là mất hẳn lệnh của chủ máy — xem [`crate::tin_den`].
+    ///
+    /// Trả `true` khi phải giao cho thợ. `false` = tin ĐÃ có trong sổ (Telegram
+    /// giao lại thứ lượt khôi phục lúc khởi động đã lo) — giao nữa là chạy hai
+    /// lần. Sổ hỏng thì vẫn giao: mất lưới dự phòng còn hơn điếc với chủ máy.
+    fn nhan_mot(&self, so: &mut Option<rusqlite::Connection>, u: &Value) -> bool {
+        let giao = match self.so_tin(so).map(|c| crate::tin_den::ghi_nhan(c, u)) {
+            Some(Ok(moi)) => {
+                if !moi {
+                    logging::info(
+                        "tin_den_duplicate",
+                        json!({ "update_id": u.get("update_id"),
+                                "why": "Telegram giao lại một tin đã nằm trong sổ — không giao lần hai" }),
+                    );
+                }
+                moi
+            }
+            Some(Err(e)) => {
+                logging::error(
+                    "tin_den_write_failed",
+                    json!({ "update_id": u.get("update_id"), "err": e.to_string(),
+                            "effect": "tin vẫn chạy, nhưng KHÔNG có bản dự phòng trên đĩa" }),
+                );
+                // Kết nối có thể đã hỏng — lượt sau mở lại.
+                *so = None;
+                true
+            }
+            None => true,
+        };
+        if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
+            self.set_offset(id + 1);
+        }
+        giao
+    }
+
+    /// Lượt KHỞI ĐỘNG: tin lần trước nhận mà chưa khép — chạy lại cái chưa chạy,
+    /// báo cái đang chạy dở và cái đã quá cũ. Xem bảng bước ở [`crate::tin_den`].
+    fn khoi_phuc_tin_den(&self, so: &mut Option<rusqlite::Connection>) {
+        let Some(c) = self.so_tin(so) else { return };
+        let (cau, chay_lai) = crate::tin_den::khoi_phuc(c, chrono::Utc::now(), TOO_OLD_SEC);
+        if let Some(cau) = cau {
+            if let Err(e) = self.send_text(&cau) {
+                logging::error("tin_den_notice_failed", json!({ "err": e }));
+            }
+        }
+        if chay_lai.is_empty() {
+            return;
+        }
+        let Some(client) = self.client() else { return };
+        for u in &chay_lai {
+            self.hand_off(&client, u);
         }
     }
 
     /// Giao một update cho luồng thợ — và quay lại nghe NGAY.
     ///
-    /// Con dấu `offset` đã tiến trước khi tới đây (xem chỗ gọi), nên update này
-    /// sẽ không được Telegram giao lại lần nữa: bỏ nó ở đây là mất hẳn một mệnh
-    /// lệnh. Vì thế hàng đợi **không có trần** và không bao giờ vứt bớt; cái nó
-    /// có là một tiếng kêu khi dài bất thường.
+    /// Con dấu `offset` đã tiến trước khi tới đây (xem chỗ gọi), nên Telegram sẽ
+    /// không giao lại update này; bản còn lại duy nhất nằm trong sổ tin đến.
+    /// Bỏ nó ở đây thì chỉ còn lượt khởi động sau mới cứu được — nên hàng đợi
+    /// **không có trần** và không bao giờ vứt bớt; cái nó có là một tiếng kêu khi
+    /// dài bất thường.
     fn hand_off(&self, client: &reqwest::blocking::Client, u: &Value) {
         if self.inline.load(Ordering::SeqCst) {
-            self.handle_update(client, u);
+            self.xu_ly(client, u);
             return;
         }
+        self.hand_off_queue(u);
+    }
+
+    /// Nửa KHÔNG mạng của [`Self::hand_off`]: đẩy vào hàng của luồng thợ.
+    fn hand_off_queue(&self, u: &Value) {
         let (lock, cv) = &*self.inflight;
         let depth = {
             let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -2341,7 +2462,51 @@ impl Inbox {
                             "why": "update nằm trong hàng của huba chừng ấy trước khi tới lượt" }),
                 );
             }
-            self.handle_update(&client, &u);
+            self.xu_ly(&client, &u);
+        }
+    }
+
+    /// Một tin chữ quá [`TOO_OLD_SEC`]: khép `bo` trong sổ và trả câu báo chủ máy.
+    ///
+    /// 🔴 Thêm 02/10. Trước đó chỉ có dòng log `telegram_update_too_old`, tức một
+    /// câu Hà gõ lúc huba không nghe được bị bỏ mà Hà không có đường nào biết —
+    /// đúng hình dạng "lệnh mất không dấu vết" mà sổ tin đến sinh ra để chặn.
+    /// `None` cho tin NGƯỜI LẠ: nó đã có cổng riêng, và trả lời người lạ là mở
+    /// miệng với người lạ.
+    fn bo_tin_qua_cu(&self, u: &Value, sent: i64) -> Option<String> {
+        if update_sender(u).as_deref() != Some(self.chat_id.as_str()) {
+            return None;
+        }
+        if let Some(id) = u.get("update_id").and_then(Value::as_i64) {
+            crate::tin_den::danh_dau_tai(&self.cfg().db, &[id], crate::tin_den::Buoc::Bo);
+        }
+        let (_, chu, _) = crate::tin_den::tom_tat(u);
+        let luc = chrono::DateTime::from_timestamp(sent, 0)
+            .map(|d| {
+                d.with_timezone(&chrono::Local)
+                    .format("%H:%M %d/%m")
+                    .to_string()
+            })
+            .unwrap_or_default();
+        Some(format!(
+            "⏭ Tin gõ lúc {luc} KHÔNG chạy — đã quá {} phút (huba không nghe được lúc ấy). \
+             Gửi lại nếu vẫn cần:\n«{}»",
+            TOO_OLD_SEC / 60,
+            crate::exec::truncate(chu.trim(), 200)
+        ))
+    }
+
+    /// `handle_update` kèm sổ tin đến: update nào KHÔNG sinh lệnh (nút xác nhận,
+    /// tệp, tin người lạ, tin quá cũ…) thì khép `xong` ngay ở đây; update nào
+    /// sinh lệnh thì để lô chạy khép (`pipeline::execute_telegram_commands`) —
+    /// khép ở đây là khép một lệnh còn nằm trong hàng bộ nhớ, đúng chỗ hở cũ.
+    fn xu_ly(&self, client: &reqwest::blocking::Client, u: &Value) {
+        let id = u.get("update_id").and_then(Value::as_i64);
+        TIN_DANG_XU_LY.with(|c| c.set(id.map(|i| (i, false))));
+        self.handle_update(client, u);
+        let sinh_lenh = TIN_DANG_XU_LY.with(|c| c.take()).is_some_and(|(_, v)| v);
+        if let (Some(id), false) = (id, sinh_lenh) {
+            crate::tin_den::danh_dau_tai(&self.cfg().db, &[id], crate::tin_den::Buoc::Xong);
         }
     }
 
@@ -2381,11 +2546,7 @@ impl Inbox {
         // nằm trong hàng đợi của chính huba) và ở `command_done` — hai mốc huba
         // tự cầm đồng hồ, không phải một mốc mượn của Telegram rồi đọc sai.
         let started = std::time::Instant::now();
-        // Tin CHỮ cũ hơn chừng này thì huba bỏ, có ghi log: đó là câu gõ từ một
-        // lần chạy trước, không phải việc đang cần làm. Mười lăm phút rộng hơn
-        // hẳn mọi lượt cài lại (vài giây tới một phút) và hẹp hơn hẳn một buổi
-        // máy tắt — chỗ giữa ấy không có ca nào mơ hồ.
-        const TOO_OLD_SEC: i64 = 900;
+        // Tin CHỮ quá `TOO_OLD_SEC` thì bỏ — xem hằng ấy.
         if let Some(sent) = text_sent_at(u) {
             let age = chrono::Utc::now().timestamp() - sent;
             if age > TOO_OLD_SEC {
@@ -2396,6 +2557,11 @@ impl Inbox {
                                 .map(|t| crate::exec::truncate(t, 40)),
                             "why": "tin gõ từ một lần chạy trước — bỏ, không chạy" }),
                 );
+                if let Some(cau) = self.bo_tin_qua_cu(u, sent) {
+                    if let Err(e) = self.send_text(&cau) {
+                        logging::error("telegram_ack_failed", json!({ "err": e }));
+                    }
+                }
                 return;
             }
         }
@@ -3783,5 +3949,126 @@ mod tests {
         let i = bare();
         let w = i.expect_confirm("555");
         assert_eq!(w.wait(Duration::from_millis(30)), None);
+    }
+
+    // ── Sổ tin đến: dây nối trong `Inbox` (phần thuần nằm ở `tests/tin_den.rs`) ──
+
+    fn cfg_so(dir: &tempfile::TempDir) -> Config {
+        Config {
+            db: dir.path().join("huba.sqlite"),
+            ..Default::default()
+        }
+    }
+
+    fn tin(id: i64, tu: i64, chu: &str, gui: i64) -> Value {
+        json!({ "update_id": id,
+                "message": { "message_id": id * 10, "date": gui,
+                             "chat": { "id": tu }, "from": { "id": tu }, "text": chu } })
+    }
+
+    fn buoc(i: &Inbox, id: i64) -> Option<String> {
+        crate::tin_den::mo(&i.cfg().db)
+            .unwrap()
+            .query_row("SELECT buoc FROM tin_den WHERE update_id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .ok()
+    }
+
+    /// Tiến con dấu `offset` ⟹ tin ĐÃ nằm trên đĩa; Telegram giao lại ⟹ không
+    /// giao thợ lần hai.
+    #[test]
+    fn nhan_mot_ghi_dia_roi_moi_tien_dau() {
+        let d = tempfile::tempdir().unwrap();
+        let i = bare_voi(cfg_so(&d));
+        let mut so = None;
+        let u = tin(900, 1, "/shot", chrono::Utc::now().timestamp());
+        assert!(i.nhan_mot(&mut so, &u), "tin mới phải được giao thợ");
+        assert_eq!(i.offset_now(), 901);
+        assert_eq!(buoc(&i, 900).as_deref(), Some("nhan"));
+        assert!(
+            !i.nhan_mot(&mut so, &u),
+            "tin đã có trong sổ mà giao nữa là chạy hai lần"
+        );
+        assert_eq!(i.offset_now(), 901);
+    }
+
+    /// CA CHÍNH qua đúng dây nối thật: tin vào hàng lệnh BỘ NHỚ rồi huba chết
+    /// trước khi lô chạy ⟹ sổ vẫn `nhan` ⟹ Inbox MỚI (khởi động lại) giao lại
+    /// đúng tin ấy cho thợ.
+    #[test]
+    fn chet_khi_lenh_con_trong_hang_thi_khoi_dong_lai_van_chay() {
+        let d = tempfile::tempdir().unwrap();
+        let i = bare_voi(cfg_so(&d));
+        let mut so = None;
+        let u = tin(901, 1, "Trả lời: chọn B", chrono::Utc::now().timestamp());
+        assert!(i.nhan_mot(&mut so, &u));
+        i.xu_ly(&reqwest::blocking::Client::new(), &u);
+        let hang = i.drain();
+        assert_eq!(
+            hang.len(),
+            1,
+            "tin của chủ máy phải thành một lệnh trong hàng"
+        );
+        assert_eq!(
+            hang[0].tin,
+            Some(901),
+            "lệnh phải mang update_id để lô khép đúng dòng"
+        );
+        assert_eq!(
+            buoc(&i, 901).as_deref(),
+            Some("nhan"),
+            "lệnh mới nằm trong hàng BỘ NHỚ thì sổ chưa được khép — đó đúng là chỗ hở cũ"
+        );
+        drop(hang); // huba chết: hàng bộ nhớ mất.
+
+        let i2 = bare_voi(cfg_so(&d));
+        let c = crate::tin_den::mo(&i2.cfg().db).unwrap();
+        let (_, chay_lai) = crate::tin_den::khoi_phuc(&c, chrono::Utc::now(), TOO_OLD_SEC);
+        for u in &chay_lai {
+            i2.hand_off_queue(u);
+        }
+        let q = i2.inflight.0.lock().unwrap();
+        assert_eq!(q.len(), 1, "khởi động lại phải giao lại đúng một tin");
+        assert_eq!(q[0].0, u, "giao lại NGUYÊN VĂN update cũ");
+    }
+
+    /// Tin KHÔNG sinh lệnh (ở đây: tin người lạ) ⟹ khép `xong` ngay, không nằm
+    /// `nhan` để lượt khởi động sau chạy lại.
+    #[test]
+    fn tin_khong_sinh_lenh_thi_khep_ngay() {
+        let d = tempfile::tempdir().unwrap();
+        let i = bare_voi(cfg_so(&d));
+        let mut so = None;
+        let u = tin(902, 2, "/shot", chrono::Utc::now().timestamp());
+        assert!(i.nhan_mot(&mut so, &u));
+        i.xu_ly(&reqwest::blocking::Client::new(), &u);
+        assert!(i.drain().is_empty(), "tin người lạ không được thành lệnh");
+        assert_eq!(buoc(&i, 902).as_deref(), Some("xong"));
+    }
+
+    /// Tin chữ QUÁ CŨ của chủ máy ⟹ khép `bo` + có câu báo nguyên văn; của
+    /// người lạ ⟹ im (không mở miệng với người lạ).
+    #[test]
+    fn tin_qua_cu_cua_chu_may_thi_khep_bo_va_bao() {
+        let d = tempfile::tempdir().unwrap();
+        let i = bare_voi(cfg_so(&d));
+        let mut so = None;
+        let cu = chrono::Utc::now().timestamp() - TOO_OLD_SEC - 60;
+        let u = tin(903, 1, "câu gõ lúc máy tắt", cu);
+        i.nhan_mot(&mut so, &u);
+        let cau = i
+            .bo_tin_qua_cu(&u, cu)
+            .expect("tin của chủ máy bị bỏ thì phải báo");
+        assert!(
+            cau.contains("«câu gõ lúc máy tắt»") && cau.contains("KHÔNG chạy"),
+            "{cau}"
+        );
+        assert_eq!(buoc(&i, 903).as_deref(), Some("bo"));
+
+        let la = tin(904, 2, "người lạ", cu);
+        i.nhan_mot(&mut so, &la);
+        assert!(i.bo_tin_qua_cu(&la, cu).is_none());
+        assert_eq!(buoc(&i, 904).as_deref(), Some("nhan"));
     }
 }

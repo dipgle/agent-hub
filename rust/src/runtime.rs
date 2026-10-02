@@ -1579,6 +1579,9 @@ pub fn restart_daemon() -> anyhow::Result<String> {
         },
     )?;
     let target = format!("gui/{}/com.dipgle.hubd", uid.stdout.trim());
+    // `kickstart -k` giết CHÍNH tiến trình này khi gọi từ trong hubad — khép lô
+    // tin đến đang chạy trước, kẻo lượt khởi động sau báo oan "đang chạy dở".
+    crate::tin_den::khep_lo_truoc_khi_tu_khoi_dong();
     let out = run(
         "launchctl",
         &["kickstart", "-k", &target],

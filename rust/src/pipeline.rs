@@ -18106,6 +18106,11 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
     if pending.is_empty() {
         return;
     }
+    // Sổ tin đến: lô bắt đầu ⟹ tin của nó sang `chay` (từ giờ huba tắt thì nó là
+    // "đang chạy dở", không chạy lại); lô hết ⟹ `xong`. Xem `crate::tin_den`.
+    let mut tin: Vec<i64> = pending.iter().filter_map(|i| i.tin).collect();
+    tin.dedup();
+    crate::tin_den::bat_dau_lo(&cfg.db, tin);
     // Lệnh chờ lâu nhất trong lô này đã nằm trong hàng bao lâu (tính cả lượt
     // chờ `CMD_LOCK` ngay trên) — thước đo "lệnh của chủ máy chờ bao lâu".
     let cho_ms = pending
@@ -18226,6 +18231,7 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
         );
         execute_commands(db, cfg, crate::telegram::NAME, &cmds);
     }
+    crate::tin_den::ket_thuc_lo();
 }
 
 /// Answer a command on the channel it came from. Failing to answer would leave

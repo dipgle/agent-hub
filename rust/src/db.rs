@@ -3,6 +3,8 @@
 //!   runs     per-poll health — a failed poll leaves a row
 //!   cursors  poll watermarks, the followed session, the last handover/aside
 //!   spend    what the owner's own calls cost, recorded and never shown
+//!   tin_den  every Telegram update, on disk BEFORE the offset moves — owned
+//!            and created by `crate::tin_den` (own connection, `fullfsync`)
 //!
 //! It used to hold four more tables — `messages`, `decisions`, `outbox`,
 //! `dead_letter` — the whole inbox. They went on 2026-08-08 with the product

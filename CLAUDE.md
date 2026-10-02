@@ -280,6 +280,17 @@ Ngoại lệ được giữ nguyên văn: **bản chụp màn thật** trong tes
    with the poll stage, and Telegram advances its own `offset` inside
    `getUpdates`. What is left under this rule is `focus:session`, the watch
    book, and the project pin.
+   🔴 **2026-10-02: Telegram's `offset` is back under it** (Hà, after a dead
+   battery: *"sao không có log dự phòng"*). The `offset` used to advance while
+   the order lived only in memory, so a power cut / dead `hubad` / restart in
+   that window lost the order with no trace. Now every update goes into
+   `data/huba.sqlite` table `tin_den` (`fullfsync`) BEFORE the offset moves
+   (`telegram::Inbox::nhan_mot`); the command batch marks it `chay` → `xong`;
+   boot replays `nhan`, and reports `chay` as *đang chạy dở* WITHOUT re-running
+   it (a second `/type` types twice). Anything that kills `hubad` from inside a
+   batch must call `tin_den::khep_lo_truoc_khi_tu_khoi_dong` first —
+   `runtime::restart_daemon` does, or every `/upgrade` reports itself as
+   interrupted. Rows are kept 7 days: that table IS the backup log.
 7. **huba takes ORDERS from the owner only.** The gate is `chat_id`
    (`HUB_TELEGRAM_CHAT_ID` in `huba.env`); anyone else typing `/new` is just
    typing text, and the refusal is LOGGED, never silently dropped.

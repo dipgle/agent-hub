@@ -1,5 +1,19 @@
 # active context — huba
 
+## 🟢 2026-10-02 16:3xZ→17:1xZ — phiên 8275eb77: SỔ TIN ĐẾN (PLAN S48) + ca thật đầu tiên của S47
+
+- **Nguồn việc:** phiên `[dwork/dhub]` chuyển đề xuất theo lời Hà (*«sao không có log dự phòng»* sau khi máy hết pin):
+  `telegram.rs` tiến `offset` rồi mới giao update vào hàng BỘ NHỚ ⟹ chết ở quãng ấy là mất lệnh không dấu vết.
+- **Đã vá + cài:** `818bea9` + `b76c300` — bảng `tin_den` (`data/huba.sqlite`, `fullfsync`, `0600`, giữ 7 ngày);
+  ghi TRƯỚC `set_offset`; lô đánh dấu `chay`→`xong`; khởi động: `nhan` mới ⟹ chạy lại, quá 15′ ⟹ `bo` + báo,
+  `chay` ⟹ `do` + báo KHÔNG chạy lại; `restart_daemon` khép lô trước `kickstart -k`. gate 183/183 ×2; đột biến
+  12/12 + chmod + 2 chỗ nối ĐỎ đúng bài. hubd pid 25111 từ 17:05:18Z, `--verify` KHỚP `0fdd7386`. Đã đẩy 0/0.
+- **Chưa có ca thật** cho đường nhận: 0 tin Telegram từ 16:57Z ⟹ mục `TIN-DEN-CA-THAT` trong `.tmp/ban-giao.tsv`.
+- **S47 ca thật ĐẠT:** 4d2135bc [dwork/account] 14:17:24Z «đang chạy dở» đúng (lệnh nền chờ cổng bị giết; cổng ấy
+  xong 14:51Z `QG_EXIT=1`). Dòng S47 vốn THIẾU trong PLAN (phiên trước khai «PLAN S47» mà chưa viết) — đã bổ sung.
+- **QG 8564f57..4d769b2:** lượt 1 chết do máy khởi động lại 16:58; lượt 2 `QG_EXIT=0`. **QG 4d769b2..b76c300: `QG_EXIT=0`.**
+- «log im 100 s trước khi tắt» (dhub hỏi) KHÔNG phải treo: nhịp vòng 120 s.
+
 ## 🟢 2026-10-02 07:3xZ — phiên 26d92e09: ⏎ cho gợi ý ngắn + `/upgrade` từ chối oan (PLAN S46)
 
 - `3ddc3ca`, cài `hubd@2026-10-02T07:40:02Z` pid 62305 KHỚP, đã đẩy. Hai hàm đọc ô nhập nay chung

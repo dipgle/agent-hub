@@ -137,7 +137,39 @@ pub fn mo(path: &Path) -> Result<Connection> {
     // ở đây đúng là mất điện (máy hết pin 02/10).
     conn.pragma_update(None, "fullfsync", "ON")?;
     conn.execute_batch(SCHEMA)?;
+    chi_chu_may_doc(path);
     Ok(conn)
+}
+
+/// Tệp DB (và `-wal`/`-shm`) chỉ CHỦ MÁY đọc được — `0600`, như `huba.env`.
+///
+/// 🔴 Đo 02/10 ngay sau lượt cài đầu: `data/huba.sqlite` nằm `0644`. Trước sổ
+/// này nó chỉ giữ con trỏ và sổ sức khoẻ; nay nó giữ NGUYÊN VĂN chữ chủ máy gõ
+/// suốt [`GIU_NGAY`] ngày, mà chữ gõ vào phiên có lúc là mã OTP. Luật 5 (không
+/// giấu chữ với CHỦ MÁY) không đổi — đây là chặn người dùng KHÁC trên máy.
+/// Hỏng thì nói ra, không chặn việc.
+fn chi_chu_may_doc(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for duoi in ["", "-wal", "-shm"] {
+            let p = PathBuf::from(format!("{}{duoi}", path.display()));
+            let Ok(m) = std::fs::metadata(&p) else {
+                continue;
+            };
+            if m.permissions().mode() & 0o777 == 0o600 {
+                continue;
+            }
+            if let Err(e) = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)) {
+                logging::warn(
+                    "tin_den_chmod_failed",
+                    json!({ "path": p.display().to_string(), "err": e.to_string() }),
+                );
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 /// Một tin đọc lại từ sổ.

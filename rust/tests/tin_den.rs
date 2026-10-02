@@ -206,6 +206,30 @@ fn so_ghi_ben_qua_mat_dien() {
     assert_eq!(sy, 2, "synchronous phải FULL (2)");
 }
 
+/// Tệp giữ nguyên văn chữ chủ máy gõ ⟹ chỉ chủ máy đọc được (`0600`), kể cả khi
+/// tệp đã có sẵn với quyền rộng hơn (DB thật nằm `0644` từ trước sổ này).
+#[cfg(unix)]
+#[test]
+fn tep_so_chi_chu_may_doc_duoc() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("huba.sqlite");
+    std::fs::write(&p, b"").unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let c = tin_den::mo(&p).unwrap();
+    tin_den::ghi_nhan(&c, &tin_chu(1, "mã OTP 123456", now().timestamp())).unwrap();
+    drop(c);
+    let _c = tin_den::mo(&p).unwrap();
+    for duoi in ["", "-wal", "-shm"] {
+        let f = std::path::PathBuf::from(format!("{}{duoi}", p.display()));
+        if let Ok(m) = std::fs::metadata(&f) {
+            assert_eq!(m.permissions().mode() & 0o777, 0o600, "{}", f.display());
+        }
+    }
+    // Mẫu số: tệp chính PHẢI có mặt để phép đo trên nói được gì.
+    assert!(p.exists());
+}
+
 /// Chữ cho người đọc sổ: câu gõ · dữ liệu nút · tên tệp kèm chú thích.
 #[test]
 fn tom_tat_nhan_ra_tin_cua_minh() {

@@ -1,5 +1,16 @@
 # active context — huba
 
+## 🟢 2026-10-03 01:3xZ→02:0xZ — phiên 8275eb77: phiên CHẾT THEO MÁY (PLAN S49) + ca thật S48
+
+- Hà hỏi *«máy tắt đột ngột … mở lại phiên đã có nạp lại được lịch sử đang làm giở không»*. Đo lần tắt 02/10
+  (`.tmp/do-mat-dien/phien_luc_tat.py`): 6 phiên sống · 6/6 nhật ký nguyên vẹn (0 dòng hỏng, cuối cách lúc tắt 1 s)
+  ⟹ `claude --resume` được; nhưng 0/6 được mở lại, 2 đang làm dở; huba im (sổ cũ 604 s) rồi quên cả 7 phiên.
+- `cdcf366`: máy khởi động SAU lượt ghi sổ cuối ⟹ MỘT tin + nút ▶ Mở lại (`moilai:<id>` = `/new <id>`), sổ
+  `watch:chet_theo_may` giữ tài khoản cho `resume_target`. Đột biến 8/8. Cài 01:56:01Z pid 12583 KHỚP; đường âm
+  đúng (không bắn nhầm). ⏳ chờ một lần máy khởi động lại thật — mục `CHET-THEO-MAY-CA-THAT`.
+- **S48 ca thật ĐẠT:** 94 tin thật 22:02Z→01:39Z, 94/94 `xong`, 0 kẹt, 0 lỗi.
+- Bẫy kịch bản đột biến: `for f` trong hàm `tra_lai` ghi đè `f` cục bộ của hàm gọi (bash phạm vi động) ⟹ dùng `local`.
+
 ## 🟢 2026-10-02 16:3xZ→17:1xZ — phiên 8275eb77: SỔ TIN ĐẾN (PLAN S48) + ca thật đầu tiên của S47
 
 - **Nguồn việc:** phiên `[dwork/dhub]` chuyển đề xuất theo lời Hà (*«sao không có log dự phòng»* sau khi máy hết pin):

@@ -909,6 +909,15 @@ pub fn callback_to_command(data: &str) -> Option<String> {
         }
         return Some(format!("/session {sid}"));
     }
+    // `moilai:<id>` — nút ▶ trên tin "phiên chết theo máy" (03/10). Đi đúng route
+    // `/new <id>` sẵn có (cửa sổ mới chạy `claude --resume`, tài khoản tra từ sổ
+    // `watch:chet_theo_may`) — thêm một chỗ BẤM, không thêm một đường ĐI.
+    if let Some(sid) = data.strip_prefix("moilai:") {
+        if sid.is_empty() {
+            return None;
+        }
+        return Some(format!("/new {sid}"));
+    }
     // `ho:<acc>:<id>` — nút "chuyển tài khoản, giữ nguyên việc" trên tin hết hạn
     // mức (2026-09-09).
     //

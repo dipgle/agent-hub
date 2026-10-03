@@ -1566,6 +1566,50 @@ fn link_cli_onto_path(rust_dir: &Path) -> String {
 }
 
 /// Bảo launchd nạp lại hubad. Gọi SAU khi đã trả lời, vì nó giết chính mình.
+/// Lúc MÁY khởi động (epoch giây), từ `sysctl -n kern.boottime`. Đọc MỘT lần mỗi
+/// tiến trình — nó không đổi chừng nào tiến trình còn sống. `None` = không đọc
+/// được (đã log) hoặc không phải macOS; chỗ gọi khi ấy KHÔNG kết luận "máy vừa
+/// khởi động lại".
+pub fn may_khoi_dong_luc() -> Option<i64> {
+    static LUC: OnceLock<Option<i64>> = OnceLock::new();
+    *LUC.get_or_init(|| {
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        let out = run(
+            "sysctl",
+            &["-n", "kern.boottime"],
+            RunOpts {
+                timeout: Some(Duration::from_secs(5)),
+                ..Default::default()
+            },
+        );
+        let v = match &out {
+            Ok(o) if o.ok() => parse_boottime(&o.stdout),
+            _ => None,
+        };
+        if v.is_none() {
+            crate::logging::warn(
+                "boottime_unreadable",
+                json!({ "out": out.as_ref().map(|o| o.stdout.clone()).map_err(|e| e.to_string()),
+                        "effect": "không biết máy khởi động lúc nào ⟹ không báo được phiên chết theo máy" }),
+            );
+        }
+        v
+    })
+}
+
+/// `{ sec = 1790957646, usec = 48942 } Fri Oct  2 23:14:06 2026` ⟹ `1790957646`.
+pub fn parse_boottime(s: &str) -> Option<i64> {
+    let i = s.find("sec = ")? + "sec = ".len();
+    s[i..]
+        .split(|c: char| !c.is_ascii_digit())
+        .next()
+        .filter(|d| !d.is_empty())?
+        .parse()
+        .ok()
+}
+
 pub fn restart_daemon() -> anyhow::Result<String> {
     if cfg!(windows) {
         anyhow::bail!("trên Windows khởi động lại bằng: schtasks /End /TN huba-hubd && schtasks /Run /TN huba-hubd");

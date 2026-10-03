@@ -88,7 +88,7 @@ pub fn split_flags(
 /// biết phiên ấy thì nó cũng không biết mở bằng tài khoản nào, mà `--resume`
 /// chạy nhầm tài khoản là mở nhầm cả kho phiên. Không biết thì TỪ CHỐI, đừng
 /// lặng lẽ rơi về tài khoản mặc định.
-fn resume_target(rest: &str, db: &Db) -> Option<(String, String, String)> {
+pub fn resume_target(rest: &str, db: &Db) -> Option<(String, String, String)> {
     let (head, tail) = split_target(rest)?;
     if crate::sessions::is_shell_id(&head) {
         return None; // cửa sổ trần không có phiên nào để nối tiếp
@@ -97,6 +97,14 @@ fn resume_target(rest: &str, db: &Db) -> Option<(String, String, String)> {
         .cursor_or_log(WATCH_KEY)
         .and_then(|v| session_name_from_book(&v, &head));
     if let Some((_, account)) = book.filter(|(_, a)| !a.trim().is_empty()) {
+        return Some((head, account, tail));
+    }
+    // Phiên CHẾT THEO MÁY ở lần khởi động gần nhất: sổ theo dõi đã quên nó ngay
+    // lượt đầu sau khởi động, chỉ còn sổ này nhớ tài khoản (nút ▶ Mở lại).
+    let may_tat = db
+        .cursor_or_log(MAY_TAT_KEY)
+        .and_then(|v| session_name_from_book(&v, &head));
+    if let Some((_, account)) = may_tat.filter(|(_, a)| !a.trim().is_empty()) {
         return Some((head, account, tail));
     }
     let stopped = stopped_session(db, &head).filter(|s| !s.account.trim().is_empty())?;
@@ -916,12 +924,115 @@ pub fn watch_book_usable(prev_len: usize, age_sec: Option<i64>) -> bool {
     prev_len == 0 || age_sec.is_some_and(|a| a <= WATCH_BOOK_STALE_SEC)
 }
 
+/// Sổ những phiên ĐÃ CHẾT THEO MÁY ở lần khởi động gần nhất (`id → Mark`).
+///
+/// Sổ theo dõi bị ghi đè ngay lượt đầu sau khởi động, nên đây là chỗ DUY NHẤT
+/// còn nhớ tài khoản + thư mục của chúng — thứ `/new <id>` cần để `--resume`
+/// đúng kho (xem `resume_target`).
+pub const MAY_TAT_KEY: &str = "watch:chet_theo_may";
+
+/// Máy khởi động lại sau lượt ghi sổ cuối ⟹ cất danh sách phiên chết theo máy
+/// vào [`MAY_TAT_KEY`] rồi trả nó. Rỗng = máy không khởi động lại kể từ lượt ấy,
+/// hoặc không đo được mốc nào (đã log) — khi ấy KHÔNG kết luận gì.
+///
+/// Cất TRƯỚC khi nói, cùng lý do với `save_watch_book`: nói xong mới cất mà sập
+/// giữa chừng thì nút ▶ trỏ vào một id huba không còn biết tài khoản.
+pub fn ghi_so_chet_theo_may(
+    db: &Db,
+    prev: &BTreeMap<String, crate::watch::Mark>,
+    so_luc: Option<i64>,
+    khoi_dong_luc: Option<i64>,
+    now: i64,
+) -> Vec<(String, crate::watch::Mark)> {
+    let (Some(so), Some(boot)) = (so_luc, khoi_dong_luc) else {
+        return Vec::new();
+    };
+    let ds = crate::watch::chet_theo_may(prev, so, boot, now);
+    if ds.is_empty() {
+        return ds;
+    }
+    let so_may: BTreeMap<&String, &crate::watch::Mark> = ds.iter().map(|(i, m)| (i, m)).collect();
+    match serde_json::to_string(&so_may).map(|v| db.set_cursor(MAY_TAT_KEY, &v)) {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => logging::error("may_tat_save_failed", json!({ "err": e.to_string() })),
+        Err(e) => logging::error("may_tat_encode_failed", json!({ "err": e.to_string() })),
+    }
+    logging::info(
+        "machine_reboot_sessions_lost",
+        json!({ "ids": ds.iter().map(|(i, _)| i.clone()).collect::<Vec<_>>(),
+                "so_luc": so, "khoi_dong_luc": boot }),
+    );
+    ds
+}
+
+/// Máy có khởi động lại SAU lượt ghi sổ cuối không. Thiếu mốc nào thì `false`.
+pub fn may_vua_khoi_dong(so_luc: Option<i64>, khoi_dong_luc: Option<i64>) -> bool {
+    matches!((so_luc, khoi_dong_luc), (Some(s), Some(b)) if b > s)
+}
+
 pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsSnapshot) {
     let live = &snap.sessions;
     let prev: BTreeMap<String, crate::watch::Mark> = db
         .cursor_or_log(WATCH_KEY)
         .and_then(|v| serde_json::from_str(&v).ok())
         .unwrap_or_default();
+
+    // 🔴 MÁY VỪA KHỞI ĐỘNG LẠI ⟹ MỘT tin, kèm nút ▶ mở lại — xem
+    // `watch::chet_theo_may`. Đứng TRƯỚC cả cửa "sổ cũ" lẫn đường thường: máy
+    // lên nhanh (sổ chưa tới 10 phút) thì đường thường sẽ đọc N cái chết thành
+    // "Terminal.app khởi động lại", sai cả nguyên nhân.
+    let so_luc = db.cursor_written_at(WATCH_KEY);
+    let boot = crate::runtime::may_khoi_dong_luc();
+    if may_vua_khoi_dong(so_luc, boot) {
+        let now = chrono::Utc::now().timestamp();
+        let ds = ghi_so_chet_theo_may(db, &prev, so_luc, boot, now);
+        if !ds.is_empty() {
+            let co_trang_thai: Vec<(String, crate::watch::Mark, Option<bool>)> = ds
+                .into_iter()
+                .map(|(id, m)| {
+                    let d = crate::sessions::turn_open_at_death(cfg, &id);
+                    (id, m, d)
+                })
+                .collect();
+            let text = crate::watch::chet_theo_may_text(
+                &co_trang_thai,
+                so_luc.unwrap_or_default(),
+                boot.unwrap_or_default(),
+            );
+            let nut: Vec<(String, String)> = co_trang_thai
+                .iter()
+                .map(|(id, m, _)| {
+                    (
+                        format!("▶ Mở lại {}", crate::watch::ten_phien_chet(id, m)),
+                        format!("moilai:{id}"),
+                    )
+                })
+                .collect();
+            logging::info("session_change", json!({ "text": text }));
+            let gui = match crate::telegram::inbox() {
+                Some(tg) => tg.send_buttons(&text, &nut),
+                None => crate::confirm::tell(cfg, &text),
+            };
+            if let Err(e) = gui {
+                logging::error("session_change_telegram_failed", json!({ "err": e }));
+            }
+        }
+        // Sổ mới + pid Terminal mới, IM về mọi thứ khác ở lượt này: cái chết của
+        // từng phiên đã được nói gộp ở trên (hoặc không có ai để nói).
+        let (_, next) =
+            crate::watch::changes(&prev, live, chrono::Utc::now().timestamp(), &snap.blind);
+        save_watch_book(db, &next);
+        if let Some(p) = snap.terminal_pid {
+            if let Err(e) = db.set_cursor(TERMINAL_PID_KEY, &p.to_string()) {
+                logging::error("terminal_pid_save_failed", json!({ "err": e.to_string() }));
+            }
+        }
+        logging::info(
+            "watch_book_after_reboot",
+            json!({ "so_luc": so_luc, "khoi_dong_luc": boot, "was": prev.len(), "now": live.len() }),
+        );
+        return;
+    }
 
     // 🔴 SỔ QUÁ CŨ = CHƯA TỪNG NHÌN, không phải "mọi thứ vừa đổi".
     //

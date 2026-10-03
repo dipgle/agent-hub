@@ -854,6 +854,110 @@ pub fn terminal_restart_text(
     s
 }
 
+/// Sổ cũ hơn chừng này thì không kể tên ai "chết theo máy": huba đã vắng mặt quá
+/// lâu trước lần khởi động, phiên trong sổ có thể đã tắt êm từ trước đó.
+pub const CHET_THEO_MAY_TOI_DA_SEC: i64 = 86_400;
+
+/// Máy vừa khởi động lại SAU lượt ghi sổ cuối ⟹ những phiên nào trong sổ đã tắt
+/// THEO MÁY. Rỗng khi máy không khởi động lại kể từ lượt ghi ấy.
+///
+/// 🔴 Hà 03/10, sau lần máy hết pin tối 02/10: *"mở lại phiên đã có nạp lại được
+/// lịch sử đang làm giở không"*. Được — đo 6/6 nhật ký nguyên vẹn, bản ghi cuối
+/// cách lúc tắt 1 giây — nhưng từ điện thoại thì KHÔNG: lượt đầu sau khởi động
+/// thấy sổ "cũ" (`watch_book_stale_muted`, 604 s), im theo luật 11, rồi ghi đè
+/// sổ bằng danh sách mới ⟹ huba quên sạch 7 phiên, `/new <id>` không còn biết
+/// tài khoản để `--resume`. Còn 2 phiên đang làm dở nằm đó, không ai mở lại.
+///
+/// Đây KHÔNG phá luật 11. Luật ấy im vì *"sổ cũ = huba đã không nhìn"*, tức
+/// không biết phiên tắt LÚC NÀO. Máy khởi động lại thì biết chắc: không tiến
+/// trình nào sống qua nó, nên mọi phiên huba thấy sống ở lượt cuối đều đã chết
+/// trong khoảng [lượt cuối, lúc khởi động]. Câu báo nói đúng khoảng ấy, không
+/// nói "vừa".
+///
+/// Bỏ: phiên CON (chết theo phiên cha, phiên cha đã có tên trong danh sách) và
+/// phiên sống chưa đủ [`MIN_LIFE_SEC`] tính tới lượt cuối — đó là lượt dò hạn
+/// mức của chính huba, trừ khi huba mở nó cho chủ máy (`h`).
+pub fn chet_theo_may(
+    prev: &BTreeMap<String, Mark>,
+    so_luc: i64,
+    khoi_dong_luc: i64,
+    now: i64,
+) -> Vec<(String, Mark)> {
+    if khoi_dong_luc <= so_luc || now - so_luc > CHET_THEO_MAY_TOI_DA_SEC {
+        return Vec::new();
+    }
+    let mut v: Vec<(String, Mark)> = prev
+        .iter()
+        .filter(|(_, m)| m.p.is_empty())
+        .filter(|(_, m)| m.h || m.f == 0 || so_luc - m.f >= MIN_LIFE_SEC)
+        .map(|(id, m)| (id.clone(), m.clone()))
+        .collect();
+    v.sort_by_key(|(id, m)| ten_phien_chet(id, m));
+    v
+}
+
+/// Tên đọc được của một phiên đã chết, cho tin "chết theo máy" và nút ▶ của nó.
+///
+/// Nhãn ĐÃ TÍNH (`Mark::l`, vd `[dwork/dci]`) trước — `d` chỉ là thư mục
+/// (`dwork`), nên ba phiên dwork khác làn sẽ đọc ra ba dòng y hệt nhau và ba nút
+/// không phân biệt được. Sổ cũ chưa có `l` thì rơi về [`name_from_mark`].
+pub fn ten_phien_chet(id: &str, m: &Mark) -> String {
+    if m.l.trim().is_empty() {
+        return name_from_mark(id, m);
+    }
+    format!("{} ({})", m.l.trim(), &id[..id.len().min(8)])
+}
+
+/// Câu báo "phiên chết theo máy". `dang_do` = nhật ký lúc chết còn lượt MỞ
+/// (`sessions::turn_open_at_death`): `Some(true)` đang làm dở · `Some(false)` đã
+/// xong lượt · `None` không đọc được nhật ký.
+///
+/// Phiên đang làm dở đứng TRƯỚC: đó là phần đòi chủ máy làm gì (cùng luật với
+/// [`terminal_restart_text`]).
+pub fn chet_theo_may_text(
+    ds: &[(String, Mark, Option<bool>)],
+    so_luc: i64,
+    khoi_dong_luc: i64,
+) -> String {
+    let gio = |t: i64| {
+        chrono::DateTime::from_timestamp(t, 0)
+            .map(|d| {
+                d.with_timezone(&chrono::Local)
+                    .format("%H:%M %d/%m")
+                    .to_string()
+            })
+            .unwrap_or_else(|| "?".into())
+    };
+    let mut s = format!(
+        "⚡ Máy khởi động lại lúc {} — {} phiên huba thấy còn sống lần cuối lúc {} đã tắt THEO MÁY.\n\
+         Lịch sử hội thoại vẫn trên đĩa: bấm ▶ để mở lại đúng phiên (claude --resume, đúng tài khoản, cửa sổ mới). \
+         Lệnh đang chạy lúc tắt KHÔNG tự chạy lại — mở rồi bảo nó làm tiếp.",
+        gio(khoi_dong_luc),
+        ds.len(),
+        gio(so_luc)
+    );
+    let mut thu_tu: Vec<&(String, Mark, Option<bool>)> = ds.iter().collect();
+    thu_tu.sort_by_key(|(_, _, d)| match d {
+        Some(true) => 0,
+        None => 1,
+        Some(false) => 2,
+    });
+    for (id, m, d) in thu_tu {
+        let tt = match d {
+            Some(true) => "⚠ ĐANG LÀM DỞ",
+            Some(false) => "đã xong lượt",
+            None => "chưa rõ (không đọc được nhật ký)",
+        };
+        let acc = if m.a.is_empty() {
+            String::new()
+        } else {
+            format!(" · {}", m.a)
+        };
+        s.push_str(&format!("\n• {}{acc} — {tt}", ten_phien_chet(id, m)));
+    }
+    s
+}
+
 /// Gọi tên một phiên ĐÃ BIẾN MẤT, bằng những gì sổ còn giữ.
 ///
 /// Ba dữ kiện xếp theo thứ người ta nhận ra: **tên** phiên · **dự án** nó đang

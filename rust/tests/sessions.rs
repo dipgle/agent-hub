@@ -1496,23 +1496,25 @@ fn a_session_name_says_which_project_it_is_working_on() {
     assert_eq!(d("projects-fb", ""), "projects-fb");
 }
 
-/// Nhật ký đang được ghi thì phiên ĐANG CHẠY — kể cả khi CLI khai `idle`.
+/// 🔁 ĐẢO CHIỀU 2026-10-03 — CLI khai `idle` thì là `idle`, nhật ký vừa ghi
+/// KHÔNG lật được nó nữa.
 ///
-/// 🔴 Hà 2026-08-12: *"trạng thái dừng, đang chạy ở danh sách phiên hình như
-/// không đúng"*. Đo đúng lúc ấy: `hanguyen-8e` có `status: "idle"` từ
-/// `claude agents` trong khi **nhật ký vừa được ghi 1 giây trước**. Một tệp vừa
-/// lớn lên là bằng chứng trực tiếp; `status` là một trường được báo cáo lại, và
-/// ở phiên terminal nó trễ hẳn một lượt.
+/// Bài này từng khoá điều ngược lại (Hà 12/08: `hanguyen-8e` có `status:
+/// "idle"` từ `claude agents` trong khi nhật ký vừa ghi 1 giây trước). Nguồn
+/// ấy đã bỏ từ 15/08; nay `status` đọc từ sổ `sessions/<pid>.json`, và đo
+/// 03/10 trên CLI 2.1.280 thì nó lệch nhật ký ≤ 9 ms ở cả bốn mốc đổi lượt
+/// (`tests/cli_status_is_the_turn.rs`). Giữ cửa cũ thì nó NUỐT tin "vừa xong":
+/// CLI ghi `turn_duration` đúng lúc khép lượt, nên vòng chạy ngay sau đó luôn
+/// thấy nhật ký "vừa ghi" — Hà: *"xong lâu rồi ko thấy báo"*.
 #[test]
 fn a_transcript_being_written_beats_a_stale_idle_flag() {
     let w = huba::sessions::is_working;
-    // Ca thật đo được: CLI nói idle, nhật ký vừa ghi 1 giây trước.
     assert!(
-        w(Some("idle"), 0, Some(1)),
-        "tin `idle` trong khi nhật ký đang lớn lên"
+        !w(Some("idle"), 0, Some(1)),
+        "nhật ký ghi lúc khép lượt không được kéo phiên về 'đang chạy'"
     );
-    assert!(w(Some("done"), 0, Some(3)));
-    // …nhưng im lâu rồi thì `idle` vẫn là `idle` — cửa mới không được siết lan.
+    assert!(!w(Some("done"), 0, Some(3)));
+    assert!(!w(Some("shell"), 0, Some(0)));
     assert!(!w(Some("idle"), 0, Some(60)));
     assert!(!w(Some("idle"), 0, None));
     // CLI nói busy thì vẫn tin thẳng.

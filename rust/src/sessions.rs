@@ -140,6 +140,10 @@ pub struct LiveSession {
     /// means "huba cannot tell", never "idle" — but it is now the rare case, not
     /// the normal one, and `is_working` prefers this field over any heuristic.
     pub status: Option<String>,
+    /// `statusUpdatedAt` của sổ phiên CLI (ms epoch) — lúc `status` đổi lần
+    /// cuối. 0 = sổ không khai. Xem `cli_turn_started`.
+    #[serde(default)]
+    pub status_at_ms: i64,
     pub state: Option<String>,
     /// Phiên có đang LÀM VIỆC ngay lúc này không — trả lời được cho MỌI phiên.
     ///
@@ -2619,6 +2623,78 @@ pub const WRITING_NOW_SEC: i64 = 15;
 /// Nên bằng chứng shell chỉ bị lật khi có một phép đo KHÁC nói ngược lại: màn
 /// hình. `None` = không đọc được màn ⟹ giữ nguyên bằng chứng cũ, vì mù không
 /// phải là lý do để kết luận ngược (cùng luật với `keys::look` trả `Blind`).
+/// CLI có tự khai lượt đang chạy hay đã khép không — tức ba giá trị đã ĐO.
+///
+/// Khai rồi thì `working` lấy thẳng từ đó (`is_working`), và cả nhánh đọc MÀN
+/// lẫn bằng chứng shell con đều đứng ngoài. Hai thứ ấy chính là nguồn chập chờn
+/// đo được ngày 2026-10-03: lượt `osascript` hỏng lúc 15:39:21Z (02/10) ⟹
+/// `screen_busy = None` ⟹ `shell_verdict` giữ "đang chạy" cho mọi phiên có
+/// lệnh nền ⟹ vòng 15:43:12Z lật cả loạt về "dừng" ⟹ **5 tin 💤 trong một
+/// phút**, 4 tin ghi *"sau 3 phút chạy"* về những phiên đứng im từ trước
+/// (`23eb8a98` khép lượt 15:32:49, không ghi gì tới 15:44). Và ngược lại: phiên
+/// `[dwork/dhub]` đứng chờ 08:48:56→08:53:44 (03/10) mà KHÔNG được báo, vì
+/// vòng 08:52:33 không đọc được màn.
+pub fn cli_turn_known(status: Option<&str>) -> bool {
+    matches!(status, Some("busy" | "idle" | "shell" | "done"))
+}
+
+/// Mốc BẮT ĐẦU lượt đang chạy, theo lời CLI (giây epoch) — `statusUpdatedAt`
+/// của trạng thái `busy`, chỉ đổi khi lượt đổi (đo 03/10: đứng yên 09:03:23
+/// suốt lượt 9 phút 44 giây).
+///
+/// Để `watch::changes` không phải lấy "lúc vòng đầu tiên nhìn thấy" làm mốc:
+/// vòng chạy mỗi 120 giây nên mốc ấy trễ tới 2 phút, và một lượt thật dài 3
+/// phút đo ra dưới `MIN_RUN_SEC` thì bị im.
+pub fn cli_turn_started(s: &LiveSession, now_sec: i64) -> Option<i64> {
+    if s.status.as_deref() != Some("busy") || s.status_at_ms <= 0 {
+        return None;
+    }
+    Some((s.status_at_ms / 1000).min(now_sec))
+}
+
+/// Phán quyết lượt của một hàng: đang chạy không, và có lệnh nền không.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TurnVerdict {
+    pub working: bool,
+    pub bg_shell: bool,
+}
+
+/// `working` + `bg_shell` của một phiên — hàm THUẦN, để luật kiểm được mà
+/// không cần màn hay tiến trình thật.
+///
+/// Hai đường, chọn bằng `cli_turn_known`:
+/// - CLI khai `busy`/`idle`/`shell`/`done` ⟹ tin thẳng (`is_working`); shell
+///   con và màn KHÔNG bỏ phiếu — lượt đã khép mà còn shell con thì đó là lệnh
+///   NỀN.
+/// - CLI không khai ⟹ đường cũ: shell con + màn (`shell_verdict`), rồi nhật ký.
+pub fn turn_verdict(
+    status: Option<&str>,
+    pending_subagents: usize,
+    idle_sec: Option<i64>,
+    shell: bool,
+    screen_busy: Option<bool>,
+    alive: bool,
+) -> TurnVerdict {
+    if !alive {
+        return TurnVerdict {
+            working: false,
+            bg_shell: false,
+        };
+    }
+    if cli_turn_known(status) {
+        let working = is_working(status, pending_subagents, idle_sec);
+        return TurnVerdict {
+            working,
+            bg_shell: !working && (shell || status == Some("shell")),
+        };
+    }
+    let shell_busy = shell_verdict(shell, screen_busy);
+    TurnVerdict {
+        working: shell_busy || is_working(status, pending_subagents, idle_sec),
+        bg_shell: shell && !shell_busy,
+    }
+}
+
 pub fn shell_verdict(shell: bool, screen_busy: Option<bool>) -> bool {
     match (shell, screen_busy) {
         (false, _) => false,
@@ -2884,26 +2960,30 @@ pub fn is_working(status: Option<&str>, pending_subagents: usize, idle_sec: Opti
     if pending_subagents > 0 {
         return true;
     }
-    // 🔴 Nhật ký ĐANG được ghi thì phiên đang chạy — kể cả khi CLI khai `idle`.
+    // 🔴 CLI KHAI THẲNG ⟹ TIN THẲNG, không để nhật ký hay màn cãi lại.
     //
-    // Hà 2026-08-12: *"trạng thái dừng, đang chạy ở danh sách phiên hình như
-    // không đúng"*. Đo đúng lúc ấy: `hanguyen-8e` — `status: "idle"` từ
-    // `claude agents`, mà **nhật ký của nó vừa được ghi 1 giây trước**. Hai
-    // nguồn nói ngược nhau, và nguồn nào đúng thì không phải chuyện ý kiến:
-    // một tệp vừa lớn lên là bằng chứng trực tiếp của việc đang diễn ra, còn
-    // `status` là một trường CLI báo cáo lại — nó trễ, và ở phiên terminal nó
-    // trễ hẳn một lượt.
+    // Đo 2026-10-03 (CLI 2.1.280), sổ `sessions/<pid>.json` lấy mẫu mỗi giây
+    // rồi đối chiếu với nhật ký của chính phiên ấy (`[dwork/dhub]` e880f072):
+    //   busy  09:03:23.161 ↔ Hà gõ           09:03:23.155
+    //   shell 09:13:07.959 ↔ turn_duration   09:13:07.950
+    //   busy  09:13:30.528 ↔ task-notification 09:13:30.530
+    //   idle  09:13:41.793 ↔ turn_duration   09:13:41.786
+    // Lệch ≤ 9 ms ở cả bốn mốc, và `end_turn` mà Stop hook nối tiếp (09:10:25)
+    // thì `status` ĐÚNG là vẫn `busy`. `"shell"` = xong lượt, còn lệnh NỀN.
     //
-    // Đặt cửa này TRƯỚC `status` chứ không sau: sau thì `idle` đã `return false`
-    // và không bao giờ tới lượt nhật ký nói.
+    // Cửa cũ *"nhật ký vừa ghi < 15 giây ⟹ đang chạy, kể cả khi CLI nói idle"*
+    // (Hà 12/08, đo trên `claude agents` — nguồn khác, đã bỏ từ 15/08) nay là
+    // CHÍNH NÓ sinh lỗi: CLI ghi `turn_duration` ĐÚNG lúc khép lượt, nên vòng
+    // chạy ngay sau mốc ấy luôn thấy nhật ký "vừa ghi" ⟹ phiên đã xong vẫn đọc
+    // là đang chạy ⟹ tin "vừa xong" trễ thêm một vòng (120 giây).
+    match status {
+        Some("busy") => return true,
+        Some("idle") | Some("shell") | Some("done") => return false,
+        _ => {}
+    }
+    // Không có `status`, hoặc một giá trị chưa đo bao giờ: lưới đỡ cũ.
     if idle_sec.is_some_and(|s| s < WRITING_NOW_SEC) {
         return true;
-    }
-    match status {
-        // Phiên nền: `claude agents` tự khai, tin thẳng.
-        Some("busy") => return true,
-        Some("idle") | Some("done") => return false,
-        _ => {}
     }
     // Còn lại (phiên terminal): hỏi nhật ký. Không đọc được mốc nào thì KHÔNG
     // đoán là đang chạy — thà im còn hơn báo động giả.
@@ -4115,6 +4195,68 @@ const BG_ENDED: [&str; 3] = ["done", "stopped", "failed"];
 /// chạy.
 pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
     let mut out = Vec::new();
+    let books = list_session_books_only(dir)?;
+    out.extend(books);
+    list_job_books(dir, &mut out)?;
+    Ok(out)
+}
+
+/// Đọc MỘT tệp sổ phiên: lấy GIÁ TRỊ JSON ĐẦU TIÊN, trả kèm số byte thừa phía sau.
+///
+/// 🔴 Đo 2026-10-03: `~/.claude-acc6/sessions/16592.json` dài **530** byte, mà
+/// 529 byte đầu là một đối tượng JSON trọn vẹn và byte cuối là một dấu `}` lẻ
+/// — dấu vết của CLI ghi đè một bản ngắn hơn lên bản cũ mà không cắt đuôi.
+/// `serde_json::from_str` từ chối cả tệp (`trailing characters at line 1
+/// column 530`), nên một phiên ĐANG SỐNG (`7347daca`, pid 16592, 16 giờ) bị
+/// rơi khỏi danh sách: trên điện thoại nó hiện thành *"cửa sổ ttys011 —
+/// shell"*, không bao giờ được báo "vừa xong", và log mang **642 dòng warn**
+/// trong 33 giờ về đúng một tệp.
+///
+/// Giá trị đầu tiên là bản ĐÚNG chứ không phải một phép đoán: lượt ghi mới bắt
+/// đầu từ byte 0, nên phần thừa luôn nằm SAU nó. Phần đuôi không bị giấu — chỗ
+/// gọi phải nói ra (`note_book_trailing`).
+pub fn parse_session_book(raw: &str) -> std::result::Result<(Value, usize), String> {
+    let mut it = serde_json::Deserializer::from_str(raw).into_iter::<Value>();
+    let v = match it.next() {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => return Err(e.to_string()),
+        None => return Err("tệp sổ phiên rỗng".to_string()),
+    };
+    let du = raw[it.byte_offset()..].trim().len();
+    Ok((v, du))
+}
+
+/// Nói ra một tệp sổ phiên có đuôi thừa — MỘT lần cho mỗi (tệp, cỡ tệp).
+///
+/// Một lần chứ không mỗi vòng: tệp ấy đứng yên hàng giờ giữa hai lượt CLI ghi,
+/// và nhắc lại một sự thật không đổi mỗi vòng chính là thứ đã sinh 642 dòng
+/// warn. Cỡ tệp đổi (CLI ghi lại) ⟹ là một ca mới, nói lại.
+fn note_book_trailing(path: &Path, len: usize, du: usize) {
+    if first_time(format!("trailing:{}#{len}", path.display())) {
+        logging::info(
+            "session_book_trailing_tolerated",
+            json!({ "path": path.display().to_string(), "len": len, "trailing_bytes": du,
+                    "why": "CLI để lại đuôi thừa sau lượt ghi đè — đọc giá trị JSON đầu tiên, phiên vẫn được liệt kê" }),
+        );
+    }
+}
+
+/// `true` đúng MỘT lần cho mỗi khoá trong đời tiến trình — để một sự thật không
+/// đổi được nói ra một lần thay vì mỗi vòng. Mutex hỏng ⟹ `true` (thà nói lặp
+/// còn hơn câm).
+fn first_time(key: String) -> bool {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SEEN.get_or_init(Default::default)
+        .lock()
+        .map(|mut s| s.insert(key))
+        .unwrap_or(true)
+}
+
+/// Ngăn `sessions/` của một tài khoản — tách khỏi `list_account_books` để bộ
+/// canh `status` (`book_status_fingerprint`) đọc đúng cùng một luật đọc.
+fn list_session_books_only(dir: &Path) -> Result<Vec<Value>> {
+    let mut out = Vec::new();
 
     let sessions = dir.join("sessions");
     let entries = std::fs::read_dir(&sessions)
@@ -4137,8 +4279,13 @@ pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
         }
         match std::fs::read_to_string(&path)
             .map_err(|e| e.to_string())
-            .and_then(|s| serde_json::from_str::<Value>(&s).map_err(|e| e.to_string()))
-        {
+            .and_then(|s| {
+                let (v, du) = parse_session_book(&s)?;
+                if du > 0 {
+                    note_book_trailing(&path, s.len(), du);
+                }
+                Ok(v)
+            }) {
             Ok(mut v)
                 if v.get("sessionId")
                     .and_then(|s| s.as_str())
@@ -4159,7 +4306,12 @@ pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
             ),
         }
     }
+    Ok(out)
+}
 
+/// Ngăn `jobs/` của một tài khoản, gộp vào `out` (hàng đã có của ngăn
+/// `sessions/`) theo `sessionId` — xem `fold_job_into_session`.
+fn list_job_books(dir: &Path, out: &mut Vec<Value>) -> Result<()> {
     // Phiên nền: một thư mục mỗi việc, `state.json` là hàng.
     let jobs = dir.join("jobs");
     if jobs.is_dir() {
@@ -4228,7 +4380,48 @@ pub fn list_account_books(dir: &Path) -> Result<Vec<Value>> {
         }
     }
 
-    Ok(out)
+    Ok(())
+}
+
+/// Dấu vân tay TRẠNG THÁI LƯỢT của mọi phiên — `sessionId:status:statusUpdatedAt`,
+/// đọc thẳng từ sổ `sessions/` của từng tài khoản.
+///
+/// Để hubad biết lúc nào phải chạy vòng NGAY thay vì ngủ hết `poll_interval_sec`
+/// (xem `hubad::follow_sleep`). Rẻ: chỉ đọc vài tệp JSON nhỏ, không gọi
+/// `osascript`, không gọi CLI.
+///
+/// Không ghi log khi một tệp đọc hỏng: đây chỉ là CÒI ĐÁNH THỨC, còn người đọc
+/// thật (`list_account_books`, chạy ở mỗi vòng) đã nói ra mọi tệp hỏng. Tệp
+/// hỏng vẫn để lại dấu `<tệp>:?` trong vân tay, nên nó đổi thì còi vẫn kêu.
+pub fn book_status_fingerprint(cfg: &Config) -> String {
+    let mut marks: Vec<String> = Vec::new();
+    for account in cfg.claude_accounts_or_ambient() {
+        let sessions = account_book_dir(&account).join("sessions");
+        let Ok(entries) = std::fs::read_dir(&sessions) else {
+            continue;
+        };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let parsed = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| parse_session_book(&s).ok());
+            marks.push(match parsed {
+                Some((v, _)) => format!(
+                    "{}:{}:{}",
+                    v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("?"),
+                    v.get("status").and_then(|s| s.as_str()).unwrap_or("-"),
+                    v.get("statusUpdatedAt")
+                        .and_then(|s| s.as_i64())
+                        .unwrap_or(0)
+                ),
+                None => format!("{}:?", path.display()),
+            });
+        }
+    }
+    marks.sort();
+    marks.join("|")
 }
 
 /// CLI gọi phiên nền là `"bg"`; cả huba đọc `"background"`. Dịch ở CỬA VÀO.
@@ -5315,6 +5508,10 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 pid: s.get("pid").and_then(|v| v.as_i64()).unwrap_or(0),
                 started_at_ms: s.get("startedAt").and_then(|v| v.as_i64()).unwrap_or(0),
                 status: s.get("status").and_then(|v| v.as_str()).map(str::to_string),
+                status_at_ms: s
+                    .get("statusUpdatedAt")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0),
                 state: s.get("state").and_then(|v| v.as_str()).map(str::to_string),
                 // Tính ở dưới, sau khi đọc xong mốc hoạt động của nhật ký.
                 working: false,
@@ -5471,6 +5668,19 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // Một lệnh shell ĐANG CHẠY là bằng chứng trực tiếp, và nó
                     // đứng TRƯỚC mọi phép suy từ nhật ký — xem `running_shell`.
                     let shell = procs.running_shell(row.pid);
+                    // CLI tự khai lượt ⟹ màn và shell con KHÔNG được bỏ phiếu
+                    // (xem `cli_turn_known`). Còn shell con sau khi lượt đã
+                    // khép thì nó là lệnh NỀN, đúng nghĩa `"shell"` của CLI.
+                    let cli_says = cli_turn_known(row.status.as_deref());
+                    if let Some(v) = row.status.as_deref().filter(|_| !cli_says) {
+                        if first_time(format!("status:{v}")) {
+                            logging::warn(
+                                "cli_status_unknown",
+                                json!({ "status": v, "session": row.session_id,
+                                        "why": "CLI khai một trạng thái lượt chưa đo bao giờ — rơi về đoán bằng màn + nhật ký" }),
+                            );
+                        }
+                    }
                     // 🔴 …NHƯNG MỘT SHELL CON KHÔNG PHẢI LÚC NÀO CŨNG LÀ LƯỢT
                     // ĐANG CHẠY. Hà 2026-08-18: *"lệnh session hiện danh sách
                     // phiên với icon biểu thị đang chạy nhưng thực ra phiên đang
@@ -5485,15 +5695,23 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // còn phiên rảnh mang lệnh nền chỉ ghi `· 2 shells` ở dòng
                     // trạng thái. Không đọc được màn thì GIỮ bằng chứng cũ —
                     // mù không phải là lý do để lật ngược một phép đo đã có.
-                    let screen_busy = if shell && !row.tty.is_empty() {
+                    let screen_busy = if shell && !cli_says && !row.tty.is_empty() {
                         crate::keys::alive_tab(&tabs, &row.tty)
                             .and_then(|t| t.screen.as_deref())
                             .and_then(crate::keys::screen_running)
                     } else {
                         None
                     };
-                    let shell_busy = shell_verdict(shell, screen_busy);
-                    if shell {
+                    let verdict = turn_verdict(
+                        row.status.as_deref(),
+                        row.pending_subagents,
+                        idle_seconds(row.last_activity.as_deref()),
+                        shell,
+                        screen_busy,
+                        row.host != "dead",
+                    );
+                    if shell && !cli_says {
+                        let shell_busy = shell_verdict(shell, screen_busy);
                         logging::info(
                             "session_busy_by_shell",
                             json!({ "session": row.session_id, "pid": row.pid,
@@ -5505,17 +5723,11 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                                     } }),
                         );
                     }
-                    // Còn shell con mà màn nói phiên đang chờ ⟹ lệnh chạy NỀN.
-                    // Ghi lại để DANH SÁCH nói ra được, thay vì chỉ dùng nó để
-                    // quyết `working` rồi bỏ đi.
-                    row.bg_shell = shell && !shell_busy && row.host != "dead";
-                    row.working = row.host != "dead"
-                        && (shell_busy
-                            || is_working(
-                                row.status.as_deref(),
-                                row.pending_subagents,
-                                idle_seconds(row.last_activity.as_deref()),
-                            ));
+                    row.working = verdict.working;
+                    // Còn shell con mà lượt đã khép ⟹ lệnh chạy NỀN. Ghi lại để
+                    // DANH SÁCH nói ra được, thay vì chỉ dùng nó để quyết
+                    // `working` rồi bỏ đi.
+                    row.bg_shell = verdict.bg_shell;
                     // Chỉ phiên ĐANG CHẠY mới có dòng trạng thái để đọc; phiên
                     // rảnh thì đọc ra chuỗi rỗng. Cửa này từng còn để chặn giá
                     // (mỗi lần đọc là 2 lượt `osascript`, 18s → 90s một vòng);

@@ -432,6 +432,10 @@ fn real_main() -> Result<()> {
         }
 
         let mut delay = Duration::from_secs(cfg.poll_interval_sec);
+        // Chụp TRƯỚC vòng chứ không sau: một lượt khép trong lúc vòng đang chạy
+        // (sau khi vòng đã đọc sổ) phải đánh thức vòng kế, không phải ngồi chờ
+        // hết `poll_interval_sec`.
+        let status_seen = huba::sessions::book_status_fingerprint(&cfg);
         match run_once(&db, &cfg) {
             Ok(summary) => {
                 consecutive_failures = 0;
@@ -514,9 +518,19 @@ fn real_main() -> Result<()> {
         // into slices so the stream can follow the file instead of waiting out
         // a two-minute cycle (UC-S03: "thấy đủ mà chậm hai phút thì vẫn không
         // giống ngồi máy").
-        follow_sleep(&cfg, &db, &waker, delay);
+        follow_sleep(&cfg, &db, &waker, delay, &status_seen);
     }
 }
+
+/// Bao lâu dò sổ `status` của CLI một lần trong lúc ngủ. Mỗi lần chỉ đọc vài
+/// tệp JSON nhỏ — không `osascript`, không gọi CLI.
+const STATUS_PEEK_SEC: u64 = 3;
+
+/// Sàn giữa hai vòng do `status` đánh thức. Một vòng tốn ~3 giây `osascript`
+/// (`ms_terminal_probe` 2841 đo 03/10); một phiên chạy Monitor có thể đổi
+/// `status` vài lần mỗi phút. Sàn này đặt trần ~4 vòng/phút cho cả máy, đổi
+/// lại tin "vừa xong" trễ tối đa ~10 giây — vẫn nhanh hơn nhịp 120 giây cũ.
+const STATUS_WAKE_MIN_SEC: u64 = 10;
 
 // 🔴 ĐÃ BỎ cả nhánh BÁM SÁT (`follow_sleep` + `idle_activity_sleep`),
 // 2026-08-14, cùng lượt gỡ tfl5 theo lời Hà: *"tạm thời không dùng tfl5 để xem
@@ -529,11 +543,40 @@ fn real_main() -> Result<()> {
 //
 // Thứ chúng phục vụ trên Telegram thì đã có đường riêng: cái loa "vừa xong /
 // vừa tắt" (`watch.rs`) chạy trong chính vòng, và `/shot` đọc màn khi được hỏi.
+//
+// 🔴 2026-10-03 — NGỦ NHƯNG CANH SỔ `status` CỦA CLI (Hà: *"việc nhận biết
+// phiên đang dừng chờ để gửi thông báo lên tele không ổn định lúc thì dồn dập
+// lúc thì xong lâu rồi ko thấy báo"*). Vòng chạy mỗi `poll_interval_sec` (120
+// giây), nên một lượt khép ngay sau một vòng phải chờ tới 2 phút mới được nói,
+// và một lượt bắt đầu RỒI khép gọn giữa hai vòng thì huba không bao giờ thấy
+// nó chạy ⟹ không có tin nào. CLI ghi `status` vào sổ đúng lúc lượt đổi (lệch
+// ≤ 9 ms so với nhật ký, xem `sessions::is_working`) — dò sổ ấy mỗi
+// `STATUS_PEEK_SEC` giây là đủ để chạy vòng NGAY khi có chuyện.
 fn follow_sleep(
-    _cfg: &huba::config::Config,
+    cfg: &huba::config::Config,
     _db: &Db,
     waker: &huba::runtime::Waker,
     delay: Duration,
+    status_seen: &str,
 ) {
-    waker.sleep(delay);
+    let start = std::time::Instant::now();
+    loop {
+        let left = delay.saturating_sub(start.elapsed());
+        if left.is_zero() {
+            return;
+        }
+        if waker.sleep(left.min(Duration::from_secs(STATUS_PEEK_SEC))) {
+            return;
+        }
+        if start.elapsed() < Duration::from_secs(STATUS_WAKE_MIN_SEC) {
+            continue;
+        }
+        if huba::sessions::book_status_fingerprint(cfg) != status_seen {
+            logging::info(
+                "cycle_woken_by_status",
+                json!({ "after_ms": start.elapsed().as_millis() as u64 }),
+            );
+            return;
+        }
+    }
 }

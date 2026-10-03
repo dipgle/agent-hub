@@ -1215,12 +1215,17 @@ pub fn changes(
         // Mốc bắt đầu chạy: giữ nguyên nếu đang chạy tiếp, đặt mới nếu vừa bắt
         // đầu. Không có mốc thì lấy lúc này — thiếu chính xác một lượt, và lượt
         // ấy sẽ bị coi là ngắn, tức im. Thà lỡ một tin còn hơn một tin sai.
+        // CLI có khai mốc bắt đầu lượt (`statusUpdatedAt` của `busy`) thì dùng
+        // mốc ấy: "lúc vòng đầu tiên nhìn thấy" trễ tới một vòng (120 giây), đủ
+        // để một lượt 3 phút đo ra dưới `MIN_RUN_SEC` rồi bị im.
+        let cli_start = crate::sessions::cli_turn_started(s, epoch_sec);
         let since = if was_working {
-            before
+            let book = before
                 .and_then(|b| working_since(&b.s))
-                .unwrap_or(epoch_sec)
+                .unwrap_or(epoch_sec);
+            cli_start.map_or(book, |c| c.min(book))
         } else {
-            epoch_sec
+            cli_start.unwrap_or(epoch_sec)
         };
         // MỒ CÔI — nói MỘT lần, xem `Mark::m`.
         //

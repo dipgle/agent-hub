@@ -3458,12 +3458,35 @@ impl Inbox {
         Ok(())
     }
 
+    /// Thân `sendMessage` của một tin TRƠN — luôn kèm bàn phím thường trực.
+    ///
+    /// 🔴 Hà 03/10: *"Tại sao thi thoảng lại mất mấy nút menu ở dưới cùng tele"*.
+    /// Đo: huba KHÔNG có chỗ nào gỡ bàn phím (`remove_keyboard` · `force_reply`:
+    /// 0 chỗ), nhưng app Telegram vẫn có lúc bỏ nó — sáng 03/10 lần bấm «📷 Xem
+    /// màn» cuối là 08:01:42Z, từ 08:32:59Z Hà phải gõ `/shot` · `/session`.
+    /// Cái hở là phía huba: bàn phím chỉ được gắn lại ở `confirm::tell` (lời chào
+    /// sau mỗi lần cài · tin báo phiên tắt không nút), tức có khi hàng giờ mới
+    /// một lần — mất là mất tới lượt cài sau. Tin trơn đi qua đây đủ dày (trả lời
+    /// lệnh lạ, `/start` trần, báo tin quá cũ…) nên gắn ở đây thì bàn phím tự
+    /// về ngay ở câu trả lời kế tiếp.
+    ///
+    /// Chỉ tin TRƠN: tin có nút dưới mang `inline_keyboard`, mà một tin chỉ mang
+    /// được một loại `reply_markup`; tin xác nhận gộp (`send_ack`) thì bị SỬA lại
+    /// về sau, nên không gắn ở đó.
+    pub fn plain_message_body(chat_id: &str, text: &str) -> Value {
+        json!({
+            "chat_id": chat_id,
+            "text": strip_markdown(text),
+            "reply_markup": Self::persistent_keyboard(),
+        })
+    }
+
     /// Gửi một câu ra Telegram. `Err` chứ không nuốt — chỗ gọi phải log.
     pub fn send_text(&self, text: &str) -> Result<(), String> {
         self.forget_ack_live();
         let v = self.post_retry(
             "sendMessage",
-            &json!({ "chat_id": self.chat_id, "text": strip_markdown(text) }),
+            &Self::plain_message_body(&self.chat_id, text),
         )?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg(), &v);

@@ -1,5 +1,13 @@
 # active context — huba
 
+## 🟢 2026-10-03 08:4xZ→09:0xZ — phiên 8275eb77: bàn phím 3 nút thi thoảng mất (PLAN S50) · chuyển phiên
+
+- Hà: *«Tại sao thi thoảng lại mất mấy nút menu ở dưới cùng tele»*. Đo: huba 0 chỗ gỡ bàn phím; tin mang bàn phím
+  cách nhau ≤ 13,5 h (bộ tự xoá 24 h không phải nguyên nhân); sáng nay 08:01→08:32Z app Telegram tự bỏ bàn phím,
+  huba chỉ gắn lại lúc cài/báo tắt không nút. `dc77797`: mọi tin trơn (`send_text`) mang bàn phím. Cài 08:55:25Z
+  pid 29453 KHỚP; sau lời chào cài Hà bấm «📋 Phiên» ×4 ⟹ gửi lại đúng là đưa bàn phím về. Mục `BAN-PHIM-S50`.
+- Cổng chung 8ff9f41..dc77797 `QG_EXIT=0`. Chuyển phiên: brief `.tmp/brief-huba-ke-nhiem-2026-10-03.md`.
+
 ## 🟢 2026-10-03 01:3xZ→02:0xZ — phiên 8275eb77: phiên CHẾT THEO MÁY (PLAN S49) + ca thật S48
 
 - Hà hỏi *«máy tắt đột ngột … mở lại phiên đã có nạp lại được lịch sử đang làm giở không»*. Đo lần tắt 02/10

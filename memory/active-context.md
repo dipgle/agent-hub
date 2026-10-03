@@ -1,5 +1,18 @@
 # active context — huba
 
+## 🟢 2026-10-03 09:0xZ→09:5xZ — phiên 5ed3d329: tin "dừng" đọc status của CLI (PLAN S51) · S46 đóng
+
+- Đóng phiên cũ 8275eb77 (pid 55178, ttys012 biến mất, cửa sổ 205 còn 0 tab). S46 ĐẠT: /upgrade thật 02/10 12:40:24Z cài
+  được (lượt đo cũ đọc hụt).
+- Hà: *«lúc thì dồn dập lúc thì xong lâu rồi ko thấy báo»*. Đo: sổ `sessions/<pid>.json` của CLI khai `busy/idle/shell`
+  lệch nhật ký ≤ 9 ms (lấy mẫu 1 s × 15 phút, `.tmp/do-status-cli/mau.tsv`); huba đoán bằng màn + shell con + 180 s ⟹
+  15:43Z 02/10 5 tin 💤/phút (4 sai), dhub 08:48→08:53 không báo, phiên 7347daca rơi khỏi danh sách (sổ thừa `}`).
+- `17be031`: `turn_verdict` · `cli_turn_started` · `parse_session_book` · hubad dậy khi `book_status_fingerprint` đổi
+  (dò 3 s, sàn 10 s). Đột biến 5/5 ĐỎ; gate 185/185; QG chung QG_EXIT=0. Cài 09:31:38Z pid 33637. Ca thật: dorg khép
+  09:50:16.712 ⟹ 💤 09:50:23.147 (6,4 s). Máy tải nặng ⟹ 37–48 s (osascript đọc tab timeout 36 s — chi phí cũ).
+- QG-WS-BD42A81: mật khẩu giả `hunter2` ở `scripts/qg-hang-doi.test.sh:265` (của worklist) vẫn còn ở 08b92de — đã nhắn
+  phiên worklist 021dcfd9. Không có việc chạy nền.
+
 ## 🟢 2026-10-03 08:4xZ→09:0xZ — phiên 8275eb77: bàn phím 3 nút thi thoảng mất (PLAN S50) · chuyển phiên
 
 - Hà: *«Tại sao thi thoảng lại mất mấy nút menu ở dưới cùng tele»*. Đo: huba 0 chỗ gỡ bàn phím; tin mang bàn phím

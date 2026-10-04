@@ -3219,7 +3219,49 @@ impl Inbox {
         html: &str,
         buttons: &[(String, String)],
     ) -> Result<(), String> {
-        self.send_html_report(html, buttons).map(|_| ())
+        // Đường này VỨT `message_id` ⟹ huba không bao giờ sửa hay xoá được tin
+        // này ⟹ gắn bàn phím thường trực an toàn (xem `html_message_body`).
+        self.send_html_with(html, buttons, true).map(|_| ())
+    }
+
+    /// Thân `sendMessage` của một tin HTML.
+    ///
+    /// `ban_phim_khi_tron`: tin KHÔNG có nút dưới thì mang bàn phím thường trực.
+    ///
+    /// 🔴 Hà 04/10: *"Lại mất menu nút bấm phía dưới"* — một ngày sau S50. Đo:
+    /// bàn phím còn lúc 02:29:25Z (bấm «📋 Phiên»), mất trước 03:41:03Z (Hà gõ
+    /// `/session`); quãng ấy huba KHÔNG xoá tin nào, KHÔNG gỡ bàn phím, tin mang
+    /// bàn phím mới nhất (lời chào cài 09:31Z 03/10) vẫn chưa tới hạn tự xoá 24 h
+    /// — tức app tự bỏ, như 03/10. Cái hở là phía huba: S50 chỉ gắn lại ở
+    /// `send_text`, mà từ 02:29Z KHÔNG một tin trơn nào đi ra. Danh sách phiên
+    /// (`/session`, «📋 Phiên» — tin Hà gọi nhiều nhất) đi đường HTML, nên Hà gõ
+    /// `/session` ba lần (03:41–03:43Z) mà bàn phím vẫn không về.
+    ///
+    /// Chỉ đường VỨT id (`send_html` · `send_html_buttons`) mới gắn: tin huba
+    /// còn giữ id để SỬA (tin gim, câu xác nhận gộp) hay XOÁ (`⏳ đang quét
+    /// màn`) thì không — app Telegram lấy bàn phím từ tin mang nó mới nhất, nên
+    /// xoá đúng tin ấy là xoá luôn bàn phím.
+    pub fn html_message_body(
+        chat_id: &str,
+        html: &str,
+        buttons: &[(String, String)],
+        ban_phim_khi_tron: bool,
+    ) -> Value {
+        let mut body = json!({
+            "chat_id": chat_id,
+            "text": html,
+            "parse_mode": "HTML",
+            // Xem trước liên kết sẽ nở một khung to đùng dưới mỗi tin có
+            // icon — đúng thứ không ai muốn khi cái link ấy chỉ là một nút
+            // trá hình.
+            "link_preview_options": { "is_disabled": true },
+        });
+        if !buttons.is_empty() {
+            body["reply_markup"] = json!({ "inline_keyboard": Self::keyboard_rows(buttons) });
+        } else if ban_phim_khi_tron {
+            body["reply_markup"] = Self::persistent_keyboard();
+        }
+        body
     }
 
     /// Như [`send_html_buttons`], và TRẢ VỀ thứ Telegram nói nó vừa hiển thị.
@@ -3242,21 +3284,20 @@ impl Inbox {
         html: &str,
         buttons: &[(String, String)],
     ) -> Result<Sent, String> {
+        // Đường này TRẢ id — chỗ gọi có thể sửa/xoá tin về sau ⟹ không bàn phím.
+        self.send_html_with(html, buttons, false)
+    }
+
+    fn send_html_with(
+        &self,
+        html: &str,
+        buttons: &[(String, String)],
+        ban_phim_khi_tron: bool,
+    ) -> Result<Sent, String> {
         // Một tin khác đi ra ⟹ câu xác nhận đang mở thôi là tin cuối.
         // `send_ack` ghi lại sổ NGAY SAU khi gửi, nên đường ấy không mất gì.
         self.forget_ack_live();
-        let mut body = json!({
-            "chat_id": self.chat_id,
-            "text": html,
-            "parse_mode": "HTML",
-            // Xem trước liên kết sẽ nở một khung to đùng dưới mỗi tin có
-            // icon — đúng thứ không ai muốn khi cái link ấy chỉ là một nút
-            // trá hình.
-            "link_preview_options": { "is_disabled": true },
-        });
-        if !buttons.is_empty() {
-            body["reply_markup"] = json!({ "inline_keyboard": Self::keyboard_rows(buttons) });
-        }
+        let body = Self::html_message_body(&self.chat_id, html, buttons, ban_phim_khi_tron);
         let v = self.post_retry("sendMessage", &body)?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg(), &v);
@@ -3264,7 +3305,8 @@ impl Inbox {
             logging::info(
                 "telegram_html_sent",
                 json!({ "message_id": sent.message_id, "text_links": sent.links.len(),
-                        "buttons": buttons.len(), "chars": sent.text.chars().count() }),
+                        "buttons": buttons.len(), "chars": sent.text.chars().count(),
+                        "ban_phim": body.get("reply_markup").and_then(|m| m.get("keyboard")).is_some() }),
             );
             Ok(sent)
         } else {

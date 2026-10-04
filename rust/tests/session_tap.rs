@@ -164,3 +164,45 @@ fn muoi_bon_phien_thi_liet_ke_du_muoi_bon() {
         );
     }
 }
+
+/// 🔴 Hà 04/10, ảnh: danh sách 7 phiên rơi về khối 7 nút ở đáy. Gốc: dòng xem
+/// trước của `[dwork/dorg]` là *"Báo cáo phiên 600ea4c8. Hai lỗi đã vá…"* — chính
+/// phiên ấy nhắc mã của nó — và `tap_rows_html` bọc MỌI dòng chứa mã ⟹ 8 đích
+/// cho 7 hàng ⟹ luật "tất cả hoặc không" từ chối cả danh sách. Phiên nhắc mã
+/// của phiên KHÁC cũng thế, và còn tệ hơn: liên kết dắt nhầm phiên.
+#[test]
+fn a_preview_that_names_a_session_id_does_not_break_the_list() {
+    bot();
+    let mut a = sess(A, "[dwork/dorg]");
+    a.last_text = Some(format!("Báo cáo phiên {}. Hai lỗi đã vá", &A[..8]));
+    let mut b = sess(B, "[huba]");
+    b.last_text = Some(format!(
+        "phiên {} đang chờ, còn {} thì xong",
+        &A[..8],
+        &B[..8]
+    ));
+    let rows = [a, b];
+    let text = session_list_text(&rows, "", NOW);
+    // Nền: ca này CÓ dòng xem trước nhắc mã — không thì bài xanh vì lẽ khác.
+    assert!(
+        text.lines()
+            .filter(|l| l.contains(&A[..8]) || l.contains(&B[..8]))
+            .count()
+            > 2,
+        "{text}"
+    );
+    let (html, wrapped) = session_list_html(&text, &rows);
+    assert_eq!(wrapped, rows.len(), "mỗi hàng đúng một đích chạm:\n{html}");
+    assert_eq!(html.matches("<a href=").count(), 2, "{html}");
+    // Mỗi liên kết bọc đúng HÀNG của phiên nó dắt tới (hàng kết thúc bằng mã).
+    for r in &rows {
+        let open = format!("start=s_{}\">", r.session_id);
+        let i = html.find(&open).expect("thiếu đích chạm");
+        let inner = &html[i..];
+        let inner = &inner[..inner.find("</a>").unwrap()];
+        assert!(
+            inner.trim_end().ends_with(&r.session_id[..8]),
+            "dắt nhầm hàng: {inner}"
+        );
+    }
+}

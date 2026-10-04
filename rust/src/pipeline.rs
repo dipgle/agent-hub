@@ -5034,9 +5034,23 @@ pub fn web_route(want: &str) -> (String, Vec<(String, String)>) {
 pub fn tap_rows_html(text: &str, taps: &[(String, String)]) -> (String, usize) {
     let mut out = String::new();
     let mut wrapped = 0usize;
+    // 🔴 Neo ở CUỐI dòng, mỗi đích MỘT lần (Hà 04/10, ảnh danh sách phiên rơi về
+    // khối nút: *"Sao danh sách acc lại bị như này rồi"*). Bản cũ bọc MỌI dòng
+    // CHỨA mã ⟹ dòng xem trước của `[dwork/dorg]` — *"Báo cáo phiên 600ea4c8…"* —
+    // cũng thành đích chạm ⟹ 8 dòng bọc cho 7 phiên ⟹ luật "tất cả hoặc không"
+    // của danh sách từ chối cả danh sách (lần cuối đi được 04:12:24Z, lần đầu rơi
+    // 04:34Z). Phiên nói về mã phiên là chuyện thường; dòng HÀNG thì luôn kết
+    // thúc bằng mã (`… · acc7 · 600ea4c8`, cũng như hàng tab `… · 1.2`).
+    let mut used = vec![false; taps.len()];
     for line in text.lines() {
-        match taps.iter().find(|(sid, _)| line.contains(sid.as_str())) {
-            Some((_, href)) => {
+        let tail = line.trim_end();
+        let hit = taps
+            .iter()
+            .enumerate()
+            .find(|(i, (sid, _))| !used[*i] && tail.ends_with(sid.as_str()));
+        match hit {
+            Some((i, (_, href))) => {
+                used[i] = true;
                 // `👉` nằm TRONG `<a>`: nó là dấu hiệu "chạm được", nên nó phải
                 // chạm được. Để ngoài là dựng lại đúng cái đích tí xíu vừa bỏ.
                 out.push_str(&format!(
@@ -17608,6 +17622,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             // Đường lùi: chưa biết tên bot ⟹ không dựng được
                             // deep link ⟹ danh sách không có chỗ nào bấm. Lúc ấy
                             // cái nút vẫn hơn một tin chỉ để đọc.
+                            //
+                            // NÓI ra vì sao rơi: 04/10 danh sách rơi về khối nút
+                            // suốt nửa giờ mà log không có một dòng nào.
+                            if !sent && rows > 0 && linked != rows {
+                                logging::warn(
+                                    "session_taps_partial",
+                                    json!({ "rows": rows, "linked": linked,
+                                            "effect": "danh sách rơi về khối nút ở đáy" }),
+                                );
+                            }
                             if !sent {
                                 let buttons: Vec<(String, String)> = live
                                     .sessions

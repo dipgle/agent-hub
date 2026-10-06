@@ -60,7 +60,8 @@
     {
       "name": "acc3",
       "config_dir": "~/.claude-acc3",
-      "launch": "claude3"
+      "launch": "claude3",
+      "locked": true
     },
     {
       "name": "acc4",
@@ -68,15 +69,18 @@
     },
     {
       "name": "acc5",
-      "config_dir": "~/.claude-acc5"
+      "config_dir": "~/.claude-acc5",
+      "locked": true
     },
     {
       "name": "acc6",
-      "config_dir": "~/.claude-acc6"
+      "config_dir": "~/.claude-acc6",
+      "locked": true
     },
     {
       "name": "acc7",
-      "config_dir": "~/.claude-acc7"
+      "config_dir": "~/.claude-acc7",
+      "locked": true
     }
   ],
   "new_in_terminal": true,

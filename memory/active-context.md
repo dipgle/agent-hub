@@ -1,6 +1,6 @@
 # active context — huba
 
-## 🟡 2026-10-06 14:1xZ→ — phiên kế nhiệm 63503ce1: đóng 5ed3d329 · nghiệm thu FILE-MARK lộ lỗ Stop hook (PLAN S52)
+## 🟢 2026-10-06 14:1xZ→16:5xZ — phiên kế nhiệm 63503ce1: đóng 5ed3d329 · nghiệm thu FILE-MARK lộ lỗ Stop hook (PLAN S52)
 
 - Đóng 5ed3d329: lượt cuối end_turn 14:09:20Z, cây 0/0 (huba + ~/projects), 0 việc chạy/hòm thư/hàng đợi ⟹ kill 44104,
   ttys013 biến mất; cửa sổ 2450 còn trong danh sách Terminal nhưng 0 tab (như 6224/205 trước đây).
@@ -9,7 +9,9 @@
   Mẫu số 14 ngày: 195 báo cáo rơi kiểu này / 8.680 lượt (2 có 📎). Không phải lỗi hubd.
 - Vá S52 `84d4e2c`: `last_prose_at` gom mọi điểm dừng của lượt (lời liền trước bản ghi hook) + `📎` là dấu nhấn của
   `key_points`. RED 3/6 → GREEN 6/6, đột biến 1/1 ĐỎ, gate.sh 187/187, đẩy 0/0. Cài 14:42:10Z pid 4299, --verify KHỚP.
-  Ca thật (`.tmp/do-stop-hook-noi-luot/ca-that.py`): bản cũ hôm nay 16/16 HỎNG; sau cài chưa có ca. QG chung đang xếp hàng.
+  Ca thật (`.tmp/do-stop-hook-noi-luot/ca-that.py`): bản cũ hôm nay 16/16 HỎNG; bản mới e06f1c31 16:23:35Z ĐẠT (1/1).
+  QG chung 17be031..c94f5a9 QG_EXIT=0 (lượt 1 không QG_BASE ra KHÔNG ĐO ĐƯỢC — phải chỉ mốc).
+- FILE-MARK: tin 💤 14:54:54Z của phiên này mang 📎 a2498af.zip ⟹ sổ tệp số 1747; 0 file_search_* từ 14:42Z. Chờ Hà bấm.
 - Hà đổi khoá qua /accounts 14:26–14:27Z: khoá acc4 (phiên này, 93 % tuần), mở acc5/6/7 — đã commit 5fedd6d + d81653e.
 
 ## 🟢 2026-10-04→06 — phiên 5ed3d329: bàn phím (eeacbda) · danh sách phiên (a2498af) · gói Windows · dọn amm · dấu tệp 📎 (869d38c)

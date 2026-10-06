@@ -50,13 +50,24 @@ fn so(nut: &(String, String)) -> usize {
         .unwrap_or_else(|| panic!("nút không phải `file:<n>`: {nut:?}"))
 }
 
+/// Đường dẫn TUYỆT ĐỐI của tệp `f` trong cây của phiên `sid` — đúng thứ dấu `📎`
+/// mang vào (06/10: huba thôi giải đường tương đối, thôi lùng cây).
+fn tuyet(dir: &tempfile::TempDir, sid: &str, f: &str) -> String {
+    let cay = if sid == A { "AI/mot" } else { "AI/hai" };
+    dir.path().join(cay).join(f).display().to_string()
+}
+
 /// ĐÚNG ca Hà gặp, và chỉ dùng API có từ trước lượt sửa (`remember_files` +
 /// `quick_file`) — nên bài này đỏ được trên sổ một ô.
 #[test]
 fn tin_moi_co_tep_khong_doi_dich_cua_tin_cu() {
-    let (db, _dir, cfg) = hai_cay(&["docs/HOP-QUYET-DINH.html", "CLAUDE.md"]);
-    let nut_a = remember_files(&db, &cfg, A, &["docs/HOP-QUYET-DINH.html".to_string()]);
-    let nut_b = remember_files(&db, &cfg, B, &["CLAUDE.md".to_string()]);
+    let (db, dir, cfg) = hai_cay(&["docs/HOP-QUYET-DINH.html", "CLAUDE.md"]);
+    let (pa, pb) = (
+        tuyet(&dir, A, "docs/HOP-QUYET-DINH.html"),
+        tuyet(&dir, B, "CLAUDE.md"),
+    );
+    let nut_a = remember_files(&db, &cfg, A, std::slice::from_ref(&pa));
+    let nut_b = remember_files(&db, &cfg, B, std::slice::from_ref(&pb));
     assert_eq!((nut_a.len(), nut_b.len()), (1, 1), "{nut_a:?} {nut_b:?}");
     assert_ne!(
         so(&nut_a[0]),
@@ -65,35 +76,36 @@ fn tin_moi_co_tep_khong_doi_dich_cua_tin_cu() {
     );
     assert_eq!(
         quick_file(&db, so(&nut_a[0])),
-        Some((A.to_string(), "docs/HOP-QUYET-DINH.html".to_string())),
+        Some((A.to_string(), pa.clone())),
         "bấm 📎 của tin CŨ sau khi tin mới tới — phải ra tệp của tin cũ"
     );
     assert_eq!(
         quick_file(&db, so(&nut_b[0])),
-        Some((B.to_string(), "CLAUDE.md".to_string()))
+        Some((B.to_string(), pb.clone()))
     );
 }
 
 #[test]
 fn cung_phien_cung_tep_thi_dung_lai_so() {
-    let (db, _dir, cfg) = hai_cay(&["a.md", "b.md"]);
-    let dau = remember_files(&db, &cfg, A, &["a.md".to_string()]);
-    let giua = remember_files(&db, &cfg, A, &["b.md".to_string()]);
-    let lai = remember_files(&db, &cfg, A, &["b.md".to_string(), "a.md".to_string()]);
+    let (db, dir, cfg) = hai_cay(&["a.md", "b.md"]);
+    let (a, b_) = (tuyet(&dir, A, "a.md"), tuyet(&dir, A, "b.md"));
+    let dau = remember_files(&db, &cfg, A, std::slice::from_ref(&a));
+    let giua = remember_files(&db, &cfg, A, std::slice::from_ref(&b_));
+    let lai = remember_files(&db, &cfg, A, &[b_.clone(), a.clone()]);
     assert_eq!(so(&lai[1]), so(&dau[0]), "a.md nhắc lại phải giữ số cũ");
     assert_eq!(so(&lai[0]), so(&giua[0]), "b.md nhắc lại phải giữ số cũ");
     // Cùng TÊN tệp ở phiên KHÁC là tệp khác (cây khác) ⟹ số khác.
-    let b = remember_files(&db, &cfg, B, &["a.md".to_string()]);
+    let b = remember_files(&db, &cfg, B, &[tuyet(&dir, B, "a.md")]);
     assert_ne!(so(&b[0]), so(&dau[0]));
 }
 
 #[test]
 fn so_cua_so_mot_o_cu_doc_ra_da_cu() {
-    let (db, _dir, cfg) = hai_cay(&["a.md"]);
+    let (db, dir, cfg) = hai_cay(&["a.md"]);
     // Sổ một ô cũ còn nằm trong DB của máy thật dưới khoá cũ.
     db.set_cursor("quick:files", r#"{"s":"x","p":["/etc/passwd"]}"#)
         .unwrap();
-    let nut = remember_files(&db, &cfg, A, &["a.md".to_string()]);
+    let nut = remember_files(&db, &cfg, A, &[tuyet(&dir, A, "a.md")]);
     assert!(so(&nut[0]) >= FILE_SO_DAU, "{nut:?}");
     for n in 0..4 {
         assert_eq!(
@@ -106,9 +118,10 @@ fn so_cua_so_mot_o_cu_doc_ra_da_cu() {
 
 #[test]
 fn so_vong_bo_muc_cu_nhat_va_moi_so_vua_phat_deu_tra_ra_dung_tep() {
-    let ten: Vec<String> = (0..FILE_GIU + 3).map(|i| format!("t/{i}.md")).collect();
-    let refs: Vec<&str> = ten.iter().map(String::as_str).collect();
-    let (db, _dir, cfg) = hai_cay(&refs);
+    let tuong: Vec<String> = (0..FILE_GIU + 3).map(|i| format!("t/{i}.md")).collect();
+    let refs: Vec<&str> = tuong.iter().map(String::as_str).collect();
+    let (db, dir, cfg) = hai_cay(&refs);
+    let ten: Vec<String> = tuong.iter().map(|t| tuyet(&dir, A, t)).collect();
     let mut dau = None;
     for t in &ten {
         let nut = remember_files(&db, &cfg, A, std::slice::from_ref(t));
@@ -124,7 +137,7 @@ fn so_vong_bo_muc_cu_nhat_va_moi_so_vua_phat_deu_tra_ra_dung_tep() {
     assert_eq!(quick_file(&db, dau), None, "mục cũ nhất phải rơi khỏi sổ");
     assert_eq!(
         quick_file(&db, dau + 3),
-        Some((A.to_string(), "t/3.md".to_string())),
+        Some((A.to_string(), ten[3].clone())),
         "mục cũ nhất CÒN giữ phải vẫn đúng số của nó"
     );
     // Mục vừa bị đẩy tới mép: nhắc lại nó cùng một tệp mới — số trả về phải
@@ -143,8 +156,8 @@ fn so_vong_bo_muc_cu_nhat_va_moi_so_vua_phat_deu_tra_ra_dung_tep() {
 /// Neo 📎 giữa chữ và nút ở đáy mang CÙNG số — sinh ra từ một lượt ghi.
 #[test]
 fn neo_va_nut_cung_so() {
-    let (db, _dir, cfg) = hai_cay(&["docs/x.md", "docs/y.md"]);
-    let paths = vec!["docs/x.md".to_string(), "docs/y.md".to_string()];
+    let (db, dir, cfg) = hai_cay(&["docs/x.md", "docs/y.md"]);
+    let paths = vec![tuyet(&dir, A, "docs/x.md"), tuyet(&dir, A, "docs/y.md")];
     assert_eq!(file_anchors(&db, &cfg, A, &paths), paths);
     let tep = ghi_so_tep(&db, &cfg, A, &paths);
     assert_eq!(tep.len(), 2);
@@ -159,12 +172,14 @@ fn neo_va_nut_cung_so() {
 #[test]
 fn lien_ket_giua_chu_mang_so_cua_so() {
     huba::telegram::set_bot_username("hub_test_bot");
-    let (db, _dir, cfg) = hai_cay(&["docs/HOP-QUYET-DINH.html"]);
+    let (db, dir, cfg) = hai_cay(&["docs/HOP-QUYET-DINH.html"]);
     // Một tin có tệp tới trước, để số của tin sau KHÁC số thứ tự 0.
-    let _truoc = remember_files(&db, &cfg, B, &["docs/HOP-QUYET-DINH.html".to_string()]);
-    let tep = ghi_so_tep(&db, &cfg, A, &["docs/HOP-QUYET-DINH.html".to_string()]);
+    let _truoc = remember_files(&db, &cfg, B, &[tuyet(&dir, B, "docs/HOP-QUYET-DINH.html")]);
+    let pa = tuyet(&dir, A, "docs/HOP-QUYET-DINH.html");
+    let tep = ghi_so_tep(&db, &cfg, A, std::slice::from_ref(&pa));
     assert_eq!(tep.len(), 1);
-    let text = "Lô vẫn chờ Hà trả lời.\n📎 docs/HOP-QUYET-DINH.html";
+    let text = format!("Lô vẫn chờ Hà trả lời.\n📎 {pa}");
+    let text = text.as_str();
     let html = render_session_data(
         text,
         &SessionData {

@@ -1654,11 +1654,7 @@ pub fn announce_changes(db: &Db, cfg: &Config, snap: &crate::sessions::SessionsS
         let files: Vec<(String, usize)> = if matches!(c, crate::watch::Change::Ended { .. }) {
             Vec::new()
         } else {
-            let seen = paths_not_in_commands(
-                scan,
-                &crate::keys::paths_on_screen(scan, PATHS_SCAN_MAX),
-                &cmds,
-            );
+            let seen = paths_not_in_commands(scan, &crate::keys::file_markers(scan), &cmds);
             let tep = ghi_so_tep(db, cfg, &id, &seen);
             quick.extend(tep.iter().map(TepDaNho::nut));
             tep.iter().map(TepDaNho::neo_so).collect()
@@ -8678,33 +8674,14 @@ pub const PATHS_SCAN_MAX: usize = 12;
 /// (`remember_files`) và liên kết 📎 giữa chữ (`file_anchors`). Hai phép lọc
 /// chép tay là hai chỉ số lệch nhau, và lệch chỉ số ở đây nghĩa là bấm 📎 trên
 /// tên tệp này lại tải về tệp khác.
-fn kept_paths(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<String> {
-    match session_root(db, cfg, session_id) {
-        Some(root) => {
-            // 🔴 MỘT TỆP MỘT NÚT — Hà 2026-08-19, ảnh tin `[tfl5]` có **hai** nút
-            // `📎 docs/du-toan.md` giống hệt nhau: *"Sao lịch sử lẫn lộn các
-            // phiên thế"*. Cùng một tệp được nhắc hai lần trong một tin (một
-            // lần trong câu văn, một lần trong dòng lệnh `mv`) là chuyện
-            // thường; hai cái nút đưa về CÙNG một tệp thì cái thứ hai không nói
-            // thêm gì, chỉ tốn một hàng bàn phím và làm người đọc tưởng có hai
-            // tệp khác nhau.
-            //
-            // Trùng nhau tính theo ĐƯỜNG ĐÃ GIẢI, không theo chuỗi: `docs/x.md`
-            // và `~/projects/AI/tfl5/docs/x.md` là hai chuỗi khác nhau trỏ vào
-            // đúng một tệp. Giữ lần nhắc ĐẦU để thứ tự nút vẫn theo thứ tự đọc.
-            // 🔴 ĐẾM RIÊNG HAI CỚ RỤNG. Dòng log dưới đây có từ trước lượt khử
-            // trùng (2026-08-20), nên nó khai đúng MỘT cớ — "không phải tệp có
-            // thật, hoặc ngoài workspace" — cho cả những lần rụng vì TRÙNG. Một
-            // dòng nhật ký khai sai nguyên nhân đắt hơn một dòng không có: nó
-            // gửi người đọc đi tìm một cái tệp không hề thiếu, đúng lúc họ mở
-            // log ra vì thấy ít nút hơn số tệp trong tin.
-            let mut da_co: Vec<std::path::PathBuf> = Vec::new();
-            let mut kept: Vec<String> = Vec::new();
-            let mut trung = 0usize;
-            for p in paths {
-                let Some(that) = sendable_file(p, &root, &cfg.workspace_root) else {
-                    continue;
-                };
+fn kept_paths(_db: &Db, cfg: &Config, _session_id: &str, paths: &[String]) -> Vec<String> {
+    let mut da_co: Vec<std::path::PathBuf> = Vec::new();
+    let mut kept: Vec<String> = Vec::new();
+    let mut trung = 0usize;
+    let mut hong: Vec<(String, String)> = Vec::new();
+    for p in paths {
+        match marked_file(p, &cfg.workspace_root) {
+            Ok(that) => {
                 if da_co.contains(&that) {
                     trung += 1;
                     continue;
@@ -8712,45 +8689,84 @@ fn kept_paths(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<
                 da_co.push(that);
                 kept.push(p.clone());
             }
-            if kept.len() < paths.len() {
-                logging::info(
-                    "quick_files_filtered",
-                    json!({ "kept": kept.len(), "seen": paths.len(),
-                            "dup": trung, "unsendable": paths.len() - kept.len() - trung,
-                            "why": "dup = cùng MỘT tệp được nhắc nhiều lần (một tệp một nút); \
-                                    unsendable = không phải tệp có thật, hoặc nằm ngoài workspace" }),
-                );
-            }
-            kept
+            Err(why) => hong.push((p.clone(), why)),
         }
-        // 🔴 Không tra được thư mục phiên thì CHỈ giữ đường tuyệt đối. Đường
-        // tương đối lúc ấy không giải được — giữ nó lại là dựng một cái nút mà
-        // cú bấm chắc chắn trả "không biết phiên ấy làm ở thư mục nào", tức một
-        // lời hứa suông (cùng bài học với `📎 com.dipgle.hubd.plist` 14/08).
-        None => paths
-            .iter()
-            .filter(|p| p.starts_with('/') || p.starts_with("~/"))
-            .cloned()
-            .collect(),
     }
+    if !hong.is_empty() || trung > 0 {
+        logging::info(
+            "file_marker_unsendable",
+            json!({ "kept": kept.len(), "seen": paths.len(), "dup": trung, "hong": hong,
+                    "effect": "dòng 📎 hỏng được ghi chú ngay tại dòng (note_unsendable_marks)" }),
+        );
+    }
+    kept
 }
 
-/// Nhớ các đường dẫn rồi dựng nút `📎 <tên file>`.
-///
-/// Cùng khuôn với [`remember_quick`] và cố ý thế: một cuốn sổ, một dạng
-/// `callback_data`, một chỗ hết hạn. Nút mang CHỈ SỐ chứ không mang đường dẫn,
-/// vì `callback_data` của Telegram chỉ có 64 byte — một đường dẫn tuyệt đối
-/// vượt trần ấy là chuyện thường, và khi vượt thì nút im lặng không hiện.
-///
-/// Sổ nhớ luôn **phiên nào đã nhắc tới đường dẫn ấy**, và đó là cả điểm:
-/// 🔴 Hà 2026-08-13: *"giới hạn phiên nào chỉ nhận được file nằm trong đúng thư
-/// mục của phiên đó thôi"*. Bản đầu gác ở GỐC WORKSPACE, tức một phiên dwork
-/// nhắc tới đường dẫn của tfl5 là kéo được file tfl5 về điện thoại. Gác theo
-/// phiên thì mỗi cái nút chỉ với tới đúng cây thư mục mà phiên ấy đang làm.
-///
-/// Buộc theo phiên ĐÃ SINH RA nút, không phải phiên đang theo lúc bấm: con trỏ
-/// đổi được giữa hai thời điểm ấy (bấm "Xem đầy đủ" là đổi), và lúc đó cái nút
-/// sẽ lặng lẽ đo bằng một cái thước khác.
+/// Tối đa bao nhiêu dấu `📎` trong MỘT tin thành liên kết. Trước 06/10 là 4 (đặt
+/// cho HÀNG NÚT ở đáy); nay đích chạm nằm trong chữ, nên trần chỉ còn để một
+/// bản liệt kê khổng lồ không thành một bức tường nút ở đáy.
+pub const FILE_MARKS_MAX: usize = 10;
+
+/// Một đường dẫn mang dấu `📎` có gửi được không — và nếu không thì VÌ SAO, để
+/// nói ra ngay tại dòng ấy (`note_unsendable_marks`) chứ không lặng lẽ thiếu
+/// một liên kết. Ranh giới giữ nguyên như `telegram::send_document`: tệp có
+/// thật, nằm trong workspace. Cỡ tệp do `send_document` lo (quá 50 MB thì gửi
+/// phần đuôi, đã có từ trước).
+pub fn marked_file(p: &str, workspace: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let expanded = match p.strip_prefix("~/") {
+        Some(rest) => crate::config::home_dir()
+            .map(|h| h.join(rest))
+            .unwrap_or_else(|| std::path::PathBuf::from(p)),
+        None => std::path::PathBuf::from(p),
+    };
+    if !expanded.is_absolute() {
+        return Err("không phải đường dẫn tuyệt đối".into());
+    }
+    let meta = std::fs::metadata(&expanded).map_err(|_| "không thấy tệp trên máy".to_string())?;
+    if !meta.is_file() {
+        return Err("đây là thư mục, không phải tệp".into());
+    }
+    let real = expanded
+        .canonicalize()
+        .map_err(|e| format!("không mở được: {e}"))?;
+    let ws = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+    if !real.starts_with(&ws) {
+        return Err(format!(
+            "nằm ngoài {} — huba chỉ gửi tệp trong đó",
+            ws.display()
+        ));
+    }
+    Ok(expanded)
+}
+
+/// Gắn lý do vào cuối mọi dòng `📎` KHÔNG gửi được — cái thiếu phải hiện ra,
+/// không được im (Hà chốt dấu duy nhất 06/10; một dòng `📎` không bấm được mà
+/// không nói gì là đúng cái "lúc được lúc không" vừa bỏ).
+pub fn note_unsendable_marks(text: &str, workspace: &std::path::Path) -> String {
+    let hong: Vec<(String, String)> = crate::keys::file_markers(text)
+        .into_iter()
+        .filter_map(|p| marked_file(&p, workspace).err().map(|why| (p, why)))
+        .collect();
+    if hong.is_empty() {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len() + 64 * hong.len());
+    for line in text.lines() {
+        out.push_str(line);
+        let one = crate::keys::file_markers(line);
+        if let Some((_, why)) = one.first().and_then(|p| hong.iter().find(|(h, _)| h == p)) {
+            out.push_str(&format!("  ⚠ {why}"));
+        }
+        out.push('\n');
+    }
+    if !text.ends_with('\n') {
+        out.pop();
+    }
+    out
+}
+
 pub fn remember_files(
     db: &Db,
     cfg: &Config,
@@ -8784,7 +8800,7 @@ pub fn ghi_so_tep(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> 
     // có thể hỏng còn hơn im lặng nuốt mọi nút vì một cuốn sổ chưa kịp ghi.
     let paths: Vec<String> = kept_paths(db, cfg, session_id, paths)
         .into_iter()
-        .take(4)
+        .take(FILE_MARKS_MAX)
         .collect();
     let paths = &paths[..];
     if paths.is_empty() {
@@ -8850,12 +8866,12 @@ pub fn ghi_so_tep(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> 
     // Trùng tên thì thêm thư mục cha, đủ để tách chứ không dán cả đường dẫn.
     let shown: Vec<String> = paths
         .iter()
-        .take(4)
+        .take(FILE_MARKS_MAX)
         .map(|p| {
             let name = p.rsplit('/').next().unwrap_or(p);
             let dup = paths
                 .iter()
-                .take(4)
+                .take(FILE_MARKS_MAX)
                 .filter(|q| q.rsplit('/').next().unwrap_or(q) == name)
                 .count()
                 > 1;
@@ -8892,7 +8908,7 @@ pub fn ghi_so_tep(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> 
 pub fn file_anchors(db: &Db, cfg: &Config, session_id: &str, paths: &[String]) -> Vec<String> {
     kept_paths(db, cfg, session_id, paths)
         .into_iter()
-        .take(4)
+        .take(FILE_MARKS_MAX)
         .collect()
 }
 
@@ -8963,80 +8979,12 @@ pub fn sendable_file(
     // (`docs/` ở cuối dòng, tên tệp ở dòng sau), và đường tính từ một thư mục
     // con chứ không từ gốc dự án. Phiên thì biết rõ nó làm ở đâu, nên câu hỏi
     // *"tệp này nằm chỗ nào trong cây ấy"* trả lời được bằng một lượt quét.
-    if expanded.is_absolute() {
-        return None;
-    }
-    let name = expanded.file_name()?.to_str()?;
-    find_one_in_tree(root, name)
-}
-
-/// Bỏ qua khi quét: nặng, và không chứa thứ ai đó nhắc tới trong một báo cáo.
-const SKIP_DIRS: &[&str] = &[
-    ".git",
-    "target",
-    "node_modules",
-    ".tmp",
-    "dist",
-    "build",
-    ".cargo",
-    ".next",
-    "vendor",
-];
-
-/// Tìm **đúng một** tệp tên `name` trong cây `root`. Nhiều khớp ⟹ `None`.
-///
-/// Nhiều khớp là ca phải TỪ CHỐI chứ không phải chọn bừa: `docs/README.md` và
-/// `web/README.md` là hai tệp khác nhau, và gửi nhầm cái thứ hai thì người đọc
-/// không có cách nào biết mình đang đọc sai tệp. Không có nút thì còn thấy được
-/// là không có; một nút gửi sai tệp thì im lặng và trông y như đúng.
-///
-/// Trần độ sâu và trần số mục là hàng rào thời gian: hàm này chạy trong lượt trả
-/// lời một cú bấm, nên nó phải kết thúc kể cả khi ai đó trỏ vào một cây khổng lồ.
-fn find_one_in_tree(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-    const MAX_DEPTH: usize = 6;
-    const MAX_ENTRIES: usize = 20_000;
-    let mut seen = 0usize;
-    let mut hit: Option<std::path::PathBuf> = None;
-    let mut queue = std::collections::VecDeque::from([(root.to_path_buf(), 0usize)]);
-    while let Some((dir, depth)) = queue.pop_front() {
-        if depth > MAX_DEPTH || seen > MAX_ENTRIES {
-            break;
-        }
-        let Ok(rd) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for e in rd.flatten() {
-            seen += 1;
-            if seen > MAX_ENTRIES {
-                logging::info(
-                    "file_search_capped",
-                    json!({ "root": root.display().to_string(), "name": name,
-                            "why": "cây quá lớn — dừng quét, không dựng nút" }),
-                );
-                return None;
-            }
-            let p = e.path();
-            let Some(base) = p.file_name().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if p.is_dir() {
-                if !base.starts_with('.') && !SKIP_DIRS.contains(&base) {
-                    queue.push_back((p, depth + 1));
-                }
-            } else if base == name {
-                if hit.is_some() {
-                    // Hai tệp cùng tên: không đoán.
-                    logging::info(
-                        "file_search_ambiguous",
-                        json!({ "name": name, "root": root.display().to_string() }),
-                    );
-                    return None;
-                }
-                hit = Some(p);
-            }
-        }
-    }
-    hit
+    //
+    // 🪦 2026-10-06 — LÙNG CÂY ĐÃ BỎ (Hà chốt *"📎 + bỏ phép đoán"*): huba chỉ
+    // còn đọc dấu `📎 /đường/dẫn/tuyệt/đối` (`keys::file_markers`), nên đường
+    // tương đối không còn đi vào đây từ đường sản phẩm. Phép lùng từng chạy
+    // 9.736 lần tới trần ("cây quá lớn") và 3.906 lần ra mơ hồ cho 90 tệp gửi.
+    None
 }
 
 pub fn session_root(db: &Db, cfg: &Config, session_id: &str) -> Option<std::path::PathBuf> {
@@ -11270,7 +11218,7 @@ pub fn say_from_session_with(
     // ⏎/⌫, không phải 📎 (xem `keys::body_before_box`).
     let seen_paths = paths_not_in_commands(
         text,
-        &crate::keys::paths_on_screen(&crate::keys::body_before_box(text), PATHS_SCAN_MAX),
+        &crate::keys::file_markers(&crate::keys::body_before_box(text)),
         &cmds,
     );
     // Sổ tệp phải được ghi thì cú bấm sau mới tra ra đường dẫn; nút ở đáy là tác
@@ -12118,6 +12066,9 @@ pub fn say_session_data_at(
     //
     // Toàn bộ khúc dựng neo nằm ở [`session_layout`] — DÙNG CHUNG với
     // `render_session_data`, để bài kiểm gửi tin thật đo đúng đường này.
+    // Dòng `📎` không gửi được thì NÓI ngay tại dòng (`note_unsendable_marks`).
+    let noted = note_unsendable_marks(text, &tg.cfg().workspace_root);
+    let text = noted.as_str();
     let Layout {
         shown,
         anchors,
@@ -17065,10 +17016,7 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     // ▶️/🖥 của nó (xem `paths_not_in_commands`).
                     let seen_paths = paths_not_in_commands(
                         &ack,
-                        &crate::keys::paths_on_screen(
-                            &crate::keys::body_before_box(&ack),
-                            PATHS_SCAN_MAX,
-                        ),
+                        &crate::keys::file_markers(&crate::keys::body_before_box(&ack)),
                         &cmds_of_text(cfg, &want, &ack),
                     );
                     // …và ĐÍCH CHẠM NẰM NGAY TẠI TÊN TỆP trong chữ, không chỉ ở

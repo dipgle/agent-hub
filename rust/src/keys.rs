@@ -4668,6 +4668,49 @@ pub fn paths_on_screen(text: &str, max: usize) -> Vec<String> {
     out
 }
 
+/// Dấu tệp DUY NHẤT huba đọc: MỘT DÒNG RIÊNG dạng `📎 /đường/dẫn/tuyệt/đối`.
+///
+/// 🔴 Hà 2026-10-06: *"ghi thêm quy tắc vào mỗi phiên khi khởi tạo, huba đọc
+/// đúng 1 định dạng đánh dấu duy nhất để bấm vào là lệnh lấy file gửi ngược về
+/// tele"* — chốt *"📎 + bỏ phép đoán"*. Phép đoán cũ (`paths_on_screen` + lùng
+/// cây) đo được trên `logs/huba.log`: **9.736** lần `file_search_capped` ("cây
+/// quá lớn — dừng quét"), **3.906** lần `file_search_ambiguous`, mà chỉ **90**
+/// tệp thật sự đi ra — đúng cái "lúc được lúc không" Hà gặp từ 24/09.
+///
+/// Quy tắc cho phiên nằm ở `~/projects/CLAUDE.md` (CLI tự nạp cho mọi phiên
+/// dưới `~/projects`). Hàm THUẦN, không chạm đĩa: "có thật không / gửi được
+/// không" hỏi ở `pipeline::marked_file`.
+///
+/// Đọc được: thụt đầu dòng, dấu `⏺`/`●` của TUI ở đầu, đường dẫn bọc trong
+/// backtick, và DẤU CÁCH trong đường dẫn (cả phần sau `📎 ` là đường dẫn — vì
+/// thế dòng phải không có chữ nào khác). Không đọc: `📎` giữa câu, đường dẫn
+/// tương đối.
+pub fn file_markers(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in text.lines() {
+        let l = raw.trim_start();
+        let l = l
+            .strip_prefix('⏺')
+            .or_else(|| l.strip_prefix('●'))
+            .map(str::trim_start)
+            .unwrap_or(l);
+        let Some(rest) = l.strip_prefix('📎') else {
+            continue;
+        };
+        if !rest.starts_with(char::is_whitespace) {
+            continue;
+        }
+        let p = rest.trim().trim_matches('`').trim();
+        if !(p.starts_with('/') || p.starts_with("~/")) || p.len() < 2 {
+            continue;
+        }
+        if !out.iter().any(|x| x == p) {
+            out.push(p.to_string());
+        }
+    }
+    out
+}
+
 /// Đây là CÂU VĂN chứ không phải một dòng lệnh?
 ///
 /// 🔴 Hà 2026-08-13, ảnh chụp màn phiên codetrail: *"bấm vào nút chạy lệnh thì

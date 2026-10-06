@@ -18,13 +18,23 @@ fn tmp_tree(tag: &str) -> std::path::PathBuf {
     root
 }
 
-/// Tên tệp TRẦN được tìm thấy trong cây phiên — Hà: *"phải tìm được file ở đĩa"*.
+/// 🔁 ĐẢO CHIỀU 2026-10-06 — tên tệp TRẦN KHÔNG còn được đi tìm trong cây.
+///
+/// Bài này từng khoá điều ngược lại (Hà 17/08: *"phải tìm được file ở đĩa"*).
+/// Hà 06/10 chốt *"📎 + bỏ phép đoán"*: huba chỉ đọc dấu `📎 /đường/dẫn/tuyệt/đối`
+/// (`keys::file_markers`), vì phép lùng này đo được 9.736 lần tới trần và 3.906
+/// lần mơ hồ cho 90 tệp gửi. Tệp CÓ THẬT trong cây mà gọi bằng tên trần ⟹ không gửi.
 #[test]
 fn a_bare_name_is_found_by_searching_the_session_tree() {
     let root = tmp_tree("find");
     std::fs::write(root.join("docs/history/ghi-chu.md"), "x").unwrap();
-    let got = sendable_file("ghi-chu.md", &root, &root).expect("phải tìm ra");
-    assert!(got.ends_with("docs/history/ghi-chu.md"), "{got:?}");
+    assert!(
+        sendable_file("ghi-chu.md", &root, &root).is_none(),
+        "tên trần không được lùng cây nữa"
+    );
+    // Đối chứng: đường TUYỆT ĐỐI tới cùng tệp ấy vẫn gửi được.
+    let abs = root.join("docs/history/ghi-chu.md");
+    assert!(sendable_file(&abs.to_string_lossy(), &root, &root).is_some());
 }
 
 /// HAI tệp trùng tên ⟹ TỪ CHỐI. Đoán ở đây là gửi nhầm tệp, và người đọc không

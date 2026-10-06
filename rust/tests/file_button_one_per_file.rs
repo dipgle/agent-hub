@@ -48,23 +48,18 @@ fn cay(files: &[&str]) -> (huba::db::Db, tempfile::TempDir, huba::config::Config
 fn mot_tep_nhac_hai_lan_van_chi_mot_nut() {
     let (db, dir, cfg) = cay(&["docs/du-toan.md", "docs/phu-luc.md"]);
 
-    // Đúng hình dạng của tin đã sinh ra lỗi: tệp được nhắc một lần giữa câu văn
-    // (đường tương đối) và một lần nữa trong dòng lệnh (đường tuyệt đối).
-    let tuyet_doi = dir
-        .path()
-        .join("AI/tfl5/docs/du-toan.md")
-        .to_string_lossy()
-        .to_string();
-    let paths = vec![
-        "docs/du-toan.md".to_string(),
-        tuyet_doi,
-        "docs/phu-luc.md".to_string(),
-    ];
+    // CÙNG một tệp, hai cách viết đường tuyệt đối (06/10: dấu `📎` chỉ mang
+    // đường tuyệt đối — ca "tương đối + tuyệt đối" cũ không còn đi vào được).
+    let goc = dir.path().join("AI/tfl5");
+    let du = goc.join("docs/du-toan.md").to_string_lossy().to_string();
+    let du_cham = goc.join("./docs/du-toan.md").to_string_lossy().to_string();
+    let phu = goc.join("docs/phu-luc.md").to_string_lossy().to_string();
+    let paths = vec![du.clone(), du_cham, phu.clone()];
 
     let neo = file_anchors(&db, &cfg, SID, &paths);
     assert_eq!(
         neo,
-        vec!["docs/du-toan.md".to_string(), "docs/phu-luc.md".to_string()],
+        vec![du, phu],
         "ba lần nhắc, hai tệp ⟹ hai neo — và giữ lần nhắc ĐẦU nên thứ tự nút \
          vẫn là thứ tự đọc"
     );
@@ -92,13 +87,17 @@ fn hai_tep_khac_nhau_trung_ten_thi_van_hai_nut() {
     // Chiều ngược lại, và là chỗ một phép khử trùng viết vội sẽ sập: khử theo
     // TÊN thì hai tệp này thành một, mất hẳn một nút có thật. Trong một cây mã,
     // `README.md` / `Cargo.toml` / `mod.rs` trùng tên là chuyện thường ngày.
-    let (db, _dir, cfg) = cay(&["docs/README.md", "tools/README.md"]);
-    let paths = vec!["docs/README.md".to_string(), "tools/README.md".to_string()];
+    let (db, dir, cfg) = cay(&["docs/README.md", "tools/README.md"]);
+    let goc = dir.path().join("AI/tfl5");
+    let paths = vec![
+        goc.join("docs/README.md").to_string_lossy().to_string(),
+        goc.join("tools/README.md").to_string_lossy().to_string(),
+    ];
 
     let neo = file_anchors(&db, &cfg, SID, &paths);
     assert_eq!(
         neo,
-        vec!["docs/README.md".to_string(), "tools/README.md".to_string()],
+        paths.clone(),
         "hai tệp thật, hai neo — trùng TÊN không phải trùng TỆP"
     );
 

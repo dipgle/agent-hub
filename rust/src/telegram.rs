@@ -1294,7 +1294,7 @@ impl Inbox {
     ///
     /// Trả `Arc` chứ không trả `&Config`: người gọi giữ được bản mình đọc sau khi
     /// khoá đã nhả, nên không lượt nào cầm khoá đọc suốt thời gian chạy một lệnh.
-    fn cfg(&self) -> std::sync::Arc<Config> {
+    pub(crate) fn cfg(&self) -> std::sync::Arc<Config> {
         self.cfg.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
@@ -3102,9 +3102,14 @@ impl Inbox {
             Some((sid, p)) => {
                 // Cây thư mục của ĐÚNG phiên đã nhắc tới đường dẫn này.
                 // Không tra ra được thì TỪ CHỐI — xem `session_root`.
+                // Dấu `📎` là đường TUYỆT ĐỐI ⟹ không cần biết thư mục của phiên;
+                // `send_document` tự gác "nằm trong workspace". Trước 06/10 chỗ
+                // này TỪ CHỐI khi sổ không có thư mục phiên, trong khi lúc dựng
+                // liên kết thì không đòi — một ngả "lúc được lúc không" nữa.
                 match db
                     .as_ref()
                     .and_then(|db| crate::pipeline::session_root(db, &self.cfg(), &sid))
+                    .or_else(|| Some(self.cfg().workspace_root.clone()))
                 {
                     Some(root) => {
                         // 🔴 GIẢI ĐƯỜNG DẪN BẰNG ĐÚNG HÀM ĐÃ DỰNG NÊN CÁI NÚT.

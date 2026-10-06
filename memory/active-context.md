@@ -7,8 +7,10 @@
 - FILE-MARK: ca 💤 dự kiến KHÔNG xảy ra. Lượt mang `📎 …a2498af.zip` khép 14:07:47.491Z; Stop hook
   `nhac-chuyen-phien.py` (ngữ cảnh 56 %) bắn 87 ms sau ⟹ CLI chạy tiếp CHÍNH lượt ấy ⟹ 💤 duy nhất chỉ mang lời sau hook.
   Mẫu số 14 ngày: 195 báo cáo rơi kiểu này / 8.680 lượt (2 có 📎). Không phải lỗi hubd.
-- Vá S52 (chưa commit lúc ghi): `last_prose_at` gom mọi điểm dừng của lượt (lời liền trước bản ghi hook) + `📎` là dấu
-  nhấn của `key_points`. RED 3/6 → GREEN 6/6, đột biến 1/1 ĐỎ, nhật ký thật ra đúng dòng 📎.
+- Vá S52 `84d4e2c`: `last_prose_at` gom mọi điểm dừng của lượt (lời liền trước bản ghi hook) + `📎` là dấu nhấn của
+  `key_points`. RED 3/6 → GREEN 6/6, đột biến 1/1 ĐỎ, gate.sh 187/187, đẩy 0/0. Cài 14:42:10Z pid 4299, --verify KHỚP.
+  Ca thật (`.tmp/do-stop-hook-noi-luot/ca-that.py`): bản cũ hôm nay 16/16 HỎNG; sau cài chưa có ca. QG chung đang xếp hàng.
+- Hà đổi khoá qua /accounts 14:26–14:27Z: khoá acc4 (phiên này, 93 % tuần), mở acc5/6/7 — đã commit 5fedd6d + d81653e.
 
 ## 🟢 2026-10-04→06 — phiên 5ed3d329: bàn phím (eeacbda) · danh sách phiên (a2498af) · gói Windows · dọn amm · dấu tệp 📎 (869d38c)
 

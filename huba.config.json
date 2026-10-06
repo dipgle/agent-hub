@@ -74,13 +74,11 @@
     },
     {
       "name": "acc6",
-      "config_dir": "~/.claude-acc6",
-      "locked": true
+      "config_dir": "~/.claude-acc6"
     },
     {
       "name": "acc7",
-      "config_dir": "~/.claude-acc7",
-      "locked": true
+      "config_dir": "~/.claude-acc7"
     }
   ],
   "new_in_terminal": true,

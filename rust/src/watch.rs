@@ -681,7 +681,9 @@ fn with_hidden_note(out: String, total: usize, shown: usize) -> String {
 /// Trả kèm TỔNG số dòng có chữ của bản gốc, vì câu "còn N dòng" phải đếm từ bản
 /// gốc chứ không phải từ những dòng đã lọt lưới.
 fn loud_lines(text: &str) -> (Vec<String>, usize) {
-    const MARKERS: [&str; 10] = ["✅", "⚠", "🔴", "⛔", "📌", "🎯", "⟹", "→", "✔", "❌"];
+    // `📎` (06/10): dấu tệp DUY NHẤT mà phiên dùng để mời tải — rơi khỏi bản rút
+    // gọn là liên kết trong chữ không còn chỗ đứng (`tests/stop_hook_keeps_the_report.rs`).
+    const MARKERS: [&str; 11] = ["✅", "⚠", "🔴", "⛔", "📌", "🎯", "⟹", "→", "✔", "❌", "📎"];
     /// Trần cho MỘT dòng — xem luật 1 trong `key_points`.
     const LINE_MAX: usize = 180;
     let lines: Vec<&str> = text

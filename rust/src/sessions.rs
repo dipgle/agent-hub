@@ -3282,29 +3282,128 @@ pub fn last_prose(tail: &str, max_chars: usize) -> Option<String> {
 ///
 /// `None` ở vế mốc là một sự thật RIÊNG (dòng nhật ký không khai `timestamp`),
 /// **không được** đọc thành "vừa xong": chỗ gọi phải im, không đoán bù.
+///
+/// 🔴 **Stop hook nối dài lượt thì lời lúc DỪNG vẫn là lời cuối** (đo 06/10,
+/// phiên `5ed3d329`). Phiên khép lượt bằng một bản báo cáo có dòng
+/// `📎 /…/huba-windows-a2498af.zip`; 87 ms sau hook Stop của workspace
+/// (`scripts/nhac-chuyen-phien.py`, ngữ cảnh ≥ 50 %) trả `block`, CLI ghi một bản
+/// ghi `user` mở bằng `Stop hook feedback` rồi chạy TIẾP chính lượt ấy. CLI không
+/// rảnh lúc nào ở giữa, nên chỉ có MỘT tin 💤 — và nó mang mỗi lời viết SAU hook.
+/// Bản báo cáo cùng dòng `📎` không bao giờ tới điện thoại. Đo 14 ngày nhật ký:
+/// **195 bản báo cáo** rơi theo đúng cách ấy (`.tmp/do-stop-hook-noi-luot/dem.py`).
+/// Ở terminal cả hai lời nằm liền nhau trên màn, nên cầu phải mang cả hai.
+///
+/// Đi ngược tới câu nhập THẬT gần nhất (ranh giới lượt). Lời nào đứng NGAY trước
+/// một bản ghi hook là một điểm dừng ⟹ giữ, theo thứ tự trên màn. Lời giữa
+/// chừng (kể chuyện trước khi gọi công cụ) không phải điểm dừng ⟹ bỏ, đúng như
+/// trước. Neo vào VỊ TRÍ (liền trước hook), không vào `stop_reason`: trường ấy
+/// là thứ CLI có thể đổi cách ghi, còn "hook chỉ bắn khi phiên dừng" thì không.
 pub fn last_prose_at(tail: &str, max_chars: usize) -> Option<(String, Option<String>)> {
+    // Trần số điểm dừng gom về một lượt: một hook kẹt vòng không được biến lời
+    // cuối thành cả cuốn nhật ký.
+    const STOPS_MAX: usize = 4;
+    let mut stops: Vec<String> = Vec::new();
+    let mut at: Option<String> = None;
+    // Vừa đi qua (ngược) một bản ghi hook ⟹ lời kế tiếp trên nó là điểm dừng.
+    let mut after_hook = false;
     for line in tail.lines().rev() {
         let Ok(record) = serde_json::from_str::<Value>(line) else {
             continue;
         };
-        if record.get("type").and_then(Value::as_str) != Some("assistant") {
-            continue;
+        match record.get("type").and_then(Value::as_str) {
+            Some("assistant") => {}
+            Some("user") => {
+                if stops.is_empty() {
+                    // Chưa có lời nào: luật cũ — câu của người không phải lời
+                    // cuối của phiên, đi tiếp lên trên.
+                    continue;
+                }
+                match user_turn_kind(&record) {
+                    UserTurn::ToolResult => after_hook = false,
+                    UserTurn::StopHook => after_hook = true,
+                    // Câu nhập thật ⟹ hết lượt này.
+                    UserTurn::Prompt => break,
+                }
+                continue;
+            }
+            _ => continue,
         }
         let Some(text) = text_of(&record) else {
+            // Bản ghi chỉ có `thinking`: cùng một lời với bản ghi chữ kề nó.
             continue;
         };
         let prose = strip_tool_marks(&text);
-        if prose.is_empty() {
+        if stops.is_empty() {
+            if prose.is_empty() {
+                continue;
+            }
+            at = record
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            stops.push(prose);
             continue;
         }
-        note_preview_risk("last_prose", &prose);
-        let at = record
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        return Some((truncate(&prose, max_chars), at));
+        if after_hook && !prose.is_empty() {
+            stops.push(prose);
+            if stops.len() >= STOPS_MAX {
+                break;
+            }
+        }
+        after_hook = false;
     }
-    None
+    if stops.is_empty() {
+        return None;
+    }
+    stops.reverse();
+    let said = stops.join("\n\n");
+    note_preview_risk("last_prose", &said);
+    Some((truncate_keep_last(&stops, &said, max_chars), at))
+}
+
+/// Ba loại bản ghi `user` mà phép đi ngược trong [`last_prose_at`] phải tách.
+enum UserTurn {
+    /// Kết quả công cụ — vẫn trong lượt.
+    ToolResult,
+    /// `Stop hook feedback: …` — hook bắt phiên làm tiếp, vẫn trong lượt.
+    StopHook,
+    /// Mọi thứ khác (câu chủ máy gõ, tin của subagent, `[Request interrupted…]`)
+    /// — ranh giới lượt.
+    Prompt,
+}
+
+fn user_turn_kind(record: &Value) -> UserTurn {
+    let content = record.get("message").and_then(|m| m.get("content"));
+    let has_result = content.and_then(Value::as_array).is_some_and(|a| {
+        a.iter()
+            .any(|b| b.get("type").and_then(Value::as_str) == Some("tool_result"))
+    });
+    if has_result {
+        return UserTurn::ToolResult;
+    }
+    match text_of(record) {
+        Some(t) if t.starts_with("Stop hook feedback") => UserTurn::StopHook,
+        _ => UserTurn::Prompt,
+    }
+}
+
+/// Cắt về trần mà GIỮ lời CUỐI: `watch::key_points` giữ phần đuôi, nên cắt đuôi
+/// của bản ghép là cắt đúng câu chốt (bài học `SAY_MAX` ngày 12/08). Thiếu chỗ
+/// thì phần TRƯỚC hook nhường, cắt từ đầu nó.
+fn truncate_keep_last(stops: &[String], said: &str, max_chars: usize) -> String {
+    if said.chars().count() <= max_chars || stops.len() < 2 {
+        return truncate(said, max_chars);
+    }
+    let last = &stops[stops.len() - 1];
+    let last_n = last.chars().count();
+    if last_n + 2 >= max_chars {
+        return truncate(last, max_chars);
+    }
+    let room = max_chars - last_n - 2;
+    let before = stops[..stops.len() - 1].join("\n\n");
+    let n = before.chars().count();
+    let kept: String = before.chars().skip(n.saturating_sub(room)).collect();
+    format!("{kept}\n\n{last}")
 }
 
 /// Bỏ những dấu `[dùng X]` mà `text_of` chèn thay cho một lượt gọi công cụ.

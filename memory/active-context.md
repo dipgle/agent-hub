@@ -1,5 +1,15 @@
 # active context — huba
 
+## 🟡 2026-10-06 14:1xZ→ — phiên kế nhiệm 63503ce1: đóng 5ed3d329 · nghiệm thu FILE-MARK lộ lỗ Stop hook (PLAN S52)
+
+- Đóng 5ed3d329: lượt cuối end_turn 14:09:20Z, cây 0/0 (huba + ~/projects), 0 việc chạy/hòm thư/hàng đợi ⟹ kill 44104,
+  ttys013 biến mất; cửa sổ 2450 còn trong danh sách Terminal nhưng 0 tab (như 6224/205 trước đây).
+- FILE-MARK: ca 💤 dự kiến KHÔNG xảy ra. Lượt mang `📎 …a2498af.zip` khép 14:07:47.491Z; Stop hook
+  `nhac-chuyen-phien.py` (ngữ cảnh 56 %) bắn 87 ms sau ⟹ CLI chạy tiếp CHÍNH lượt ấy ⟹ 💤 duy nhất chỉ mang lời sau hook.
+  Mẫu số 14 ngày: 195 báo cáo rơi kiểu này / 8.680 lượt (2 có 📎). Không phải lỗi hubd.
+- Vá S52 (chưa commit lúc ghi): `last_prose_at` gom mọi điểm dừng của lượt (lời liền trước bản ghi hook) + `📎` là dấu
+  nhấn của `key_points`. RED 3/6 → GREEN 6/6, đột biến 1/1 ĐỎ, nhật ký thật ra đúng dòng 📎.
+
 ## 🟢 2026-10-04→06 — phiên 5ed3d329: bàn phím (eeacbda) · danh sách phiên (a2498af) · gói Windows · dọn amm · dấu tệp 📎 (869d38c)
 
 - Bàn phím mất lại 04/10: app tự bỏ (huba 0 xoá/0 gỡ); hở phía huba là /session đi HTML không mang bàn phím ⟹ eeacbda gắn

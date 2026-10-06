@@ -1,5 +1,17 @@
 # active context — huba
 
+## 🟢 2026-10-04→06 — phiên 5ed3d329: bàn phím (eeacbda) · danh sách phiên (a2498af) · gói Windows · dọn amm · dấu tệp 📎 (869d38c)
+
+- Bàn phím mất lại 04/10: app tự bỏ (huba 0 xoá/0 gỡ); hở phía huba là /session đi HTML không mang bàn phím ⟹ eeacbda gắn
+  bàn phím vào tin HTML không nút mà huba vứt id. Cài 04:38Z; ảnh Hà 05:03Z thấy bàn phím.
+- Danh sách phiên rơi về khối nút 04:34Z: dòng xem trước «Báo cáo phiên 600ea4c8…» chứa mã ⟹ 8 đích/7 hàng ⟹ a2498af neo
+  ở CUỐI dòng. Cài 05:13Z; tới 06/10: 141 session_taps_sent · 0 partial — ĐẠT.
+- Windows: CHƯA chạy trên máy thật; gói mới .tmp/huba-windows-a2498af.zip (sha 21d01e07…); kiem-tra-ket-qua.txt 06/10 là
+  của dwork-dhub, không phải huba.
+- amm: Hà ra lệnh 2 lần ⟹ xoá amm/.devnet-91338 (72 GB, gitignored, tiến trình chết, ghi cuối 30/08, 0 handle) — ổ 53→123 GB
+  trống; đã khai phá luật "không ghi ra ngoài cây".
+- Dấu tệp: Hà chốt «📎 + bỏ phép đoán» ⟹ 869d38c + luật ~/projects/CLAUDE.md. gate 186/186, đột biến 4/4; chờ cài + ca thật.
+
 ## 🟢 2026-10-03 09:0xZ→09:5xZ — phiên 5ed3d329: tin "dừng" đọc status của CLI (PLAN S51) · S46 đóng
 
 - Đóng phiên cũ 8275eb77 (pid 55178, ttys012 biến mất, cửa sổ 205 còn 0 tab). S46 ĐẠT: /upgrade thật 02/10 12:40:24Z cài

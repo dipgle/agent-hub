@@ -1,5 +1,14 @@
 # active context — huba
 
+## 🟡 2026-10-07 02:4xZ — Hà hỏi vì sao máy chậm (chỉ đo, chưa dọn gì)
+
+- Máy M1 Pro 8 nhân / 16 GB. Tải 22–34 · swap 3,6/5 GB · 4,4 ngày: ~196 GB swapout / ~141 GB swapin (trang 16 KB) ⟹ nút
+  cổ chai là RAM, không phải CPU. Lớn nhất: VM Docker 4,36 GB (chỉ `tfl5_pg` 610 MB) · 11 phiên claude ~3 GB RSS (3 phiên
+  rảnh 33 h/13 h/10 h) · Brave 2,6 GB · Terminal 1,28 GB · ngăn xếp vite mồ côi dev-tochuc (ppid 1, 2 ngày 10 giờ).
+- Spotlight lập chỉ mục 498.528 tệp .js trong ~/projects/dwork; tắt cần sudo (phiên + huba không có) ⟹ tay Hà.
+- huba: `ms_terminal_probe` TB 2,7 s (03–04/10) → 8,2 s (06/10), đi theo tải ⟹ triệu chứng; 1 giờ đo: 12 osa_timeout.
+  Công cụ: `.tmp/do-may-cham/phien-song.py`.
+
 ## 🟢 2026-10-06 14:1xZ→16:5xZ — phiên kế nhiệm 63503ce1: đóng 5ed3d329 · nghiệm thu FILE-MARK lộ lỗ Stop hook (PLAN S52)
 
 - Đóng 5ed3d329: lượt cuối end_turn 14:09:20Z, cây 0/0 (huba + ~/projects), 0 việc chạy/hòm thư/hàng đợi ⟹ kill 44104,

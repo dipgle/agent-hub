@@ -8,6 +8,13 @@
 - Spotlight lập chỉ mục 498.528 tệp .js trong ~/projects/dwork; tắt cần sudo (phiên + huba không có) ⟹ tay Hà.
 - huba: `ms_terminal_probe` TB 2,7 s (03–04/10) → 8,2 s (06/10), đi theo tải ⟹ triệu chứng; 1 giờ đo: 12 osa_timeout.
   Công cụ: `.tmp/do-may-cham/phien-song.py`.
+- Hà hỏi PHIÊN NÀO gây đột biến. Đo (`.tmp/do-may-cham/theo-phien.py` · `cong-va-nghen.py` · `ai-chay-luc.py`):
+  09:56 tải 83 = cổng chất lượng dwork/dev-worklist (vitest 7 luồng sau xargs -P 4) chạy song song cổng tfl5 (uc_*).
+  5.210 vòng từ 02/10 23:14: 0 cổng TB 3,4 s/p90 5,4 s · 1 cổng 6,5/20,2 s · 2 cổng 7,8/20,3 s. Giờ cổng: dwork 25,4 h
+  (dev 7,3 · dci 5,5 · worklist 5,1 · tochuc 3,7 · dhub 2,7 · ddriver 1,1), tfl5 ~9,4 h. node ghi 34 GB 02/10 23:44–00:15:
+  27 lệnh nặng của ~8 phiên chồng khung, 0 nhật ký in PID ⟹ KHÔNG gán được một phiên.
+  Sửa giữa chừng: vé wt-wasmi 1791255856 ghi `chay` mà pid chết (bản ghi kẹt) ⟹ 23,6 h là SAI, thật 0,8 h; ket_qua của
+  dwork là chuỗi theo module, so với "0" là sai ⟹ rút lại «17/17 không xanh».
 
 ## 🟢 2026-10-06 14:1xZ→16:5xZ — phiên kế nhiệm 63503ce1: đóng 5ed3d329 · nghiệm thu FILE-MARK lộ lỗ Stop hook (PLAN S52)
 

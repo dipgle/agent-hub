@@ -1,5 +1,14 @@
 # active context — huba
 
+## 🟡 2026-10-08 15:1xZ→ — [dwork/account] báo: auto_handover mở kế nhiệm THỨ HAI (PLAN S53)
+
+- Ca thật đo lại: 7096bc70 (81 %) tự mở kế nhiệm bằng acc-mo-vai.sh 15:00:27Z (pid 47993, 8ed68b81, start 15:01:18Z);
+  15:05:04Z auto_handover vẫn fork + mở 6082b444 (pid 460). auto_handover_why chỉ biết lượt do huba làm.
+- Vá 2b2dcd7: dò lượt gọi acc-mo-vai.sh trong NHẬT KÝ của chính phiên + phiên sống khởi động sau lượt gọi mang tên
+  brief ⟹ held SelfHandedOver. Không khớp theo cây, không sửa acc-mo-vai.sh. 8 ca, đột biến 2/2 ĐỎ (+1 lớp thừa gỡ),
+  phát lại nhật ký thật đúng hai chiều. gate 188/188. Cài 15:30:38Z pid 32249, --verify KHỚP 5a49cb5c.
+- Chưa có ca thật: ngưỡng 80 %, lúc 15:33Z không phiên nào vượt. Đo: lệnh trong sổ bàn giao S53-TU-BAN-GIAO.
+
 ## 🟡 2026-10-07 02:4xZ — Hà hỏi vì sao máy chậm (chỉ đo, chưa dọn gì)
 
 - Máy M1 Pro 8 nhân / 16 GB. Tải 22–34 · swap 3,6/5 GB · 4,4 ngày: ~196 GB swapout / ~141 GB swapin (trang 16 KB) ⟹ nút

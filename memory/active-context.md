@@ -8,6 +8,9 @@
   brief ⟹ held SelfHandedOver. Không khớp theo cây, không sửa acc-mo-vai.sh. 8 ca, đột biến 2/2 ĐỎ (+1 lớp thừa gỡ),
   phát lại nhật ký thật đúng hai chiều. gate 188/188. Cài 15:30:38Z pid 32249, --verify KHỚP 5a49cb5c.
 - Chưa có ca thật: ngưỡng 80 %, lúc 15:33Z không phiên nào vượt. Đo: lệnh trong sổ bàn giao S53-TU-BAN-GIAO.
+- QG chung c94f5a9..2b2dcd7 QG_EXIT=0. ⏸ 16:5xZ TẠM DỪNG theo lời Hà (qua phiên aihub, 23:4x giờ máy): «tạm dừng để ưu
+  tiên đóng gói account». Không xếp vé cổng/build mới; hubd 32249 + hòm thư vẫn chạy cho account. Còn treo khi làm lại: vé
+  QG cho commit sổ sau 2b2dcd7 (chỉ tài liệu) · ca thật S53.
 
 ## 🟡 2026-10-07 02:4xZ — Hà hỏi vì sao máy chậm (chỉ đo, chưa dọn gì)
 

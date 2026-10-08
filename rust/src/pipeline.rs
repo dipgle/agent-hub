@@ -2111,6 +2111,26 @@ fn auto_handover(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot
             continue;
         }
 
+        // 🔴 PHIÊN ĐÃ TỰ MỞ KẾ NHIỆM ⟹ đừng mở cái thứ hai (08/10, [dwork/account]):
+        // `7096bc70` chạy `acc-mo-vai.sh` 15:00:27Z, kế nhiệm pid 47993 đã làm việc,
+        // vậy mà 15:05:04Z lượt này vẫn fork bàn giao rồi mở `6082b444` — một cây,
+        // hai phiên, một việc. Hỏi ở ĐÂY (sau mọi cửa rẻ, trước lượt fork tốn hạn mức)
+        // vì nó đọc nhật ký + `ps`: chỉ chạy cho phiên sắp bị bàn giao.
+        if let Some((succ, brief)) = crate::sessions::self_opened_successor(cfg, s, &live.sessions)
+        {
+            logging::info(
+                "auto_handover_held",
+                json!({ "session": s.session_id, "pct": pct, "why": "SelfHandedOver",
+                        "successor": succ, "brief": brief }),
+            );
+            // Nối sổ kế nhiệm như lượt huba tự làm, để `/session <mã cũ>` dẫn sang
+            // phiên mới. Ghi MỘT lần — lượt nào cũng ghi là mỗi vòng một lần ghi DB.
+            if successor_of(db, &s.session_id).as_deref() != Some(succ.as_str()) {
+                remember_successor(db, &s.session_id, &succ, chrono::Utc::now().timestamp());
+            }
+            continue;
+        }
+
         logging::info(
             "auto_handover_firing",
             json!({ "session": s.session_id, "name": s.name, "pct": pct, "idle_sec": idle_sec }),

@@ -7952,6 +7952,190 @@ pub fn should_close_old_window(new_session_appeared: bool) -> bool {
     new_session_appeared
 }
 
+/// Một lượt phiên TỰ mở kế nhiệm bằng `acc-mo-vai.sh <cây> <brief>`, đọc từ chính
+/// nhật ký của nó. `at_ms` là mốc lệnh được gõ — phiên kế nhiệm sinh SAU mốc ấy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelfHandover {
+    pub at_ms: i64,
+    pub tree: String,
+    pub brief: String,
+}
+
+/// Mọi lượt gọi `acc-mo-vai.sh` có ĐỦ hai tham số vị trí (cây, brief) trong phần
+/// nhật ký đã đọc — THUẦN.
+///
+/// 🔴 Vì sao có (đo 08/10, [dwork/account] báo): phiên `7096bc70` (81 %) tự mở kế
+/// nhiệm lúc 15:00:27Z — pid 47993, argv `cd …/dwork/dev && đọc .tmp/brief-…` — vậy
+/// mà 15:05:04Z `auto_handover` vẫn mở thêm `6082b444`: một cây hai phiên kế nhiệm
+/// cùng nhận một việc. [`auto_handover_why`](crate::pipeline::auto_handover_why) chỉ
+/// biết lượt bàn giao do CHÍNH huba làm.
+///
+/// Nhận diện theo THAM SỐ, không theo đầu ra: dòng `▶ đã mở:` của script rơi mất
+/// chỉ vì một `| tail -3`. Lượt đọc mã (`sed … acc-mo-vai.sh`), `--tu-kiem`, `--xem`
+/// không có đủ hai tham số nên tự rơi ra. Ứng viên sai (vd câu `echo` nhắc cú pháp)
+/// vô hại: nó chỉ được tính khi có một phiên SỐNG khớp — xem [`successor_by_brief`].
+pub fn self_handover_calls(tail: &str) -> Vec<SelfHandover> {
+    let mut out = Vec::new();
+    for line in tail.lines() {
+        if !line.contains("acc-mo-vai.sh") {
+            continue;
+        }
+        let Ok(record) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if record.get("type").and_then(Value::as_str) != Some("assistant") {
+            continue;
+        }
+        let Some(at_ms) = record
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| t.timestamp_millis())
+        else {
+            continue;
+        };
+        let blocks = record
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array);
+        for b in blocks.into_iter().flatten() {
+            if b.get("type").and_then(Value::as_str) != Some("tool_use")
+                || b.get("name").and_then(Value::as_str) != Some("Bash")
+            {
+                continue;
+            }
+            let cmd = b
+                .get("input")
+                .and_then(|i| i.get("command"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            for l in cmd.lines() {
+                if let Some((tree, brief)) = acc_mo_vai_args(l) {
+                    out.push(SelfHandover { at_ms, tree, brief });
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `(cây, brief)` của MỘT dòng lệnh gọi `acc-mo-vai.sh` — `None` nếu dòng ấy không mở
+/// phiên nào. `--xem` / `--tu-kiem` / chỉ nhắc tên tệp đều rơi ra vì THIẾU hai tham số
+/// vị trí — không cần vế riêng (vế riêng từng có, đột biến gỡ nó vẫn xanh: lớp thừa).
+/// Thứ thật sự gánh việc là điểm DỪNG ở ống/chuyển hướng: thiếu nó thì
+/// `sed … acc-mo-vai.sh | cut -c1-200` đọc thành cây=`cut`.
+fn acc_mo_vai_args(line: &str) -> Option<(String, String)> {
+    let (_, rest) = line.split_once("acc-mo-vai.sh")?;
+    let mut pos: Vec<String> = Vec::new();
+    let mut toks = rest.split_whitespace();
+    while let Some(t) = toks.next() {
+        // Hết lệnh: ống, nối lệnh, chuyển hướng (`2>&1` cũng là chuyển hướng).
+        if t.starts_with(['|', '&', ';', '<', '>']) || t.contains('>') {
+            break;
+        }
+        match t {
+            "--acc" | "--model" => {
+                toks.next();
+            }
+            _ if t.starts_with("--") => {}
+            _ => pos.push(t.trim_matches(['"', '\'']).to_string()),
+        }
+    }
+    match pos.as_slice() {
+        [tree, brief, ..] if !tree.is_empty() && !brief.is_empty() => {
+            Some((tree.clone(), brief.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// Phiên kế nhiệm tự mở có đang SỐNG không — THUẦN. `candidates` = (mã phiên, mốc khởi
+/// động ms, argv) của những phiên khác đang sống.
+///
+/// Khớp khi một ứng viên khởi động KHÔNG SỚM HƠN lượt gọi và argv mang TÊN TỆP brief.
+/// Hai vế đều có lý do đo được: brief hay được dùng lại qua nhiều đời (chính phiên cũ
+/// có thể mang đúng brief ấy trong argv) ⟹ phải có mốc; lượt gọi đưa brief tuyệt đối
+/// còn đề bài phiên mới mang brief tương đối ⟹ so theo tên tệp.
+pub fn successor_by_brief(
+    calls: &[SelfHandover],
+    candidates: &[(String, i64, String)],
+) -> Option<(String, String)> {
+    for c in calls.iter().rev() {
+        let name = c.brief.rsplit('/').next().unwrap_or(&c.brief);
+        if name.is_empty() {
+            continue;
+        }
+        if let Some((sid, _, _)) = candidates
+            .iter()
+            .find(|(_, started, argv)| *started >= c.at_ms && argv.contains(name))
+        {
+            return Some((sid.clone(), c.brief.clone()));
+        }
+    }
+    None
+}
+
+/// Bao nhiêu byte đuôi nhật ký đọc để tìm lượt tự bàn giao. Lượt gọi nằm vài phút
+/// trước lúc huba định bàn giao (ca 08/10: 4,5 phút); 1 MB là chỗ cho một phiên vừa
+/// nuốt vài tệp lớn. Chỉ đọc cho phiên SẮP bị bàn giao, nên gần như không tốn gì.
+const SELF_HANDOVER_TAIL: u64 = 1 << 20;
+
+/// Phiên này đã TỰ mở kế nhiệm và kế nhiệm còn sống? ⟹ `(mã phiên kế nhiệm, brief)`.
+///
+/// Không đọc được gì (thiếu nhật ký, `ps` hỏng) ⟹ `None` + GHI LOG: rơi về đúng hành
+/// vi cũ (bàn giao), không im lặng.
+pub fn self_opened_successor(
+    cfg: &Config,
+    s: &LiveSession,
+    live: &[LiveSession],
+) -> Option<(String, String)> {
+    let Some(path) = find_transcript(&cfg.claude_transcript_root(), &s.session_id) else {
+        logging::info(
+            "self_handover_check_skipped",
+            json!({ "session": s.session_id, "why": "không tìm thấy nhật ký" }),
+        );
+        return None;
+    };
+    let tail = match read_tail_n(&path, SELF_HANDOVER_TAIL) {
+        Ok(t) => t,
+        Err(e) => {
+            logging::warn(
+                "self_handover_check_skipped",
+                json!({ "session": s.session_id, "why": "đọc nhật ký hỏng", "err": e.to_string() }),
+            );
+            return None;
+        }
+    };
+    let calls = self_handover_calls(&tail);
+    let earliest = calls.iter().map(|c| c.at_ms).min()?;
+    let mut candidates = Vec::new();
+    for o in live {
+        if o.session_id == s.session_id
+            || o.host == "dead"
+            || o.pid <= 0
+            || o.started_at_ms < earliest
+        {
+            continue;
+        }
+        let pid = o.pid.to_string();
+        match crate::exec::run(
+            "ps",
+            &["-o", "command=", "-p", &pid],
+            crate::exec::RunOpts {
+                timeout: Some(std::time::Duration::from_secs(5)),
+                ..Default::default()
+            },
+        ) {
+            Ok(out) => candidates.push((o.session_id.clone(), o.started_at_ms, out.stdout)),
+            Err(e) => logging::warn(
+                "self_handover_argv_unread",
+                json!({ "session": s.session_id, "pid": o.pid, "err": e.to_string() }),
+            ),
+        }
+    }
+    successor_by_brief(&calls, &candidates)
+}
+
 /// Mở một phiên MỚI mang theo bản bàn giao. Cửa sổ cũ chỉ đóng khi
 /// [`should_close_old_window`] cho phép — mặc định của lượt do người gõ là GIỮ.
 pub fn start_fresh_after_handover(

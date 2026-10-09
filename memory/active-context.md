@@ -1,5 +1,16 @@
 # active context — huba
 
+## 🟢 2026-10-09 05:3xZ — Hà giao «remote» (chia sẻ màn + điều khiển chuột) ⇒ TÁCH thành dự án riêng `~/projects/remote`
+
+- Hà chốt: RustDesk tự dựng máy chủ trên **vps-c** (109.123.234.223, Singapore, ping 59 ms ±2; vps-a 62–203 ms + đĩa
+  88 % + mailler thật; vps-b ở Pháp 237 ms). Cổng 21114–21119 trống cả 3 máy; TCP từ ngoài vào RST nhanh; UDP chưa đo.
+- Đã dựng khung `remote` bằng `AI/init-project/startup.sh` (daemon pid 62385) + mở phiên bằng
+  `acc-mo-vai.sh ../remote ../huba/.tmp/brief-remote-2026-10-09.md --checklist` (đường cây/brief TƯƠNG ĐỐI với
+  `dwork/` — truyền tuyệt đối thì script trả KHONG DO DUOC exit 2). Phiên `0c33c70e` acc6 pid 63905 ttys013, busy,
+  đã đọc brief. Huba KHÔNG làm gì thêm cho remote; nút `/remote` trong huba (nếu Hà muốn) là việc sau.
+- Đo kèm (cho remote): Terminal có sẵn Trợ năng + Ghi màn (AXIsProcessTrusted=True, dời chuột +40 px rồi trả về);
+  điện thoại KHÔNG trong tailnet; tailnet chưa bật HTTPS/Funnel.
+
 ## 🟡 2026-10-09 01:0xZ→ — Hà gửi ảnh: `/anh` «chụp được nhưng KHÔNG gửi được ảnh» + treo (việc Hà giao thẳng, thắng lệnh tạm dừng)
 
 - Đo: 4/4 lượt `/anh` từ 00:50Z chết đúng trần 40 s của client (PNG 2,7–3,5 MB). Đường lên tới api.telegram.org

@@ -11,6 +11,12 @@
 - QG chung c94f5a9..2b2dcd7 QG_EXIT=0. ⏸ 16:5xZ TẠM DỪNG theo lời Hà (qua phiên aihub, 23:4x giờ máy): «tạm dừng để ưu
   tiên đóng gói account». Không xếp vé cổng/build mới; hubd 32249 + hòm thư vẫn chạy cho account. Còn treo khi làm lại: vé
   QG cho commit sổ sau 2b2dcd7 (chỉ tài liệu) · ca thật S53.
+- 09/10 00:4xZ Hà «Gửi đề xuất cho phiên điều phối và dwork»: đã SendMessage (đề xuất, không giao việc) ⇒ uds 8114
+  [scripts/qg-may-xa] mạch giữ qg-dieu-phoi.sh: `TRAN=2` (:110) → 1 qua `.qg-tai-nguyen` (:63, chưa có tệp) + vé kẹt
+  luot/1791255856 · uds 33291 [dwork/dorg]: qg-test.sh:256 vitest `--maxWorkers` (2.1.9 có cờ) + dci-cong-tat-ca.sh:225
+  BO_GOM_SONG_SONG 4→2. Không gửi 81740 (mạch bộ chấm năng lực cùng module).
+- Hà hỏi chống ngủ: `pmset` SleepDisabled=1 (đã có) · 0 lần Sleep từ 07/10 · `sysadminctl -screenLock status` = immediate
+  ⟹ gập máy = khoá màn, không phải ngủ. Tắt khoá cần mật khẩu của Hà.
 
 ## 🟡 2026-10-07 02:4xZ — Hà hỏi vì sao máy chậm (chỉ đo, chưa dọn gì)
 

@@ -1,5 +1,17 @@
 # active context — huba
 
+## 🟡 2026-10-09 01:0xZ→ — Hà gửi ảnh: `/anh` «chụp được nhưng KHÔNG gửi được ảnh» + treo (việc Hà giao thẳng, thắng lệnh tạm dừng)
+
+- Đo: 4/4 lượt `/anh` từ 00:50Z chết đúng trần 40 s của client (PNG 2,7–3,5 MB). Đường lên tới api.telegram.org
+  01:0xZ: curl 3 MB 60 s qua 2 MB (~33 KB/s); 01:19Z: 650 KB 17,7 s · 3 MB 45 s. Đường lên chung (cloudflare) 225 KB/s.
+  07/10 ảnh cùng cỡ đi 4–5 s ⟹ đường lên đổi, không phải mã. Trong 40 s ấy lệnh khác chờ (📋 Phiên `cho_ms` 20 341).
+  Câu lỗi đưa nguyên `/bot<khoá>/sendPhoto` ra buồng chat (log thì đã redact từ trước).
+- Vá 741d156: ảnh ≥1 MB ⟹ `sips` JPEG q80, `-Z 2560` chỉ khi cạnh dài >2560 (đo: sips PHÓNG TO 1200×800); không nhỏ
+  hơn/hỏng ⟹ log + gửi gốc. Ảnh màn thật 3 573 721 B ⟹ 652 237 B. Câu lỗi: cỡ + giây + `< K KB/s`; mọi `.send()` trong
+  telegram.rs qua `logging::redact`. test telegram 108/108, đối chứng ngược 2 ĐỎ. Cài 01:17:29Z pid 89384 --verify KHỚP.
+- CHƯA nghiệm thu: chưa có lượt `/anh` thật sau khi cài (chờ Hà bấm). Còn lại: upload vẫn chặn luồng lệnh ~18 s ở
+  đường lên hiện tại (650 KB) — chưa tách upload khỏi luồng lệnh. QG chưa chạy (lệnh tạm dừng). Sổ: `ANH-JPEG-0910`.
+
 ## ⏸ 2026-10-09 00:47Z — kế nhiệm 929404de (acc6, pid 58176, ttys005) đã đóng phiên cũ 63503ce1; ĐỨNG CHỜ Hà báo làm lại
 
 - Đo trước khi đóng: lượt cuối end_turn 00:46:57Z · cây 0/0 tại 99910eb · 0 việc nền (`dang-chay.py` 00:47:15Z: {} / []),

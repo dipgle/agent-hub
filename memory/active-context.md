@@ -1,5 +1,12 @@
 # active context — huba
 
+## ⏸ 2026-10-09 00:47Z — kế nhiệm 929404de (acc6, pid 58176, ttys005) đã đóng phiên cũ 63503ce1; ĐỨNG CHỜ Hà báo làm lại
+
+- Đo trước khi đóng: lượt cuối end_turn 00:46:57Z · cây 0/0 tại 99910eb · 0 việc nền (`dang-chay.py` 00:47:15Z: {} / []),
+  hòm thư chỉ còn `.taken-*`, hàng đợi daemon rỗng. Cổng QG đang chạy lúc ấy là của dwork/dev (pid 55548, ttys010), không
+  phải huba. `kill 68259` ⇒ pid hết, MCP con + caffeinate hết; đóng cửa sổ 13924 ⇒ `ps -t ttys002`: không còn tty.
+- S53: 0 dòng `auto_handover*` cho 63503ce1 trong logs/huba.log (phiên cũ ~50 %, dưới ngưỡng 80 %) ⇒ vẫn chưa có ca thật.
+
 ## 🟡 2026-10-08 15:1xZ→ — [dwork/account] báo: auto_handover mở kế nhiệm THỨ HAI (PLAN S53)
 
 - Ca thật đo lại: 7096bc70 (81 %) tự mở kế nhiệm bằng acc-mo-vai.sh 15:00:27Z (pid 47993, 8ed68b81, start 15:01:18Z);

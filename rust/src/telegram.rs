@@ -555,6 +555,142 @@ pub fn photo_route(len: u64) -> PhotoRoute {
     }
 }
 
+/// Định dạng của tệp ảnh đem tải lên — quyết định tên tệp + kiểu MIME.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum ImageKind {
+    Png,
+    Jpeg,
+}
+
+/// Ảnh từ cỡ này trở lên thì đổi sang JPEG trước khi tải lên.
+///
+/// 🔴 Đo 2026-10-09 (Hà gửi ảnh `/anh` báo *"chụp được nhưng KHÔNG gửi được
+/// ảnh: error sending request"*, 4/4 lượt từ 00:50Z): ảnh chụp màn là PNG
+/// 2,7–3,5 MB, và đường lên tới `api.telegram.org` sáng hôm ấy chỉ còn ~33 KB/s
+/// (curl 3 MB: 60 s qua được 2 MB) ⟹ lượt nào cũng chết đúng ở trần 40 s của
+/// client, và suốt 40 s ấy mọi lệnh khác của chủ máy xếp hàng sau nó. Cùng tấm
+/// ảnh ấy ngày 07/10 đi mất 4–5 s — ảnh không đổi, đường lên đổi.
+/// Một ảnh màn thật 3024×1964: PNG 3 573 721 B ⟹ JPEG chất lượng 80, cạnh dài
+/// 2560: **652 237 B** (nhỏ 5,5 lần), đổi mất 0,14 s, chữ trên màn vẫn đọc rõ.
+pub const SHRINK_ABOVE: u64 = 1024 * 1024;
+/// Cạnh dài tối đa của ảnh tải lên.
+pub const SHRINK_EDGE: u32 = 2560;
+
+/// Bề ngang × bề cao của một PNG, đọc từ khối IHDR — `None` nếu không phải PNG.
+pub fn png_size(head: &[u8]) -> Option<(u32, u32)> {
+    if head.len() < 24 || &head[..8] != b"\x89PNG\r\n\x1a\n" || &head[12..16] != b"IHDR" {
+        return None;
+    }
+    let w = u32::from_be_bytes(head[16..20].try_into().ok()?);
+    let h = u32::from_be_bytes(head[20..24].try_into().ok()?);
+    Some((w, h))
+}
+
+/// Tham số `sips` để đổi một ảnh sang JPEG. Hàm THUẦN.
+///
+/// 🔴 `-Z` chỉ được thêm khi cạnh dài THẬT SỰ vượt [`SHRINK_EDGE`]: đo 09/10,
+/// `sips -Z 2560` PHÓNG TO một ảnh 1200×800 lên 2560×1706 — tệp ra còn to hơn
+/// tệp vào. Không biết cỡ (không phải PNG) thì cũng không thêm.
+pub fn shrink_args(size: Option<(u32, u32)>, src: &str, out: &str) -> Vec<String> {
+    let mut a: Vec<String> = ["-s", "format", "jpeg", "-s", "formatOptions", "80"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    if let Some((w, h)) = size {
+        if w.max(h) > SHRINK_EDGE {
+            a.push("-Z".into());
+            a.push(SHRINK_EDGE.to_string());
+        }
+    }
+    a.extend([src.to_string(), "--out".to_string(), out.to_string()]);
+    a
+}
+
+/// Đổi một ảnh lớn sang JPEG nhỏ hơn để tải lên; `None` = gửi nguyên tệp gốc.
+///
+/// Mọi nhánh `None` trừ "ảnh đã nhỏ" đều GHI LOG: đổi hỏng không chặn việc gửi
+/// (bản gốc vẫn đi được), nhưng không được im.
+/// Tệp trả về nằm cạnh tệp gốc; chỗ gọi xoá nó sau khi gửi.
+pub fn shrink_for_upload(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if len < SHRINK_ABOVE {
+        return None;
+    }
+    let size = {
+        use std::io::Read;
+        let mut head = [0u8; 24];
+        std::fs::File::open(path)
+            .and_then(|mut f| f.read_exact(&mut head))
+            .ok()
+            .and_then(|_| png_size(&head))
+    };
+    let out = path.with_extension("gui.jpg");
+    let args = shrink_args(
+        size,
+        &path.display().to_string(),
+        &out.display().to_string(),
+    );
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let t0 = std::time::Instant::now();
+    let ran = crate::exec::run(
+        "sips",
+        &args,
+        crate::exec::RunOpts {
+            timeout: Some(Duration::from_secs(20)),
+            ..Default::default()
+        },
+    );
+    let ms = t0.elapsed().as_millis() as u64;
+    let why = match ran {
+        Ok(o) if o.code == Some(0) => {
+            let got = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+            if got > 0 && got < len {
+                logging::info(
+                    "photo_shrunk",
+                    json!({ "from": len, "to": got, "ms": ms, "size": size }),
+                );
+                return Some(out);
+            }
+            format!("JPEG {got} B không nhỏ hơn bản gốc")
+        }
+        Ok(o) => format!(
+            "sips thoát {:?}: {}",
+            o.code,
+            crate::exec::truncate(o.stderr.trim(), 160)
+        ),
+        Err(e) => logging::err_chain(&e),
+    };
+    let _ = std::fs::remove_file(&out);
+    logging::warn(
+        "photo_shrink_skipped",
+        json!({ "bytes": len, "ms": ms, "why": why, "effect": "gửi nguyên tệp gốc" }),
+    );
+    None
+}
+
+/// Câu lỗi khi tải ảnh lên hỏng — nói ra CỠ, THỜI GIAN, và quá trần hay không.
+///
+/// `error sending request for url (…)` không nói được với người cầm điện thoại
+/// điều gì đáng biết: không biết ảnh to bao nhiêu, chờ bao lâu, lỗi ở máy hay ở
+/// Telegram — và nó mang nguyên token bot trong URL. Quá trần thì mức đường lên
+/// đo được là một CẬN TRÊN (chưa tới nơi trong ngần ấy giây), nên nói là `<`.
+pub fn upload_err_text(timed_out: bool, bytes: u64, ms: u64, detail: &str) -> String {
+    let mb = bytes as f64 / 1_048_576.0;
+    let s = ms as f64 / 1000.0;
+    if timed_out {
+        let kbs = bytes as f64 / 1024.0 / s.max(0.001);
+        format!(
+            "tải lên {mb:.1} MB quá {s:.0} s chưa xong — đường lên mạng của máy đang chậm \
+             (< {kbs:.0} KB/s), không phải Telegram từ chối"
+        )
+    } else {
+        format!(
+            "tải lên {mb:.1} MB hỏng sau {s:.1} s: {}",
+            logging::redact(detail)
+        )
+    }
+}
+
 /// Buồng chat tự xoá tin (`message_auto_delete_time`) SỚM hơn hoặc bằng mốc
 /// `after_hours` của huba ⟹ để Telegram làm, huba không gọi `deleteMessage`.
 pub fn chat_deletes_first(auto_delete_sec: Option<i64>, after_hours: u64) -> bool {
@@ -1665,7 +1801,7 @@ impl Inbox {
             .post(self.api("setMyCommands"))
             .json(&json!({ "commands": list }))
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| logging::redact(&e.to_string()))?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             logging::info("telegram_commands_registered", json!({ "count": n }));
@@ -1933,7 +2069,7 @@ impl Inbox {
             .post(self.api("sendDocument"))
             .multipart(form)
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| logging::redact(&e.to_string()))?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg(), &v);
@@ -1972,7 +2108,19 @@ impl Inbox {
     /// của Telegram"* — huba từ chối thay cho Telegram một tấm ảnh mà Telegram
     /// vẫn nhận được, chỉ là qua cửa khác. Và `sendPhoto` còn từ chối cả ảnh nhỏ
     /// mà quá dài/rộng, nên bị từ chối thì cũng thử lại bằng cửa tệp.
+    ///
+    /// Ảnh từ [`SHRINK_ABOVE`] trở lên đi dưới dạng JPEG ([`shrink_for_upload`]);
+    /// đổi hỏng thì gửi bản gốc như trước.
     pub fn send_photo(&self, path: &std::path::Path, caption: &str) -> Result<(), String> {
+        let gon = shrink_for_upload(path);
+        let out = self.send_image(gon.as_deref().unwrap_or(path), gon.is_some(), caption);
+        if let Some(j) = &gon {
+            let _ = std::fs::remove_file(j);
+        }
+        out
+    }
+
+    fn send_image(&self, path: &std::path::Path, jpeg: bool, caption: &str) -> Result<(), String> {
         let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
         let route = photo_route(meta.len());
         if route == PhotoRoute::TooBig {
@@ -1991,10 +2139,16 @@ impl Inbox {
                 .unwrap_or("không rõ")
                 .to_string()
         };
+        let kind = if jpeg {
+            ImageKind::Jpeg
+        } else {
+            ImageKind::Png
+        };
+        let t0 = std::time::Instant::now();
         let mut sent_as = "photo";
         let mut v = json!({});
         if route == PhotoRoute::Photo {
-            v = self.post_image(bytes.clone(), "sendPhoto", "photo", caption)?;
+            v = self.post_image(bytes.clone(), "sendPhoto", "photo", caption, kind)?;
             if !ok(&v) {
                 logging::warn(
                     "telegram_photo_refused_retry_as_file",
@@ -2004,13 +2158,21 @@ impl Inbox {
         }
         if !ok(&v) {
             sent_as = "document";
-            v = self.post_image(bytes, "sendDocument", "document", caption)?;
+            v = self.post_image(bytes, "sendDocument", "document", caption, kind)?;
         }
         if ok(&v) {
             remember_sent(&self.cfg(), &v);
+            // Cỡ lớn nhất Telegram giữ lại — để "thu ảnh có làm mất nét không"
+            // trả lời được bằng số, không bằng niềm tin.
+            let kept = v
+                .pointer("/result/photo")
+                .and_then(Value::as_array)
+                .and_then(|a| a.last())
+                .map(|p| json!([p.get("width"), p.get("height")]));
             logging::info(
                 "telegram_photo_sent",
-                json!({ "bytes": meta.len(), "as": sent_as }),
+                json!({ "bytes": meta.len(), "as": sent_as, "jpeg": jpeg,
+                        "ms": t0.elapsed().as_millis() as u64, "kept": kept }),
             );
             Ok(())
         } else {
@@ -2018,28 +2180,43 @@ impl Inbox {
         }
     }
 
-    /// One multipart upload of a PNG; returns Telegram's JSON answer as is.
+    /// One multipart upload of an image; returns Telegram's JSON answer as is.
     fn post_image(
         &self,
         bytes: Vec<u8>,
         method: &str,
         field: &str,
         caption: &str,
+        kind: ImageKind,
     ) -> Result<Value, String> {
         let client = self.client().ok_or("không dựng được HTTP client")?;
+        let len = bytes.len() as u64;
+        let (name, mime) = match kind {
+            ImageKind::Png => ("man-hinh.png", "image/png"),
+            ImageKind::Jpeg => ("man-hinh.jpg", "image/jpeg"),
+        };
         let part = reqwest::blocking::multipart::Part::bytes(bytes)
-            .file_name("man-hinh.png")
-            .mime_str("image/png")
+            .file_name(name)
+            .mime_str(mime)
             .map_err(|e| e.to_string())?;
         let form = reqwest::blocking::multipart::Form::new()
             .text("chat_id", self.chat_id.clone())
             .text("caption", caption.to_string())
             .part(field.to_string(), part);
+        let t0 = std::time::Instant::now();
         let r = client
             .post(self.api(method))
             .multipart(form)
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                let ms = t0.elapsed().as_millis() as u64;
+                logging::warn(
+                    "telegram_image_upload_failed",
+                    json!({ "method": method, "bytes": len, "ms": ms,
+                            "timeout": e.is_timeout(), "err": e.to_string() }),
+                );
+                upload_err_text(e.is_timeout(), len, ms, &e.to_string())
+            })?;
         Ok(r.json().unwrap_or_else(|_| json!({})))
     }
 
@@ -3159,9 +3336,9 @@ impl Inbox {
             .post(self.api("getChat"))
             .json(&json!({ "chat_id": self.chat_id }))
             .send()
-            .map_err(|e| e.to_string())?
+            .map_err(|e| logging::redact(&e.to_string()))?
             .json()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| logging::redact(&e.to_string()))?;
         if v.get("ok").and_then(Value::as_bool) != Some(true) {
             return Err(v
                 .get("description")
@@ -3189,7 +3366,7 @@ impl Inbox {
             .post(self.api("deleteMessage"))
             .json(&json!({ "chat_id": self.chat_id, "message_id": message_id }))
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| logging::redact(&e.to_string()))?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             Ok(())
@@ -3739,7 +3916,7 @@ impl Inbox {
             .post(self.api("getChat"))
             .json(&json!({ "chat_id": self.chat_id }))
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| logging::redact(&e.to_string()))?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) != Some(true) {
             return Err(v
@@ -3764,7 +3941,7 @@ impl Inbox {
                 "disable_notification": true,
             }))
             .send()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| logging::redact(&e.to_string()))?;
         let v: Value = r.json().unwrap_or_else(|_| json!({}));
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             Ok(())

@@ -1009,6 +1009,156 @@ fn a_photo_over_the_photo_limit_goes_as_a_file_not_nowhere() {
     assert_eq!(photo_route(TELEGRAM_FILE_MAX + 1), PhotoRoute::TooBig);
 }
 
+/// Một BMP 24-bit nhiễu, rồi `sips` đổi sang PNG — ảnh THẬT cho `sips` đọc,
+/// không phải vài byte giả đầu tệp.
+fn noisy_png(dir: &std::path::Path, name: &str, w: u32, h: u32) -> std::path::PathBuf {
+    let row = (w as usize * 3 + 3) & !3;
+    let mut px = vec![0u8; row * h as usize];
+    let mut x: u32 = 0x9e37_79b9;
+    for b in px.iter_mut() {
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        *b = x as u8;
+    }
+    let mut bmp = Vec::new();
+    bmp.extend_from_slice(b"BM");
+    bmp.extend_from_slice(&(54 + px.len() as u32).to_le_bytes());
+    bmp.extend_from_slice(&[0, 0, 0, 0]);
+    bmp.extend_from_slice(&54u32.to_le_bytes());
+    bmp.extend_from_slice(&40u32.to_le_bytes());
+    bmp.extend_from_slice(&(w as i32).to_le_bytes());
+    bmp.extend_from_slice(&(h as i32).to_le_bytes());
+    bmp.extend_from_slice(&1u16.to_le_bytes());
+    bmp.extend_from_slice(&24u16.to_le_bytes());
+    bmp.extend_from_slice(&[0u8; 4]);
+    bmp.extend_from_slice(&(px.len() as u32).to_le_bytes());
+    bmp.extend_from_slice(&[0u8; 16]);
+    bmp.extend_from_slice(&px);
+    let b = dir.join(format!("{name}.bmp"));
+    std::fs::write(&b, bmp).unwrap();
+    let p = dir.join(format!("{name}.png"));
+    let st = std::process::Command::new("sips")
+        .args(["-s", "format", "png"])
+        .arg(&b)
+        .arg("--out")
+        .arg(&p)
+        .output()
+        .unwrap();
+    assert!(st.status.success(), "sips không dựng được PNG thử");
+    p
+}
+
+fn sips_size(p: &std::path::Path) -> (u32, u32) {
+    let o = std::process::Command::new("sips")
+        .args(["-g", "pixelWidth", "-g", "pixelHeight"])
+        .arg(p)
+        .output()
+        .unwrap();
+    let t = String::from_utf8_lossy(&o.stdout);
+    let num = |k: &str| {
+        t.lines()
+            .find(|l| l.contains(k))
+            .and_then(|l| l.split(':').nth(1))
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap()
+    };
+    (num("pixelWidth"), num("pixelHeight"))
+}
+
+/// Ảnh màn lớn đi dưới dạng JPEG nhỏ hơn, cạnh dài ≤ 2560 — và KHÔNG phóng to
+/// ảnh vốn nhỏ.
+///
+/// 🔴 Đo 2026-10-09: 4/4 lượt `/anh` (PNG 2,7–3,5 MB) chết ở trần 40 s khi đường
+/// lên tới Telegram còn ~33 KB/s. Và `sips -Z 2560` phóng 1200×800 lên 2560×1706
+/// — nên vế "ảnh nhỏ giữ nguyên cỡ" là một bài kiểm có chủ, không phải trang trí.
+#[test]
+fn a_big_screenshot_goes_up_as_a_smaller_jpeg_and_a_small_one_is_not_enlarged() {
+    use huba::telegram::{shrink_for_upload, SHRINK_EDGE};
+    let dir = tempfile::tempdir().unwrap();
+
+    let big = noisy_png(dir.path(), "to", 3024, 1200);
+    let big_len = std::fs::metadata(&big).unwrap().len();
+    let j = shrink_for_upload(&big).expect("ảnh màn lớn phải được thu");
+    let j_len = std::fs::metadata(&j).unwrap().len();
+    assert!(
+        j_len < big_len,
+        "JPEG {j_len} B không nhỏ hơn PNG {big_len} B"
+    );
+    let (w, h) = sips_size(&j);
+    assert_eq!(w.max(h), SHRINK_EDGE, "cạnh dài sau khi thu: {w}×{h}");
+    assert!(big.exists(), "tệp gốc phải còn nguyên — chỗ gọi tự xoá");
+
+    // Ảnh nhỏ vẫn qua ngưỡng byte (PNG nhiễu ~2,9 MB) nên vẫn đổi — chỉ không
+    // được đổi CỠ. Đòi `Some`, không `if let`: phóng to thì JPEG to hơn gốc,
+    // lớp so cỡ gạt nó về `None`, và một `if let` sẽ xanh trên đúng ca ấy
+    // (đối chứng ngược 09/10 bắt được chỗ mù này).
+    let small = noisy_png(dir.path(), "nho", 1200, 800);
+    let j = shrink_for_upload(&small).expect("ảnh 1200×800 phải đổi được sang JPEG nhỏ hơn");
+    assert_eq!(sips_size(&j), (1200, 800), "ảnh nhỏ bị phóng to");
+}
+
+/// Đổi hỏng ⟹ gửi bản gốc (`None`), không để lại tệp rác, không làm hỏng gốc.
+#[test]
+fn a_file_sips_cannot_read_falls_back_to_the_original() {
+    use huba::telegram::{shrink_for_upload, SHRINK_ABOVE};
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("khong-phai-anh.png");
+    std::fs::write(&p, vec![b'x'; SHRINK_ABOVE as usize + 10]).unwrap();
+    assert_eq!(shrink_for_upload(&p), None);
+    assert!(p.exists());
+    assert!(!p.with_extension("gui.jpg").exists(), "để lại tệp JPEG dở");
+
+    let tiny = dir.path().join("nho.png");
+    std::fs::write(&tiny, b"\x89PNG").unwrap();
+    assert_eq!(
+        shrink_for_upload(&tiny),
+        None,
+        "ảnh dưới ngưỡng không cần đổi"
+    );
+}
+
+#[test]
+fn shrink_resizes_only_when_the_long_side_is_over_the_edge() {
+    use huba::telegram::{png_size, shrink_args};
+    let has_z = |a: &[String]| a.iter().any(|x| x == "-Z");
+    assert!(has_z(&shrink_args(Some((3024, 1964)), "a", "b")));
+    assert!(has_z(&shrink_args(Some((1200, 3000)), "a", "b")));
+    assert!(!has_z(&shrink_args(Some((2560, 1600)), "a", "b")));
+    assert!(!has_z(&shrink_args(Some((1200, 800)), "a", "b")));
+    assert!(!has_z(&shrink_args(None, "a", "b")));
+
+    let mut head = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    head.extend_from_slice(&3024u32.to_be_bytes());
+    head.extend_from_slice(&1964u32.to_be_bytes());
+    assert_eq!(png_size(&head), Some((3024, 1964)));
+    assert_eq!(png_size(b"GIF89a................."), None);
+    assert_eq!(png_size(&head[..20]), None);
+}
+
+/// Câu lỗi tải ảnh nói CỠ + THỜI GIAN, và không mang token bot ra buồng chat.
+///
+/// 🔴 Câu cũ, nguyên văn trên điện thoại 09/10: *"error sending request for url
+/// (https://api.telegram.org/bot<số>:<khoá>/sendPhoto)"* — khoá bot đầy đủ, và
+/// không một chữ nào nói vì sao.
+#[test]
+fn an_upload_error_says_size_and_time_and_never_the_token() {
+    use huba::telegram::upload_err_text;
+    let raw = "error sending request for url (https://api.telegram.org/bot8739623904:AAFfGm5Wp-x_y/sendPhoto)";
+    let t = upload_err_text(true, 2_681_020, 40_000, raw);
+    assert!(t.contains("2.6 MB") && t.contains("40 s"), "{t}");
+    assert!(t.contains("< 65 KB/s"), "{t}");
+    assert!(!t.contains("AAFfGm5Wp") && !t.contains("8739623904"), "{t}");
+
+    let t = upload_err_text(false, 652_237, 1_200, raw);
+    assert!(t.contains("0.6 MB") && t.contains("1.2 s"), "{t}");
+    assert!(
+        t.contains("sendPhoto"),
+        "giữ tên phương thức để còn tra: {t}"
+    );
+    assert!(!t.contains("AAFfGm5Wp"), "{t}");
+}
+
 /// Buồng chat tự xoá SỚM hơn huba thì huba không gọi xoá vào chỗ trống.
 ///
 /// 🔴 Đo 2026-10-01: lý do đầu tiên đọc được sau khi vá ghi lý do là

@@ -9,7 +9,9 @@
 - Vá 741d156: ảnh ≥1 MB ⟹ `sips` JPEG q80, `-Z 2560` chỉ khi cạnh dài >2560 (đo: sips PHÓNG TO 1200×800); không nhỏ
   hơn/hỏng ⟹ log + gửi gốc. Ảnh màn thật 3 573 721 B ⟹ 652 237 B. Câu lỗi: cỡ + giây + `< K KB/s`; mọi `.send()` trong
   telegram.rs qua `logging::redact`. test telegram 108/108, đối chứng ngược 2 ĐỎ. Cài 01:17:29Z pid 89384 --verify KHỚP.
-- CHƯA nghiệm thu: chưa có lượt `/anh` thật sau khi cài (chờ Hà bấm). Còn lại: upload vẫn chặn luồng lệnh ~18 s ở
+- NGHIỆM THU THẬT 02:05:51Z (`/anh` của Hà): 2 773 500 B → JPEG 674 355 B → sendPhoto OK 17,8 s, Telegram giữ 2560×1662.
+  «`/anh` nhảy vào phiên» 02:03Z = GỢI Ý MỜ của Claude Code trong ô nhập (lượt trước của phiên bảo Hà bấm `/anh`);
+  `tin_den` 01:50–02:05:51Z: 0 tin `/anh` ⟹ không ai gõ gì vào phiên. Còn lại: upload vẫn chặn luồng lệnh ~18 s ở
   đường lên hiện tại (650 KB) — chưa tách upload khỏi luồng lệnh. QG chưa chạy (lệnh tạm dừng). Sổ: `ANH-JPEG-0910`.
 
 ## ⏸ 2026-10-09 00:47Z — kế nhiệm 929404de (acc6, pid 58176, ttys005) đã đóng phiên cũ 63503ce1; ĐỨNG CHỜ Hà báo làm lại

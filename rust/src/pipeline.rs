@@ -14028,9 +14028,30 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     Some(ack)
                 }
             }
-            CommandKind::Accounts if !cmd.arg.trim().is_empty() => {
-                let ack = match account_lock_order(&cmd.arg) {
-                    Some((ten, khoa)) => match set_account_locked(cfg, &ten, khoa) {
+            CommandKind::Accounts => {
+                let ack = match accounts_order(&cmd.arg) {
+                    // Một ảnh chụp thật, không phải con số nhớ từ lượt trước: câu
+                    // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì
+                    // hiện tại. Hạn mức: tài khoản có số cũ hơn 5′ thì đo lại trước
+                    // khi trả lời (Hà 24/09) — xem `runtime::accounts_say`.
+                    AccountsOrder::List => crate::runtime::accounts_say(
+                        cfg,
+                        db,
+                        &crate::sessions::snapshot(cfg),
+                        chrono::Utc::now().timestamp_millis(),
+                        &db.dead_accounts(),
+                    ),
+                    // Đo lại hạn mức của ĐÚNG tài khoản ấy, kể cả đang khoá (Hà
+                    // 10/10) — xem `runtime::usage_lam_moi_mot`.
+                    AccountsOrder::Detail(ten) => crate::runtime::account_detail_say(
+                        cfg,
+                        db,
+                        &crate::sessions::snapshot(cfg),
+                        &ten,
+                        &db.dead_accounts(),
+                        chrono::Utc::now().timestamp_millis(),
+                    ),
+                    AccountsOrder::Lock(ten, khoa) => match set_account_locked(cfg, &ten, khoa) {
                         Ok(msg) => msg,
                         Err(e) => {
                             logging::error(
@@ -14041,45 +14062,8 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             format!("⚠ không đổi được khoá của {ten}: {e}")
                         }
                     },
-                    None => {
-                        let biet: Vec<String> = cfg
-                            .claude_accounts_or_ambient()
-                            .into_iter()
-                            .map(|a| a.name)
-                            .collect();
-                        match account_detail_order(&cmd.arg, &biet) {
-                            // Ảnh chụp thật cho dòng "phiên đang chạy" — cùng lý do
-                            // với `/accounts` trơn ngay dưới.
-                            Some(ten) => crate::runtime::account_detail_say(
-                                cfg,
-                                &crate::sessions::snapshot(cfg),
-                                &ten,
-                                &db.dead_accounts(),
-                                chrono::Utc::now().timestamp_millis(),
-                            ),
-                            None => "⚠ Gõ: /accounts detail <tài khoản> · /accounts khoa \
-                                     <tài khoản> · /accounts mo <tài khoản> (trống = xem \
-                                     danh sách)"
-                                .to_string(),
-                        }
-                    }
+                    AccountsOrder::Usage => ACCOUNTS_USAGE.to_string(),
                 };
-                reply_in_channel(db, cfg, adapter, cmd, &ack);
-                Some(ack)
-            }
-            CommandKind::Accounts => {
-                // Một ảnh chụp thật, không phải con số nhớ từ lượt trước: câu
-                // hỏi "phiên nào đang chạy bằng tài khoản nào" chỉ đúng ở thì
-                // hiện tại. Hạn mức: tài khoản có số cũ hơn 5′ thì đo lại trước
-                // khi trả lời (Hà 24/09) — xem `runtime::accounts_say`.
-                let live = crate::sessions::snapshot(cfg);
-                let ack = crate::runtime::accounts_say(
-                    cfg,
-                    db,
-                    &live,
-                    chrono::Utc::now().timestamp_millis(),
-                    &db.dead_accounts(),
-                );
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
                 Some(ack)
             }
@@ -18831,21 +18815,65 @@ fn save_edited_config(cfg: &Config, root: Value) -> Result<()> {
     crate::config::save(&incoming)
 }
 
-/// Đọc `khoa <tên>` / `mo <tên>` sau `/accounts` ⟹ `(tên, có khoá không)`.
-/// Không khớp dạng nào ⟹ `None`, để route in cách gõ thay vì đoán ý.
-pub fn account_lock_order(arg: &str) -> Option<(String, bool)> {
-    let mut it = arg.split_whitespace();
-    let dong_tu = it.next()?.to_lowercase();
-    let ten = it.next()?.to_string();
-    if it.next().is_some() {
-        return None;
-    }
-    match dong_tu.as_str() {
-        "khoa" | "khoá" | "khóa" | "lock" => Some((ten, true)),
-        "mo" | "mở" | "unlock" => Some((ten, false)),
+/// Việc mà một dòng `/accounts …` đòi — xem [`accounts_order`].
+#[derive(Debug, PartialEq, Eq)]
+pub enum AccountsOrder {
+    /// `/accounts` trơn — danh sách.
+    List,
+    /// `/accounts <tên>` — chi tiết + đo lại hạn mức, kể cả đang khoá.
+    Detail(String),
+    /// `/accounts <tên> -b` (khoá, `true`) · `-a` (mở, `false`).
+    Lock(String, bool),
+    /// Không khớp dạng nào — route in cách gõ thay vì đoán ý.
+    Usage,
+}
+
+/// Dạng gõ: `/accounts [<tên> [-a | -b]]` — Hà 2026-10-10: *"sửa lại lệnh thành
+/// `/accounts [acc1 [-a | -b]]`"*. `-b` = khoá (block), `-a` = mở (allow). Cờ đứng
+/// trước hay sau tên đều nhận.
+///
+/// Dạng cũ (`detail|khoa|mo <tên>`, 29/09) VẪN nhận: nó nằm trong những tin Telegram
+/// đã gửi và trong thói quen gõ — cùng luật với `/new` (vị trí cũ vẫn parse). Một
+/// động từ cũ đứng một mình (`/accounts khoa`) là thiếu tên ⟹ [`AccountsOrder::Usage`],
+/// không bị đọc thành một tài khoản tên "khoa".
+pub fn accounts_order(arg: &str) -> AccountsOrder {
+    let t: Vec<&str> = arg.split_whitespace().collect();
+    let co = |s: &str| match s {
+        "-b" => Some(true),
+        "-a" => Some(false),
         _ => None,
+    };
+    let dong_tu_cu = |s: &str| -> Option<Option<bool>> {
+        match s.to_lowercase().as_str() {
+            "detail" | "chitiet" | "chi-tiet" | "ct" | "xem" => Some(None),
+            "khoa" | "khoá" | "khóa" | "lock" => Some(Some(true)),
+            "mo" | "mở" | "unlock" => Some(Some(false)),
+            _ => None,
+        }
+    };
+    let ten = |s: &str| !s.starts_with('-') && dong_tu_cu(s).is_none();
+    match t.as_slice() {
+        [] => AccountsOrder::List,
+        [a] if ten(a) => AccountsOrder::Detail((*a).to_string()),
+        [a, f] if ten(a) && co(f).is_some() => {
+            AccountsOrder::Lock((*a).to_string(), co(f) == Some(true))
+        }
+        [f, a] if ten(a) && co(f).is_some() => {
+            AccountsOrder::Lock((*a).to_string(), co(f) == Some(true))
+        }
+        [dt, a] if ten(a) => match dong_tu_cu(dt) {
+            Some(None) => AccountsOrder::Detail((*a).to_string()),
+            Some(Some(khoa)) => AccountsOrder::Lock((*a).to_string(), khoa),
+            None => AccountsOrder::Usage,
+        },
+        _ => AccountsOrder::Usage,
     }
 }
+
+/// Câu hướng dẫn khi dòng `/accounts …` không khớp dạng nào.
+pub const ACCOUNTS_USAGE: &str = "⚠ Gõ: /accounts · /accounts <tài khoản> (chi tiết + đo lại hạn \
+                                  mức, kể cả đang khoá) · /accounts <tài khoản> -b (khoá) · \
+                                  /accounts <tài khoản> -a (mở)";
 
 /// Tài khoản SẼ chạy một lượt `/new`, nếu nó đang khoá.
 ///
@@ -18913,29 +18941,7 @@ pub fn hoi_mo_tai_khoan_khoa(
     }
 }
 
-/// Đọc `detail <tên>` sau `/accounts` ⟹ tên tài khoản cần xem chi tiết.
-///
-/// Gõ TRẦN một tên (`/accounts acc3`) cũng nhận — nhưng chỉ khi tên ấy có
-/// trong `biet`: khớp chính xác cả chuỗi là một phép ĐO, không phải đoán (cùng
-/// lối nghĩ với `lift_bare_account` của `/new`). Động từ `detail` thì nhận mọi
-/// tên, để tên gõ sai được trả lời bằng danh sách thay vì bằng câu hướng dẫn.
-pub fn account_detail_order(arg: &str, biet: &[String]) -> Option<String> {
-    let t: Vec<&str> = arg.split_whitespace().collect();
-    match t.as_slice() {
-        [dt, ten]
-            if matches!(
-                dt.to_lowercase().as_str(),
-                "detail" | "chitiet" | "chi-tiet" | "ct" | "xem"
-            ) =>
-        {
-            Some((*ten).to_string())
-        }
-        [ten] if biet.iter().any(|b| b == ten) => Some((*ten).to_string()),
-        _ => None,
-    }
-}
-
-/// Khoá / mở MỘT tài khoản trong `claude_accounts` — `/accounts khoa|mo <tên>`.
+/// Khoá / mở MỘT tài khoản trong `claude_accounts` — `/accounts <tên> -b|-a`.
 ///
 /// `/set` không làm được việc này: nó đi theo đường chấm qua KHOÁ của object,
 /// còn `claude_accounts` là một MẢNG, và `locked: false` cố ý không ghi ra tệp
@@ -18972,7 +18978,7 @@ pub fn set_account_locked(cfg: &Config, name: &str, locked: bool) -> Result<Stri
     let viec = match (truoc, locked) {
         (true, true) => "vẫn đang KHOÁ (không đổi)",
         (false, false) => "vẫn đang mở (không đổi)",
-        (false, true) => "đã KHOÁ — huba không chọn, không mở phiên, không dò /usage trên nó",
+        (false, true) => "đã KHOÁ — huba không tự chọn, không tự mở phiên, không tự dò /usage trên nó (gõ /accounts <tên> vẫn đo)",
         (true, false) => "đã MỞ khoá — huba dùng lại được",
     };
     let dau = if locked { "🔒" } else { "🔓" };

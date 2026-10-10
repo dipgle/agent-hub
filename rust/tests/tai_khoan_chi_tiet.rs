@@ -12,7 +12,7 @@ mod common;
 use std::path::Path;
 
 use huba::config::{ClaudeAccountCfg, Config};
-use huba::pipeline::account_detail_order;
+use huba::pipeline::accounts_order;
 use huba::quota::{identity, Identity};
 use huba::runtime::{account_detail_say, account_detail_text};
 use huba::sessions::{LiveSession, SessionsSnapshot};
@@ -87,31 +87,22 @@ fn identity_noi_ro_vi_sao_khong_doc_duoc() {
 // ── Cú pháp ─────────────────────────────────────────────────────────────────
 
 #[test]
-fn cu_phap_detail_va_ten_tran() {
-    let biet = vec!["acc1".to_string(), "acc3".to_string()];
-    assert_eq!(
-        account_detail_order("detail acc3", &biet).as_deref(),
-        Some("acc3")
-    );
-    assert_eq!(
-        account_detail_order("chitiet acc3", &biet).as_deref(),
-        Some("acc3")
-    );
-    assert_eq!(account_detail_order("acc3", &biet).as_deref(), Some("acc3"));
-    // Tên gõ sai sau `detail` vẫn tới được route — để route trả DANH SÁCH.
-    assert_eq!(
-        account_detail_order("detail acc9", &biet).as_deref(),
-        Some("acc9")
-    );
-    // Vế ngược: tên trần lạ, hay thiếu tên, KHÔNG được đoán thành một lệnh xem.
-    assert_eq!(account_detail_order("acc9", &biet), None);
-    assert_eq!(account_detail_order("detail", &biet), None);
-    assert_eq!(account_detail_order("khoa", &biet), None);
-    assert_eq!(account_detail_order("detail acc3 thêm", &biet), None);
+fn cu_phap_ten_tran_va_detail_cu() {
+    use huba::pipeline::AccountsOrder::*;
+    // Dạng mới (Hà 10/10): tên trần = xem chi tiết — kể cả tên lạ, để route trả
+    // DANH SÁCH tài khoản thay vì câu hướng dẫn.
+    assert_eq!(accounts_order("acc3"), Detail("acc3".into()));
+    assert_eq!(accounts_order("acc9"), Detail("acc9".into()));
+    // Dạng cũ vẫn nhận.
+    assert_eq!(accounts_order("detail acc3"), Detail("acc3".into()));
+    assert_eq!(accounts_order("chitiet acc3"), Detail("acc3".into()));
+    // Vế ngược: thiếu tên / thừa chữ ⟹ hướng dẫn.
+    assert_eq!(accounts_order("detail"), Usage);
+    assert_eq!(accounts_order("detail acc3 thêm"), Usage);
 
-    let (k, _, arg) = huba::verbs::parse_command("/accounts detail acc3").unwrap();
+    let (k, _, arg) = huba::verbs::parse_command("/accounts acc3").unwrap();
     assert_eq!(k, huba::adapters::CommandKind::Accounts);
-    assert_eq!(arg, "detail acc3");
+    assert_eq!(arg, "acc3");
 }
 
 // ── Câu trả lời ─────────────────────────────────────────────────────────────
@@ -142,6 +133,7 @@ fn chi_tiet_in_email_khoa_va_phien_dang_chay() {
         &snap,
         "acc3",
         None,
+        None,
         Ok(id),
         &dead,
         BAY_GIO,
@@ -149,7 +141,7 @@ fn chi_tiet_in_email_khoa_va_phien_dang_chay() {
     assert!(t.contains("email: trogiup.gdk@gmail.com"), "{t}");
     assert!(t.contains("tổ chức trogiup's Organization"), "{t}");
     assert!(t.contains("🔒 ĐANG KHOÁ"), "{t}");
-    assert!(t.contains("/accounts mo acc3"), "{t}");
+    assert!(t.contains("/accounts acc3 -a"), "{t}");
     assert!(t.contains("~/.claude-acc3") && t.contains("claude3"), "{t}");
     assert!(t.contains("phiên đang chạy (1): projects-1a"), "{t}");
     assert!(
@@ -167,12 +159,13 @@ fn chi_tiet_in_email_khoa_va_phien_dang_chay() {
         &SessionsSnapshot::default(),
         "acc3",
         None,
+        None,
         Ok(identity_mau()),
         &dead,
         BAY_GIO,
     );
     assert!(!mo.contains("ĐANG KHOÁ"), "{mo}");
-    assert!(mo.contains("/accounts khoa acc3"), "{mo}");
+    assert!(mo.contains("/accounts acc3 -b"), "{mo}");
     assert!(mo.contains("phiên đang chạy: không có"), "{mo}");
 }
 
@@ -193,6 +186,7 @@ fn chi_tiet_noi_ro_khi_khong_doc_duoc_email_va_ten_la() {
         &snap,
         "acc3",
         None,
+        None,
         Err("chưa đăng nhập (sổ không có oauthAccount)".into()),
         &dead,
         BAY_GIO,
@@ -206,6 +200,7 @@ fn chi_tiet_noi_ro_khi_khong_doc_duoc_email_va_ten_la() {
         &snap,
         "acc9",
         None,
+        None,
         Ok(identity_mau()),
         &dead,
         BAY_GIO,
@@ -214,19 +209,90 @@ fn chi_tiet_noi_ro_khi_khong_doc_duoc_email_va_ten_la() {
     assert!(la.contains("acc1 · acc3"), "{la}");
 }
 
-/// Trọn đường đọc TỆP: thư mục cấu hình thật (tạm) → sổ `.claude.json` → câu.
+/// `claude` GIẢ: mỗi lần bị gọi ghi một dòng vào `<config_dir>/goi.log`, rồi in câu
+/// `/usage` với tuần 42 % — cùng khuôn với `tests/usage_do_khi_chon.rs`.
+fn claude_gia(dir: &Path) -> std::path::PathBuf {
+    let p = dir.join("claude-gia.sh");
+    std::fs::write(
+        &p,
+        "#!/bin/bash\n\
+         echo x >> \"$CLAUDE_CONFIG_DIR/goi.log\"\n\
+         printf '{\"result\":\"Current session: 3%% used\\\\nCurrent week (all models): 42%% used\"}\\n'\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+    p
+}
+
+fn so_lan_goi(dir: &Path) -> usize {
+    std::fs::read_to_string(dir.join("goi.log"))
+        .map(|s| s.lines().count())
+        .unwrap_or(0)
+}
+
+/// Trọn đường: thư mục cấu hình thật (tạm) → sổ `.claude.json` → đo lại `/usage` → câu.
+///
+/// 🔴 Hà 2026-10-10: *"Lệnh `/accounts detail acc` vẫn phải đo lại được kể cả đang
+/// khóa"*. Tài khoản ở đây ĐANG KHOÁ, và lượt dò phải chạy đúng MỘT lần: lần hỏi
+/// thứ hai trong 5′ dùng lại số vừa đo (luật 5′ của `/accounts`, Hà 24/09).
 #[test]
-fn chi_tiet_doc_that_tu_so_cua_tai_khoan() {
+fn chi_tiet_do_lai_ca_tai_khoan_dang_khoa() {
     let d = tempfile::tempdir().unwrap();
-    so(d.path(), SO_DAY_DU);
-    let t = account_detail_say(
-        &cfg_voi(Some(d.path()), false),
-        &SessionsSnapshot::default(),
-        "acc3",
-        &std::collections::BTreeMap::new(),
-        BAY_GIO,
-    );
+    let acc3 = d.path().join("acc3");
+    so(&acc3, SO_DAY_DU);
+    let db = huba::db::Db::open(&d.path().join("huba.sqlite")).unwrap();
+    let mut c = cfg_voi(Some(&acc3), true);
+    c.claude_cli = claude_gia(d.path()).display().to_string();
+    let now = chrono::Utc::now().timestamp_millis();
+    let dead = std::collections::BTreeMap::new();
+
+    let t = account_detail_say(&c, &db, &SessionsSnapshot::default(), "acc3", &dead, now);
+    assert_eq!(so_lan_goi(&acc3), 1, "tài khoản khoá phải được đo lại: {t}");
+    assert!(t.contains("🔒 ĐANG KHOÁ"), "{t}");
     assert!(t.contains("email: trogiup.gdk@gmail.com"), "{t}");
-    assert!(t.contains("vai trò admin"), "{t}");
-    assert!(t.contains("hạn mức:"), "{t}");
+    assert!(
+        t.contains("đo lại /usage (vừa đo): tuần 42% · 5 tiếng 3%"),
+        "số vừa đo phải tới màn: {t}"
+    );
+
+    let t2 = account_detail_say(&c, &db, &SessionsSnapshot::default(), "acc3", &dead, now);
+    assert_eq!(so_lan_goi(&acc3), 1, "số còn mới (<5′) mà vẫn đo lại: {t2}");
+    assert!(t2.contains("tuần 42%"), "{t2}");
+
+    // Vế ngược: đường TỰ chọn tài khoản vẫn không dò tài khoản khoá.
+    let mut c_cu = c.clone();
+    c_cu.claude_accounts.retain(|a| a.name == "acc3");
+    let _ = huba::runtime::usage_lam_moi(
+        &c_cu,
+        &huba::db::Db::open(&d.path().join("khac.sqlite")).unwrap(),
+        0,
+    );
+    assert_eq!(
+        so_lan_goi(&acc3),
+        1,
+        "usage_lam_moi (tự chọn) đã dò tài khoản khoá"
+    );
+}
+
+#[test]
+fn dong_do_lai_chi_noi_khi_moi_hon_so_cli_va_noi_ra_khi_hong() {
+    use huba::runtime::do_lai_line;
+    let now = 1_790_000_000_000;
+    let row = serde_json::json!({ "week_pct": 42, "session_pct": 3,
+        "week_models": [{ "name": "Fable", "pct": 7 }], "at_ms": now - 3 * 60_000 });
+    let l = do_lai_line(Some(&row), Some(now - 3_600_000), now).unwrap();
+    assert!(
+        l.contains("(3 phút trước): tuần 42% · 5 tiếng 3% · Fable 7%"),
+        "{l}"
+    );
+    // Sổ CLI mới hơn lượt dò ⟹ dòng `hạn mức:` đã là số mới nhất ⟹ im.
+    assert_eq!(do_lai_line(Some(&row), Some(now - 60_000), now), None);
+    assert_eq!(do_lai_line(None, None, now), None);
+    // Lượt dò gần nhất hỏng ⟹ nói ra, kể cả khi còn số cũ.
+    let hong =
+        serde_json::json!({ "err": "hết giờ 60 s", "week_pct": 40, "at_ms": now - 7_200_000 });
+    let l = do_lai_line(Some(&hong), None, now).unwrap();
+    assert!(l.contains("lượt gần nhất HỎNG — hết giờ 60 s"), "{l}");
+    assert!(l.contains("(2 tiếng trước): tuần 40%"), "{l}");
 }

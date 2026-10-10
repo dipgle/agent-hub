@@ -8401,7 +8401,7 @@ pub fn account_locked_text(cfg: &Config, name: &str) -> String {
     } else {
         format!(" Đang mở: {}.", mo.join(" · "))
     };
-    format!("🔒 {name} đang KHOÁ — huba không mở phiên trên nó. Mở khoá: /accounts mo {name}.{con}")
+    format!("🔒 {name} đang KHOÁ — huba không mở phiên trên nó. Mở khoá: /accounts {name} -a.{con}")
 }
 
 /// TỪ để gõ ở terminal cho ra đúng tài khoản ấy.

@@ -156,13 +156,15 @@ pub fn accounts_say(
     accounts_text(cfg, live, &usage, &crate::quota::read_all(cfg), dead, now)
 }
 
-/// `/accounts detail <tên>` — MỘT tài khoản, kể cả email (Hà 29/09).
+/// `/accounts <tên>` — MỘT tài khoản, kể cả email (Hà 29/09).
 ///
-/// Chỉ ĐỌC TỆP (sổ `.claude.json` qua [`crate::quota::identity`] và
-/// [`crate::quota::read`]), không spawn `claude`: không tiêu hạn mức, nên xem
-/// được cả tài khoản đang khoá mà không "đưa nó vào sử dụng".
+/// Danh tính + sổ `.claude.json` đọc TỆP ([`crate::quota::identity`],
+/// [`crate::quota::read`]). Hạn mức thì ĐO LẠI trước khi trả lời nếu số mới nhất cũ
+/// hơn [`USAGE_CU_ACCOUNTS_MS`] — **kể cả tài khoản đang khoá** (Hà 2026-10-10), xem
+/// [`usage_lam_moi_mot`]. Nên lệnh này có thể chờ một lượt `/usage` (trần 60 s).
 pub fn account_detail_say(
     cfg: &Config,
+    db: &Db,
     live: &SessionsSnapshot,
     name: &str,
     dead: &std::collections::BTreeMap<String, String>,
@@ -173,8 +175,19 @@ pub fn account_detail_say(
         .into_iter()
         .find(|a| a.name == name)
     else {
-        return account_detail_text(cfg, live, name, None, Err(String::new()), dead, now_ms);
+        return account_detail_text(
+            cfg,
+            live,
+            name,
+            None,
+            None,
+            Err(String::new()),
+            dead,
+            now_ms,
+        );
     };
+    let usage = usage_lam_moi_mot(cfg, db, name, USAGE_CU_ACCOUNTS_MS);
+    let row = usage.get("accounts").and_then(|m| m.get(name));
     let dir = acc
         .config_dir
         .as_deref()
@@ -182,15 +195,72 @@ pub fn account_detail_say(
         .map(|d| crate::config::expand_home(Path::new(d)));
     let q = crate::quota::read(&acc.name, dir.as_deref());
     let id = crate::quota::identity(dir.as_deref());
-    account_detail_text(cfg, live, name, Some(&q), id, dead, now_ms)
+    account_detail_text(cfg, live, name, Some(&q), row, id, dead, now_ms)
+}
+
+/// Dòng "đo lại /usage" của `/accounts <tên>` — `None` khi không có gì MỚI để nói.
+///
+/// In TRỌN số đo (không chỉ phần lệch như danh sách `/accounts`): ở trang chi tiết,
+/// người gõ hỏi đúng câu "giờ còn bao nhiêu", và dòng `hạn mức:` phía trên mang
+/// tuổi của sổ CLI — với tài khoản khoá thì sổ ấy có khi cũ cả tuần. Im khi sổ CLI
+/// MỚI HƠN lượt dò (dòng trên đã là số mới nhất). Lượt dò gần nhất hỏng thì nói ra.
+/// Thuần, để kiểm được.
+pub fn do_lai_line(row: Option<&Value>, tep_ms: Option<i64>, now_ms: i64) -> Option<String> {
+    let row = row?;
+    let mut out = String::new();
+    if let Some(err) = row.get("err").and_then(Value::as_str) {
+        out.push_str(&format!("đo lại /usage: lượt gần nhất HỎNG — {err}\n"));
+    }
+    if let Some(at) = row.get("at_ms").and_then(Value::as_i64) {
+        if tep_ms.is_none_or(|t| at >= t) {
+            let mut parts: Vec<String> = Vec::new();
+            if let Some(p) = row.get("week_pct").and_then(Value::as_u64) {
+                parts.push(format!("tuần {p}%"));
+            }
+            if let Some(p) = row.get("session_pct").and_then(Value::as_u64) {
+                parts.push(format!("5 tiếng {p}%"));
+            }
+            for m in row
+                .get("week_models")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+            {
+                if let (Some(n), Some(p)) = (
+                    m.get("name").and_then(Value::as_str),
+                    m.get("pct").and_then(Value::as_u64),
+                ) {
+                    parts.push(format!("{n} {p}%"));
+                }
+            }
+            let so = if parts.is_empty() {
+                row.get("raw")
+                    .and_then(Value::as_str)
+                    .unwrap_or("(không đọc ra số)")
+                    .to_string()
+            } else {
+                parts.join(" · ")
+            };
+            let phut = (now_ms - at).max(0) / 60_000;
+            let tuoi = match phut {
+                0 => "vừa đo".to_string(),
+                1..=90 => format!("{phut} phút trước"),
+                _ => format!("{} tiếng trước", phut / 60),
+            };
+            out.push_str(&format!("đo lại /usage ({tuoi}): {so}\n"));
+        }
+    }
+    (!out.is_empty()).then_some(out)
 }
 
 /// Phần dựng câu của [`account_detail_say`] — thuần, để bài kiểm khỏi đọc `$HOME`.
+#[allow(clippy::too_many_arguments)]
 pub fn account_detail_text(
     cfg: &Config,
     live: &SessionsSnapshot,
     name: &str,
     quota: Option<&crate::quota::Quota>,
+    usage_row: Option<&Value>,
     id: Result<crate::quota::Identity, String>,
     dead: &std::collections::BTreeMap<String, String>,
     now_ms: i64,
@@ -259,6 +329,9 @@ pub fn account_detail_text(
     if let Some(q) = quota {
         out.push_str(&format!("hạn mức: {}\n", q.say(now_ms)));
     }
+    if let Some(l) = do_lai_line(usage_row, quota.and_then(|q| q.fetched_at_ms), now_ms) {
+        out.push_str(&l);
+    }
     if let Some(why) = dead.get(&acc.name) {
         out.push_str(&format!(
             "⛔ TỔ CHỨC ĐÃ KHOÁ — không được chọn nữa: {why}\n"
@@ -275,9 +348,9 @@ pub fn account_detail_text(
         n => format!("phiên đang chạy ({n}): {}\n", mine.join(", ")),
     });
     out.push_str(&if acc.locked {
-        format!("🔓 mở khoá: /accounts mo {}", acc.name)
+        format!("🔓 mở khoá: /accounts {} -a", acc.name)
     } else {
-        format!("🔒 khoá: /accounts khoa {}", acc.name)
+        format!("🔒 khoá: /accounts {} -b", acc.name)
     });
     out
 }
@@ -350,7 +423,7 @@ pub fn accounts_text(
         // chỉ còn là thông tin, không còn là lý do để chọn nó.
         if acc.locked {
             out.push_str(&format!(
-                "    🔒 ĐANG KHOÁ — huba không chọn, không mở phiên, không dò /usage · mở: /accounts mo {}\n",
+                "    🔒 ĐANG KHOÁ — huba không tự chọn, không tự mở phiên, không tự dò /usage · đo lại: /accounts {0} · mở: /accounts {0} -a\n",
                 acc.name
             ));
         }
@@ -674,7 +747,7 @@ pub fn can_do_lai(tuoi: Option<i64>, cu_ms: i64) -> bool {
 /// `claude` từng kéo một vòng lên 80 s (đo 2026-08-10).
 pub fn usage_lam_moi(cfg: &Config, db: &Db, cu_ms: i64) -> Value {
     let now = chrono::Utc::now().timestamp_millis();
-    let mut so = doc_so_usage(db);
+    let so = doc_so_usage(db);
     let so_cli = crate::quota::read_all(cfg);
     let accounts = cfg.claude_accounts_or_ambient();
     // 🔒 Tài khoản khoá thì KHÔNG dò: mỗi lượt dò là một `claude -p` chạy bằng
@@ -687,17 +760,7 @@ pub fn usage_lam_moi(cfg: &Config, db: &Db, cu_ms: i64) -> Value {
     let can: Vec<&crate::config::ClaudeAccountCfg> = accounts
         .iter()
         .filter(|a| !a.locked)
-        .filter(|a| {
-            let at = so
-                .get(&a.name)
-                .and_then(|r| r.get("at_ms"))
-                .and_then(Value::as_i64);
-            let tep = so_cli
-                .iter()
-                .find(|q| q.account == a.name)
-                .and_then(|q| q.fetched_at_ms);
-            can_do_lai(tuoi_so_do(at, tep, now), cu_ms)
-        })
+        .filter(|a| can_do_lai(tuoi_cua(&so, &so_cli, &a.name, now), cu_ms))
         .collect();
     crate::logging::info(
         "usage_do_lai",
@@ -708,6 +771,65 @@ pub fn usage_lam_moi(cfg: &Config, db: &Db, cu_ms: i64) -> Value {
     if can.is_empty() {
         return usage_cached(cfg, db);
     }
+    do_va_ghi_so(cfg, db, so, &can)
+}
+
+/// `/accounts <tên>` — đo lại MỘT tài khoản nếu số cũ hơn `cu_ms`, **KỂ CẢ ĐANG KHOÁ**.
+///
+/// 🔴 Hà 2026-10-10: *"Lệnh `/accounts detail acc` vẫn phải đo lại được kể cả đang
+/// khóa"*. Khoá (Hà 29/09) cấm huba TỰ đưa tài khoản vào sử dụng — mọi đường tự
+/// chọn vẫn đi qua [`usage_lam_moi`], nơi tài khoản khoá bị loại. Ở đây chủ máy gõ
+/// TÊN tài khoản để hỏi nó còn bao nhiêu: cú gõ ấy là sự đồng ý cho ĐÚNG một lượt
+/// dò, cùng lối nghĩ với `hoi_mo_tai_khoan_khoa` (một cú bấm của người, cho đúng
+/// lượt này). Không có đường này thì số của tài khoản khoá đứng im mãi — sổ
+/// `.claude.json` chỉ phiên tương tác mới ghi, mà tài khoản khoá thì không ai mở.
+pub fn usage_lam_moi_mot(cfg: &Config, db: &Db, ten: &str, cu_ms: i64) -> Value {
+    let now = chrono::Utc::now().timestamp_millis();
+    let so = doc_so_usage(db);
+    let so_cli = crate::quota::read_all(cfg);
+    let accounts = cfg.claude_accounts_or_ambient();
+    let Some(acc) = accounts.iter().find(|a| a.name == ten) else {
+        return usage_cached(cfg, db);
+    };
+    let tuoi = tuoi_cua(&so, &so_cli, ten, now);
+    let do_lai = can_do_lai(tuoi, cu_ms);
+    crate::logging::info(
+        "usage_do_lai_mot",
+        json!({ "account": ten, "locked": acc.locked, "tuoi_ms": tuoi,
+                "cu_hon_ms": cu_ms, "do_lai": do_lai,
+                "vi": "chủ máy gõ /accounts <tên> — đo cả khi khoá (Hà 2026-10-10)" }),
+    );
+    if !do_lai {
+        return usage_cached(cfg, db);
+    }
+    do_va_ghi_so(cfg, db, so, &[acc])
+}
+
+/// Tuổi số đo mới nhất của `ten` — sổ `/usage` của huba hoặc sổ `.claude.json`.
+fn tuoi_cua(
+    so: &serde_json::Map<String, Value>,
+    so_cli: &[crate::quota::Quota],
+    ten: &str,
+    now: i64,
+) -> Option<i64> {
+    let at = so
+        .get(ten)
+        .and_then(|r| r.get("at_ms"))
+        .and_then(Value::as_i64);
+    let tep = so_cli
+        .iter()
+        .find(|q| q.account == ten)
+        .and_then(|q| q.fetched_at_ms);
+    tuoi_so_do(at, tep, now)
+}
+
+/// Dò `/usage` song song cho `can`, ghi kết quả vào sổ, trả [`usage_cached`].
+fn do_va_ghi_so(
+    cfg: &Config,
+    db: &Db,
+    mut so: serde_json::Map<String, Value>,
+    can: &[&crate::config::ClaudeAccountCfg],
+) -> Value {
     let ket_qua: Vec<(String, Value)> = std::thread::scope(|s| {
         let tay: Vec<_> = can
             .iter()

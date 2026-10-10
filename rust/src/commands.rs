@@ -384,12 +384,13 @@ pub const ROUTES: &[Route] = &[
         aliases: &["acc", "taikhoan"],
         legacy: &[],
         kind: CommandKind::Accounts,
-        // `Rest`: gõ trơn = XEM như cũ; `khoa <tên>` / `mo <tên>` = khoá / mở
-        // một tài khoản (Hà 29/09) — ngồi ở máy thì sửa tệp cấu hình, từ điện
-        // thoại thì phải có đường này, không thì là một "gap" của cầu nối.
+        // `Rest`: gõ trơn = XEM như cũ; `<tên> -b` / `<tên> -a` = khoá / mở
+        // một tài khoản (Hà 29/09, cú pháp đổi 10/10) — ngồi ở máy thì sửa tệp
+        // cấu hình, từ điện thoại thì phải có đường này, không thì là một "gap".
+        // Dạng cũ `detail|khoa|mo <tên>` vẫn nhận — `pipeline::accounts_order`.
         arg: Arg::Rest,
-        usage: "[detail|khoa|mo <tài khoản>]",
-        help: "Các tài khoản Claude trên máy · detail <tên> = chi tiết + email · khoa/mo <tên> = khoá/mở",
+        usage: "[<tài khoản> [-a | -b]]",
+        help: "Các tài khoản Claude trên máy · <tên> = chi tiết + email + ĐO LẠI hạn mức (kể cả đang khoá) · <tên> -b = khoá · <tên> -a = mở",
         listed: true,
     },
     Route {

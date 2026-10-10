@@ -169,7 +169,7 @@ fn cua_mo_phien_chan_tai_khoan_khoa_ke_ca_mac_dinh() {
         .to_string();
     assert!(e.contains("acc2 đang KHOÁ"), "{e}");
     assert!(
-        e.contains("/accounts mo acc2"),
+        e.contains("/accounts acc2 -a"),
         "câu từ chối phải chỉ đường mở: {e}"
     );
     assert!(
@@ -261,7 +261,7 @@ fn mo_tai_khoan_khoa_chi_khi_chu_may_bam() {
     });
     let ra = ra.expect("huỷ mà vẫn mở");
     assert!(
-        ra.contains("Đã huỷ") && ra.contains("/accounts mo acc2"),
+        ra.contains("Đã huỷ") && ra.contains("/accounts acc2 -a"),
         "{ra}"
     );
 
@@ -310,31 +310,46 @@ fn khoa_het_thi_cau_tu_choi_noi_thang() {
 
 // ── Khoá / mở từ điện thoại ─────────────────────────────────────────────────
 
+/// 🔴 Hà 2026-10-10: *"sửa lại lệnh thành `/accounts [acc1 [-a | -b]]`"* —
+/// `-b` khoá, `-a` mở; dạng cũ `khoa|mo <tên>` vẫn nhận (tin đã gửi + thói quen).
 #[test]
 fn route_accounts_nhan_khoa_mo() {
     use huba::adapters::CommandKind;
-    use huba::pipeline::account_lock_order;
+    use huba::pipeline::{accounts_order, AccountsOrder::*};
     use huba::verbs::parse_command;
 
-    let (k, _, arg) = parse_command("/accounts khoa acc3").unwrap();
+    let (k, _, arg) = parse_command("/accounts acc3 -b").unwrap();
     assert_eq!(k, CommandKind::Accounts);
-    assert_eq!(arg, "khoa acc3");
+    assert_eq!(arg, "acc3 -b");
     let (_, _, trong) = parse_command("/accounts").unwrap();
     assert!(trong.is_empty(), "gõ trơn vẫn là XEM");
 
-    assert_eq!(account_lock_order("khoa acc3"), Some(("acc3".into(), true)));
-    assert_eq!(account_lock_order("khoá acc3"), Some(("acc3".into(), true)));
-    assert_eq!(account_lock_order("mo acc3"), Some(("acc3".into(), false)));
-    assert_eq!(account_lock_order("mở acc3"), Some(("acc3".into(), false)));
-    assert_eq!(account_lock_order("khoa"), None, "thiếu tên");
+    assert_eq!(accounts_order(""), List);
+    assert_eq!(accounts_order("acc3 -b"), Lock("acc3".into(), true));
+    assert_eq!(accounts_order("acc3 -a"), Lock("acc3".into(), false));
     assert_eq!(
-        account_lock_order("xoa acc3"),
-        None,
+        accounts_order("-b acc3"),
+        Lock("acc3".into(), true),
+        "cờ đứng trước"
+    );
+    // Dạng cũ vẫn nhận.
+    assert_eq!(accounts_order("khoa acc3"), Lock("acc3".into(), true));
+    assert_eq!(accounts_order("khoá acc3"), Lock("acc3".into(), true));
+    assert_eq!(accounts_order("mo acc3"), Lock("acc3".into(), false));
+    assert_eq!(accounts_order("mở acc3"), Lock("acc3".into(), false));
+    // Vế ngược: thiếu tên, cờ lạ, động từ lạ, nhiều tài khoản ⟹ hướng dẫn, không đoán.
+    assert_eq!(accounts_order("khoa"), Usage, "thiếu tên");
+    assert_eq!(accounts_order("-b"), Usage, "thiếu tên");
+    assert_eq!(accounts_order("acc3 -x"), Usage, "cờ lạ không được đoán");
+    assert_eq!(accounts_order("acc3 -a -b"), Usage);
+    assert_eq!(
+        accounts_order("xoa acc3"),
+        Usage,
         "động từ lạ không được đoán"
     );
     assert_eq!(
-        account_lock_order("khoa acc3 acc4"),
-        None,
+        accounts_order("khoa acc3 acc4"),
+        Usage,
         "một lệnh một tài khoản"
     );
 }
@@ -437,7 +452,8 @@ fn accounts_noi_ra_tai_khoan_nao_dang_khoa() {
     );
     assert!(t.contains("🔒 1 đang khoá"), "{t}");
     assert!(t.contains("🔒 ĐANG KHOÁ"), "{t}");
-    assert!(t.contains("/accounts mo acc3"), "{t}");
+    assert!(t.contains("/accounts acc3 -a"), "{t}");
+    assert!(t.contains("đo lại: /accounts acc3"), "{t}");
     assert_eq!(t.matches("🔒 ĐANG KHOÁ").count(), 1, "chỉ acc3 khoá: {t}");
 
     let mo = huba::runtime::accounts_text(

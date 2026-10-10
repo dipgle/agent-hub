@@ -710,8 +710,8 @@ pub struct ClaudeAccountCfg {
     /// chạy trên nó vẫn được liệt kê — nhìn không phải là dùng.
     ///
     /// Hà 2026-09-29: *"thêm thuộc tính khóa vào danh sách tài khoản, nếu đang
-    /// khóa thì không đưa vào sử dụng"*. Đổi từ điện thoại: `/accounts khoa <tên>`
-    /// · `/accounts mo <tên>`. Mặc định `false`, và `false` không ghi ra tệp —
+    /// khóa thì không đưa vào sử dụng"*. Đổi từ điện thoại: `/accounts <tên> -b`
+    /// · `/accounts <tên> -a`. Mặc định `false`, và `false` không ghi ra tệp —
     /// cấu hình cũ đọc vào y nguyên.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,

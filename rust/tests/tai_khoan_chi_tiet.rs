@@ -295,4 +295,18 @@ fn dong_do_lai_chi_noi_khi_moi_hon_so_cli_va_noi_ra_khi_hong() {
     let l = do_lai_line(Some(&hong), None, now).unwrap();
     assert!(l.contains("lượt gần nhất HỎNG — hết giờ 60 s"), "{l}");
     assert!(l.contains("(2 tiếng trước): tuần 40%"), "{l}");
+
+    // Đo 10/10: CLI chạy xong mà KHÔNG có dòng % nào (acc1 · acc2 · acc3 khoá) ⟹
+    // nói thẳng là không có số, KHÔNG đưa câu thô của CLI ra như thể đó là số đo.
+    let tho = serde_json::json!({ "raw": "You are currently using your subscription to power your Claude Code usage ·  · What's contributing to your limits usage?", "at_ms": now });
+    let l = do_lai_line(Some(&tho), None, now).unwrap();
+    assert!(
+        l.contains("(vừa đo): CLI chạy xong nhưng KHÔNG trả số % nào"),
+        "{l}"
+    );
+    assert!(l.contains("số mới nhất vẫn là dòng hạn mức ở trên"), "{l}");
+    assert!(
+        !l.contains("What's contributing"),
+        "câu thô lọt ra màn: {l}"
+    );
 }

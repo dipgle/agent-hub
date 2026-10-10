@@ -234,10 +234,7 @@ pub fn do_lai_line(row: Option<&Value>, tep_ms: Option<i64>, now_ms: i64) -> Opt
                 }
             }
             let so = if parts.is_empty() {
-                row.get("raw")
-                    .and_then(Value::as_str)
-                    .unwrap_or("(không đọc ra số)")
-                    .to_string()
+                usage_khong_so(row.get("raw").and_then(Value::as_str).unwrap_or(""))
             } else {
                 parts.join(" · ")
             };
@@ -251,6 +248,28 @@ pub fn do_lai_line(row: Option<&Value>, tep_ms: Option<i64>, now_ms: i64) -> Opt
         }
     }
     (!out.is_empty()).then_some(out)
+}
+
+/// Câu thay cho câu thô của CLI khi lượt dò `/usage` CHẠY XONG mà không ra số % nào.
+///
+/// 🔴 Đo 2026-10-10 (Hà gõ `/accounts acc1` lần đầu sau khi cho đo cả tài khoản khoá):
+/// CLI 2.1.280 in cho acc4 (đang chạy phiên) đủ `Current session: 34% used` ·
+/// `Current week (all models): 77% used` · `Current week (Fable): 4%`; còn acc1 · acc2 ·
+/// acc3 (khoá, sổ `.claude.json` cũ 248–270 tiếng) thì chỉ in câu đầu *"You are currently
+/// using your subscription…"* rồi nhảy thẳng sang *"What's contributing…"* — KHÔNG một
+/// dòng % nào. Đưa nguyên câu ấy ra điện thoại là một dòng vô nghĩa đội lốt số đo; nói
+/// thẳng là CLI không trả số, và số còn lại là số nào.
+pub fn usage_khong_so(raw: &str) -> String {
+    let dau = raw.split(" · ").next().unwrap_or("").trim();
+    format!(
+        "CLI chạy xong nhưng KHÔNG trả số % nào cho tài khoản này (tài khoản đang chạy phiên \
+         thì có) — số mới nhất vẫn là dòng hạn mức ở trên{}",
+        if dau.is_empty() {
+            String::new()
+        } else {
+            format!(" · CLI nói: «{}»", crate::exec::truncate(dau, 60))
+        }
+    )
 }
 
 /// Phần dựng câu của [`account_detail_say`] — thuần, để bài kiểm khỏi đọc `$HOME`.
@@ -566,7 +585,7 @@ pub fn accounts_text(
                     // thà một dòng thô còn hơn một con số bịa. Đây là nhánh
                     // KHÔNG ĐỌC RA SỐ NÀO, khác hẳn nhánh "đọc ra và khớp hết".
                     if let Some(raw) = v.get("raw").and_then(Value::as_str) {
-                        out.push_str(&format!("    (dò /usage: {raw})\n"));
+                        out.push_str(&format!("    (dò /usage: {})\n", usage_khong_so(raw)));
                     }
                 } else if !parts.is_empty() {
                     out.push_str(&if co_doi_chieu {

@@ -1,5 +1,14 @@
 # active context — huba
 
+## 🟡 2026-10-10 09:2xZ — `/accounts [<tên> [-a | -b]]` (Hà: chi tiết phải ĐO LẠI kể cả tài khoản khoá)
+
+- 4047acb: `/accounts <tên>` ⟹ `runtime::usage_lam_moi_mot` dò `/usage` đúng tài khoản ấy nếu số >5′, KỂ CẢ khoá;
+  mọi đường TỰ chọn (`usage_lam_moi`) vẫn loại khoá. `-b` khoá · `-a` mở (cờ trước/sau tên); dạng cũ
+  `detail|khoa|mo` vẫn nhận. `do_lai_line` in trọn số vừa đo + tuổi. 188/188 tệp test, 1291 bài xanh; đối chứng
+  ngược 3 lỗi cấy ⇒ ĐỎ. Cài 09:27:03Z pid 55395 --verify KHỚP cafaabfe.
+- CHƯA nghiệm thu thật: chờ Hà gõ `/accounts <tài khoản đang khoá>` trên Telegram — bộ canh nền đọc dòng
+  `usage_do_lai_mot` trong logs/huba.log. Đoán nghĩa cờ: `-b` = block/khoá, `-a` = allow/mở (Hà chưa xác nhận).
+
 ## 🟢 2026-10-09 05:3xZ — Hà giao «remote» (chia sẻ màn + điều khiển chuột) ⇒ TÁCH thành dự án riêng `~/projects/remote`
 
 - Hà chốt: RustDesk tự dựng máy chủ trên **vps-c** (109.123.234.223, Singapore, ping 59 ms ±2; vps-a 62–203 ms + đĩa

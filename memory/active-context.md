@@ -6,8 +6,11 @@
   mọi đường TỰ chọn (`usage_lam_moi`) vẫn loại khoá. `-b` khoá · `-a` mở (cờ trước/sau tên); dạng cũ
   `detail|khoa|mo` vẫn nhận. `do_lai_line` in trọn số vừa đo + tuổi. 188/188 tệp test, 1291 bài xanh; đối chứng
   ngược 3 lỗi cấy ⇒ ĐỎ. Cài 09:27:03Z pid 55395 --verify KHỚP cafaabfe.
-- CHƯA nghiệm thu thật: chờ Hà gõ `/accounts <tài khoản đang khoá>` trên Telegram — bộ canh nền đọc dòng
-  `usage_do_lai_mot` trong logs/huba.log. Đoán nghĩa cờ: `-b` = block/khoá, `-a` = allow/mở (Hà chưa xác nhận).
+- NGHIỆM THU THẬT 09:32Z (Hà gõ `/accounts acc1`, `acc2`): dò chạy trên tài khoản khoá (log `usage_do_lai_mot`
+  locked:true). NHƯNG CLI 2.1.280 không trả dòng % nào cho acc1/2/3 (khoá, sổ `.claude.json` cũ 248–270 h); acc4 (đang
+  chạy phiên) cùng env sạch ra đủ số ⟹ 6543147: màn nói «CLI không trả số», không in câu thô. Cài pid 19414 KHỚP.
+  Đoán nghĩa cờ: `-b` = khoá, `-a` = mở (Hà chưa xác nhận). Chạy tay `claude -p /usage` từ shell phiên ⟹ ra bảng
+  kiểu `/cost` (môi trường lồng) — muốn tái hiện hubad phải `env -i` + cwd `~/Library/Application Support/hub`.
 
 ## 🟢 2026-10-09 05:3xZ — Hà giao «remote» (chia sẻ màn + điều khiển chuột) ⇒ TÁCH thành dự án riêng `~/projects/remote`
 

@@ -412,13 +412,37 @@ fn dang_nhap_cu_phap_va_hinh_dang_ma() {
         Login("acc3".into(), Some("Ab12Cd34#Ef56".into()))
     );
     assert_eq!(accounts_order("-l"), Usage, "thiếu tên");
-    assert_eq!(accounts_order("acc3 -l ma thua"), Usage, "mã là MỘT chuỗi");
+    // Nhiều chữ sau -l vẫn là MỘT lượt gửi mã — `code_shape_why` nói đúng chỗ sai.
+    assert_eq!(
+        accounts_order("acc3 -l ma thua"),
+        Login("acc3".into(), Some("ma thua".into()))
+    );
 
     assert!(code_shape_ok("Ab12Cd34#Ef56"));
     assert!(!code_shape_ok("ngan"));
     assert!(
         !code_shape_ok("hai tu ghep"),
         "câu chữ lẫn vào không phải mã"
+    );
+    // Đo 11/10: thiếu `#` ⟹ CLI từ chối «Invalid code … full code» — chặn TRƯỚC khi gõ.
+    assert!(
+        !code_shape_ok("abchdhxyz123"),
+        "mã thiếu # không được đem gõ"
+    );
+    let why = huba::account_login::code_shape_why(
+        "acc3",
+        "https://claude.com/cai/oauth/authorize?code=true",
+    )
+    .unwrap();
+    assert!(why.contains("ĐƯỜNG DẪN, không phải mã"), "{why}");
+    let why = huba::account_login::code_shape_why("acc3", "abchdhxyz123").unwrap();
+    assert!(
+        why.contains("CÓ dấu #") && why.contains("/accounts acc3 -l <mã>"),
+        "{why}"
+    );
+    assert_eq!(
+        huba::account_login::code_shape_why("acc3", "Ab12Cd34#Ef56"),
+        None
     );
 
     let g = guide(
@@ -440,5 +464,56 @@ fn dang_nhap_cu_phap_va_hinh_dang_ma() {
     assert!(
         g.contains("ĐÚNG tài khoản acc3") && g.contains("nhắc lại"),
         "{g}"
+    );
+}
+
+/// Màn THẬT của lượt Hà 11/10 01:05Z sau khi huba (bản đầu) gõ thêm `exit`: CLI không
+/// in lại dấu nhắc, mỗi mã hỏng thêm một câu `Invalid code` — và vẫn CHẠY.
+const MAN_INVALID_HAI_LAN: &str = "hanguyen@Has-MacBook-Pro ~ % CLAUDE_CONFIG_DIR='/Users/hanguyen/.claude-acc3' 'claude' auth login --email 'x@y.com'\n\
+Opening browser to sign in…\n\
+If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=YYYY\n\
+Paste code here if prompted > Invalid code. Please make sure the full code was copied.\n\
+Invalid code. Please make sure the full code was copied.\n";
+
+#[test]
+fn dang_nhap_cham_ket_cuc_bang_tien_trinh_khong_bang_dong_cuoi() {
+    use huba::account_login::{ket_cuc, login_pid, new_after, waiting_for_code, Ket};
+    // Dòng cuối KHÔNG phải dấu nhắc mà CLI vẫn chờ — đúng chỗ bản đầu đọc sai.
+    assert!(!waiting_for_code(MAN_INVALID_HAI_LAN));
+    // Chữ MỚI sau lượt gõ: chỉ câu thứ hai, không lặp câu cũ.
+    let truoc = MAN_INVALID_HAI_LAN.replacen(
+        "\nInvalid code. Please make sure the full code was copied.\n",
+        "\n",
+        1,
+    );
+    assert_ne!(truoc, MAN_INVALID_HAI_LAN, "mẫu phải đổi được");
+    assert_eq!(
+        new_after(&truoc, MAN_INVALID_HAI_LAN),
+        "Invalid code. Please make sure the full code was copied."
+    );
+    assert_eq!(new_after(MAN_DANG_NHAP, MAN_DANG_NHAP), "");
+
+    let invalid = "Invalid code. Please make sure the full code was copied.";
+    assert_eq!(
+        ket_cuc(invalid, true),
+        Ket::ChuaNhan(invalid.into()),
+        "còn chạy ⟹ CHƯA nhận, không đóng"
+    );
+    let failed = "Login failed: Request failed with status code 400";
+    assert_eq!(ket_cuc(failed, false), Ket::Hong(failed.into()));
+    assert_eq!(ket_cuc(invalid, false), Ket::Hong(invalid.into()));
+    assert_eq!(ket_cuc("", true), Ket::ChuaNoi);
+    assert_eq!(
+        ket_cuc("Login successful.", false),
+        Ket::Xong("Login successful.".into())
+    );
+
+    // `ps -t ttys014 -o pid=,command=` đo thật 11/10.
+    let ps = "58110 login -pf hanguyen\n58148 -zsh\n58259 claude auth login --email x@y.com\n";
+    assert_eq!(login_pid(ps), Some(58259));
+    assert_eq!(
+        login_pid("58110 login -pf hanguyen\n58148 -zsh\n"),
+        None,
+        "chỉ còn shell ⟹ CLI đã thoát"
     );
 }

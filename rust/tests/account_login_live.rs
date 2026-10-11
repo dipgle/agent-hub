@@ -82,6 +82,47 @@ fn dang_nhap_tron_vong_tren_thu_muc_trong() {
         "{b}"
     );
 
+    // Sổ cũ quá 15′ ⟹ lượt -l mới phải TẮT đúng CLI cũ (không gõ chữ vào nó), đóng cửa sổ
+    // cũ, mở cửa sổ khác.
+    let cu: serde_json::Value =
+        serde_json::from_str(&db.cursor_or_log("login:thu").expect("có sổ")).unwrap();
+    let tty_cu = cu["tty"]
+        .as_str()
+        .unwrap()
+        .trim_start_matches("/dev/")
+        .to_string();
+    // 🔴 Chấm theo PID, KHÔNG theo tên tty: lượt chạy đầu của bài này đỏ oan vì cửa sổ MỚI
+    // dựng lên đã dùng lại đúng `ttys002` của cửa sổ vừa đóng (luật 11b — tty là con số
+    // ĐƯỢC DÙNG LẠI).
+    let ps = std::process::Command::new("ps")
+        .args(["-t", &tty_cu, "-o", "pid=,command="])
+        .output()
+        .unwrap();
+    let pid_cu = huba::account_login::login_pid(&String::from_utf8_lossy(&ps.stdout))
+        .expect("CLI cũ phải đang chạy trước khi huỷ");
+    let mut gia = cu.clone();
+    gia["at_ms"] = serde_json::json!(0);
+    db.set_cursor("login:thu", &gia.to_string()).unwrap();
+    let a2 = huba::account_login::start(&cfg, &db, "thu");
+    let w2: i64 = a2
+        .split("cửa sổ Terminal ")
+        .nth(1)
+        .and_then(|r| r.split_whitespace().next())
+        .and_then(|n| n.parse().ok())
+        .expect("câu dẫn đường phải nêu id cửa sổ");
+    assert_ne!(w2, w, "phải là cửa sổ MỚI");
+    assert!(
+        huba::keys::window_gone(w).unwrap_or(false),
+        "cửa sổ cũ {w} còn đó"
+    );
+    let con = std::process::Command::new("ps")
+        .args(["-p", &pid_cu.to_string()])
+        .status()
+        .unwrap()
+        .success();
+    assert!(!con, "CLI cũ pid {pid_cu} còn sống");
+    let w = w2;
+
     let c = huba::account_login::finish(&cfg, &db, "thu", "thu-ma-gia-123#abc");
     println!("── finish ──\n{c}");
     assert!(c.contains("Login failed"), "{c}");

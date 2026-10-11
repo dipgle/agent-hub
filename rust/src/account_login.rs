@@ -17,7 +17,12 @@
 //! · `contents` của tab trả đường dẫn trên MỘT dòng logic (500 ký tự, cửa sổ 206 cột).
 //! · gõ bằng `do script` (chữ + xuống dòng một lượt) thì ô ấy NHẬN và GỬI ngay — khác
 //!   ô nhập của phiên `claude`, nơi một lượt như thế bị đọc thành dán.
-//! · mã sai: `Login failed: Request failed with status code 400`, rồi CLI thoát về shell.
+//! · mã có `#` mà sai: `Login failed: Request failed with status code 400`, rồi CLI THOÁT.
+//! · mã THIẾU `#` (lượt thật của Hà 01:05Z): `Invalid code. Please make sure the full code
+//!   was copied.` — và CLI **KHÔNG thoát**, vẫn chờ mã khác, KHÔNG in lại dấu nhắc. Bản đầu
+//!   đọc dòng cuối màn để biết "còn chờ không", nên tưởng CLI đã xong, gõ `exit` (CLI nhận
+//!   làm mã thứ hai), đóng không được ⟹ cửa sổ bị ẨN cùng một `auth login` mồ côi, và câu
+//!   báo về nói "đã đóng". Nay "còn chờ" chấm bằng TIẾN TRÌNH trên tty ([`cli_pid`]).
 //! · câu của lượt THÀNH CÔNG chưa đo được (muốn thấy phải đăng nhập thật) — nên kết quả
 //!   báo về là NGUYÊN VĂN dòng sau ô dán mã + một lượt đo `/usage` mới, không đoán chữ.
 
@@ -111,10 +116,109 @@ pub fn la_man_dang_nhap(screen: &str) -> bool {
     screen.contains(" auth login") && screen.contains("visit:")
 }
 
-/// Mã người dán có lẫn câu chữ thừa không — mã OAuth là MỘT chuỗi liền, không dấu cách.
+/// Mã người dán có lẫn câu chữ thừa không — mã OAuth là MỘT chuỗi liền, không dấu cách,
+/// và có `#` (đo 11/10: thiếu `#` thì CLI từ chối ngay *"Invalid code … full code"*).
 pub fn code_shape_ok(code: &str) -> bool {
     let c = code.trim();
-    c.len() >= 8 && !c.chars().any(char::is_whitespace)
+    c.len() >= 8 && c.contains('#') && !c.chars().any(char::is_whitespace)
+}
+
+/// Câu trả lời khi mã người dán chắc chắn hỏng — `None` = hình dạng được, đem gõ. THUẦN.
+pub fn code_shape_why(name: &str, code: &str) -> Option<String> {
+    let c = code.trim();
+    if c.starts_with("http://") || c.starts_with("https://") {
+        return Some(format!(
+            "⚠ đó là một ĐƯỜNG DẪN, không phải mã. Mở đường dẫn đăng nhập, đăng nhập xong trang \
+             hiện ra một MÃ (có dấu #) — chép mã ấy rồi gửi: /accounts {name} -l <mã>"
+        ));
+    }
+    (!code_shape_ok(c)).then(|| {
+        format!(
+            "⚠ mã trông không đủ: mã đăng nhập là MỘT chuỗi liền, ≥ 8 ký tự, CÓ dấu # ở giữa \
+             (thiếu phần sau # thì CLI từ chối). Chép ĐỦ rồi gửi: /accounts {name} -l <mã>"
+        )
+    })
+}
+
+/// pid của `claude … auth login` trong bảng `ps -t <tty> -o pid=,command=`. Hàm THUẦN.
+pub fn login_pid(ps_out: &str) -> Option<i32> {
+    ps_out
+        .lines()
+        .find(|l| l.contains(" auth login"))
+        .and_then(|l| l.split_whitespace().next())
+        .and_then(|p| p.parse().ok())
+}
+
+/// Chữ CLI in THÊM sau lượt gõ: phần sau dấu nhắc của màn sau, bỏ phần đã có từ trước
+/// (CLI không in lại dấu nhắc sau `Invalid code`, nên các câu cũ nằm cùng một khúc). THUẦN.
+pub fn new_after(truoc: &str, sau: &str) -> String {
+    let a = after_prompt(truoc);
+    let b = after_prompt(sau);
+    match b.strip_prefix(a.as_str()) {
+        Some(r) => r.trim_start_matches(" · ").trim().to_string(),
+        None => b,
+    }
+}
+
+/// Kết cục MỘT lượt gõ mã.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ket {
+    /// CLI trả lời mà VẪN CHẠY — nó còn chờ mã khác (đo: `Invalid code …`).
+    ChuaNhan(String),
+    /// CLI đã thoát kèm lời hỏng (`Login failed …`).
+    Hong(String),
+    /// CLI đã thoát, lời không mang dấu hỏng — báo NGUYÊN VĂN, không tự xưng "thành công".
+    Xong(String),
+    /// CLI vẫn chạy và chưa in gì.
+    ChuaNoi,
+}
+
+/// Chấm kết cục bằng TIẾN TRÌNH + chữ mới, không bằng dòng cuối màn. Hàm THUẦN.
+pub fn ket_cuc(moi: &str, cli_con_song: bool) -> Ket {
+    let l = moi.to_lowercase();
+    let hong = l.contains("fail") || l.contains("invalid") || l.contains("error");
+    match (cli_con_song, moi.is_empty(), hong) {
+        (true, true, _) => Ket::ChuaNoi,
+        (true, false, _) => Ket::ChuaNhan(moi.to_string()),
+        (false, _, true) => Ket::Hong(moi.to_string()),
+        (false, _, false) => Ket::Xong(if moi.is_empty() {
+            "(CLI thoát, không in gì)".to_string()
+        } else {
+            moi.to_string()
+        }),
+    }
+}
+
+/// pid của `auth login` đang chạy trên `tty` — `None` = CLI đã thoát (hoặc hỏi `ps` hỏng).
+fn cli_pid(tty: &str) -> Option<i32> {
+    let t = tty.trim_start_matches("/dev/");
+    let out = crate::exec::run(
+        "ps",
+        &["-t", t, "-o", "pid=,command="],
+        crate::exec::RunOpts {
+            timeout: Some(Duration::from_secs(5)),
+            ..Default::default()
+        },
+    )
+    .ok()?;
+    login_pid(&out.stdout)
+}
+
+/// Đóng cửa sổ shell (CLI đã thoát) và nói ĐÚNG cái đã xảy ra: đóng ≠ chỉ ẩn được.
+fn dong_cua_so(name: &str, w: i64) -> String {
+    match crate::keys::exit_and_close_shell(w, Duration::from_secs(5)) {
+        Ok(crate::keys::Closed::Gone) => "đã đóng cửa sổ".to_string(),
+        Ok(crate::keys::Closed::Hidden) => {
+            format!("⚠ cửa sổ {w} không đóng được, chỉ ẨN được (còn trong menu Window)")
+        }
+        Err(e) => {
+            logging::warn(
+                "account_login_window_not_closed",
+                json!({ "account": name, "window": w, "err": logging::err_chain(&e) }),
+            );
+            format!("⚠ chưa đóng được cửa sổ {w}: {e}")
+        }
+    }
 }
 
 /// Bắt đầu (hoặc nhắc lại) một lượt đăng nhập — trả câu cho điện thoại.
@@ -136,10 +240,10 @@ pub fn start(cfg: &Config, db: &Db, name: &str) -> String {
         .and_then(|i| i.email);
 
     // Đã có cửa sổ đang chờ mã cho tài khoản này ⟹ nhắc lại đường dẫn, KHÔNG mở cái thứ hai.
-    if let Some((w, at)) = pending(db, name) {
+    if let Some((w, at, tty)) = pending(db, name) {
         let tuoi = chrono::Utc::now().timestamp_millis() - at;
         let man = crate::keys::screen_text(w).unwrap_or_default();
-        if tuoi < LOGIN_STALE_MS && waiting_for_code(&man) {
+        if tuoi < LOGIN_STALE_MS && la_man_dang_nhap(&man) && cli_pid(&tty).is_some() {
             if let Some(url) = login_url(&man) {
                 logging::info(
                     "account_login_reminded",
@@ -148,7 +252,7 @@ pub fn start(cfg: &Config, db: &Db, name: &str) -> String {
                 return guide(name, email.as_deref(), &url, w, true);
             }
         }
-        cancel(db, name, w, "lượt -l mới thay cửa sổ cũ");
+        cancel(db, name, w, &tty, "lượt -l mới thay cửa sổ cũ");
     }
 
     let cmd = login_command(cfg, &acc, email.as_deref());
@@ -198,7 +302,8 @@ pub fn start(cfg: &Config, db: &Db, name: &str) -> String {
     guide(name, email.as_deref(), &url, w, false)
 }
 
-/// Gõ mã người dán vào đúng cửa sổ đang chờ, đọc lại kết quả, đo lại, đóng cửa sổ.
+/// Gõ mã người dán vào đúng cửa sổ đang chờ, đọc lại kết quả; CLI đã thoát thì đo lại
+/// và đóng cửa sổ, còn chờ thì để nguyên và nói ra.
 pub fn finish(cfg: &Config, db: &Db, name: &str, code: &str) -> String {
     if !cfg
         .claude_accounts_or_ambient()
@@ -207,27 +312,23 @@ pub fn finish(cfg: &Config, db: &Db, name: &str, code: &str) -> String {
     {
         return unknown(cfg, name);
     }
-    if !code_shape_ok(code) {
-        return format!(
-            "⚠ mã trông không đúng (mã đăng nhập là MỘT chuỗi liền, ≥ 8 ký tự). Gửi lại: \
-             /accounts {name} -l <mã>"
-        );
+    if let Some(why) = code_shape_why(name, code) {
+        return why;
     }
-    let Some((w, _)) = pending(db, name) else {
+    let Some((w, _, tty)) = pending(db, name) else {
         return format!(
             "⚠ không có cửa sổ đăng nhập nào đang chờ mã cho {name}. Mở lại: /accounts {name} -l"
         );
     };
-    let man = crate::keys::screen_text(w).unwrap_or_default();
-    if !la_man_dang_nhap(&man) || !waiting_for_code(&man) {
+    let truoc = crate::keys::screen_text(w).unwrap_or_default();
+    if !la_man_dang_nhap(&truoc) || cli_pid(&tty).is_none() {
         forget(db, name);
         logging::warn(
             "account_login_not_waiting",
-            json!({ "account": name, "window": w }),
+            json!({ "account": name, "window": w, "tty": tty }),
         );
         return format!(
-            "⚠ cửa sổ {w} không còn đứng ở ô dán mã (đã đóng, hoặc CLI đã thoát). Mở lại: \
-             /accounts {name} -l"
+            "⚠ cửa sổ {w} không còn chờ mã (đã đóng, hoặc CLI đã thoát). Mở lại: /accounts {name} -l"
         );
     }
     if let Err(e) = crate::keys::type_into(w, code.trim()) {
@@ -237,57 +338,66 @@ pub fn finish(cfg: &Config, db: &Db, name: &str, code: &str) -> String {
         );
         return format!("⚠ không gõ được mã vào cửa sổ {w}: {e}");
     }
-    // Chờ CLI xong việc: ô dán mã biến mất khỏi dòng cuối và có chữ mới sau nó.
-    let mut man = String::new();
+    let mut moi = String::new();
+    let mut song = true;
     for _ in 0..30 {
         std::thread::sleep(Duration::from_secs(1));
-        man = crate::keys::screen_text(w).unwrap_or_default();
-        if !waiting_for_code(&man) && !after_prompt(&man).is_empty() {
+        moi = new_after(&truoc, &crate::keys::screen_text(w).unwrap_or_default());
+        song = cli_pid(&tty).is_some();
+        if !song {
+            break;
+        }
+        if !moi.is_empty() {
+            // Đã trả lời mà còn chạy — cho thêm 3 s để thoát hẳn trước khi chấm "còn chờ".
+            for _ in 0..3 {
+                std::thread::sleep(Duration::from_secs(1));
+                if cli_pid(&tty).is_none() {
+                    song = false;
+                    break;
+                }
+            }
+            moi = new_after(&truoc, &crate::keys::screen_text(w).unwrap_or_default());
             break;
         }
     }
-    let cli_noi = after_prompt(&man);
-    // Đo 11/10: mã sai ⟹ `Login failed: …`. Câu của lượt thành công chưa đo được, nên
-    // chỉ chữ `fail` đổi dấu — phần còn lại báo NGUYÊN VĂN, không đoán.
-    let hong = cli_noi.to_lowercase().contains("fail");
+    let ket = ket_cuc(&moi, song);
     logging::info(
         "account_login_code_sent",
-        json!({ "account": name, "window": w, "cli": crate::exec::truncate(&cli_noi, 200),
-                "hong": hong }),
+        json!({ "account": name, "window": w, "cli_con_song": song,
+                "cli": crate::exec::truncate(&moi, 200), "ket": format!("{ket:?}").split('(').next() }),
     );
-    if cli_noi.is_empty() {
-        // CLI chưa nói gì sau 30 s — có thể còn đang đổi mã. Gõ `exit` lúc này là gõ vào
-        // chính CLI ấy; để nguyên cửa sổ và sổ, nói ra.
-        return format!(
-            "⏳ đã gõ mã vào cửa sổ {w} nhưng sau 30 s CLI chưa in gì. Cửa sổ để nguyên; xem: \
-             /accounts {name}"
-        );
+    match ket {
+        Ket::ChuaNhan(t) => format!(
+            "⚠ {name} — CLI CHƯA nhận mã: «{}»\nCLI vẫn đang chờ trong cửa sổ {w}. Chép ĐỦ mã \
+             (có dấu #) rồi gửi: /accounts {name} -l <mã>",
+            crate::exec::truncate(&t, 300)
+        ),
+        Ket::ChuaNoi => format!(
+            "⏳ đã gõ mã vào cửa sổ {w} nhưng sau 30 s CLI chưa in gì và vẫn chạy. Cửa sổ để \
+             nguyên; xem: /accounts {name}"
+        ),
+        Ket::Hong(t) => {
+            let dong = dong_cua_so(name, w);
+            forget(db, name);
+            format!(
+                "⚠ {name} — CLI nói: «{}»\n{dong}\nThử lại: /accounts {name} -l",
+                crate::exec::truncate(&t, 300)
+            )
+        }
+        Ket::Xong(t) => {
+            let dong = dong_cua_so(name, w);
+            forget(db, name);
+            let usage = crate::runtime::usage_lam_moi_mot(cfg, db, name, 0);
+            let row = usage.get("accounts").and_then(|m| m.get(name));
+            let do_lai =
+                crate::runtime::do_lai_line(row, None, chrono::Utc::now().timestamp_millis())
+                    .unwrap_or_else(|| "đo lại /usage: không có kết quả\n".to_string());
+            format!(
+                "🔑 {name} — CLI nói: «{}»\n{do_lai}{dong}",
+                crate::exec::truncate(&t, 300)
+            )
+        }
     }
-    let dong = match crate::keys::exit_and_close_shell(w, Duration::from_secs(5)) {
-        Ok(_) => "đã đóng cửa sổ".to_string(),
-        Err(e) => {
-            logging::warn(
-                "account_login_window_not_closed",
-                json!({ "account": name, "window": w, "err": logging::err_chain(&e) }),
-            );
-            format!("⚠ chưa đóng được cửa sổ {w}: {e}")
-        }
-    };
-    forget(db, name);
-    let usage = crate::runtime::usage_lam_moi_mot(cfg, db, name, 0);
-    let row = usage.get("accounts").and_then(|m| m.get(name));
-    let do_lai = crate::runtime::do_lai_line(row, None, chrono::Utc::now().timestamp_millis())
-        .unwrap_or_else(|| "đo lại /usage: không có kết quả\n".to_string());
-    format!(
-        "{} {name} — CLI nói: «{}»\n{do_lai}{dong}{}",
-        if hong { "⚠" } else { "🔑" },
-        crate::exec::truncate(&cli_noi, 300),
-        if hong {
-            format!("\nThử lại: /accounts {name} -l")
-        } else {
-            String::new()
-        }
-    )
 }
 
 /// Câu dẫn đường gửi về điện thoại. Hàm THUẦN.
@@ -322,9 +432,13 @@ fn unknown(cfg: &Config, name: &str) -> String {
     )
 }
 
-fn pending(db: &Db, name: &str) -> Option<(i64, i64)> {
+fn pending(db: &Db, name: &str) -> Option<(i64, i64, String)> {
     let v: Value = serde_json::from_str(&db.cursor_or_log(&cursor_key(name))?).ok()?;
-    Some((v.get("window")?.as_i64()?, v.get("at_ms")?.as_i64()?))
+    Some((
+        v.get("window")?.as_i64()?,
+        v.get("at_ms")?.as_i64()?,
+        v.get("tty")?.as_str()?.to_string(),
+    ))
 }
 
 fn forget(db: &Db, name: &str) {
@@ -336,9 +450,9 @@ fn forget(db: &Db, name: &str) {
     }
 }
 
-/// Bỏ một lượt chờ mã: gõ một mã HỎNG cho CLI thoát (đo: mã sai ⟹ thoát về shell),
-/// rồi đóng cửa sổ như mọi cửa sổ shell khác của huba.
-fn cancel(db: &Db, name: &str, w: i64, vi: &str) {
+/// Bỏ một lượt chờ mã: TẮT đúng tiến trình `auth login` của cửa sổ ấy (không gõ gì vào
+/// nó — đo 11/10: chữ gõ vào bị nhận làm mã), rồi đóng cửa sổ shell như mọi cửa sổ khác.
+fn cancel(db: &Db, name: &str, w: i64, tty: &str, vi: &str) {
     let man = crate::keys::screen_text(w).unwrap_or_default();
     if !la_man_dang_nhap(&man) {
         // Không phải cửa sổ của mình (đã đóng, hoặc id đã thuộc về cửa sổ khác) ⟹ KHÔNG đụng.
@@ -349,16 +463,21 @@ fn cancel(db: &Db, name: &str, w: i64, vi: &str) {
         forget(db, name);
         return;
     }
-    if waiting_for_code(&man) {
-        let _ = crate::keys::type_into(w, "huy");
-        std::thread::sleep(Duration::from_secs(3));
+    if let Some(pid) = cli_pid(tty) {
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+        for _ in 0..6 {
+            std::thread::sleep(Duration::from_millis(500));
+            if cli_pid(tty).is_none() {
+                break;
+            }
+        }
     }
-    let ket = crate::keys::exit_and_close_shell(w, Duration::from_secs(5));
+    let dong = dong_cua_so(name, w);
     logging::info(
         "account_login_cancelled",
-        json!({ "account": name, "window": w, "vi": vi,
-                "dong": ket.as_ref().map(|_| "ok").unwrap_or("hong"),
-                "err": ket.err().map(|e| logging::err_chain(&e)) }),
+        json!({ "account": name, "window": w, "vi": vi, "dong": dong }),
     );
     forget(db, name);
 }

@@ -18869,8 +18869,10 @@ pub fn accounts_order(arg: &str) -> AccountsOrder {
             AccountsOrder::Lock((*a).to_string(), co(f) == Some(true))
         }
         [a, "-l"] | ["-l", a] if ten(a) => AccountsOrder::Login((*a).to_string(), None),
-        [a, "-l", ma] | ["-l", a, ma] if ten(a) => {
-            AccountsOrder::Login((*a).to_string(), Some((*ma).to_string()))
+        // Nhiều chữ sau `-l` (dán cả đường dẫn nhiều dòng, 11/10) ⟹ vẫn là MỘT lượt gửi mã,
+        // để `account_login::code_shape_why` nói đúng chỗ sai thay vì câu hướng dẫn chung.
+        [a, "-l", ma @ ..] | ["-l", a, ma @ ..] if ten(a) && !ma.is_empty() => {
+            AccountsOrder::Login((*a).to_string(), Some(ma.join(" ")))
         }
         [dt, a] if ten(a) => match dong_tu_cu(dt) {
             Some(None) => AccountsOrder::Detail((*a).to_string()),

@@ -8,7 +8,7 @@
 //! được là hỏi thẳng Terminal ngay trước khi gõ: tab đang chọn của cửa sổ ấy có
 //! mang tty của phiên đích không (`pipeline::paste_target_ok`).
 
-use huba::pipeline::same_tty;
+use huba::pipeline::{ly_do_khong_cua_so, rao_tab, same_tty};
 
 #[test]
 fn cung_tty_bo_tien_to_dev_va_khong_khop_chuoi_rong() {
@@ -23,6 +23,54 @@ fn cung_tty_bo_tien_to_dev_va_khong_khop_chuoi_rong() {
         "chuỗi rỗng không phải một tty — `\"\" == \"\"` là cái bẫy"
     );
     assert!(!same_tty("/dev/", "ttys000"));
+}
+
+/// 🔴 Lý do KHÔNG gõ phải là lý do THẬT (2026-10-11). Đo 10/10 12:10→12:26Z, việc
+/// hòm thư 1480 của phiên `c3063353` [dwork/dhub]: sáu lượt
+/// `runin_paste_target_unverified` — cửa sổ 36638, tty ttys001, `osascript quá
+/// 45s` — mà câu ⏳ lẫn câu bỏ cuộc gửi Hà đều nói *"chưa tìm ra cửa sổ của
+/// phiên"*. Cửa sổ CÓ; cái hỏng là Terminal trả lời chậm.
+#[test]
+fn ly_do_khong_go_la_ly_do_that_ca_1480() {
+    let why = rao_tab(36638, "ttys001", Err("osascript quá 45s")).unwrap_err();
+    assert!(why.contains("osascript quá 45s"), "mất lỗi thật: {why}");
+    assert!(why.contains("36638"), "phải nói cửa sổ ĐÃ tìm thấy: {why}");
+    assert!(
+        !why.contains("chưa tìm ra cửa sổ"),
+        "đúng câu sai của ca 1480: {why}"
+    );
+}
+
+#[test]
+fn rao_tab_khop_thi_go_lech_thi_noi_tab_nao() {
+    assert_eq!(rao_tab(8411, "ttys000", Ok("/dev/ttys000")), Ok(()));
+    let why = rao_tab(8411, "ttys000", Ok("/dev/ttys001")).unwrap_err();
+    assert!(
+        why.contains("ttys001") && why.contains("ttys000"),
+        "phải nói tab mang tty nào, phiên cần tty nào: {why}"
+    );
+    // Tab trả chuỗi rỗng không phải "khớp" — cùng bẫy `"" == ""` của `same_tty`.
+    assert!(rao_tab(1, "", Ok("")).is_err());
+}
+
+/// "Terminal nói không có" và "hỏi mà Terminal không trả lời" dẫn tới hai việc
+/// khác hẳn nhau (phiên đã rời cửa sổ ↔ chờ Terminal) — không gộp một câu.
+#[test]
+fn khong_cua_so_va_khong_hoi_duoc_la_hai_cau() {
+    let khong = ly_do_khong_cua_so("ttys001", None);
+    let cam = ly_do_khong_cua_so("/dev/ttys001", Some("osascript quá 45s"));
+    assert_ne!(khong, cam);
+    assert!(khong.contains("ttys001"), "{khong}");
+    assert!(
+        cam.contains("osascript quá 45s") && cam.contains("ttys001"),
+        "{cam}"
+    );
+    assert!(!cam.contains("/dev/"), "{cam}");
+    let khong_tty = ly_do_khong_cua_so("??", None);
+    assert!(
+        !khong_tty.contains("??"),
+        "`??` không phải một tty: {khong_tty}"
+    );
 }
 
 fn nguon() -> String {
@@ -104,6 +152,13 @@ fn doi_chung_nguoc_phep_do_hang_rao() {
         co_hang_rao(co_rao),
         (2, 2),
         "phép dò chặn cả hình dạng đúng"
+    );
+    // Hình dạng từ 11/10: hàng rào trả LÝ DO, cú gõ nằm trong nhánh `Ok(())`.
+    let co_rao_ly_do = "Ok(Some(w)) => match paste_target_ok(w, &s.tty, &s.session_id) {\n    Ok(()) => match crate::keys::type_and_send(w, block) {\nOk(Some(w)) => match paste_target_ok(w, &t, &p.s) {\n    Ok(()) => crate::keys::type_and_send(w, &p.b)";
+    assert_eq!(
+        co_hang_rao(co_rao_ly_do),
+        (2, 2),
+        "phép dò chặn hình dạng hàng-rào-trả-lý-do"
     );
 }
 

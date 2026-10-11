@@ -7427,9 +7427,12 @@ enum DanVao {
     DaGui,
     /// Chữ còn NẰM TRONG ô nhập, chưa gửi (`Delivered` khác `Gone`).
     NamTrongO(String),
-    /// Chưa gõ: không cửa sổ, tab sắp nhận chữ không phải của phiên
-    /// ([`paste_target_ok`]), hoặc Terminal trả lỗi (`Some(lỗi)`).
-    ChuaDan(Option<String>),
+    /// Chưa gõ — và VÌ SAO, luôn mang theo: không cửa sổ · không hỏi được
+    /// Terminal · tab sắp nhận chữ không phải của phiên hay không đọc được
+    /// ([`paste_target_ok`]) · Terminal trả lỗi lúc gõ. Từng là
+    /// `Option<String>` với `None` = "chưa tìm ra cửa sổ", và đúng cái `None` ấy
+    /// nuốt lý do thật của ca 1480 (xem [`rao_tab`]).
+    ChuaDan(String),
 }
 
 /// Khối `[huba chạy hộ]` của lệnh `lenh` đã vào HỘI THOẠI (lượt `user`) hay HÀNG
@@ -7649,8 +7652,8 @@ fn dan_vao_phien(
     match crate::keys::window_of(&s.tty) {
         // Cú Enter rời nằm ở MỘT chỗ (`keys::type_and_send`) — bản chép tay cũ
         // nuốt lỗi bằng `let _ = press(…)`, đúng hình dạng luật 3 cấm.
-        Ok(Some(w)) if paste_target_ok(w, &s.tty, &s.session_id) => {
-            match crate::keys::type_and_send(w, block) {
+        Ok(Some(w)) => match paste_target_ok(w, &s.tty, &s.session_id) {
+            Ok(()) => match crate::keys::type_and_send(w, block) {
                 // Màn nói "đã đi" — CHƯA đủ; hỏi nhật ký phiên (xem `xac_nhan_da_gui`).
                 Ok(crate::keys::Delivered::Gone) => xac_nhan_da_gui(
                     nhat_ky.as_ref().map(|(p, n)| (p.as_path(), *n)),
@@ -7660,10 +7663,12 @@ fn dan_vao_phien(
                     line,
                 ),
                 Ok(other) => DanVao::NamTrongO(format!("{other:?}")),
-                Err(e) => DanVao::ChuaDan(Some(e.to_string())),
-            }
-        }
-        _ => DanVao::ChuaDan(None),
+                Err(e) => DanVao::ChuaDan(e.to_string()),
+            },
+            Err(why) => DanVao::ChuaDan(why),
+        },
+        Ok(None) => DanVao::ChuaDan(ly_do_khong_cua_so(&s.tty, None)),
+        Err(e) => DanVao::ChuaDan(ly_do_khong_cua_so(&s.tty, Some(&e.to_string()))),
     }
 }
 
@@ -7854,10 +7859,7 @@ fn tra_viec_mot(
                 crate::sessions::shown(&s)
             ))
         }
-        DanVao::ChuaDan(loi) => {
-            let why = loi
-                .clone()
-                .unwrap_or_else(|| "chưa tìm ra cửa sổ của phiên".to_string());
+        DanVao::ChuaDan(why) => {
             if tuoi >= RUNIN_GIVE_UP_SEC {
                 logging::error(
                     "so_viec_bo_cuoc",
@@ -8358,19 +8360,24 @@ pub fn runin_pending_tick(db: &Db, cfg: &Config, now: i64) {
             .iter()
             .find(|s| s.session_id == p.s && s.host != "dead")
             .map(|s| s.tty.clone());
-        let typed = match tty {
+        // `Ok(chữ đã tới đâu)` · `Err(vì sao chưa gõ)` — lý do đi thẳng vào câu bỏ
+        // cuộc, không dịch lại thành "không có cửa sổ" (xem [`rao_tab`]).
+        let typed: Result<String, String> = match tty {
             Some(t) if !t.is_empty() => {
                 // HẠNG GẤP cả cú gõ lại — cùng lý do với `dan_vao_phien`: ở hạng
                 // nền, từ 21:29Z đường này nhận 2 việc và dán được 0.
                 let _lane = crate::exec::urgent();
                 match crate::keys::window_of(&t) {
-                    Ok(Some(w)) if paste_target_ok(w, &t, &p.s) => {
-                        crate::keys::type_and_send(w, &p.b).map(|d| Some(format!("{d:?}")))
-                    }
-                    // Không có cửa sổ, HOẶC tab sắp nhận chữ không phải của phiên
-                    // này (hàng rào `paste_target_ok`) ⟹ chưa gõ, giữ lại lượt sau.
-                    Ok(_) => Ok(None),
-                    Err(e) => Err(e),
+                    Ok(Some(w)) => match paste_target_ok(w, &t, &p.s) {
+                        Ok(()) => crate::keys::type_and_send(w, &p.b)
+                            .map(|d| format!("{d:?}"))
+                            .map_err(|e| e.to_string()),
+                        // Tab sắp nhận chữ không phải của phiên này, hoặc không
+                        // đọc được nó ⟹ chưa gõ, giữ lại lượt sau.
+                        Err(why) => Err(why),
+                    },
+                    Ok(None) => Err(ly_do_khong_cua_so(&t, None)),
+                    Err(e) => Err(ly_do_khong_cua_so(&t, Some(&e.to_string()))),
                 }
             }
             // Phiên đã chết trong lúc chờ: không còn ai để dán vào, và giữ tiếp
@@ -8392,7 +8399,7 @@ pub fn runin_pending_tick(db: &Db, cfg: &Config, now: i64) {
             }
         };
         match typed {
-            Ok(Some(landed)) => {
+            Ok(landed) => {
                 logging::info(
                     "runin_pending_delivered",
                     json!({ "session": p.s, "landed": landed, "waited_sec": now - p.t }),
@@ -8407,12 +8414,9 @@ pub fn runin_pending_tick(db: &Db, cfg: &Config, now: i64) {
                 );
                 continue;
             }
-            Ok(None) | Err(_) => {
+            Err(why) => {
                 if now - p.t >= RUNIN_GIVE_UP_SEC {
-                    let why = match &typed {
-                        Err(e) => crate::exec::truncate(&e.to_string(), 160),
-                        _ => "phiên không có cửa sổ terminal".to_string(),
-                    };
+                    let why = crate::exec::truncate(&why, 160);
                     logging::error(
                         "runin_pending_gave_up",
                         json!({ "session": p.s, "waited_sec": now - p.t, "err": why }),
@@ -10401,8 +10405,53 @@ pub fn same_tty(a: &str, b: &str) -> bool {
     !a.is_empty() && a == b
 }
 
+/// Gõ được vào cửa sổ `window` không, từ câu Terminal trả lời về tab đang chọn
+/// (`tab`) — và nếu không thì VÌ SAO. THUẦN, để kiểm được không cần Terminal.
+///
+/// 🔴 Lý do phải đi theo tới câu báo (2026-10-11). Bản cũ trả `bool`, nên ba kết
+/// cục khác hẳn nhau — không thấy cửa sổ · tab mang tty khác · không đọc được tab
+/// — ra cùng MỘT câu *"chưa tìm ra cửa sổ của phiên"*. Đo 10/10 12:10→12:26Z (việc
+/// hòm thư 1480, phiên `c3063353` [dwork/dhub]): cửa sổ 36638 TÌM THẤY, cái hỏng là
+/// `osascript quá 45s` lúc đọc tab, sáu lượt liền (cùng khung có 17
+/// `terminal_probe_failed` + 10 `window_of_from_cache` — Terminal chậm toàn máy),
+/// vậy mà câu ⏳ lẫn câu bỏ cuộc gửi Hà đều nói "chưa tìm ra cửa sổ".
+pub fn rao_tab(window: i64, want_tty: &str, tab: Result<&str, &str>) -> Result<(), String> {
+    let n = |s: &str| s.trim().trim_start_matches("/dev/").to_string();
+    match tab {
+        Ok(t) if same_tty(t, want_tty) => Ok(()),
+        Ok(t) => Err(format!(
+            "tab đang chọn của cửa sổ {window} mang {}, không phải {} của phiên",
+            if n(t).is_empty() {
+                "tty rỗng".to_string()
+            } else {
+                n(t)
+            },
+            n(want_tty)
+        )),
+        Err(e) => Err(format!(
+            "có cửa sổ {window}, nhưng không đọc được tab sắp nhận chữ: {e}"
+        )),
+    }
+}
+
+/// Câu cho ca [`crate::keys::window_of`] không đưa ra cửa sổ nào. Terminal trả
+/// lời "không có" (`loi = None`) và hỏi mà Terminal không trả lời (`Some(lỗi)`)
+/// dẫn tới hai việc khác nhau — phiên đã rời cửa sổ ↔ chờ Terminal — nên là hai
+/// câu. THUẦN.
+pub fn ly_do_khong_cua_so(tty: &str, loi: Option<&str>) -> String {
+    if !crate::sessions::is_real_tty(tty) {
+        return "phiên không chạy trong cửa sổ terminal nào (không có tty)".to_string();
+    }
+    let tty = tty.trim().trim_start_matches("/dev/");
+    match loi {
+        None => format!("Terminal không có cửa sổ nào giữ {tty}"),
+        Some(e) => format!("không hỏi được Terminal cửa sổ nào giữ {tty}: {e}"),
+    }
+}
+
 /// HÀNG RÀO Ở CỬA GÕ cho kết quả `/runin`: tab sắp nhận chữ có đúng là tty của
-/// phiên đích không. `false` ⟹ KHÔNG gõ lượt này (chỗ gọi giữ lại để gõ lại).
+/// phiên đích không. `Err(lý do)` ⟹ KHÔNG gõ lượt này (chỗ gọi giữ lại để gõ
+/// lại, và đưa đúng lý do ấy vào câu báo — xem [`rao_tab`]).
 ///
 /// 🔴 2026-09-23, main dwork 44 báo, đo trên nhật ký của chính hai phiên: kết
 /// quả đẩy `lan/dorg` lúc 17:40Z vào hàng chờ của phiên **dci** (`2151a7af…jsonl`
@@ -10416,7 +10465,7 @@ pub fn same_tty(a: &str, b: &str) -> bool {
 /// Không đọc được tab ⟹ `false`, cố ý: dán nhầm vào phiên khác là đưa kết quả
 /// lệnh của một làn cho một làn khác đọc và làm theo — đắt hơn nhiều một lượt
 /// chờ `RUNIN_RETRY_SEC`.
-fn paste_target_ok(window: i64, want_tty: &str, session: &str) -> bool {
+fn paste_target_ok(window: i64, want_tty: &str, session: &str) -> Result<(), String> {
     // 🔴 HẠNG GẤP cho đúng MỘT câu hỏi này (sửa cùng ngày, sau khi đo bản đầu
     // chạy thật 18:16→21:15Z): 74 lượt `runin_paste_to` đều khớp, nhưng 23 lượt
     // `runin_paste_target_unverified` — phần lớn là *"vòng nền đã tiêu hết ngân
@@ -10426,34 +10475,32 @@ fn paste_target_ok(window: i64, want_tty: &str, session: &str) -> bool {
     // 1072 giây. Một câu hỏi đứng giữa cú dán mà một phiên đang chờ không phải
     // việc quét nền; guard chỉ sống trong hàm này nên phần còn lại vẫn là nền.
     let _lane = crate::exec::urgent();
-    match crate::keys::selected_tab_tty(window) {
-        Ok(tab) => {
-            let khop = same_tty(&tab, want_tty);
+    let tab = crate::keys::selected_tab_tty(window).map_err(|e| e.to_string());
+    let ket = rao_tab(window, want_tty, tab.as_deref().map_err(String::as_str));
+    match &tab {
+        Ok(t) => {
             logging::info(
                 "runin_paste_to",
                 json!({ "session": session, "window": window,
-                        "tty": want_tty, "tab_tty": tab, "khop": khop }),
+                        "tty": want_tty, "tab_tty": t, "khop": ket.is_ok() }),
             );
-            if !khop {
+            if let Err(why) = &ket {
                 logging::error(
                     "runin_paste_target_mismatch",
                     json!({ "session": session, "window": window,
-                            "tty": want_tty, "tab_tty": tab,
+                            "tty": want_tty, "tab_tty": t, "why": why,
                             "effect": "KHÔNG gõ — tab sẽ nhận chữ không phải của phiên đích; giữ lại để gõ lại" }),
                 );
             }
-            khop
         }
-        Err(e) => {
-            logging::warn(
-                "runin_paste_target_unverified",
-                json!({ "session": session, "window": window, "tty": want_tty,
-                        "err": e.to_string(),
-                        "effect": "không đọc được tab sắp nhận chữ ⟹ KHÔNG gõ lượt này, giữ lại để gõ lại" }),
-            );
-            false
-        }
+        Err(e) => logging::warn(
+            "runin_paste_target_unverified",
+            json!({ "session": session, "window": window, "tty": want_tty,
+                    "err": e,
+                    "effect": "không đọc được tab sắp nhận chữ ⟹ KHÔNG gõ lượt này, giữ lại để gõ lại" }),
+        ),
     }
+    ket
 }
 
 /// Đề bài của MỘT lệnh chạy nền — gom lại thay vì tám tham số rời, cùng lý lẽ
@@ -10821,7 +10868,11 @@ fn watch_long_job(job: LongJob) {
                                 // hỏi Terminal — 386 lượt trong một ngày. Một
                                 // lần hỏi trượt không phải một sự thật vĩnh
                                 // viễn, nên giữ kết quả lại và gõ lại vòng sau.
-                                DanVao::ChuaDan(Some(e)) => {
+                                //
+                                // Không cửa sổ · tab không phải của phiên · Terminal
+                                // trả lỗi: cùng một việc (giữ, gõ lại), nhưng câu báo
+                                // nói ĐÚNG lý do — xem [`rao_tab`].
+                                DanVao::ChuaDan(why) => {
                                     remember_runin_pending_for(
                                         &cfg,
                                         &s.session_id,
@@ -10830,31 +10881,14 @@ fn watch_long_job(job: LongJob) {
                                         chrono::Utc::now().timestamp(),
                                     );
                                     format!(
-                                        "⏳ Đã chạy xong. Terminal chưa nhận được ({}) — huba sẽ gõ lại, \
+                                        "⏳ Đã chạy xong. Chưa dán được vào {} ({}) — huba sẽ gõ lại, \
                                          báo anh khi vào được phiên.\n\n$ {}\n{}",
-                                        crate::exec::truncate(&e, 160),
+                                        crate::sessions::shown(&s),
+                                        crate::exec::truncate(&why, 160),
                                         line,
                                         crate::exec::truncate(&report, 600)
                                     )
                                 }
-                            // Không có cửa sổ, hoặc tab sắp nhận chữ không phải
-                            // của phiên này (`paste_target_ok`) ⟹ giữ, gõ lại sau.
-                            DanVao::ChuaDan(None) => {
-                                remember_runin_pending_for(
-                                    &cfg,
-                                    &s.session_id,
-                                    &line,
-                                    &block,
-                                    chrono::Utc::now().timestamp(),
-                                );
-                                format!(
-                                    "⏳ Đã chạy xong. Chưa tìm ra cửa sổ của {} — huba sẽ gõ lại, \
-                                     báo anh khi vào được phiên.\n\n$ {}\n{}",
-                                    crate::sessions::shown(&s),
-                                    line,
-                                    crate::exec::truncate(&report, 600)
-                                )
-                            }
                         },
                     }
                 }

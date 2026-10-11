@@ -1,5 +1,22 @@
 # active context — huba
 
+## 🟡 2026-10-11 01:2xZ→ — kế nhiệm 72057 (ttys002) đóng phiên cũ 929404de; vá câu báo dán /runin (571b7b1)
+
+- Đóng 929404de: lượt cuối khép 01:25:17Z (turn_duration, sau khi tự tắt bộ canh bxwngcp7z) · cây 0/0 tại a4a87dd ·
+  con chỉ còn 2 MCP + caffeinate, 0 hòm thư/hàng đợi ⇒ `kill 58176`, đóng cửa sổ 27178 ⇒ ttys005 biến mất (cửa sổ còn
+  vỏ ẩn visible=false 0 tab, cùng dạng 6224).
+- Lòi từ log (quét lỗi 24 h: 1 dòng error `so_viec_bo_cuoc`): 10/10 12:10→12:26Z việc hòm thư 1480 của c3063353
+  [dwork/dhub] (`acc-mo-vai.sh dev-dhub …`) bỏ cuộc sau 938 s với câu «chưa tìm ra cửa sổ của phiên» — SAI: cửa sổ
+  36638 CÓ, cái hỏng là `osascript quá 45s` lúc đọc tab ×6 (cùng khung 17 terminal_probe_failed + 10
+  window_of_from_cache ⇒ Terminal chậm toàn máy). Gốc: `paste_target_ok` trả bool + `dan_vao_phien` gộp mọi ca vào
+  `ChuaDan(None)`. Vá 571b7b1: hàng rào trả lý do (`rao_tab` thuần), `ly_do_khong_cua_so` tách "Terminal nói không
+  có" ≠ "hỏi không được", `ChuaDan(String)`, `runin_pending_tick` cũng thôi nói "phiên không có cửa sổ terminal".
+  RED 3/10 (câu đúng ca 1480) ⇒ GREEN 10/10 + so_viec_thu_tu 7/7, fmt/clippy 0. CHƯA cài, CHƯA QG (lệnh tạm dừng).
+- S53 ca thật nửa vời: 943f45cc tự mở dd0f128c 18:32:20Z; huba held TooFresh ×4 rồi phiên tắt 18:35:32Z ⇒ không kế
+  nhiệm thứ hai, nhưng cổng SelfHandedOver chưa được chạm. Phát lại nhật ký thật qua `self_handover_calls` +
+  `successor_by_brief`: khớp dd0f128c, hai đối chứng ⇒ None.
+- FILE-MARK: 38 `telegram_document_sent` từ 06/10 ⇒ đường 📎 chạy thật; a2498af.zip vẫn chưa bấm.
+
 ## 🟡 2026-10-11 00:3xZ — `/accounts <tên> -l [mã]` đăng nhập lại từ điện thoại (Hà: «thêm cờ -l để chạy luồng login»)
 
 - 0e0cf55 `src/account_login.rs`: mở cửa sổ `auth login` thật → gửi đường dẫn "trang hiện mã" → `-l <mã>` gõ vào cửa

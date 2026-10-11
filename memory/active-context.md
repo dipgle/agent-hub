@@ -9,8 +9,10 @@
   đã chặn + nói «CLI không thấy đăng nhập gói». `auth status` từ phiên báo loggedIn:false cho MỌI tài khoản (classifier
   chặn đọc Keychain để kiểm) ⟹ KHÔNG dùng nó để chấm.
 - 6d455a7: commit nguyên trạng `huba.config.json` acc4 locked=true — Hà khoá qua chat 23:55:37Z (log account_lock_set).
-- Cài 00:29:41Z pid 30047 KHỚP 883420ea. 189/189 tệp, 1294 bài. CHƯA nghiệm thu thật: chưa ai đăng nhập một tài khoản
-  thật qua -l (câu CLI khi THÀNH CÔNG chưa từng thấy). Chưa biết `auth login` bỏ dở có làm mất đăng nhập cũ không.
+- Lượt THẬT của Hà 01:02–01:05Z (acc3): gửi lại đường dẫn, rồi mã thiếu `#` ⇒ CLI `Invalid code…` và KHÔNG thoát ⇒
+  bản đầu gõ `exit` vào CLI, cửa sổ bị ẨN + `auth login` mồ côi (đã dọn), báo sai «đã đóng». de7c8ec: chấm theo
+  TIẾN TRÌNH (`ps -t`), huỷ = tắt pid, chặn mã thiếu `#`/đường dẫn, Gone≠Hidden. Cài 01:2xZ pid 66002 KHỚP 04982da5.
+  189/189 tệp, 1295 bài. CHƯA có lượt đăng nhập THÀNH CÔNG nào; chưa biết `auth login` bỏ dở có mất đăng nhập cũ không.
 
 ## 🟡 2026-10-10 09:2xZ — `/accounts [<tên> [-a | -b]]` (Hà: chi tiết phải ĐO LẠI kể cả tài khoản khoá)
 

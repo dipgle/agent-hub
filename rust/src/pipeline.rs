@@ -14062,6 +14062,10 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                             format!("⚠ không đổi được khoá của {ten}: {e}")
                         }
                     },
+                    AccountsOrder::Login(ten, None) => crate::account_login::start(cfg, db, &ten),
+                    AccountsOrder::Login(ten, Some(ma)) => {
+                        crate::account_login::finish(cfg, db, &ten, &ma)
+                    }
                     AccountsOrder::Usage => ACCOUNTS_USAGE.to_string(),
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
@@ -18824,13 +18828,16 @@ pub enum AccountsOrder {
     Detail(String),
     /// `/accounts <tên> -b` (khoá, `true`) · `-a` (mở, `false`).
     Lock(String, bool),
+    /// `/accounts <tên> -l` (mở luồng đăng nhập) · `-l <mã>` (gõ mã vào cửa sổ đang chờ).
+    Login(String, Option<String>),
     /// Không khớp dạng nào — route in cách gõ thay vì đoán ý.
     Usage,
 }
 
-/// Dạng gõ: `/accounts [<tên> [-a | -b]]` — Hà 2026-10-10: *"sửa lại lệnh thành
-/// `/accounts [acc1 [-a | -b]]`"*. `-b` = khoá (block), `-a` = mở (allow). Cờ đứng
-/// trước hay sau tên đều nhận.
+/// Dạng gõ: `/accounts [<tên> [-a | -b | -l [mã]]]` — Hà 2026-10-10: *"sửa lại lệnh
+/// thành `/accounts [acc1 [-a | -b]]`"*; 2026-10-11: *"thêm cờ -l để chạy luồng login"*.
+/// `-b` = khoá (block), `-a` = mở (allow), `-l` = đăng nhập (`crate::account_login`).
+/// Cờ đứng trước hay sau tên đều nhận.
 ///
 /// Dạng cũ (`detail|khoa|mo <tên>`, 29/09) VẪN nhận: nó nằm trong những tin Telegram
 /// đã gửi và trong thói quen gõ — cùng luật với `/new` (vị trí cũ vẫn parse). Một
@@ -18861,6 +18868,10 @@ pub fn accounts_order(arg: &str) -> AccountsOrder {
         [f, a] if ten(a) && co(f).is_some() => {
             AccountsOrder::Lock((*a).to_string(), co(f) == Some(true))
         }
+        [a, "-l"] | ["-l", a] if ten(a) => AccountsOrder::Login((*a).to_string(), None),
+        [a, "-l", ma] | ["-l", a, ma] if ten(a) => {
+            AccountsOrder::Login((*a).to_string(), Some((*ma).to_string()))
+        }
         [dt, a] if ten(a) => match dong_tu_cu(dt) {
             Some(None) => AccountsOrder::Detail((*a).to_string()),
             Some(Some(khoa)) => AccountsOrder::Lock((*a).to_string(), khoa),
@@ -18873,7 +18884,8 @@ pub fn accounts_order(arg: &str) -> AccountsOrder {
 /// Câu hướng dẫn khi dòng `/accounts …` không khớp dạng nào.
 pub const ACCOUNTS_USAGE: &str = "⚠ Gõ: /accounts · /accounts <tài khoản> (chi tiết + đo lại hạn \
                                   mức, kể cả đang khoá) · /accounts <tài khoản> -b (khoá) · \
-                                  /accounts <tài khoản> -a (mở)";
+                                  /accounts <tài khoản> -a (mở) · /accounts <tài khoản> -l \
+                                  (đăng nhập lại; rồi -l <mã>)";
 
 /// Tài khoản SẼ chạy một lượt `/new`, nếu nó đang khoá.
 ///

@@ -309,4 +309,136 @@ fn dong_do_lai_chi_noi_khi_moi_hon_so_cli_va_noi_ra_khi_hong() {
         !l.contains("What's contributing"),
         "câu thô lọt ra màn: {l}"
     );
+
+    // Đo 11/10: tài khoản CHƯA đăng nhập ⟹ `/usage` trả bảng `/cost`. Nói ra là chưa
+    // đăng nhập, chỉ đường -l, và KHÔNG một dấu `$` nào lên màn (luật 9).
+    let cost = serde_json::json!({ "raw": "Total cost:            $0.0000 · Total duration (API):  0s · Total duration (wall): 0s", "at_ms": now });
+    let l = do_lai_line(Some(&cost), None, now).unwrap();
+    assert!(
+        l.contains("KHÔNG thấy tài khoản này đăng nhập") && l.contains("cờ -l"),
+        "{l}"
+    );
+    assert!(!l.contains('$'), "tiền lên màn: {l}");
+    // Câu thô lạ có `$` (không phải bảng /cost) cũng không được trích ra.
+    let la = serde_json::json!({ "raw": "Spent $3 this week", "at_ms": now });
+    let l = do_lai_line(Some(&la), None, now).unwrap();
+    assert!(!l.contains('$'), "tiền lên màn: {l}");
+}
+
+// ── `/accounts <tên> -l` — đăng nhập lại (Hà 2026-10-11) ─────────────────────
+
+/// Màn THẬT của `claude auth login` (CLI 2.1.280, cửa sổ Terminal, 11/10) — đường
+/// dẫn rút gọn phần `scope`/`code_challenge`/`state`, giữ đúng hình dạng.
+const MAN_DANG_NHAP: &str = "Last login: Sun Oct 11 07:09:51 on ttys003\n\
+hanguyen@Has-MacBook-Pro ~ % CLAUDE_CONFIG_DIR='/Users/hanguyen/.claude-acc3' 'claude' auth login\n\
+Opening browser to sign in…\n\
+If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&scope=user%3Aprofile&code_challenge=XXXX&code_challenge_method=S256&state=YYYY\n\
+Paste code here if prompted > \n\n";
+
+/// Cùng cửa sổ sau khi gõ một mã SAI — nguyên văn 11/10.
+const MAN_MA_SAI: &str =
+    "hanguyen@Has-MacBook-Pro ~ % CLAUDE_CONFIG_DIR='/tmp/x' 'claude' auth login\n\
+Opening browser to sign in…\n\
+If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=YYYY\n\
+Paste code here if prompted > Login failed: Request failed with status code 400\n\
+hanguyen@Has-MacBook-Pro scratchpad % \n";
+
+#[test]
+fn dang_nhap_doc_dung_duong_dan_trang_hien_ma_va_o_cho_ma() {
+    use huba::account_login::{after_prompt, login_url, waiting_for_code};
+    let url = login_url(MAN_DANG_NHAP).expect("màn thật phải có đường dẫn");
+    assert!(
+        url.starts_with("https://claude.com/cai/oauth/authorize?"),
+        "{url}"
+    );
+    assert!(
+        url.contains("platform.claude.com%2Foauth%2Fcode%2Fcallback")
+            && url.ends_with("state=YYYY"),
+        "phải là đường TRANG HIỆN MÃ, lấy trọn tới hết dòng: {url}"
+    );
+    assert!(waiting_for_code(MAN_DANG_NHAP));
+    // Vế ngược: CLI đã thoát sau mã sai ⟹ KHÔNG còn chờ, và lời của nó đọc ra được,
+    // không lẫn dấu nhắc shell.
+    assert!(!waiting_for_code(MAN_MA_SAI));
+    assert_eq!(
+        after_prompt(MAN_MA_SAI),
+        "Login failed: Request failed with status code 400"
+    );
+    assert_eq!(after_prompt(MAN_DANG_NHAP), "");
+    assert_eq!(login_url("không có gì"), None);
+    // Chốt cửa sổ: màn của huba thì nhận; màn của một phiên khác (id cửa sổ dùng lại) thì KHÔNG.
+    assert!(huba::account_login::la_man_dang_nhap(MAN_DANG_NHAP));
+    assert!(huba::account_login::la_man_dang_nhap(MAN_MA_SAI));
+    assert!(!huba::account_login::la_man_dang_nhap(
+        "❯ \n⏵⏵ auto mode on · visit: https://x"
+    ));
+    assert_eq!(
+        login_url("visit: http://localhost:61422/callback"),
+        None,
+        "chỉ nhận https"
+    );
+}
+
+#[test]
+fn dang_nhap_dung_lenh_dung_tai_khoan() {
+    use huba::account_login::login_command;
+    let d = tempfile::tempdir().unwrap();
+    let c = cfg_voi(Some(d.path()), true);
+    let acc3 = c.claude_accounts[1].clone();
+    let l = login_command(&c, &acc3, Some("a'b@x.com"));
+    assert!(
+        l.starts_with(&format!("CLAUDE_CONFIG_DIR='{}' ", d.path().display())),
+        "{l}"
+    );
+    assert!(
+        l.contains(" auth login --email 'a'\\''b@x.com'"),
+        "email phải được bọc: {l}"
+    );
+    // Tài khoản mặc định = biến VẮNG MẶT, kể cả khi hồ sơ shell có đặt sẵn.
+    let acc1 = c.claude_accounts[0].clone();
+    let l1 = login_command(&c, &acc1, None);
+    assert!(l1.starts_with("env -u CLAUDE_CONFIG_DIR "), "{l1}");
+    assert!(l1.ends_with(" auth login"), "{l1}");
+}
+
+#[test]
+fn dang_nhap_cu_phap_va_hinh_dang_ma() {
+    use huba::account_login::{code_shape_ok, guide};
+    use huba::pipeline::AccountsOrder::*;
+    assert_eq!(accounts_order("acc3 -l"), Login("acc3".into(), None));
+    assert_eq!(accounts_order("-l acc3"), Login("acc3".into(), None));
+    assert_eq!(
+        accounts_order("acc3 -l Ab12Cd34#Ef56"),
+        Login("acc3".into(), Some("Ab12Cd34#Ef56".into()))
+    );
+    assert_eq!(accounts_order("-l"), Usage, "thiếu tên");
+    assert_eq!(accounts_order("acc3 -l ma thua"), Usage, "mã là MỘT chuỗi");
+
+    assert!(code_shape_ok("Ab12Cd34#Ef56"));
+    assert!(!code_shape_ok("ngan"));
+    assert!(
+        !code_shape_ok("hai tu ghep"),
+        "câu chữ lẫn vào không phải mã"
+    );
+
+    let g = guide(
+        "acc3",
+        Some("x@y.com"),
+        "https://claude.com/cai/oauth/authorize?a=1",
+        42,
+        false,
+    );
+    assert!(
+        g.contains("https://claude.com/cai/oauth/authorize?a=1"),
+        "{g}"
+    );
+    assert!(
+        g.contains("ĐÚNG x@y.com") && g.contains("/accounts acc3 -l <mã>"),
+        "{g}"
+    );
+    let g = guide("acc3", None, "https://x", 42, true);
+    assert!(
+        g.contains("ĐÚNG tài khoản acc3") && g.contains("nhắc lại"),
+        "{g}"
+    );
 }

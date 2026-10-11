@@ -259,8 +259,19 @@ pub fn do_lai_line(row: Option<&Value>, tep_ms: Option<i64>, now_ms: i64) -> Opt
 /// using your subscription…"* rồi nhảy thẳng sang *"What's contributing…"* — KHÔNG một
 /// dòng % nào. Đưa nguyên câu ấy ra điện thoại là một dòng vô nghĩa đội lốt số đo; nói
 /// thẳng là CLI không trả số, và số còn lại là số nào.
+///
+/// 🔴 Đo 2026-10-11 (bài `account_login_live`, thư mục cấu hình CHƯA đăng nhập): `/usage`
+/// trả bảng `/cost` — *"Total cost: $0.0000 · Total duration …"*. Đó là dấu hiệu CLI KHÔNG
+/// thấy đăng nhập gói nào, nên nói đúng điều ấy và chỉ đường `-l`; và KHÔNG BAO GIỜ đưa
+/// câu thô có dấu `$` ra màn — luật 9, không có tiền trên màn.
 pub fn usage_khong_so(raw: &str) -> String {
+    if raw.contains("Total cost") {
+        return "CLI trả bảng chi phí thay cho hạn mức — tức nó KHÔNG thấy tài khoản này đăng \
+                nhập bằng gói nào. Đăng nhập lại: cờ -l"
+            .to_string();
+    }
     let dau = raw.split(" · ").next().unwrap_or("").trim();
+    let dau = if dau.contains('$') { "" } else { dau };
     format!(
         "CLI chạy xong nhưng KHÔNG trả số % nào cho tài khoản này (tài khoản đang chạy phiên \
          thì có) — số mới nhất vẫn là dòng hạn mức ở trên{}",

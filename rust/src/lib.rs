@@ -16,6 +16,8 @@
 //! was CI noise, and the ceiling built to contain its spending ended up
 //! standing between the owner and his own machine.
 
+/// `/accounts <tên> -l` — đăng nhập lại một tài khoản Claude từ điện thoại.
+pub mod account_login;
 pub mod adapters;
 /// Gửi MỘT phím vào Terminal, không kèm dấu xuống dòng — tệp DUY NHẤT có
 /// `unsafe`, và luật *"no unsafe anywhere"* được gỡ đúng cho nó (Hà 2026-08-19).

@@ -1,5 +1,17 @@
 # active context — huba
 
+## 🟡 2026-10-11 00:3xZ — `/accounts <tên> -l [mã]` đăng nhập lại từ điện thoại (Hà: «thêm cờ -l để chạy luồng login»)
+
+- 0e0cf55 `src/account_login.rs`: mở cửa sổ `auth login` thật → gửi đường dẫn "trang hiện mã" → `-l <mã>` gõ vào cửa
+  sổ → đọc NGUYÊN VĂN lời CLI → đóng → đo lại /usage. Đo trên thư mục cấu hình TRỐNG: đường dẫn + `Paste code here if
+  prompted >`; `do script` gửi được mã; mã sai ⇒ `Login failed: … 400`. Bài live (ignore) xanh trọn vòng 2 lần.
+- Lòi ra: `/usage` của tài khoản CHƯA đăng nhập = bảng `/cost` («Total cost: $…») ⟹ câu hôm qua đưa `$` lên màn;
+  đã chặn + nói «CLI không thấy đăng nhập gói». `auth status` từ phiên báo loggedIn:false cho MỌI tài khoản (classifier
+  chặn đọc Keychain để kiểm) ⟹ KHÔNG dùng nó để chấm.
+- 6d455a7: commit nguyên trạng `huba.config.json` acc4 locked=true — Hà khoá qua chat 23:55:37Z (log account_lock_set).
+- Cài 00:29:41Z pid 30047 KHỚP 883420ea. 189/189 tệp, 1294 bài. CHƯA nghiệm thu thật: chưa ai đăng nhập một tài khoản
+  thật qua -l (câu CLI khi THÀNH CÔNG chưa từng thấy). Chưa biết `auth login` bỏ dở có làm mất đăng nhập cũ không.
+
 ## 🟡 2026-10-10 09:2xZ — `/accounts [<tên> [-a | -b]]` (Hà: chi tiết phải ĐO LẠI kể cả tài khoản khoá)
 
 - 4047acb: `/accounts <tên>` ⟹ `runtime::usage_lam_moi_mot` dò `/usage` đúng tài khoản ấy nếu số >5′, KỂ CẢ khoá;

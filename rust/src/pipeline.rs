@@ -272,6 +272,8 @@ fn pin_html(sid: &str, line: &str) -> Option<String> {
 /// `editMessageText` hỏng DAI DẲNG (bot bị siết nhịp, mất quyền sửa) biến thành
 /// một tin mới mỗi mười giây — đúng luật 11 của dự án: một cái điện thoại rung
 /// mãi là một cái điện thoại bị tắt tiếng, và nó mang theo cả những tin đáng đọc.
+/// Ngoại lệ DUY NHẤT (16/10): Telegram chứng minh tin đã mất (`pin_is_gone`) ⟹
+/// vòng nền dựng lại qua `pin_rebuild_bg` — im lặng, có nhịp, có trần.
 fn pin_apply(
     db: &Db,
     tg: &crate::telegram::Inbox,
@@ -295,12 +297,28 @@ fn pin_apply(
             // Tin gim có thể đã bị xoá (`delete_after_hours`) hoặc chủ máy tự gỡ
             // — GHI rồi đi tiếp xuống đường gửi mới, đừng nuốt và cũng đừng bỏ
             // cuộc: mất tin gim thì dựng lại một cái, không để trống đỉnh.
-            Err(e) => logging::info(
-                "pin_edit_failed",
-                json!({ "message_id": mid, "err": e, "tao_neu_thieu": tao_neu_thieu,
-                        "effect": if tao_neu_thieu { "gửi một tin gim mới thay chỗ" }
-                                  else { "giữ nguyên tin gim cũ — vòng nền không đẻ tin" } }),
-            ),
+            //
+            // 🔴 Vòng nền cũng dựng lại — nhưng CHỈ khi Telegram CHỨNG MINH tin
+            // đã mất (`pin_is_gone`), và qua nhịp `pin_rebuild_bg`. Trước 16/10
+            // vòng nền bỏ cuộc ở đây, nên đồng hồ tự xoá 24 giờ của buồng chat
+            // để đỉnh buồng TRỐNG mỗi ngày cho tới khi chủ máy tự chạm vào một
+            // phiên (đo: 08/10–15/10, ngày nào cũng một lượt "not found").
+            // Lỗi khác (siết nhịp, mất quyền sửa) vẫn KHÔNG đẻ tin — đúng lý do
+            // của `tao_neu_thieu`.
+            Err(e) => {
+                let da_mat = pin_is_gone(&e);
+                logging::info(
+                    "pin_edit_failed",
+                    json!({ "message_id": mid, "err": e, "tao_neu_thieu": tao_neu_thieu,
+                            "da_mat": da_mat,
+                            "effect": if tao_neu_thieu { "gửi một tin gim mới thay chỗ" }
+                                      else if da_mat { "vòng nền dựng lại tin gim (qua nhịp pin_rebuild_bg)" }
+                                      else { "giữ nguyên tin gim cũ — vòng nền không đẻ tin" } }),
+                );
+                if !tao_neu_thieu && da_mat {
+                    return pin_rebuild_bg(db, tg, sid, line, VI_SAO_DA_MAT);
+                }
+            }
         }
     }
     if !tao_neu_thieu {
@@ -321,9 +339,36 @@ fn pin_apply(
     }
 }
 
+/// Mốc GỬI (giây unix) của tin đang gim, theo sổ — `None` khi sổ chưa có `d`
+/// (sổ trước 16/10, hoặc số trần dạng cũ).
+///
+/// Cần mốc gửi chứ không phải mốc sửa: đồng hồ tự xoá của buồng chat
+/// (`message_auto_delete_time`, đo 16/10: 86400 s) đếm từ lúc tin được GỬI, và
+/// sửa chữ bao nhiêu lần cũng không lùi được nó.
+pub fn pinned_sent_at(db: &Db) -> Option<i64> {
+    let v = db.cursor_or_log(PIN_FOLLOWING_KEY)?;
+    let j: serde_json::Value = serde_json::from_str(&v).ok()?;
+    j.get("d")
+        .and_then(serde_json::Value::as_i64)
+        .filter(|d| *d > 0)
+}
+
 /// Ghi sổ gim. Một chỗ, vì hai bản chép là hai bản sẽ lệch.
-fn pin_book(db: &Db, message_id: i64, text: &str) {
-    let so = json!({ "m": message_id, "t": text }).to_string();
+///
+/// Cùng `message_id` với sổ đang giữ ⟹ đây là một lượt SỬA, giữ nguyên `d`.
+/// Id khác ⟹ tin vừa gửi, `d` = bây giờ.
+pub fn pin_book(db: &Db, message_id: i64, text: &str) {
+    let cung_tin = pinned_message(db).map(|(m, _)| m) == Some(message_id);
+    let gui_luc = if cung_tin {
+        pinned_sent_at(db)
+    } else {
+        Some(chrono::Utc::now().timestamp())
+    };
+    let mut so = json!({ "m": message_id, "t": text });
+    if let Some(d) = gui_luc {
+        so["d"] = json!(d);
+    }
+    let so = so.to_string();
     if let Err(e) = db.set_cursor(PIN_FOLLOWING_KEY, &so) {
         logging::error(
             "pin_book_failed",
@@ -331,6 +376,162 @@ fn pin_book(db: &Db, message_id: i64, text: &str) {
                     "effect": "đã đặt tin gim nhưng sổ giữ chữ CŨ — vòng sau sẽ sửa lại y hệt" }),
         );
     }
+}
+
+/// Lý do ghi vào `pin_rebuilt` — hằng để chỗ gọi đọc được trên một dòng.
+const VI_SAO_DA_MAT: &str = "tin gim đã mất (Telegram: not found)";
+const VI_SAO_SAP_HET_HAN: &str = "tin gim sắp tới hạn tự xoá của buồng chat";
+
+/// Telegram nói tin gim KHÔNG CÒN — bằng chứng, không phải một lượt hỏng.
+///
+/// Đúng một câu, đo được trên máy Hà (log 08/10–15/10, mỗi ngày một lần ~24 giờ
+/// sau khi tin gim được gửi). Mọi lỗi khác (`Too Many Requests`, mất quyền,
+/// mạng) là "không sửa được LÚC NÀY", và đọc chúng thành "đã mất" là đẻ một tin
+/// mới cho mỗi lượt hỏng.
+pub fn pin_is_gone(err: &str) -> bool {
+    err.contains("message to edit not found")
+}
+
+/// Dựng lại tin gim bao lâu TRƯỚC khi đồng hồ tự xoá của buồng chat tới hạn.
+pub const PIN_RENEW_BEFORE_SEC: i64 = 30 * 60;
+
+/// Tin gim đã tới lúc phải thay bằng một tin mới chưa — hàm THUẦN.
+///
+/// 🔴 Đồng hồ tự xoá của buồng chat xoá cả tin ĐANG GIM: đo 16/10,
+/// `message_auto_delete_time = 86400`, và log có đúng một lượt `pin_edit_failed
+/// … not found` mỗi ngày, ~24 giờ sau khi tin gim được gửi. Chờ nó mất rồi mới
+/// dựng là để đỉnh buồng TRỐNG một quãng — vá ở phía trước, không ở phía sau.
+///
+/// Không biết mốc gửi (sổ cũ) hoặc buồng không đặt đồng hồ ⟹ `false`: không
+/// đoán tuổi của một tin. Đồng hồ ngắn bất thường thì ít nhất chờ nửa đời của
+/// nó, để không dựng lại ở mọi vòng.
+pub fn pin_due_for_renew(sent_at: Option<i64>, now: i64, chat_timer_sec: Option<i64>) -> bool {
+    match (sent_at, chat_timer_sec) {
+        (Some(d), Some(t)) if t > 0 => now - d >= (t - PIN_RENEW_BEFORE_SEC).max(t / 2),
+        _ => false,
+    }
+}
+
+/// Nhịp tối thiểu giữa hai lần VÒNG NỀN tự dựng lại tin gim — nhân đôi sau mỗi
+/// lần hỏng liền nhau, trần [`PIN_BG_REBUILD_GAP_MAX_SEC`].
+pub const PIN_BG_REBUILD_GAP_SEC: i64 = 600;
+pub const PIN_BG_REBUILD_GAP_MAX_SEC: i64 = 6 * 3600;
+
+/// Vòng nền được dựng lại tin gim lúc này chưa — hàm THUẦN.
+///
+/// `last` = `(lần thử gần nhất, số lần hỏng liền nhau)`. Đây là cái trần cho nỗi
+/// sợ đã viết ở `pin_apply`: một lỗi DAI DẲNG (bot mất quyền gim) không được
+/// biến thành một tin mới mỗi mười giây. Với nhịp này nó là tối đa 10 phút →
+/// 20 → 40 … → 6 giờ một tin, và mỗi lần đều có dòng `error` trong log.
+pub fn pin_bg_rebuild_allowed(last: Option<(i64, u32)>, now: i64) -> bool {
+    match last {
+        None => true,
+        Some((at, hong)) => {
+            let gap = PIN_BG_REBUILD_GAP_SEC
+                .saturating_mul(1i64 << hong.min(10))
+                .min(PIN_BG_REBUILD_GAP_MAX_SEC);
+            now - at >= gap
+        }
+    }
+}
+
+/// Sổ nhịp của [`pin_bg_rebuild_allowed`]. Trong bộ nhớ là đủ: khởi động lại
+/// thì quên, và cái giá là đúng MỘT lượt dựng lại sớm.
+static PIN_BG_REBUILD: std::sync::Mutex<Option<(i64, u32)>> = std::sync::Mutex::new(None);
+
+/// Gửi một tin gim MỚI thay cho tin đang gim, gim nó, rồi dọn tin cũ.
+///
+/// MỘT cửa cho cả ba đường dựng lại: nút START (`/start` trần — buồng chat vừa
+/// bị xoá lịch sử), vòng nền thấy tin gim đã mất, vòng nền thấy tin gim sắp tới
+/// hạn tự xoá.
+///
+/// 🔴 Vì sao phải là tin MỚI, không phải sửa tin cũ (đo 16/10): Hà xoá lịch sử
+/// buồng chat lúc ~02:24Z, nhưng tin gim 56699 VẪN SỐNG ở phía bot — sửa được
+/// suốt hai giờ sau đó, và `getChat` lúc 04:20:37Z vẫn trả `pinned_message =
+/// 56699`. Xoá lịch sử với bot chỉ xoá ở PHÍA CHỦ MÁY. Sửa một tin anh không còn
+/// thấy là sửa vào khoảng không.
+///
+/// Trả `Some(id mới)` chỉ khi SỔ đã trỏ vào tin mới — tức cái gim đã lên.
+fn pin_rebuild(
+    db: &Db,
+    tg: &crate::telegram::Inbox,
+    sid: &str,
+    line: &str,
+    im_lang: bool,
+    vi_sao: &str,
+) -> Option<i64> {
+    let Some(html) = pin_html(sid, line) else {
+        logging::warn(
+            "pin_rebuild_no_link",
+            json!({ "vi_sao": vi_sao, "effect": "chưa biết tên bot ⟹ không dựng được liên kết xem màn — không gim lại" }),
+        );
+        return None;
+    };
+    let cu = pinned_message(db).map(|(m, _)| m);
+    let gui = if im_lang {
+        tg.send_html_silent(&html)
+    } else {
+        tg.send_html_report(&html, &[])
+    };
+    let moi = match gui {
+        Ok(s) => s.message_id,
+        Err(e) => {
+            logging::error(
+                "pin_rebuild_send_failed",
+                json!({ "vi_sao": vi_sao, "err": e,
+                        "effect": "đỉnh buồng chat vẫn không có tin gim cho phiên đang theo" }),
+            );
+            return None;
+        }
+    };
+    pin_following(db, tg, moi, line);
+    if pinned_message(db).map(|(m, _)| m) != Some(moi) {
+        // `pin_following` đã ghi `pin_failed` kèm lý do của Telegram.
+        logging::warn(
+            "pin_rebuild_not_pinned",
+            json!({ "vi_sao": vi_sao, "message_id": moi,
+                    "effect": "tin mới đã gửi nhưng KHÔNG gim được — sổ vẫn giữ tin cũ" }),
+        );
+        return None;
+    }
+    // Dọn tin cũ: sau một lượt xoá lịch sử nó chỉ còn ở phía bot; sau một lượt
+    // dựng lại sớm nó còn nằm trong buồng chat của chủ máy, đã gỡ gim — một dòng
+    // thứ hai nói đúng điều tin mới nói. Đã mất rồi thì Telegram trả "not
+    // found", ghi rồi thôi.
+    if let Some(cu) = cu.filter(|c| *c != moi) {
+        if let Err(e) = tg.delete_message(cu) {
+            logging::info(
+                "pin_old_delete_failed",
+                json!({ "message_id": cu, "err": e, "effect": "tin gim cũ (đã gỡ gim) nằm lại nếu còn" }),
+            );
+        }
+    }
+    logging::info(
+        "pin_rebuilt",
+        json!({ "vi_sao": vi_sao, "cu": cu, "moi": moi, "im_lang": im_lang }),
+    );
+    Some(moi)
+}
+
+/// [`pin_rebuild`] cho VÒNG NỀN: im lặng, và qua nhịp [`pin_bg_rebuild_allowed`].
+fn pin_rebuild_bg(
+    db: &Db,
+    tg: &crate::telegram::Inbox,
+    sid: &str,
+    line: &str,
+    vi_sao: &str,
+) -> Option<i64> {
+    let now = chrono::Utc::now().timestamp();
+    let mut slot = PIN_BG_REBUILD.lock().unwrap_or_else(|e| e.into_inner());
+    // Chưa tới nhịp thì về, KHÔNG ghi: chỗ gọi hỏi lại mỗi vòng (~10 giây), và
+    // lần thử gần nhất đã để lại dòng `error`/`warn` của nó rồi.
+    if !pin_bg_rebuild_allowed(*slot, now) {
+        return None;
+    }
+    let hong_truoc = slot.map(|(_, h)| h).unwrap_or(0);
+    let kq = pin_rebuild(db, tg, sid, line, true, vi_sao);
+    *slot = Some((now, if kq.is_some() { 0 } else { hong_truoc + 1 }));
+    kq
 }
 
 /// Tin "⏳ đang quét màn" đang chờ được xoá — giữ đúng `message_id` của nó.
@@ -412,6 +613,12 @@ fn clear_scan_notice(db: &Db, tg: &crate::telegram::Inbox) {
 ///   `claude agents` mù (xem luật 11b: danh sách rỗng không có nghĩa là phiên
 ///   chết), và viết "đã tắt" lên đỉnh buồng chat vì một phép hỏi trượt là đúng
 ///   con bug đã trả giá ngày 12/08 với ba tin báo tử sai trong tám giây.
+///
+/// Và hai cửa DỰNG LẠI (16/10), cả hai im lặng và qua nhịp `pin_rebuild_bg`:
+/// ④ tin sắp tới hạn tự xoá của buồng chat ⟹ thay trước; ⑤ sửa hỏng vì tin đã
+/// mất (`pin_is_gone`) ⟹ dựng lại (trong `pin_apply`). Xoá lịch sử thì KHÔNG
+/// cửa nào ở đây thấy được — tin vẫn sống ở phía bot; đường của ca ấy là nút
+/// START, xem `on_bare_start`.
 pub fn refresh_pin(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapshot) {
     if !cfg.pin_following {
         return;
@@ -427,12 +634,23 @@ pub fn refresh_pin(db: &Db, cfg: &Config, live: &crate::sessions::SessionsSnapsh
         return;
     };
     let moi = pin_line(s);
-    if moi == cu {
-        return;
-    }
     let Some(tg) = crate::telegram::inbox() else {
         return;
     };
+    // ④ tin gim SẮP tới hạn tự xoá của buồng chat ⟹ thay bằng tin mới, TRƯỚC khi
+    // nó mất (xem `pin_due_for_renew`). Đứng trước ② vì chữ không đổi không có
+    // nghĩa là tin còn sống: phiên nằm 💤 cả ngày thì không vòng nào sửa nó,
+    // và đỉnh buồng trống mà không ai hay. Đồng hồ được hỏi tối đa 6 giờ một
+    // lần (`chat_auto_delete_sec` giữ bản đọc), nên vế này không tốn mạng.
+    let now = chrono::Utc::now().timestamp();
+    let dong_ho = crate::telegram::chat_auto_delete_sec(tg, now);
+    if pin_due_for_renew(pinned_sent_at(db), now, dong_ho) {
+        pin_rebuild_bg(db, tg, &sid, &moi, VI_SAO_SAP_HET_HAN);
+        return;
+    }
+    if moi == cu {
+        return;
+    }
     // ĐÚNG MỘT CỬA với đường chạm-vào-phiên: `pin_apply` sửa tin đang gim, và chỉ
     // dựng tin mới khi cái cũ đã biến mất. Trước 26/08 chỗ này có bản chép riêng
     // của phép sửa + ghi sổ; hai bản chép của cùng một sự thật là hai bản sẽ lệch.
@@ -18204,6 +18422,115 @@ fn execute_session_runs(db: &Db, cfg: &Config) -> bool {
     co_tu_so
 }
 
+/// Một loạt `/start` trần trong chừng này giây được trả lời MỘT lần.
+///
+/// Đo 16/10: 20 cú bấm START trong 5 phút (chủ máy bấm lại vì lô lệnh đang kẹt
+/// sau một hộp xác nhận), tới tay huba trong cùng một lô ⟹ 20 câu trả lời y hệt.
+pub const BARE_START_FOLD_SEC: u64 = 30;
+
+/// Lần gần nhất một `/start` trần đã được trả lời — xem [`BARE_START_FOLD_SEC`].
+static BARE_START_LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Câu trả lời cho `/start` trần — hàm THUẦN.
+///
+/// Một câu cho HAI nghĩa của cùng một chuỗi: nút START (buồng chat vừa trống —
+/// thường là vừa xoá lịch sử) và một deep link ☑ bị Telegram cắt mất payload.
+/// Không tách được hai nghĩa từ chữ, nên câu nói việc huba ĐÃ làm cho nghĩa thứ
+/// nhất, rồi hướng dẫn cho nghĩa thứ hai, có điều kiện — không phán bừa là
+/// "cú chạm của anh vừa bốc hơi" với một người chỉ vừa bấm START.
+///
+/// `gim_lai` = dòng vừa gim lại · `dang_theo` = có phiên đang theo ·
+/// `gim_bat` = cờ `pin_following`.
+pub fn bare_start_reply(gim_lai: Option<&str>, dang_theo: bool, gim_bat: bool) -> String {
+    let dau = match (gim_lai, dang_theo, gim_bat) {
+        (Some(dong), _, _) => format!("↻ Đã gim lại phiên đang theo: {dong}\n"),
+        (None, false, _) => "Chưa theo phiên nào — gõ /session rồi chạm một phiên.\n".to_string(),
+        (None, true, true) => {
+            "⚠ Chưa gim lại được phiên đang theo — chạm lại phiên ấy trong /session.\n".to_string()
+        }
+        (None, true, false) => String::new(),
+    };
+    format!(
+        "{dau}Vừa chạm một ☑ trong chữ? Cú chạm ấy tới nơi KHÔNG kèm lựa chọn (Telegram cắt mất \
+         dữ liệu của liên kết) — bấm NÚT ở đáy tin, hoặc /pick <câu>.<ô> · /key <số>."
+    )
+}
+
+/// `/start` trần: gim lại phiên đang theo bằng một tin MỚI, rồi trả lời một câu.
+///
+/// 🔴 Hà 16/10: *"khi xóa hết lịch sử lại không thấy tự tạo lại tin gim ở trên
+/// về phiên đang được chọn"*. Đo cùng ngày: xoá lịch sử buồng chat với bot chỉ
+/// xoá ở PHÍA CHỦ MÁY — tin gim 56699 vẫn sửa được từ phía bot, và `getChat`
+/// vẫn trả nó là tin đang gim. Không có tín hiệu nào từ Telegram báo "buồng vừa
+/// trống", trừ đúng một thứ: buồng trống thì client hiện nút START, và nút ấy
+/// gửi `/start` trần. Đó là chỗ duy nhất huba biết để dựng lại.
+///
+/// Tên phiên lấy từ sổ theo dõi trước (rẻ, như đường chạm-vào-phiên); sổ không
+/// biết tên thì mới trả một lượt ảnh chụp. Icon trạng thái do `refresh_pin`
+/// điền ở vòng quét kế — đúng như đường chạm-vào-phiên.
+fn on_bare_start(db: &Db, cfg: &Config, inbox: &crate::telegram::Inbox) {
+    {
+        let mut lan_truoc = BARE_START_LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if lan_truoc.is_some_and(|t| t.elapsed().as_secs() < BARE_START_FOLD_SEC) {
+            logging::info(
+                "telegram_bare_start_folded",
+                json!({ "why": "đã trả lời một `/start` trần trong BARE_START_FOLD_SEC giây qua" }),
+            );
+            return;
+        }
+        *lan_truoc = Some(std::time::Instant::now());
+    }
+    let sid = db.cursor_or_log(FOCUS_SESSION_KEY).unwrap_or_default();
+    let sid = sid.trim();
+    let dang_theo = !sid.is_empty();
+    let mut gim_lai: Option<String> = None;
+    if cfg.pin_following && dang_theo {
+        let dong = db
+            .cursor_or_log(WATCH_KEY)
+            .and_then(|v| session_name_from_book(&v, sid))
+            .map(|(ten, tk)| pin_line_from(None, false, None, &ten, &tk))
+            .or_else(|| {
+                crate::sessions::snapshot(cfg)
+                    .sessions
+                    .iter()
+                    .find(|s| s.session_id == sid)
+                    .map(pin_line)
+            });
+        match dong {
+            Some(dong) => {
+                if pin_rebuild(db, inbox, sid, &dong, false, "nút START / `/start` trần").is_some()
+                {
+                    gim_lai = Some(dong);
+                }
+            }
+            None => logging::warn(
+                "pin_rebuild_no_name",
+                json!({ "session": sid,
+                        "effect": "phiên đang theo không có trong sổ lẫn ảnh chụp — không gim lại" }),
+            ),
+        }
+    }
+    // Trước 16/10 dòng này là `telegram_deep_link_payload_lost` (warn) — giữ tên
+    // cũ trong trường để lượt đếm trước/sau còn nối được với nhau.
+    logging::info(
+        "telegram_bare_start",
+        json!({ "dang_theo": dang_theo, "gim_lai": gim_lai.is_some(),
+                "pin_following": cfg.pin_following,
+                "hai_nghia": "nút START khi buồng trống (vừa xoá lịch sử) HOẶC deep link mất payload",
+                "truoc_16_10_ghi_la": "telegram_deep_link_payload_lost" }),
+    );
+    if let Err(e) = inbox.send_text(&bare_start_reply(
+        gim_lai.as_deref(),
+        dang_theo,
+        cfg.pin_following,
+    )) {
+        logging::error(
+            "telegram_ack_failed",
+            json!({ "err": e, "what": "bare_start" }),
+        );
+    }
+}
+
 /// Chạy những mệnh lệnh vừa gõ trên TELEGRAM.
 ///
 /// Cùng `parse_command`, cùng `execute_commands`, cùng bộ handler với phòng chat
@@ -18320,21 +18647,16 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
                     // việc bấm một cái ☑. Đo được 10 lượt như thế, 10/09→18/09,
                     // và không ai lần ra. Một dòng log gọi đúng tên sự việc rẻ
                     // hơn tám ngày.
+                    //
+                    // 🔴 VÀ `/start` TRẦN CÒN LÀ NÚT START — đo 16/10. Hà xoá
+                    // lịch sử buồng chat lúc ~02:24Z; buồng trống ⟹ Telegram
+                    // thay ô nhập bằng nút START, và nút ấy gửi đúng `/start`
+                    // trần. 20 cú bấm trong 5 phút, 20 lần huba đáp "cú chạm ấy
+                    // không mang lựa chọn nào", và tin gim không hề quay lại.
+                    // Hai nghĩa không tách được từ chữ ⟹ `on_bare_start` làm
+                    // việc đúng cho CẢ HAI.
                     if item.text.trim() == "/start" {
-                        logging::warn(
-                            "telegram_deep_link_payload_lost",
-                            json!({ "why": "`/start` trần — Telegram giao cú chạm mà không mang payload \
-                                            ⇒ một lựa chọn/tab/Submit vừa BỐC HƠI",
-                                    "sua": "bấm NÚT ở đáy tin thay cho ☑ trong chữ" }),
-                        );
-                        if let Err(e) = inbox.send_text(
-                            "⚠ Cú chạm ấy tới nơi nhưng KHÔNG mang theo lựa chọn nào \
-                             (Telegram cắt mất phần dữ liệu của liên kết).\n\
-                             → Bấm NÚT ở đáy tin, hoặc gõ /pick <câu>.<ô> · /key <số>.\n\
-                             Dấu ☑ trong chữ chỉ để NHÌN xem ô nào đã tích.",
-                        ) {
-                            logging::error("telegram_ack_failed", json!({ "err": e }));
-                        }
+                        on_bare_start(db, cfg, inbox);
                         continue;
                     }
                     logging::info("telegram_not_a_command", json!({ "head": head }));

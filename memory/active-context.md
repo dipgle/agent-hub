@@ -1,5 +1,25 @@
 # active context — huba
 
+## 🟡 2026-10-16 04:1xZ→04:35Z — tin gim không tự quay lại sau khi xoá lịch sử (Hà: «khi xóa hết lịch sử lại không thấy tự tạo lại tin gim…») — PLAN S54
+
+- ĐO (thăm dò, chỉ-đọc): Hà xoá lịch sử ~02:24Z ⟹ buồng trống ⟹ nút START gửi `/start` TRẦN: 20 lượt
+  02:24–02:29Z (`tin_den` 251582407…), cả 20 được đáp «cú chạm ấy không mang lựa chọn nào» lúc 02:31Z, 0 lượt gim
+  lại. Tin gim 56699 VẪN SỐNG phía bot: `telegram_message_edited 56699` tới 04:20Z, `getChat` 04:20:37Z (qua hòm thư
+  huba, `.tmp/do-gim-getchat.py`) trả `pinned_message=56699` ⟹ xoá lịch sử với bot chỉ xoá phía chủ máy; getChat/sửa
+  KHÔNG thấy được ca này. Ca thứ hai cùng triệu chứng: đồng hồ tự xoá 86400 s xoá cả tin gim — log 08/10→15/10 mỗi ngày
+  một `pin_edit_failed … not found` ~24h sau lúc gửi, vòng nền bỏ cuộc (`tao_neu_thieu=false`).
+- VÁ (chưa commit lúc ghi dòng này): `on_bare_start` (gim lại bằng tin MỚI qua `pin_rebuild`, xoá tin cũ, một câu cho
+  cả loạt trong 30 s, câu không còn phán «mất lựa chọn») · `pin_apply` nhánh `pin_is_gone` ⟹ `pin_rebuild_bg` (im lặng,
+  nhịp 10′ nhân đôi khi hỏng, trần 6h) · `refresh_pin` ④ thay trước 30′ khi sổ có `d` (mốc gửi; `pin_book` giữ `d`
+  khi sửa) · `telegram::send_html_silent`, `chat_auto_delete_sec` thành pub. Bài `tests/pin_rebuild.rs` 11/11 (có đối
+  chứng ngược 5 chỗ nối) + pin_book_legacy 10 + keyboard 7 + cycle_wiring 2 ⇒ TEST_EXIT=0; clippy -D warnings 0;
+  fmt sạch. CHƯA chạy gate.sh trọn, CHƯA QG (lệnh tạm dừng 08/10 chưa gỡ; việc Hà giao thẳng nên vẫn cài).
+- Cài 04:32:06Z, hubd pid 99102, chữ ký cert, `--verify` KHỚP 230826db; 0 dòng error sau khởi động.
+- CHƯA NGHIỆM THU trên Telegram: cần tay Hà (xoá lịch sử → bấm START → nhìn đỉnh buồng). Ca hết hạn: 56699 sổ không có
+  `d` ⟹ chờ ~13:54Z hôm nay, phải thấy `da_mat:true` rồi `pin_rebuilt`. Sổ bàn giao: PIN-START · PIN-HETHAN.
+- Lòi ra, CHƯA truy gốc: 26 tin «❌ Đóng» cùng một giây 02:22:12–13Z (gửi_lúc của Telegram, 26 update_id) ⟹ 26 hộp
+  xác nhận nối nhau giữ CMD_LOCK ~9′ — đúng lúc Hà bấm START không thấy gì. Sổ: CLOSE-26.
+
 ## 🟡 2026-10-11 01:2xZ→ — kế nhiệm 72057 (ttys002) đóng phiên cũ 929404de; vá câu báo dán /runin (571b7b1)
 
 - Đóng 929404de: lượt cuối khép 01:25:17Z (turn_duration, sau khi tự tắt bộ canh bxwngcp7z) · cây 0/0 tại a4a87dd ·

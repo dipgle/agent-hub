@@ -706,7 +706,10 @@ static CHAT_TIMER: Mutex<Option<(i64, Option<i64>)>> = Mutex::new(None);
 
 /// The chat's auto-delete timer, asked at most every [`CHAT_TIMER_RECHECK_SEC`].
 /// A failed ask is logged and reads as "no timer" — huba then deletes as before.
-fn chat_auto_delete_sec(inbox: &Inbox, now: i64) -> Option<i64> {
+/// Also read by `pipeline::refresh_pin`: the same timer deletes the PINNED
+/// message (measured daily 08/10–15/10: `pin_edit_failed` "message to edit not
+/// found" ~24h after each pin was sent).
+pub fn chat_auto_delete_sec(inbox: &Inbox, now: i64) -> Option<i64> {
     let mut slot = CHAT_TIMER.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, sec)) = *slot {
         if now - at < CHAT_TIMER_RECHECK_SEC {
@@ -3476,19 +3479,37 @@ impl Inbox {
         buttons: &[(String, String)],
         ban_phim_khi_tron: bool,
     ) -> Result<Sent, String> {
+        let body = Self::html_message_body(&self.chat_id, html, buttons, ban_phim_khi_tron);
+        self.send_html_body(&body, buttons.len())
+    }
+
+    /// Như [`send_html_report`] (trả id, không nút, không bàn phím) — nhưng
+    /// **KHÔNG RUNG** (`disable_notification`).
+    ///
+    /// Dành cho tin huba tự dựng mà không ai hỏi: tin gim mất hoặc sắp tới hạn
+    /// tự xoá thì vòng nền dựng lại một cái (`pipeline::pin_rebuild`). Chủ máy
+    /// không làm gì mà điện thoại rung là đúng thứ luật 11 cấm — rung mãi thì
+    /// bị tắt tiếng, mang theo cả những tin đáng đọc.
+    pub fn send_html_silent(&self, html: &str) -> Result<Sent, String> {
+        let mut body = Self::html_message_body(&self.chat_id, html, &[], false);
+        body["disable_notification"] = json!(true);
+        self.send_html_body(&body, 0)
+    }
+
+    fn send_html_body(&self, body: &Value, buttons: usize) -> Result<Sent, String> {
         // Một tin khác đi ra ⟹ câu xác nhận đang mở thôi là tin cuối.
         // `send_ack` ghi lại sổ NGAY SAU khi gửi, nên đường ấy không mất gì.
         self.forget_ack_live();
-        let body = Self::html_message_body(&self.chat_id, html, buttons, ban_phim_khi_tron);
-        let v = self.post_retry("sendMessage", &body)?;
+        let v = self.post_retry("sendMessage", body)?;
         if v.get("ok").and_then(Value::as_bool) == Some(true) {
             remember_sent(&self.cfg(), &v);
             let sent = Sent::read(&v);
             logging::info(
                 "telegram_html_sent",
                 json!({ "message_id": sent.message_id, "text_links": sent.links.len(),
-                        "buttons": buttons.len(), "chars": sent.text.chars().count(),
-                        "ban_phim": body.get("reply_markup").and_then(|m| m.get("keyboard")).is_some() }),
+                        "buttons": buttons, "chars": sent.text.chars().count(),
+                        "ban_phim": body.get("reply_markup").and_then(|m| m.get("keyboard")).is_some(),
+                        "im_lang": body.get("disable_notification").is_some() }),
             );
             Ok(sent)
         } else {

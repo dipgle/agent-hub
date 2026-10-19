@@ -287,7 +287,9 @@ pub fn start(cfg: &Config, db: &Db, name: &str) -> String {
             crate::exec::truncate(&cuoi, 300)
         );
     };
-    let ghi = json!({ "window": w, "tty": tty, "at_ms": chrono::Utc::now().timestamp_millis() });
+    // `email` = hòm thư điền sẵn — lượt gửi mã đối chiếu với tài khoản THẬT vừa vào.
+    let ghi = json!({ "window": w, "tty": tty, "at_ms": chrono::Utc::now().timestamp_millis(),
+                      "email": email });
     if let Err(e) = db.set_cursor(&cursor_key(name), &ghi.to_string()) {
         logging::error(
             "account_login_cursor_not_saved",
@@ -385,6 +387,7 @@ pub fn finish(cfg: &Config, db: &Db, name: &str, code: &str) -> String {
             )
         }
         Ket::Xong(t) => {
+            let mong = pending_email(db, name);
             let dong = dong_cua_so(name, w);
             forget(db, name);
             let usage = crate::runtime::usage_lam_moi_mot(cfg, db, name, 0);
@@ -392,8 +395,35 @@ pub fn finish(cfg: &Config, db: &Db, name: &str, code: &str) -> String {
             let do_lai =
                 crate::runtime::do_lai_line(row, None, chrono::Utc::now().timestamp_millis())
                     .unwrap_or_else(|| "đo lại /usage: không có kết quả\n".to_string());
+            // «Login successful» chỉ nói CLI đã nhận mã, không nói ĐÃ VÀO TÀI KHOẢN NÀO —
+            // đọc lại sổ của chính tài khoản ấy và của mọi tài khoản khác.
+            let ids = danh_tinh_tat_ca(cfg);
+            let moi = ids
+                .iter()
+                .find(|(n, _)| n == name)
+                .and_then(|(_, e)| e.clone());
+            let trung = moi
+                .as_deref()
+                .map(|m| trung_voi(&ids, name, m))
+                .unwrap_or_default();
+            let khop = match (mong.as_deref(), moi.as_deref()) {
+                (Some(a), Some(b)) => Some(a.eq_ignore_ascii_case(b)),
+                _ => None,
+            };
+            // Không ghi email vào log — chỉ cờ và tên tài khoản.
+            let ghi = if khop == Some(false) || !trung.is_empty() || moi.is_none() {
+                logging::warn
+            } else {
+                logging::info
+            };
+            ghi(
+                "account_login_identity",
+                json!({ "account": name, "khop_dien_san": khop, "co_email": moi.is_some(),
+                        "trung": trung }),
+            );
+            let ai = canh_bao_danh_tinh(name, mong.as_deref(), moi.as_deref(), &trung);
             format!(
-                "🔑 {name} — CLI nói: «{}»\n{do_lai}{dong}",
+                "🔑 {name} — CLI nói: «{}»\n{ai}{do_lai}{dong}",
                 crate::exec::truncate(&t, 300)
             )
         }
@@ -430,6 +460,126 @@ fn unknown(cfg: &Config, name: &str) -> String {
             .collect::<Vec<_>>()
             .join(" · ")
     )
+}
+
+/// Hòm thư đã điền sẵn (`--email`) lúc mở lượt đăng nhập đang chờ — `None` khi không điền.
+fn pending_email(db: &Db, name: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(&db.cursor_or_log(&cursor_key(name))?).ok()?;
+    v.get("email")?
+        .as_str()
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+}
+
+/// Email của MỌI tài khoản khai trong cấu hình, đọc từ sổ `.claude.json` của từng cái.
+pub fn danh_tinh_tat_ca(cfg: &Config) -> Vec<(String, Option<String>)> {
+    cfg.claude_accounts_or_ambient()
+        .iter()
+        .map(|a| {
+            let dir = a
+                .config_dir
+                .as_deref()
+                .filter(|d| !d.is_empty())
+                .map(|d| crate::config::expand_home(Path::new(d)));
+            (
+                a.name.clone(),
+                crate::quota::identity(dir.as_deref())
+                    .ok()
+                    .and_then(|i| i.email),
+            )
+        })
+        .collect()
+}
+
+/// Các tài khoản KHÁC `ten` đang đăng nhập cùng `email` (không phân biệt hoa thường). Hàm THUẦN.
+pub fn trung_voi(ids: &[(String, Option<String>)], ten: &str, email: &str) -> Vec<String> {
+    ids.iter()
+        .filter(|(n, e)| n != ten && e.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(email)))
+        .map(|(n, _)| n.clone())
+        .collect()
+}
+
+/// Các nhóm ≥2 tài khoản cùng một email — `(email, [tên…])`, theo thứ tự khai. Hàm THUẦN.
+pub fn nhom_trung(ids: &[(String, Option<String>)]) -> Vec<(String, Vec<String>)> {
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    for (n, e) in ids {
+        let Some(e) = e.as_deref().filter(|e| !e.is_empty()) else {
+            continue;
+        };
+        match out.iter_mut().find(|(k, _)| k.eq_ignore_ascii_case(e)) {
+            Some((_, v)) => v.push(n.clone()),
+            None => out.push((e.to_string(), vec![n.clone()])),
+        }
+    }
+    out.retain(|(_, v)| v.len() > 1);
+    out
+}
+
+/// Dòng cảnh báo trùng cho `/accounts` — `None` khi không có nhóm trùng nào. Hàm THUẦN.
+///
+/// 🔴 Đo 2026-10-19 (Hà: *"Tại sao acc3 và acc5 lại là 1"*): `~/.claude-acc3` và
+/// `~/.claude-acc5` cùng `accountUuid 29829ac3` — một tài khoản, một hạn mức. Hai hàng
+/// in số y hệt nhau, và không câu nào nói vì sao.
+pub fn trung_line(nhom: &[(String, Vec<String>)]) -> Option<String> {
+    if nhom.is_empty() {
+        return None;
+    }
+    let mut s = String::new();
+    for (email, ten) in nhom {
+        s.push_str(&format!(
+            "⚠ {} đăng nhập CÙNG MỘT tài khoản ({email}) — chung hạn mức: số của hàng này là \
+             số của hàng kia. Cái nào đăng nhập nhầm thì: /accounts <tên> -l\n",
+            ten.join(" · ")
+        ));
+    }
+    Some(s)
+}
+
+/// Câu thêm vào sau một lượt «Login successful» — LUÔN nói tài khoản vừa vào là ai,
+/// và kêu khi nó không phải người đã điền sẵn hoặc trùng tài khoản khác. Hàm THUẦN.
+///
+/// 🔴 Đo 2026-10-19: lượt `/accounts acc5 -l` ngày 13/10 00:20Z điền sẵn
+/// `help.me002022@gmail.com` (`login_hint`), Hà duyệt trên điện thoại, CLI in
+/// «Login successful.» — và acc5 nay là `trogiup.gdk@gmail.com`, đúng tài khoản của
+/// acc3. `login_hint` chỉ là GỢI Ý: trang dùng tài khoản đang mở trên trình duyệt.
+/// huba đáp *"CLI nói: «Login successful.»"* rồi thôi, nên sáu ngày không ai biết.
+pub fn canh_bao_danh_tinh(
+    ten: &str,
+    mong: Option<&str>,
+    moi: Option<&str>,
+    trung: &[String],
+) -> String {
+    let Some(moi) = moi.filter(|m| !m.is_empty()) else {
+        return format!(
+            "⚠ sổ của {ten} không ghi email nào — CHƯA xác nhận được {ten} vừa đăng nhập vào \
+             tài khoản nào. Xem: /accounts {ten}\n"
+        );
+    };
+    let mut s = format!("tài khoản: {moi}\n");
+    let sai_nguoi = mong.filter(|m| !m.is_empty() && !m.eq_ignore_ascii_case(moi));
+    if let Some(m) = sai_nguoi {
+        s.push_str(&format!(
+            "⚠ KHÔNG phải {m} như đã điền sẵn — trang đăng nhập dùng tài khoản đang mở trên \
+             trình duyệt điện thoại, chữ điền sẵn chỉ là gợi ý.\n"
+        ));
+    }
+    if !trung.is_empty() {
+        s.push_str(&format!(
+            "⚠ {moi} cũng đang là {0} ⟹ {ten} và {0} là MỘT tài khoản, chung hạn mức.\n",
+            trung.join(" · ")
+        ));
+    }
+    if sai_nguoi.is_some() {
+        s.push_str(&format!(
+            "Sửa: đăng xuất {moi} khỏi claude.ai trên trình duyệt điện thoại (hoặc mở đường dẫn \
+             trong tab ẩn danh), rồi /accounts {ten} -l\n"
+        ));
+    } else if !trung.is_empty() {
+        s.push_str(&format!(
+            "Cái nào nhầm thì đăng xuất {moi} trên trình duyệt điện thoại rồi /accounts <tên> -l\n"
+        ));
+    }
+    s
 }
 
 fn pending(db: &Db, name: &str) -> Option<(i64, i64, String)> {

@@ -1,5 +1,21 @@
 # active context — huba
 
+## 🟡 2026-10-19 04:0xZ — acc3 và acc5 là MỘT tài khoản (Hà: «Tại sao acc3 và acc5 lại là 1») — PLAN S55
+
+- ĐO: `~/.claude-acc3/.claude.json` + `~/.claude-acc5/.claude.json` cùng `accountUuid 29829ac3`, org `481fe180`,
+  `trogiup.gdk@gmail.com` ⟹ chung một hạn mức (hai hàng số y hệt). Gốc trong log: `/accounts acc5` 13/10 00:16Z còn
+  là `help.me002022@gmail.com` (CLI không thấy gói ⟹ gợi ý `-l`); `/accounts acc5 -l` 00:20Z điền sẵn
+  `login_hint=help.me002022` ⟹ «Login successful.» 00:22Z ⟹ acc5 thành trogiup (trình duyệt điện thoại đang mở
+  trogiup; login_hint chỉ là gợi ý). huba đáp «CLI nói: Login successful» rồi thôi — 6 ngày không ai biết.
+- VÁ: `account_login::finish` (Ket::Xong) LUÔN in «tài khoản: <email>» + kêu khi khác hòm thư điền sẵn / trùng tài
+  khoản khác (`canh_bao_danh_tinh`; `start` ghi `email` vào sổ chờ); `/accounts` thêm dòng trùng (`nhom_trung` ·
+  `trung_line`), `/accounts <tên>` thêm «CÙNG MỘT tài khoản với …». Log `account_login_identity` (không ghi email).
+  `tests/account_identity.rs` 8/8 (bảng thật 19/10 + đối chứng ngược 4 chỗ nối) + tai_khoan_chi_tiet 11 +
+  usage_do_khi_chon 11 + pin_rebuild 11 + cycle_wiring 2 ⇒ TEST_EXIT=0; clippy 0. Cài 04:06:50Z pid 36549 KHỚP 5e9dd02d.
+- CHƯA: Hà đăng nhập lại acc5 đúng help.me002022 (sổ ACC5-TRUNG). Chọn tài khoản tự động vẫn coi acc3/acc5 là hai
+  vùng hạn mức — CHƯA sửa (hết trùng thì hết ca).
+- S54 nghiệm thu: 18/10 Hà bấm START 4 lượt ⟹ 4 `pin_rebuilt` (58072·58126·58150·58175) — sổ PIN-START ⇒ XONG.
+
 ## 🟡 2026-10-16 04:1xZ→04:35Z — tin gim không tự quay lại sau khi xoá lịch sử (Hà: «khi xóa hết lịch sử lại không thấy tự tạo lại tin gim…») — PLAN S54
 
 - ĐO (thăm dò, chỉ-đọc): Hà xoá lịch sử ~02:24Z ⟹ buồng trống ⟹ nút START gửi `/start` TRẦN: 20 lượt

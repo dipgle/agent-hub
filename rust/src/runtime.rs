@@ -153,7 +153,15 @@ pub fn accounts_say(
     dead: &std::collections::BTreeMap<String, String>,
 ) -> String {
     let usage = usage_lam_moi(cfg, db, USAGE_CU_ACCOUNTS_MS);
-    accounts_text(cfg, live, &usage, &crate::quota::read_all(cfg), dead, now)
+    let mut out = accounts_text(cfg, live, &usage, &crate::quota::read_all(cfg), dead, now);
+    // Hai thư mục cấu hình cùng một tài khoản ⟹ hai hàng số y hệt nhau mà không câu nào
+    // nói vì sao (đo 19/10: acc3 + acc5). Nói ở cuối, sau mọi hàng.
+    let nhom = crate::account_login::nhom_trung(&crate::account_login::danh_tinh_tat_ca(cfg));
+    if let Some(dong) = crate::account_login::trung_line(&nhom) {
+        out.push('\n');
+        out.push_str(&dong);
+    }
+    out
 }
 
 /// `/accounts <tên>` — MỘT tài khoản, kể cả email (Hà 29/09).
@@ -195,7 +203,20 @@ pub fn account_detail_say(
         .map(|d| crate::config::expand_home(Path::new(d)));
     let q = crate::quota::read(&acc.name, dir.as_deref());
     let id = crate::quota::identity(dir.as_deref());
-    account_detail_text(cfg, live, name, Some(&q), row, id, dead, now_ms)
+    let email = id.as_ref().ok().and_then(|i| i.email.clone());
+    let mut out = account_detail_text(cfg, live, name, Some(&q), row, id, dead, now_ms);
+    if let Some(e) = email {
+        let trung =
+            crate::account_login::trung_voi(&crate::account_login::danh_tinh_tat_ca(cfg), name, &e);
+        if !trung.is_empty() {
+            out.push_str(&format!(
+                "⚠ CÙNG MỘT tài khoản với {} — chung hạn mức. Nhầm thì đăng xuất {e} trên trình \
+                 duyệt điện thoại rồi /accounts {name} -l\n",
+                trung.join(" · ")
+            ));
+        }
+    }
+    out
 }
 
 /// Dòng "đo lại /usage" của `/accounts <tên>` — `None` khi không có gì MỚI để nói.

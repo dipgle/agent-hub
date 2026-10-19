@@ -153,10 +153,19 @@ pub fn accounts_say(
     dead: &std::collections::BTreeMap<String, String>,
 ) -> String {
     let usage = usage_lam_moi(cfg, db, USAGE_CU_ACCOUNTS_MS);
-    let mut out = accounts_text(cfg, live, &usage, &crate::quota::read_all(cfg), dead, now);
+    let ids = crate::account_login::danh_tinh_tat_ca(cfg);
+    let mut out = accounts_text_voi_email(
+        cfg,
+        live,
+        &usage,
+        &crate::quota::read_all(cfg),
+        &ids,
+        dead,
+        now,
+    );
     // Hai thư mục cấu hình cùng một tài khoản ⟹ hai hàng số y hệt nhau mà không câu nào
     // nói vì sao (đo 19/10: acc3 + acc5). Nói ở cuối, sau mọi hàng.
-    let nhom = crate::account_login::nhom_trung(&crate::account_login::danh_tinh_tat_ca(cfg));
+    let nhom = crate::account_login::nhom_trung(&ids);
     if let Some(dong) = crate::account_login::trung_line(&nhom) {
         out.push('\n');
         out.push_str(&dong);
@@ -426,6 +435,25 @@ pub fn accounts_text(
     dead: &std::collections::BTreeMap<String, String>,
     now_ms: i64,
 ) -> String {
+    accounts_text_voi_email(cfg, live, usage, quotas, &[], dead, now_ms)
+}
+
+/// [`accounts_text`] kèm EMAIL trên dòng tên mỗi tài khoản — Hà 2026-10-19: *"Hiện thêm
+/// cả email đi"*, ngay sau khi đo ra acc3 và acc5 cùng một tài khoản: hai hàng số y hệt
+/// mà danh sách không cho thấy chúng là cùng một người.
+///
+/// `ids` = `(tên, email)` từ [`crate::account_login::danh_tinh_tat_ca`] — truyền vào,
+/// không đọc tại chỗ, cùng ranh giới với `quotas`. Rỗng ⟹ không in email (đường cũ).
+/// Có trong `ids` mà sổ không ghi email ⟹ NÓI là chưa đọc được, đừng bỏ trống.
+pub fn accounts_text_voi_email(
+    cfg: &Config,
+    live: &SessionsSnapshot,
+    usage: &Value,
+    quotas: &[crate::quota::Quota],
+    ids: &[(String, Option<String>)],
+    dead: &std::collections::BTreeMap<String, String>,
+    now_ms: i64,
+) -> String {
     let pending = usage.get("pending").and_then(Value::as_bool) == Some(true);
     let per_acc = usage.get("accounts");
     let accounts = cfg.claude_accounts_or_ambient();
@@ -447,8 +475,13 @@ pub fn accounts_text(
         // Tài khoản mặc định = tài khoản KHÔNG có `config_dir`. Đó chính là
         // định nghĩa `sessions::account_dir` dùng, nên đọc cùng một chỗ.
         let is_default = acc.config_dir.as_deref().unwrap_or("").is_empty();
+        let email = match ids.iter().find(|(n, _)| n == &acc.name) {
+            None => String::new(),
+            Some((_, Some(e))) if !e.is_empty() => format!(" · {e}"),
+            Some(_) => " · chưa đọc được email".to_string(),
+        };
         out.push_str(&format!(
-            "\n{}{} · {}\n",
+            "\n{}{}{email} · {}\n",
             acc.name,
             if is_default {
                 " ⭐ mặc định của /new"

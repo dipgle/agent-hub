@@ -14,6 +14,9 @@
   usage_do_khi_chon 11 + pin_rebuild 11 + cycle_wiring 2 ⇒ TEST_EXIT=0; clippy 0. Cài 04:06:50Z pid 36549 KHỚP 5e9dd02d.
 - CHƯA: Hà đăng nhập lại acc5 đúng help.me002022 (sổ ACC5-TRUNG). Chọn tài khoản tự động vẫn coi acc3/acc5 là hai
   vùng hạn mức — CHƯA sửa (hết trùng thì hết ca).
+- 04:1xZ Hà «Hiện thêm cả email đi» ⟹ `/accounts` in email trên dòng tên mỗi tài khoản (`accounts_text_voi_email`;
+  sổ không ghi email ⟹ «chưa đọc được email»; `accounts_text` cũ giữ nguyên cho 13 chỗ gọi). account_identity 10/10 ·
+  config 39 · tai_khoan_khoa 16; clippy 0. Cài 04:14:16Z pid 52590 KHỚP e5c87c02. CHƯA thấy trên Telegram.
 - S54 nghiệm thu: 18/10 Hà bấm START 4 lượt ⟹ 4 `pin_rebuilt` (58072·58126·58150·58175) — sổ PIN-START ⇒ XONG.
 
 ## 🟡 2026-10-16 04:1xZ→04:35Z — tin gim không tự quay lại sau khi xoá lịch sử (Hà: «khi xóa hết lịch sử lại không thấy tự tạo lại tin gim…») — PLAN S54

@@ -115,6 +115,77 @@ fn accounts_without_a_book_never_group_together() {
     assert_eq!(trung_line(&[]), None);
 }
 
+// ── `/accounts`: email trên dòng tên mỗi tài khoản (Hà 19/10: «Hiện thêm cả email đi») ──
+
+fn cfg_3() -> huba::config::Config {
+    huba::config::Config {
+        claude_accounts: ["acc1", "acc3", "acc5"]
+            .iter()
+            .map(|n| huba::config::ClaudeAccountCfg {
+                name: (*n).into(),
+                config_dir: (*n != "acc1").then(|| format!("~/.claude-{n}")),
+                launch: None,
+                locked: false,
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
+fn dong_ten<'a>(s: &'a str, ten: &str) -> &'a str {
+    s.lines()
+        .find(|l| l.starts_with(&format!("{ten} ")))
+        .unwrap_or_else(|| panic!("thiếu dòng tên {ten}:\n{s}"))
+}
+
+#[test]
+fn every_account_row_carries_its_email() {
+    let ids: Vec<(String, Option<String>)> = vec![
+        ("acc1".into(), None),
+        ("acc3".into(), Some("trogiup.gdk@gmail.com".into())),
+        ("acc5".into(), Some("trogiup.gdk@gmail.com".into())),
+    ];
+    let s = huba::runtime::accounts_text_voi_email(
+        &cfg_3(),
+        &Default::default(),
+        &serde_json::json!({}),
+        &[],
+        &ids,
+        &Default::default(),
+        0,
+    );
+    assert!(
+        dong_ten(&s, "acc3").starts_with("acc3 · trogiup.gdk@gmail.com · "),
+        "{s}"
+    );
+    assert!(
+        dong_ten(&s, "acc5").starts_with("acc5 · trogiup.gdk@gmail.com · "),
+        "{s}"
+    );
+    // Mặc định vẫn đứng ngay sau tên; sổ không có email ⟹ NÓI ra, không bỏ trống.
+    assert!(
+        dong_ten(&s, "acc1").starts_with("acc1 ⭐ mặc định của /new · chưa đọc được email · "),
+        "{s}"
+    );
+}
+
+#[test]
+fn the_old_entry_point_prints_no_email() {
+    // 13 chỗ gọi cũ (bài kiểm) đi `accounts_text` — không truyền danh tính ⟹ không in.
+    let s = huba::runtime::accounts_text(
+        &cfg_3(),
+        &Default::default(),
+        &serde_json::json!({}),
+        &[],
+        &Default::default(),
+        0,
+    );
+    assert!(
+        !s.contains('@') && !s.contains("chưa đọc được email"),
+        "{s}"
+    );
+}
+
 // ── Chỗ nối: soi nguồn, kèm đối chứng ngược ──────────────────────────────────
 
 fn doc(rel: &str) -> String {
@@ -142,6 +213,9 @@ fn noi(login: &str, runtime: &str) -> Result<(), String> {
     let ds = than(runtime, "pub fn accounts_say(").ok_or("mất accounts_say")?;
     if !ds.contains("trung_line(") {
         return Err("/accounts không báo trùng".into());
+    }
+    if !(ds.contains("accounts_text_voi_email(") && ds.contains("&ids,")) {
+        return Err("/accounts không in email".into());
     }
     let ct = than(runtime, "pub fn account_detail_say(").ok_or("mất account_detail_say")?;
     if !ct.contains("trung_voi(") {
@@ -189,6 +263,11 @@ fn removing_any_wire_turns_the_check_red() {
             "account_login::trung_voi(",
             "account_login::khong(",
             "/accounts <tên> không",
+        ),
+        (
+            "        &ids,\n",
+            "        &[],\n",
+            "/accounts không in email",
         ),
     ];
     for (goc, thay, mong) in ca_runtime {

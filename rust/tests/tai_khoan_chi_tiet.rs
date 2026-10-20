@@ -14,7 +14,7 @@ use std::path::Path;
 use huba::config::{ClaudeAccountCfg, Config};
 use huba::pipeline::accounts_order;
 use huba::quota::{identity, Identity};
-use huba::runtime::{account_detail_say, account_detail_text};
+use huba::runtime::account_detail_text;
 use huba::sessions::{LiveSession, SessionsSnapshot};
 
 const BAY_GIO: i64 = 1_790_000_000_000;
@@ -211,6 +211,10 @@ fn chi_tiet_noi_ro_khi_khong_doc_duoc_email_va_ten_la() {
 
 /// `claude` GIẢ: mỗi lần bị gọi ghi một dòng vào `<config_dir>/goi.log`, rồi in câu
 /// `/usage` với tuần 42 % — cùng khuôn với `tests/usage_do_khi_chon.rs`.
+///
+/// Chỉ Unix (kịch bản bash + quyền 0o755): thiếu cổng này thì clippy đích Windows
+/// của `gate.sh` đỏ — đỏ từ 11/10 tới 20/10 mà không lượt cổng trọn nào thấy.
+#[cfg(unix)]
 fn claude_gia(dir: &Path) -> std::path::PathBuf {
     let p = dir.join("claude-gia.sh");
     std::fs::write(
@@ -225,6 +229,7 @@ fn claude_gia(dir: &Path) -> std::path::PathBuf {
     p
 }
 
+#[cfg(unix)]
 fn so_lan_goi(dir: &Path) -> usize {
     std::fs::read_to_string(dir.join("goi.log"))
         .map(|s| s.lines().count())
@@ -237,6 +242,7 @@ fn so_lan_goi(dir: &Path) -> usize {
 /// khóa"*. Tài khoản ở đây ĐANG KHOÁ, và lượt dò phải chạy đúng MỘT lần: lần hỏi
 /// thứ hai trong 5′ dùng lại số vừa đo (luật 5′ của `/accounts`, Hà 24/09).
 #[test]
+#[cfg(unix)]
 fn chi_tiet_do_lai_ca_tai_khoan_dang_khoa() {
     let d = tempfile::tempdir().unwrap();
     let acc3 = d.path().join("acc3");
@@ -247,7 +253,14 @@ fn chi_tiet_do_lai_ca_tai_khoan_dang_khoa() {
     let now = chrono::Utc::now().timestamp_millis();
     let dead = std::collections::BTreeMap::new();
 
-    let t = account_detail_say(&c, &db, &SessionsSnapshot::default(), "acc3", &dead, now);
+    let t = huba::runtime::account_detail_say(
+        &c,
+        &db,
+        &SessionsSnapshot::default(),
+        "acc3",
+        &dead,
+        now,
+    );
     assert_eq!(so_lan_goi(&acc3), 1, "tài khoản khoá phải được đo lại: {t}");
     assert!(t.contains("🔒 ĐANG KHOÁ"), "{t}");
     assert!(t.contains("email: trogiup.gdk@gmail.com"), "{t}");
@@ -256,7 +269,14 @@ fn chi_tiet_do_lai_ca_tai_khoan_dang_khoa() {
         "số vừa đo phải tới màn: {t}"
     );
 
-    let t2 = account_detail_say(&c, &db, &SessionsSnapshot::default(), "acc3", &dead, now);
+    let t2 = huba::runtime::account_detail_say(
+        &c,
+        &db,
+        &SessionsSnapshot::default(),
+        "acc3",
+        &dead,
+        now,
+    );
     assert_eq!(so_lan_goi(&acc3), 1, "số còn mới (<5′) mà vẫn đo lại: {t2}");
     assert!(t2.contains("tuần 42%"), "{t2}");
 

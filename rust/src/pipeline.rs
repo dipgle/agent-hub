@@ -2656,6 +2656,7 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
         };
         let mut target = crate::watch::suggest_account(&s.account, &hang, &live.sessions, now_min);
         let phut = minutes_until_reset(khi, now_min);
+        let moc = read_reset(khi, s.limit_window, s.limit_left_min, now_min);
         let age_sec =
             ((chrono::Utc::now().timestamp_millis() - s.started_at_ms).max(0) / 1000) as u64;
         let xet = |target: Option<&str>| {
@@ -2665,7 +2666,7 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
                 age_sec,
                 crate::sessions::is_real_tty(&s.tty),
                 target,
-                phut,
+                moc,
                 cfg.auto_handover.on_limit_wait_min,
             )
         };
@@ -2686,10 +2687,14 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
             why = xet(target.as_deref());
         }
         if why != LimitWhy::Do {
+            // `loai` + `con_lai_neo` đi kèm để lần sau đọc log là thấy phán quyết
+            // tựa vào ĐÂU: mốc neo từ nhật ký, hay đường lùi theo loại hạn mức.
             logging::info(
                 "auto_limit_held",
                 json!({ "session": s.session_id, "acc": s.account, "khi": khi,
                         "phut_toi_reset": phut, "tuoi_giay": age_sec,
+                        "loai": format!("{:?}", s.limit_window),
+                        "con_lai_neo": s.limit_left_min,
                         "why": format!("{why:?}") }),
             );
             continue;
@@ -2712,6 +2717,8 @@ fn auto_switch_on_limit(db: &Db, cfg: &Config, live: &crate::sessions::SessionsS
             "auto_limit_firing",
             json!({ "session": s.session_id, "name": s.name, "acc_cu": s.account,
                     "acc_moi": acc_moi, "khi": khi, "phut_toi_reset": phut,
+                    "loai": format!("{:?}", s.limit_window),
+                    "con_lai_neo": s.limit_left_min,
                     "hang": hang.iter()
                         .map(|a| format!("{}={}", a.name, a.rank.say()))
                         .collect::<Vec<_>>() }),
@@ -3057,19 +3064,30 @@ pub enum UnstickWhy {
 /// TỰ MỞ LẠI lại là phút huba thôi bấm — vá một vòng lặp vô ích bằng một cái
 /// khoá vĩnh viễn, tệ hơn cả lỗi ban đầu.
 ///
-/// Cách phân biệt đã có sẵn, dùng lại nguyên si của [`auto_limit_why`]: cửa sổ
-/// hạn mức phiên là 5 giờ ([`LIMIT_WINDOW_MAX_MIN`] = 360 phút, chừa lệch), nên
-/// một mốc dạng ĐỒNG HỒ đọc ra xa hơn thế là một mốc **đã qua**. Còn đọc không
-/// ra đồng hồ (`resets Sep 1` — hạn mức TUẦN) thì fail-closed: coi như còn cắn,
-/// vì nó còn cắn thật, hàng ngày.
-pub fn limit_still_biting(limited: Option<&str>, now_min: u64) -> bool {
+/// Phán "đã qua" là của [`read_reset`], dùng chung với [`auto_limit_why`]: có
+/// mốc neo (lúc CLI in dòng chặn) thì trừ thẳng; không có thì chỉ dòng `session
+/// limit` mới được suy từ trần 5 giờ. Đọc không ra đồng hồ (dạng ngày) thì
+/// fail-closed: coi như còn cắn, vì nó còn cắn thật.
+///
+/// 🔴 20/10: bản cũ chỉ nhận `limited` + giờ, nên `weekly limit · resets 1pm`
+/// lúc 19:41 đọc thành "hết cắn" ⟹ [`crate::watch::suggest_account`] coi acc3
+/// (tuần 100 %) là tài khoản còn sống. Loại hạn mức và mốc neo nay là tham số
+/// BẮT BUỘC, để không chỗ gọi nào lặng lẽ rơi về cách đọc cũ.
+pub fn limit_still_biting(
+    limited: Option<&str>,
+    window: crate::keys::LimitWindow,
+    left_min: Option<i64>,
+    now_min: u64,
+) -> bool {
     let Some(khi) = limited.map(str::trim).filter(|k| !k.is_empty()) else {
         return false;
     };
-    // Đọc: "CÒN cắn, trừ khi mốc đọc ra xa hơn cả cửa sổ hạn mức". Nhánh `_`
-    // gom hai ca cố ý: mốc còn ở phía trước, và mốc đọc KHÔNG ra đồng hồ (hạn
-    // mức TUẦN) — cả hai đều là còn cắn.
-    !matches!(minutes_until_reset(khi, now_min), Some(m) if m > LIMIT_WINDOW_MAX_MIN)
+    // Đọc: "CÒN cắn, trừ khi mốc đã qua". `Unknown` (dạng ngày) và `Ahead` đều
+    // là còn cắn.
+    !matches!(
+        read_reset(khi, window, left_min, now_min),
+        ResetRead::Passed(_)
+    )
 }
 
 /// Bây giờ là phút thứ mấy của ngày, theo giờ **ĐỊA PHƯƠNG**.
@@ -3552,7 +3570,12 @@ fn auto_unstick_box(cfg: &Config, live: &crate::sessions::SessionsSnapshot, now_
         let why = unstick_why(
             crate::sessions::is_real_tty(&s.tty),
             crate::sessions::is_hub_own_probe(s),
-            limit_still_biting(s.limited.as_deref(), now_min),
+            limit_still_biting(
+                s.limited.as_deref(),
+                s.limit_window,
+                s.limit_left_min,
+                now_min,
+            ),
             s.screen_choices,
             Some(text),
             stable_sec,
@@ -4429,10 +4452,88 @@ pub enum LimitWhy {
     NoAccount,
     /// Đồng hồ mở lại còn chừng này phút: chờ rẻ hơn thay cả cửa sổ.
     ResetsSoon(u64),
-    /// Mốc mở lại đọc ra XA hơn cả cửa sổ hạn mức ⟹ nó là mốc **đã qua**, tức
-    /// hạn mức đã tự mở và dòng chữ trên màn chỉ là vết cũ — xem
-    /// [`LIMIT_WINDOW_MAX_MIN`].
+    /// Mốc mở lại **đã qua** ([`ResetRead::Passed`]), tức hạn mức đã tự mở và
+    /// dòng chữ trên màn chỉ là vết cũ. Số = phút đọc trên mặt đồng hồ tính từ
+    /// lúc này (`minutes_until_reset`), giữ nguyên nghĩa cũ để log còn so được.
     ResetAlreadyPassed(u64),
+}
+
+/// Mốc mở lại đọc ra thành gì — SAU khi đã biết dòng chặn nói về hạn mức nào
+/// và được CLI in ra lúc nào. Một chỗ phán "đã qua", để [`auto_limit_why`] và
+/// [`limit_still_biting`] không mỗi bên tự đoán một kiểu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResetRead {
+    /// Không đọc ra đồng hồ (`resets Oct 22 at 1pm` — mốc còn > 24 giờ lúc in,
+    /// hoặc chữ lạ). Xem [`auto_limit_why`] để biết vì sao vẫn chuyển.
+    Unknown,
+    /// Còn chừng này phút nữa.
+    Ahead(u64),
+    /// Đã qua. Số = phút trên mặt đồng hồ tính từ lúc này, như
+    /// [`LimitWhy::ResetAlreadyPassed`].
+    Passed(u64),
+}
+
+/// Đọc mốc mở lại của MỘT dòng chặn — xem [`ResetRead`].
+///
+/// `left_min` = số phút còn lại tính bằng mốc NEO ([`reset_left_min`]), có khi
+/// nhật ký của phiên còn bản ghi CLI in dòng ấy. Có nó thì nó là câu trả lời:
+/// một phép trừ hai mốc tuyệt đối, không đoán gì, đúng với cả hạn mức tuần lẫn
+/// vết banner nằm lại sau giờ mở (ca 10/09 ở [`crate::watch::suggest_account`]).
+///
+/// Không có mốc neo thì lùi về HÌNH DẠNG sản phẩm, và chỉ ở chỗ đã đo được:
+/// `session limit` xa hơn [`LIMIT_WINDOW_MAX_MIN`] ⟹ đã qua. Loại dài hơn
+/// (`weekly`…) thì đồng hồ một mình KHÔNG phân biệt được qua hay chưa (mốc in
+/// ≤ 24 giờ nên mọi số 0–1439 đều có thể là thật) ⟹ coi là còn cắn, cùng chiều
+/// với dạng ngày `resets Oct 22 at 1pm` vốn đã được xét như thế từ đầu.
+pub fn read_reset(
+    khi: &str,
+    window: crate::keys::LimitWindow,
+    left_min: Option<i64>,
+    now_min: u64,
+) -> ResetRead {
+    let dial = minutes_until_reset(khi, now_min);
+    if let Some(left) = left_min {
+        return match u64::try_from(left) {
+            Ok(m) if m > 0 => ResetRead::Ahead(m),
+            // ≤ 0: đúng giây mở hoặc đã qua. `dial` luôn có ở đây (mốc neo chỉ
+            // tính được khi đồng hồ đọc ra), `0` chỉ để không phải `unwrap`.
+            _ => ResetRead::Passed(dial.unwrap_or(0)),
+        };
+    }
+    let Some(m) = dial else {
+        return ResetRead::Unknown;
+    };
+    match window {
+        crate::keys::LimitWindow::Session if m > LIMIT_WINDOW_MAX_MIN => ResetRead::Passed(m),
+        _ => ResetRead::Ahead(m),
+    }
+}
+
+/// Còn bao nhiêu PHÚT tới giờ mở lại, NEO vào lúc CLI in dòng chặn.
+///
+/// Vì sao neo được, đo trên mã CLI 2.1.28x (`function Pc` trong `claude.exe`):
+/// dòng chặn in đồng hồ trần (`1pm`) khi và chỉ khi mốc còn **≤ 24 giờ** tính từ
+/// lúc in. Nên mốc thật là lần ĐẦU TIÊN đồng hồ ấy điểm sau giây in — không có
+/// ca thứ hai. Không cần biết loại hạn mức, không cần trần 360 phút.
+///
+/// Ca thật 19/10 tính lại bằng hàm này: in 12:25:47Z (19:25 giờ máy), `resets
+/// 1pm` ⟹ mốc 2026-10-20T06:00:00Z — trùng `week_resets_at` trong sổ hạn mức
+/// của chính tài khoản ấy tới từng phút; lúc 12:41:39Z còn 1039 phút.
+///
+/// `printed_ms` = dấu giờ bản ghi CLI trong nhật ký; `lech_phut` = độ lệch giờ
+/// máy so với UTC lúc đọc (Sài Gòn: 420). Đổi giờ mùa giữa lúc in và lúc đọc
+/// thì lệch một tiếng — máy này không có giờ mùa, ghi ra vì đó là một GIẢ ĐỊNH.
+/// Trả số âm hoặc 0 khi mốc đã qua; `None` khi `khi` không có đồng hồ.
+pub fn reset_left_min(khi: &str, printed_ms: i64, now_ms: i64, lech_phut: i64) -> Option<i64> {
+    let in_phut = printed_ms.div_euclid(60_000);
+    let in_gio_may = (in_phut + lech_phut).rem_euclid(1440) as u64;
+    let m = minutes_until_reset(khi, in_gio_may)?;
+    // Đồng hồ trùng đúng phút in ⟹ mốc là 24 giờ sau, không phải "ngay bây giờ":
+    // CLI không bao giờ in một mốc mở lại đã tới.
+    let m = if m == 0 { 1440 } else { m as i64 };
+    let mo_lai_ms = (in_phut + m) * 60_000;
+    // Làm tròn LÊN tới phút: còn 30 giây vẫn là "còn 1 phút", chưa phải đã qua.
+    Some(-(now_ms - mo_lai_ms).div_euclid(60_000))
 }
 
 /// Trần của một cửa sổ hạn mức dạng ĐỒNG HỒ, tính bằng phút.
@@ -4445,14 +4546,20 @@ pub enum LimitWhy {
 ///
 /// Cái phân biệt được hai ca ấy KHÔNG nằm trong dòng chữ, nó nằm ở hình dạng của
 /// sản phẩm: cửa sổ hạn mức phiên là **5 giờ**, nên lúc vừa chạm trần thì mốc mở
-/// lại luôn ≤ 5 giờ nữa. Hạn mức TUẦN thì in NGÀY (`resets Sep 1`), không in
-/// đồng hồ, nên nó không đi qua đường này (`minutes_until_reset` trả `None`).
-/// ⟹ một mốc dạng đồng hồ đọc ra xa hơn 6 giờ là một mốc đã qua, không có ca thứ
-/// ba. Để 6 chứ không phải 5: chừa cho lệch đồng hồ và cho ngày CLI đổi cửa sổ.
+/// lại luôn ≤ 5 giờ nữa ⟹ một mốc dạng đồng hồ đọc ra xa hơn 6 giờ là một mốc đã
+/// qua. Để 6 chứ không phải 5: chừa cho lệch đồng hồ và cho ngày CLI đổi cửa sổ.
 ///
-/// ⚠ Và lúc ấy đúng việc là **KHÔNG chuyển**: hạn mức đã tự mở, phiên cũ còn
-/// nguyên ngữ cảnh của nó. Bàn giao lúc này là đổi một phiên 67% ngữ cảnh lấy
-/// một bản tóm thô — đúng cái giá mà `auto_handover` sinh ra để tránh.
+/// 🔴 **CHỈ cho hạn mức PHIÊN, và chỉ khi không neo được lúc in** (vá 20/10). Câu
+/// cũ ở đây viết *"hạn mức TUẦN thì in NGÀY, không đi qua đường này"*, và nó SAI:
+/// CLI in đồng hồ cho MỌI loại khi mốc còn ≤ 24 giờ (xem
+/// [`crate::keys::LimitWindow`]). Ca thật 19/10: `weekly limit · resets 1pm` đọc
+/// ra 1039 phút ⟹ bị phán "đã qua" trong khi còn đúng 1039 phút thật. Nay
+/// [`read_reset`] hỏi mốc NEO trước (lúc CLI in dòng ấy, lấy từ nhật ký), và trần
+/// này chỉ còn là đường lùi cho dòng `session limit` không có mốc neo.
+///
+/// ⚠ Và lúc mốc đã qua thì đúng việc là **KHÔNG chuyển**: hạn mức đã tự mở, phiên
+/// cũ còn nguyên ngữ cảnh của nó. Bàn giao lúc này là đổi một phiên 67% ngữ cảnh
+/// lấy một bản tóm thô — đúng cái giá mà `auto_handover` sinh ra để tránh.
 const LIMIT_WINDOW_MAX_MIN: u64 = 360;
 
 /// Phiên trẻ hơn chừng này giây thì KHÔNG bị tự chuyển. Phanh chống dây chuyền.
@@ -4487,7 +4594,7 @@ pub fn auto_limit_why(
     age_sec: u64,
     has_window: bool,
     target: Option<&str>,
-    mins_to_reset: Option<u64>,
+    reset: ResetRead,
     wait_min: u64,
 ) -> LimitWhy {
     match limited {
@@ -4518,26 +4625,30 @@ pub fn auto_limit_why(
     // hình dạng ĐẮT nhất: hạn mức TUẦN in `resets Sep 1`, tức còn nhiều ngày —
     // đúng ca phải chuyển. Fail-closed ở đây nghĩa là để phiên chết đứng suốt
     // mấy ngày chỉ để tránh một cửa sổ thừa.
-    if let Some(m) = mins_to_reset {
+    //
+    // Phán "đã qua" KHÔNG nằm ở đây nữa (20/10): nó cần biết loại hạn mức và lúc
+    // in, mà hàm này chỉ nhận một con số — đúng chỗ đã đọc `weekly limit ·
+    // resets 1pm` thành mốc đã qua. Xem [`read_reset`].
+    match reset {
         // Mốc đã qua ⟹ hạn mức đã tự mở, không có gì để chuyển.
-        if m > LIMIT_WINDOW_MAX_MIN {
-            return LimitWhy::ResetAlreadyPassed(m);
-        }
-        if m < wait_min {
-            return LimitWhy::ResetsSoon(m);
-        }
+        ResetRead::Passed(m) => LimitWhy::ResetAlreadyPassed(m),
+        ResetRead::Ahead(m) if m < wait_min => LimitWhy::ResetsSoon(m),
+        ResetRead::Ahead(_) | ResetRead::Unknown => LimitWhy::Do,
     }
-    LimitWhy::Do
 }
 
 /// Còn bao nhiêu PHÚT nữa tới giờ mở lại, đọc từ chính dòng CLI in ra.
 ///
 /// Đầu vào là thứ [`crate::keys::session_limit_on_screen`] trả về (phần sau dấu
 /// `·`). Hai dạng đo được trên máy này: `resets 10:30pm (Asia/Saigon)` và
-/// `resets Sep 1`. Dạng đầu ra được số; dạng sau **cố ý** trả `None` — nó là hạn
-/// mức tuần, còn hàng ngày, và một parser đoán ngày tháng ở đây đắt hơn nhiều so
-/// với việc thú nhận không biết. Xem [`auto_limit_why`] để biết `None` dẫn tới
-/// quyết định gì và vì sao.
+/// `resets Sep 1 at 1pm`. Dạng đầu ra được số; dạng sau **cố ý** trả `None` — CLI
+/// chỉ in ngày khi mốc còn hơn 24 giờ, tức còn lâu, và một parser đoán ngày tháng
+/// ở đây đắt hơn nhiều so với việc thú nhận không biết. Xem [`auto_limit_why`]
+/// để biết `None` dẫn tới quyết định gì và vì sao.
+///
+/// ⚠ Số này là phút trên MẶT ĐỒNG HỒ (0–1439), KHÔNG phải "còn bao lâu": một mốc
+/// đã qua đọc lên y hệt một mốc gần 24 giờ nữa. Muốn biết qua hay chưa thì hỏi
+/// [`read_reset`], đừng tự so số này với một cái trần.
 ///
 /// 🔴 **Tên MÚI GIỜ chứa `am`** — `(America/New_York)` có `am` ngay sau dấu
 /// ngoặc — nên bản đầu cắt ở `(` trước khi tìm `am`/`pm`. Cấy lỗi để kiểm

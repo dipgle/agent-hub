@@ -14,6 +14,12 @@
 //! cd ~/projects/huba/rust
 //! cargo test --offline --test account_login_live -- --ignored --nocapture
 //! ```
+//!
+//! Chỉ macOS: bài này mở cửa sổ Terminal.app thật và chép shim bằng quyền Unix.
+//! Thiếu cổng này thì `clippy --target x86_64-pc-windows-gnu` của `gate.sh` đỏ
+//! (`std::os::unix` không có) — đỏ từ 11/10 tới 20/10 mà không ai thấy, vì không
+//! lượt cổng trọn nào chạy trong khoảng ấy.
+#![cfg(target_os = "macos")]
 
 mod common;
 

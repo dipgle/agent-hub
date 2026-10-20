@@ -10,6 +10,7 @@
 //! cổng phải có đối chứng ngược — cấy ca hỏng ⇒ phải nổ (`Do`); cấy ca lành ⇒
 //! phải KHÔNG nổ, và phải nói ĐÚNG vì sao.
 
+use huba::keys::LimitWindow;
 use huba::pipeline::{
     cau_da_vao_nhat_ky, limit_still_biting, o_sau_cu_bam, stuck_next, unstick_done, unstick_why,
     OSau, StuckNext, UnstickDone, UnstickWhy,
@@ -160,7 +161,12 @@ fn the_same_box_fires_when_the_session_is_not_limited() {
 #[test]
 fn a_reset_mark_still_ahead_is_still_biting() {
     assert!(
-        limit_still_biting(Some("resets 9:10pm (Asia/Saigon)"), 20 * 60),
+        limit_still_biting(
+            Some("resets 9:10pm (Asia/Saigon)"),
+            LimitWindow::Session,
+            None,
+            20 * 60
+        ),
         "20:00 mà mốc mở lại là 21:10 thì còn 70 phút nữa — vẫn đang bị chặn"
     );
 }
@@ -170,25 +176,53 @@ fn a_reset_mark_still_ahead_is_still_biting() {
 #[test]
 fn a_reset_mark_already_passed_is_only_an_old_line() {
     assert!(
-        !limit_still_biting(Some("resets 9:10pm (Asia/Saigon)"), 21 * 60 + 46),
+        !limit_still_biting(
+            Some("resets 9:10pm (Asia/Saigon)"),
+            LimitWindow::Session,
+            None,
+            21 * 60 + 46
+        ),
         "mốc đã qua 36 phút mà vẫn đọc thành 'đang bị chặn' thì huba thôi bấm \
          đúng lúc phiên gõ được trở lại"
     );
 }
 
-/// Hạn mức TUẦN in NGÀY (`resets Sep 1`), không in đồng hồ ⟹ `minutes_until_reset`
-/// trả `None`. Fail-closed: coi như còn cắn, vì nó còn cắn thật, hàng ngày.
+/// Dòng in NGÀY (`resets Sep 1 at 1pm` — CLI chỉ in ngày khi mốc còn hơn 24 giờ)
+/// ⟹ `minutes_until_reset` trả `None`. Fail-closed: coi như còn cắn, vì nó còn
+/// cắn thật. (Câu cũ ở đây viết *"hạn mức TUẦN in NGÀY"* — sai từ 19/10: tuần
+/// cũng in đồng hồ khi mốc ≤ 24 giờ, xem `tests/weekly_limit_clock_form.rs`.)
 #[test]
 fn a_weekly_limit_has_no_clock_and_stays_biting() {
-    assert!(limit_still_biting(Some("resets Sep 1"), 12 * 60));
+    assert!(limit_still_biting(
+        Some("resets Sep 1 at 1pm (Asia/Saigon)"),
+        LimitWindow::Longer,
+        None,
+        12 * 60
+    ));
+    assert!(limit_still_biting(
+        Some("resets Sep 1"),
+        LimitWindow::Session,
+        None,
+        12 * 60
+    ));
 }
 
 /// Không có dòng nào (hoặc dòng rỗng) ⟹ không bị chặn. Ca này phải ĐÚNG, nếu
 /// không thì mọi phiên bình thường đều bị cái phanh mới khoá lại.
 #[test]
 fn no_limit_line_means_not_limited() {
-    assert!(!limit_still_biting(None, 12 * 60));
-    assert!(!limit_still_biting(Some("   "), 12 * 60));
+    assert!(!limit_still_biting(
+        None,
+        LimitWindow::Session,
+        None,
+        12 * 60
+    ));
+    assert!(!limit_still_biting(
+        Some("   "),
+        LimitWindow::Longer,
+        Some(500),
+        12 * 60
+    ));
 }
 
 /// Ô nhập trống hoặc chỉ toàn khoảng trắng thì không có gì để gửi.

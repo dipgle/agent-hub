@@ -5889,6 +5889,62 @@ pub fn activity(screen: &str) -> Option<Activity> {
 const RECENT_STATUS_LINES: usize = 40;
 
 pub fn session_limit_on_screen(screen: &str) -> Option<String> {
+    limit_line_on_screen(screen).map(|(_, khi)| khi)
+}
+
+/// Hạn mức NÀO chặn phiên — cái tên CLI in giữa `You've hit your` và `limit`.
+///
+/// 🔴 Sinh ra từ ca thật 19/10 ([dwork/review], acc3, Hà duyệt chuyển sang
+/// huba): `You've hit your weekly limit · resets 1pm (Asia/Saigon)` in lúc
+/// 19:25 giờ máy, và [`crate::pipeline::auto_limit_why`] đọc nó thành
+/// `ResetAlreadyPassed(1039)` **13 lần trong 15 phút**. Đúng giây ấy, sổ hạn
+/// mức của chính huba ghi acc3 tuần 100 %, mở lại 2026-10-20T06:00Z, tức còn
+/// đúng 1039 phút: mốc CHƯA qua. Phiên đứng chết cho tới khi Hà tự bấm đóng.
+///
+/// Gốc: [`session_limit_on_screen`] chỉ giữ phần sau `·`, nên chữ `weekly` rơi
+/// mất, và trần 360 phút của [`crate::pipeline::read_reset`] (đo cho cửa sổ
+/// 5 giờ) bị áp lên một hạn mức TUẦN. Tiền đề cũ *"hạn mức tuần thì in NGÀY"*
+/// đo lại trên mã CLI 2.1.28x là SAI: hàm định dạng (`function Pc` trong
+/// `claude.exe`) in ĐỒNG HỒ cho MỌI loại hạn mức khi mốc còn ≤ 24 giờ lúc in,
+/// và chỉ in ngày khi xa hơn.
+///
+/// Tên CLI đang có (đọc từ chính bản cài): `session` · `weekly` · `Opus` ·
+/// `Sonnet` · `Fable` · `usage credit` · `monthly spend`. Chỉ `session` là cửa
+/// sổ 5 giờ; mọi tên khác đều dài hơn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum LimitWindow {
+    /// `session limit`, cửa sổ 5 giờ. Đứng làm mặc định vì đó là hành vi CŨ:
+    /// một phiên dựng tay (bài kiểm, JSON cũ) không khai loại thì vẫn được xét
+    /// như trước lượt vá.
+    #[default]
+    Session,
+    /// Mọi tên còn lại, kể cả dòng không có tên: không có cửa sổ nào ngắn hơn
+    /// 5 giờ, nên trần 360 phút không được phép áp vào đây.
+    Longer,
+}
+
+impl LimitWindow {
+    /// Cửa `skip_serializing_if` của `LiveSession::limit_window`.
+    pub fn is_session(&self) -> bool {
+        *self == LimitWindow::Session
+    }
+}
+
+/// Loại hạn mức của MỘT dòng chặn. Xem [`LimitWindow`].
+pub fn limit_window_of(line: &str) -> LimitWindow {
+    let low = line.to_lowercase();
+    let sau = low.split_once("hit your").map_or(low.as_str(), |(_, r)| r);
+    let ten = sau.split_once("limit").map_or(sau, |(t, _)| t);
+    if ten.contains("session") {
+        LimitWindow::Session
+    } else {
+        LimitWindow::Longer
+    }
+}
+
+/// Như [`session_limit_on_screen`], kèm LOẠI hạn mức đọc từ chính dòng ấy —
+/// một dòng, một lượt đọc, hai dữ kiện; đừng đọc lại dòng lần thứ hai để lấy loại.
+pub fn limit_line_on_screen(screen: &str) -> Option<(LimitWindow, String)> {
     // Nguyên văn CLI in ra, tính từ ĐẦU dòng. Chữ thường vì so sau `to_lowercase`.
     const MO_DAU: &str = "you've hit your";
     let lines: Vec<&str> = screen.lines().collect();
@@ -5917,7 +5973,7 @@ pub fn session_limit_on_screen(screen: &str) -> Option<String> {
             .map(|(_, r)| r.trim().to_string())
             .filter(|r| !r.is_empty())
             .unwrap_or_else(|| l.to_string());
-        return Some(khi);
+        return Some((limit_window_of(&low), khi));
     }
     None
 }

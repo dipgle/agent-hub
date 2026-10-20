@@ -18,7 +18,8 @@
 
 use huba::config::AutoHandoverCfg;
 use huba::keys::session_limit_on_screen;
-use huba::pipeline::{auto_limit_why, minutes_until_reset, LimitWhy};
+use huba::keys::LimitWindow;
+use huba::pipeline::{auto_limit_why, minutes_until_reset, read_reset, LimitWhy, ResetRead};
 
 /// Ca thật, nguyên văn dòng đo được trên máy này 2026-08-28.
 const DONG_CHAN: &str = "You've hit your session limit · resets 10:30pm (Asia/Saigon)";
@@ -34,7 +35,15 @@ const DU_TUOI: u64 = 3600;
 #[test]
 fn a_blocked_session_with_somewhere_to_go_switches() {
     assert_eq!(
-        auto_limit_why(Some(KHI_TUAN), false, DU_TUOI, true, Some("acc2"), None, 30),
+        auto_limit_why(
+            Some(KHI_TUAN),
+            false,
+            DU_TUOI,
+            true,
+            Some("acc2"),
+            ResetRead::Unknown,
+            30
+        ),
         LimitWhy::Do,
         "phiên bị chặn, có cửa sổ, có tài khoản để sang — mà vẫn không chuyển"
     );
@@ -45,7 +54,15 @@ fn a_blocked_session_with_somewhere_to_go_switches() {
 #[test]
 fn an_unreadable_clock_does_not_block_the_switch() {
     assert_eq!(
-        auto_limit_why(Some(KHI_TUAN), false, DU_TUOI, true, Some("acc2"), None, 30),
+        auto_limit_why(
+            Some(KHI_TUAN),
+            false,
+            DU_TUOI,
+            true,
+            Some("acc2"),
+            ResetRead::Unknown,
+            30
+        ),
         LimitWhy::Do
     );
 }
@@ -56,14 +73,30 @@ fn an_unreadable_clock_does_not_block_the_switch() {
 #[test]
 fn a_healthy_session_never_fires() {
     assert_eq!(
-        auto_limit_why(None, false, DU_TUOI, true, Some("acc2"), None, 30),
+        auto_limit_why(
+            None,
+            false,
+            DU_TUOI,
+            true,
+            Some("acc2"),
+            ResetRead::Unknown,
+            30
+        ),
         LimitWhy::NotLimited,
         "phiên KHÔNG bị chặn mà cổng vẫn đòi chuyển tài khoản"
     );
     // Chuỗi rỗng cũng là "không bị chặn": một `Some("")` lọt qua sẽ mở một cửa
     // sổ mới cho một phiên hoàn toàn khoẻ mạnh.
     assert_eq!(
-        auto_limit_why(Some("   "), false, DU_TUOI, true, Some("acc2"), None, 30),
+        auto_limit_why(
+            Some("   "),
+            false,
+            DU_TUOI,
+            true,
+            Some("acc2"),
+            ResetRead::Unknown,
+            30
+        ),
         LimitWhy::NotLimited
     );
 }
@@ -80,7 +113,7 @@ fn a_clean_screen_reads_as_not_limited() {
             DU_TUOI,
             true,
             Some("acc2"),
-            None,
+            ResetRead::Unknown,
             30
         ),
         LimitWhy::NotLimited
@@ -95,7 +128,7 @@ fn a_clean_screen_reads_as_not_limited() {
             DU_TUOI,
             true,
             Some("acc2"),
-            Some(300),
+            ResetRead::Ahead(300),
             30
         ),
         LimitWhy::Do
@@ -110,11 +143,27 @@ fn a_clean_screen_reads_as_not_limited() {
 #[test]
 fn no_account_to_move_to_means_hold_not_guess() {
     assert_eq!(
-        auto_limit_why(Some(KHI_TUAN), false, DU_TUOI, true, None, None, 30),
+        auto_limit_why(
+            Some(KHI_TUAN),
+            false,
+            DU_TUOI,
+            true,
+            None,
+            ResetRead::Unknown,
+            30
+        ),
         LimitWhy::NoAccount
     );
     assert_eq!(
-        auto_limit_why(Some(KHI_TUAN), false, DU_TUOI, true, Some(""), None, 30),
+        auto_limit_why(
+            Some(KHI_TUAN),
+            false,
+            DU_TUOI,
+            true,
+            Some(""),
+            ResetRead::Unknown,
+            30
+        ),
         LimitWhy::NoAccount
     );
 }
@@ -129,7 +178,7 @@ fn a_clock_about_to_reset_is_worth_waiting_for() {
             DU_TUOI,
             true,
             Some("acc2"),
-            Some(5),
+            ResetRead::Ahead(5),
             30
         ),
         LimitWhy::ResetsSoon(5)
@@ -142,7 +191,7 @@ fn a_clock_about_to_reset_is_worth_waiting_for() {
             DU_TUOI,
             true,
             Some("acc2"),
-            Some(30),
+            ResetRead::Ahead(30),
             30
         ),
         LimitWhy::Do
@@ -155,7 +204,7 @@ fn a_clock_about_to_reset_is_worth_waiting_for() {
             DU_TUOI,
             true,
             Some("acc2"),
-            Some(0),
+            ResetRead::Ahead(0),
             0
         ),
         LimitWhy::Do
@@ -170,12 +219,36 @@ fn a_clock_about_to_reset_is_worth_waiting_for() {
 ///
 /// Cái phân biệt được hai ca nằm ở hình dạng sản phẩm, không nằm trong dòng chữ:
 /// cửa sổ hạn mức phiên là 5 giờ ⟹ mốc dạng đồng hồ không bao giờ xa hơn thế.
+///
+/// Từ 20/10 phán "đã qua" sống ở `read_reset` (cần LOẠI hạn mức — xem
+/// `tests/weekly_limit_clock_form.rs`), nên ca này khoá ở cả hai tầng: tầng đọc
+/// phải ra `Passed`, tầng quyết phải biến `Passed` thành không chuyển.
 #[test]
 fn a_reset_clock_that_already_passed_means_the_limit_lifted() {
     // Nguyên văn số đo tối ấy.
     assert_eq!(
         minutes_until_reset("resets 1:40am (Asia/Saigon)", 2 * 60 + 48),
         Some(1372)
+    );
+    // Không có mốc neo ⟹ đường lùi theo hình dạng: dòng `session limit` xa hơn
+    // 360 phút là đã qua.
+    assert_eq!(
+        read_reset(
+            "resets 1:40am (Asia/Saigon)",
+            LimitWindow::Session,
+            None,
+            2 * 60 + 48
+        ),
+        ResetRead::Passed(1372)
+    );
+    // Sát trần: 22:00 → `resets 4am` = 360 phút = mốc THẬT; `4:01am` = 361 = đã qua.
+    assert_eq!(
+        read_reset("resets 4am", LimitWindow::Session, None, 22 * 60),
+        ResetRead::Ahead(360)
+    );
+    assert_eq!(
+        read_reset("resets 4:01am", LimitWindow::Session, None, 22 * 60),
+        ResetRead::Passed(361)
     );
     assert_eq!(
         auto_limit_why(
@@ -184,7 +257,7 @@ fn a_reset_clock_that_already_passed_means_the_limit_lifted() {
             DU_TUOI,
             true,
             Some("acc1"),
-            Some(1372),
+            ResetRead::Passed(1372),
             30
         ),
         LimitWhy::ResetAlreadyPassed(1372),
@@ -198,7 +271,7 @@ fn a_reset_clock_that_already_passed_means_the_limit_lifted() {
             DU_TUOI,
             true,
             Some("acc1"),
-            Some(360),
+            ResetRead::Ahead(360),
             30
         ),
         LimitWhy::Do
@@ -210,7 +283,7 @@ fn a_reset_clock_that_already_passed_means_the_limit_lifted() {
             DU_TUOI,
             true,
             Some("acc1"),
-            Some(361),
+            ResetRead::Passed(361),
             30
         ),
         LimitWhy::ResetAlreadyPassed(361)
@@ -245,7 +318,7 @@ fn a_freshly_opened_session_is_never_switched_again() {
             138,
             true,
             Some("acc3"),
-            Some(60),
+            ResetRead::Ahead(60),
             30
         ),
         LimitWhy::TooYoung(138),
@@ -259,7 +332,7 @@ fn a_freshly_opened_session_is_never_switched_again() {
             601,
             true,
             Some("acc3"),
-            Some(60),
+            ResetRead::Ahead(60),
             30
         ),
         LimitWhy::Do
@@ -271,7 +344,15 @@ fn a_freshly_opened_session_is_never_switched_again() {
 #[test]
 fn a_session_already_moved_is_not_moved_twice() {
     assert_eq!(
-        auto_limit_why(Some(KHI_TUAN), true, DU_TUOI, true, Some("acc2"), None, 30),
+        auto_limit_why(
+            Some(KHI_TUAN),
+            true,
+            DU_TUOI,
+            true,
+            Some("acc2"),
+            ResetRead::Unknown,
+            30
+        ),
         LimitWhy::AlreadyDone
     );
 }
@@ -287,7 +368,7 @@ fn a_session_without_a_real_window_is_left_alone() {
             DU_TUOI,
             false,
             Some("acc2"),
-            None,
+            ResetRead::Unknown,
             30
         ),
         LimitWhy::NoWindow
@@ -300,11 +381,19 @@ fn a_session_without_a_real_window_is_left_alone() {
 fn the_cheapest_reason_wins() {
     // Vừa không bị chặn, vừa đã chuyển, vừa không cửa sổ, vừa không tài khoản.
     assert_eq!(
-        auto_limit_why(None, true, DU_TUOI, false, None, Some(1), 30),
+        auto_limit_why(None, true, DU_TUOI, false, None, ResetRead::Ahead(1), 30),
         LimitWhy::NotLimited
     );
     assert_eq!(
-        auto_limit_why(Some(KHI_TUAN), true, DU_TUOI, false, None, Some(1), 30),
+        auto_limit_why(
+            Some(KHI_TUAN),
+            true,
+            DU_TUOI,
+            false,
+            None,
+            ResetRead::Ahead(1),
+            30
+        ),
         LimitWhy::AlreadyDone
     );
 }

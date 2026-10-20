@@ -1087,8 +1087,12 @@ pub fn suggest_account(
     let dang_chan: Vec<&str> = now
         .iter()
         .filter(|s| {
-            crate::pipeline::limit_still_biting(s.limited.as_deref(), now_min)
-                || s.account_dead.is_some()
+            crate::pipeline::limit_still_biting(
+                s.limited.as_deref(),
+                s.limit_window,
+                s.limit_left_min,
+                now_min,
+            ) || s.account_dead.is_some()
         })
         .map(|s| s.account.as_str())
         .collect();

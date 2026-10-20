@@ -205,6 +205,23 @@ pub struct LiveSession {
     /// còn 5 tiếng thì chuyển tài khoản — hai hành động khác nhau.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limited: Option<String>,
+    /// Hạn mức NÀO — đọc từ cùng dòng với [`LiveSession::limited`]. Chỉ có nghĩa
+    /// khi `limited` là `Some`. Xem [`crate::keys::LimitWindow`]. Mặc định
+    /// (`Session`) không ghi ra JSON, để hình dạng ảnh chụp của mọi phiên KHÔNG
+    /// bị hạn mức chặn giữ nguyên như trước.
+    #[serde(default, skip_serializing_if = "crate::keys::LimitWindow::is_session")]
+    pub limit_window: crate::keys::LimitWindow,
+    /// Còn bao nhiêu phút tới giờ mở lại, ĐO LÚC CHỤP, neo vào lúc CLI in dòng
+    /// chặn (dấu giờ bản ghi trong nhật ký) — xem [`crate::pipeline::reset_left_min`].
+    /// `≤ 0` = mốc đã qua. `None` = không neo được (nhật ký không mang dòng ấy,
+    /// hay mang một dòng KHÁC dòng đang hiện), khi ấy chỗ đọc lùi về
+    /// `limit_window`.
+    ///
+    /// Đo lúc chụp chứ không giữ mốc tuyệt đối, vì mọi chỗ đọc trường này đều
+    /// nhận ảnh chụp của CHÍNH vòng ấy, và chúng chỉ biết giờ dưới dạng
+    /// phút-trong-ngày — đúng thứ không trừ được qua nửa đêm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_left_min: Option<i64>,
     /// Tài khoản của phiên này bị TỔ CHỨC KHOÁ — nguyên văn dòng trên màn.
     ///
     /// 🔴 Khác hẳn [`LiveSession::limited`] ở chỗ đắt nhất: hạn mức chờ một cái
@@ -570,6 +587,29 @@ pub fn hubd_runtime_dir() -> PathBuf {
 /// Và chỉ tính khi bản ghi assistant CUỐI CÙNG là lỗi: lỗi hai tiếng trước mà
 /// phiên đã chạy tiếp thì nó không còn đứng vì lỗi nữa.
 pub fn transcript_error(tail: &str) -> Option<String> {
+    transcript_error_at(tail).map(|e| e.text)
+}
+
+/// Bản ghi lỗi cuối của nhật ký, kèm hai mốc CLI ghi cạnh nó — xem
+/// [`transcript_error_at`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct JournalError {
+    /// Đúng chữ [`transcript_error`] trả về.
+    pub text: String,
+    /// Lúc CLI ghi bản ghi (ms, trường `timestamp`).
+    pub at_ms: Option<i64>,
+    /// Giờ mở lại hạn mức NGUYÊN BẢN (ms, `quotaLimits.resetsAt` là giây) — có từ
+    /// CLI 2.1.280: đo 20/10 trên nhật ký 60 ngày, **39/39** dòng chặn của 2.1.280
+    /// mang nó (33 `seven_day` · 6 `five_hour`), **0/12** của 2.1.228.
+    pub resets_at_ms: Option<i64>,
+}
+
+/// Như [`transcript_error`], kèm hai MỐC đi cùng bản ghi lỗi — thứ biến dòng
+/// `resets 1pm` thành một giờ tuyệt đối (xem
+/// [`crate::pipeline::reset_left_min`] và [`settle_limit_at`]). Mốc hỏng hay vắng
+/// ⟹ `None` ở trường ấy, chữ lỗi vẫn giữ: thiếu mốc chỉ làm phán quyết lùi về
+/// đường cũ, không được làm mất cái lỗi.
+pub fn transcript_error_at(tail: &str) -> Option<JournalError> {
     for line in tail.lines().rev() {
         let Ok(r) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -595,10 +635,22 @@ pub fn transcript_error(tail: &str) -> Option<String> {
             _ => String::new(),
         };
         let text = text.trim();
-        return Some(if text.is_empty() {
-            "lỗi API (nhật ký không kèm chữ)".to_string()
-        } else {
-            truncate(text, 200)
+        return Some(JournalError {
+            text: if text.is_empty() {
+                "lỗi API (nhật ký không kèm chữ)".to_string()
+            } else {
+                truncate(text, 200)
+            },
+            at_ms: r
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .map(|t| t.timestamp_millis()),
+            resets_at_ms: r
+                .pointer("/quotaLimits/resetsAt")
+                .and_then(Value::as_i64)
+                .filter(|s| *s > 0)
+                .map(|s| s * 1000),
         });
     }
     None
@@ -2829,17 +2881,79 @@ pub fn settle_limit(
     error: Option<String>,
     tren_man: Option<String>,
 ) -> (Option<String>, Option<String>) {
-    let chan = tren_man.or_else(|| {
-        error
-            .as_deref()
-            .and_then(crate::keys::session_limit_on_screen)
-    });
+    let s = settle_limit_at(
+        error.map(|text| JournalError {
+            text,
+            ..JournalError::default()
+        }),
+        tren_man.map(|k| (crate::keys::LimitWindow::default(), k)),
+        0,
+        0,
+    );
+    (s.error, s.limited)
+}
+
+/// Kết quả của [`settle_limit_at`] — bốn trường ghi thẳng vào [`LiveSession`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct LimitSettled {
+    pub error: Option<String>,
+    pub limited: Option<String>,
+    pub window: crate::keys::LimitWindow,
+    pub left_min: Option<i64>,
+}
+
+/// [`settle_limit`] đầy đủ: thêm LOẠI hạn mức và số phút còn lại NEO vào lúc
+/// CLI in dòng chặn (20/10, ca `weekly limit · resets 1pm` — xem
+/// [`crate::keys::LimitWindow`]).
+///
+/// `nk` = bản ghi lỗi cuối của nhật ký ([`transcript_error_at`]);
+/// `tren_man` = thứ [`crate::keys::limit_line_on_screen`] đọc được.
+///
+/// Số phút còn lại lấy theo thứ tự, nguồn THẬT trước nguồn suy:
+/// 1. `quotaLimits.resetsAt` của chính bản ghi — giờ mở lại CLI nhận từ máy chủ;
+/// 2. dấu giờ bản ghi + đồng hồ trên dòng ([`crate::pipeline::reset_left_min`]),
+///    cho CLI cũ không ghi trường trên;
+/// 3. không có gì ⟹ `None`, chỗ đọc lùi về loại hạn mức.
+///
+/// Cả 1 lẫn 2 CHỈ được dùng khi dòng trong nhật ký là CÙNG dòng đang được tin
+/// (cùng chữ giờ mở lại). Nhật ký mang một dòng chặn khác — lần chặn trước, giờ
+/// khác — thì mốc của nó nói về một sự kiện khác, và neo vào đó là trừ nhầm mốc.
+pub fn settle_limit_at(
+    nk: Option<JournalError>,
+    tren_man: Option<(crate::keys::LimitWindow, String)>,
+    now_ms: i64,
+    lech_phut: i64,
+) -> LimitSettled {
+    let trong_nhat_ky = nk
+        .as_ref()
+        .and_then(|e| crate::keys::limit_line_on_screen(&e.text));
+    let Some((window, khi)) = tren_man.or_else(|| trong_nhat_ky.clone()) else {
+        return LimitSettled {
+            error: nk.map(|e| e.text),
+            limited: None,
+            window: crate::keys::LimitWindow::default(),
+            left_min: None,
+        };
+    };
+    let cung_dong = matches!(&trong_nhat_ky, Some((_, k)) if *k == khi);
+    let left_min = match nk.as_ref().filter(|_| cung_dong) {
+        Some(JournalError {
+            resets_at_ms: Some(mo),
+            ..
+        }) => Some(-(now_ms - mo).div_euclid(60_000)),
+        Some(JournalError {
+            at_ms: Some(luc), ..
+        }) => crate::pipeline::reset_left_min(&khi, *luc, now_ms, lech_phut),
+        _ => None,
+    };
     // Hết hạn mức thì KHÔNG còn là lỗi: lỗi thì thử lại được, hết hạn mức thì
     // chỉ có chờ đồng hồ hoặc đổi tài khoản. Giữ cả hai là giữ nguyên cái đọc
     // sai, vì `state_of` sẽ chọn `error`.
-    match chan {
-        Some(k) => (None, Some(k)),
-        None => (error, None),
+    LimitSettled {
+        error: None,
+        limited: Some(khi),
+        window,
+        left_min,
     }
 }
 
@@ -5584,6 +5698,8 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                 monitors: 0,
                 // Cũng điền ở khúc đọc màn — xem `keys::session_limit_on_screen`.
                 limited: None,
+                limit_window: crate::keys::LimitWindow::default(),
+                limit_left_min: None,
                 account_dead: None,
                 screen_choices: 0,
                 screen_multi: false,
@@ -5739,7 +5855,9 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     // đoạn nhật ký vừa nạp, không tốn thêm lần đọc nào.
                     row.asking = pending_question(&tail);
                     // Lỗi đọc từ NHẬT KÝ, không đợi đọc màn — xem `LiveSession::error`.
-                    row.error = transcript_error(&tail);
+                    // Giữ cả LÚC ghi: nó là mốc neo của dòng hết hạn mức bên dưới.
+                    let loi_nk = transcript_error_at(&tail);
+                    row.error = loi_nk.as_ref().map(|e| e.text.clone());
                     let parsed = parse_tail(&tail, &background_agent_calls(&path));
                     if parsed.last_text.is_none() {
                         row.note = Some("chưa có lượt hội thoại nào đọc được".into());
@@ -5846,7 +5964,7 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     } else {
                         crate::keys::alive_tab(&tabs, &row.tty).and_then(|t| t.screen.as_deref())
                     };
-                    let tren_man = man.and_then(crate::keys::session_limit_on_screen);
+                    let tren_man = man.and_then(crate::keys::limit_line_on_screen);
                     // 🔴 TÀI KHOẢN BỊ KHOÁ — cùng cửa với dòng hạn mức, cùng lý
                     // do (chữ đã nằm sẵn trong `tabs`), nhưng là một sự thật
                     // KHÁC: hạn mức chờ đồng hồ, bị khoá thì chờ vô ích.
@@ -5883,10 +6001,19 @@ pub fn snapshot(cfg: &Config) -> SessionsSnapshot {
                     row.screen_multi = man
                         .map(|t| crate::keys::has_submit(t) || crate::keys::ask_table(t).is_some())
                         .unwrap_or(false);
-                    // Hai nguồn, một phán quyết — xem [`settle_limit`].
-                    let (loi, chan) = settle_limit(row.error.take(), tren_man);
-                    row.error = loi;
-                    row.limited = chan;
+                    // Hai nguồn, một phán quyết — xem [`settle_limit_at`].
+                    // Đưa bản nhật ký ĐẦY ĐỦ (`loi_nk`, có mốc) chứ không phải chữ
+                    // trơn ở `row.error` — `row.error` được ghi lại ngay dưới.
+                    let chot = settle_limit_at(
+                        loi_nk,
+                        tren_man,
+                        chrono::Utc::now().timestamp_millis(),
+                        i64::from(chrono::Local::now().offset().local_minus_utc()) / 60,
+                    );
+                    row.error = chot.error;
+                    row.limited = chot.limited;
+                    row.limit_window = chot.window;
+                    row.limit_left_min = chot.left_min;
                     row.context_tokens = parsed.context_tokens;
                     row.model = parsed.model.clone();
                     row.last_role = parsed.last_role;

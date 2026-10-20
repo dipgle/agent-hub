@@ -49,9 +49,10 @@ pub struct AutoHandoverCfg {
     /// Đồng hồ mở lại còn dưới chừng này PHÚT thì CHỜ, đừng đốt một cửa sổ.
     ///
     /// Hạn mức 5 giờ hay tự mở lại sau ít phút; thay cửa sổ lúc ấy là mất phiên
-    /// cũ để đổi lấy vài phút. Hạn mức TUẦN (`resets Sep 1`) thì không đọc ra
-    /// phút nào — xem [`crate::pipeline::minutes_until_reset`], và đó đúng là ca
-    /// phải chuyển.
+    /// cũ để đổi lấy vài phút. Mốc còn hơn 24 giờ thì CLI in NGÀY (`resets Sep 1
+    /// at 1pm`), không đọc ra phút nào, và đó đúng là ca phải chuyển. ⚠ Hạn mức
+    /// tuần KHÔNG phải lúc nào cũng in ngày: còn ≤ 24 giờ thì nó in đồng hồ y như
+    /// hạn mức 5 giờ — xem [`crate::pipeline::read_reset`].
     pub on_limit_wait_min: u64,
 }
 

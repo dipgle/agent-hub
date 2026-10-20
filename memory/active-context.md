@@ -1,5 +1,24 @@
 # active context — huba
 
+## 🟡 2026-10-20 00:0xZ→00:45Z — hạn mức TUẦN in đồng hồ bị đọc thành «mốc đã qua» ⟹ không tự chuyển ([dwork/review] báo, Hà duyệt) — PLAN S56
+
+- ĐO: be02cd68 [dwork/review] acc3 `You've hit your weekly limit · resets 1pm (Asia/Saigon)` 12:25:47Z; `auto_limit_held` ×13
+  12:26→12:41Z cùng `ResetAlreadyPassed(1039)`; `quota_read` acc3 cùng giây: tuần 100 %, `week_resets_at` 2026-10-20T06:00Z.
+  Mã CLI (`function Pc`, claude.exe 2.1.280): in ĐỒNG HỒ khi mốc ≤ 24 giờ cho MỌI loại hạn mức. Bản ghi nhật ký có
+  `quotaLimits.resetsAt` (đo 60 ngày: 2.1.280 39/39 dòng chặn có · 2.1.228 0/12).
+- VÁ: `keys::LimitWindow` + `limit_line_on_screen`; `sessions::transcript_error_at` (JournalError: at_ms · resets_at_ms) +
+  `settle_limit_at` ⟹ `LiveSession.limit_window` / `limit_left_min`; `pipeline::read_reset` (một chỗ phán «đã qua») ·
+  `reset_left_min` · `auto_limit_why(…, ResetRead, …)` · `limit_still_biting(limited, window, left_min, now_min)`.
+  Log `auto_limit_held/firing` thêm `loai` + `con_lai_neo`.
+- KIỂM: RED API cũ (`.tmp/va-tuan-1910/zz_red_tuan.rs`) TEST_EXIT=101 đúng `ResetAlreadyPassed(1039)` ⟹ `weekly_limit_clock_form`
+  10/10; đột biến 7/7 bắt, M0 xanh, trả byte KHỚP; phát lại nhật ký thật be02cd68 ⟹ 1039 · Longer · Do; soát Sonnet: 0 lỗi
+  hành vi (sửa thêm câu sai ở `config.rs:51`). Cổng trọn lộ clippy Windows ĐỎ từ 11/10 (2 tệp kiểm dùng `std::os::unix`
+  trần) ⟹ `cfg`; `gate.sh` GATE_EXIT=0 · 192/192 · WIN_EXIT=0 (`.tmp/gate-tuan-1910-c.log`).
+- CÀI 00:40Z pid 96375, `--verify` KHỚP 14ccc26a; 0 dòng error sau cài. CHƯA: ca chặn thật kế tiếp trên daemon (lúc cài 0/44
+  phiên bị chặn). Đo: `command grep -a -E 'auto_limit_(held|firing)' logs/huba.log | tail -3` phải mang `"loai"`.
+- 5b7d6cb (email trên `/accounts`) ĐÃ CHẠY THẬT: Hà gõ `/accounts` 7 lần sau cài (04:15Z→00:19Z), ack mang email từng hàng.
+- CHƯA ĐẨY: HEAD vượt origin/main (5b7d6cb + bản này); phiên này mang `--disallowedTools Bash(git push:*)` ⟹ Hà quyết.
+
 ## 🟡 2026-10-19 04:0xZ — acc3 và acc5 là MỘT tài khoản (Hà: «Tại sao acc3 và acc5 lại là 1») — PLAN S55
 
 - ĐO: `~/.claude-acc3/.claude.json` + `~/.claude-acc5/.claude.json` cùng `accountUuid 29829ac3`, org `481fe180`,

@@ -203,6 +203,36 @@ pub fn account_detail_say(
             now_ms,
         );
     };
+    // 🔑 Chạy bằng API key: không dò `/usage` (không có hạn mức gói), không in hạn mức
+    // của đăng nhập gói cũ, không báo trùng theo email cũ — cả ba nói về một cách xác
+    // thực CLI không còn dùng. Danh tính gói cũ vẫn in, có ghi rõ là không dùng.
+    if let Some(nhan) = crate::api_key::nhan(&crate::api_key::thu_muc(&acc)) {
+        let dir = acc
+            .config_dir
+            .as_deref()
+            .filter(|d| !d.is_empty())
+            .map(|d| crate::config::expand_home(Path::new(d)));
+        let mut out = account_detail_text(
+            cfg,
+            live,
+            name,
+            None,
+            None,
+            crate::quota::identity(dir.as_deref()),
+            dead,
+            now_ms,
+        );
+        let chen = format!(
+            "🔑 chạy bằng {nhan} — tính tiền theo token, không có hạn mức gói; huba không tự \
+             chọn nó. Email bên dưới là đăng nhập gói CŨ, CLI không dùng. Bỏ: /accounts \
+             {name} -k xoa\n"
+        );
+        match out.find('\n') {
+            Some(i) => out.insert_str(i + 1, &chen),
+            None => out.push_str(&chen),
+        }
+        return out;
+    }
     let usage = usage_lam_moi_mot(cfg, db, name, USAGE_CU_ACCOUNTS_MS);
     let row = usage.get("accounts").and_then(|m| m.get(name));
     let dir = acc
@@ -841,15 +871,23 @@ pub fn usage_lam_moi(cfg: &Config, db: &Db, cu_ms: i64) -> Value {
         .filter(|a| a.locked)
         .map(|a| a.name.clone())
         .collect();
+    // 🔑 Tài khoản chạy bằng API key cũng KHÔNG dò: không có hạn mức gói nào để đo
+    // (đo 21/10: `/usage` ở đó chỉ trả bảng chi phí, `num_turns 0`), nên một lượt dò
+    // chỉ đẻ ra một hàng số rỗng.
+    let api: Vec<String> = accounts
+        .iter()
+        .filter(|a| crate::api_key::nhan(&crate::api_key::thu_muc(a)).is_some())
+        .map(|a| a.name.clone())
+        .collect();
     let can: Vec<&crate::config::ClaudeAccountCfg> = accounts
         .iter()
-        .filter(|a| !a.locked)
+        .filter(|a| !a.locked && !api.contains(&a.name))
         .filter(|a| can_do_lai(tuoi_cua(&so, &so_cli, &a.name, now), cu_ms))
         .collect();
     crate::logging::info(
         "usage_do_lai",
         json!({ "cu_hon_ms": cu_ms, "mau_so": accounts.len(),
-                "bo_qua_khoa": khoa,
+                "bo_qua_khoa": khoa, "bo_qua_api_key": api,
                 "do_lai": can.iter().map(|a| a.name.clone()).collect::<Vec<_>>() }),
     );
     if can.is_empty() {
@@ -1178,7 +1216,7 @@ fn parse_usage(text: &str) -> Value {
 /// Tài khoản mặc định chọn bằng cách KHÔNG có `CLAUDE_CONFIG_DIR` — trỏ nó vào
 /// `~/.claude` là một chuyện khác. Đo được ngay ngày đầu: gọi tay trong shell
 /// đang set `CLAUDE_CONFIG_DIR=acc3` thì "acc1" trả về hòm thư của acc3.
-fn account_env(acc: &crate::config::ClaudeAccountCfg) -> Vec<(String, Option<String>)> {
+pub fn account_env(acc: &crate::config::ClaudeAccountCfg) -> Vec<(String, Option<String>)> {
     match acc.config_dir.as_ref() {
         Some(d) => vec![(
             "CLAUDE_CONFIG_DIR".to_string(),

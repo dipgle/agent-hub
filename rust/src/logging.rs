@@ -186,8 +186,9 @@ pub fn error(msg: &str, fields: Value) {
 /// Cắt theo HÌNH DẠNG, không theo danh sách khoá đã biết: `/bot<gì đó>/` trong
 /// một URL telegram thì luôn là token, kể cả token sau này đổi.
 pub fn redact(text: &str) -> String {
+    let text = che_api_key(text);
     let mut out = String::with_capacity(text.len());
-    let mut rest = text;
+    let mut rest = text.as_str();
     while let Some(i) = rest.find("/bot") {
         out.push_str(&rest[..i + 4]);
         let after = &rest[i + 4..];
@@ -197,6 +198,39 @@ pub fn redact(text: &str) -> String {
             out.push_str("<token>");
         }
         rest = &after[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Thay mọi API key Anthropic trong một chuỗi bằng `sk-ant-…WXYZ` (4 ký tự cuối).
+///
+/// 🔴 Có từ 2026-10-21, cùng route `/accounts <tên> -k <key>`: key đi tới bằng một tin
+/// Telegram, mà tin ấy chạm ba chỗ ghi đĩa trước khi route kịp làm gì — `tin_den`
+/// (`chu` + `goc`, 7 ngày), dòng log của mọi câu lỗi có mang chữ tin, và câu báo khởi
+/// động lại (`tin_den::cau_bao_khoi_dong` gửi lại chữ tin chạy dở lên Telegram). Che
+/// theo HÌNH DẠNG, đúng như `/bot<token>/` ở trên: không cần biết trước key nào.
+///
+/// Chỉ che khi phần sau `sk-ant-` dài ≥ 20 ký tự: câu hướng dẫn *"phải mở đầu bằng
+/// sk-ant-api"* không phải một key, và che nó là làm hỏng chính câu dạy cách gõ.
+pub fn che_api_key(text: &str) -> String {
+    const DAU: &str = "sk-ant-";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(DAU) {
+        out.push_str(&rest[..i]);
+        let sau = &rest[i + DAU.len()..];
+        let dai = sau
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            .unwrap_or(sau.len());
+        if dai >= 20 {
+            out.push_str(DAU);
+            out.push('…');
+            out.push_str(&sau[dai - 4..dai]);
+        } else {
+            out.push_str(&rest[i..i + DAU.len() + dai]);
+        }
+        rest = &sau[dai..];
     }
     out.push_str(rest);
     out

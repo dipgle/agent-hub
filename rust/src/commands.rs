@@ -389,8 +389,8 @@ pub const ROUTES: &[Route] = &[
         // cấu hình, từ điện thoại thì phải có đường này, không thì là một "gap".
         // Dạng cũ `detail|khoa|mo <tên>` vẫn nhận — `pipeline::accounts_order`.
         arg: Arg::Rest,
-        usage: "[<tài khoản> [-a | -b | -l [mã]]]",
-        help: "Các tài khoản Claude trên máy · <tên> = chi tiết + email + ĐO LẠI hạn mức (kể cả đang khoá) · <tên> -b = khoá · <tên> -a = mở · <tên> -l = đăng nhập lại",
+        usage: "[<tài khoản> [-a | -b | -l [mã] | -k <API key>|xoa]]",
+        help: "Các tài khoản Claude trên máy · <tên> = chi tiết + email + ĐO LẠI hạn mức (kể cả đang khoá) · <tên> -b = khoá · <tên> -a = mở · <tên> -l = đăng nhập lại · <tên> -k <API key> = chạy bằng API key (tính tiền; -k xoa = về gói)",
         listed: true,
     },
     Route {

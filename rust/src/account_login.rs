@@ -472,10 +472,17 @@ fn pending_email(db: &Db, name: &str) -> Option<String> {
 }
 
 /// Email của MỌI tài khoản khai trong cấu hình, đọc từ sổ `.claude.json` của từng cái.
+///
+/// 🔑 Tài khoản chạy bằng API key thì trả NHÃN key (`API key …WXYZ`) thay cho email: sổ
+/// `.claude.json` của nó vẫn còn đăng nhập gói cũ (acc5 21/10: trogiup, trùng acc3) mà
+/// CLI không dùng nữa — in email ấy là nói sai tài khoản đang chạy, và báo trùng oan.
 pub fn danh_tinh_tat_ca(cfg: &Config) -> Vec<(String, Option<String>)> {
     cfg.claude_accounts_or_ambient()
         .iter()
         .map(|a| {
+            if let Some(nhan) = crate::api_key::nhan(&crate::api_key::thu_muc(a)) {
+                return (a.name.clone(), Some(nhan));
+            }
             let dir = a
                 .config_dir
                 .as_deref()

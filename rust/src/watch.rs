@@ -1116,6 +1116,7 @@ pub fn suggest_account(
             !matches!(
                 a.rank,
                 crate::quota::Rank::Full
+                    | crate::quota::Rank::ApiKey
                     | crate::quota::Rank::NotReady
                     | crate::quota::Rank::Dead
                     | crate::quota::Rank::Locked

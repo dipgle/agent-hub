@@ -14429,6 +14429,16 @@ fn execute_commands(db: &Db, cfg: &Config, adapter: &str, commands: &[ChannelCom
                     AccountsOrder::Login(ten, Some(ma)) => {
                         crate::account_login::finish(cfg, db, &ten, &ma)
                     }
+                    // 🔑 Xoá tin chứa key khỏi buồng chat TRƯỚC mọi việc khác: kết cục
+                    // nào (cất được hay không) thì key cũng không nên nằm lại trên
+                    // màn điện thoại. Bản lưu trong `tin_den` đã che từ lúc nhận.
+                    AccountsOrder::ApiKey(ten, Some(key)) => {
+                        let xoa = xoa_tin_chua_key(cmd);
+                        let ack =
+                            crate::api_key::dat(cfg, &ten, &key, &crate::api_key::kiem_voi_may_chu);
+                        format!("{ack}\n{xoa}")
+                    }
+                    AccountsOrder::ApiKey(ten, None) => crate::api_key::go(cfg, &ten),
                     AccountsOrder::Usage => ACCOUNTS_USAGE.to_string(),
                 };
                 reply_in_channel(db, cfg, adapter, cmd, &ack);
@@ -19297,6 +19307,9 @@ pub enum AccountsOrder {
     Lock(String, bool),
     /// `/accounts <tên> -l` (mở luồng đăng nhập) · `-l <mã>` (gõ mã vào cửa sổ đang chờ).
     Login(String, Option<String>),
+    /// `/accounts <tên> -k <key>` (chạy bằng API key) · `-k xoa` (`None`, trả về gói) —
+    /// Hà 2026-10-21: *"Tạo thêm lệnh chuyển sang sử dụng api"*. Xem [`crate::api_key`].
+    ApiKey(String, Option<String>),
     /// Không khớp dạng nào — route in cách gõ thay vì đoán ý.
     Usage,
 }
@@ -19341,6 +19354,15 @@ pub fn accounts_order(arg: &str) -> AccountsOrder {
         [a, "-l", ma @ ..] | ["-l", a, ma @ ..] if ten(a) && !ma.is_empty() => {
             AccountsOrder::Login((*a).to_string(), Some(ma.join(" ")))
         }
+        // `-k` TRẦN không làm gì (Usage): một lượt gõ dở `-k` rồi bấm gửi không được hiểu
+        // thành "bỏ key". Bỏ phải gõ rõ `xoa`. Nhiều mảnh sau `-k` (điện thoại bẻ dòng
+        // giữa key) giữ dấu cách để `api_key::hinh_dang_sai` nói đúng chỗ sai.
+        [a, "-k", k @ ..] | ["-k", a, k @ ..] if ten(a) && !k.is_empty() => match k {
+            [x] if matches!(x.to_lowercase().as_str(), "xoa" | "xoá" | "xóa" | "off") => {
+                AccountsOrder::ApiKey((*a).to_string(), None)
+            }
+            _ => AccountsOrder::ApiKey((*a).to_string(), Some(k.join(" "))),
+        },
         [dt, a] if ten(a) => match dong_tu_cu(dt) {
             Some(None) => AccountsOrder::Detail((*a).to_string()),
             Some(Some(khoa)) => AccountsOrder::Lock((*a).to_string(), khoa),
@@ -19354,7 +19376,8 @@ pub fn accounts_order(arg: &str) -> AccountsOrder {
 pub const ACCOUNTS_USAGE: &str = "⚠ Gõ: /accounts · /accounts <tài khoản> (chi tiết + đo lại hạn \
                                   mức, kể cả đang khoá) · /accounts <tài khoản> -b (khoá) · \
                                   /accounts <tài khoản> -a (mở) · /accounts <tài khoản> -l \
-                                  (đăng nhập lại; rồi -l <mã>)";
+                                  (đăng nhập lại; rồi -l <mã>) · /accounts <tài khoản> -k <API \
+                                  key> (chạy bằng API key; bỏ: -k xoa)";
 
 /// Tài khoản SẼ chạy một lượt `/new`, nếu nó đang khoá.
 ///
@@ -19428,6 +19451,33 @@ pub fn hoi_mo_tai_khoan_khoa(
 /// còn `claude_accounts` là một MẢNG, và `locked: false` cố ý không ghi ra tệp
 /// nên trường ấy thường không có mặt để mà đặt. Tên lạ ⟹ từ chối kèm danh sách,
 /// đừng lặng lẽ thêm một hàng mới.
+/// Xoá tin Telegram chứa API key (`/accounts <tên> -k <key>`) — trả câu nói kết cục,
+/// để chủ máy biết có phải tự xoá tay không. Bot xoá được tin ĐẾN trong buồng chat
+/// riêng (Bot API, trong 48 giờ) — cùng đường `telegram.rs` dọn tiếng vọng `/start`.
+fn xoa_tin_chua_key(cmd: &ChannelCommand) -> String {
+    let (Some(tg), Some(id)) = (crate::telegram::inbox(), cmd.message_id) else {
+        return "⚠ Không có tin Telegram nào để xoá (lệnh không đến từ buồng chat) — nếu key \
+                nằm ở đâu khác thì tự xoá."
+            .into();
+    };
+    match tg.delete_message(id) {
+        Ok(()) => {
+            logging::info(
+                "account_api_key_message_deleted",
+                json!({ "message_id": id }),
+            );
+            "🗑 Đã xoá tin chứa key khỏi buồng chat.".into()
+        }
+        Err(e) => {
+            logging::warn(
+                "account_api_key_message_kept",
+                json!({ "message_id": id, "err": e }),
+            );
+            format!("⚠ CHƯA xoá được tin chứa key ({e}) — xoá tay tin ấy trên Telegram.")
+        }
+    }
+}
+
 pub fn set_account_locked(cfg: &Config, name: &str, locked: bool) -> Result<String> {
     let mut root = read_config_value(cfg)?;
     let rows = root

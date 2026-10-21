@@ -237,10 +237,21 @@ pub fn ghi_nhan(conn: &Connection, u: &Value) -> Result<bool> {
         .ok_or_else(|| anyhow!("update không có update_id"))?;
     let (loai, chu, gui) = tom_tat(u);
     let now = logging::now_iso();
+    // 🔑 Che API key TRƯỚC khi chạm đĩa (route `/accounts <tên> -k <key>`, 21/10) — cả
+    // `chu` lẫn `goc`. Bản trong bộ nhớ đi tiếp nguyên vẹn tới route; chỉ bản lưu bị
+    // che. Hệ quả có chủ ý: một lệnh `-k` chạy lại từ sổ lúc khởi động sẽ nhận key đã
+    // che, và `api_key::hinh_dang_sai` nói đúng câu ấy thay vì cất một key hỏng.
     let n = conn.execute(
         "INSERT OR IGNORE INTO tin_den (update_id, nhan_luc, gui_luc, loai, chu, goc, buoc, doi_luc)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'nhan', ?2)",
-        params![id, now, gui, loai, chu, u.to_string()],
+        params![
+            id,
+            now,
+            gui,
+            loai,
+            logging::che_api_key(&chu),
+            logging::che_api_key(&u.to_string())
+        ],
     )?;
     Ok(n == 1)
 }

@@ -1,5 +1,21 @@
 # active context — huba
 
+## 🟡 2026-10-21 09:xxZ→10:1xZ — `/accounts <tên> -k <API key>` (Hà: «Tôi có api key và muốn dùng cho acc5» → «Tạo thêm lệnh chuyển sang sử dụng api») — PLAN S57
+
+- ĐO: CLI 2.1.280 — `apiKeyHelper` trong `<thư mục>/settings.json` thắng đăng nhập gói, không hỏi; `ANTHROPIC_API_KEY` phải
+  được duyệt (chưa duyệt ⟹ CLI hỏi lúc mở). `auth status` có helper ⟹ `authMethod api_key_helper` (mã 0) — KHÔNG kiểm key.
+  `GET /v1/models` key giả ⟹ 401 `invalid x-api-key` (0,5 s, máy chủ thật). `/usage` tài khoản API: nội bộ, `num_turns 0`.
+- ĐO: hook che bí mật trong sổ nhớ (`cred-scrubber.sh`) KHÔNG CÒN (không tệp, không đăng ký) ⟹ dán key vào chat là nằm nguyên văn.
+  `tin_den` lưu `chu` + `goc` nguyên văn 7 ngày TRƯỚC khi xét lệnh; `cau_bao_khoi_dong` gửi lại chữ tin chạy dở lên Telegram.
+- LÀM: `rust/src/api_key.rs` (dat · go · nhan · kiem_voi_may_chu · auth_status) · `logging::che_api_key` (trong `redact`) ·
+  `tin_den::ghi_nhan` lưu bản che · `pipeline::AccountsOrder::ApiKey` + `xoa_tin_chua_key` · `quota::Rank::ApiKey` +
+  `dung_api_key` (`watch::suggest_account` loại) · `runtime::usage_lam_moi` bỏ qua tài khoản API · `account_detail_say` ·
+  `account_login::danh_tinh_tat_ca` in nhãn key · help `/accounts`.
+- KIỂM: `tests/api_key.rs` 12/12; đột biến 11/11 đỏ đúng bài (M9 lượt đầu cấy ra mã không biên dịch ⟹ cấy lại, đỏ); gate.sh
+  GATE_EXIT=0 · 193/193 · WIN_EXIT=0 (`.tmp/gate-k-2110-b.log`).
+- CHƯA: nghiệm thu thật = Hà gửi `/accounts acc5 -k <key>` từ Telegram ⟹ log `account_api_key_set` + `account_api_key_message_deleted`,
+  `auth status` acc5 ra `api_key_helper`, `/accounts` in «API key …». acc5 vẫn KHOÁ.
+
 ## 🟡 2026-10-20 00:0xZ→00:45Z — hạn mức TUẦN in đồng hồ bị đọc thành «mốc đã qua» ⟹ không tự chuyển ([dwork/review] báo, Hà duyệt) — PLAN S56
 
 - ĐO: be02cd68 [dwork/review] acc3 `You've hit your weekly limit · resets 1pm (Asia/Saigon)` 12:25:47Z; `auto_limit_held` ×13

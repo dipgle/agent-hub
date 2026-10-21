@@ -389,6 +389,12 @@ fn doc_models(buckets: Option<&Value>) -> Vec<ModelPct> {
 pub enum Rank {
     Free(i64),
     Unknown,
+    /// 🔑 Chạy bằng API key (`apiKeyHelper`, route `/accounts <tên> -k`, 21/10): tính TIỀN
+    /// theo token, không có hạn mức gói. huba **không bao giờ tự chọn** nó — luật 8:
+    /// huba không tự tiêu gì, mọi lượt tốn phải là một cú bấm của người
+    /// (`/new -a <tên>`). Đứng ngay sau `Unknown` chỉ để có chỗ; cửa thật là
+    /// `watch::suggest_account` loại nó ra.
+    ApiKey,
     Full,
     NotReady,
     Dead,
@@ -401,6 +407,7 @@ impl Rank {
         match self {
             Rank::Free(p) => format!("đã dùng {p}%"),
             Rank::Unknown => "chưa đo được".to_string(),
+            Rank::ApiKey => "API KEY — tính tiền, huba không tự chọn".to_string(),
             Rank::Full => "ĐÃ KỊCH TRẦN".to_string(),
             Rank::NotReady => "CHƯA DÙNG ĐƯỢC".to_string(),
             Rank::Dead => "TỔ CHỨC ĐÃ KHOÁ".to_string(),
@@ -1085,6 +1092,8 @@ pub fn rank_all(cfg: &crate::config::Config, now_ms: i64) -> Vec<Ranked> {
             // năm đường cùng thấy, và dòng log dưới cũng nói ra.
             let r = if cfg.account_locked(&q.account) {
                 Rank::Locked
+            } else if dung_api_key(cfg, &q.account) {
+                Rank::ApiKey
             } else {
                 rank(&q, now_ms)
             };
@@ -1114,6 +1123,16 @@ pub fn rank_all(cfg: &crate::config::Config, now_ms: i64) -> Vec<Ranked> {
             }
         })
         .collect()
+}
+
+/// Tài khoản `ten` có đang chạy bằng API key không (`apiKeyHelper` trong `settings.json`
+/// của thư mục cấu hình) — xem [`crate::api_key::nhan`].
+pub fn dung_api_key(cfg: &crate::config::Config, ten: &str) -> bool {
+    cfg.claude_accounts_or_ambient()
+        .iter()
+        .find(|a| a.name == ten)
+        .and_then(|a| crate::api_key::nhan(&crate::api_key::thu_muc(a)))
+        .is_some()
 }
 
 /// Bản đọc thô của mọi tài khoản, theo đúng thứ tự cấu hình.

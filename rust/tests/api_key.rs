@@ -189,7 +189,7 @@ fn dat_key_dung_ghi_hai_tep_va_cli_xac_nhan() {
     std::fs::write(acc5.join("settings.json"), SETTINGS_CU).unwrap();
     let c = cfg_mot(&acc5, claude_gia(t.path(), "dung"), true);
     let k = key_gia();
-    let ack = huba::api_key::dat(&c, "acc5", &k, &|_| KiemKey::Dung);
+    let ack = huba::api_key::dat(&c, "acc5", &k, &|_, _| KiemKey::Dung);
 
     assert!(
         ack.starts_with("🔑 acc5 nay chạy bằng API key …WXYZ"),
@@ -234,7 +234,7 @@ fn cli_khong_nhan_thi_tra_nguyen_trang() {
     std::fs::create_dir_all(&acc5).unwrap();
     std::fs::write(acc5.join("settings.json"), SETTINGS_CU).unwrap();
     let c = cfg_mot(&acc5, claude_gia(t.path(), "khong_nhan"), true);
-    let ack = huba::api_key::dat(&c, "acc5", &key_gia(), &|_| KiemKey::Dung);
+    let ack = huba::api_key::dat(&c, "acc5", &key_gia(), &|_, _| KiemKey::Dung);
     assert!(
         ack.contains("CHƯA đổi gì") && ack.contains("nguyên trạng"),
         "{ack}"
@@ -262,7 +262,7 @@ fn may_chu_tu_choi_thi_khong_ghi_gi() {
         KiemKey::Sai("máy chủ trả 401 invalid x-api-key".into()),
         KiemKey::KhongKiemDuoc("không gọi được api.anthropic.com".into()),
     ] {
-        let ack = huba::api_key::dat(&c, "acc5", &k, &|_| kq.clone());
+        let ack = huba::api_key::dat(&c, "acc5", &k, &|_, _| kq.clone());
         assert!(ack.contains("CHƯA đổi gì") && !ack.contains(&k), "{ack}");
         assert_eq!(
             std::fs::read_to_string(acc5.join("settings.json")).unwrap(),
@@ -275,7 +275,7 @@ fn may_chu_tu_choi_thi_khong_ghi_gi() {
         &c,
         "acc5",
         "sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-        &|_| panic!("hình dạng sai mà vẫn hỏi máy chủ"),
+        &|_, _| panic!("hình dạng sai mà vẫn hỏi máy chủ"),
     );
     assert!(ack.contains("không phải key Anthropic"), "{ack}");
 }
@@ -289,7 +289,7 @@ fn settings_hong_thi_khong_ghi_de() {
     std::fs::create_dir_all(&acc5).unwrap();
     std::fs::write(acc5.join("settings.json"), "{ hỏng").unwrap();
     let c = cfg_mot(&acc5, claude_gia(t.path(), "dung"), false);
-    let ack = huba::api_key::dat(&c, "acc5", &key_gia(), &|_| KiemKey::Dung);
+    let ack = huba::api_key::dat(&c, "acc5", &key_gia(), &|_, _| KiemKey::Dung);
     assert!(ack.contains("hỏng JSON"), "{ack}");
     assert_eq!(
         std::fs::read_to_string(acc5.join("settings.json")).unwrap(),
@@ -330,7 +330,7 @@ fn tai_khoan_api_khong_bao_gio_duoc_tu_chon() {
     std::fs::create_dir_all(&acc5).unwrap();
     let mut c = cfg_mot(&acc5, claude_gia(t.path(), "dung"), false);
     assert!(!huba::quota::dung_api_key(&c, "acc5"), "chưa đặt key");
-    let ack = huba::api_key::dat(&c, "acc5", &key_gia(), &|_| KiemKey::Dung);
+    let ack = huba::api_key::dat(&c, "acc5", &key_gia(), &|_, _| KiemKey::Dung);
     assert!(
         ack.contains("KHÔNG tự chọn"),
         "mở khoá thì phải nói rõ: {ack}"
@@ -402,7 +402,7 @@ fn danh_tinh_in_nhan_key_va_thoi_bao_trung() {
     c.claude_accounts = accs;
     // Đối chứng: trước khi đặt key thì đúng là trùng.
     assert_eq!(nhom_trung(&danh_tinh_tat_ca(&c)).len(), 1);
-    let ack = huba::api_key::dat(&c, "acc5", &key_gia(), &|_| KiemKey::Dung);
+    let ack = huba::api_key::dat(&c, "acc5", &key_gia(), &|_, _| KiemKey::Dung);
     assert!(ack.starts_with("🔑"), "{ack}");
     let ids = danh_tinh_tat_ca(&c);
     assert_eq!(
@@ -410,4 +410,128 @@ fn danh_tinh_in_nhan_key_va_thoi_bao_trung() {
         ("acc5".to_string(), Some("API key …WXYZ".to_string()))
     );
     assert!(nhom_trung(&ids).is_empty(), "{ids:?}");
+}
+
+// ───────────── key cấp NGƯỜI DÙNG cần workspace (lượt thật của Hà 21/10 10:27Z) ─────────
+
+/// Máy chủ trả 400 «not scoped to a workspace … anthropic-workspace-id» cho key
+/// `sk-ant-usr-` của Hà. Key ĐÚNG — chỉ thiếu ID workspace.
+#[test]
+fn tach_key_va_workspace() {
+    use huba::api_key::tach_key_workspace;
+    let k = key_gia();
+    assert_eq!(tach_key_workspace(&k), (k.clone(), None));
+    assert_eq!(
+        tach_key_workspace(&format!("{k} wrkspc_01AbC")),
+        (k.clone(), Some("wrkspc_01AbC".to_string()))
+    );
+    // Mảnh thứ hai KHÔNG phải workspace (điện thoại bẻ dòng giữa key) ⟹ giữ nguyên để
+    // hinh_dang_sai nói «khoảng trắng», không đem một nửa key đi làm workspace.
+    let (gop, ws) = tach_key_workspace("sk-ant-usr-aaaa bbbb");
+    assert_eq!(ws, None);
+    assert!(hinh_dang_sai(&gop).unwrap().contains("khoảng trắng"));
+}
+
+#[cfg(unix)]
+#[test]
+fn can_workspace_thi_noi_cach_gui_va_khong_ghi_gi() {
+    let t = tempfile::tempdir().unwrap();
+    let acc5 = t.path().join("acc5");
+    std::fs::create_dir_all(&acc5).unwrap();
+    std::fs::write(acc5.join("settings.json"), SETTINGS_CU).unwrap();
+    let c = cfg_mot(&acc5, claude_gia(t.path(), "dung"), true);
+    let k = key_gia().replace("sk-ant-api03-", "sk-ant-usr-");
+    let ack = huba::api_key::dat(&c, "acc5", &k, &|_, ws| {
+        assert_eq!(ws, None);
+        KiemKey::CanWorkspace(
+            "This API key is not scoped to a workspace … anthropic-workspace-id".into(),
+        )
+    });
+    assert!(
+        ack.contains("ĐÚNG") && ack.contains("/accounts acc5 -k <key> <wrkspc_…>"),
+        "{ack}"
+    );
+    assert!(!ack.contains(&k), "{ack}");
+    assert_eq!(
+        std::fs::read_to_string(acc5.join("settings.json")).unwrap(),
+        SETTINGS_CU
+    );
+    assert!(!acc5.join(huba::api_key::TEP_KEY).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn co_workspace_thi_hoi_kem_va_ghi_header() {
+    let t = tempfile::tempdir().unwrap();
+    let acc5 = t.path().join("acc5");
+    std::fs::create_dir_all(&acc5).unwrap();
+    std::fs::write(acc5.join("settings.json"), SETTINGS_CU).unwrap();
+    let c = cfg_mot(&acc5, claude_gia(t.path(), "dung"), true);
+    let k = key_gia().replace("sk-ant-api03-", "sk-ant-usr-");
+    let ack = huba::api_key::dat(&c, "acc5", &format!("{k} wrkspc_01AbC"), &|key, ws| {
+        // Máy chủ phải được hỏi bằng ĐÚNG key (không dính workspace) + đúng workspace.
+        assert!(key.starts_with("sk-ant-usr-") && !key.contains(' '));
+        if ws == Some("wrkspc_01AbC") {
+            KiemKey::Dung
+        } else {
+            KiemKey::CanWorkspace("anthropic-workspace-id".into())
+        }
+    });
+    assert!(
+        ack.starts_with("🔑 acc5 nay chạy bằng API key …WXYZ · workspace wrkspc_01AbC"),
+        "{ack}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(acc5.join(huba::api_key::TEP_KEY)).unwrap(),
+        k
+    );
+    let s: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(acc5.join("settings.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        s["env"]["ANTHROPIC_CUSTOM_HEADERS"],
+        "anthropic-workspace-id: wrkspc_01AbC"
+    );
+    assert_eq!(s["theme"], "dark");
+    assert_eq!(
+        huba::api_key::nhan(&acc5).as_deref(),
+        Some("API key …WXYZ · workspace wrkspc_01AbC")
+    );
+    // Gỡ: bỏ cả helper lẫn header của huba, không để lại `env` rỗng.
+    let bo = huba::api_key::go(&c, "acc5");
+    assert!(bo.contains("thôi dùng API key"), "{bo}");
+    let s: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(acc5.join("settings.json")).unwrap())
+            .unwrap();
+    assert!(
+        s.get("env").is_none() && s.get("apiKeyHelper").is_none(),
+        "{s}"
+    );
+}
+
+/// `ANTHROPIC_CUSTOM_HEADERS` của CHỦ MÁY (không phải header workspace của huba) ⟹ không ghi đè.
+#[cfg(unix)]
+#[test]
+fn khong_ghi_de_header_cua_chu_may() {
+    let t = tempfile::tempdir().unwrap();
+    let acc5 = t.path().join("acc5");
+    std::fs::create_dir_all(&acc5).unwrap();
+    let cu = "{\"env\": {\"ANTHROPIC_CUSTOM_HEADERS\": \"x-rieng: 1\"}}\n";
+    std::fs::write(acc5.join("settings.json"), cu).unwrap();
+    let c = cfg_mot(&acc5, claude_gia(t.path(), "dung"), true);
+    let ack = huba::api_key::dat(
+        &c,
+        "acc5",
+        &format!("{} wrkspc_01AbC", key_gia()),
+        &|_, _| KiemKey::Dung,
+    );
+    assert!(
+        ack.contains("CHƯA đổi gì") && ack.contains("sửa tay"),
+        "{ack}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(acc5.join("settings.json")).unwrap(),
+        cu
+    );
+    assert!(!acc5.join(huba::api_key::TEP_KEY).exists());
 }

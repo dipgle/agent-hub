@@ -99,11 +99,37 @@ pub enum KiemKey {
     Sai(String),
     /// Không hỏi được (mạng, hết giờ, mã lạ). Không phải "sai" — nhưng cũng không cất.
     KhongKiemDuoc(String),
+    /// `400` đòi `anthropic-workspace-id`: key ĐÚNG nhưng là key cấp NGƯỜI DÙNG
+    /// (`sk-ant-usr-`, lượt thật của Hà 21/10 10:27Z) — phải gửi kèm ID workspace.
+    CanWorkspace(String),
+}
+
+/// Header CLI gửi kèm mọi yêu cầu khi key cần workspace — qua `env` của `settings.json`.
+///
+/// 📐 Đo 21/10 bằng máy chủ GIẢ 127.0.0.1 (`ANTHROPIC_BASE_URL` trong cùng `env`): CLI
+/// 2.1.280 gửi `POST /v1/messages` mang `x-api-key` từ `apiKeyHelper` VÀ
+/// `anthropic-workspace-id` từ `ANTHROPIC_CUSTOM_HEADERS`, ở mọi lượt.
+pub const BIEN_HEADER: &str = "ANTHROPIC_CUSTOM_HEADERS";
+
+/// Giá trị huba ghi vào [`BIEN_HEADER`] cho một workspace.
+pub fn header_workspace(ws: &str) -> String {
+    format!("anthropic-workspace-id: {ws}")
+}
+
+/// Tách `<key> [wrkspc_…]` — mảnh thứ hai CHỈ được nhận là workspace khi đúng tiền tố
+/// `wrkspc_`; còn lại giữ nguyên chuỗi để [`hinh_dang_sai`] nói đúng "có khoảng trắng"
+/// (điện thoại bẻ dòng giữa key). Hàm THUẦN.
+pub fn tach_key_workspace(s: &str) -> (String, Option<String>) {
+    let manh: Vec<&str> = s.split_whitespace().collect();
+    match manh.as_slice() {
+        [k, ws] if ws.starts_with("wrkspc_") => ((*k).to_string(), Some((*ws).to_string())),
+        _ => (s.trim().to_string(), None),
+    }
 }
 
 /// Hỏi máy chủ Anthropic key có dùng được không — `GET /v1/models`, KHÔNG tốn token
 /// (luật 8: huba không tự tiêu gì).
-pub fn kiem_voi_may_chu(key: &str) -> KiemKey {
+pub fn kiem_voi_may_chu(key: &str, ws: Option<&str>) -> KiemKey {
     let client = match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -111,11 +137,14 @@ pub fn kiem_voi_may_chu(key: &str) -> KiemKey {
         Ok(c) => c,
         Err(e) => return KiemKey::KhongKiemDuoc(format!("không dựng được HTTP client: {e}")),
     };
-    let r = client
+    let mut req = client
         .get("https://api.anthropic.com/v1/models")
         .header("x-api-key", key.trim())
-        .header("anthropic-version", "2023-06-01")
-        .send();
+        .header("anthropic-version", "2023-06-01");
+    if let Some(ws) = ws {
+        req = req.header("anthropic-workspace-id", ws);
+    }
+    let r = req.send();
     match r {
         Err(e) => KiemKey::KhongKiemDuoc(format!(
             "không gọi được api.anthropic.com: {}",
@@ -128,11 +157,14 @@ pub fn kiem_voi_may_chu(key: &str) -> KiemKey {
             let loi = than
                 .pointer("/error/message")
                 .and_then(Value::as_str)
-                .map(|m| crate::exec::truncate(m, 160))
+                // 300, không 160: câu 400 của máy chủ mang cả cách sửa ở nửa sau, và bản
+                // 160 cắt mất đúng phần ấy trên màn của Hà (21/10 10:27Z).
+                .map(|m| crate::exec::truncate(m, 300))
                 .unwrap_or_default();
             match ma {
                 200 => KiemKey::Dung,
                 401 | 403 => KiemKey::Sai(format!("máy chủ trả {ma} {loi}").trim().to_string()),
+                400 if loi.contains("anthropic-workspace-id") => KiemKey::CanWorkspace(loi),
                 _ => KiemKey::KhongKiemDuoc(format!("máy chủ trả {ma} {loi}").trim().to_string()),
             }
         }
@@ -155,8 +187,19 @@ pub fn nhan(dir: &Path) -> Option<String> {
     if helper != helper_cua_huba(dir) {
         return Some("API key (apiKeyHelper ngoài huba)".into());
     }
+    let ws = doc_settings(dir)
+        .ok()
+        .flatten()
+        .and_then(|m| {
+            m.get("env")?
+                .get(BIEN_HEADER)?
+                .as_str()?
+                .strip_prefix("anthropic-workspace-id: ")
+                .map(|w| format!(" · workspace {w}"))
+        })
+        .unwrap_or_default();
     Some(match std::fs::read_to_string(dir.join(TEP_KEY)) {
-        Ok(k) if !k.trim().is_empty() => format!("API key {}", duoi(&k)),
+        Ok(k) if !k.trim().is_empty() => format!("API key {}{ws}", duoi(&k)),
         _ => format!("API key — ⚠ tệp {TEP_KEY} không đọc được, phiên sẽ không gọi được API"),
     })
 }
@@ -274,10 +317,15 @@ fn tim(cfg: &Config, ten: &str) -> Result<ClaudeAccountCfg, String> {
     })
 }
 
-/// `/accounts <tên> -k <key>` — kiểm key, cất, gắn `apiKeyHelper`, rồi bắt CLI xác
-/// nhận. `kiem` = [`kiem_voi_may_chu`] (bài kiểm truyền bản giả). Trả câu cho chủ máy;
-/// câu ấy KHÔNG BAO GIỜ chứa key.
-pub fn dat(cfg: &Config, ten: &str, key: &str, kiem: &dyn Fn(&str) -> KiemKey) -> String {
+/// `/accounts <tên> -k <key> [wrkspc_…]` — kiểm key, cất, gắn `apiKeyHelper` (và header
+/// workspace khi có), rồi bắt CLI xác nhận. `kiem` = [`kiem_voi_may_chu`] (bài kiểm truyền
+/// bản giả). Trả câu cho chủ máy; câu ấy KHÔNG BAO GIỜ chứa key.
+pub fn dat(
+    cfg: &Config,
+    ten: &str,
+    key: &str,
+    kiem: &dyn Fn(&str, Option<&str>) -> KiemKey,
+) -> String {
     if cfg!(windows) {
         return "⚠ -k chưa làm cho Windows (apiKeyHelper ở đây dùng `cat`).".into();
     }
@@ -285,7 +333,8 @@ pub fn dat(cfg: &Config, ten: &str, key: &str, kiem: &dyn Fn(&str) -> KiemKey) -
         Ok(a) => a,
         Err(m) => return m,
     };
-    let key = key.trim();
+    let (key, ws) = tach_key_workspace(key);
+    let key = key.as_str();
     if let Some(vi_sao) = hinh_dang_sai(key) {
         logging::warn(
             "account_api_key_refused",
@@ -293,8 +342,21 @@ pub fn dat(cfg: &Config, ten: &str, key: &str, kiem: &dyn Fn(&str) -> KiemKey) -
         );
         return format!("⚠ {ten}: CHƯA đổi gì — {vi_sao}.");
     }
-    match kiem(key) {
+    match kiem(key, ws.as_deref()) {
         KiemKey::Dung => {}
+        KiemKey::CanWorkspace(m) => {
+            logging::warn(
+                "account_api_key_refused",
+                json!({ "account": ten, "why": "cần workspace", "duoi": duoi(key),
+                        "co_workspace": ws.is_some(), "err": m }),
+            );
+            return format!(
+                "⚠ {ten}: CHƯA đổi gì — key {} ĐÚNG nhưng là key cấp người dùng, máy chủ đòi \
+                 ID workspace. Lấy ID ở console.anthropic.com → Settings → Workspaces (dạng \
+                 wrkspc_…) rồi gửi: /accounts {ten} -k <key> <wrkspc_…>\n(máy chủ: {m})",
+                duoi(key)
+            );
+        }
         KiemKey::Sai(m) => {
             logging::warn(
                 "account_api_key_refused",
@@ -334,6 +396,36 @@ pub fn dat(cfg: &Config, ten: &str, key: &str, kiem: &dyn Fn(&str) -> KiemKey) -
         .and_then(Value::as_str)
         .map(str::to_string);
     settings.insert("apiKeyHelper".into(), Value::String(helper_cua_huba(&dir)));
+    // Header workspace đi qua `env` của settings.json (xem [`BIEN_HEADER`]). Một giá trị
+    // KHÁC của chủ máy thì không ghi đè — dừng và nói.
+    let mut env = match settings.get("env") {
+        None => serde_json::Map::new(),
+        Some(Value::Object(m)) => m.clone(),
+        Some(_) => {
+            return format!("⚠ {ten}: CHƯA đổi gì — `env` trong settings.json không phải object")
+        }
+    };
+    match env.get(BIEN_HEADER).and_then(Value::as_str) {
+        Some(h) if !h.starts_with("anthropic-workspace-id: ") => {
+            return format!(
+                "⚠ {ten}: CHƯA đổi gì — settings.json đã có {BIEN_HEADER} của người khác; sửa tay"
+            )
+        }
+        _ => {}
+    }
+    match &ws {
+        Some(w) => {
+            env.insert(BIEN_HEADER.into(), Value::String(header_workspace(w)));
+        }
+        None => {
+            env.remove(BIEN_HEADER);
+        }
+    }
+    if env.is_empty() {
+        settings.remove("env");
+    } else {
+        settings.insert("env".into(), Value::Object(env));
+    }
     let ghi = ghi_nguyen_tu(&dir.join(TEP_KEY), key.as_bytes(), true).and_then(|_| {
         let mut s = serde_json::to_string_pretty(&Value::Object(settings))
             .map_err(|e| format!("không dựng được settings.json: {e}"))?;
@@ -383,13 +475,16 @@ pub fn dat(cfg: &Config, ten: &str, key: &str, kiem: &dyn Fn(&str) -> KiemKey) -
         )
     };
     format!(
-        "🔑 {ten} nay chạy bằng API key {} — máy chủ nhận key, CLI xác nhận \
+        "🔑 {ten} nay chạy bằng API key {}{} — máy chủ nhận key, CLI xác nhận \
          authMethod=api_key_helper.\n\
          Đăng nhập gói cũ trong thư mục vẫn còn nhưng KHÔNG được dùng. Phiên {ten} ĐANG mở \
          vẫn chạy bằng cách cũ tới khi mở lại.\n\
          ⚠ Tính tiền theo token. {khoa}\n\
          Bỏ: /accounts {ten} -k xoa",
-        duoi(key)
+        duoi(key),
+        ws.as_deref()
+            .map(|w| format!(" · workspace {w}"))
+            .unwrap_or_default()
     )
 }
 
@@ -416,6 +511,19 @@ pub fn go(cfg: &Config, ten: &str) -> String {
         Some(_) => {}
     }
     settings.remove("apiKeyHelper");
+    // Header workspace của huba đi cùng key — gỡ cùng lúc; của người khác thì giữ.
+    if let Some(Value::Object(env)) = settings.get_mut("env") {
+        if env
+            .get(BIEN_HEADER)
+            .and_then(Value::as_str)
+            .is_some_and(|h| h.starts_with("anthropic-workspace-id: "))
+        {
+            env.remove(BIEN_HEADER);
+        }
+        if env.is_empty() {
+            settings.remove("env");
+        }
+    }
     let mut s = match serde_json::to_string_pretty(&Value::Object(settings)) {
         Ok(s) => s,
         Err(e) => return format!("⚠ {ten}: CHƯA đổi gì — {e}"),

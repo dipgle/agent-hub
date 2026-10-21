@@ -18652,6 +18652,83 @@ fn on_bare_start(db: &Db, cfg: &Config, inbox: &crate::telegram::Inbox) {
     }
 }
 
+/// Hai cú bấm GIỐNG HỆT nhau cách nhau không quá chừng này — tính lúc VÀO HÀNG,
+/// nối chuỗi từng cặp liền nhau — thì cú sau là bấm lặp, không phải việc mới.
+///
+/// Đo 16/10: cả loạt 26 tin «❌ Đóng» vào hàng trong 958 ms (02:22:12.751 →
+/// 13.709Z). Mười cú START Hà bấm vì không thấy gì (02:28:03–14Z) cách nhau
+/// 0,8–1,9 s — cũng là bấm lặp, và một câu trả lời là đủ. Hai giây vẫn hẹp hơn
+/// hẳn mọi lượt dùng có chủ ý: một lệnh `/shot` thật chạy 3–18 s mới có ảnh.
+pub const LAP_CUA_SO_MS: u128 = 2000;
+
+/// Kết quả của [`gop_lenh_lap`].
+pub struct GopLap {
+    /// Lệnh còn lại, đúng thứ tự cũ.
+    pub giu: Vec<crate::telegram::Incoming>,
+    /// Mỗi loạt bị gộp: (khoá lệnh, số cú bấm BỎ đi). Một loạt một dòng.
+    pub nhom: Vec<(String, usize)>,
+    /// Cú bấm cuối cùng có khoá — chuyển sang lô sau, vì một loạt có thể bị cắt
+    /// làm hai lô (đo 16/10: lô đầu 2 tin, lô sau 24).
+    pub truoc: Option<(String, std::time::Instant)>,
+}
+
+/// Gộp một loạt cú bấm lặp thành MỘT lệnh. Hàm thuần — không log, không khoá.
+///
+/// `truoc` = cú bấm có khoá cuối cùng của lô trước. Chỉ lệnh có khoá
+/// ([`verbs::lap_vo_nghia`]) mới gộp được; lệnh `quiet` (bước phụ của chính huba)
+/// không bao giờ gộp. Một lệnh khác chen giữa cắt loạt.
+///
+/// ⚠ Lượt KHỞI ĐỘNG phát lại sổ tin đến (`khoi_phuc_tin_den`) đóng mốc `at` lúc
+/// phát lại, nên hai cú cùng khoá cách nhau vài phút cũng gộp. Cố ý: tin chờ
+/// phát lại là tin gửi lúc huba đang chết — không cú nào thấy câu trả lời của cú
+/// trước, đúng hình dạng "bấm lại vì không thấy gì" — và bốn lệnh có khoá đọc
+/// trạng thái LÚC CHẠY, nên chạy liền nhau N lần là N bản của một câu trả lời.
+/// Nút inline mang đích (`close:<id>`, `shot:<id>`) không có khoá — ngoài phạm vi.
+pub fn gop_lenh_lap(
+    items: Vec<crate::telegram::Incoming>,
+    truoc: Option<(String, std::time::Instant)>,
+) -> GopLap {
+    let mut giu = Vec::with_capacity(items.len());
+    let mut nhom: Vec<(String, usize)> = Vec::new();
+    let mut truoc = truoc;
+    // Loạt đang mở đã có dòng trong `nhom` chưa: cú bỏ ĐẦU của mỗi loạt mở dòng
+    // mới, các cú sau cộng dồn vào đó.
+    let mut dong_mo = false;
+    for item in items {
+        let khoa = if item.quiet {
+            None
+        } else {
+            verbs::lap_vo_nghia(&item.text)
+        };
+        let lap = khoa.filter(|k| {
+            truoc.as_ref().is_some_and(|(tk, luc)| {
+                tk == k && item.at.saturating_duration_since(*luc).as_millis() <= LAP_CUA_SO_MS
+            })
+        });
+        // Nối chuỗi: cú này là mốc cho cú sau, kể cả khi chính nó bị bỏ.
+        truoc = khoa.map(|k| (k.to_string(), item.at));
+        match lap {
+            Some(k) => match nhom.last_mut() {
+                Some((_, n)) if dong_mo => *n += 1,
+                _ => {
+                    nhom.push((k.to_string(), 1));
+                    dong_mo = true;
+                }
+            },
+            None => {
+                dong_mo = false;
+                giu.push(item);
+            }
+        }
+    }
+    GopLap { giu, nhom, truoc }
+}
+
+/// Cú bấm có khoá cuối cùng mà [`execute_telegram_commands`] đã thấy — xem
+/// [`GopLap::truoc`]. Chỉ đọc/ghi khi đang giữ `CMD_LOCK`.
+static LAP_TRUOC: std::sync::Mutex<Option<(String, std::time::Instant)>> =
+    std::sync::Mutex::new(None);
+
 /// Chạy những mệnh lệnh vừa gõ trên TELEGRAM.
 ///
 /// Cùng `parse_command`, cùng `execute_commands`, cùng bộ handler với phòng chat
@@ -18691,6 +18768,21 @@ fn execute_telegram_commands(db: &Db, cfg: &Config) {
         .map(|i| i.at.elapsed().as_millis() as u64)
         .max()
         .unwrap_or(0);
+    // Loạt bấm lặp ⟹ một lệnh (đo 16/10: 26 «❌ Đóng» ⟹ 26 hộp hỏi). Tin bị gộp
+    // vẫn nằm trong `tin` ở trên, nên sổ tin đến vẫn khép nó `xong`.
+    let pending = {
+        let mut nho = LAP_TRUOC.lock().unwrap_or_else(|e| e.into_inner());
+        let g = gop_lenh_lap(pending, nho.take());
+        *nho = g.truoc;
+        for (lenh, bo) in &g.nhom {
+            logging::info(
+                "telegram_repeat_collapsed",
+                json!({ "lenh": lenh, "bo": bo, "cua_so_ms": LAP_CUA_SO_MS as u64,
+                        "why": "cú bấm giống hệt cú trước trong cửa sổ — chạy một lần" }),
+            );
+        }
+        g.giu
+    };
     let mut cmds: Vec<ChannelCommand> = Vec::new();
     for item in pending {
         match verbs::parse_command(&item.text) {

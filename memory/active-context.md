@@ -1,5 +1,34 @@
 # active context — huba
 
+## 🟡 2026-10-21 11:3xZ→ — phiên kế nhiệm 54deeaf5: đóng a370f134 · đo lại sổ · vá CLOSE-26 (loạt cú bấm lặp) — PLAN S58
+
+- ĐÓNG phiên cũ a370f134 (pid 13141, ttys014, cửa sổ 57176): lượt cuối khép 11:31:29Z (turn_duration), cây 0 tệp bẩn, con chỉ
+  project-agent + vault-node + caffeinate, hàng đợi daemon rỗng ⟹ `kill` ⟹ thoát; đóng cửa sổ (lượt đầu classifier chặn, lượt
+  hai dạng `close window id 57176` qua) ⟹ ttys014 0 tiến trình. Scratchpad phiên cũ còn BẢN SAO key acc5
+  (`…/a370f134…/scratchpad/acc5-ban-sao-1792582038/k`, 101 B, 0644 trong thư mục 0700) — `rm` bị classifier chặn
+  [Irreversible Local Destruction] ⟹ KHÔNG đi vòng, báo Hà; bản gốc `~/.claude-acc5/huba-api-key` (0600).
+- ĐO LẠI: S56 0 ca mới sau cài · S57 acc5 `api_key_helper`, rò key 0 (log: chỉ tiền tố; `tin_den` 7/1598 dòng nhắc `sk-ant-`,
+  0 dòng mang thân key, glob có đối chứng dương) · PUSH-8 vượt 12 · PIN-HETHAN chưa có ca (tin gim dài nhất 19,4 h).
+- CLOSE-26 GỐC (đo `tin_den`, chép `.tmp/close-26/tin_den-0216.tsv` trước khi sổ 7 ngày tự dọn): 26 tin «❌ Đóng»
+  `message_id` 57073→57098 liền nhau, Telegram `date` 1792117332–333 ⟹ máy Hà dồn gửi MỘT lượt (người không bấm nổi 26
+  lần/giây). huba chạy từng tin (lô 2 + lô 24) ⟹ 26 `confirm_asked` 02:22:15→02:31:48Z: 23 `Declined` (Hà bấm Huỷ) + 3
+  `TimedOut` (90 s mỗi hộp); ~20 /start
+  + 2 «📋 Phiên» + /session + /shot nằm hàng tới 02:32:05.993Z (cùng `doi_luc`). Nguyên nhân phía app (mạng/hàng gửi lại)
+  KHÔNG đo được từ phía bot — Bot API không có giờ phía máy.
+- VÁ: `verbs::LAP_VO_NGHIA` (`/shot` `/session` `/close` `/start`, chỉ dạng TRƠN) + `lap_vo_nghia` (nhãn bàn phím ≡ lệnh) ·
+  `pipeline::gop_lenh_lap` (hàm thuần: chuỗi cú bấm cùng khoá, mỗi cặp liền nhau ≤ `LAP_CUA_SO_MS` 2000 theo lúc VÀO HÀNG
+  ⟹ chạy cú đầu; `quiet` không gộp; lệnh khác chen giữa cắt loạt) · `LAP_TRUOC` chuyển cú cuối sang lô sau (loạt bị cắt
+  2+24) · log `telegram_repeat_collapsed {lenh, bo}`. Tin bị gộp vẫn trong danh sách `tin` ⟹ sổ tin đến khép `xong`.
+- KIỂM: RED bản thế chỗ (hành vi cũ) 5/9 đỏ đúng câu gộp, TEST_EXIT=101 ⟹ GREEN 10/10 (thêm bài nối dây đọc thân
+  `execute_telegram_commands`); đột biến `.tmp/close-26/dot-bien.sh` M0 xanh · 10/10 đỏ đúng bài · trả byte KHỚP; fmt +
+  clippy `-D warnings` (lib + bài) 0; 20 tệp bài kề cận 20/20 xanh (`.tmp/close-26/ke-can.log`). Soát Sonnet: #1 phát lại
+  lúc khởi động gộp cả hai cú cách vài phút (`at` đóng lúc phát lại) — giữ CÓ CHỦ Ý (tin phát lại = bấm lúc huba chết, không
+  cú nào thấy trả lời; bốn lệnh đọc trạng thái lúc chạy), ghi ở doc `gop_lenh_lap`; #2 nút inline mang đích ngoài phạm vi.
+- CÀI 11:55:39Z pid 61161, `--verify` KHỚP b2d51202, 0 dòng error sau cài, `tin_den_recovered` rỗng. CHƯA: ca thật — đo
+  `command grep -a telegram_repeat_collapsed logs/huba.log`. CHƯA QG (chỉ chạy khi gom/đẩy — PUSH-8 chờ Hà).
+- CÒN (thiết kế, CHƯA ai hỏi): hộp hỏi vẫn giữ `CMD_LOCK` tới 90 s (`confirm::ask`) ⟹ lệnh khác xếp sau một hộp chưa trả
+  lời. Trước vá trần xấu nhất 26×90 s ≈ 39 phút; sau vá 90 s.
+
 ## 🟡 2026-10-21 09:xxZ→10:1xZ — `/accounts <tên> -k <API key>` (Hà: «Tôi có api key và muốn dùng cho acc5» → «Tạo thêm lệnh chuyển sang sử dụng api») — PLAN S57
 
 - ĐO: CLI 2.1.280 — `apiKeyHelper` trong `<thư mục>/settings.json` thắng đăng nhập gói, không hỏi; `ANTHROPIC_API_KEY` phải

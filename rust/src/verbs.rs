@@ -50,6 +50,33 @@ pub const KEYBOARD: &[(&str, &str)] = &[
     ("❌ Đóng", "/close"),
 ];
 
+/// Lệnh mà bấm LẶP liên tiếp không thêm nghĩa gì ngoài lần đầu — xem
+/// [`lap_vo_nghia`] và `pipeline::gop_lenh_lap`.
+///
+/// 🔴 Đo 16/10 02:22:12–13Z: **26 tin «❌ Đóng»** tới trong MỘT giây, `message_id`
+/// liền nhau 57073→57098 (không tin nào của bot chen giữa) ⟹ máy Hà dồn gửi một
+/// lượt. huba chạy từng tin ⟹ 26 hộp «Đóng hẳn phiên…?» nối nhau (Hà bấm Huỷ 23
+/// hộp, 3 hộp hết giờ 90 s) tới 02:31:48Z, và ~20 cú START + 📋 Phiên + /shot xếp
+/// hàng sau chúng tới 02:32:05Z. Ngồi ở máy thì một hộp thoại đang mở nuốt mọi cú bấm lặp — đây là
+/// đúng việc ấy, không hơn.
+///
+/// Hẹp có chủ ý: chỉ lệnh XEM (`/shot`, `/session`, `/start` trần) và lệnh có
+/// HỎI LẠI (`/close` trơn). `/type`, `/key`, `/pick`, chữ thường KHÔNG BAO GIỜ ở
+/// đây — gõ "ok" hai lần có thể là trả lời hai câu hỏi, và gộp nhầm là mất một
+/// câu trả lời của chủ máy. Chỉ dạng TRƠN: `/shot <phiên>` mang đích nên không gộp.
+pub const LAP_VO_NGHIA: &[&str] = &["/shot", "/session", "/close", "/start"];
+
+/// Khoá để so hai cú bấm: nhãn bàn phím dịch về lệnh (`❌ Đóng` ≡ `/close`), và
+/// chỉ lệnh trong [`LAP_VO_NGHIA`] mới có khoá. `None` = lệnh này lặp là có nghĩa.
+pub fn lap_vo_nghia(text: &str) -> Option<&'static str> {
+    let t = text.trim();
+    let t = KEYBOARD
+        .iter()
+        .find(|(nhan, _)| *nhan == t)
+        .map_or(t, |(_, lenh)| *lenh);
+    LAP_VO_NGHIA.iter().copied().find(|k| *k == t)
+}
+
 /// `ttys014` — tên một tty như Terminal khai, đã bỏ `/dev/`.
 ///
 /// Hẹp có chủ ý: payload đi thẳng vào `win-<tty>` rồi thành id phiên, nên nhận

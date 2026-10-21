@@ -69,8 +69,7 @@
     },
     {
       "name": "acc5",
-      "config_dir": "~/.claude-acc5",
-      "locked": true
+      "config_dir": "~/.claude-acc5"
     },
     {
       "name": "acc6",

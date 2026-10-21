@@ -13,8 +13,16 @@
   `account_login::danh_tinh_tat_ca` in nhãn key · help `/accounts`.
 - KIỂM: `tests/api_key.rs` 12/12; đột biến 11/11 đỏ đúng bài (M9 lượt đầu cấy ra mã không biên dịch ⟹ cấy lại, đỏ); gate.sh
   GATE_EXIT=0 · 193/193 · WIN_EXIT=0 (`.tmp/gate-k-2110-b.log`).
-- CHƯA: nghiệm thu thật = Hà gửi `/accounts acc5 -k <key>` từ Telegram ⟹ log `account_api_key_set` + `account_api_key_message_deleted`,
-  `auth status` acc5 ra `api_key_helper`, `/accounts` in «API key …». acc5 vẫn KHOÁ.
+- LƯỢT THẬT (Hà, Telegram): 10:09Z + 10:11Z key `sk-ant-usr-` bị chặn oan (đòi `sk-ant-api`) ⟹ e6dd773; 10:27Z máy chủ 400
+  «not scoped to a workspace» ⟹ c2e97c8 (`-k <key> <wrkspc_…>`); 10:56:59Z + 11:06:00Z `account_api_key_set` (…EgAA rồi …BgAA,
+  workspace wrkspc_017g…), tin chứa key đã xoá (60334 · 60349). Bài soát bảo mật lộ 11 ký tự key Hà trong log (cắt-40-rồi-che)
+  ⟹ che mảnh 8–19 + ghi đè tại chỗ 3 mảnh ⟹ 0.
+- ĐO 11:2xZ (key acc5, máy chủ thật, ~2 cent khuyến mãi): yêu cầu API thường (Haiku · Opus 5.5 · 1M · thinking · effort xhigh ·
+  max_tokens 128k) ⟹ 200; `claude -p --model haiku` trên acc5 ⟹ đúng, $0.0116. NHƯNG phiên tương tác ⟹ «Credit balance is too
+  low» (11:25:34Z `req_011CgFJLd2qscYVerCq1eh3C`). Bắt yêu cầu CLI bằng máy chủ giả rồi bỏ dần: CHỈ header beta
+  `claude-code-20250219` là đủ để máy chủ trả «credit balance too low». Console tổ chức «Do vui's Individual Org»: credit
+  balance $0.00, $199.99 PROMOTIONAL, No payment method ⟹ khuyến mãi KHÔNG trả cho yêu cầu Claude Code. KHÔNG lách (gỡ header
+  = lách luật tính tiền). Việc của Hà: nạp tiền / thêm phương thức thanh toán, hoặc `/accounts acc5 -k xoa`.
 
 ## 🟡 2026-10-20 00:0xZ→00:45Z — hạn mức TUẦN in đồng hồ bị đọc thành «mốc đã qua» ⟹ không tự chuyển ([dwork/review] báo, Hà duyệt) — PLAN S56
 

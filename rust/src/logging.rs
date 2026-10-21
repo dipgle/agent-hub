@@ -211,8 +211,9 @@ pub fn redact(text: &str) -> String {
 /// động lại (`tin_den::cau_bao_khoi_dong` gửi lại chữ tin chạy dở lên Telegram). Che
 /// theo HÌNH DẠNG, đúng như `/bot<token>/` ở trên: không cần biết trước key nào.
 ///
-/// Chỉ che khi phần sau `sk-ant-` dài ≥ 20 ký tự: câu hướng dẫn *"phải mở đầu bằng
-/// sk-ant-api"* không phải một key, và che nó là làm hỏng chính câu dạy cách gõ.
+/// Ngưỡng: phần sau `sk-ant-` dài ≥ 20 ký tự ⟹ key, che và giữ 4 ký tự cuối; 8–19 ⟹
+/// MẢNH key bị cắt, che hết; < 8 ⟹ chỉ là tiền tố công khai (`sk-ant-api03-` = 6) hay câu
+/// hướng dẫn, giữ nguyên — che nó là làm hỏng chính câu dạy cách gõ.
 pub fn che_api_key(text: &str) -> String {
     const DAU: &str = "sk-ant-";
     let mut out = String::with_capacity(text.len());
@@ -227,6 +228,14 @@ pub fn che_api_key(text: &str) -> String {
             out.push_str(DAU);
             out.push('…');
             out.push_str(&sau[dai - 4..dai]);
+        } else if dai >= 8 {
+            // 🔴 MẢNH key bị cắt cụt (bài soát 21/10): `telegram_command_queued` ghi
+            // `truncate(chữ, 40)` rồi mới qua đây, nên `/accounts acc5 -k sk-ant-usr-…`
+            // chỉ còn ~15 ký tự sau `sk-ant-` — bản đầu để nguyên, tức 11 ký tự BÍ MẬT
+            // của key Hà nằm trong `logs/huba.log` (2 dòng, 10:09:56Z + 10:11:29Z). Che
+            // mà KHÔNG giữ đuôi: đuôi của một mảnh là ký tự giữa key, không phải đuôi.
+            out.push_str(DAU);
+            out.push('…');
         } else {
             out.push_str(&rest[i..i + DAU.len() + dai]);
         }

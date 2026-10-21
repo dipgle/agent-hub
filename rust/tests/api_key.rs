@@ -59,10 +59,21 @@ fn cu_phap_k() {
 fn hinh_dang_key() {
     assert_eq!(hinh_dang_sai(&key_gia()), None);
     assert_eq!(hinh_dang_sai(&format!("  {}\n", key_gia())), None);
+    // Ca thật 21/10: key của Hà mở đầu `sk-ant-usr-` — bản đầu chặn nó vì đòi
+    // `sk-ant-api`. Mọi `sk-ant-…` đủ dài đều đi HỎI máy chủ; máy chủ mới là người phán.
+    let usr = key_gia().replace("sk-ant-api03-", "sk-ant-usr-");
+    assert_eq!(
+        hinh_dang_sai(&usr),
+        None,
+        "sk-ant-usr- phải được đem đi hỏi máy chủ"
+    );
     let admin = key_gia().replace("sk-ant-api03-", "sk-ant-admin01-");
-    assert!(hinh_dang_sai(&admin)
+    assert_eq!(hinh_dang_sai(&admin), None);
+    // Đối chứng: không phải key Anthropic thì chặn ngay, không hỏi ai.
+    let khac = key_gia().replace("sk-ant-api03-", "sk-or-v1-");
+    assert!(hinh_dang_sai(&khac)
         .unwrap()
-        .contains("không phải API key"));
+        .contains("không phải key Anthropic"));
     assert!(hinh_dang_sai("sk-ant-api03-ngan")
         .unwrap()
         .contains("quá ngắn"));
@@ -70,7 +81,7 @@ fn hinh_dang_key() {
     let che = che_api_key(&key_gia());
     assert!(hinh_dang_sai(&che).unwrap().contains("ĐÃ CHE"));
     // Lời từ chối không mang key.
-    assert!(!hinh_dang_sai(&admin).unwrap().contains(&admin));
+    assert!(!hinh_dang_sai(&khac).unwrap().contains(&khac));
     assert_eq!(duoi(&key_gia()), "…WXYZ");
 }
 
@@ -91,6 +102,21 @@ fn che_key_theo_hinh_dang() {
     // Đối chứng: câu hướng dẫn nhắc `sk-ant-api` KHÔNG phải key ⟹ giữ nguyên.
     let huong_dan = "phải mở đầu bằng sk-ant-api, key này đuôi …WXYZ";
     assert_eq!(che_api_key(huong_dan), huong_dan);
+    // 🔴 CẮT TRƯỚC, CHE SAU (bài soát 21/10): `telegram_command_queued` ghi
+    // `truncate(chữ, 40)` rồi mới qua `redact` ⟹ đoạn key còn lại ngắn hơn 20 ký tự và
+    // bản đầu để lọt ~9 ký tự BÍ MẬT. Một mảnh key cụt vẫn phải che.
+    let cut = huba::exec::truncate(&dong, 40);
+    let r = redact(&cut);
+    assert!(
+        !r.contains(&k[13..19]),
+        "mảnh key sau cắt 40 ký tự lọt vào log: {r}"
+    );
+    // Đối chứng: phần ĐẦU công khai `sk-ant-api03-` một mình (không ký tự bí mật nào)
+    // không bị biến thành rác.
+    assert_eq!(
+        che_api_key("tiền tố sk-ant-api03- là công khai"),
+        "tiền tố sk-ant-api03- là công khai"
+    );
     // Mọi dòng log đi qua `redact` ⟹ che luôn, cạnh phép che token bot cũ.
     let loi = format!("POST https://api.telegram.org/bot123:ABC/sendMessage {k}");
     let r = redact(&loi);
@@ -248,10 +274,10 @@ fn may_chu_tu_choi_thi_khong_ghi_gi() {
     let ack = huba::api_key::dat(
         &c,
         "acc5",
-        "sk-ant-admin01-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
         &|_| panic!("hình dạng sai mà vẫn hỏi máy chủ"),
     );
-    assert!(ack.contains("không phải API key"), "{ack}");
+    assert!(ack.contains("không phải key Anthropic"), "{ack}");
 }
 
 /// settings.json hỏng JSON ⟹ KHÔNG ghi đè (đó là tệp chủ máy tự sửa).

@@ -58,10 +58,14 @@ pub fn duoi(key: &str) -> String {
     format!("…{}", k[tu..].iter().collect::<String>())
 }
 
-/// `None` = đúng hình dạng API key của Anthropic; `Some(lý do)` = sai. Hàm THUẦN.
+/// `None` = đủ hình dạng để đem đi HỎI máy chủ; `Some(lý do)` = sai. Hàm THUẦN.
 ///
-/// Cùng phép thử CLI dùng (`sk-ant-` rồi `api` ở ký tự 7–9): key admin
-/// (`sk-ant-admin…`) hay mã OAuth không gọi được API hội thoại.
+/// 🔴 Chỉ gác phần chắc chắn sai (không `sk-ant-`, có khoảng trắng, quá ngắn), KHÔNG gác
+/// loại key. Bản đầu (21/10) đòi `sk-ant-api` — chép từ một hàm CLI dùng cho việc KHÁC
+/// (`e.slice(7,10)==="api"`) — và chặn ngay lượt thật đầu tiên của Hà: key của anh mở đầu
+/// `sk-ant-usr-`. CLI 2.1.280 không gác tiền tố nào: chuỗi `apiKeyHelper` trả ra đi
+/// thẳng thành `x-api-key`. Người phán key dùng được hay không là MÁY CHỦ
+/// ([`kiem_voi_may_chu`], đúng header ấy) — không phải một cái tiền tố huba đoán.
 pub fn hinh_dang_sai(key: &str) -> Option<String> {
     let k = key.trim();
     // Bản đã che (`logging::che_api_key`) — tới đây chỉ bằng đường chạy lại từ sổ
@@ -74,9 +78,9 @@ pub fn hinh_dang_sai(key: &str) -> Option<String> {
     if k.chars().any(char::is_whitespace) {
         return Some("key có khoảng trắng ở giữa — dán thiếu hay thừa một đoạn".into());
     }
-    if !k.starts_with("sk-ant-api") {
+    if !k.starts_with("sk-ant-") {
         return Some(format!(
-            "không phải API key Anthropic (phải mở đầu bằng sk-ant-api, key này đuôi {})",
+            "không phải key Anthropic (phải mở đầu bằng sk-ant-, key này đuôi {})",
             duoi(k)
         ));
     }

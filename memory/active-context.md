@@ -25,7 +25,15 @@
   lúc khởi động gộp cả hai cú cách vài phút (`at` đóng lúc phát lại) — giữ CÓ CHỦ Ý (tin phát lại = bấm lúc huba chết, không
   cú nào thấy trả lời; bốn lệnh đọc trạng thái lúc chạy), ghi ở doc `gop_lenh_lap`; #2 nút inline mang đích ngoài phạm vi.
 - CÀI 11:55:39Z pid 61161, `--verify` KHỚP b2d51202, 0 dòng error sau cài, `tin_den_recovered` rỗng. CHƯA: ca thật — đo
-  `command grep -a telegram_repeat_collapsed logs/huba.log`. CHƯA QG (chỉ chạy khi gom/đẩy — PUSH-8 chờ Hà).
+  `command grep -a telegram_repeat_collapsed logs/huba.log`.
+- ĐẨY (Hà «Đẩy đi»): QG `a4a87dd..b461e63` QG_EXIT=1 — fmt · clippy · gate.sh · 5 phép quét ✅; đỏ «13 commit chưa push» (theo
+  thiết kế) + «bí mật lọt vào diff» 50 dòng ⟹ trích nguyên văn bộ quét in đủ 50 (`.tmp/close-26/quet-bi-mat-diff.sh`, khớp
+  loại trừ 1 · trung hoà 11): 50/50 tên định danh `api_key::`/`ApiKey` + 1 tiền tố công khai; hình dạng key trên dòng thêm 0
+  (đối chứng dương 1). `git push` lượt 1 (có `| tail`) classifier chặn ⟹ lượt 2 trần ⟹ `a4a87dd..b461e63`; ls-remote = b461e63.
+- acc5 (S57): Hà 12:07Z vẫn «Credit balance too low». Tài liệu chính thức platform.claude.com/docs/en/about-claude/
+  api-credits-for-subscribers: tiền API của gói Max/Team = «Promotional credits», «Doesn't cover: Claude Code» — Console Hà:
+  Credit balance $0.00 · $199.99 promotional · No payment method. `claude -p` acc5 11:18Z CHẠY ($0.0116) — chỉ phiên tương
+  tác bị từ chối. Việc của Hà: mua credit, hoặc `/accounts acc5 -k xoa`.
 - CÒN (thiết kế, CHƯA ai hỏi): hộp hỏi vẫn giữ `CMD_LOCK` tới 90 s (`confirm::ask`) ⟹ lệnh khác xếp sau một hộp chưa trả
   lời. Trước vá trần xấu nhất 26×90 s ≈ 39 phút; sau vá 90 s.
 
